@@ -26246,3 +26246,1938 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `zuqmrnvytwpnxuwkmknwopmqpqmoppuz`, bookmark
   `plan/spare-builder-fifo-release/01-nonblocking-fifo-release`,
   [PR #4390](https://github.com/scode/farhelm/pull/4390/changes).
+
+## agent-text-helper-removes-wrap-boundary-spaces.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/helpers/real-agent.ts` was removed with the browser suite in 6ef88c9a4 (#3401). The
+  current real-agent tests match against the supervisor's rendered screen
+  (`crates/farhelm/tests/e2e/real_agent_capture.rs:34-39`, `screen_tail`), which joins nothing across soft wraps. The
+  stream helper `crates/farhelm/tests/e2e/harness.rs:159-187` does join soft-wrapped history rows, and it keeps their
+  trailing blanks ("Rows keep their trailing blanks"), so a space at a wrap survives. No current helper trims rows
+  before joining them. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## alias-propagation-test-reloads-before-live-row-check.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/sidebar.spec.ts` was removed in 6ef88c9a4 (#3401). In the desktop app a session row reads
+  its host label on each draw from the pushed hosts collection
+  (`crates/gui/farhelm-gui/src/session_list/row.rs:984-991`, `short_name` via `hosts::identity`). There is no memoized
+  row component for a page reload to paper over. The current label test (`session_list/tests.rs:1484-1510`) checks the
+  derivation directly, so the reload-masking gap has no counterpart. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## alternate-screen-wheel-keeps-stale-selection.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. On the alternate screen with mouse reporting off, the desktop terminal sends the wheel to
+  the program as a `GridInput::Mouse` wheel group through `send_user`
+  (`crates/gui/farhelm-gui/src/terminal/attached.rs:1493-1524`). `send_user` clears the local selection and follows the
+  bottom for every user input (`attached.rs:1428-1442`, "Input clears the selection"). The old `grid-terminal.js`
+  bypass, which sent through a path that did not clear the selection, has no counterpart. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## announcement-close-missing-rendered-opening-token.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. Each opening of the Announcements dialog is its own entity, holding the entries it was
+  opened with and its own layer id (`crates/gui/farhelm-gui/src/announcements.rs:166-240`). Got it, the × and Enter
+  close through that dialog's weak handle and its layer (`close`, `dismiss`). The record-shown hook reads that dialog's
+  own `entries` and `unrecorded` flag. A close aimed at an earlier opening upgrades nothing or names a closed layer, so
+  it cannot dismiss a later history opening or record a different batch. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## announcement-history-overwrites-waiting-pending-batch.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. History and the automatic batch no longer share one displayed vector. `open_history` and
+  `open_pending` each open a separate dialog over their own copy, read from the pushed queue
+  (`crates/gui/farhelm-gui/src/announcements.rs:95-131`). Opening history writes nothing and cannot replace the pending
+  list. A click before the window-start check refuses the automatic batch for that UI session, and the entries stay
+  pending until the next window start or reset. That rule was decided by the maintainer on 2026-11-14
+  (`crates/gui/farhelm-gui/src/welcome.rs:30-35`). Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## approval-copy-test-assumes-clipboard-object.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/approval-layout.spec.ts` and its `navigator.clipboard` stub were removed with the browser
+  suite in 6ef88c9a4 (#3401). The desktop approval card copies through GPUI's clipboard in Rust tests, and no browser
+  clipboard object is involved, so the fixture assumption has no counterpart. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## attachment-failure-announcement-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old non-live `attach-error` divs went with 1eb4e3751 (#3407). The desktop terminal's
+  attachment strip, which shows the busy line and every failure or refusal, is drawn with `.role(Role::Status)` and an
+  accessible label joining every line (`crates/gui/farhelm-gui/src/terminal/attachments.rs:280-317`). That is the
+  status-region pattern the finding asked for, matching the drag-copy notice (`terminal/drag_notice.rs:245`). Checked by
+  a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## attention-update-removes-focused-control.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. Starting Update from the attention list still removes the focused button when the row turns
+  into a working row (`crates/gui/farhelm-gui/src/session_list/attention.rs:906-909`). The desktop focus coordinator
+  then recovers: when nothing holds focus and no dialog is open, focus goes home
+  (`crates/gui/farhelm-gui/src/focus.rs:21-30`, `recover` at 1746-1760). SPEC.md "Where focus rests" (3550-3558) defines
+  exactly that for a focused control that goes away. Focus is never dropped and no key is consumed. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## bulk-sandbox-delete-drops-eligible-peer.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop bulk Delete takes one whole-environment Delete per environment, but only from
+  the first member that is actually admitted. A refused member gets its not-started line and does not claim the
+  environment, so the next marked peer is admitted in its place
+  (`crates/gui/farhelm-gui/src/session_list/bulk.rs:617-638`: `wholes.insert` runs only after `held`). Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## changed-file-hover-test-clicks-before-stat-readiness.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/grid-client/grid-attach.spec.ts` was removed with the browser suite in 6ef88c9a4 (#3401). The
+  desktop file-link tests (`crates/gui/farhelm-gui/src/terminal/files/tests.rs`, around 454-500 and 694-770) serve file
+  checks through fake transfers that the test answers explicitly. A click before the answer lands is tested as its own
+  case, so the readiness race has no counterpart. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## cleanup-stop-transport-error-skips-delete.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/helpers/fleet.ts` (`cleanupSession`) and the Playwright tests that used it were removed
+  in 6ef88c9a4 (#3401). The current Rust and GUI tests run their own helms and supervisors from temporary state
+  directories and do not share a long-lived test stack, so no counterpart Stop-then-Delete cleanup helper exists.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## clone-read-overwrites-manual-recipe-choice.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop Clone seeds the source environment's recipe and place synchronously, from the
+  pushed hosts collection, when the launcher opens (`crates/gui/farhelm-gui/src/launcher/entry.rs:213-247`,
+  `draft.seed_target`; `launcher/draft.rs:1331-1348`). No source-host read is left waiting to finish later, so nothing
+  can overwrite a recipe the user picks afterwards. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## completed-followup-leaves-old-update-tracked-busy.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app keeps no tracked run identity for a host's Update. "Working" is derived on
+  each draw from the helm's retained run, which counts only while it is Running, or from an Update request still out in
+  the operation store (`crates/gui/farhelm-gui/src/hosts/status.rs:16-18`, `live` at 145-190). A retained run first seen
+  as Completed is not live, so no older Update can stay busy or keep Update and the host's settings withdrawn. Checked
+  by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## completed-only-retry-keeps-host-warning.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop warning logic clears an action's warning whenever a retained run of that action
+  is first seen Completed, whether or not its Running state was observed
+  (`crates/gui/farhelm-gui/src/hosts/status.rs:294-322`, `RunStatus::Completed => self.set(action, false)`). The module
+  docs give the rule as "a later run of the same action completes" (lines 19-23). Checked by a delegated reader against
+  main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## container-redraw-discards-hover.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop file links keep a hover's check whenever a redraw finds the same link again:
+  same cells, file and label (`crates/gui/farhelm-gui/src/terminal/files.rs:10-12`, `follow` at 139-162). There is no
+  separate container admission step that waits on a stat and can be invalidated by a second row change. Redraws of other
+  cells on the row therefore keep a completed hover. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## credential-catalog-success-starvation.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop Credentials section no longer re-reads the catalog on every fleet notice, and
+  it has no generation check that drops answers. It reads `GET /api/credentials` when the section is shown and after its
+  own saves and deletes. The UI channel answers commands in order, so each answer replaces the list and none is thrown
+  away (`crates/gui/farhelm-gui/src/settings/credentials.rs:9-17`). The starvation route, where notices outrun replies,
+  does not exist. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## deleted-source-retains-replace-question.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop plain-Replace YOLO question is drawn only on the source session's own row, or
+  in its header or interrupted card while that session is the selected one
+  (`crates/gui/farhelm-gui/src/session_list/replace_yolo.rs:16-21`, `shown` at 144-157). A deleted source has no row and
+  cannot be the selected session, so its question is drawn nowhere and cannot come back with a later session. Its
+  leftover map entry refuses actions only for that gone session's key, and the next question asked prunes it (lines
+  36-40, 132). Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## detached-grid-retains-program-drag-guidance.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. In the desktop app a window displaced from the seat goes wholly inert (SPEC.md:3337-3338).
+  `set_inert` puts away any drag-copy notice (`crates/gui/farhelm-gui/src/terminal/attached.rs:783-797`), and a pending
+  grace window refuses to raise one while the terminal is inert (`drag_grace_over`, around 3475-3483). The
+  direct-takeover route therefore cannot leave program-drag guidance on the retained screen. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## drag-copy-guidance-gap-stays-stale-after-text-size-change.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop notice re-reads the row height on every frame the terminal renders
+  (`crates/gui/farhelm-gui/src/terminal/attached.rs:3553-3558`) and places the notice from that shared value and the
+  pane's bounds in the same frame (3571-3580; module docs 159-162). A text-size change redraws the terminal, so the
+  three-row gap follows the new size and the notice's expiry is untouched. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## effort-catalog-replaces-focused-control.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop launcher still switches Effort from segments to a select past five options
+  (`crates/gui/farhelm-gui/src/launcher/view/choices.rs:44-46, 250-252`), and its catalog arrives asynchronously
+  (`launcher/draft.rs`, `Catalog`). But the launcher is a dialog layer. When the focused control disappears inside a
+  dialog, the focus coordinator moves focus to the closest remaining control by last drawn position
+  (`crates/gui/farhelm-gui/src/focus.rs:33-35`, `recover` at 1752-1760). No key is consumed and focus does not land on
+  the dialog container. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## escaped-token-path-display-collision-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: moot. The old approval card (`crates/farhelm-ui/src/approvals.rs`) went with 1eb4e3751 (#3407). The
+  container GitHub token file is now a decode-only field of retired supervisor-outside containers: stored rows keep it,
+  but admitting new work refuses any present legacy choice (`crates/farhelm-proto/src/launch.rs:704-720, 746-748`). The
+  desktop approval model (`crates/gui/farhelm-gui/src/approvals/model.rs`) draws no token-file row, so the display
+  collision has no counterpart. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## extreme-history-numbering-hangs-selection.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop selection code is Rust over `u64` line numbers, not JavaScript doubles.
+  `crates/gui/farhelm-grid-model/src/selection.rs:316-321` clamps the range to the retained lines and iterates a bounded
+  `start..=end` range, using `saturating_add` for the last line. A screen base at 2^53-1 (the wire maximum) has a
+  following line of 2^53 in `u64` arithmetic, so the loop always terminates. The JS `abs++` loop in `grid-buffer.js`
+  went with `crates/farhelm-ui` (#3407). Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## failed-launch-pins-template-host.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop launcher tracks whether the host was hand-picked as a field of its own:
+  `LaunchDraft::host_chosen` (`crates/gui/farhelm-gui/src/launcher/draft.rs:339-343`). Only `choose_host` sets it (998),
+  and its only callers are the host picker (`launcher/view/host_picker.rs:262`) and template application
+  (`templates/apply.rs:563`). A refused or failed launch brings back the same draft without touching it. Save as
+  template checks Host only from `host_chosen` (`templates/save.rs:104`), so a host the user inherited stays unchecked
+  after a failure. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## failed-recipe-refresh-test-lacks-baseline-row.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/tensorlake-recipes.spec.ts` was removed with the browser suite (#3401). The desktop test
+  that replaces it, `an_unreadable_catalog_keeps_the_rows_and_retry_loading_asks_again`
+  (`crates/gui/farhelm-gui/src/settings/recipe_tests.rs:866-898`), lists `rust-dev` first, pushes the failed read, and
+  asserts the row is still drawn next to the stale-list alert. It then retries. The missing baseline-row witness does
+  not carry over. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## grid-drop-suppresses-refusal-explanation.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The browser dragover/`dropEffect` mechanism is gone with `crates/farhelm-ui` (#3407), and
+  the old app's repair (7c764927) had already removed the grid-only refusal. In the desktop app the whole terminal pane
+  is the drop target (`crates/gui/farhelm-gui/src/terminal/attached.rs:2438-2441`). `dropped` and `offer` (1668-1686)
+  either upload the dropped files or, when the terminal is not live or is inert, call `attachments.refuse`, which shows
+  the refusal. No path cancels a drop silently. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## grid-fixture-measures-before-bold-font-ready.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/grid-client/grid-terminal.spec.ts` and its asynchronous CSS font loading were removed with the
+  browser suite (#3401). The desktop app registers its bundled UI and terminal fonts synchronously at startup
+  (`crates/gui/farhelm-gui/src/bootstrap.rs:85-86`) and picks the bold and italic faces explicitly
+  (`terminal.rs:1413-1416`). No font-readiness race exists for a current test to miss. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## header-confirmation-lowers-link-refusal.md
+
+- Outcome: `discard`.
+- Assessment: moot. The old CSS z-index swap (`app.css:1437`) went with `crates/farhelm-ui` (#3407). In the desktop app
+  the refused link's explanation is raised above the approval region only while the pointer stays on the link
+  (`crates/gui/farhelm-gui/src/terminal/attached.rs:3249-3300`). Otherwise it is drawn inside the terminal pane.
+  SPEC_impl.md's z-order ladder (835-866, rung 6) now says explicitly that "a layer holding the keyboard moves the
+  refusal below the layers, leaving a confirmation readable". Sitting under the approval cards (rung 5) in that state is
+  the specified placement, not an unaccepted gap. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## hidden-progress-test-observes-unaffected-host.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/provisioning.spec.ts` was removed (#3401), and the guard its test was meant to prove has
+  no desktop counterpart: the hidden-Hosts guard against menus closing when rows moved. Desktop popovers follow their
+  anchor as it moves and close only when it is no longer drawn (`crates/gui/farhelm-gui/src/layers.rs:26-30`), so there
+  is no guard whose removal a test must detect. The replacement test
+  `a_registered_hosts_ring_goes_with_its_run_and_leaves_another_avatars_menu_open`
+  (`session_list/host_rail/tests.rs:1876-1945`) only checks that the menu stays open with focus. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## host-menu-requested-index-survives-command-removal.md
+
+- Outcome: `discard`.
+- Assessment: moot. The old app's `HostRow` "requested" numeric menu index went with `crates/farhelm-ui` (#3407). The
+  desktop host menu (`crates/gui/farhelm-gui/src/hosts/menu.rs`) has Up and Down move between focus handles in the layer
+  manager's Menu context (`actions.rs:145-150`), and Home and End focus the first or last handle
+  (`components/menu_keys.rs:51-70`). No numeric position is kept that could go stale when Adopt or Update disappears.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## host-removal-test-leaks-confirmation-preference.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/provisioning.spec.ts` and the long-lived shared Playwright helm were removed (#3401).
+  Desktop GUI tests each build their own fake helm and app context (`crates/gui/farhelm-gui/src/test_support.rs`), so no
+  preference can leak from one test to the next. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## hosts-panel-test-misses-filtered-row-premise.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/hosts-panel.spec.ts` was removed (#3401). The desktop test for a filtered-out open
+  session, `a_filtered_out_open_session_keeps_its_terminal_header_details_bar_and_rename`
+  (`crates/gui/farhelm-gui/src/session_pane/carried_tests.rs:116-200`), does assert the premise the finding found
+  missing: `node(&nodes, "session-row-a").is_none()`, the "0 of 2" count and "No waiting sessions." all come before it
+  checks that the terminal is still drawn. The Hosts swap is covered separately by
+  `hosts_swaps_the_list_for_the_panel_and_back_keeping_focus` (`session_list/host_rail/tests.rs:1143-1200`). Checked by
+  a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## initial-shortcut-replay-lacks-busy-release-wake.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Dioxus deferred replay with its untracked `busy_now` gate went with `crates/farhelm-ui` (#3407).
+  The desktop quick-launch dispatcher does not queue a press until the launcher stops being busy. A press that arrives
+  while the launcher is busy "is taken and changes nothing"
+  (`crates/gui/farhelm-gui/src/templates/dispatch.rs:18-20,279-281`). The only presses that wait are those for the
+  catalog read, which `Launcher::apply_batch` replays in order. No wake on busy release is needed. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## invalidated-selection-drag-keeps-old-anchors.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. `extend_selection` in `crates/gui/farhelm-gui/src/terminal/attached.rs:4061-4080` checks
+  whether the view's selection has been cleared before extending. A reset (resize, history reset, alternate-screen
+  switch), trimmed history, or input to the program all clear it. When it is gone, `extend_selection` drops the drag
+  gesture (`self.select = None`) and copies nothing, with a comment explaining why. Drag moves (4103-4127) and
+  drag-scroll ticks both go through it. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## late-suspend-question-interrupts-work.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop host Suspend (`crates/gui/farhelm-gui/src/hosts/lifecycle.rs:136-231`) takes
+  the press's `Mark`, waits for the activity read, and asks through `ask(host, &mark, …)`. That opens nothing if the
+  user has moved on since the mark (doc at 175-177). Instead, the host row shows `MOVED_ON` ("Farhelm checked this
+  host's sessions after you moved on. Choose Suspend again…", 71-73). A late reply no longer opens a question over later
+  typing. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts
+  on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## lifecycle-fixture-cleanup-stops-after-release-failure.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/tensorlake-hosts.spec.ts`, its `finally` cleanup and the shared long-lived helm stack
+  were removed with the browser suite (#3401). Desktop tests run against a per-test fake helm, so no saved setting or
+  resource survives into later tests whatever a cleanup step does. Checked by a delegated reader against main 28f177284
+  (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## long-host-name-progress-reachability-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: moot. The old launcher's `HostResumeProgress` pill text went with `crates/farhelm-ui` (#3407). The desktop
+  launcher has not built resume-before-create yet ("comes with the launcher's resume-before-create work",
+  `crates/gui/farhelm-gui/src/launcher/request.rs:15-16`), so there is no resume preparation line. The desktop progress
+  pill already gives its text and host detail `min_w_0().overflow_hidden()` (`launcher/pill.rs:181-187,217-218`).
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## macos-control-click-suppresses-row-marking.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. SPEC.md was changed to match the platform. It now reads "Cmd+click (macOS) or Ctrl+click
+  (Linux) toggles one row's mark" (SPEC.md:2318). The desktop app documents that GPUI's macOS layer turns Ctrl+left into
+  a right press, so Cmd-click is the Mac toggle (`crates/gui/farhelm-gui/src/session_list/marking.rs:1-12,94-103`;
+  `vendor/gpui-pre-macos/src/window.rs:2906-2908`). Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## marked-count-reflow-leaves-popup-at-old-anchor.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop marked-sessions menu is a layer-manager popover anchored to its toggle
+  (`crates/gui/farhelm-gui/src/session_list/marking.rs:814-821`). Popovers follow their anchor element wherever it is
+  drawn each frame, in the frame the anchor moves (`layers.rs:26-28,765,2576`). If the count text reflows the toggle
+  onto another line, the menu moves with it. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## matching-restart-template-model-normalizes-historical-permissions.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. Template application (`crates/gui/farhelm-gui/src/templates/apply.rs:481-505`) applies a
+  template model through `choose_catalog_model` or `choose_custom_model`. When the model belongs to the agent already
+  chosen, both only set the model and drop an incompatible effort (`launcher/draft.rs:704-720,761-773`). Neither
+  reconciles the whole harness or touches the permission, so a historical unset permission survives. Repeated held
+  values are removed before replay (`apply.rs:355-380`), and an explicit permission reset is handled separately so it
+  does not falsely restore an unset permission (511-522). Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## moved-on-body-focus.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop Replace YOLO question opens through the prompt with the answer's `Mark`
+  (`crates/gui/farhelm-gui/src/session_list/replace_yolo.rs:205-218`). Its focus moves go through `focus::focus_control`
+  / `focus_in_layer` (`prompt.rs:1595-1604`). Both refuse once `has_moved_on(mark)` is true, whatever currently holds
+  focus (`focus.rs:545-553,620-623`). The row is revealed only if the user has not moved on (`replace_yolo.rs:215`).
+  Nothing lets empty or body focus count as permission. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## moved-on-launch-return.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop launcher's refusal and failure path
+  (`crates/gui/farhelm-gui/src/launcher/launch.rs:19-24,281-298,666-705,978,1035-1050`) checks
+  `focus::has_moved_on(&mark)` against the submit press. If the user has moved on, the launcher stays in its slot behind
+  a notice (`Notice::LaunchNotStarted`, `LaunchMayStillStart` or `EnvironmentLaunchUnknown`) and returns only when the
+  user opens it. Otherwise it comes back with its draft. The same rule covers environment launches (`run_failed`,
+  953-978) and prepared quick launches (`reveal_prepared`). Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## narrow-sidebar-tests-measure-outer-container.md
+
+- Outcome: `discard`.
+- Assessment: moot. The cited test, `e2e/tests/sidebar.spec.ts`, and its `.app-sidebar` / `.sidebar-content` CSS boxes
+  went away with the Playwright suite in 6ef88c9a4 (#3401). The desktop app's sidebar tests in
+  `crates/gui/farhelm-gui/src/session_list/` measure GPUI element bounds by element id. No current test uses the
+  outer-sidebar-instead-of-content-column measurement this finding describes. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## neighbor-status-redraw-cancels-stable-url-click.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app still lets you click links in the terminal. A release counts as a click
+  when the link found again under the pointer equals the pressed one
+  (`crates/gui/farhelm-gui/src/terminal/attached.rs:2718-2733`). `TerminalLink.evidence` there is a set of absolute line
+  numbers (`crates/gui/farhelm-grid-model/src/links.rs:313,376`), not per-row content identities. Redrawing an unrelated
+  neighbouring status line changes neither the link's line numbers, nor its target, nor its ranges, so the click is no
+  longer cancelled. The JS row-identity comparison (`grid-terminal.js` hoverCurrent) was removed with
+  `crates/farhelm-ui` in 1eb4e3751 (#3407). Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## nul-delimited-osc-identity-ambiguity.md
+
+- Outcome: `discard`.
+- Assessment: moot. The NUL-joined key in `grid-buffer.js` went away with `crates/farhelm-ui` in 1eb4e3751, and it had
+  already been repaired before that. The desktop app compares OSC 8 link identity structurally, as `Arc<Link>` values
+  (`crates/gui/farhelm-grid-model/src/links.rs:282-286`). The `Link` struct derives PartialEq over separate `id` and
+  `uri` fields (`crates/farhelm-proto/src/grid.rs:961-970`). No delimiter-joined key is left to collide. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## older-pin-success-clears-newer-stop-error.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app's operation store admits one request per session key at a time
+  (`crates/gui/farhelm-gui/src/operations.rs:15-21`, `Operations::start` → `admit` at :842-849). Pin goes through
+  `menu::send` on `OpKey::session(key)` (`session_list/pins.rs:385-387`, `menu.rs:713-738`), so it is refused while that
+  session's Stop is in flight, and a bulk Stop holds its keys too. A recorded refusal stays until the next operation on
+  that key starts. A Pin can therefore only clear a Stop failure if the user starts it after that failure appears, which
+  is not the overlapping route this finding describes. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## ordinary-menu-opening-focus-before-visible-placement.md
+
+- Outcome: `discard`.
+- Assessment: moot. The opacity:0 measure-then-place step in `menu_panel.rs` was part of the Dioxus/Wry UI, removed in
+  1eb4e3751. The desktop app's layer manager places each popover from the anchor's bounds and the popover's measured
+  size in the same frame it lays it out (`crates/gui/farhelm-gui/src/layers.rs:406-417`, `popover_origin` at :2617).
+  There is no invisible, unplaced menu state during which keyboard input could reach a menu the user cannot see. Checked
+  by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## orphan-confirmation-opens-outside-visible-scroll.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app's "Sandboxes not on this helm" list
+  (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) still asks its Delete question inline under the rows.
+  That question opens through `prompt::ask_inline(...).starts_on_cancel()` (:257-288). Inside a dialog, inline questions
+  move focus through `focus::focus_in_layer`, which waits for the frame that first draws the starting answer and
+  "scrolls it into view as Tab would" (`crates/gui/farhelm-gui/src/prompt.rs:112-119`). A long list therefore brings
+  Cancel into view. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## orphan-fixture-cleanup-ignores-http-refusals.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/tensorlake-tunnels.spec.ts` and its reusable shared stack went away in 6ef88c9a4 (#3401).
+  The fake Tensorlake (`crates/farhelm-helm/src/tensorlake/e2e.rs`) now serves only helm unit tests, each with its own
+  temporary state (module docs :1-12). The desktop app's sandbox-list tests run against an in-memory helm fake
+  (`settings/tensorlake_sandbox_tests.rs:1-12`). No test shares a stack that unchecked cleanup could contaminate.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## orphan-fixture-edits-shared-model-without-lock.md
+
+- Outcome: `discard`.
+- Assessment: moot. The spec-side read/modify/rename of `state.json` happened in the removed
+  `e2e/tests/tensorlake-tunnels.spec.ts` (6ef88c9a4). The fake is now `cfg(test)`-only, and nothing outside it rewrites
+  its model mid-operation: the runtime env-var selection used by the browser suite is gone
+  (`crates/farhelm-helm/src/tensorlake/e2e.rs:4-12`). The desktop app's sandbox tests use the in-memory `FakeHelm`.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## orphan-test-cleanup-stops-after-first-error.md
+
+- Outcome: `discard`.
+- Assessment: moot. The sequential finally block was in the removed `e2e/tests/tensorlake-tunnels.spec.ts` (6ef88c9a4),
+  and so was the shared stack it could contaminate. The current sandbox-list tests
+  (`crates/gui/farhelm-gui/src/settings/tensorlake_sandbox_tests.rs`) run on an in-memory fake with no shared state to
+  clean up. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## orphan-test-setup-precedes-cleanup-guard.md
+
+- Outcome: `discard`.
+- Assessment: moot. The setup-before-try gap was in the removed `e2e/tests/tensorlake-tunnels.spec.ts` (6ef88c9a4),
+  whose saved key and recipe persisted on a reused stack. The current tests use an in-memory `FakeHelm` or a per-test
+  temporary helm state, so a setup failure leaves nothing behind for later tests. Checked by a delegated reader against
+  main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## pinned-host-dialog-chrome-can-hide-content.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. Host Settings in the desktop app is built on the shared `DialogFrame`
+  (`crates/gui/farhelm-gui/src/hosts/settings.rs:10-12,75`). The frame's contract is that when the pinned header and
+  answers don't fit a short window, the whole card scrolls instead
+  (`crates/gui/farhelm-gui/src/components/dialog.rs:1-9`, `BODY_MIN_HEIGHT` at :58). Every dialog gets this, so Host
+  Settings' footer Close and note stay reachable. The old `host-dialog-framed`-only CSS went away with
+  `crates/farhelm-ui`. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## pinned-session-menu-placement-uses-outdated-item-count.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app has no fixed 528 px / eight-item reserve. The row menu caps its own height
+  at the window's content height (`crates/gui/farhelm-gui/src/session_list/menu.rs:20-24,856-862`). The layer manager
+  places it beside the row from its measured height, and the shared clamp shifts it back inside the content area
+  (`layers.rs:380-392`, `popover_origin` at :2617). A ten-item menu that fits moves up and doesn't scroll. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## plain-url-scan-repeats-history-decoding.md
+
+- Outcome: `discard`.
+- Assessment: moot. The lazy binary-history decoder (`grid-model.js` historyLine) went away with `crates/farhelm-ui` in
+  1eb4e3751. In the desktop app's grid model, `selection_line` returns a borrowed `&GridRow` from history indexed by
+  absolute line (`crates/gui/farhelm-grid-model/src/selection.rs:195-203`). URL detection (`links.rs:263-430`) re-reads
+  rows without decoding or allocating them again. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## primary-row-drag-continues-through-middle-button.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app's drag watch ends on a left-button release only and ignores other buttons'
+  releases (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs:960-961`). A move with the left button no longer held
+  cancels the drag (:944-957: `held = event.pressed_button == Some(MouseButton::Left)`, otherwise `cancel_pin_drag`).
+  Releasing the primary button mid-chord therefore ends the drag, and a later middle-button release can't commit a move.
+  The JS pointer handlers went away with `crates/farhelm-ui`. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## queued-recipe-edits-after-save-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop recipe editor locks the form synchronously when Save starts. `started` calls
+  `set_saving(true)`, which marks every text input read-only on its own state
+  (`crates/gui/farhelm-gui/src/settings/recipes/editor.rs:476-491,580-586`), so later keystrokes are refused by the
+  input regardless of repaint timing. The structural edits (choose software, add or remove a tunnel) return early while
+  busy (:593-620). GPUI handles events one at a time on one thread, so no edit can slip in between capturing the draft
+  and applying the lock. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## recipe-cleanup-navigation.md
+
+- Outcome: `discard`.
+- Assessment: moot. The navigation-before-cleanup ordering was in the removed `e2e/tests/tensorlake-recipes.spec.ts`
+  (6ef88c9a4), and so were the per-slot stacks it could contaminate. The desktop app's recipe tests
+  (`crates/gui/farhelm-gui/src/settings/recipe_tests.rs` and related files) run against an in-memory helm fake, with no
+  page navigation and no persistent rows. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## recipe-leave-save-live-draft-mismatch-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. In the desktop app, the "Save these changes before leaving?" question opens as its own
+  layer over the hosting dialog (`crates/gui/farhelm-gui/src/settings/recipes/editor/leaving.rs:13-15`), with a veil, so
+  the form behind it can't be edited while the question is up. Save reads the draft straight from the inputs
+  (`editor.rs:12-15,496-500`), which is exactly what was on screen when the answer was drawn. GPUI handles events one at
+  a time, so there is no event-to-render gap to exploit. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## release-shot-account-readiness.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/docs-shots/release-notes.spec.ts` went away in 6ef88c9a4. Release-note shots now live in
+  `scripts/docs-shots/release-notes.py`, which has no Tensorlake account or API-key capture (it captures rename, mute,
+  groups, settings search, hosts and notification settings). No current shot waits on that form's readiness. Checked by
+  a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## removed-tunnel-retains-validation-error.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop recipe editor stores each error together with the draft it was raised against,
+  and shows it only while the current draft still equals that draft
+  (`crates/gui/farhelm-gui/src/settings/recipes/editor.rs:445-451`, set at :576). Removing the offending tunnel changes
+  the draft (`remove_tunnel` at :613-620), so the old error stops showing even though nothing clears it explicitly.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## repeated-cleanup-failure-test-misses-recurrence.md
+
+- Outcome: `discard`.
+- Assessment: moot. The weak repeated-failure step was in the removed `e2e/tests/rail-notices.spec.ts` (6ef88c9a4; it
+  published resolution right after `feed.notify(2)` with no second-failure witness). The desktop app's notification-bell
+  tests (`crates/gui/farhelm-gui/src/notices_bell/tests.rs`) have no repeated-failure test making that unwitnessed
+  assertion, so no current test has this gap. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## replace-cleanup-snapshots-owned-ids-before-drain.md
+
+- Outcome: `discard`.
+- Assessment: moot. The early `...owned.map` cleanup snapshot was in the removed `e2e/tests/replace.spec.ts`
+  (6ef88c9a4), along with its real-route draining and shared stack. The desktop app's Replace tests
+  (`session_pane/header_tests.rs`, `session_list/lifecycle_tests.rs`) answer every request on an in-memory `FakeHelm`
+  and create no real sessions to leak. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## replace-question-omits-prefix-movement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app's popovers, the row menu included, are placed every frame from the anchor's
+  bounds in that frame (`crates/gui/farhelm-gui/src/layers.rs:398-417`, `popover_origin` at :2617; the anchor's tracker
+  records where it is drawn each frame, :671-680). When a Replace question appears above the list and pushes rows down,
+  B's open menu moves with B's menu button on the next frame. The old app's measure-once placement
+  (`anchored_popovers.rs`) went away with `crates/farhelm-ui`. Checked by a delegated reader against main 28f177284
+  (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## replace-question-test-starts-with-restart-unavailable.md
+
+- Outcome: `discard`.
+- Assessment: moot. The assertion the finding describes, which accepted a Restart that was already unavailable, was in
+  the removed `e2e/tests/replace.spec.ts` (6ef88c9a4). The desktop app's lifecycle exclusion tests establish the
+  positive premise: Restart and Stop are asserted unavailable while a Restart is out, then available once it is answered
+  (`crates/gui/farhelm-gui/src/session_pane/header_tests.rs:1005-1042`). No current test repeats the starts-unavailable
+  mistake. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## replace-source-removal-hides-progress-and-timeout.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old UI's 60-second client deadline, whose timeout message landed on a source row that
+  no longer existed, has no counterpart: the desktop app's command channel has no per-command deadline. The helm sends
+  the replacement reply right after removing the source and publishing that removal
+  (`crates/farhelm-helm/src/sessions.rs:5079-5085`, `forget_deleted_session` at :4117), so the gap with no row is only
+  the reply's transit time. During that gap the selection stays on the source (`session_list/selection.rs:55-59`), and
+  an interrupted card keeps drawing from its held row with the wait line (`session_pane.rs:252-260,604-628`). A running
+  session's header wait line does need the stored row (`session_pane/header.rs:735-747`), so it can drop out for that
+  brief moment, which is negligible. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## replacement-history-absence-asserted-before-delivery.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Playwright test `e2e/tests/replace.spec.ts` and the browser grid client whose sliced history
+  delivery created the ordering gap were removed in 6ef88c9a4 (#3401) and 1eb4e3751 (#3407). No current Rust test
+  asserts that a replacement terminal lacks old scrollback. A grep of `crates/gui` and `crates/farhelm/tests/e2e` for
+  replacement/history checks finds no counterpart, so the oracle gap has nothing left to apply to. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## restart-with-does-not-resume-suspended-host.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop launcher never sends Restart with to a suspended or stopped environment host.
+  `LaunchDraft::host_refusal` returns `Refusal::ResumeHost` with the advice " Resume it in Hosts, then restart."
+  (`crates/gui/farhelm-gui/src/launcher/request.rs:421-462`), and `request()` sends nothing while any refusal applies
+  (`launcher/view.rs:1283-1295`). This is the "disabled with an actionable resume-first explanation" outcome the finding
+  proposed. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## resume-launch-test-records-session-after-assertion.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/tensorlake-lifecycle.spec.ts` and its Playwright cleanup helpers were removed in
+  6ef88c9a4 (#3401). The desktop launcher has no automatic resume-then-launch path to test: a suspended host is refused
+  with Resume advice (`launcher/request.rs:421-462`). No current Rust test has this
+  create-then-assert-before-recording-ID shape. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## resume-preview-readiness-witness.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Playwright test and the old launcher's resume-then-preview effect (`create_form.rs:6393-6415`)
+  were removed in 6ef88c9a4 (#3401) and 1eb4e3751 (#3407). The desktop launcher does not resume a suspended host before
+  a fresh checkout. It refuses with "Resume it in Hosts, then launch." (`launcher/request.rs:14-16,421-462`), so the
+  guarded one-press boundary this test was meant to witness does not exist. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## resume-test-retires-create-stub-before-client-settles.md
+
+- Outcome: `discard`.
+- Assessment: moot. Both affected tests (`tensorlake-lifecycle.spec.ts`, `tensorlake-sandbox-sessions.spec.ts`) and the
+  Playwright route-stub helpers were removed in 6ef88c9a4 (#3401). The client continuation they raced (Resume, then host
+  GET, then key mint, then create) was old-app code removed in 1eb4e3751. The desktop launcher does not resume before
+  creating (`launcher/request.rs:421-462`). Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## retained-restart-hides-reboot-card.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app keeps a global "restarted" mark per session
+  (`crates/gui/farhelm-gui/src/session_pane/card.rs:153-220`). The follower drops it on every pushed store change once
+  the row no longer calls for a recovery card or has left the listing (`forget_settled`, called from `Follow::check` at
+  :366). A stale row has no recovery reason (`card.rs:98-101`), and a host reboot makes the helm push that session's row
+  as stale. So the mark is retired whether or not the session was open, and a later Interrupted row shows the card again
+  (module docs :21-23). Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## route-retirement-failure-skips-owned-session-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: moot. Every cited site (`tensorlake-lifecycle.spec.ts`, `nonblocking-launch.spec.ts`,
+  `launch-progress.spec.ts`, `yolo-guard.spec.ts`) and the `page.unroute`/drained-route helpers were removed with the
+  Playwright suite in 6ef88c9a4 (#3401). The current GUI tests run in-process with fakes and have no browser route
+  retirement that could throw before session cleanup. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-create-cancel-lacks-opening-guard.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old Add host dialog (`tensorlake/add_host.rs`) was removed in 1eb4e3751. In the desktop
+  app, the Tensorlake creation confirmation is asked through the prompt foundation
+  (`crates/gui/farhelm-gui/src/hosts/setup.rs:384-422`). There, answers act only on the question's frozen value, the
+  first answer wins, and a question's answers cannot authorize a replacement question (`prompt.rs:1-25`). It also opens
+  only through the Continue's mark (`hosts/add/tensorlake.rs:36-43,425-434`). Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-create-reply-loses-new-recipe-default.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop app does not build New's placement from a create response.
+  `new_beside_open_session` reads the open session's row and its environment from the pushed store collections when New
+  opens (`crates/gui/farhelm-gui/src/launcher/entry.rs:110-121`, docs :24-37). Those rows carry their host binding, so
+  there is no hostless snapshot to fall back to Local from. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-launch-bypasses-repository-search-refusal.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. `Launcher::refusal` refuses with SELECT_REPOSITORY while the search holds an unpicked `gh:`
+  query, for every placement, after the place's own reasons (`crates/gui/farhelm-gui/src/launcher/view.rs:1176-1182`).
+  `request()` returns nothing whenever `refusal()` is Some, including on the new-environment branch
+  (`launcher/view.rs:1293-1298`), and `environment_body` also re-checks `launch_refusal`
+  (`launcher/request.rs:634-637`). Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-launch-question-lacks-opening-token.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. "Create a sandbox for this session?" is now asked through the prompt foundation's inline
+  question (`crates/gui/farhelm-gui/src/launcher/view/sandbox_question.rs:1-31,123-140`). Any draft edit retires it, its
+  consent applies to exactly one submit, and answers act on the frozen value with first-answer-wins semantics
+  (`prompt.rs:1-25`). The old unbound `Option<LaunchDraft>` slot is gone with 1eb4e3751. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-launch-sends-hidden-agent-prompt.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The new-environment body is built through `create_request`, which sends
+  `self.active_prompt()` (`crates/gui/farhelm-gui/src/launcher/request.rs:607-624,643-657`). `active_prompt` drops the
+  prompt off the Agent tab, or when the agent type cannot take one (:507-516). A dormant prompt is therefore never sent
+  for Goose or Pi. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-lifecycle-questions-lack-opening-guards.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old `sandbox_sessions.rs` Controls were removed in 1eb4e3751. In the desktop app,
+  Suspend and Stop and suspend freeze their verb and Stop guards at the click (`Asked`), go through the prompt
+  foundation's frozen-value, first-answer-wins question, and send one request on the session's operation key
+  (`crates/gui/farhelm-gui/src/session_list/environment.rs:30-49,417-472,523-552`; `prompt.rs:1-25`). An old answer
+  cannot act on a later opening's claim, because each question carries its own frozen value and there is no separate
+  held-claim signal. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-outage-card-ignores-host-refresh-failure.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop session pane shows the unavailable or suspended card only while the store holds
+  the open session's row as stale, which the helm pushes for hosts it is not connected to
+  (`crates/gui/farhelm-gui/src/session_pane/unavailable.rs:11-13`). There is no client-side host-list refresh whose
+  failure retains an old Suspended snapshot. Host and session state arrive by push, so the old app's failed-refresh path
+  has no counterpart. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sandbox-row-menu-owns-transient-lifecycle-state.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The row menu now closes first, and the question is asked through the session list
+  (`list.ask_about_row`), not the menu (`crates/gui/farhelm-gui/src/session_list/menu.rs:1293-1320,555-598`). The
+  request and its outcome live in the operation store on the session's key and show on the row and header
+  (`session_list/environment.rs:42-49,648-690`), so closing the menu cannot lose them. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## selected-expanded-host-hover-white-on-white.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The CSS cascade is gone with 1eb4e3751. In the desktop app, a pressed (chosen) rail entry
+  keeps the accent fill one step up under the pointer, with inverse ink
+  (`crates/gui/farhelm-gui/src/components/button.rs:543-549,718-724`). The doc comment there explicitly calls out the
+  old white-on-light defect. The expanded labels inherit the button's ink when pressed
+  (`session_list/host_rail.rs:602-635`). Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## self-ssh-guidance-misses-skipped-tests.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The Playwright multi-host suite and `scripts/tensorlake/run-shard.sh` are gone. Current
+  `.agents/tensorlake.md:146-155` says a failed self-ssh "leaves the tests that use the second host printing `SKIPPED`
+  ... so a run with it is not evidence for those tests". `scripts/tensorlake/run-rust-shard.sh:87` records
+  `self-ssh: ok` or `FAILED` in `summary.txt`, so the docs now describe the skip outcome and the independent witness.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## short-trash-frame-reachability-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old webview had no live minimum window size, which is what made the 220 px viewport
+  possible. The desktop app sets a 720 x 560 minimum on its main window
+  (`crates/gui/farhelm-gui/src/bootstrap.rs:58,185`). On Linux the minimum is grown so the content keeps it
+  (`desktop.rs:535-551`). A Trash dialog can no longer get anywhere near the overcommitted heights the finding computed.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## short-window-host-rail-reachability.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The CSS rail and footer layout were removed in 1eb4e3751. The desktop main window enforces
+  a 560 px minimum content height (`crates/gui/farhelm-gui/src/bootstrap.rs:58,185`; `desktop.rs:535-551`), far above
+  the 160 to 200 px sidebar heights where the footer could cover All and the host avatars. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## sort-test-cleanup-stops-after-first-failure.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/sort.spec.ts` and the shared Playwright stack were removed in 6ef88c9a4 (#3401). The
+  desktop app's sort tests are in-process GPUI tests with fake stores (`crates/gui/farhelm-gui/src/session_list/`), with
+  no real sleep sessions or shared stack to leak into. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## ssh-key-tooltip-test-lacks-loading-witness.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/tooltip-coverage.spec.ts`, the runtime sampling audit, was removed in 6ef88c9a4 (#3401).
+  In the desktop app, hover help is a required constructor argument of every control component, so a control without it
+  does not compile (`crates/gui/farhelm-gui/src/components/mod.rs:1-6`; `Button::new` takes a `HoverHelp`). No coverage
+  audit exists whose loading premise could be missed. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## stop-progress-omits-row-movement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old app positioned popups from measured row coordinates that ignored Stop progress, and
+  that code was removed in 1eb4e3751. In the desktop app, every popover and anchored question follows its anchor element
+  wherever it is drawn each frame: "An overlay closes when its subject is gone, not when it moves", with the anchor's
+  bounds written by its tracker as frames are prepared (`crates/gui/farhelm-gui/src/layers.rs:26-39,420-421,538-546`). A
+  row that grows or shrinks moves its open menu with it. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## stopped-reader-output-witness.md
+
+- Outcome: `discard`.
+- Assessment: moot. `e2e/tests/grid-flood.spec.ts` was removed in 6ef88c9a4 (#3401), and no current test uses the
+  `FloodGated` fixture. The surviving flood test, `crates/farhelm/tests/e2e/terminal_backpressure.rs`, uses
+  `flood-memory` with explicit started and progress acknowledgement files (:80-81,161), and the GUI's flood test is an
+  in-process delivery test (`terminal/attached/tests.rs:1139-1145`). Neither has the unwitnessed browser stopped-reader
+  overlap premise. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## suspended-launch-missing-identity.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old launcher's resume-then-preview branch that silently returned on a missing identity
+  was removed in 1eb4e3751. The desktop launcher refuses any launch on a suspended or stopped environment host with a
+  visible `Refusal::ResumeHost` ("Resume it in Hosts, then launch."), checked before any identity or preview step
+  (`crates/gui/farhelm-gui/src/launcher/request.rs:421-440`). A connected host without an identity gets its own visible
+  reason (`UNVERIFIED_HOST`, :213-216,410-411). There is no silent no-op. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-browser-cleanup-drains-real-api-route-before-request-client-lifetime.md
+
+- Outcome: `discard`.
+- Assessment: moot. The affected specs (`tensorlake-sandbox-sessions.spec.ts`, `podman-environments.spec.ts`), the
+  drained-route and cleanup helpers, and Playwright's request fixture lifetime all went with 6ef88c9a4 (#3401). The
+  current Rust tests (`crates/farhelm/tests/e2e/podman_environments.rs` and the GPUI in-process tests) have no mocked
+  browser routes that await real API cleanup before independent teardown. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-bulk-delete-test-row-disappearance-comment-false-oracle.md
+
+- Outcome: `discard`.
+- Assessment: moot. The misleading comment was in `e2e/tests/tensorlake-sandbox-sessions.spec.ts:959-962`, removed with
+  the browser suite in 6ef88c9a4 (#3401). The listing and refresh code it described (`list/view.rs`,
+  `list/lifecycle.rs`) was removed in 1eb4e3751. The desktop bulk Delete tests (`session_list/bulk_tests.rs`) are new
+  code and do not carry that comment. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-capture-terminaltext-stale-no-row-dom-rationale.md
+
+- Outcome: `discard`.
+- Assessment: moot. The stale docstring was in `e2e/readme-video/overlay.ts`, which `git log` shows was deleted in
+  6ef88c9a4 (#3401). Its subject, the browser grid's DOM row elements, went with 1eb4e3751. `scripts/readme-video.sh` no
+  longer references any overlay or terminalText helper. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-delete-freshness-test-docstring-connected-versus-suspended.md
+
+- Outcome: `discard`.
+- Assessment: moot. The test `environment_delete_for_host_reads_the_current_host_state` lived in
+  `crates/farhelm-ui/src/sandbox_sessions.rs`, deleted with the old webview UI in 1eb4e3751 (#3407). The desktop app's
+  version is `the_lane_is_whole_only_when_a_current_read_lists_the_host_not_connected` in
+  `crates/gui/farhelm-gui/src/session_list/environment_delete_tests.rs:143-168`. Its docstring correctly says that "a
+  failed read that still holds the suspended host" picks the session lane, which matches its fixture. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-file-links-failed-grid-mount-fixture-getter-mismatch.md
+
+- Outcome: `discard`.
+- Assessment: moot. The JS test fixture (`crates/farhelm-ui/js-tests/terminal-files.test.js`) and the production
+  `getGrid().element` getter/dispose-before-rethrow path (`assets/terminal.js`, `terminal-files.js`) were deleted in
+  1eb4e3751 (#3407). The desktop app's file links are Rust code under `crates/gui/farhelm-gui/src/terminal/files/`.
+  Nothing there creates links before a component that might not exist, so there is no getter that can throw during
+  cleanup. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-grid-input-font-inline-owner-rationale.md
+
+- Outcome: `discard`.
+- Assessment: moot. The SPEC_impl.md sentence ("sets its own font inline") and the grid-terminal.js and app.css it
+  described were removed along with the browser and webview UIs (6ef88c9a4 #3401, 1eb4e3751 #3407). `git grep` finds
+  neither "harmlessly … sets its own font" nor the hidden-input font rule in SPEC_impl.md today. The GPUI app has no CSS
+  inheritance or hidden textarea. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-held-replay-helper-misstates-history-drained-boundary.md
+
+- Outcome: `discard`.
+- Assessment: moot. The helper and the takeover test are Playwright code (`e2e/tests/grid-attach.spec.ts`, the
+  held-replay helper), and their sliced history drain was in `grid-terminal.js`. All of it was removed in 6ef88c9a4
+  (#3401) and 1eb4e3751 (#3407). A search of `crates/gui` for "been applied" or "in slices" finds no matching claim in
+  the desktop app's terminal tests. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-hidden-grid-test-no-measurement-two-column-rationale.md
+
+- Outcome: `discard`.
+- Assessment: moot. The comment was in `e2e/tests/terminal-tabs.spec.ts` and described `grid-terminal.js` fitting. Both
+  were removed in 6ef88c9a4 (#3401) and 1eb4e3751 (#3407). A search of `crates/gui` for "two columns" or "measured
+  nothing" finds no counterpart rationale in the desktop app's terminal tests. Checked by a delegated reader against
+  main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-http-golden-defaulted-trash-epoch.md
+
+- Outcome: `discard`.
+- Assessment: moot. The separate UI decoder with a defaulted `trash_epoch` (`crates/farhelm-ui/src/lib.rs`) and its
+  consumer golden test went with #3407. `crates/farhelm-helm/src/http_contract_tests.rs:1-14` records that. Today the
+  helm and the desktop app share one `HostView` (`crates/farhelm-proto/src/ui_channel.rs:821-908`), whose `trash_epoch`
+  has no serde default. A renamed field would change the serialized JSON and fail
+  `host_list_serializes_to_the_shared_fixture`, so there is no second decoder left that could drift. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-launcher-feed-restarts-cancel-first-environment-catalog.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Dioxus `use_resource` catalog read that every feed notice restarted (`create_form.rs`) was
+  removed in #3407. In the desktop launcher, recipes are a pushed collection read straight from the store
+  (`crates/gui/farhelm-gui/src/launcher/request.rs:130-140`; `launcher/view/placement.rs:13-20` "Nothing copied"). The
+  Tensorlake account is read once as the launcher opens (`placement.rs:21`, `read_account` at :67), so feed notices
+  cannot cancel and restart anything. Checked by a delegated reader against main 28f177284 (code reading, not run);
+  triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-mouse-reattach-test-claims-nonexistent-viewer-sgr-encoding-restoration.md
+
+- Outcome: `discard`.
+- Assessment: moot. The misleading comment was in `e2e/tests/mouse-modes.spec.ts`, removed with the Playwright suite in
+  6ef88c9a4 (#3401). A search of `crates/gui` for SGR finds only input-mapping encoder tables and an SGR rendering note.
+  No desktop test claims that SGR encoding is restored to a returning viewer. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-old-terminal-positive-large-websocket-message-oracle-removed-before-retirement.md
+
+- Outcome: `discard`.
+- Assessment: moot. This is a historical gap at an intermediate revision. Old (tmux/xterm) terminals were later retired
+  (dbfc69751) and their byte path removed (f560058), and the browser terminal WebSocket went with #3401. No current
+  consumer sends raw pastes over 1 MiB as single messages, so nothing is left to protect. Checked by a delegated reader
+  against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-old-xterm-query-selection-unicode-tests-removed-before-retirement.md
+
+- Outcome: `discard`.
+- Assessment: moot. The finding admits the gap was only intermediate: the old xterm renderer and its
+  DECRQM/DECRQSS/selection handlers were removed in f560058, and the browser UI in #3401/#3407. The desktop app renders
+  through its own grid model and has no xterm handlers to cover. Checked by a delegated reader against main 28f177284
+  (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-plain-environment-lifecycle-direction-before-screen-update.md
+
+- Outcome: `discard`.
+- Assessment: moot. The route depended on Dioxus delivering a click against the updated VDOM before the old frame was
+  repainted (`list/row.rs`, `sandbox_sessions.rs` Controls), which was removed in #3407. The desktop app freezes the
+  verb at the click from the current store (`crates/gui/farhelm-gui/src/session_list/environment.rs:29-32`, "The verb is
+  frozen at the click"). Any remaining input-before-repaint window falls under SPEC.md:5446's accepted sub-second
+  delivery race, which the finding itself proposed as its disposition. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-real-app-terminal-disclosure-cover-and-refusal-layer-tests-removed.md
+
+- Outcome: `discard`.
+- Assessment: moot. The concern was browser CSS layers and `data-link-cover` markup that synthetic divs could not
+  verify. That markup and the Playwright suite were removed in #3401/#3407. The desktop app has a native layer manager
+  (`crates/gui/farhelm-gui/src/layers.rs`, refusal slot at :157 and :234), and its tests use real components. Examples
+  are `a_real_approval_card_covering_the_link_panel_refuses_the_click` (`terminal/attached/tests.rs:4536`),
+  `a_click_whose_destination_is_not_fully_visible_is_refused` (:4991),
+  `a_covered_tunnel_hint_refuses_the_modified_click` (:5620) and `a_covered_file_panel_refuses_the_transfer...`
+  (`terminal/files/tests.rs:611`). Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-recipe-row-deep-clones-global-place-status-matrix.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The per-row deep clone (`recipes.rs` handing each `RecipePlaces` component a full clone)
+  was removed in #3407. The desktop app reads the places once per render
+  (`crates/gui/farhelm-gui/src/settings/recipes.rs:1016`, `places::places(cx)`) and gives each row a borrowed `&Places`.
+  `place_lines` (`settings/recipes/places.rs:155-180`) only filters by reference, so the matrix is never copied per row.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-replace-with-environment-recent-bypasses-held-placement-admission.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. In Replace with, the desktop launcher refuses a recent setup that made a new environment
+  and changes nothing. It shows "Restart and Replace keep the existing environment"
+  (`crates/gui/farhelm-gui/src/launcher/view/recents.rs:29`, :54-56, :103). The test
+  `replace_with_refuses_an_environment_setup` (`launcher/environment_recents_tests.rs:301-307`) pins this for both a
+  click and `recent:` search. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-replay-reveal-helper-retired-async-write-rationale.md
+
+- Outcome: `discard`.
+- Assessment: moot. The reveal-wait helper (`e2e/terminal-readiness.ts` / `waitForReplayReveal`) and its callers were
+  Playwright code, removed in 6ef88c9a4 (#3401). The xterm asynchronous-write mechanism it described was already gone in
+  f560058. The desktop app has no such helper. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-retired-delete-only-menu-invalidates-unconditional-rename-rationale.md
+
+- Outcome: `discard`.
+- Assessment: moot. The stale comment ("Rename is unconditional today") was in `crates/farhelm-ui/src/list/row.rs`,
+  removed in #3407. The desktop row menu documents the retired case correctly:
+  `crates/gui/farhelm-gui/src/session_list/menu.rs:96-97` and :406 say a retired session's menu holds Delete alone, and
+  :1135-1152 draws separators only in the non-retired branch. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-retired-only-bulk-delete-cancel-has-no-focus-target.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop bulk question chooses where focus returns when it opens. It uses the marked
+  bar's ⋯ when that is drawn, and otherwise the bar's own button for the action, which covers the case where every
+  marked row is a retired session (`crates/gui/farhelm-gui/src/session_list/bulk.rs:541-559`,
+  `menu_toggle_drawn().unwrap_or_else(|| self.marking.button_focus(action))`). Checked by a delegated reader against
+  main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-retired-xterm-private-url-tag-test-gap.md
+
+- Outcome: `discard`.
+- Assessment: moot. The finding says itself that this mattered only while the vendored xterm renderer existed. f560058
+  removed the bundle and its private `extended.urlId` reads, and #3401/#3407 removed the browser UI. The desktop app
+  gets link tags from its own grid model (`crates/gui/farhelm-grid-model`), with no dependency on a vendored library's
+  private field. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-settings-container-tensorlake-order-contract.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The removed browser test and `farhelm-ui` settings list are gone (6ef88c9a4, 1eb4e3751).
+  The desktop Settings dialog's section list `Section::ALL` at `crates/gui/farhelm-gui/src/settings.rs:465-480` is
+  Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, ..., which matches SPEC.md:2424 (Tensorlake
+  before Containers). The order test docs at `settings/tests.rs:279-281` state the same order. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-sidebar-retires-restart-success-before-mounted-observer.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The Dioxus seed/mounted-observer split is gone (1eb4e3751). In the desktop app the open
+  session's recovery card is derived from the store's own row plus a "restarted" mark
+  (`crates/gui/farhelm-gui/src/session_pane/card.rs:109-187`). The mark is dropped only once the row no longer gives a
+  recovery reason (`card.rs:189-219`), and at that point the card would not show anyway. No separate view snapshot
+  exists that a list update could leave behind, so the open view cannot keep showing the interrupted card after a
+  successful Restart. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-stopped-waiting-row-menu-order-disagrees-with-render.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old separate `menu_order` projection was removed with `farhelm-ui`. The desktop row
+  menu draws Suspend/Resume and Stop and suspend from one rule (`session_list/menu.rs:1284-1364`, using
+  `hosts/offers.rs:396-405`, where stopped-and-waiting is not resumable). Up and Down move through whatever focusable
+  items are drawn (`actions.rs:417-418` binds them to focus next/previous in the menu context), and disabled menu items
+  stay focusable (`components/menu_item.rs:16`). So the disabled Stop and suspend is drawn and also reachable by
+  keyboard. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-terminal-files-cursor-teardown-comment-misattributes-global-setter-to-grid.md
+
+- Outcome: `discard`.
+- Assessment: moot. The finding is about a comment in the old JS test
+  `crates/farhelm-ui/js-tests/terminal-files.test.js` describing `grid-terminal.js` cursor accessors. Both files were
+  removed with `farhelm-ui` in 1eb4e3751. The desktop terminal's file-link code
+  (`crates/gui/farhelm-gui/src/terminal/files.rs` and its tests) has no JS cursor setters, and its tests carry no such
+  teardown comment. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-ui-container-leftover-question-missing-answer-focus-handoff.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old Dioxus component is gone. Settings → Containers' Delete now opens its question
+  through `prompt::ask_inline` with `.starts_on_cancel()` (`crates/gui/farhelm-gui/src/settings/containers.rs:289-299`).
+  `ask_inline` moves focus to the question's starting answer, in a dialog once the frame has drawn it
+  (`crates/gui/farhelm-gui/src/prompt.rs:1566-1578`), so focus no longer stays on the row's Delete. Checked by a
+  delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket
+  items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-ui-podman-start-help-overpromises-interrupted-and-restart.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. `ProviderUi::starting_help` (`crates/gui/farhelm-gui/src/environment_ui.rs:745-761`) now
+  says "sessions that were running come back ended, or interrupted if its host restarted, with Restart where a
+  conversation was captured". Its doc comment records that the old "return as interrupted, with Restart available"
+  wording was replaced on 2026-11-16 to match SPEC.md. Sessions that had already ended are no longer promised
+  interrupted status. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked
+  the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-ui-recipe-panel-move-leaves-old-key-location-and-module-map.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop Recipes section's no-key note is "Save an API key in Settings → Credentials to
+  build snapshots." (`crates/gui/farhelm-gui/src/settings/recipes.rs:128-132`), and the test at
+  `settings/recipe_tests.rs:978-987` pins it. A search finds no "recipe list sits between the ssh key" text in the GUI's
+  module docs, so the stale module-map claim is gone too. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-ui-shared-sandbox-recipe-choices-omit-resource-sizes.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The launcher's Recipe select lists Tensorlake recipes with the cube mark and "N CPUs · N GB
+  memory" through `ProviderUi::recipe_listing` (`crates/gui/farhelm-gui/src/environment_ui.rs:388-404`). It is used by
+  `launcher/destination_rows.rs:181`, which meets SPEC.md:1526. Checked by a delegated reader against main 28f177284
+  (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-wake-browser-stale-suspension-oracle-unattributed-host-read-count.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Playwright test `e2e/tests/tensorlake-lifecycle.spec.ts` and the browser launcher's
+  resume-and-wait helper it exercised were removed (6ef88c9a4, 1eb4e3751). The desktop launcher does not resume a
+  suspended host before creating a session. It refuses and asks the user to resume in Hosts
+  (`crates/gui/farhelm-gui/src/launcher/request.rs:15-16, 422-437`; SPEC.md:358-360 "Resuming before the create is
+  planned"). So no current wake path or test has this read-count oracle. Checked by a delegated reader against main
+  28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trailing-warned-delete-handoff-clears-error-before-view-admission.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. In the desktop app, an "unasked" whole-environment Delete answer is handled in one
+  synchronous settle (`crates/gui/farhelm-gui/src/session_list/environment_delete.rs:310-328`). The follow-up question
+  opens only if the user has not moved on (`!settled.user_moved_on`). The refusal record is forgotten only when that
+  question actually opened. Otherwise the helm's words stay on the session's row (module NOTE at `:55-59`), so the
+  failure explanation is not lost. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trash-question-reopen-skips-answer-focus.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop Trash dialog's "Delete all" and "Delete all on" ask through
+  `prompt::ask_inline` on every press (`crates/gui/farhelm-gui/src/trash/dialog.rs:160-225`, docs at `:23-44`). Each
+  call builds a new inline question and moves focus to its starting answer (`prompt.rs:1566-1578`). There is no
+  mount-only focus step that a second activation could skip. Checked by a delegated reader against main 28f177284 (code
+  reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## trash-read-eligibility-can-remain-cached.md
+
+- Outcome: `discard`.
+- Assessment: moot. The concern was a Dioxus `Memo::peek` returning a cached read-eligibility value during cleanup
+  (`farhelm-ui/src/list/trash.rs`), removed in 1eb4e3751. The desktop Trash reads are event-driven: a read happens on
+  connection and when the pushed trash epoch moves (`crates/gui/farhelm-gui/src/trash.rs:12-21`). Ordering is handled by
+  "newest read per host wins" instead of generations (`trash/listing.rs:9-21`). No cached-eligibility gate exists that
+  could go stale. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## tunnel-allow-keyboard-guard-source-gap.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The tunnel warning is now a shared prompt `Question` that starts on Cancel
+  (`crates/gui/farhelm-gui/src/terminal/tunnels.rs:719-745`). Every component button ignores held-key repeats and
+  modified keys for activation (`crates/gui/farhelm-gui/src/components/mod.rs:392-430`, `components/button.rs:29-30`),
+  and composing input never reaches a button. The guard is now shared by every button, including Allow tunnels, instead
+  of opted into per caller. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## tunnel-error-covers-approval-disclosure.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The CSS layer-45 overlap is gone with `farhelm-ui`. In the desktop app the tunnel failure
+  notice is an overlay inside the terminal pane (`crates/gui/farhelm-gui/src/terminal/attached.rs:2304-2323`). Agent
+  approval cards are drawn in the window's approval region, which the layer manager places above page content and above
+  dialogs (`crates/gui/farhelm-gui/src/layers.rs:2138-2154`). So cards paint over the tunnel notice, not under it.
+  Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on
+  high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## tunnel-remove-uses-shifting-row-index.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The desktop recipe editor gives each tunnel row a stable `key: u64`
+  (`crates/gui/farhelm-gui/src/settings/recipes/editor.rs:211-216`). Remove deletes by that key,
+  `self.tunnels.retain(|row| row.key != key)` (`:614-620`, wired at `:1013`). An earlier removal cannot redirect a later
+  Remove to a different row. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## unapproved-ssh-help-copy-receiver-contract-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: moot. The SSH connection help dialog (`crates/farhelm-ui/src/ssh_help.rs`, with copyable "Sessions
+  connection" / "Setup and updates connection" commands for the Add host draft) was removed in 1eb4e3751. The desktop
+  Add host dialog (`crates/gui/farhelm-gui/src/hosts/add.rs`) and the agent host-add request (`approvals/host_add.rs`)
+  have no SSH help or copyable SSH command. SPEC.md and SPEC_impl.md no longer describe one, so an unapproved draft has
+  no copy path. Checked by a delegated reader against main 28f177284 (code reading, not run); triage spot-checked the
+  verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## uninstall-test-restores-before-run-settles.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Playwright test `e2e/tests/terminal-multihost.spec.ts` and its long-lived shared helm stacks
+  were removed with the browser suite (6ef88c9a4). The desktop uninstall tests
+  (`crates/gui/farhelm-gui/src/hosts/uninstall/tests.rs`) drive the helm client's in-process fake per test (`FakeHelm`),
+  with no shared stack, no restore step and no cleanup that a still-active run could contaminate. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## unsupported-filter-warning-cannot-wrap.md
+
+- Outcome: `discard`.
+- Assessment: moot. The CSS `nowrap` conflict was in the removed `farhelm-ui` stylesheet. The desktop session list
+  deliberately did not port the unsupported-filter wording: "the channel's helm always applies its query or refuses it,
+  so the listing carries nothing that could call for it" (`crates/gui/farhelm-gui/src/session_list/filters.rs:55-57`).
+  So no such warning is drawn. Checked by a delegated reader against main 28f177284 (code reading, not run); triage
+  spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## update-preplanning-retarget-consent-ambiguity.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The behavior persists in the desktop app: Update sends a bodyless
+  `POST /api/hosts/{id}/update` and the helm plans from the entry's current row
+  (`crates/gui/farhelm-gui/src/hosts/update.rs:10-15`). The current specification settles this as intended:
+  SPEC.md:429-436 says a host entry is one logical host and that "Approvals, settings changes and confirmed operations
+  therefore follow the entry", even across a destination change. A search found no conflicting "rendered binding"
+  wording left in SPEC_impl.md, so the code matches the spec and the ambiguity is resolved. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## update-reminder-before-initial-provisioning-read.md
+
+- Outcome: `discard`.
+- Assessment: already fixed. The old app published an empty progress snapshot before its first provisioning read. In the
+  desktop app, hosts and host progress are both pushed collections installed together from one UI-channel snapshot
+  (`crates/farhelm-helm-client/src/collections.rs:298-301`). The Update offer is computed from that store
+  (`crates/gui/farhelm-gui/src/hosts.rs:542-547`, `hosts/offers.rs:546-560`), so there is no window where hosts are
+  known but their progress has not been read yet. Checked by a delegated reader against main 28f177284 (code reading,
+  not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking under the already-fixed rule (`review_feedback_queue/.agents/triage.md`, "Preparing
+  each item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## uuid-hold-intercepts-terminal-lease.md
+
+- Outcome: `discard`.
+- Assessment: moot. The Playwright test `e2e/tests/destination-authority.spec.ts` and its global
+  `Crypto.prototype.randomUUID` override were removed with the browser suite (6ef88c9a4), and the browser's JS id
+  minting for create keys and terminal leases went with `farhelm-ui` (1eb4e3751). The desktop tests are Rust tests
+  against the helm client's fake, with no shared UUID hook that terminal startup could hit. Checked by a delegated
+  reader against main 28f177284 (code reading, not run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## visual-capture-clicks-hidden-templates.md
+
+- Outcome: `discard`.
+- Assessment: moot. The unscoped visual capture `e2e/docs-shots/visual-review.spec.ts` was removed with the browser
+  suite (6ef88c9a4). Current captures are separate per-page scripts under `scripts/docs-shots/`. `launch-templates.py`
+  starts from the engine's reset state with Templates visible in the session list heading (`launch-templates.py:17-18`),
+  and no script goes from Hosts into Templates. Checked by a delegated reader against main 28f177284 (code reading, not
+  run); triage spot-checked the verdicts on high-bucket items.
+- Decision: recorded without asking on the maintainer's 2026-11-21 instruction to discard immediately every finding that
+  is clearly moot: its code went with the browser interface (#3401) or the old webview app (#3407), and current code has
+  no counterpart defect.
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## tensorlake-add-host-caches-skip-confirmation.md
+
+- Outcome: `other`.
+- Assessment: matches the review filter "Harm whose route is not established in shipped code"
+  (`review_feedback_queue/FILTER.md`): the skipped confirmation needs the setting to change behind an open Add host
+  form, and no shipped way to make that change has been found. Checked by a delegated reader against main 28f177284
+  (code reading, not run). The bucket was `other`, so no independent drop check applies.
+- Decision: removed without asking under the filter rule (`review_feedback_queue/.agents/triage.md`, "Preparing each
+  item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## large-notice-history-exceeds-mark-budget.md
+
+- Outcome: `other`.
+- Assessment: matches the review filter "Harm whose route is not established in shipped code"
+  (`review_feedback_queue/FILTER.md`): it needs a notification history of hundreds of thousands of rows, which supported
+  use does not reach (notices are keyed by condition). Checked by a delegated reader against main 28f177284 (code
+  reading, not run). The bucket was `other`, so no independent drop check applies.
+- Decision: removed without asking under the filter rule (`review_feedback_queue/.agents/triage.md`, "Preparing each
+  item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## pending-replace-recreates-announcement.md
+
+- Outcome: `other`.
+- Assessment: matches the review filter "Harm whose route is not established in shipped code"
+  (`review_feedback_queue/FILTER.md`): the repeated announcement depends on how VoiceOver treats a reappearing status
+  node through GPUI, which nobody has verified. Checked by a delegated reader against main 28f177284 (code reading, not
+  run). The bucket was `other`, so no independent drop check applies.
+- Decision: removed without asking under the filter rule (`review_feedback_queue/.agents/triage.md`, "Preparing each
+  item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## pending-stop-header-width.md
+
+- Outcome: `other`.
+- Assessment: matches the review filter "Harm whose route is not established in shipped code"
+  (`review_feedback_queue/FILTER.md`): the crowding depends on the pending label's width at the minimum pane size, which
+  nobody has measured. Checked by a delegated reader against main 28f177284 (code reading, not run). The bucket was
+  `other`, so no independent drop check applies.
+- Decision: removed without asking under the filter rule (`review_feedback_queue/.agents/triage.md`, "Preparing each
+  item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
+
+## codex-auth-object-depth-contract.md
+
+- Outcome: `other`.
+- Assessment: matches the review filter "Harm whose route is not established in shipped code"
+  (`review_feedback_queue/FILTER.md`): it needs a pasted Codex login nested more than 128 levels deep, and real Codex
+  login files are shallow. Checked by a delegated reader against main 28f177284 (code reading, not run). The bucket was
+  `other`, so no independent drop check applies.
+- Decision: removed without asking under the filter rule (`review_feedback_queue/.agents/triage.md`, "Preparing each
+  item").
+- Completion criteria: remove the feedback file and its index entry; no code or spec change.
+- Execution: `complete`; removed during the 2026-11-21 triage of findings that cited removed UI code.
