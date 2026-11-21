@@ -24,18 +24,16 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::session_requests::{BrowseDirectoryBody, BrowseDirectoryReply};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
 };
 
 use super::{Launcher, on_launcher};
+use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::Field;
 use crate::operations;
 use crate::theme::{self, metrics};
-
-/// Browse's words from inside its edge: the old `padding: 0 14px` (CSS padding sits inside the border).
-const BROWSE_PAD_X: f32 = 14.;
 
 /// What one listing is about: the host, the connection the launcher saw it on, and the folder as typed.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -55,9 +53,11 @@ pub(super) struct Browse {
 }
 
 impl Launcher {
-    /// Whether the launcher offers Browse: a folder destination this draft may change.
+    /// Browse reads a changeable folder on an existing host. New environments have a held home and no host to ask.
     pub(super) fn offers_browse(&self) -> bool {
-        self.draft.checkout.is_none() && !self.draft.holds(Field::Destination)
+        self.draft.checkout.is_none()
+            && self.draft.target.is_none()
+            && !self.draft.holds(Field::Destination)
     }
 
     /// What a browse would be about now: the chosen host on the connection the registry lists, and the folder as it
@@ -136,10 +136,13 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// The Browse button, under the Host row ([`Launcher::with_browse_below`]), while the launcher offers it; greyed
-    /// while no host is chosen. A press only reads, so it never waits on the YOLO question's host write. It is as tall
-    /// as the host button (the old `min-height: 36px`) and 14 pixels in at the sides (`padding: 0 14px`).
-    pub(super) fn browse_button(&self, cx: &mut Context<Self>) -> Option<Button> {
+    /// The folder action at the far end of the address field. A press only reads, so it never waits on a launch's
+    /// confirmation. The button stays in the form while hosts load, disabled until the draft names one.
+    pub(super) fn browse_button(
+        &self,
+        palette: &theme::Palette,
+        cx: &mut Context<Self>,
+    ) -> Option<Button> {
         if !self.offers_browse() {
             return None;
         }
@@ -154,13 +157,19 @@ impl Launcher {
                 div()
                     .flex()
                     .items_center()
+                    .gap(px(6.))
                     .h(super::host_picker::control_content_height())
-                    .px(px(BROWSE_PAD_X) - metrics::BUTTON_PAD.1)
-                    // `.launch-composer-destination-row > button`: `font-size: 13px`.
                     .text_size(metrics::TEXT_MD)
+                    .child(
+                        svg()
+                            .path(Icon::Folder.path())
+                            .size(px(14.))
+                            .flex_none()
+                            .text_color(theme::color(palette.fg_1)),
+                    )
                     .child("Browse"),
             )
-            .tier(Tier::Neutral)
+            .tier(Tier::Ghost)
             .disabled(self.draft.host.is_none())
             .on_click(on_launcher(cx.weak_entity(), Launcher::browse)),
         )

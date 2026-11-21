@@ -20,7 +20,9 @@ use super::draft::{LaunchDraft, RunsOn};
 use super::environment_launch_tests::{answer_with, plain_preferences, window_with_more};
 use super::environment_tests::{account, built_json, ready_key, recipe_json, sandbox};
 use super::launch_tests::command_draft;
-use super::view_tests::{draft, fixture_hosts, name_of, shown_refusal};
+use super::view_tests::{
+    click_in_body, draft, fixture_hosts, name_of, pick_host_menu_row, shown_refusal,
+};
 use crate::focus::Mark;
 use crate::session_list::tests::painted;
 use crate::test_support::{self, any_open, focused_id, meta, settle};
@@ -70,17 +72,17 @@ fn usable() -> Settings {
     account(true, ready_key(COMMAND))
 }
 
-/// SPEC.md, "Creation": "A segment with no usable place is hidden"; the old switch showed New sandbox only once the
-/// account had an API key, since without one every recipe is refused. Specified: with the account read saying no API
-/// key is saved, the switch shows Existing host and New container but no New sandbox.
+/// Without an API key none of the account's recipes can launch. The host menu still offers any usable container
+/// host's New container row, while New sandbox is absent.
 #[gpui::test]
 fn new_sandbox_is_hidden_without_an_api_key(cx: &mut TestAppContext) {
     let (_helm, cx) = opened(cx, &account(false, ready_key(COMMAND)));
+    click_in_body(cx, "launcher-host");
     assert!(
-        name_of(cx, "launcher-runs-on-New container").is_some(),
-        "the premise: the switch is drawn"
+        name_of(cx, "launcher-host-option-New container").is_some(),
+        "the premise: the New environment group is drawn"
     );
-    assert_eq!(name_of(cx, "launcher-runs-on-New sandbox"), None);
+    assert_eq!(name_of(cx, "launcher-host-option-New sandbox"), None);
 }
 
 /// SPEC.md, "Sandbox sessions": a missing "local Farhelm SSH key also disables" a recipe; the old switch still entered
@@ -95,7 +97,7 @@ fn entering_new_sandbox_chooses_the_first_built_recipe_and_names_the_missing_key
 ) {
     let keyless = account(true, SshKeyStatus::NotCreated);
     let (mut helm, cx) = opened(cx, &keyless);
-    test_support::click(cx, "launcher-runs-on-New sandbox");
+    pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     let entered = draft(cx);
     assert_eq!(entered.target, Some(sandbox("ready")));
     assert_eq!(entered.folder.value(), "~");
@@ -119,7 +121,7 @@ fn entering_new_sandbox_chooses_the_first_built_recipe_and_names_the_missing_key
 #[gpui::test]
 fn sandbox_recipes_are_listed_with_their_mark_size_and_refusal(cx: &mut TestAppContext) {
     let (_helm, cx) = opened(cx, &usable());
-    test_support::click(cx, "launcher-runs-on-New sandbox");
+    pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     test_support::click(cx, "launcher-recipe");
     let lines = painted(&test_support::frame(cx));
     assert!(
@@ -143,7 +145,7 @@ fn sandbox_recipes_are_listed_with_their_mark_size_and_refusal(cx: &mut TestAppC
 #[gpui::test]
 fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
     let (_helm, cx) = opened(cx, &usable());
-    test_support::click(cx, "launcher-runs-on-New sandbox");
+    pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     assert_eq!(
         name_of(cx, "launcher-registration-words").as_deref(),
         Some(
@@ -176,7 +178,7 @@ fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
         cx.debug_bounds("launcher-registration-note").is_some(),
         "the premise: the note is drawn"
     );
-    test_support::click(cx, "launcher-runs-on-Existing host");
+    pick_host_menu_row(cx, "launcher-host-option-1");
     assert_eq!(cx.debug_bounds("launcher-registration-note"), None);
 }
 
@@ -198,10 +200,13 @@ fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppConte
         window_with_more(cx, command_draft(), hosts, plain_preferences(), vec![empty]);
     answer_with(&mut helm, cx, Some(&usable()), |_| false);
     for (segment, named) in [
-        ("launcher-runs-on-New sandbox", "new sandbox"),
-        ("launcher-runs-on-New container", "new container on host1"),
+        ("launcher-host-option-New sandbox", "new sandbox"),
+        (
+            "launcher-host-option-New container",
+            "new container on host1",
+        ),
     ] {
-        test_support::click(cx, segment);
+        pick_host_menu_row(cx, segment);
         let recipe = draft(cx).target.map(|target| target.recipe().to_owned());
         assert_eq!(
             recipe.as_deref(),
@@ -219,7 +224,7 @@ fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppConte
         let note = cx.debug_bounds("launcher-registration-note").is_some();
         assert_eq!(
             note,
-            segment == "launcher-runs-on-New sandbox",
+            segment == "launcher-host-option-New sandbox",
             "{segment}: the registration note"
         );
     }
@@ -230,18 +235,25 @@ fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppConte
 /// The pricing page the question links to, the old question's.
 const PRICING: &str = "https://www.tensorlake.ai/pricing";
 
-/// Enter New sandbox (on `ready`, the first built recipe) and press Launch, answering everything but an environment
-/// create, and return what was sent: nothing, while the question asks first.
+/// Enter New sandbox (on `ready`, the first built recipe) and verify the form discloses billing and deletion before
+/// pressing Launch. Return what was sent, which is nothing while the confirmation is open.
 fn press_in_new_sandbox(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
     account: &Settings,
 ) -> Vec<FakeCommand> {
-    test_support::click(cx, "launcher-runs-on-New sandbox");
+    pick_host_menu_row(cx, "launcher-host-option-New sandbox");
     assert_eq!(
         draft(cx).target,
         Some(sandbox("ready")),
         "the premise: New sandbox on `ready`"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-environment-notice").as_deref(),
+        Some(
+            "This session's sandbox bills while running. Suspend stops CPU and memory billing. Deleting its last session removes the sandbox and its files."
+        ),
+        "the form shows the notice even if the confirmation will be skipped"
     );
     test_support::click(cx, "launcher-launch");
     environment_creates(helm, cx, account)
@@ -471,7 +483,7 @@ fn an_edit_retires_the_question(cx: &mut TestAppContext) {
         cx.debug_bounds("prompt-confirm").is_some(),
         "the premise: the question is up"
     );
-    test_support::click(cx, "launcher-runs-on-Existing host");
+    pick_host_menu_row(cx, "launcher-host-option-1");
     assert_eq!(
         cx.debug_bounds("prompt-confirm"),
         None,

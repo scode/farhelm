@@ -1232,7 +1232,11 @@ fn a_container_template_on_a_number_key_launches_at_its_place(cx: &mut TestAppCo
         label(cx, "launcher-recipe").is_some() && label(cx, "launcher-container-host").is_some(),
         "and shows it in its Recipe and Container host rows"
     );
-    assert_eq!(label(cx, "launcher-host"), None, "in place of the Host row");
+    assert_eq!(
+        label(cx, "launcher-host").as_deref(),
+        Some("Host: New container"),
+        "the picker names the retained container placement"
+    );
 }
 
 /// The old app's "a recipe template quick launch asks before one recipe request" (`tensorlake-sandbox-sessions.spec.ts`

@@ -22,7 +22,9 @@ use super::entry::HOST_NOT_CARRIED;
 use super::entry::{new_available, open_clone, open_new, open_new_named, open_replace_with};
 use super::environment_launch_tests::{answer_except, catalog};
 use super::launch_tests::{HostChange, created, creates, start_host_change};
-use super::view_tests::{click_in_body, draft, fixture_hosts, name_of, read, shown_refusal};
+use super::view_tests::{
+    click_in_body, draft, fixture_hosts, name_of, pick_host_menu_row, read, shown_refusal,
+};
 use crate::actions::NewSession;
 use crate::layers;
 use crate::local_state;
@@ -831,7 +833,7 @@ fn clone_of_an_environment_session_starts_a_fresh_one_from_its_recipe(cx: &mut T
     assert_eq!(opened.mode, Mode::Clone);
     assert_eq!(opened.target, Some(sandbox("web")));
     assert_eq!(destination(cx), (Some(1), "~".to_owned()));
-    test_support::click(cx, "launcher-runs-on-Existing host");
+    pick_host_menu_row(cx, "launcher-host-option-1");
     assert_eq!(draft(cx).target, None, "the premise: Existing host chosen");
     assert_eq!(destination(cx).0, Some(1));
     assert_eq!(host_note(cx), None, "the environment was carried");
@@ -901,15 +903,15 @@ fn new_beside_an_open_environment_session_preselects_its_recipe_and_place(cx: &m
 
 /// SPEC.md, "Sandbox sessions": "Restart, Restart with, Replace and Replace with stay in the existing sandbox". The
 /// draft refuses a target in Replace with (`environment_tests`); this shows the launcher offers none either, where New
-/// beside the same session does. Specified: with c open on a `web` sandbox and New container usable, New shows the Runs
-/// on switch; Replace with of c holds host11 with no target and draws no switch.
+/// beside the same session does. With c open on `web`, New can pick another destination. Replace with holds host11
+/// and presents it as text, so it cannot offer a new environment.
 #[gpui::test]
 fn replace_with_of_an_environment_session_keeps_its_environment(cx: &mut TestAppContext) {
     let (_helm, cx) = environment_window(cx, "c", "web");
     assert!(new(cx));
     assert!(
-        name_of(cx, "launcher-runs-on-Existing host").is_some(),
-        "the premise: New beside c shows the switch"
+        name_of(cx, "launcher-host").is_some(),
+        "the premise: New beside c shows the picker"
     );
     test_support::keys(cx, "escape");
     assert!(cx.update(|window, cx| open_replace_with("c", window, cx)));
@@ -917,9 +919,5 @@ fn replace_with_of_an_environment_session_keeps_its_environment(cx: &mut TestApp
     let draft = draft(cx);
     assert!(matches!(draft.mode, Mode::ReplaceWith { .. }));
     assert_eq!((draft.target, draft.host), (None, Some(11)));
-    assert_eq!(
-        name_of(cx, "launcher-runs-on-Existing host"),
-        None,
-        "no switch"
-    );
+    assert_eq!(name_of(cx, "launcher-host"), None, "no picker");
 }
