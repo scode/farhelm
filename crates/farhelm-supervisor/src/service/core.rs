@@ -18039,11 +18039,9 @@ pub(crate) mod tests {
     /// live (`still_alive_for_delete`; Restart no longer consults this).
     ///
     /// Only an unconfirmed launch qualifies. A rebooted (`Interrupted`) or
-    /// host-orphaned (`Exited`) row also reloads with no terminal, and
-    /// nothing of it is running; if this predicate widened to them, an
-    /// ordinary post-reboot delete would come back "still running". A row
-    /// that still has a terminal is never answered here: its terminal is
-    /// probed instead.
+    /// host-orphaned (`Exited`) row has a settled launch outcome. Delete
+    /// still checks for surviving descendants during teardown. For a row
+    /// with a terminal, the caller consults that terminal's liveness.
     #[farhelm_testtrace::test]
     async fn only_an_unconfirmed_terminal_less_launch_may_be_live() {
         assert!(terminal_less_launch_may_be_live(&entry_with(
@@ -27943,7 +27941,7 @@ exit 1
     /// the default seams the first create waits on the host's systemd probe,
     /// whose 15-second bound outlasts this test's 10-second wait for the
     /// reply. On loaded Tensorlake shards it timed out at exactly that wait
-    /// (FLAKES.md, 2026-11-09). Scopes play no part in what is tested here.
+    /// (FLAKES_ARCHIVE.md, 2026-11-09). Scopes play no part in what is tested here.
     #[farhelm_testtrace::test]
     async fn a_failed_create_replays_its_error_and_a_changed_override_conflicts() {
         let state = StateDir::new();
@@ -32776,7 +32774,7 @@ exit 1
     /// launched. Either way such a test passes or fails on the host's
     /// systemd: the hosted release runner has a user manager that can
     /// stall, and `an_ambiguous_planned_checkout_never_adopts_a_foreign_directory`
-    /// failed the v0.20.0 release gate on the first path (FLAKES.md,
+    /// failed the v0.20.0 release gate on the first path (FLAKES_ARCHIVE.md,
     /// 2026-09-30). A disabled manager never asks the host's systemd
     /// anything and never records a scoped launch, so teardown takes the
     /// plain process-tree sweep and a retry relies on the sentinel and
@@ -37899,7 +37897,7 @@ exit 1
     /// budget, Delete finds the recorded scope cannot be checked, which is an
     /// unconfirmed cleanup it must refuse (SPEC.md "Lifecycle operations").
     /// That failed the v0.20.0 release gate on the hosted runner, which has a
-    /// user manager (FLAKES.md, 2026-09-30). Nothing here is about cgroup
+    /// user manager (FLAKES_ARCHIVE.md, 2026-09-30). Nothing here is about cgroup
     /// scopes, so the fixture keeps the host's systemd out of the
     /// refusal-and-Delete contract.
     #[farhelm_testtrace::test(flavor = "multi_thread")]

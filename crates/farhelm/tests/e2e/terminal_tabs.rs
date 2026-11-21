@@ -22,14 +22,8 @@ use std::sync::atomic::AtomicUsize;
 // become observable once a session has a second terminal at all.
 // ---------------------------------------------------------------------------
 
-/// A supervisor whose launches all run `shell` — the seam that makes a
-/// tab's own launch drivable, since a tab has no invocation of its own.
-///
-/// Used to give the agent terminal a plain shell so the conformance tests
-/// can drive BOTH terminals identically. The dead-at-open-reply refusal
-/// needs this same seam pointed at a shell that exits immediately, but it
-/// must ALSO hold the settle boundary, so it assembles its seams itself
-/// rather than growing a second parameter here.
+/// A supervisor whose launches all run `shell`. The tab-close signal test
+/// pins Bash for its TERM behavior and checks the signal mask on Linux.
 async fn harness_with_shell(shell: &str) -> Harness {
     harness_with_seams(
         SupervisorTimeouts::default(),
@@ -238,9 +232,7 @@ async fn agent_restores_session_directory_but_tab_keeps_startup_cd() {
     );
 }
 
-/// The shape both pause hooks below share, spelled once so the constructor's
-/// signature stays readable; identical to the supervisor's own alias for
-/// these seams.
+/// The shape of a zero-argument asynchronous pause hook in the supervisor.
 type PauseHook =
     Arc<dyn Fn() -> Pin<Box<dyn std::future::Future<Output = ()> + Send>> + Send + Sync>;
 
@@ -248,18 +240,8 @@ type PauseHook =
 /// drive it: `entered` fires when the supervisor reaches the boundary, and
 /// the hook returns once `release` is notified.
 ///
-/// The two hooks this file installs share one shape — a zero-argument
-/// `Fn() -> BoxFuture<()>` (the supervisor's `ForwarderCleanupGate` and
-/// `TabSettleGate` are both that alias) — so one constructor serves both,
-/// and the seam FIELD a test installs it in is what names the boundary
-/// being held. The staged hooks (`ArchiveGate` takes a stage and answers
-/// with a `Result`) are a different shape and are not served here. The
-/// two boundaries in this file:
-/// a forwarder's cleanup publication (its deferred-publication interval is
-/// only a scheduler race, and finalization must be provable while the output
-/// client is already safe but its per-terminal barrier still reads as
-/// pending), and a tab open's dead-shell settle (see
-/// `host_tabs::a_tab_shell_dead_at_open_is_refused_with_its_last_words_and_leaves_nothing`).
+/// The caller installs it at the boundary it needs to hold, such as tab
+/// open's dead-shell settle or the Restart prelaunch window.
 ///
 /// `notify_one` before anyone waits still stores a permit, so a test that
 /// reaches its `notified()` after the supervisor has already entered the
@@ -1389,12 +1371,9 @@ fn host_size(host: &farhelm_supervisor::hosts::HostTerminal) -> String {
 }
 
 /// Wait until `host` (`what`, for the failure message) has `expected` in
-/// force ([`host_size`]), failing the test after ten seconds. Woken by any
-/// change of the runtime's status and otherwise re-checked every 100 ms,
-/// since the size is the emulator's and not a status field of its own. A
-/// runtime that has ended (its status channel closed) can change size no
-/// more, so the wait stops there and fails at once if the size is not the
-/// one expected.
+/// force ([`host_size`]), failing the test after ten seconds. A resize wakes
+/// the status subscriber. The wait also rechecks every 100 ms and ends
+/// when the runtime closes its status channel.
 async fn wait_for_host_size(
     host: &farhelm_supervisor::hosts::HostTerminal,
     what: &str,
@@ -1484,15 +1463,15 @@ async fn input_reaches_only_the_terminal_it_was_sent_to() {
     );
 }
 
-/// A stalled viewer on one TAB pauses only that tab's stream: the agent
+/// Pausing output on a TAB viewer holds only that tab's stream: the agent
 /// terminal keeps flowing throughout (PLAN_M4.md acceptance 5).
 ///
 /// Every terminal is its own host with its own stream, so
 /// the claim is that the supervisor's per-attachment flow control and stall
 /// handling stay per terminal: a wedged tab viewer must not hold up the
-/// agent's stream, the terminal the user is actually looking at. The agent
-/// is round-tripped repeatedly for longer than the stall window that could
-/// interfere, so a check that finished early cannot miss the interaction.
+/// agent's stream, the terminal the user is actually looking at. The test
+/// round-trips the agent repeatedly for eight seconds while the tab's
+/// output is paused. This exercises the paused period before stall detach.
 #[farhelm_testtrace::test]
 async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
     let h = harness().await;
@@ -1550,8 +1529,9 @@ async fn a_stalled_tab_viewer_does_not_pause_the_agents_stream() {
         "the agent must have been round-tripped several times while the tab was stalled"
     );
 
-    // And the stalled tab recovers on resume rather than staying dead —
-    // the other half of the isolation claim.
+    // After resume, check for the flood marker. The echoed command can
+    // also contain this prefix, so the check alone cannot prove delivery
+    // of a flood record.
     h.client.resume_output(tab_chan).await;
     wait_for(&mut tab_rx, &mut tab_seen, "FLOOD-", 30).await;
 }

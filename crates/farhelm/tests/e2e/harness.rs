@@ -1878,7 +1878,7 @@ pub(crate) async fn supervisor_on(state_dir: &std::path::Path) -> anyhow::Result
 /// check, as it must (SPEC.md "Lifecycle operations"). A create retry asks
 /// the same manager whether the reserved launch's scope exists. This
 /// failed `create_idempotency` on loaded Tensorlake shards and
-/// `containerized_sessions` in a release gate (FLAKES.md, 2026-11-09 and
+/// `containerized_sessions` in a release gate (FLAKES_ARCHIVE.md, 2026-11-09 and
 /// 2026-11-17). A disabled manager never asks systemd and never records a
 /// scoped launch, so teardown takes the process-tree sweep and a retry
 /// relies on its host and sentinel evidence. Every supervisor the test

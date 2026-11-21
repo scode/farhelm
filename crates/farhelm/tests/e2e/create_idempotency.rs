@@ -631,7 +631,7 @@ struct CrashScene {
 /// Both supervisors run without a user manager ([`scopeless_seams`]), so the
 /// retry's launch evidence comes from hosts and sentinels, and the closing
 /// Delete never waits on a fresh systemd probe. It refused under load when it
-/// did (FLAKES.md, 2026-11-09).
+/// did (FLAKES_ARCHIVE.md, 2026-11-09).
 async fn retry_after_a_crash_at(stage: CreateStage) -> CrashScene {
     let state = farhelm_teststate::tempdir().expect("tempdir");
     let state_dir = state.path().to_path_buf();

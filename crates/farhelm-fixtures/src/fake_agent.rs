@@ -1880,8 +1880,8 @@ pub const FLOOD_RECORDS: u64 = 800_000;
 ///   `n, n+1, n+2, ...`, so a gap is loss and a repeat or a step backwards
 ///   is a duplicate. A marker without a number could show neither.
 /// - **A terminal `FLOOD-DONE` marker, then an idle wait.** Tests need a
-///   definite end to assert a tail against, and the process must not exit,
-///   which would end the terminal whose history is under test.
+///   definite end to assert a tail against. The idle wait leaves the
+///   producing program live for observations made after the burst.
 /// - **A gate on one input byte.** Emitting fast enough to outrun every
 ///   consumer can mean, on a fast host, that the ENTIRE burst is already
 ///   in the terminal's history before a test even finishes attaching; the
