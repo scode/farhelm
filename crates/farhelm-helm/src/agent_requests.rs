@@ -3736,12 +3736,12 @@ async fn find_template(
     Ok(template)
 }
 
-/// Recipe templates stay GUI-only until agent-requested billing is designed.
-/// Refusing before an approval also keeps new placement fields off old agent wires.
+/// Template management stays with the desktop app. Create handles recipe
+/// launches separately because their approval must cover the new environment.
 fn recipe_template_refusal() -> anyhow::Error {
     anyhow::Error::new(crate::SupervisorError::helm(
         ErrorKind::Unauthorized,
-        "Recipe templates can only be used and edited in Farhelm's GUI".into(),
+        "Manage recipe templates in Farhelm's GUI. From an ordinary host, launch one with `farhelm agent create --template`.".into(),
     ))
 }
 
@@ -4552,11 +4552,11 @@ async fn launch_environment_for_agent(
             plan.title_kind,
         ))
         .await?;
-    // Bounded here as well as at the relay: the relay's budget covers the
-    // approval wait plus this allowance, so answering by the end of the
-    // allowance after the Allow reaches the agent before its relay gives up,
-    // with the honest "still launching" instead of a lost answer. The launch
-    // task is not cancelled; its progress stays in the host's attention area.
+    // The relay includes time for the approval and this post-approval wait,
+    // which normally lets the "still launching" outcome reach the agent.
+    // Planning before approval and registering the launch afterwards can
+    // use up the relay's margin before this wait begins.
+    // The launch task continues and the host's attention area shows progress.
     let session =
         match tokio::time::timeout(farhelm_proto::approvals::ENVIRONMENT_LAUNCH_WAIT, result).await
         {
@@ -14981,7 +14981,8 @@ mod tests {
                 let (kind, message) = refused(handler.handle(ordinary, "local-live", verb).await);
                 assert_eq!(kind, ErrorKind::Unauthorized, "{provider:?}");
                 assert_eq!(
-                    message, "Recipe templates can only be used and edited in Farhelm's GUI",
+                    message,
+                    "Manage recipe templates in Farhelm's GUI. From an ordinary host, launch one with `farhelm agent create --template`.",
                     "{provider:?}"
                 );
             }

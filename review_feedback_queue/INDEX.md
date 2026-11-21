@@ -144,9 +144,6 @@ consequences.
 - [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
   leftover sandbox whose name has no helm tag is labelled as another helm's.
 
-- [`host-permission-copy-quotes-retired-labels.md`](host-permission-copy-quotes-retired-labels.md) — Specifications and
-  helm refusal text quote old host-permission labels rather than the controls users now see.
-
 - [`browser-shard-failure-sweeps-running-siblings.md`](browser-shard-failure-sweeps-running-siblings.md) — An early
   shard exception can clean up workers that sibling shards are still using. Additional reviewed scope: A Rust runner
   infrastructure or local evidence-save exception can sweep sibling sandboxes before their work and evidence collection
@@ -306,20 +303,12 @@ consequences.
   — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md`](trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md)
-  — Recipe-template refusals still claim agent use is GUI-only. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-agent-environment-missing-local-ssh-key-preflight.md`](trailing-agent-environment-missing-local-ssh-key-preflight.md)
   — Sandbox agent launches ask for approval before checking the local SSH key. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-environment-history-admits-agent-origin.md`](trailing-environment-history-admits-agent-origin.md) — Agent
   environment launches enter GUI place-default and recent-history bookkeeping. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md`](trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md)
-  — Environment wait comment promises a relay ordering the budgets do not guarantee. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-nonfinal-environment-delete-cache-survivor-oracle.md`](trailing-nonfinal-environment-delete-cache-survivor-oracle.md)
@@ -437,10 +426,6 @@ consequences.
 - [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)
   — Clone wire documentation still forbids the new environment clone form. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-create-cwd-help-omits-recipe-home-default.md`](trailing-agent-create-cwd-help-omits-recipe-home-default.md)
-  — Create folder help omits the new recipe launch default. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
 
 - [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
   — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence,

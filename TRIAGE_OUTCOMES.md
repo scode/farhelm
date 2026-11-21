@@ -149,21 +149,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-recipe-template-management-refusal-denies-supported-agent-launch-use.md
-
-- Outcome: `fix code`.
-- Assessment: agent_requests.rs:3739 has the comment "Recipe templates stay GUI-only until agent-requested billing is
-  designed" and :3744 the message. The test asserts the same text at :14961. Basis: SPEC.md:1673-1674: "Recipe templates
-  stay GUI-only for listing and writing: agents cannot list, read or write them, and agent template verbs naming one are
-  refused, while `farhelm agent create --template` may launch one from an ordinary host." Fix: reword the message to
-  "listed and edited" (or similar), update the comment and the test assertion. The refusal itself does not change.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-environment-history-admits-agent-origin.md
 
 - Outcome: `fix code`.
@@ -240,19 +225,6 @@
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-podman.md`.
-
-## trailing-agent-create-cwd-help-omits-recipe-home-default.md
-
-- Outcome: `fix code`.
-- Assessment: still at `crates/farhelm/src/main.rs:320`. `--recipe` help (:340-342) already says "Folder is the new
-  home". Basis: SPEC.md:4675-4676 "The destination follows the launcher's rules for a new environment: a folder is the
-  new environment's home, and `--gh` clones the repository inside it."
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## ime-commit-bypasses-quick-launch-capture.md
 
@@ -854,20 +826,6 @@
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## host-permission-copy-quotes-retired-labels.md
-
-- Outcome: `fix code`.
-- Assessment: The helm's refusal for YOLO launches tells you to turn on "start YOLO sessions here without asking", but
-  the host settings switch is now labelled "Start YOLO sessions without asking". SPEC.md quotes the old label too.
-  Verified: Confirmed. yolo_guard.rs ~31 and ~163 have the old text, SPEC.md ~4455 has the old text, and the GUI label
-  is in hosts/settings.rs ~377. Permission behavior is unaffected.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## host-lock-table-contradicts-startup-span.md
 
 - Outcome: `fix code`.
@@ -901,20 +859,6 @@
   that does not exist. Verified: agent_launch.rs:149-151 and :183 still mention `resolve_environment`, which does not
   exist (the real helper is `resolve_placed`). launcher.rs:661-662 still says "Agent callers supply no recipes".
   agent_requests.rs:2465 passes recipes through resolve_placed.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-environment-wait-comment-promises-a-relay-ordering-the-budgets-do-not-guarantee.md
-
-- Outcome: `fix code`.
-- Assessment: None. A comment promises the "still launching" answer always reaches the agent before the relay gives up.
-  The spec says this is only the normal case. Verified: The comment is still at agent_requests.rs:4555-4559.
-  SPEC_impl.md says the relay's extra time is "not a guaranteed ordering" (per the reviewer; consistent with the env
-  section's "normally").
 - Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
   Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
   separate them by area of code so there is a good chance of them running concurrently."
