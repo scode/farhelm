@@ -4,4 +4,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `launcher-repository-search-loading.md` — show "Loading repositories…" instead of "no matches" while the launcher's repository search is pending, and close its triage outcome
 - [complete] `stop-wait-starting-launch-witness.md` — make the supervisor stop-wait test witness a launch still registering, and close its triage outcome
-- [landing 04d4ab] `spare-builder-fifo-release.md` — keep the spare-builder test's named-pipe release from hanging when its reader exited, and close its triage outcome
