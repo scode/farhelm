@@ -359,8 +359,9 @@ fn a_pick_applies_its_template_once_the_catalog_is_read(cx: &mut TestAppContext)
     let shown = text(cx);
     assert!(shown.contains("gpt-x"), "the model applied: {shown:?}");
     assert!(
-        shown.contains("Codex · "),
-        "with Codex as its agent type: {shown:?}"
+        test_support::label(cx, "launcher-launch")
+            .is_some_and(|name| name.starts_with("Launch Codex · ")),
+        "the launch action names Codex as its agent type"
     );
     assert_eq!(
         banner(cx).as_deref(),

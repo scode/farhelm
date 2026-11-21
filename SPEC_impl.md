@@ -8737,8 +8737,8 @@ has read, after which the launcher puts its text fields back in step with the dr
 launcher's catalog read is out waits in a plain ordered list and is applied when the read answers, or dropped if a press
 of Launch sends the draft first. A taken `tl:` row in the composer search is one such batch
 (`templates::dispatch::search_row_batch`), built from the one row search above and keeping the launch kind unless the
-template sets one. A refusal changes nothing and is shown as its own alert above the search box, beside the box's own
-refusal of a held field, where the old launcher said why a template did not apply, until the next press of Launch or
+template sets one. A refusal changes nothing and is shown as its own alert below the command field, beside the field's
+own refusal of a held field, where the old launcher said why a template did not apply, until the next press of Launch or
 edit; a missing mark or an unbound key refuses there without opening Templates. Focus stays where it is, and a control
 the edits remove hands focus on through the focus coordinator, not yet to the search. While the YOLO question's host
 write is out a press changes nothing. While Save as template's panel is open a press changes nothing, presses still
@@ -8782,10 +8782,10 @@ number key, bolt chord, template list, quick switcher, or sequence. Incomplete b
 the template needs more choices; any incomplete sequence says its combined setup is incomplete
 (`templates::dispatch::incomplete_banner`). New opens with it, or with a quick launch's refusal, as a field the launcher
 draws until the draft is next edited (`launcher::view::Note`): the banner at the top of its notices region in the old
-banner's look, the refusal ("Not launched." first) above the search box as one plain line in the warning ink, as every
-template refusal in the launcher is. A banner also goes on its own six seconds after its batch applied, whatever the
-origin, as the old launcher's did (SPEC.md names the number-key and sequence banners and is silent on the others): one
-deadline the launcher keeps beside the note, started only once application has finished so that a slow catalog read
+banner's look, the refusal ("Not launched." first) below the command field as one plain line in the warning ink, as
+every template refusal in the launcher is. A banner also goes on its own six seconds after its batch applied, whatever
+the origin, as the old launcher's did (SPEC.md names the number-key and sequence banners and is silent on the others):
+one deadline the launcher keeps beside the note, started only once application has finished so that a slow catalog read
 cannot spend the viewing interval. A prepared launcher that waits behind the launch notice spends it there too. Nothing
 stores the hint or changes launch admission.
 
@@ -8897,6 +8897,12 @@ values separately and uses the terminal face for the wrapper. The request prereq
 so they reveal the affected field even while Launch has an earlier refusal to show. The desktop app and helm share the
 literal conversation-selector check. After a correction the disclosure stays open until the user closes it, keeping the
 field available for continued editing.
+
+The launcher supplies its command field to the shared dialog frame's control heading. Its rocket and Return hint share
+the single-line input's focus outline and send clicks to its editor. Mode guidance can wrap beneath that row, while
+Close stays aligned to the input. Query notices and refusals have their own bounded scrolling area by the field, visible
+at any form scroll position. The suggestion popover follows the field's anchor. The footer retains its own bounded
+notices and names the launch target through the main action's accessible name.
 
 The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
 when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone

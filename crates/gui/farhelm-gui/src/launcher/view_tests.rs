@@ -280,6 +280,7 @@ fn new_opens_on_the_agent_tab_with_focus_in_the_search_box(cx: &mut TestAppConte
         "the Command tab's do not"
     );
     assert_eq!(draft(cx).tab, Tab::Agent);
+    assert_eq!(name_of(cx, "launcher").as_deref(), Some("New session"));
     assert!(
         read(cx, |launcher, window, cx| launcher
             .search
@@ -288,49 +289,53 @@ fn new_opens_on_the_agent_tab_with_focus_in_the_search_box(cx: &mut TestAppConte
         "focus starts in the search box"
     );
     let search = test_support::bounds(cx, "launcher-search-row");
-    let folder = test_support::bounds(cx, "launcher-folder-row");
+    let body = test_support::bounds(cx, "launcher-body");
+    let close = test_support::bounds(cx, "launcher-close");
     assert!(
-        search.top() < folder.top(),
-        "the search box is above the destination"
+        search.bottom() <= body.top() && search.center().y == close.center().y,
+        "the command field and Close sit on one line above the scrolling form"
     );
+    assert!(drawn(cx, "launcher-command-hints"));
+    assert!(has_node(cx, "launcher-empty-launch-hint"));
+    // Both decorations share the field's well. Their pointer handling must leave typing with the editor.
+    for adornment in ["launcher-command-mark", "launcher-empty-launch-hint"] {
+        test_support::click(cx, adornment);
+        assert!(
+            search_focused(cx),
+            "{adornment} sent focus to the text editor"
+        );
+    }
+    keys(cx, "c l a u d e");
+    assert_eq!(
+        search_text(cx),
+        "claude",
+        "focus stayed in the command field"
+    );
+    assert!(!drawn(cx, "launcher-command-hints"));
+    assert!(!has_node(cx, "launcher-empty-launch-hint"));
 }
 
-/// The footer says what Launch would start in the old footer's words, and Launch's accessible name keeps them after its
-/// verb (SPEC.md, "Creation": the main action's accessible name keeps the operation and target; long summaries keep
-/// their full text accessible). Why this matters: the visible Launch says only "Launch", so a screen reader user learns
-/// the target from these names alone. Specified: New with no agent type names no agent ("host1 · ~") and its choices
-/// all "Default"; the Command tab opens with "Command" and has no line of choices.
+/// The action still names the launch target to assistive technology after removing the visible summary.
+/// A Command draft includes its launch kind, where a draft with no agent chosen has no agent name to read.
 #[gpui::test]
-fn the_footer_names_what_launch_would_start(cx: &mut TestAppContext) {
+fn the_launch_action_names_its_target_without_a_footer_summary(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
-    assert_eq!(
-        name_of(cx, "launcher-summary-target").as_deref(),
-        Some("host1 · ~")
-    );
     assert_eq!(
         name_of(cx, "launcher-launch").as_deref(),
         Some("Launch host1 · ~")
     );
-    assert_eq!(
-        name_of(cx, "launcher-summary-choices").as_deref(),
-        Some("Model: Default · Effort: Default · Permissions: Default")
-    );
+    assert!(!has_node(cx, "launcher-summary-target"));
+    assert!(!has_node(cx, "launcher-summary-choices"));
     test_support::click(cx, "launcher-tabs-Command");
     assert_eq!(
-        name_of(cx, "launcher-summary-target").as_deref(),
-        Some("Command · host1 · ~")
-    );
-    assert_eq!(
-        name_of(cx, "launcher-summary-choices"),
-        None,
-        "no choices line on the Command tab"
+        name_of(cx, "launcher-launch").as_deref(),
+        Some("Launch Command · host1 · ~")
     );
 }
 
-/// An Agent draft ready to launch paints Launch as primary and Reset choices as neutral in both appearances. The
-/// border distinguishes the neutral look from the unavailable look, which uses the same fill.
+/// The footer makes Launch primary and Reset choices quiet in both appearances, so they have distinct hierarchy.
 #[gpui::test]
-fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
+fn the_footer_keeps_launch_primary_and_reset_quiet(cx: &mut TestAppContext) {
     let mut draft = LaunchDraft::new(Some(1), "~".into(), None);
     draft.choose_harness(LaunchHarness::Codex, None, None);
     let (_helm, cx) = launcher_on(cx, draft);
@@ -356,10 +361,7 @@ fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
             )
         });
         assert_eq!(palette.dark, appearance == Preference::Dark);
-        for (id, fill, border) in [
-            ("launcher-launch", palette.accent_fill, palette.accent_edge),
-            ("launcher-reset", palette.bg_2, palette.border),
-        ] {
+        for (id, fill, border) in [("launcher-launch", palette.accent_fill, palette.accent_edge)] {
             let bounds = test_support::bounds(cx, id);
             assert!(!bounds.contains(&pointer), "the premise: {id} is unhovered");
             // The scene snaps the paint to device pixels. Match the button's own quad, since its parent may
@@ -391,13 +393,29 @@ fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
                 "{appearance:?}: {id} paints its tier's resting border"
             );
         }
+        let reset = test_support::bounds(cx, "launcher-reset");
+        let reset = cx.update(|window, _| {
+            Bounds::from_corners(
+                window.pixel_snap_point(reset.origin),
+                window.pixel_snap_point(reset.bottom_right()),
+            )
+            .scale(window.scale_factor())
+        });
+        assert!(
+            !quads.iter().any(|quad| {
+                quad.bounds == reset
+                    && quad.content_mask.bounds.contains(&reset.center())
+                    && quad.background == Background::from(theme::color(palette.bg_2))
+            }),
+            "{appearance:?}: Reset does not take the neutral fill"
+        );
     }
 }
 
 /// At the minimum window size the body can scroll while the pinned footer and header stay in view. Tab and
-/// Shift+Tab wrap between Launch and Close, and the footer's other actions keep their reading order.
+/// Shift+Tab wrap between Launch and the command field, and the footer's other actions keep their reading order.
 #[gpui::test]
-fn the_footer_actions_follow_reading_order_and_wrap_to_close(cx: &mut TestAppContext) {
+fn the_footer_actions_follow_reading_order_and_wrap_to_the_command_field(cx: &mut TestAppContext) {
     let mut launch = LaunchDraft::new(Some(1), "~".into(), None);
     let _ = launch.choose_harness(LaunchHarness::Codex, None, None);
     let (_helm, cx) = launcher_on(cx, launch);
@@ -420,22 +438,24 @@ fn the_footer_actions_follow_reading_order_and_wrap_to_close(cx: &mut TestAppCon
         assert_eq!(node.visible_bounds, node.bounds, "{id} is visible");
     };
     let start = test_support::bounds(cx, "launcher-search-box").top();
-    keys(cx, "shift-tab shift-tab");
+    let folder = test_support::bounds(cx, "launcher-folder-row").top();
+    keys(cx, "shift-tab");
     at_endpoint(cx, "launcher-launch");
     super::browse_tests::scroll_body(cx, -4000.);
     assert!(
-        test_support::bounds(cx, "launcher-search-box").top() < start,
-        "the body scrolls independently of the footer"
+        test_support::bounds(cx, "launcher-folder-row").top() < folder,
+        "the body scrolls independently of the pinned rows"
     );
+    assert_eq!(test_support::bounds(cx, "launcher-search-box").top(), start);
     at_endpoint(cx, "launcher-launch");
     keys(cx, "tab");
-    at_endpoint(cx, "launcher-close");
-    keys(cx, "tab");
     assert!(search_focused(cx));
+    keys(cx, "tab");
+    at_endpoint(cx, "launcher-close");
     super::browse_tests::scroll_body(cx, 4000.);
     assert_eq!(test_support::bounds(cx, "launcher-search-box").top(), start);
     keys(cx, "shift-tab");
-    at_endpoint(cx, "launcher-close");
+    assert!(search_focused(cx));
     keys(cx, "shift-tab");
     at_endpoint(cx, "launcher-launch");
     for id in [
@@ -518,6 +538,7 @@ fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAp
     settle(cx);
     assert!(search_focused(cx));
     for id in [
+        "launcher-close",
         "launcher-recent-0",
         "launcher-destination-Folder",
         "launcher-destination-Managed checkout",
@@ -539,45 +560,35 @@ fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAp
     }
 }
 
-/// A host the store does not list, and no host at all, are "Unavailable host" in the footer, the old footer's words, so
-/// the target never silently loses its host part.
+/// An unavailable host still has a name in the action's accessible target.
 #[gpui::test]
-fn the_footer_says_unavailable_host_for_a_host_it_cannot_name(cx: &mut TestAppContext) {
+fn the_action_says_unavailable_host_for_a_host_it_cannot_name(cx: &mut TestAppContext) {
     for host in [Some(99), None] {
         let (_helm, cx) = launcher_on(cx, LaunchDraft::new(host, "~".into(), None));
         assert_eq!(
-            name_of(cx, "launcher-summary-target").as_deref(),
-            Some("Unavailable host · ~"),
+            name_of(cx, "launcher-launch").as_deref(),
+            Some("Launch Unavailable host · ~"),
             "host {host:?}"
         );
     }
 }
 
-/// The footer of an agent launch with choices: a Clone of a Codex session names Codex, and its line of choices reads
-/// its model, effort and permissions in the old footer's words (effort "High", not the command line's "high"; YOLO as
-/// "YOLO"), then the line count of a typed prompt.
+/// Clone keeps a mode-specific name and an empty command field so the user knows what Enter will start.
 #[gpui::test]
-fn the_footer_reads_an_agent_launchs_choices(cx: &mut TestAppContext) {
+fn the_clone_header_names_its_mode_and_keeps_focus(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(
         Some("gpt-5"),
         Some(LaunchEffort::High),
         Some(LaunchPermission::Yolo),
     ));
     let (_helm, cx) = launcher_on(cx, LaunchDraft::clone_of(&source, Some(1)));
+    assert_eq!(name_of(cx, "launcher").as_deref(), Some("Clone session"));
     assert_eq!(
-        name_of(cx, "launcher-summary-target").as_deref(),
-        Some("Codex · host1 · /src/project")
+        name_of(cx, "launcher-launch").as_deref(),
+        Some("Launch Codex · host1 · /src/project")
     );
-    click_in_body(cx, "launcher-prompt");
-    assert!(
-        focused(cx, Field::Prompt),
-        "the premise: the click focused the prompt"
-    );
-    keys(cx, "h i enter t h e r e");
-    assert_eq!(
-        name_of(cx, "launcher-summary-choices").as_deref(),
-        Some("Model: gpt-5 · Effort: High · Permissions: YOLO · Prompt: 2 lines")
-    );
+    assert!(search_focused(cx));
+    assert!(drawn(cx, "launcher-command-hints"));
 }
 
 /// A press of Launch on an incomplete draft says why beside it, "Not launched." first (SPEC.md, "Creation": "an
@@ -711,6 +722,12 @@ fn restart_with_starts_on_cancel_and_says_restart_error(cx: &mut TestAppContext)
     source.restart_offer = RestartOffer::Resume;
     let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
     let (_helm, cx) = launcher_on(cx, restart);
+    assert_eq!(name_of(cx, "launcher").as_deref(), Some("Restart session"));
+    assert_eq!(
+        name_of(cx, "launcher-mode-summary").as_deref(),
+        Some("Resume this session with different settings")
+    );
+    assert!(!drawn(cx, "launcher-command-hints"));
     assert!(
         !drawn(cx, "launcher-tabs"),
         "Restart with holds the launch kind"
@@ -2415,8 +2432,8 @@ fn launch_refuses_after_the_chosen_host_disappears(cx: &mut TestAppContext) {
     assert_eq!(read(cx, |launcher, _, _| launcher.draft.host), Some(9));
     assert_eq!(name_of(cx, "launcher-host").as_deref(), Some("Host"));
     assert_eq!(
-        name_of(cx, "launcher-summary-target").as_deref(),
-        Some("Command · Unavailable host · /tmp"),
+        name_of(cx, "launcher-launch").as_deref(),
+        Some("Launch Command · Unavailable host · /tmp"),
     );
     test_support::click(cx, "launcher-launch");
     assert_eq!(
@@ -3113,9 +3130,8 @@ fn with_real_text_system(test: impl FnOnce(&mut TestAppContext)) {
     scheduler.end_test();
 }
 
-/// `text`'s width at the launcher's 13-pixel text size, shaped by the window's text system in the monospace face when
-/// `mono` is set and in the interface face otherwise.
-fn face_width(cx: &mut VisualTestContext, text: &str, mono: bool) -> f32 {
+/// Shape `text` at the specified size so the measurement can distinguish the two bundled faces.
+fn face_width(cx: &mut VisualTestContext, text: &str, size: gpui::Pixels, mono: bool) -> f32 {
     let family = if mono {
         crate::assets::TERMINAL_FONT
     } else {
@@ -3127,12 +3143,9 @@ fn face_width(cx: &mut VisualTestContext, text: &str, mono: bool) -> f32 {
     }
     .to_run(text.len());
     cx.update(|window, _| {
-        let line = window.text_system().shape_line(
-            text.to_owned().into(),
-            crate::theme::metrics::TEXT_MD,
-            &[run],
-            None,
-        );
+        let line = window
+            .text_system()
+            .shape_line(text.to_owned().into(), size, &[run], None);
         f32::from(line.width)
     })
 }
@@ -3145,7 +3158,7 @@ fn face_width(cx: &mut VisualTestContext, text: &str, mono: bool) -> f32 {
 /// shows every field. Specified, with the real text system, on New's Command tab with the folder `/iiiiiiii` and the
 /// agent command `iiiiiiii`, and `/iiiiiiii` typed into the search box, where focus starts: the Folder field, the Agent
 /// command field, the search box and the two rows each paint one line holding their text (a row's sentence isolates
-/// aside), as wide as its parts drawn in their faces at 13 pixels, within half a pixel: the fields' values in the
+/// aside), as wide as its parts drawn in their faces at each control's text size, within half a pixel. Field values use the
 /// monospace face, the query in the interface face, and each row's words in the interface face followed by the path in
 /// the monospace face. The premise, per case: every other choice of face for the line's parts draws it at least a pixel
 /// wider or narrower.
@@ -3209,6 +3222,11 @@ fn the_launchers_paths_and_command_are_monospace_beside_words_in_the_interface_f
                 .collect()
         };
         for (case, id, parts) in cases {
+            let size = if id == "launcher-search" {
+                px(14.5)
+            } else {
+                crate::theme::metrics::TEXT_MD
+            };
             let text: String = parts.iter().map(|(part, _)| *part).collect();
             let lines = crate::session_list::host_rail::tests::texts_within(&nodes, &id);
             let matching: Vec<_> = lines.iter().filter(|&line| shown(line) == text).collect();
@@ -3222,7 +3240,7 @@ fn the_launchers_paths_and_command_are_monospace_beside_words_in_the_interface_f
             for flips in 0..1u32 << parts.len() {
                 let mut total = 0.;
                 for (n, (part, mono)) in parts.iter().enumerate() {
-                    total += face_width(cx, part, *mono != ((flips >> n) & 1 == 1));
+                    total += face_width(cx, part, size, *mono != ((flips >> n) & 1 == 1));
                 }
                 choices.push(total);
             }

@@ -169,10 +169,8 @@ fn an_empty_history_shows_no_strip(cx: &mut TestAppContext) {
     assert!(!strip_shown(cx));
 }
 
-/// A click fills the setup (the Agent tab, its choices and folder) and launches nothing; Enter on the focused row
-/// launches the filled setup, once, through the ordinary path; a held Enter does nothing. Why: SPEC.md: "clicking it
-/// never launches, and pressing Enter on a focused row launches the filled setup through the ordinary Launch path"
-/// (old "composer Enter on a focused recent launches the filled setup").
+/// A click fills the setup and returns focus to the command field. This lets the user keep refining the draft.
+/// Enter on a keyboard-focused row launches the filled setup once through the ordinary path; a held Enter does nothing.
 #[gpui::test]
 fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_in_tmp(cx, &two_setups());
@@ -187,18 +185,22 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     assert_eq!(filled.agent.permissions, Some(LaunchPermission::Yolo));
     assert_eq!(filled.folder.value(), "/tmp");
     assert!(
+        super::view_tests::search_focused(cx),
+        "the click returned focus to the command field"
+    );
+    assert!(
         creates(&mut helm, cx).is_empty(),
         "a click launches nothing"
     );
 
     test_support::click(cx, "launcher-tabs-Command");
     test_support::click(cx, "launcher-search-row");
-    // Tab from the search box reaches the first row.
-    keys(cx, "tab");
+    // The header's Close lies between the field and the first recent.
+    keys(cx, "tab tab");
     assert_eq!(
         test_support::focused_id(cx).as_deref(),
         Some("launcher-recent-0"),
-        "the premise: Tab from search lands on the first row"
+        "the premise: keyboard focus reached the first row"
     );
     cx.simulate_event(gpui::KeyDownEvent {
         native_key: None,
@@ -245,7 +247,7 @@ fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppConte
         "no hint while the row lacks keyboard focus"
     );
     test_support::click(cx, "launcher-search-row");
-    keys(cx, "tab");
+    keys(cx, "tab tab");
     assert_eq!(
         test_support::focused_id(cx).as_deref(),
         Some("launcher-recent-0"),
@@ -390,7 +392,7 @@ fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
         name_of(cx, "launcher-recent-1").is_some_and(|name| name.starts_with("/tmp · ")),
         "the premise: the Codex folder setup is the second row"
     );
-    keys(cx, "tab tab");
+    keys(cx, "tab tab tab");
     assert_eq!(
         test_support::focused_id(cx).as_deref(),
         Some("launcher-recent-1"),

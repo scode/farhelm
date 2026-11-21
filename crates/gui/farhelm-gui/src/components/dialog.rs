@@ -10,9 +10,9 @@
 //!
 //! A dialog may also have the shared header Close control SPEC.md gives editors such as Rename ("a shared title and
 //! Close header"): the old `.dialog-close` "×" at the header's top right. Drawn in the header, it comes first in Tab
-//! order, before the body's fields and the answers (SPEC.md for Rename: "Tab follows Close, the title field, Cancel,
-//! Save"). Its label and help are each dialog's own, as they were in the old app ("Close rename", "Close rename; keep
-//! the current title"), and so is what it does.
+//! order in ordinary title headers, before the body's fields and the answers (SPEC.md for Rename: "Tab follows Close,
+//! the title field, Cancel, Save"). The session launcher has a control before Close in its header
+//! ([`DialogFrame::heading_control`]). Each dialog supplies what Close does and its label and help.
 //!
 //! The old host dialogs and Settings framed their header further (`.host-dialog-framed` and `.host-settings-header` in
 //! the old stylesheet): an icon tile left of the title ([`DialogFrame::tile`]), a note at the footer's left beside the
@@ -22,9 +22,8 @@
 //! The host settings dialog's header shows more than a title and a one-line summary can: the host's name over its
 //! status line, a colored phase dot beside the build. It draws its own heading in their place
 //! ([`DialogFrame::heading`]), and its title, "Host settings · <name>", stays the dialog's accessible name.
-//! The session launcher's footer had two more parts (`.launch-composer-footer`): a summary of what its main action
-//! would start, beside the answers ([`DialogFrame::footer_lead`]), and a region under them for what a press of an
-//! answer has to say ([`DialogFrame::notices`], placed under the row by [`DialogFrame::notices_below`]). Settings pins
+//! The session launcher's footer gives a press of its main action room for a confirmation or refusal
+//! ([`DialogFrame::notices`], placed under the row by [`DialogFrame::notices_below`]). Settings pins
 //! the recipe editor's own answers in that region above the row, as a band ruled off from its Close
 //! ([`DialogFrame::notices_rule`]).
 //! Every body scrolls on Page Up, Page Down, Home and End from a control inside it that has no use for the key
@@ -99,7 +98,7 @@ pub struct DialogFrame {
     id: SharedString,
     title: Line,
     summary: Option<Line>,
-    heading: Option<AnyElement>,
+    heading: Option<Heading>,
     body: AnyElement,
     answers: Vec<Button>,
     close: Option<IconButton>,
@@ -119,6 +118,16 @@ pub struct DialogFrame {
     scroll_stop: Option<SharedString>,
     notices_stop: Option<SharedString>,
     flat_margin_when_wide: bool,
+}
+
+/// A custom title occupies the normal title slot. A control keeps its own line with Close and can give its
+/// supporting text the whole header width underneath.
+enum Heading {
+    Title(AnyElement),
+    Control {
+        field: AnyElement,
+        detail: Option<AnyElement>,
+    },
 }
 
 impl DialogFrame {
@@ -197,7 +206,22 @@ impl DialogFrame {
     /// colored dot), so the heading draws its own summary too. A [`DialogFrame::summary`] set beside it is still drawn
     /// under it; no caller sets both. The heading draws any host value through the host-text element, as everywhere.
     pub fn heading(mut self, heading: impl IntoElement) -> Self {
-        self.heading = Some(heading.into_any_element());
+        self.heading = Some(Heading::Title(heading.into_any_element()));
+        self
+    }
+
+    /// Put the primary control in the heading and align Close to it. The detail occupies a second line across
+    /// the header, so hint chips or an explanation can wrap without shifting Close out of the control's row.
+    /// The frame title is still its accessible name. Tab visits the control before Close.
+    pub(crate) fn heading_control(
+        mut self,
+        field: impl IntoElement,
+        detail: Option<AnyElement>,
+    ) -> Self {
+        self.heading = Some(Heading::Control {
+            field: field.into_any_element(),
+            detail,
+        });
         self
     }
 
@@ -371,18 +395,28 @@ impl RenderOnce for DialogFrame {
         let (width, max_height) = (limits.width, limits.height);
 
         let mut heading = div().flex_1().min_w_0();
-        heading = match self.heading {
-            Some(drawn) => heading.child(drawn),
-            None => heading.child(
-                div()
-                    // The id lets a capture name a spot to park the pointer on. Not `-title`: a question's
-                    // host-value title already draws under `prompt-title`, and `settings-heading` is taken.
-                    .id(ElementId::Name(format!("{}-frame-title", self.id).into()))
-                    .text_size(metrics::TEXT_TITLE)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(self.title),
-            ),
+        let (detail, control_header) = match self.heading {
+            Some(Heading::Title(drawn)) => {
+                heading = heading.child(drawn);
+                (None, false)
+            }
+            Some(Heading::Control { field, detail }) => {
+                heading = heading.child(field);
+                (detail, true)
+            }
+            None => {
+                heading = heading.child(
+                    div()
+                        // The id lets a capture name a spot to park the pointer on. Not `-title`: a question's
+                        // host-value title already draws under `prompt-title`, and `settings-heading` is taken.
+                        .id(ElementId::Name(format!("{}-frame-title", self.id).into()))
+                        .text_size(metrics::TEXT_TITLE)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .text_color(theme::color(palette.fg_0))
+                        .child(self.title),
+                );
+                (None, false)
+            }
         };
         if let Some(summary) = self.summary {
             heading = heading.child(
@@ -405,23 +439,35 @@ impl RenderOnce for DialogFrame {
                 .text_color(theme::color(palette.fg_0))
                 .child(tile)
         });
-        let header = div()
+        let header_row = div()
             .flex()
-            .flex_shrink_0()
             .items_center()
-            .gap(px(14.))
-            .py(head_y)
-            .px(head_x)
-            .bg(theme::color(palette.control_hover))
-            .border_b_1()
-            .border_color(theme::color(palette.border_dim))
+            .gap(px(if control_header { 8. } else { 14. }))
             .children(tile)
             .child(heading)
             // `align-self: flex-start`: the Close sits level with the title, not centered on a two-line heading.
-            .children(
-                self.close
-                    .map(|close| div().flex_shrink_0().self_start().child(close)),
-            );
+            .children(self.close.map(|close| {
+                div()
+                    .flex_shrink_0()
+                    .when(!control_header, Styled::self_start)
+                    .child(close)
+            }));
+        let header = if control_header {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(header_row)
+                .children(detail)
+        } else {
+            header_row
+        }
+        .flex_shrink_0()
+        .py(if control_header { px(12.) } else { head_y })
+        .px(head_x)
+        .bg(theme::color(palette.control_hover))
+        .border_b_1()
+        .border_color(theme::color(palette.border_dim));
         // Both scrolling parts scroll a control Tab or the app focuses into view (the focus coordinator's
         // `scroll_region`): the body for its fields, the whole card for the header's Close and the answers when even
         // they do not fit. Their scroll handles live in keyed element state, since a frame is rebuilt on every draw.

@@ -1169,13 +1169,13 @@ agent choice is independent of that destination:
   Cursor and OpenCode show that Farhelm will not capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
   scrolls, above **More options** for supported agents. The label note says it sends once as the agent's first message.
-  Hover help says that Restart, Clone and Replace do not send it again. The summary adds `Prompt: N lines` for a
-  nonempty message. Enter edits the message without launching. Goose, Pi, shells and command launches offer no box. The
-  draft survives recent-setup selection and switching tabs; unsupported selections omit it from the request. A Clone or
-  Replace-with prefill clears it. Template messages with invisible formatting are shown escaped and read-only until
-  explicitly cleared; ordinary newlines and tabs remain editable. The message travels with the create request, including
-  managed checkouts and named conversations where supported, and for a create the command line or an agent sends with an
-  idempotency key, its exact value is part of that key's retry identity.
+  Hover help says that Restart, Clone and Replace do not send it again. Enter edits the message without launching.
+  Goose, Pi, shells and command launches offer no box. The draft survives recent-setup selection and switching tabs;
+  unsupported selections omit it from the request. A Clone or Replace-with prefill clears it. Template messages with
+  invisible formatting are shown escaped and read-only until explicitly cleared; ordinary newlines and tabs remain
+  editable. The message travels with the create request, including managed checkouts and named conversations where
+  supported, and for a create the command line or an agent sends with an idempotency key, its exact value is part of
+  that key's retry identity.
 - Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. Farhelm
   first checks the start and resume commands with a literal shell-word splitter, which can refuse valid Bash source.
   Accepted text reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments,
@@ -1360,27 +1360,27 @@ agent choice is independent of that destination:
   then a unique case-insensitive exact name, then a unique case-insensitive prefix, using Rust's Unicode lowercase.
   Unknown or ambiguous words refuse the whole sequence, naming the word and, for ambiguity, the competing candidates; a
   word's refusal wins over an unbound number key in the same sequence. Outside the launcher it opens New with that
-  error; in the launcher it appears above the search box without changing the draft (above rather than beneath, matching
-  the old app). While armed, typed characters never reach the terminal's program. Enter applies the templates in that
-  order, later edits winning, and directly launches through the same defaults, validation and admission as quick launch.
-  In the session launcher, Enter instead applies the queued templates to the current draft without launching; each
-  completed sequence is one refusal unit, and the pill says "apply" instead of "launch". An unbound key opens Templates
-  at Enter with the binding hint outside the launcher; inside the launcher it shows a refusal above the search box
-  without changing the draft. A refusal names its template and reveals New with the draft outside the launcher; an
-  incomplete result opens New with a prominent banner saying "This sequence doesn't make a complete setup; complete it
-  below", whether one or several templates were queued. A YOLO question uses the same fallback. The banner follows the
-  number-key banner's expiry and dismissal rules. Bindings refresh when the prefix starts; Enter captures the bound
-  names currently shown in the pill. Enter with nothing queued cancels without opening anything. A non-modal amber
-  status pill is centered over the terminal area, or the main area with no session open, showing queued entries as chips
-  and the word in progress. Its hint names typing, Tab, Enter and Escape. While a word is in progress, a list below the
-  pill shows at most five matching template names, exact matches before prefixes and catalog order within each tier;
-  non-matches are absent. Candidates and Tab use an independent catalog read when the prefix starts, which never gates
-  Enter or decides what Enter launches. Neither the pill nor the list takes focus or pointer input. While the launcher
-  is open, the pill stays at the bottom of the main area so it does not cover the launcher. It is larger, with a soft
-  amber halo and a short fade/scale entrance that is disabled for reduced motion; it never loops or takes pointer input.
-  There is no timeout. Escape cancels and is consumed; a click, switching windows or opening a dialog cancels.
-  Non-sequence keys, including arrows, other chords and Shift+Enter, cancel and reach their normal target; Meta, Control
-  and Shift on their own do not cancel. Repeated held keys add nothing and never launch again.
+  error. In the launcher it appears below the command field without changing the draft. While armed, typed characters
+  never reach the terminal's program. Enter applies the templates in that order, later edits winning, and directly
+  launches through the same defaults, validation and admission as quick launch. In the session launcher, Enter instead
+  applies the queued templates to the current draft without launching; each completed sequence is one refusal unit, and
+  the pill says "apply" instead of "launch". An unbound key opens Templates at Enter with the binding hint outside the
+  launcher. Inside the launcher it shows a refusal below the command field without changing the draft. A refusal names
+  its template and reveals New with the draft outside the launcher; an incomplete result opens New with a prominent
+  banner saying "This sequence doesn't make a complete setup; complete it below", whether one or several templates were
+  queued. A YOLO question uses the same fallback. The banner follows the number-key banner's expiry and dismissal rules.
+  Bindings refresh when the prefix starts; Enter captures the bound names currently shown in the pill. Enter with
+  nothing queued cancels without opening anything. A non-modal amber status pill is centered over the terminal area, or
+  the main area with no session open, showing queued entries as chips and the word in progress. Its hint names typing,
+  Tab, Enter and Escape. While a word is in progress, a list below the pill shows at most five matching template names,
+  exact matches before prefixes and catalog order within each tier; non-matches are absent. Candidates and Tab use an
+  independent catalog read when the prefix starts, which never gates Enter or decides what Enter launches. Neither the
+  pill nor the list takes focus or pointer input. While the launcher is open, the pill stays at the bottom of the main
+  area so it does not cover the launcher. It is larger, with a soft amber halo and a short fade/scale entrance that is
+  disabled for reduced motion; it never loops or takes pointer input. There is no timeout. Escape cancels and is
+  consumed; a click, switching windows or opening a dialog cancels. Non-sequence keys, including arrows, other chords
+  and Shift+Enter, cancel and reach their normal target; Meta, Control and Shift on their own do not cancel. Repeated
+  held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
   identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
   focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
@@ -1421,24 +1421,25 @@ A custom model id is typed into the model field and applied with Enter; it needs
 card's compact Folder or Managed checkout switch sits next to its heading. An ordinary folder uses one address field
 with Host at its start, the path in the terminal font, and Browse at the right. Repository and checkout fields, or a new
 environment's recipe and place, occupy the space beside Host when chosen. The optional session name sits beside the
-address and drops below it when the form is narrow. Held values show as text. The launcher has a shared header with
-Close, a scrolling body and a pinned footer. Search and recent setups precede the Destination card, followed by the
-Agent and Command tabs and their fields. The selected tab is underlined. Labels sit above the fields with short notes
-where needed. The Agent tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model,
-Effort and Permissions share a row when they fit. **More options** folds the conversation selector, when offered, and
-Wrapper prefix together at the bottom of the Agent form. The folded row names the fields and shows a pill for each set
-value, with the wrapper prefix in the terminal font. With both empty it says "none set". It opens and stays open while a
-field inside is required, refused or invalid. After a correction, the user can close it once no field needs attention.
-The footer shows the chosen agent type or command, host and destination beside a compact Launch, Replace or Restart
-action; its accessible name retains that operation and target. Agent launches also retain the model, effort, permissions
-and nonempty prompt's line count in the footer summary. Long summaries may truncate visually; their full text remains
-accessible. Cancel comes first in the action row, then Reset choices where offered, Save as template where offered, and
-the main action last. Native Tab follows Close, the visible body controls in order, then the footer actions. More
-options is a Tab stop, with its editors following it in the order when expanded. Ordinary launches still start focus on
-search; Restart starts on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the
-actions in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains
-inline in the scrolling body. Project registration (associating metadata with a directory) is optional convenience and
-never a prerequisite.
+address and drops below it when the form is narrow. Held values show as text. The launcher's command field is the
+header's first control. It starts with the launcher mark and a placeholder naming its mode, with Close alongside it.
+While empty, it shows the Return shortcut for launching. New and Clone also show examples below it for picking an agent
+or host, choosing a repository or template, and naming the session. Replace with and Restart with keep their mode
+explanation below the field. A mouse pick from recent setups returns focus to the command field. Recent setups precede
+the Destination card in the scrolling body, followed by the Agent and Command tabs and their fields. The selected tab is
+underlined. Labels sit above the fields with short notes where needed. The Agent tab shows the session list's harness
+marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a row when they fit. **More
+options** folds the conversation selector, when offered, and Wrapper prefix together at the bottom of the Agent form.
+The folded row names the fields and shows a pill for each set value, with the wrapper prefix in the terminal font. With
+both empty it says "none set". It opens and stays open while a field inside is required, refused or invalid. After a
+correction, the user can close it once no field needs attention. The footer's actions sit on the right. Cancel comes
+first, then quiet Reset choices and Save as template where offered. The main action comes last with a Return key cap.
+Its accessible name keeps the operation and target. Tab follows the command field, Close, the visible body controls,
+then the footer actions. More options is a Tab stop, with its editors following it when expanded. New, Clone and Replace
+with open with focus in the command field. Restart with opens on Cancel. Refusals, destructive warnings and the inline
+YOLO question remain adjacent to the actions in a bounded scroll region, so long content cannot displace those actions.
+The save-as-template panel remains inline in the scrolling body. Project registration (associating metadata with a
+directory) is optional convenience and never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
@@ -1531,10 +1532,10 @@ refused launch (New, Clone, Replace with, quick launch) shows as a bordered aler
 starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart mode uses the
 same alert beside Restart, with "Restart error." before the refusal's words. A quick launch that could not be prepared
 (its templates or the host's recent setups could not be read) and opened New instead of launching says why on one plain
-line in the warning color above the search box, not in that alert. Errors that are not a refused launch, such as "Save
-as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
-directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
-form still names that host, its connection and that folder.
+line in the warning color below the command field. Errors that are not a refused launch, such as "Save as template"
+refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a directory or is not
+usable, the folder field is also marked and says so under it, naming the host, for as long as the form still names that
+host, its connection and that folder.
 
 The GUI has no per-request deadline. A command the helm leaves unanswered too long counts as a lost connection (see
 [Losing the connection to the helm](#losing-the-connection-to-the-helm)).
@@ -1556,10 +1557,10 @@ SSH later refuses the key, launch fails with that remedy and attempts to delete 
 billing and visible failed cleanup are accepted. Other failures retain their own reason. Launch never starts a missing
 software snapshot build; Add host keeps its existing build-if-missing behavior.
 
-The footer names **new &lt;recipe&gt; sandbox**. A note by the destination explains that the sandbox is for this
-session, bills while running, Suspend stops CPU and memory billing, and deleting its last session removes the sandbox
-and its files. Managed checkout works normally, including the recipe's GitHub token for private clones. Folder is fixed
-to the new sandbox's home, without Browse or recent folders.
+The launch action's accessible name includes **new &lt;recipe&gt; sandbox**. A note by the destination explains that the
+sandbox is for this session, bills while running, Suspend stops CPU and memory billing, and deleting its last session
+removes the sandbox and its files. Managed checkout works normally, including the recipe's GitHub token for private
+clones. Folder is fixed to the new sandbox's home, without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
 and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and
@@ -2101,14 +2102,15 @@ submission and focus-return behavior.
   OpenCode have no stored resume command, so they do not gain Restart with. Muse launches created before conversation
   tracking also retain their missing resume command until recreated. The launcher's ordinary controls, templates,
   validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while the shown agent is
-  working, with the agent type, host and folder beside it. A working agent is stopped first with the user's confirmation
-  on that action; a live agent in any other status is stopped first without it, as for Restart. The edited launch is
-  validated exactly as a create validates it before anything is stopped, so an invalid edit leaves the agent running and
-  the dialog open with the reason. A refusal leaves the dialog and its edits visible with the reason. The held folder
-  never uses or updates the per-host folder default; its advisory check still applies. Restart with runs the resume
-  command, so an edited start command of a command launch takes effect the next time it is cloned or replaced. Command
-  launches offer this action exactly when Restart is. Its entry in the header's Restart menu remains visible but greyed
-  out otherwise, with a hover tooltip and accessible description explaining why.
+  working. The form shows the held agent type, host and folder, and the action's accessible name includes them. A
+  working agent is stopped first with the user's confirmation on that action; a live agent in any other status is
+  stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it before
+  anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves
+  the dialog and its edits visible with the reason. The held folder never uses or updates the per-host folder default;
+  its advisory check still applies. Restart with runs the resume command, so an edited start command of a command launch
+  takes effect the next time it is cloned or replaced. Command launches offer this action exactly when Restart is. Its
+  entry in the header's Restart menu remains visible but greyed out otherwise, with a hover tooltip and accessible
+  description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free
