@@ -22,26 +22,6 @@
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
-## light-appearance-darkens-terminal-catchup.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop terminal's
-  "Connecting" placeholder (`crates/gui/farhelm-gui/src/terminal/attached.rs:2170-2189`) draws its text in the interface
-  palette's `fg_dim`. That is `#414b5f` in the light appearance (`theme.rs:292`). The text sits on the pane's ground
-  (2447), which comes from `style::defaults(None)` and is the fixed terminal background `#282c34` in both appearances
-  (`theme.rs:379-381`). That pair is roughly 1.6:1 contrast.
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes (""Connecting" text in a terminal is
-  near-unreadable in light appearance"), with a test where practical. Size gate: about 100 lines of diff (code, tests
-  and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity
-  gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
-  follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
-  the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
-
 ## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
 
 - Outcome: `fix code`.
