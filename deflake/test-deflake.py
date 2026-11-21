@@ -16,6 +16,7 @@ import importlib.util
 import json
 import os
 import pathlib
+import stat
 import sys
 import tempfile
 import unittest
@@ -293,6 +294,37 @@ class StateRootLocation(unittest.TestCase):
                         D.prepare_state_root()
                 root.chmod(0o755)
                 with self.assertRaises(SystemExit):
+                    D.prepare_state_root()
+
+    def test_prepare_requires_owner_or_root_even_for_a_sticky_parent(self):
+        """Exercise the parent check after the private state root has passed.
+
+        A sticky directory's owner can replace its entries. Keep its mode
+        fixed and vary ownership, using a non-root effective uid so the
+        root-owned case qualifies even when the test itself runs as root.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = pathlib.Path(tmp) / "farhelm-tmp" / "deflake"
+            parent_status = mock.Mock(st_uid=0, st_mode=stat.S_IFDIR | 0o1777)
+            test_uid = os.geteuid() + 1
+            read_stat = pathlib.Path.stat
+
+            def stat_for(path, **kwargs):
+                if path == root.parent:
+                    return parent_status
+                status = read_stat(path, **kwargs)
+                if path == root:
+                    return mock.Mock(st_uid=test_uid, st_mode=status.st_mode)
+                return status
+
+            with (
+                mock.patch.object(D, "state_root", return_value=root),
+                mock.patch.object(os, "geteuid", return_value=test_uid),
+                mock.patch.object(pathlib.Path, "stat", autospec=True, side_effect=stat_for),
+            ):
+                self.assertEqual(D.prepare_state_root(), root)
+                parent_status.st_uid = test_uid + 1
+                with self.assertRaisesRegex(SystemExit, "belongs to another user"):
                     D.prepare_state_root()
 
 

@@ -32,39 +32,6 @@
   over it, block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/launcher-repository-search-loading.md`.
 
-## sticky-parent-guard-contradicts-own-docs.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
-  reviewed. Claim: the recorder's and deflake's parent-directory checks accept any sticky parent, which contradicts
-  their docs' promise to refuse a `/tmp/farhelm-tmp` that another account created first. Current main confirms it.
-  `scripts/record-test-run.py:304` returns `st_uid in (euid, 0) or S_ISVTX`. Its docstring (296-300) says that in a
-  sticky directory "only an entry's owner may rename or remove it", and names exactly the case where "another account
-  could create `/tmp/farhelm-tmp` first". `deflake/bin/deflake:110` has the same check, and its docstring (96-102)
-  promises refusal of "a `farhelm-tmp` it owns". `docs/test-run-evidence.md:120-121` says "otherwise another account
-  that created the fixed-name directory first could swap or read the evidence." On Linux, the owner of a sticky
-  directory can rename or unlink any entry in it. A sticky directory owned by this user or by root already passes the
-  uid test, so the sticky clause only ever admits a sticky directory owned by another account, which is the case the
-  docs promise to refuse. `scripts/test-record-test-run.py:1768-1793` asserts that acceptance (a stranger-owned 1777
-  parent is safe) and repeats the wrong rationale in its docstring. SPEC_impl.md:5295-5297 ("Development tooling assumes
-  a single-user machine… need not defend against one") keeps this out of `highest`. It does not make the docs' claim
-  true.
-- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
-  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
-  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
-  revise it.
-- Completion criteria: in `safe_parent` (`scripts/record-test-run.py`) and `prepare_state_root` (`deflake/bin/deflake`),
-  accept the parent only when this user or root owns it, dropping the sticky alternative; root-owned `/tmp` still
-  passes. Fix both docstrings' sticky rationale. In `docs/test-run-evidence.md:120-121`, replace "or be sticky like
-  `/tmp`" with the owner-or-root rule. Change `test_roots_owned_by_another_user_are_refused` in
-  `scripts/test-record-test-run.py` to assert that a stranger-owned sticky parent is refused while a root-owned parent
-  passes, and correct its docstring. Add the matching refusal case to `deflake/test-deflake.py` if it covers
-  `prepare_state_root`. (If the maintainer prefers a docs-only correction that cites the SPEC_impl single-user rule, the
-  same files are touched and the test docstring is still corrected.) Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove
-  the feedback file and its index entry.
-- Execution: planned in `plans/queue/sticky-tmp-parent-refusal.md`.
-
 ## folder-refusal-classifier-matches-path-text.md
 
 - Outcome: `fix code`.

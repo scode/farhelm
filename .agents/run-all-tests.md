@@ -102,6 +102,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   request counts and diagnostics for unexpected requests in refused `/latest` cases, plus legacy upgrade-floor refusal,
   dedicated status propagation and preservation of the old app and command files.
 - `dprint check`
+- `python3 -B scripts/test-record-test-run.py` and `python3 -B deflake/test-deflake.py` (recorder and deflake tooling,
+  including state-root ownership)
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
