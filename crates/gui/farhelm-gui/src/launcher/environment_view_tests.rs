@@ -116,17 +116,18 @@ fn new_container_shows_its_rows_with_unusable_hosts_disabled(cx: &mut TestAppCon
     );
     assert!(name_of(cx, "launcher-recipe").is_some());
     test_support::click(cx, "launcher-container-host");
+    let painted = crate::session_list::tests::painted(&test_support::frame(cx));
     assert!(
-        crate::session_list::tests::painted(&test_support::frame(cx))
+        painted
             .iter()
             .any(|line| line.contains("Podman is not installed on this host")),
-        "host2 says why"
+        "host2 says why: {painted:?}"
     );
     assert!(
-        crate::session_list::tests::painted(&test_support::frame(cx))
+        painted
             .iter()
             .any(|line| line.contains("this host cannot run containers")),
-        "host3, which carries no check, is listed and says so"
+        "host3, which carries no check, is listed and says so: {painted:?}"
     );
     test_support::click(cx, "launcher-container-host-option-2");
     assert_eq!(

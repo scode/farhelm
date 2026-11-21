@@ -2834,6 +2834,31 @@
       "reference": null
     },
     {
+      "golden": "launcher-command-results",
+      "title": "New session showing grouped command results and the source label on the form",
+      "reference": null
+    },
+    {
+      "golden": "launcher-narrow",
+      "title": "A narrow launcher with template results under the command field",
+      "reference": null
+    },
+    {
+      "golden": "launcher-replace-with",
+      "title": "Replace with, showing the held host and the warning about replacing the source",
+      "reference": null
+    },
+    {
+      "golden": "launcher-restart-with",
+      "title": "Restart with, showing its held fields and disabled setup choices",
+      "reference": null
+    },
+    {
+      "golden": "launcher-yolo-question",
+      "title": "New session with the YOLO confirmation visible below the launch actions",
+      "reference": "launcher-yolo-confirmation"
+    },
+    {
       "golden": "templates-dialog",
       "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key, the editor not opened yet",
       "reference": "templates-dialog"

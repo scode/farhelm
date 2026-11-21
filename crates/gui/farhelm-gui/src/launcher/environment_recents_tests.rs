@@ -305,8 +305,8 @@ fn environment_setups_stay_apart_from_a_hosts_held_folder_default(cx: &mut TestA
 /// SPEC.md, "Sandbox sessions": "Restart, Restart with, Replace and Replace with stay in the existing sandbox"; the
 /// launcher area decided on 2026-11-16 that Replace with shows a new environment's setup and refuses it in the old
 /// launcher's words rather than leaving it out. Specified: in Replace with on host1, the `web` container setup is drawn
-/// "Replace: ~ · web container on host1 · …"; a click on it, and Enter on it from `recent:` in search, each change
-/// nothing and say "Restart and Replace keep the existing environment", under the choices and above the box.
+/// "Replace: ~ · web container on host1 · …", disabled with explanatory help. Enter on the query result stays
+/// refused with the same reason, so changing presentation cannot change the target.
 #[gpui::test]
 fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
@@ -319,13 +319,35 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
         "{name}"
     );
     let before = draft(cx);
+    let row = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"))
+        .expect("the held setup remains listed");
+    assert!(!row.flags.click);
+    let help = super::recents_view_tests::recent_help(cx, "launcher-recent-0")
+        .expect("a disabled row still explains itself on hover");
+    assert!(help.starts_with(KEEPS_ENVIRONMENT), "{help}");
+    assert!(help.contains("~ · web container on host1"), "{help}");
     test_support::click(cx, "launcher-recent-0");
     assert_eq!(draft(cx), before, "nothing changed");
-    assert_eq!(
-        name_of(cx, "launcher-choice-notice").as_deref(),
-        Some(KEEPS_ENVIRONMENT)
-    );
     test_support::click(cx, "launcher-search-row");
+    keys(cx, "down");
+    assert!(super::view_tests::search_focused(cx));
+    assert_eq!(
+        super::view_tests::selected_state(cx, "launcher-recent-0"),
+        Some(true)
+    );
+    keys(cx, "enter enter");
+    assert_eq!(
+        draft(cx),
+        before,
+        "repeated Enter did not replace the source"
+    );
+    assert!(
+        helm.commands()
+            .iter()
+            .all(|command| !command.path.ends_with("/replace"))
+    );
     cx.simulate_input("recent:");
     settle(cx);
     keys(cx, "enter");
@@ -334,6 +356,13 @@ fn replace_with_refuses_an_environment_setup(cx: &mut TestAppContext) {
         Some(KEEPS_ENVIRONMENT)
     );
     assert_eq!(draft(cx), before, "nothing changed");
+    test_support::click(cx, "launcher-launch");
+    assert!(
+        helm.commands()
+            .iter()
+            .any(|command| command.path.ends_with("/replace")),
+        "the underlying form can replace when its own action is chosen"
+    );
 }
 
 /// A recent setup's destination comes with it: one that made a new environment in a managed checkout chooses that

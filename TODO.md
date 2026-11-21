@@ -266,14 +266,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
   also "Fix 'answer trust dialog' for Claude Code").
 
-- **Session launcher: put the command field in charge.** the session launcher is getting really crowded. The search
-  field "is the "do everything command field" of the current launcher", so it should be "central and prominent and the
-  obvious main place to be", with keyboard focus starting there and hints for a couple of things you can type; the agent
-  icons are the session list's own. Agreed on mockups (design B2): the field replaces the title row, the left column
-  lists recent setups and templates and becomes the field's results while typing, the form gets labels above its fields,
-  one host-and-folder field and a More options fold, and the footer loses its summary line. Plan:
-  `plans/queue/launcher-command-field.md`.
-
 - **Show the changed golden pictures on one page.** Visual reviews are handed paths to changed pictures and judge them
   file by file, with nothing showing what changed or flagging a scene nobody meant to touch. Make a page of only the
   changed and new pictures (reference, new picture and the differing pixels, light and dark) whenever a run finds any,

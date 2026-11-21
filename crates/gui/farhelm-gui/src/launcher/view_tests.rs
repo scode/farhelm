@@ -503,8 +503,8 @@ fn the_harness_picker_uses_at_most_two_lines_at_the_minimum_width(cx: &mut TestA
     );
 }
 
-/// With every placement offered, Tab follows the visible launch groups: search and recents, destination and
-/// placement, host and path, then the active launch tab and its agent choices.
+/// Recent setups are keyboard choices of the field, so Tab proceeds from the header into the form without stopping
+/// on them even when all launch destinations are offered.
 #[gpui::test]
 fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAppContext) {
     use super::recents_view_tests::{chosen, history, launched};
@@ -537,9 +537,9 @@ fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAp
     }
     settle(cx);
     assert!(search_focused(cx));
+    assert!(drawn(cx, "launcher-recent-0"));
     for id in [
         "launcher-close",
-        "launcher-recent-0",
         "launcher-destination-Folder",
         "launcher-destination-Managed checkout",
         "launcher-host",

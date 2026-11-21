@@ -27,11 +27,12 @@ the top of the window says so instead, and its **Open launcher** brings the laun
 
 ## The launcher at a glance
 
-The search box comes first, then where the session runs, then the **Agent** and **Command** tabs with their choices.
+Type in the command field at the top to fill in your launch. Recent setups and templates sit beside the form, where
+you can choose the destination and edit the **Agent** or **Command** settings before pressing **Launch**.
 
 <Screenshot
   name="start-a-session/launch-button"
-  alt="The launcher's footer: what Launch will start (Codex, Local (this machine), and the directory), the summary of choices, and the Launch button."
+  alt="The launcher's footer with Cancel, Reset choices, Save as template, and Launch."
 />
 
 **Cancel**, Escape, or the × (Close) at the top of the launcher closes it and forgets your choices. **Reset choices**
@@ -45,9 +46,9 @@ keeps the host, directory, and name.
   alt="The launcher's destination part: the folder or managed checkout choice, the host menu, the directory field, and directory history dropdown."
 />
 
-**Runs on** chooses between **Existing host** and a new environment made for
-this session: **New container** when you have a host that can run containers, and **New sandbox** once a Tensorlake API
-key is saved. [Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host;
+The **Host** menu lists your existing hosts and lets you start in a new environment. It offers **New container** when
+you have a host that can run containers, and **New sandbox** once a Tensorlake API key is saved.
+[Container sessions](/docs/agents/containerized-sessions/) use a recipe and a Linux container host;
 [sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your Tensorlake
 account, and Farhelm asks before creating the billed sandbox. Either can clone a [managed
 checkout](#start-from-a-managed-checkout) inside or start in the new environment's home. Opening **+** (New session) while a sandbox or container session is open preselects a new one from
@@ -65,8 +66,8 @@ host's directory, unless you typed or picked one yourself. With **Folder** chose
 directory on a connected host: if it does not exist there, or is not a directory, a warning under the field names the
 host. You can still launch; the host checks the directory again when you do.
 
-**Browse**, under the host, lists the directories under the path in the directory field one level at a time, for when
-you would rather find a directory than type it. Choosing one of the directory list's entries fills the field without
+**Browse**, at the end of the address, lists the directories under the current path one level at a time. Choosing one of
+the directory list's entries fills the field without
 launching. **Local home** also switches the host to **Local (this machine)**. With the list open, Escape closes the list
 first. **Name (optional)** names the session in the session list; leave it empty and Farhelm picks a name.
 
@@ -74,13 +75,13 @@ first. **Name (optional)** names the session in the session list; leave it empty
 
 <Screenshot
   name="start-a-session/harness-and-model"
-  alt="The harness buttons with Codex chosen, and the model choice under them, both explained."
+  alt="The agent choices with Codex selected and the Model field below them."
 />
 
 To get a family's latest model without looking up its full name, type the family's short name in **Model** (such as
 `sol`, `fable` or `glm`) and press Enter. If you have not chosen an agent yet and only one
 offers that family, Farhelm chooses it for you; otherwise it asks you to choose one first. Earlier versions of each
-family are listed under **Older models**. Typing the same short name in the launcher's search box highlights that latest
+family are listed under **Older models**. Typing the same short name in the launcher's command field highlights that latest
 model too.
 
 <Screenshot
@@ -98,7 +99,7 @@ each agent offers. To answer directory-trust questions automatically, use the
 of these agents, start [Bash or Zsh under **Shells**](/docs/agents/shells/) or use the **Command**
 tab for a [custom command](/docs/agents/custom-commands/).
 
-To start a known agent through another command, enter a **Wrapper prefix** on the **Agent** tab. Farhelm places it
+To start a known agent through another command, open **More options** on the **Agent** tab and enter a **Wrapper prefix**. Farhelm places it
 before the command it builds for that agent; [Agent wrappers](/docs/agents/agent-wrappers/) explains what the wrapper
 must pass through and when to use a custom command instead.
 
@@ -170,22 +171,22 @@ that host's `⋯` menu. [Manage hosts](/docs/using/manage-hosts/) covers the res
 
 <Screenshot
   name="start-a-session/recent-setups"
-  alt="The recent setups list under the launcher's search box, showing setups that match the chosen directory."
+  alt="The Recent list beside the form, showing previous setups that match the chosen directory."
 />
 
 A setup keeps the agent, model, effort, permissions, wrapper prefix and destination of a launch you made on the
 launcher's **Agent** tab, however you filled it in. Farhelm keeps setups separately for each host, and keeps launches
 into a new sandbox or container on their own, so they stay after that sandbox or container is deleted. The launcher
-shows up to three, from the chosen host and from your new sandboxes and containers. Type `recent:` in the search box to
-find older setups.
+shows up to three, from the chosen host and from your new sandboxes and containers. Click a setup to fill in the form.
+With the command field empty, you can press ↓ to move into the list, then Enter on a recent setup to launch it. Type
+`recent:` to find older setups or to reach them when the window is too narrow to show the list.
 
 A setup that made a new sandbox or container names the recipe and where it runs, such as "web container on build1".
 Matching setups can show even when the selected host is disconnected or you already have a recipe selected. Choosing
 one restores the recipe and where it runs. The next launch creates a fresh sandbox or container. If the recipe or
 container host has been removed, choose another before launching.
 
-If you choose one of these setups in **Replace with…**, Farhelm refuses it and says **Restart and Replace keep the
-existing environment**.
+In **Replace with…**, these setups are disabled because the replacement stays in the existing environment.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -193,26 +194,27 @@ covers it, along with **Replace with…**.
 
 ## Search instead of clicking
 
-The search box has the keyboard focus when the launcher opens, so you can set up a whole launch without the mouse.
+The command field has focus when you start a new session, clone, or choose Replace with. You can type an agent, host,
+model, directory or session name as soon as the launcher opens. Results take the place of the recent setups and
+templates, or open under the field in a narrow window.
 
 <Screenshot
   name="start-a-session/search"
-  alt="The launcher's search box with claude typed, listing matching agents, models, and setups."
+  alt="The launcher with claude typed in the command field and matching agents, models, and setups beside the form."
 />
 
 Enter takes the highlighted result. Typing a path offers to use it as the directory or to browse it. When nothing
 matches ordinary text, the list offers **Set session name**. For example, type `asdf` and press Enter to name the
-session; a separate Enter in the emptied box launches it. A prefix with no matching choices shows why, while you type. Escape hides the list or its message without
-clearing your text; Enter reopens it before another Enter can choose a row. Away from the search box, Enter on one of the
-launcher's choices, such as a harness, an effort, or a recent setup, picks it and launches with everything as it then
-stands.
+session. With the field now empty, a second Enter launches the setup in the form. A prefix with no matches shows why.
+Escape hides the results and keeps your text. Press Enter to show them again. You can also edit the form directly
+while results are open. A click in the form closes them.
 
 In the directory dropdown, Enter chooses a suggestion only after an arrow key has highlighted it, without launching.
 With nothing highlighted, Enter in the directory field launches the path you typed.
 
 <Screenshot
   name="start-a-session/search-name"
-  alt="The search box with name: claude typed, offering that session name instead of choosing the Claude agent."
+  alt="The command field with name: claude typed, offering Claude as the session name."
 />
 
 A few other prefixes do something no plain search does: `gh:`
@@ -258,8 +260,8 @@ clean them up. In a [container session](/docs/agents/containerized-sessions/) or
 Delete removes it permanently, without trash, unless another session still uses it; deleting the last session there
 removes the whole environment too.
 
-Choose **Managed checkout** in the **Where** row, enter the repository as `owner/repo`, and select its suggestion. You
-can also type `gh:owner/repo` in the search box and choose **Managed checkout: owner/repo**. Farhelm suggests
+Choose **Managed checkout** in **Destination**, enter the repository as `owner/repo`, and select its suggestion. You
+can also type `gh:owner/repo` in the command field and choose **Managed checkout: owner/repo**. Farhelm suggests
 repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 On an existing connected host, the launcher shows the directory the clone will go into before launch, and the launch

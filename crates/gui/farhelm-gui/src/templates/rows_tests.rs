@@ -351,13 +351,21 @@ fn a_pick_applies_its_template_once_the_catalog_is_read(cx: &mut TestAppContext)
     pick(cx, "model-only");
     assert!(any_open(cx), "New opened at once");
     assert!(
-        !text(cx).contains("gpt-x"),
+        crate::launcher::view_tests::shown_draft(cx)
+            .agent
+            .model
+            .is_none(),
         "the template waits for the catalog read"
     );
     assert_eq!(banner(cx), None, "and so does its banner");
     assert!(creates(&mut helm, cx).is_empty(), "nothing was launched");
-    let shown = text(cx);
-    assert!(shown.contains("gpt-x"), "the model applied: {shown:?}");
+    assert_eq!(
+        crate::launcher::view_tests::shown_draft(cx)
+            .agent
+            .model
+            .as_deref(),
+        Some("gpt-x")
+    );
     assert!(
         test_support::label(cx, "launcher-launch")
             .is_some_and(|name| name.starts_with("Launch Codex · ")),
