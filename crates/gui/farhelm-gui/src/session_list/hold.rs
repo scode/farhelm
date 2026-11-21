@@ -26,9 +26,9 @@
 //!   manual order within the slots they already hold. An accepted cross-area drop moves a held slot in the window
 //!   that sent it. Other membership and pin changes keep their slots. A pin made during the hold offers Move after
 //!   the hold ends ([`super::pins`]). Collapse is applied after reconciliation.
-//! - **A pin drag is activity.** While a pinned row is dragged by its grip, every move the drag captures counts as
-//!   the pointer moving over the rows, wherever it is, as the old list kept hearing the moves its grip captured; the
-//!   drop is a manual move like any other ([`super::pin_drag`]).
+//! - **A pin drag is activity.** While a pinned row is dragged by its grip, a move the drag captures over the rows
+//!   counts as the pointer moving over them, and a move outside the rows counts as leaving the list, as a Shift-sweep's
+//!   moves do; the drop is a manual move like any other ([`super::pin_drag`]).
 //! - **A different list is no hold's business.** Changing the host, the status filter or the order asks for a
 //!   different list, so a hold taken for one list ends when the list on screen answers another ([`ListId`]), including
 //!   a hold taken while the new list's reply was still on its way.

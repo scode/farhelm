@@ -3321,6 +3321,21 @@
       "golden": "attention-cue-flash",
       "title": "Amber flash over an attention row, the reduced-motion cue",
       "reference": null
+    },
+    {
+      "golden": "session-environment-unavailable",
+      "title": "Open session whose sandbox or container is unavailable",
+      "reference": null
+    },
+    {
+      "golden": "environment-delete-confirmation",
+      "title": "Delete of a connected sandbox or container session, with its process warning",
+      "reference": null
+    },
+    {
+      "golden": "tab-only-stop-confirmation",
+      "title": "Stop of a session whose only remaining terminals are tabs",
+      "reference": null
     }
   ],
   "reference_scenes": [

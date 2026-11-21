@@ -36,6 +36,10 @@ use crate::theme::{self, Palette, metrics};
 pub(super) const PANE_WIDTH: f32 = 250.;
 
 /// Keep the template's summary and shortcut together with its search-row identity.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a few rows built per frame for the start column, never stored; boxing would only add allocations"
+)]
 enum StartRow {
     Recent(LaunchHistoryEntry, HostText),
     Template(rows::Row),
@@ -421,6 +425,10 @@ fn compact_match(full: &str, compact: &str, query: &str) -> HostText {
 
 /// A recent setup keeps its full destination and choices in hover help. Start a wrapper's details with its prefix,
 /// since it can distinguish setups whose other visible choices are the same.
+#[allow(
+    clippy::too_many_arguments,
+    reason = "the row's drawn facts, shared by the start column and typed results, passed through once"
+)]
 fn recent_choice(
     entry: &LaunchHistoryEntry,
     placement: &HostText,
