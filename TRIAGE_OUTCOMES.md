@@ -79,33 +79,6 @@
   fragment); over it, block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/stop-wait-starting-launch-witness.md`.
 
-## legacy-expectation-is-parsed-as-cli-option.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
-  reviewed. `Expectation::render` (`crates/farhelm-supervisor/src/installation/mod.rs:714-721`) writes an absent id as
-  `-`, so a two-field record yields `-:0:<installed>`. `scripts/install.sh:1189-1190` passes it as a separate argument
-  (`set -- "$@" --expect "$FARHELM_INSTALL_EXPECT"`), and `InstallArgs.expect` (`crates/farhelm/src/main.rs:1440-1443`)
-  is a plain `#[arg(long)]` without `allow_hyphen_values`. I checked clap_builder 4.6.7 (the version in Cargo.lock):
-  `parser.rs:213-225,893-898` parses a following `-…` token as a short flag unless the pending option allows hyphen
-  values, so the CLI rejects the value before `Expectation::parse` runs. SPEC_impl.md:4816-4820 requires the form:
-  "Otherwise the record's id (none for a two-field record), its generation and the Installed version become the
-  expectation the installer is run with, as `FARHELM_INSTALL_EXPECT=<id or ->:<generation>:<installed or ->`. ... A
-  two-field record matched by a "no id" expectation is given its id by that run". The only test
-  (`scripts/test-install-sh.sh:2826-2831`) uses expectations that have ids.
-- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
-  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
-  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
-  revise it.
-- Completion criteria: `farhelm internal install --expect -:0:<version>` is accepted and reaches `Expectation::parse`.
-  Either set `allow_hyphen_values = true` on `InstallArgs.expect` (the repo's existing convention for hyphen-leading
-  values) or have `install.sh` pass `--expect=<value>`. Add a test that pushes an ID-less expectation through the CLI
-  boundary: a clap parse test of `-:0:1.2.3`, or a `scripts/test-install-sh.sh` case with a two-field record and a
-  matching `FARHELM_INSTALL_EXPECT` that asserts the install succeeds and the record gains an id. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over it,
-  block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/installer-expect-hyphen-value.md`.
-
 ## spare-test-fifo-write-can-outlive-reader.md
 
 - Outcome: `other`.

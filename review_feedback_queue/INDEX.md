@@ -353,10 +353,6 @@ consequences.
 - [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
   regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
 
-- [`legacy-expectation-is-parsed-as-cli-option.md`](legacy-expectation-is-parsed-as-cli-option.md) — The installer CLI
-  rejects its documented ID-less expectation when the shell supplies it as a separate argument. An ordinary published
-  updater history reaching that boundary remains unestablished.
-
 - [`matching-restart-template-model-normalizes-historical-permissions.md`](matching-restart-template-model-normalizes-historical-permissions.md)
   — A template repeating the current agent and model can change a session's historical agent-owned permission setting to
   Guarded without containing a permission edit, making an otherwise unchanged Restart draft count as edited.
