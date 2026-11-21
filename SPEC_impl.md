@@ -8283,7 +8283,11 @@ does not change precedence, and an unparsable value leaves age unknown and false
 incompatible protocol case is displayed as `Needs update`, or `Too new` when the peer's protocol is the higher one. A
 development helm (version `0.0.0` with a prerelease, what every build from source reports) never calls a connected peer
 newer and never refuses Update as a downgrade, since it sorts below every release; a skew is judged by protocol versions
-alone, so a skewed host with the higher protocol reads `Too new` there too. Protocol version bumps with any incompatible
+alone, so a skewed host with the higher protocol reads `Too new` there too. Version order is not Update's only guard: a
+host whose supervisor reports a database schema newer than the supervisor this helm installs can open is refused
+whatever the versions say (`schema_refusal` in `crates/farhelm-helm/src/provisioning/service.rs`), because updating back
+from a development build passes the downgrade check yet leaves a supervisor that refuses its database and restarts
+forever. A host that reports no schema is not refused on this ground. Protocol version bumps with any incompatible
 change — which includes a field whose omission changes what the receiver DOES, not only changes to frames and message
 sets. A serde-additive field can still be semantically load-bearing: the non-displacing attach is the worked example (a
 peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is
