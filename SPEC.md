@@ -3003,8 +3003,9 @@ never gates the user's own typing. Status also decides whether Restart and Resta
 also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
 not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
 agent. Users install the documented Grok and Antigravity hooks themselves to enable conversation capture. Both can
-launch before those hooks are installed. OMP and Grok use generic activity only. Their approval prompts show the generic
-running/idle classification, never waiting.
+launch before those hooks are installed. OMP and Grok use generic activity only. Their approval prompts, and
+Antigravity's, show the generic running/idle classification, never waiting — a settled scope decision, not a reader
+waiting to be written.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering

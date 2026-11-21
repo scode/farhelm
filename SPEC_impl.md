@@ -8602,11 +8602,13 @@ commands, including Goose's leading `env` words. The field is omitted when absen
 rather than translating the new launch shape. OMP attribution skips exactly that many words before classifying the agent
 program, without relaxing its process proof. At spawn the supervisor fills `{cwd}` (and the compiler's Codex trust
 markers `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, which predate launch kinds and are filled in any launch that
-contains one, a command launch included, so a command copied from a composed Codex launch keeps working), then replaces
-`{farhelm_args}` with the declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume
-and never shown the command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the
-agent process alone, after scrubbing inherited reporter variables. Goose is the one kind whose integration the
-environment still switches: its reporter is persisted in the resumed session, so a resume carries no argument and only
+contains one, a command launch included, so a command copied from a composed Codex launch keeps working; Antigravity's
+`{antigravity:trusted-cwd}` is filled only in a structured Antigravity launch's trust option and stays literal in a
+command launch, though a session's displayed command shows it as it is), then replaces `{farhelm_args}` with the
+declared kind's own arguments (`AgentIntegration::farhelm_args`, asked for a start or a resume and never shown the
+command) and puts that kind's reporter settings in `LaunchSpec.env`, which the shim sets on the agent process alone,
+after scrubbing inherited reporter variables. Goose is the one kind whose integration the environment still switches:
+its reporter is persisted in the resumed session, so a resume carries no argument and only
 `FARHELM_GOOSE_REPORTER_ENABLED` turns it on or off. A legacy session goes through the previous release's injection
 (`AgentIntegration::inject_hooks`, with its shape checks and `env` prefix). Its only other reader of a command line is
 OMP's process attribution (`classify_omp_launch`), which reads the program word of every OMP launch, new ones included,
