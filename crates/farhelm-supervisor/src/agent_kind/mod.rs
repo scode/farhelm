@@ -193,7 +193,7 @@
 //! can never participate in a deadlock. Replies never run a reader; they
 //! read the stored result.
 
-use farhelm_proto::{AgentKind, RestartOffer, SessionLaunch};
+use farhelm_proto::{AgentKind, LaunchHarness, RestartOffer, SessionLaunch};
 use serde::{Deserialize, Serialize};
 use std::path::Path;
 
@@ -294,8 +294,9 @@ pub(crate) use records::{
 /// `{cwd}` and `{farhelm_args}` at spawn in `Supervisor::prepare_launch`, the
 /// only place the launch's working directory is known on every path.
 pub use farhelm_proto::session_launch::{
-    CODEX_TRUSTED_CWD_PLACEHOLDER, CODEX_UNTRUSTED_CWD_PLACEHOLDER, CONVERSATION_PLACEHOLDER,
-    CWD_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER, RESERVED_PLACEHOLDERS, is_reserved_placeholder,
+    ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER, CODEX_TRUSTED_CWD_PLACEHOLDER,
+    CODEX_UNTRUSTED_CWD_PLACEHOLDER, CONVERSATION_PLACEHOLDER, CWD_PLACEHOLDER,
+    FARHELM_ARGS_PLACEHOLDER, RESERVED_PLACEHOLDERS, is_reserved_placeholder,
 };
 
 /// The short model-visible pointer delivered through every supported vendor's
@@ -2308,7 +2309,7 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 }
 
 /// Substitute the launch's working directory into each supported whole-element
-/// marker. Codex project-trust markers use the target's canonical directory
+/// marker. Codex and Antigravity trust markers use the target's canonical directory
 /// when available; the ordinary `{cwd}` marker keeps the path the terminal host receives.
 /// Meant for exactly one caller, `Supervisor::prepare_launch` — the
 /// single seam where an argv becomes a process for create, retry, and
@@ -2331,17 +2332,17 @@ fn fill_slots(argv: &mut [String], placeholder: &str, value: &str) {
 /// which is exactly why `ensure_executable_argv` exists — so "it's just a
 /// `String`" is not why this is safe; `ensure_cwd_usable` having already
 /// rejected one is.)
-pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
+pub(crate) fn fill_cwd(
+    mut argv: Vec<String>,
+    cwd: &str,
+    selection: Option<&farhelm_proto::LaunchSelection>,
+) -> Vec<String> {
+    let antigravity_slot = antigravity_trust_slot(&argv, selection);
     fill_slots(&mut argv, CWD_PLACEHOLDER, cwd);
-    if !argv.iter().skip(1).any(|element| {
-        matches!(
-            element.as_str(),
-            CODEX_TRUSTED_CWD_PLACEHOLDER | CODEX_UNTRUSTED_CWD_PLACEHOLDER
-        )
-    }) {
+    if antigravity_slot.is_none() && !argv.iter().skip(1).any(|word| is_codex_trust_slot(word)) {
         return argv;
     }
-    // Codex matches project trust by the path it sees after chdir. Resolve
+    // Codex and Antigravity match trust by the path they see after chdir. Resolve
     // symlinks here, on the target host, so the per-run override names that
     // same directory. If the path changes after the earlier usability check,
     // retain the original spelling: the subsequent exec will decide whether
@@ -2350,6 +2351,9 @@ pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
         .ok()
         .and_then(|path| path.into_os_string().into_string().ok())
         .unwrap_or_else(|| cwd.to_string());
+    if let Some(index) = antigravity_slot {
+        argv[index] = serde_json::json!({ "trustedWorkspaces": [&resolved] }).to_string();
+    }
     for element in argv.iter_mut().skip(1) {
         let level = match element.as_str() {
             CODEX_TRUSTED_CWD_PLACEHOLDER => "trusted",
@@ -2365,17 +2369,52 @@ pub fn fill_cwd(mut argv: Vec<String>, cwd: &str) -> Vec<String> {
     argv
 }
 
-/// Whether `argv` carries a working-directory marker as a whole element.
-/// The one place that comparison is spelled out, so the log line in
-/// `prepare_launch` and this module's own tests cannot drift from either the
-/// ordinary `{cwd}` or Codex project-trust substitution rule.
-pub fn has_cwd_placeholder(argv: &[String]) -> bool {
-    argv.iter().any(|element| {
-        matches!(
-            element.as_str(),
-            CWD_PLACEHOLDER | CODEX_TRUSTED_CWD_PLACEHOLDER | CODEX_UNTRUSTED_CWD_PLACEHOLDER
-        )
-    })
+/// Codex trust markers can also occur in user-written Command source.
+fn is_codex_trust_slot(element: &str) -> bool {
+    matches!(
+        element,
+        CODEX_TRUSTED_CWD_PLACEHOLDER | CODEX_UNTRUSTED_CWD_PLACEHOLDER
+    )
+}
+
+/// Only a structured Antigravity launch with resolved trust owns a settings
+/// slot. This final settings pair follows Custom words and precedes any
+/// conversation selector. Earlier uses of the marker in saved launches stay literal.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn antigravity_trust_slot(
+    argv: &[String],
+    selection: Option<&farhelm_proto::LaunchSelection>,
+) -> Option<usize> {
+    let selection = selection.filter(|selection| selection.workspace_trust == Some(true))?;
+    match selection.harness {
+        LaunchHarness::Antigravity => argv
+            .windows(2)
+            .rposition(|pair| {
+                pair[0] == "--settings" && pair[1] == ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER
+            })
+            .map(|index| index + 1),
+        LaunchHarness::Claude
+        | LaunchHarness::Codex
+        | LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Grok
+        | LaunchHarness::Muse
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Pi
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => None,
+    }
+}
+
+/// Whether the launch carries a whole argument that needs its working directory.
+pub(crate) fn has_cwd_placeholder(
+    argv: &[String],
+    selection: Option<&farhelm_proto::LaunchSelection>,
+) -> bool {
+    argv.iter()
+        .any(|element| element == CWD_PLACEHOLDER || is_codex_trust_slot(element))
+        || antigravity_trust_slot(argv, selection).is_some()
 }
 
 /// Whether a resume template carries the placeholder as a whole element.
@@ -3020,14 +3059,14 @@ mod tests {
             "--dir={cwd}".to_string(),
             CWD_PLACEHOLDER.to_string(),
         ];
-        assert!(has_cwd_placeholder(&argv));
+        assert!(has_cwd_placeholder(&argv, None));
         assert!(
-            !has_cwd_placeholder(&["claude".to_string(), "--dir={cwd}".to_string()]),
+            !has_cwd_placeholder(&["claude".to_string(), "--dir={cwd}".to_string()], None),
             "an embedded {{cwd}} is not a placeholder occurrence"
         );
-        let filled = fill_cwd(argv, "/a b/c");
+        let filled = fill_cwd(argv, "/a b/c", None);
         assert!(
-            !has_cwd_placeholder(&filled),
+            !has_cwd_placeholder(&filled, None),
             "nothing is left to substitute once every whole-element match is filled"
         );
         assert_eq!(
@@ -3049,9 +3088,9 @@ mod tests {
             (CODEX_UNTRUSTED_CWD_PLACEHOLDER, "untrusted"),
         ] {
             let argv = vec!["codex".to_string(), "-c".to_string(), marker.to_string()];
-            assert!(has_cwd_placeholder(&argv));
-            let filled = fill_cwd(argv, cwd);
-            assert!(!has_cwd_placeholder(&filled));
+            assert!(has_cwd_placeholder(&argv, None));
+            let filled = fill_cwd(argv, cwd, None);
+            assert!(!has_cwd_placeholder(&filled, None));
             assert_eq!(filled.len(), 3);
             assert_eq!(
                 filled[2],
@@ -3069,6 +3108,53 @@ mod tests {
                 "the escaped path must remain one exact project key"
             );
         }
+    }
+
+    /// Antigravity trusts the canonical path, including any characters that
+    /// need JSON escaping. A symlink spelling would still show the prompt.
+    #[cfg(unix)]
+    #[test]
+    fn antigravity_trust_encodes_the_canonical_cwd_as_one_argument() {
+        let temp = tempfile::tempdir().unwrap();
+        let path = temp.path().join("path with \"quotes\" and \\");
+        std::fs::create_dir(&path).unwrap();
+        let alias = temp.path().join("alias");
+        std::os::unix::fs::symlink(&path, &alias).unwrap();
+        let canonical = path.canonicalize().unwrap();
+        assert_ne!(alias, canonical);
+        let cwd = alias.to_str().unwrap();
+        let mut selection = farhelm_proto::LaunchSelection {
+            harness: LaunchHarness::Antigravity,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let argv = vec![
+            "agy".to_owned(),
+            "--custom-argument".to_owned(),
+            ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER.to_owned(),
+            "--settings".to_owned(),
+            ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER.to_owned(),
+        ];
+        // Old custom arguments and authored Command text can carry this spelling.
+        for source in [None, Some(&selection)] {
+            assert!(!has_cwd_placeholder(&argv, source));
+            assert_eq!(fill_cwd(argv.clone(), cwd, source), argv);
+        }
+        selection.workspace_trust = Some(true);
+        assert!(has_cwd_placeholder(&argv, Some(&selection)));
+        let filled = fill_cwd(argv.clone(), cwd, Some(&selection));
+        assert!(!has_cwd_placeholder(&filled, Some(&selection)));
+        assert_eq!(filled.len(), argv.len());
+        assert_eq!(&filled[..4], &argv[..4]);
+        assert_eq!(
+            serde_json::from_str::<serde_json::Value>(&filled[4]).unwrap(),
+            serde_json::json!({ "trustedWorkspaces": [canonical.to_str().unwrap()] })
+        );
     }
 
     /// A symlink spelling of the selected directory must authorize the
@@ -3089,6 +3175,7 @@ mod tests {
                 CODEX_TRUSTED_CWD_PLACEHOLDER.into(),
             ],
             alias.to_str().expect("fixture path is UTF-8"),
+            None,
         );
         assert_eq!(
             filled[2],
@@ -3114,7 +3201,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn cwd_never_fills_the_program_slot() {
         let argv = vec![CWD_PLACEHOLDER.to_string(), "x".to_string()];
-        assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
+        assert_eq!(fill_cwd(argv.clone(), "/tmp", None), argv);
     }
 
     /// A template with no `{cwd}` at all is the common case (every launch
@@ -3125,8 +3212,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn cwd_fill_is_a_no_op_without_a_placeholder() {
         let argv = vec!["claude".to_string(), "--resume".to_string()];
-        assert_eq!(fill_cwd(argv.clone(), "/tmp"), argv);
-        assert!(!has_cwd_placeholder(&argv));
+        assert_eq!(fill_cwd(argv.clone(), "/tmp", None), argv);
+        assert!(!has_cwd_placeholder(&argv, None));
     }
 
     /// Pins the ORDER contract: identity is substituted when the restart
@@ -3168,7 +3255,7 @@ mod tests {
             "{{conversation}} is filled and {{cwd}} is left exactly as it was"
         );
 
-        let after_spawn = fill_cwd(after_resume, "/work/dir");
+        let after_spawn = fill_cwd(after_resume, "/work/dir", None);
         assert_eq!(
             after_spawn,
             [

@@ -1699,6 +1699,12 @@ mod tests {
                 ),
                 false,
             ),
+            (
+                AgentKind::Antigravity,
+                LaunchHarness::Antigravity,
+                include_str!("../../tests/fixtures/screens/antigravity/1.5.13/waiting-trust.txt"),
+                false,
+            ),
         ];
         for (kind, harness, trust, legacy) in cases {
             let mut entry = entry_with(Some(a_terminal()), LastOutcome::Running);

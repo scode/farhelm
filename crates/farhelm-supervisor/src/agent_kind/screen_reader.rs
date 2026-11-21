@@ -389,11 +389,11 @@ pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
         AgentKind::Claude => &ClaudeReader,
         AgentKind::Codex => &CodexReader,
         AgentKind::Muse => &MuseReader,
+        AgentKind::Antigravity => &AntigravityReader,
         AgentKind::Goose
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
-        | AgentKind::Antigravity
         | AgentKind::Generic => &GenericReader,
     }
 }
@@ -431,6 +431,60 @@ fn any_contains(lines: &[&str], needle: &str) -> bool {
 struct GenericReader;
 
 impl ScreenReader for GenericReader {}
+
+/// Antigravity 1.5.13 has a distinct startup trust menu. Only that menu
+/// supplies a Waiting reading. Other screens still use change counting,
+/// without treating a lack of anchors as screen-reader drift.
+struct AntigravityReader;
+
+impl ScreenReader for AntigravityReader {
+    fn trust_prompt(&self, text: &str) -> bool {
+        // The terminal wraps both paths and prose at narrow widths. The complete
+        // question, selected answer and final key hints must still form one menu
+        // at the bottom of the screen.
+        const FOOTER: &str = "↑/↓ Navigate · enter Confirm";
+        // The footer can share its physical row with the model and effort.
+        // An output row below it means the menu is no longer the current view.
+        let text = text.trim_end();
+        let body = text.rsplit_once('\n').and_then(|(body, last)| {
+            let status = last.trim_start().strip_prefix(FOOTER)?;
+            (status.is_empty() || status.starts_with(char::is_whitespace)).then_some(body)
+        });
+        let words = body
+            .unwrap_or(text)
+            .split_whitespace()
+            .collect::<Vec<_>>()
+            .join(" ");
+        let Some(menu) = body
+            .map(|_| words.as_str())
+            .or_else(|| words.strip_suffix(FOOTER).map(str::trim_end))
+        else {
+            return false;
+        };
+        let Some(explanation) = menu
+            .strip_suffix(" > Yes, I trust this folder No, exit")
+            .or_else(|| menu.strip_suffix(" Yes, I trust this folder > No, exit"))
+        else {
+            return false;
+        };
+        let Some(workspace) = explanation.strip_suffix(
+            " Do you trust the contents of this project? Antigravity CLI requires permission to read, edit, and execute files here.",
+        ) else {
+            return false;
+        };
+        workspace
+            .rsplit_once("Accessing workspace: ")
+            .is_some_and(|(_, path)| !path.is_empty())
+    }
+
+    fn read(&self, counts: SampleCounts, screen: &Screen<'_>) -> Reading {
+        if self.trust_prompt(screen.text) {
+            Reading::anchored(ScreenState::Waiting)
+        } else {
+            generic_reading(counts)
+        }
+    }
+}
 
 // ---------------------------------------------------------------------
 // Muse Code (observed on 1.4.14)
@@ -881,6 +935,46 @@ fn codex_has_composer(lines: &[&str]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Trust must be visible to status and the discovery hint while either
+    /// answer is selected. Wrapping keeps the same menu, but quoted text or
+    /// output after the menu closes must leave the ordinary activity reader in charge.
+    #[test]
+    fn antigravity_reads_only_the_current_trust_menu() {
+        let trust =
+            include_str!("../../tests/fixtures/screens/antigravity/1.5.13/waiting-trust.txt");
+        let reader = reader_for(AgentKind::Antigravity);
+        let wrapped = trust.replace("read, edit,", "read,\nedit,");
+        let status = trust.replace("enter Confirm", "enter Confirm  gemini-4-neon · auto");
+        let declined = trust.replace(
+            "> Yes, I trust this folder\n  No, exit",
+            "  Yes, I trust this folder\n> No, exit",
+        );
+        assert_ne!(wrapped, trust);
+        assert_ne!(declined, trust);
+        assert_ne!(status, trust);
+        for text in [trust, &wrapped, &declined, &status] {
+            assert!(reader.trust_prompt(text));
+            let reading = reader.read(counts(9, 9), &Screen { text, title: "" });
+            assert_eq!(reading.state, ScreenState::Waiting);
+            assert!(reading.anchored);
+        }
+        assert!(!reader.has_screen_rules());
+        let completed = format!("{trust}\nType your message");
+        let completed_with_status = format!("{status}\nType your message");
+        for text in [
+            "Type your message",
+            "The dialog says: Do you trust the contents of this project?",
+            completed.as_str(),
+            completed_with_status.as_str(),
+        ] {
+            assert!(!reader.trust_prompt(text));
+            let quiet = counts(9, 9);
+            let reading = reader.read(quiet, &Screen { text, title: "" });
+            assert_eq!(reading.state, generic_reading(quiet).state);
+            assert!(!reading.anchored);
+        }
+    }
 
     /// Real trust dialogs have a specific question, two answers and footer.
     /// Ordinary permission dialogs and quoted transcript text must not advertise

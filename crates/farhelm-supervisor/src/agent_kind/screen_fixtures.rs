@@ -37,14 +37,17 @@ const EXPECTED_STATES: &[&str] = &["working", "waiting", "idle", "unknown"];
 
 /// Harnesses represented by real or explicitly derived screen fixtures.
 const HARNESSES: &[&str] = &["claude", "codex", "muse"];
+/// These harnesses have anchored Waiting screens without an activity reader
+/// for ordinary output. Their fixtures still go through state and repaint checks.
+const TRUST_ONLY_HARNESSES: &[&str] = &["antigravity"];
 
-/// The agent kind for a harness as fixture directories name it, one of
-/// [`HARNESSES`].
+/// The agent kind for a directory in either of the fixture harness lists.
 fn agent_kind(harness: &str) -> AgentKind {
     match harness {
         "claude" => AgentKind::Claude,
         "codex" => AgentKind::Codex,
         "muse" => AgentKind::Muse,
+        "antigravity" => AgentKind::Antigravity,
         other => panic!("no agent kind for harness {other:?}"),
     }
 }
@@ -84,7 +87,8 @@ fn load_fixtures() -> Vec<ScreenFixture> {
     for harness_dir in sorted_dirs(&root) {
         let harness = file_name(&harness_dir);
         assert!(
-            HARNESSES.contains(&harness.as_str()),
+            HARNESSES.contains(&harness.as_str())
+                || TRUST_ONLY_HARNESSES.contains(&harness.as_str()),
             "unexpected harness directory {}",
             harness_dir.display()
         );
@@ -282,6 +286,16 @@ fn screen_fixtures_are_well_formed_and_cover_every_live_state() {
                 );
             }
         }
+    }
+    for harness in TRUST_ONLY_HARNESSES {
+        assert!(
+            fixtures.iter().any(|fixture| {
+                fixture.harness == *harness
+                    && fixture.expected == "waiting"
+                    && fixture.scenario == "trust"
+            }),
+            "no trust fixture captured for {harness}"
+        );
     }
 }
 
