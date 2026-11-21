@@ -38,3 +38,44 @@ A separate test could hold registration back across later checks if a delayed ea
 
 The independent source and wording reviews passed. Source review walked through the immediate-return regression and
 confirmed that it fails the new assertion before the test can register the launch.
+
+### Landing
+
+#### What landed with it
+
+launcher-repository-search-loading, the launcher's repository search fix, landed just before this plan in the same
+round, and a large triage change (#4392) landed on main while the round's checks ran; both touch only other code and the
+shared triage records. An independent reviewer and I read the changes against each other and found no interaction. The
+landing made no fixes of its own to this plan.
+
+#### Checks
+
+This round landed two plans together: launcher-repository-search-loading (the desktop launcher's repository search) and
+stop-wait-starting-launch-witness (one supervisor test). The landing ran the desktop app's GUI test suite, the
+supervisor's tests of its shutdown wait, and the main lint (clippy) on a separate arm64 Linux test machine, and the
+screenshot comparisons and small checks locally on x86_64, on both plans stacked together on main:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `b90372e6-9c53-4ddb-ac08-364a3b78c896`): all
+  3226 tests passed.
+- `cargo nextest run -p farhelm-supervisor --lib -E 'test(/stop_wait|pending_hold/)'`, on the test machine (recorder run
+  `a94b80ea-5c52-44b5-97d2-88eb617e8378`): all 3 passed, including the changed test.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `b19ba13c-2850-4bcd-aa39-b644e80d7250`): passed. No screenshot shows a search still loading, so the comparisons do not
+  cover the new loading message; the GUI tests above do.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+While these checks ran, a large triage change (#4392, review findings that cited removed UI code) landed on main. It
+changes only the triage records and review queue, which the plans also edit, so each plan was rebased onto it with its
+own entries kept and nothing else changed; the runs above still apply. Skipped: the workspace suite and the end-to-end
+smoke test, since each change is confined to what the runs above cover; and Mac runs, since nothing here is
+Mac-specific.
+
+#### Things you should know that the report does not say
+
+Nothing beyond the report.
+
+#### What you should still do
+
+Nothing.
