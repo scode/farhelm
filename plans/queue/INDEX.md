@@ -4,5 +4,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 0332f4] `launcher-command-field.md` — make the session launcher's search field its header and starting point, with hints, a left column of recent setups, templates and results, a calmer form, and no footer summary
 - [in-flight 8739fa] `goldens-fast-and-targeted.md` — make the golden screenshot runs fast (optimized image, renderer and UI libraries in development builds, each picture written once, four scenes at a time) and targeted (render only named scenes), and keep a run going past a broken scene
-- [pending] `docs-shots-targeted-runs.md` — let one docs screenshot run name several pages or single shots, locally and on boats, and make a parking failure list every spot it tried and why
+- [in-flight 341e55] `docs-shots-targeted-runs.md` — let one docs screenshot run name several pages or single shots, locally and on boats, and make a parking failure list every spot it tried and why
 - [pending] `golden-changes-page.md` — write a page of only the changed and new golden pictures (reference, new, differing pixels) after every run that finds any, and describe one visual-review procedure built on it (after `goldens-fast-and-targeted.md`)
