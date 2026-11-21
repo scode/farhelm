@@ -34806,6 +34806,48 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `pvyryxtlxostzvtwvkpklpzskylypvox`, `plan/triage-podman/03-pending-capture-delete-anyway`,
   [draft PR](https://github.com/scode/farhelm/pull/4501/changes). Fixed as decided.
 
+## retargeted-ssh-alias-can-forget-live-container.md
+
+- Outcome: `fix spec+code`.
+- Assessment: A container session's host is reached through an SSH alias. If the user repoints that alias in their SSH
+  config to another machine or account, Delete checks the new machine, finds no container, reports success and drops the
+  session from Hosts. The real container keeps running on the old machine with nothing in Farhelm managing it. Verified:
+  Confirmed on main. `environment/podman.rs` `place()` compares only the registry route (destination string + config
+  path). `destroy`/`remove_container` treat Podman's "absent" on that route as proof. No machine or account identity is
+  recorded or checked for Podman places. SPEC.md ~322-326 has identity-change detection for ordinary host connections
+  ("never silently merges"), and SPEC.md 5285-5296 treats deliberate setup outside Farhelm as the user's intent. Which
+  of the two governs here is unsettled.
+- Decision: Q4, the maintainer picked "Apply the ordinary identity rules". (2026-11-21 fewest-questions triage page
+  (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of
+  plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Container hosts reached over SSH follow the ordinary host identity rules: record the machine and
+  account identity when a container is bound, refuse to accept "absent" as proof of deletion under a different identity,
+  and refuse twin container hosts that reach the same machine and account. Update SPEC accordingly. Both identity items
+  may land together. Remove the feedback file and its index entry.
+- Execution: `tqutnrkvprvxxxtzqlupqrtupnyosmuy`, `plan/triage-podman/04-container-host-identity`,
+  [draft PR](https://github.com/scode/farhelm/pull/4504/changes). Deferred to TODO.md, Near term → Plan follow-up,
+  “Apply host identity rules to Podman places”. An absent container with no recorded original identity cannot
+  distinguish a removed resource from a changed route.
+
+## podman-place-probe-bypasses-host-identity-refusal.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Two SSH host entries that reach the same machine and account (a LAN address and a tailnet address) are
+  both offered as usable container hosts, even though Farhelm's ordinary connection refuses the duplicate entry.
+  Verified: Confirmed. `podman_probe.rs` caches readiness per host entry and route, with no supervisor identity or
+  endpoint comparison. #4083 already fixed the cross-place orphan Delete. What remains is admitting the twin place.
+- Decision: Q4, the maintainer picked "Apply the ordinary identity rules". (2026-11-21 fewest-questions triage page
+  (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of
+  plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Container hosts reached over SSH follow the ordinary host identity rules: record the machine and
+  account identity when a container is bound, refuse to accept "absent" as proof of deletion under a different identity,
+  and refuse twin container hosts that reach the same machine and account. Update SPEC accordingly. Both identity items
+  may land together. Remove the feedback file and its index entry.
+- Execution: `tqutnrkvprvxxxtzqlupqrtupnyosmuy`, `plan/triage-podman/04-container-host-identity`,
+  [draft PR](https://github.com/scode/farhelm/pull/4504/changes). Deferred to TODO.md, Near term → Plan follow-up,
+  “Apply host identity rules to Podman places”. The paired legacy-binding decision is unsettled and both outcomes must
+  share one identity record.
+
 ## valid-ssh-uri-short-label-parsing.md
 
 - Outcome: `fix code`.
