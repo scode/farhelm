@@ -26067,9 +26067,9 @@ exit 1
     /// Why: a session started in the same instant as a quit must get the
     /// same narrowing of its start gap as one started a moment earlier
     /// (design, section 1), or an install could remove the version it needs.
-    /// Spec: with a launch counted as starting before the wait begins, which
-    /// registers against a running test host and writes the host child's
-    /// mark only after the wait has begun, the wait settles.
+    /// The wait's first poll must stay pending with only the starting guard
+    /// held. Once the host child's mark and hold are registered, the same
+    /// wait must settle.
     #[farhelm_testtrace::test]
     async fn the_stop_wait_covers_launches_still_starting() {
         let state = StateDir::new();
@@ -26084,32 +26084,32 @@ exit 1
         let spec = crate::launch::spec_path_for_launch(state.path(), "s", 0);
         std::fs::create_dir_all(spec.parent().unwrap()).expect("launch dir");
 
-        // A launch still starting: the wait must not end while it is in
-        // flight, and must pick it up once it registers.
         let starting = sup
             .starting_launch()
             .expect("launches are open before the stop's wait")
             .expect("the versioned layout counts launches");
-        let register = {
-            let sup = Arc::clone(&sup);
-            let spec = spec.clone();
-            tokio::spawn(async move {
-                // sleep-ok: scheduling stimulus; the launch registers after the wait has begun.
-                tokio::time::sleep(Duration::from_millis(200)).await;
-                std::fs::write(
-                    crate::session_hold::held_mark_path(&spec),
-                    format!("{child}\n"),
-                )
-                .expect("the host child's mark");
-                sup.track_pending_hold("s", 0, &spec, host);
-                drop(starting);
-            })
-        };
+        let mut wait = std::pin::pin!(sup.wait_for_pending_holds(PENDING_HOLD_WAIT));
+        // Registration cannot race this check, so a wait that ignores the
+        // starting guard sees an empty queue and returns too early.
+        std::future::poll_fn(|cx| {
+            assert!(
+                wait.as_mut().poll(cx).is_pending(),
+                "the stop wait returned before the starting launch registered"
+            );
+            std::task::Poll::Ready(())
+        })
+        .await;
+        std::fs::write(
+            crate::session_hold::held_mark_path(&spec),
+            format!("{child}\n"),
+        )
+        .expect("the host child's mark");
+        sup.track_pending_hold("s", 0, &spec, host);
+        drop(starting);
         assert!(
-            sup.wait_for_pending_holds(PENDING_HOLD_WAIT).await,
-            "the launch that was still starting is waited for and settles"
+            wait.await,
+            "the stop wait settles after the launch registers"
         );
-        register.await.expect("registration task");
     }
 
     /// A terminal tab's window starts the tab helper through the app's
