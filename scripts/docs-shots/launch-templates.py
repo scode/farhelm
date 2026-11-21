@@ -138,18 +138,18 @@ SHOTS = [
         annotations=[
             Callout("id:launcher-search", "tl: lists your templates. Type part of a name to narrow the list.",
                     side="left"),
-            Callout("id:launcher-search-results",
+            Callout("id:launcher-search-option-0",
                     "Choosing one makes its choices in the launcher, just as if you had made them by hand.",
                     side="left", dy=60),
         ],
-        # The old shot's width: the launcher's full search row would make the picture far wider than the docs' column,
-        # and the results' right half is empty.
+        # Keep the query, the choices beside the form and their notes together as a compact crop.
         max_width=900,
+        max_height=320,
     ),
     Shot(
         "applied",
         applied,
-        ["id:launcher-destination-section", "id:launcher-model-row", "id:launcher-effort-row"],
+        ["id:launcher-provenance", "id:launcher-destination-section", "id:launcher-model-row", "id:launcher-effort-row"],
         park=LAUNCHER_PARK,
         annotations=[
             Callout("id:launcher-host",
@@ -163,7 +163,8 @@ SHOTS = [
         "save-as-template",
         save_as_template,
         ["id:save-template-panel"],
-        park=LAUNCHER_PARK,
+        # Scrolling the Save panel into view can take Destination above the viewport.
+        park="id:save-template-choices-heading",
         annotations=[
             # Down the left of the launcher, each level with what it explains.
             Callout("id:save-template-name", "A new name. One already in use is refused.", side="left", dy=-20),

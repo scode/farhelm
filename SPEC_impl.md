@@ -8901,8 +8901,14 @@ field available for continued editing.
 The launcher supplies its command field to the shared dialog frame's control heading. Its rocket and Return hint share
 the single-line input's focus outline and send clicks to its editor. Mode guidance can wrap beneath that row, while
 Close stays aligned to the input. Query notices and refusals have their own bounded scrolling area by the field, visible
-at any form scroll position. The suggestion popover follows the field's anchor. The footer retains its own bounded
-notices and names the launch target through the main action's accessible name.
+at any form scroll position. At a wide size `DialogFrame` hosts two independently scrolling regions. The command pane
+paints the same grouped search rows as the narrow field popover, using the search's default row and ordering. Its empty
+state reads the ordinary history filter and template catalog. Its keyboard highlight follows the setup or template's
+identity without moving focus out of the editor. Tab, Escape and outside clicks clear the highlight or close results
+before the parent dialog handles dismissal. Held-field reasons come from the same rules as application, including the
+template's no-op treatment of equal held values. Narrow windows use the existing popover and field anchor. The form
+remembers the last applied template with edits or the setup that filled it until Reset. The footer retains its own
+bounded notices and names the launch target through the main action's accessible name.
 
 The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
 when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone

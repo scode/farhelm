@@ -50,9 +50,9 @@ chosen with the same **Folder** and **Managed checkout** control as the launcher
 moves to the trash when its last session is deleted. A model or a destination can stand on its own. Another template can
 supply the agent or host.
 
-The editor's **Host** field begins with a **Runs on** switch like the launcher's: **Existing host** with a host to choose,
+The editor's **Host** field begins with a **Runs on** switch: **Existing host** with a host to choose,
 **New container** with a **Recipe** and a **Container host**, or **New sandbox** with a **Recipe**. Applying the
-template sets the launcher's **Runs on** the same way. The editor offers recipes that are not built yet and container
+template sets the destination in the launcher. The editor offers recipes that are not built yet and container
 hosts that cannot run containers right now, since those are checked when you launch; a removed container host or deleted
 recipe stays selected, marked unavailable, and the launcher refuses the template until you change it. In a new container or sandbox the folder
 is its home, and a managed checkout is cloned inside. Deleting its session removes the checkout permanently, without
@@ -191,7 +191,7 @@ a template keeps that template's choice. Saving a numbered base keeps the origin
 
 The template keeps the current **Agent** or **Command** tab and only the choices you check. **Cancel** or Escape
 returns to the setup without saving. **Save as template** is not offered in **Replace with**, for a session in a
-container or sandbox, or when **Runs on** is **New container** or **New sandbox**.
+container or sandbox, or when the launcher is set to **New container** or **New sandbox**.
 
 ## Edit a template
 
@@ -224,20 +224,23 @@ template never changes a session that already started from it.
 
 <Screenshot
   name="launch-templates/apply"
-  alt="The launcher's search box with tl: typed, listing the three templates."
+  alt="The launcher with tl: typed in the command field and three matching templates beside the form."
 />
 
 <Screenshot
   name="launch-templates/applied"
-  alt="The launcher after applying codex-deep and then api-repo, launching Codex on build-box in ~/src/api."
+  alt="The form filled in by codex-deep and api-repo, ready to launch Codex on build-box in ~/src/api."
 />
+
+Click a template in the list beside the form to apply it. You can also type `tl:` in the command field and choose a
+match. This works in a narrow window too. The form shows the name of the last template you applied.
 
 Templates apply in the order you choose them, and where two set the same choice, the later one wins. A template only fills in what it holds, so anything the launch still needs, such as the agent when no template picked one, you choose
 by hand as usual.
 
 You can also press the **⚡** shortcut, a bound number key, or a completed launch sequence while New, Clone, Replace
 with or Restart with is open. Several presses stack in order, and **Launch** remains your action. Your current field and search text
-stay in place unless a template switches tabs and removes that field; focus then returns to the launcher's search.
+stay in place unless a template switches tabs and removes that field. Focus then returns to the command field.
 
 A template whose choices do not fit what the launcher holds is refused as a whole, with a message saying which choice
 did not fit: a model the chosen agent does not offer, for example, or an older template with a model and no saved tab

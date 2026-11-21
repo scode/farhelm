@@ -4,8 +4,6 @@
 #[cfg(test)]
 mod tests;
 
-use std::ops::Range;
-
 use farhelm_input_mapping::Platform;
 use gpui::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
@@ -24,6 +22,7 @@ use crate::components::{
     HoverHelp, OptionRow, TextInput, TextInputEvent, TextInputState, Vertical,
 };
 use crate::focus::{self, Mark};
+use crate::host_text::match_ranges as highlights;
 use crate::layers;
 use crate::theme::{self, Palette, metrics};
 
@@ -420,42 +419,6 @@ fn key_entry(section: Section, place: tensorlake_key::Place) -> Entry {
 
 fn fold(text: &str) -> String {
     text.chars().flat_map(char::to_lowercase).collect()
-}
-
-/// Highlight ranges refer to the source's UTF-8 bytes. A lowercased character can occupy a different number of
-/// bytes or expand into two characters, so substring offsets in the folded text cannot be passed to StyledText.
-fn highlights(text: &str, words: &[String]) -> Vec<Range<usize>> {
-    let mut folded = String::new();
-    let mut original = Vec::new();
-    for (start, ch) in text.char_indices() {
-        for lower in ch.to_lowercase() {
-            folded.push(lower);
-            original.extend(std::iter::repeat_n(
-                start..start + ch.len_utf8(),
-                lower.len_utf8(),
-            ));
-        }
-    }
-    let mut hits = Vec::new();
-    for word in words {
-        // Adjacent matches can share bytes, as two matches of "ana" do in "banana".
-        hits.extend(
-            folded
-                .char_indices()
-                .filter(|&(start, _)| folded[start..].starts_with(word))
-                .map(|(start, _)| original[start].start..original[start + word.len() - 1].end),
-        );
-    }
-    hits.sort_unstable_by_key(|range| range.start);
-    let mut merged: Vec<Range<usize>> = Vec::new();
-    for hit in hits {
-        if let Some(last) = merged.last_mut().filter(|last| hit.start <= last.end) {
-            last.end = last.end.max(hit.end);
-        } else {
-            merged.push(hit);
-        }
-    }
-    merged
 }
 
 fn marked(text: &str, words: &[String], selected: bool, palette: &Palette) -> StyledText {

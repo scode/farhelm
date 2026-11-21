@@ -89,9 +89,9 @@ impl Launcher {
         self.history.asked = key;
         self.history.answered = None;
         self.history.failed = None;
-        // The folder list's and the search's rows follow the history, so a highlight on the old rows goes with it.
+        // The folder list belongs to this history. The command field can also offer rows from other sources.
         self.drop_folder_highlight();
-        self.reset_search_highlight(cx);
+        self.reset_host_history_highlight();
         if let Some(key) = key {
             self.send_history_read(key, cx);
         }
@@ -131,9 +131,8 @@ impl Launcher {
                                 cx,
                             );
                             launcher.history.answered = Some((key, reply));
-                            // The new recents shift the folder list's and the search's rows under any highlight.
+                            // The folder list uses an index. The command field resolves a deliberate pick by identity.
                             launcher.drop_folder_highlight();
-                            launcher.reset_search_highlight(cx);
                         }
                         Err(_) => launcher.history.failed = Some(key),
                     }
@@ -166,8 +165,6 @@ impl Launcher {
                 let _ = launcher.update(cx, |launcher, cx| {
                     if let Ok(entries) = answer {
                         launcher.history.environment = Some(entries);
-                        // The new rows shift the search's rows under its highlight.
-                        launcher.reset_search_highlight(cx);
                         cx.notify();
                     }
                 });
@@ -175,7 +172,7 @@ impl Launcher {
         );
     }
 
-    /// The history recent setups are drawn from, in the strip and the search: the chosen host's while it is current,
+    /// The history recent setups are drawn from, in the empty pane and the search: the chosen host's while it is current,
     /// with the launches into new environments merged in ([`merged`]); `None` with neither.
     pub(super) fn recent_history(&self, cx: &App) -> Option<LaunchHistoryReply> {
         merged(

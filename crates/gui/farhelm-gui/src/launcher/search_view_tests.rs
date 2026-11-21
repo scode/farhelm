@@ -263,6 +263,25 @@ fn escape_closes_the_results_and_keeps_the_query(cx: &mut TestAppContext) {
     );
 }
 
+/// The narrow popover closes through the layer manager. Reopening starts at the query's default, with no edit yet.
+#[gpui::test]
+fn reopening_the_narrow_popover_drops_its_old_arrow_pick(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:");
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    keys(cx, "escape");
+    assert!(!results_shown(cx));
+    let before = draft(cx);
+    keys(cx, "enter");
+    assert!(results_shown(cx));
+    assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(true));
+    assert_eq!(draft(cx), before);
+}
+
 /// A labelled query with no match says why in the results, in the warning ink, and Enter changes nothing. Why: a
 /// scoped query that matched nothing must not quietly become a name.
 #[gpui::test]
@@ -928,6 +947,141 @@ fn a_tl_row_applies_its_template_and_keeps_the_launch_kind(cx: &mut TestAppConte
     assert_eq!(applied.command.command, "true");
 }
 
+/// Taking a template from the empty command field applies its edits once and keeps the editor ready for a query.
+/// The same source mark remains while the form is edited and clears on Reset choices.
+#[gpui::test]
+fn the_empty_field_can_apply_a_template_and_reset_its_source(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    cx.simulate_resize(gpui::size(gpui::px(1080.), gpui::px(900.)));
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert_eq!(
+        name_of(cx, "launcher-template-partial").as_deref(),
+        Some("Template: partial")
+    );
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+    assert!(search_focused(cx));
+    keys(cx, "enter");
+    assert_eq!(draft(cx).folder.value(), "/srv/partial");
+    assert!(search_focused(cx));
+    test_support::click(cx, "launcher-harness-Codex");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(
+        name_of(cx, "launcher-provenance-label").as_deref(),
+        Some("From a template: partial")
+    );
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+    assert!(super::recents_view_tests::creates(&mut helm, cx).is_empty());
+    test_support::click(cx, "launcher-reset");
+    assert_eq!(name_of(cx, "launcher-provenance-label"), None);
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(false));
+}
+
+/// Resizing preserves the query and its highlighted choice while moving between the pane and the popover. A press
+/// on the form closes the wide results and still reaches the control the user pressed.
+#[gpui::test]
+fn the_inline_search_reflows_and_a_form_click_still_edits(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    let wide = gpui::size(gpui::px(1080.), gpui::px(900.));
+    cx.simulate_resize(wide);
+    settle(cx);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:");
+    assert!(results_shown(cx));
+    assert!(
+        test_support::bounds(cx, "launcher-search-results").right()
+            <= test_support::bounds(cx, "launcher-body").left()
+    );
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    assert!(cx.debug_bounds("launcher-command-pane").is_none());
+    assert!(results_shown(cx));
+    assert_eq!(search_text(cx), "tl:");
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    cx.simulate_resize(wide);
+    settle(cx);
+    assert!(results_shown(cx));
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    test_support::click(cx, "launcher-harness-Codex");
+    assert!(!results_shown(cx));
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+    assert_eq!(search_text(cx), "tl:");
+}
+
+/// A live template edit can move a highlighted row. Enter still takes the user's choice, not its former position.
+#[gpui::test]
+fn the_arrow_choice_follows_a_template_after_a_catalog_push(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{Collection, CollectionChanges};
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:");
+    keys(cx, "down");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-1").as_deref(),
+        Some("Template: go")
+    );
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    helm.push(CollectionChanges {
+        collection: Collection::Templates,
+        meta: test_support::meta(&["go", "nowhere", "reset-codex", "reset-goose", "to-opencode"]),
+        upsert: Vec::new(),
+        remove: vec!["partial".into()],
+    });
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Template: go")
+    );
+    assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(true));
+    keys(cx, "enter");
+    assert_eq!(draft(cx).tab, Tab::Command);
+    assert_eq!(draft(cx).command.command, "true");
+}
+
+/// A template disabled while a model catalog is pending must never enqueue an edit in case its name is reused.
+#[gpui::test]
+fn enter_on_a_held_template_keeps_its_query_and_never_queues_the_edit(cx: &mut TestAppContext) {
+    use farhelm_proto::launcher::{LaunchTemplate, TemplateDestination, TemplateFields};
+    use farhelm_proto::ui_channel::{Collection, CollectionChanges, KeyedEntry};
+    let source = super::draft_tests::session(codex(None, None, None));
+    let (mut helm, cx) =
+        launcher_with_templates_on(cx, None, LaunchDraft::replace_with("a", &source, Some(1)));
+    type_in(cx, "tl:nowhere");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-0").as_deref(),
+        Some("Template: nowhere")
+    );
+    let before = draft(cx);
+    keys(cx, "enter");
+    assert_eq!(search_text(cx), "tl:nowhere");
+    assert!(
+        name_of(cx, "launcher-search-refusal")
+            .is_some_and(|words| words.contains("keeps the session's host"))
+    );
+    let replacement = LaunchTemplate {
+        name: "nowhere".into(),
+        fields: TemplateFields {
+            destination: Some(TemplateDestination::Folder("/other".into())),
+            ..TemplateFields::default()
+        },
+    };
+    helm.push(CollectionChanges {
+        collection: Collection::Templates,
+        meta: test_support::meta(&["nowhere"]),
+        upsert: vec![KeyedEntry {
+            key: "nowhere".into(),
+            value: serde_json::to_value(replacement).unwrap(),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    assert_eq!(draft(cx), before);
+}
+
 /// A template whose agent cannot run an explicitly chosen permission raises the escalation banner, as the hand switch
 /// would, judged once for the whole template. Why: SPEC.md applies a template's edits "in the same way and with the same
 /// effects as making them by hand" (old "template permissions are compared after the complete template transaction").
@@ -1258,8 +1412,8 @@ fn a_saved_folder_from_search_leaves_a_managed_checkout(cx: &mut TestAppContext)
     assert_eq!(after.tab, Tab::Command, "the tab stays");
 }
 
-/// Type `o`, move the highlight down one row, let `answer` rebuild the rows, and press Enter: what the launcher chose
-/// shows which row Enter took. Returns the agent type the first row of `o` names, which is the row the text names.
+/// Type `o`, choose the second agent and let `answer` rebuild the rows. That agent must stay selected even while the
+/// search picks up new catalog or history entries.
 fn arrow_then_answer(
     cx: &mut TestAppContext,
     answer: impl FnOnce(&mut farhelm_helm_client::fake::FakeHelm, &mut VisualTestContext),
@@ -1271,10 +1425,10 @@ fn arrow_then_answer(
     );
     type_in(cx, "o");
     let first = read(cx, |launcher, _, cx| launcher.search_results(cx).rows);
-    let (Some(super::search::Row::Harness(named)), Some(_)) = (first.first(), first.get(1)) else {
-        panic!("the premise: `o` names an agent type first and offers another row: {first:?}");
+    let Some(super::search::Row::Harness(picked)) = first.get(1) else {
+        panic!("the premise: `o` offers an agent type in position two: {first:?}");
     };
-    let named = *named;
+    let picked = *picked;
     keys(cx, "down");
     assert_eq!(
         selected_state(cx, "launcher-search-option-1"),
@@ -1284,17 +1438,22 @@ fn arrow_then_answer(
     answer(&mut helm, cx);
     let rows = read(cx, |launcher, _, cx| launcher.search_results(cx).rows);
     assert_ne!(rows, first, "the premise: the answer rebuilt the rows");
+    let index = rows
+        .iter()
+        .position(|row| *row == super::search::Row::Harness(picked))
+        .unwrap();
+    assert_eq!(
+        selected_state(cx, &format!("launcher-search-option-{index}")),
+        Some(true)
+    );
     keys(cx, "enter");
-    (draft(cx).agent.harness, named)
+    (draft(cx).agent.harness, picked)
 }
 
-/// A history answer that arrives while the results are open puts the highlight back on the row the text names, so
-/// Enter takes that row rather than whatever row now sits at the index the arrow left. Why: the highlight is an index
-/// into rows the answer rebuilds (it adds saved folders, recent setups and past models); the folder list drops its
-/// highlight for the same reason.
+/// A history answer may add folders, recent setups and past models. Enter still takes the user-selected agent.
 #[gpui::test]
-fn a_history_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
-    let (chosen_harness, named) = arrow_then_answer(cx, |helm, cx| {
+fn a_history_answer_preserves_the_arrow_choice(cx: &mut TestAppContext) {
+    let (chosen_harness, picked) = arrow_then_answer(cx, |helm, cx| {
         answer_history(
             helm,
             cx,
@@ -1306,16 +1465,50 @@ fn a_history_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
     });
     assert_eq!(
         chosen_harness,
-        Some(named),
-        "Enter took the row the text names"
+        Some(picked),
+        "Enter took the row chosen with the arrow"
     );
 }
 
-/// The catalog's answer resets the highlight the same way: it adds its models and drops past models it turns out to
-/// list. Why: as for the history answer, Enter must not take a row the arrow never reached.
+/// A reconnect replaces the history underneath a query. Template choices belong to the helm catalog, so a
+/// reconnect between Down and Enter must leave the deliberately chosen template selected.
 #[gpui::test]
-fn a_catalog_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
-    let (chosen_harness, named) = arrow_then_answer(cx, |helm, cx| {
+fn a_reconnect_preserves_the_template_arrow_choice(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher_with_templates(cx, None);
+    answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
+    type_in(cx, "tl:reset");
+    keys(cx, "down");
+    assert_eq!(
+        name_of(cx, "launcher-search-option-1").as_deref(),
+        Some("Template: reset-goose"),
+    );
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+
+    let mut hosts = fixture_hosts(&[0]);
+    let host = &mut hosts.entries[0].value;
+    host["incarnation"] = serde_json::json!(host["incarnation"].as_u64().unwrap() + 1);
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: hosts.collection,
+        meta: hosts.meta,
+        upsert: hosts.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert!(
+        helm.commands()
+            .iter()
+            .any(|cmd| cmd.path.starts_with("/api/launch-history")),
+        "the premise: the replacement connection caused another history read"
+    );
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Goose));
+}
+
+/// A catalog answer may add models or replace a past model. Unrelated changes keep the user's chosen agent.
+#[gpui::test]
+fn a_catalog_answer_preserves_the_arrow_choice(cx: &mut TestAppContext) {
+    let (chosen_harness, picked) = arrow_then_answer(cx, |helm, cx| {
         answer_catalog(
             helm,
             cx,
@@ -1324,8 +1517,8 @@ fn a_catalog_answer_resets_the_search_highlight(cx: &mut TestAppContext) {
     });
     assert_eq!(
         chosen_harness,
-        Some(named),
-        "Enter took the row the text names"
+        Some(picked),
+        "Enter took the row chosen with the arrow"
     );
 }
 

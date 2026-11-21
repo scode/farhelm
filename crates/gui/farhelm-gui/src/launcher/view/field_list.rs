@@ -71,7 +71,7 @@ pub(in crate::launcher) struct FieldList {
     /// The open list's layer, as last opened by the field. The layer manager closes it itself on Escape or a press
     /// outside, without telling the field, so [`FieldList::is_open`] asks it rather than trusting this.
     layer: Option<LayerId>,
-    /// Where the field is drawn, for the list to open under it; refreshed every frame ([`FieldList::track_anchor`]).
+    /// The drawn bounds to open below, refreshed every frame. A field can anchor to its whole control row.
     anchor: Option<Anchor>,
     /// The highlighted row, as an index into the list's current rows. Closing the list drops it; when else it changes
     /// is each list's own rule.
@@ -79,6 +79,14 @@ pub(in crate::launcher) struct FieldList {
 }
 
 impl FieldList {
+    /// A press on the field's own anchor belongs to the editor, even while results are drawn in a separate pane.
+    pub(super) fn contains_anchor(&self, at: gpui::Point<gpui::Pixels>) -> bool {
+        self.anchor
+            .as_ref()
+            .and_then(Anchor::drawn_bounds)
+            .is_some_and(|bounds| bounds.contains(&at))
+    }
+
     /// Whether the list is open: opened by the field and not since closed by the layer manager.
     pub(in crate::launcher) fn is_open(&self, window: &Window, cx: &App) -> bool {
         self.layer
@@ -100,8 +108,8 @@ impl FieldList {
         true
     }
 
-    /// Note where the field is drawn under `key` (which must differ from the field's own id), for the list to open
-    /// under it as wide as it, and return the element that records it, drawn inside the field's box.
+    /// Track the relative box where the list should open across its full width. The folder uses its input box and
+    /// the command field uses the row it shares with Close. Give the tracker its own key.
     pub(super) fn track_anchor(
         &mut self,
         key: &'static str,

@@ -127,6 +127,7 @@ enum Heading {
     Control {
         field: AnyElement,
         detail: Option<AnyElement>,
+        tracker: AnyElement,
     },
 }
 
@@ -212,15 +213,18 @@ impl DialogFrame {
 
     /// Put the primary control in the heading and align Close to it. The detail occupies a second line across
     /// the header, so hint chips or an explanation can wrap without shifting Close out of the control's row.
-    /// The frame title is still its accessible name. Tab visits the control before Close.
+    /// The tracker covers the whole control row, so a popover can share the form's edges. The frame title is still
+    /// its accessible name. Tab visits the control before Close.
     pub(crate) fn heading_control(
         mut self,
         field: impl IntoElement,
         detail: Option<AnyElement>,
+        tracker: impl IntoElement,
     ) -> Self {
         self.heading = Some(Heading::Control {
             field: field.into_any_element(),
             detail,
+            tracker: tracker.into_any_element(),
         });
         self
     }
@@ -395,14 +399,18 @@ impl RenderOnce for DialogFrame {
         let (width, max_height) = (limits.width, limits.height);
 
         let mut heading = div().flex_1().min_w_0();
-        let (detail, control_header) = match self.heading {
+        let (detail, tracker) = match self.heading {
             Some(Heading::Title(drawn)) => {
                 heading = heading.child(drawn);
-                (None, false)
+                (None, None)
             }
-            Some(Heading::Control { field, detail }) => {
+            Some(Heading::Control {
+                field,
+                detail,
+                tracker,
+            }) => {
                 heading = heading.child(field);
-                (detail, true)
+                (detail, Some(tracker))
             }
             None => {
                 heading = heading.child(
@@ -415,7 +423,7 @@ impl RenderOnce for DialogFrame {
                         .text_color(theme::color(palette.fg_0))
                         .child(self.title),
                 );
-                (None, false)
+                (None, None)
             }
         };
         if let Some(summary) = self.summary {
@@ -439,7 +447,9 @@ impl RenderOnce for DialogFrame {
                 .text_color(theme::color(palette.fg_0))
                 .child(tile)
         });
+        let control_header = tracker.is_some();
         let header_row = div()
+            .relative()
             .flex()
             .items_center()
             .gap(px(if control_header { 8. } else { 14. }))
@@ -451,7 +461,8 @@ impl RenderOnce for DialogFrame {
                     .flex_shrink_0()
                     .when(!control_header, Styled::self_start)
                     .child(close)
-            }));
+            }))
+            .children(tracker);
         let header = if control_header {
             div()
                 .flex()

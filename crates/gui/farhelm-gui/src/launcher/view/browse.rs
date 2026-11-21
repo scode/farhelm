@@ -157,17 +157,14 @@ impl Launcher {
                 div()
                     .flex()
                     .items_center()
-                    .gap(px(6.))
                     .h(super::host_picker::control_content_height())
-                    .text_size(metrics::TEXT_MD)
                     .child(
                         svg()
                             .path(Icon::Folder.path())
                             .size(px(14.))
                             .flex_none()
                             .text_color(theme::color(palette.fg_1)),
-                    )
-                    .child("Browse"),
+                    ),
             )
             .tier(Tier::Ghost)
             .disabled(self.draft.host.is_none())

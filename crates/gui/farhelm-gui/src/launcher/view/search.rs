@@ -1,25 +1,25 @@
-//! The session launcher's command field in the header, with its results floating underneath, which
-//! turns a typed word into one choice in the draft. What a query offers is [`crate::launcher::search`]'s; this module
-//! draws it and applies the row the user takes.
+//! The session launcher's command field turns a typed word into one choice in the draft. What a query offers is
+//! [`crate::launcher::search`]'s. This module applies the choice and shares one results list between the left pane and
+//! the narrow window popover. The empty pane's history and templates live in [`start`].
 //!
 //! SPEC.md, "Creation" (the launch-composer search sentences). Ported from the old launcher's search box and results
 //! area (`list/create_form.rs`, the `.launch-composer-search` markup and its key handler, and `accept_search_result`
 //! with `apply_search_result` in `list/create_form/draft.rs`) at reference commit `24bc0580`. Here's the TLDR:
 //!
-//! - **Typing** opens the results under the field, on the layer manager's non-focusing popover, so focus and every key
-//!   stay in the field, and preselects the row an exact word names ([`crate::launcher::search::Results::default`]).
+//! - **Typing** opens the pane's results or, in a narrow window, a non-focusing popover. Focus stays in the field,
+//!   which preselects the row an exact word names ([`crate::launcher::search::Results::default`]).
 //!   Up and Down move the highlighted row, wrapping, and the list keeps it in view. Escape, or a press outside, closes
 //!   the results and keeps what was typed; Escape with them closed is the dialog's (it closes the launcher).
-//! - **Enter** on an empty box presses the main action, as the old form's own submit did: it launches a complete draft
-//!   and says why not beside it otherwise. With text, Enter reopens closed results, takes the highlighted row of open
+//! - **Enter** on an empty field presses the main action unless Down moved its highlight into the empty pane.
+//!   In that case it takes the highlighted setup or template. With text, Enter reopens closed results, takes the highlighted row of open
 //!   ones, and does nothing when they offer no row (their message stays). A held Enter does nothing (SPEC.md: "A held
 //!   Enter never launches"), so holding it after a pick cannot launch the pick.
 //! - **Taking a row** (Enter or a click) makes the one edit it names through the same draft method a hand edit uses,
 //!   then empties the box and closes the results, with focus back in the box for the next word; choosing Custom moves
 //!   focus on to its flags, as choosing it by hand does. An agent type or model taken on the Command tab switches to
 //!   the Agent tab, where they belong. A row that would change what this launcher holds fixed (Restart with's agent
-//!   type, host, folder and name; Replace with's host) is refused even when it names the current value.
-//!   When refused, the box keeps its text and the results close so the reason below the field shows.
+//!   type, host, folder and name; Replace with's host) shows as disabled. A refusal that reaches apply keeps the query
+//!   and closes results so its reason can show below the field.
 //! - **A `tl:` row** applies its template to the draft through the templates' own application path, as a template
 //!   shortcut's press in the open launcher does (`crate::templates::dispatch::search_row_batch`); a template that
 //!   does not apply changes nothing, and the launcher's refusal note says why below the field.
@@ -28,9 +28,9 @@
 //!
 //! - **Rows from the chosen host's launch history.** A saved folder becomes the folder as a pick from the folder list
 //!   does (leaving a managed checkout, keeping the tab). A model from a past launch chooses the agent type it ran with
-//!   and the model as that type's custom id. A recent setup fills the draft as a click on the strip's row does
+//!   and the model as that type's custom id. A recent setup fills the draft as a click on an empty-pane row does
 //!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
-//!   filled, and SPEC.md's Enter that launches is the strip's focused row. A setup carrying a retired container choice,
+//!   filled, and SPEC.md's Enter that launches is the empty pane's highlighted row. A setup carrying a retired container choice,
 //!   a new environment's setup in Replace with, or a folder or setup from a history that is no longer the chosen
 //!   host's, is refused below the field. While a new environment is chosen, every folder row and Browse
 //!   is refused there too, in the old words: the environment's folder is its fixed home (`environment_refusal`). A
@@ -44,9 +44,9 @@ use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
-    px, svg,
+    AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
+    ParentElement as _, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _,
+    WeakEntity, Window, div, px, svg,
 };
 
 use super::Launcher;
@@ -54,20 +54,20 @@ use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
 use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, recent_hover, wrapper_tail};
 use crate::assets::{Icon, TERMINAL_FONT};
-use crate::components::{
-    HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chip, option_heading,
-};
+use crate::components::{HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chip};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::short_name;
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{
-    destination_label, permission_value, summary_before_permissions, summary_without_wrapper,
-    wrapper_summary,
+    SetupKey, destination_label, permission_value, summary_before_permissions,
+    summary_without_wrapper, wrapper_summary,
 };
 use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::theme::{self, metrics};
+
+mod start;
 
 /// The input's name describes what typing there does and stays in place when a query hides its placeholder.
 const SEARCH_LABEL: &str = "Choose an agent, host, folder, model or session name";
@@ -93,16 +93,44 @@ const SEARCH_RESULTS: &str = "launcher-search-results";
 /// Why a saved folder or recent setup from an earlier host's history changed nothing, as the old launcher said it.
 const STALE_ROW: &str = "That result belongs to an earlier host; choose a current result";
 
+/// The right side still needs room for the address and several agent controls to share rows.
+const MIN_WIDE_FORM_WIDTH: f32 = 650.;
+
+/// The 250-pixel pane leaves at least 650 pixels for the address and agent controls on its right. Use the same
+/// horizontal inset as DialogFrame so the two-column threshold is based on the card, not the whole window.
+pub(super) fn command_pane_fits(window: &Window) -> bool {
+    crate::desktop::linux_title_bar::content_area(window)
+        .size
+        .width
+        >= px(start::PANE_WIDTH + MIN_WIDE_FORM_WIDTH) + metrics::DIALOG_SIDE_MARGIN * 2.
+}
+
+/// A remembered source and an empty pane's keyboard target both follow the row, never its current index.
+#[derive(Clone, Debug, PartialEq)]
+pub(super) enum SetupSource {
+    Recent(Option<i64>, SetupKey),
+    Template(String),
+}
+
 /// What the search box holds besides the draft and its own text. None of it is shared with another surface.
 #[derive(Default)]
 pub(super) struct SearchBox {
-    /// The results under the box, with the highlighted row: always set by the time the results open (to the row the
-    /// box's text names, [`Results::default`]), and clamped when read, since the rows follow the store. Read as the
-    /// first row while unset.
+    /// The narrow results popover. Both presentations choose their default against the current rows, since a live
+    /// update can insert a row ahead of an exact match.
     list: FieldList,
+    /// Wide results are part of the dialog and need no floating layer. Only one presentation is open at a time.
+    inline_results: bool,
+    /// The field retains focus. Down explicitly starts navigating the empty pane and Up from the first row clears it.
+    start_highlight: Option<SetupSource>,
+    /// The last child revealed by keyboard navigation, so drawing after a mouse wheel does not undo the scroll.
+    pub(super) pane_revealed: Option<usize>,
+    /// The setup or last template that filled the form. Hand edits leave its provenance visible until Reset.
+    pub(super) source: Option<SetupSource>,
     /// Why the last row taken changed nothing (a field this launcher holds fixed), said below the field until the next
     /// keystroke in it or the next row taken.
-    refusal: Option<String>,
+    refusal: Option<HostSentence>,
+    /// A deliberate arrow pick follows the row when a live update inserts or removes choices before it.
+    typed_choice: Option<Row>,
 }
 
 impl Launcher {
@@ -139,35 +167,48 @@ impl Launcher {
         })
     }
 
-    /// Highlight the row the box's text names again, as typing does: the rows have changed under the highlight (a
-    /// history answer adds or drops rows), so the index the arrows left would now point at a row they never reached,
-    /// and Enter would take it.
-    pub(super) fn reset_search_highlight(&mut self, cx: &App) {
-        let default = self.search_results(cx).default;
-        self.search_box.list.highlighted = Some(default);
+    /// Forget the keyboard's explicit result when starting a fresh search.
+    pub(super) fn reset_search_highlight(&mut self) {
+        self.search_box.typed_choice = None;
+        self.search_box.pane_revealed = None;
+    }
+
+    /// A host's history can disappear during a reconnect. Keep explicit picks from the template and model
+    /// catalogs, and from helm-wide environment history, since those rows do not come from that connection.
+    pub(super) fn reset_host_history_highlight(&mut self) {
+        let from_host = match self.search_box.typed_choice.as_ref() {
+            Some(Row::Folder(_) | Row::HistoryModel { .. }) => true,
+            Some(Row::Recent { entry, .. }) => entry.target.is_none(),
+            _ => false,
+        };
+        if from_host {
+            self.reset_search_highlight();
+        }
     }
 
     /// Whether the results are open: opened by the box and not since closed by the layer manager.
     pub(super) fn search_open(&self, window: &Window, cx: &App) -> bool {
-        self.search_box.list.is_open(window, cx)
+        self.search_box.inline_results || self.search_box.list.is_open(window, cx)
     }
 
-    /// The highlighted row among `count` rows (`count` at least one): the one the box's text named or an arrow moved
-    /// to, clamped to the rows there are now.
-    fn search_highlight(&self, count: usize) -> usize {
-        self.search_box
-            .list
-            .highlighted
-            .unwrap_or(0)
-            .min(count.saturating_sub(1))
+    /// Resolve a deliberate arrow pick by identity. A missing row takes Enter with it until another choice is made.
+    fn search_highlight(&self, results: &Results) -> Option<usize> {
+        if let Some(picked) = &self.search_box.typed_choice {
+            return results
+                .rows
+                .iter()
+                .position(|row| same_search_choice(row, picked));
+        }
+        (results.default < results.rows.len()).then_some(results.default)
     }
 
     /// The user typed in the box: forget the last refusal, preselect what the new text names, and show the results
     /// (or close them when the text offers nothing to show, an emptied box).
     pub(super) fn search_typed(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         self.search_box.refusal = None;
+        self.reset_search_highlight();
+        self.search_box.start_highlight = None;
         let results = self.search_results(cx);
-        self.search_box.list.highlighted = Some(results.default);
         if results.rows.is_empty() && results.message.is_none() && results.reason.is_none() {
             self.close_search(window, cx);
         } else if !self.search_open(window, cx) {
@@ -183,13 +224,17 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let count = self.search_results(cx).rows.len();
-        if !self.search_open(window, cx) || count == 0 {
+        if self.search.text(cx).is_empty() && command_pane_fits(window) {
+            self.step_start_choice(arrow, cx);
             return;
         }
-        // From the clamped row: the box always has one highlighted, so neither arrow starts from none.
-        let from = self.search_highlight(count);
-        self.search_box.list.highlighted = step(Some(from), arrow, count);
+        if !self.search_open(window, cx) {
+            return;
+        }
+        let results = self.search_results(cx);
+        let from = self.search_highlight(&results);
+        self.search_box.typed_choice =
+            step(from, arrow, results.rows.len()).map(|index| results.rows[index].clone());
         cx.notify();
     }
 
@@ -200,20 +245,25 @@ impl Launcher {
         }
         // Literally empty, as the old check was: a box holding only spaces is a query, and never launches.
         if self.search.text(cx).is_empty() {
+            if command_pane_fits(window)
+                && let Some(row) = self.search_box.start_highlight.clone()
+            {
+                self.take_start_highlight(&row, window, cx);
+                return;
+            }
             self.close_search(window, cx);
             self.press(window, cx);
             return;
         }
         if !self.search_open(window, cx) {
-            let results = self.search_results(cx);
-            self.search_box.list.highlighted = Some(results.default);
+            self.reset_search_highlight();
             self.open_search(window, cx);
             cx.notify();
             return;
         }
-        let rows = self.search_results(cx).rows;
-        if let Some(row) = rows.get(self.search_highlight(rows.len())) {
-            self.take_search_row(row.clone(), window, cx);
+        let results = self.search_results(cx);
+        if let Some(index) = self.search_highlight(&results) {
+            self.take_search_row(results.rows[index].clone(), window, cx);
         }
     }
 
@@ -221,7 +271,11 @@ impl Launcher {
     /// fixed, else make its one edit, empty the box, close the results and keep focus in the box (Custom's flags take
     /// it instead).
     fn take_search_row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(refusal) = self.search_row_refusal(&row, cx) {
+        let refusal = self.row_disabled(&row, cx).or_else(|| {
+            self.search_row_refusal(&row, cx)
+                .map(|words| HostSentence::new("launcher-refusal-reason").text(words))
+        });
+        if let Some(refusal) = refusal {
             self.search_box.refusal = Some(refusal);
             // The results would cover the reason; closing them keeps the query, and Enter opens them again.
             self.close_search(window, cx);
@@ -248,15 +302,8 @@ impl Launcher {
     /// environment ([`KEEPS_ENVIRONMENT`]), or a saved folder or recent setup
     /// from a history that is no longer the chosen host's (the host changed after the row was drawn).
     fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
-        if let Some(field) = self.held_by_row(row) {
-            // Only Replace with and Restart with hold fields; New and Clone never get here.
-            let mode = match self.draft.mode {
-                Mode::ReplaceWith { .. } => "replace",
-                Mode::New | Mode::Clone | Mode::RestartWith(_) => "restart",
-            };
-            return Some(capitalized(&format!(
-                "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
-            )));
+        if let Some(reason) = self.held_row_reason(row) {
+            return Some(reason);
         }
         if self.draft.target.is_some()
             && let Some(words) = environment_refusal(row)
@@ -286,6 +333,39 @@ impl Launcher {
             _ => false,
         };
         stale.then(|| STALE_ROW.to_owned())
+    }
+
+    /// Show a disabled choice with the existing refusal. A template can still repeat a held value as a no-op.
+    fn row_disabled(&self, row: &Row, cx: &App) -> Option<HostSentence> {
+        if let Row::Template(name) = row
+            && self.draft.holds(Field::Host)
+        {
+            return crate::templates::dispatch::held_row_refusal(
+                &self.draft,
+                name,
+                &self.hosts(cx),
+                cx,
+            );
+        }
+        self.held_row_reason(row)
+            .or_else(|| {
+                matches!(row, Row::Recent { entry, .. } if entry.target.is_some() && self.draft.holds(Field::Host))
+                    .then(|| KEEPS_ENVIRONMENT.to_owned())
+            })
+            .map(|words| HostSentence::new("launcher-held-choice").text(words))
+    }
+
+    /// Use the same words in a held row's help and in the refusal if a keyboard pick or an outdated row reaches it.
+    fn held_row_reason(&self, row: &Row) -> Option<String> {
+        let field = self.held_by_row(row)?;
+        let mode = if matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
+            "replace"
+        } else {
+            "restart"
+        };
+        Some(capitalized(&format!(
+            "{field} cannot change here: this dialog keeps {field} fixed for {mode}"
+        )))
     }
 
     /// The field, in the old refusal's words, that taking `row` would change while this launcher holds it fixed: any
@@ -416,7 +496,7 @@ impl Launcher {
                 self.sync_fields(window, cx);
                 self.changed(cx);
             }
-            // The strip's fill, as a click on its row makes it: it never launches, from Enter here either (the old
+            // The empty pane's fill, as a click on its row makes it: it never launches, from Enter here either (the old
             // search row did not). `search_row_refusal` has already said why a setup cannot be taken.
             Row::Recent { entry, .. } => {
                 let _ = self.take_recent(&entry, window, cx);
@@ -426,8 +506,12 @@ impl Launcher {
         }
     }
 
-    /// Open the results under the box, as a popover that never takes focus.
+    /// Use the pane at wide sizes, otherwise open under the field in a popover that never takes focus.
     fn open_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if command_pane_fits(window) {
+            self.search_box.inline_results = true;
+            return;
+        }
         self.search_box
             .list
             .open(SEARCH_RESULTS, draw_search_rows, window, cx);
@@ -436,10 +520,42 @@ impl Launcher {
     /// Close the results if they are open. What was typed stays; the highlight goes, and the next opening sets it
     /// again.
     pub(super) fn close_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_box.inline_results = false;
+        self.search_box.start_highlight = None;
+        self.reset_search_highlight();
         self.search_box.list.close(window, cx);
     }
 
-    /// The header's command field and the detail beneath its row with Close.
+    /// Give the command list its first Escape before the dialog closes. Its popover handles this itself when narrow.
+    pub(super) fn dismiss_command_pane(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !self.search_box.inline_results && self.search_box.start_highlight.is_none() {
+            return false;
+        }
+        self.close_search(window, cx);
+        cx.notify();
+        true
+    }
+
+    /// Move already-open results to the presentation that fits a resized window, retaining the query and choice.
+    pub(super) fn reflow_search(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let wide = command_pane_fits(window);
+        if !wide {
+            self.search_box.start_highlight = None;
+        }
+        let inline = self.search_box.inline_results;
+        if self.search_open(window, cx) && wide != inline {
+            let choice = self.search_box.typed_choice.take();
+            self.close_search(window, cx);
+            self.search_box.typed_choice = choice;
+            self.open_search(window, cx);
+        }
+    }
+
+    /// The command field, the detail beneath it and the tracker for the whole row it shares with Close.
     ///
     /// It also forgets results the layer manager closed on its own (Escape, a press outside), which tells the box
     /// nothing; that relies on the launcher being drawn in every frame its dialog is, as the model field does.
@@ -448,8 +564,10 @@ impl Launcher {
         palette: &theme::Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> (AnyElement, Option<AnyElement>) {
-        self.search_box.list.follow(window, cx);
+    ) -> (AnyElement, Option<AnyElement>, AnyElement) {
+        if self.search_box.list.follow(window, cx) {
+            self.reset_search_highlight();
+        }
         let tracker = self
             .search_box
             .list
@@ -509,8 +627,7 @@ impl Launcher {
                 div()
                     .debug_selector(|| "launcher-search-box".into())
                     .relative()
-                    .child(field)
-                    .child(tracker),
+                    .child(field),
             )
             .into_any_element();
         let guidance = match &self.draft.mode {
@@ -534,7 +651,7 @@ impl Launcher {
                 .children(notices)
                 .into_any_element()
         });
-        (field, detail)
+        (field, detail, tracker.into_any_element())
     }
 
     /// Show command notices by the field even when the form below has scrolled away from its start. A refusal
@@ -562,7 +679,7 @@ impl Launcher {
             div()
                 .id("launcher-search-refusal")
                 .role(Role::Status)
-                .aria_label(SharedString::from(words.clone()))
+                .aria_label(words.accessible_name())
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.warn))
                 .child(words)
@@ -660,6 +777,26 @@ fn command_summary(words: &'static str, palette: &theme::Palette) -> AnyElement 
         .into_any_element()
 }
 
+/// Match a keyboard target across updates to a host's status, a model's catalog label, or a setup's history record.
+fn same_search_choice(a: &Row, b: &Row) -> bool {
+    match (a, b) {
+        (Row::Host { id: a, .. }, Row::Host { id: b, .. }) => a == b,
+        (
+            Row::Model {
+                id: a, harness: x, ..
+            },
+            Row::Model {
+                id: b, harness: y, ..
+            },
+        ) => a == b && x == y,
+        (Row::Recent { entry: a, .. }, Row::Recent { entry: b, .. }) => {
+            a.host == b.host
+                && crate::launcher::recents::setup_key(a) == crate::launcher::recents::setup_key(b)
+        }
+        _ => a == b,
+    }
+}
+
 /// Why `row` cannot apply while a new environment is chosen, or `None` when it can (SPEC.md, "Container sessions":
 /// Folder destinations "use its home, without Browse or recent folders"). A folder row would move the folder off the
 /// environment's fixed home, and Browse would list a machine that does not exist yet; both are refused in the old
@@ -709,13 +846,16 @@ fn draw_search_rows(
     launcher: &Launcher,
     list: Stateful<Div>,
     weak: &WeakEntity<Launcher>,
-    _: &Window,
+    window: &Window,
     cx: &App,
 ) -> Drawn {
     let palette = theme::palette(cx);
+    let inline = command_pane_fits(window);
+    let text = launcher.search.text(cx);
+    let (_, query) = scoped(&text);
     let results = launcher.search_results(cx);
     let harness = launcher.draft.agent.harness;
-    let active = launcher.search_highlight(results.rows.len());
+    let active = launcher.search_highlight(&results);
     // With rows the area is a list box; with none, it holds only its message, which is the status line the old
     // area was (`role="status"`).
     let list = if results.rows.is_empty() {
@@ -752,34 +892,55 @@ fn draw_search_rows(
     // node, which this leaves out (a recorded deviation): a nested row would scroll only its whole group into view.
     let mut active_child = None;
     for (group, rows) in results.groups() {
-        children.push(option_heading(
+        children.push(command_heading(
             SharedString::from(format!("launcher-search-group-{}", group.label())),
             group.label(),
             palette,
         ));
         for (index, row) in rows {
-            if index == active {
+            let selected = Some(index) == active;
+            if selected {
                 active_child = Some(children.len());
             }
             let id = format!("launcher-search-option-{index}");
             let words = row.words(SharedString::from(format!("{id}-words")));
             let label = words.accessible_name();
-            let help = recent_hover(
-                row.help(harness, SharedString::from(format!("{id}-help"))),
-                matches!(&row, Row::Recent { entry, .. } if entry.selection.wrapper_prefix.is_some()),
-            );
+            let help = row.help(harness, SharedString::from(format!("{id}-help")));
+            let refusal = launcher.row_disabled(row, cx);
+            let disabled = refusal.is_some();
+            let help = match row {
+                Row::Recent { entry, .. } => {
+                    recent_hover(help, entry.selection.wrapper_prefix.is_some(), refusal)
+                }
+                _ => HoverHelp::sentence(refusal.unwrap_or(help)),
+            };
             let weak = weak.clone();
             let taken = row.clone();
-            let content = match row {
-                Row::Recent { entry, placement } => {
-                    recent_lines(&id, entry, placement, index == active, palette)
+            let content = if inline {
+                start::typed_choice(
+                    launcher,
+                    row,
+                    words,
+                    query,
+                    selected && !disabled,
+                    palette,
+                    cx,
+                )
+            } else {
+                match row {
+                    Row::Recent { entry, placement } => {
+                        recent_lines(&id, entry, placement, selected, query, palette)
+                    }
+                    Row::Template(_) => words.underline_template_matches(query).into_any_element(),
+                    _ => words.underline_matches(query).into_any_element(),
                 }
-                _ => words.into_any_element(),
             };
             children.push(
                 OptionRow::new(id, label, help, Role::ListBoxOption)
-                    .in_popover()
-                    .selected(index == active)
+                    .when(inline, OptionRow::compact)
+                    .when(!inline, OptionRow::in_popover)
+                    .selected(selected)
+                    .disabled(disabled)
                     .child(content)
                     .on_click(move |_, window, cx| {
                         let row = taken.clone();
@@ -797,15 +958,38 @@ fn draw_search_rows(
     }
 }
 
+/// Give result groups the same quiet hierarchy as the form's section labels. Keep the ordinary spelling for speech.
+fn command_heading(
+    id: impl Into<SharedString>,
+    label: &str,
+    palette: &theme::Palette,
+) -> AnyElement {
+    let id = id.into();
+    div()
+        .id(id.clone())
+        .debug_selector(move || id.to_string())
+        .role(Role::Label)
+        .aria_label(label.to_owned())
+        .pt(px(4.))
+        .px(px(6.))
+        .pb(px(1.))
+        .text_size(px(11.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(theme::color(palette.fg_1))
+        .child(label.to_uppercase())
+        .into_any_element()
+}
+
 /// A recent setup's row content, on two lines as the old search row drew it: "Recent setup: " with where it started (in
 /// the terminal font unless it is a repository) and the host, then, smaller and quieter, its model, effort and
-/// permissions, with YOLO in the danger ink. The agent type is in the row's name and hover help, not drawn, as in the old
-/// row. Both lines cut their text short rather than wrap.
+/// permissions, with YOLO in the danger ink. The agent is beside the host on the first line so an agent query has a
+/// visible match. Both lines cut their text short rather than wrap.
 fn recent_lines(
     id: &str,
     entry: &LaunchHistoryEntry,
     placement: &HostText,
     selected: bool,
+    query: &str,
     palette: &theme::Palette,
 ) -> AnyElement {
     let part = |name: &str| SharedString::from(format!("{id}-{name}"));
@@ -819,7 +1003,12 @@ fn recent_lines(
     } else {
         first.host(&destination)
     };
-    let first = first.text(" · ").host(placement);
+    let first = first
+        .text(" · ")
+        .host(placement)
+        .text(" · ")
+        .text(super::harness_label(selection.harness))
+        .underline_matches(query);
     let shell = selection.harness.is_shell();
     // The old second line's `--fg-1`, and `--on-accent-dim` on the selected row's fill.
     let quiet = if selected {
@@ -840,26 +1029,38 @@ fn recent_lines(
                 .mt(px(2.))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(quiet))
-                .when(shell, |line| line.child(summary_without_wrapper(selection)))
+                .when(shell, |line| {
+                    line.child(
+                        HostSentence::new(part("selection"))
+                            .host(&HostText::from_host(summary_without_wrapper(selection)))
+                            .underline_matches(query),
+                    )
+                })
                 .when(!shell, |line| {
                     // A custom model id is host-supplied text, so the line is drawn escaped.
                     line.child(
                         HostSentence::new(part("selection"))
                             .host(&HostText::from_host(summary_before_permissions(selection)))
-                            .text(" · Permissions: "),
+                            .text(" · Permissions: ")
+                            .underline_matches(query),
                     )
                     .child(
                         div()
                             .flex_none()
                             .when(yolo, |word| word.text_color(theme::color(palette.danger)))
-                            .child(permission_value(selection)),
+                            .child(
+                                HostSentence::new(part("permission"))
+                                    .text(permission_value(selection))
+                                    .underline_matches(query),
+                            ),
                     )
                 })
                 .when_some(wrapper_summary(selection), |line, wrapper| {
                     line.child(wrapper_tail(
                         HostSentence::new(part("wrapper"))
                             .text(" · ")
-                            .host(&HostText::from_host(wrapper)),
+                            .host(&HostText::from_host(wrapper))
+                            .underline_matches(query),
                     ))
                 }),
         )
