@@ -1703,10 +1703,6 @@ consequences.
   by default. A small Templates button crop would fail the publisher’s size check if a page uses it, and the template
   search crop catches a warning below the search box.
 
-- [`desktop-updater-read-failure-enables-auto-install.md`](desktop-updater-read-failure-enables-auto-install.md) —
-  Farhelm can install an update in the background after you turned automatic updates off, if it later cannot read the
-  setting.
-
 - [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
   enough to time out while the host is still working, Farhelm can remove the session without telling you where its
   unarchived checkout was left.

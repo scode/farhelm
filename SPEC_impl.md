@@ -7721,7 +7721,8 @@ installs over an unwithdrawn wait, accepting that rare case because the user ask
 Running record still protects the version that is running. A withdrawn wait never takes this path.
 
 The automatic-updates setting is `install_updates_automatically` in `desktop-client.json`, through that file's locked
-read-modify-write. It is optional, and absence means on, so every existing file reads as on.
+read-modify-write. A missing file or setting means on. A read or parse failure counts as off so a saved opt-out survives
+a failure to read it.
 
 The same file holds optional `automatic_probe_failure_since`, serde's `SystemTime` object with UTC `secs_since_epoch`
 and `nanos_since_epoch`. Absence means no streak; exact precision avoids showing a notice early at the three-day
