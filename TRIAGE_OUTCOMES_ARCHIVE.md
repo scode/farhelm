@@ -34654,3 +34654,42 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   consequence is a delayed capture diagnostic. jj change `pnuwusoq`, bookmark
   `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
   [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## valid-ssh-uri-short-label-parsing.md
+
+- Outcome: `fix code`.
+- Assessment: host_name.rs `destination_host` strips a URI port only when `is_port` (non-empty, all digits) holds, so
+  the suffix stays, `IpAddr` parsing fails and the address is cut at its first dot (confirmed). The trailing-slash form
+  in the file's TLDR is not detailed and is unverified. Basis: SPEC.md:287-291, "Short name": "removes `ssh://`, a user
+  prefix through the last `@`, brackets, and a port only in an SSH URI ... IP addresses stay whole". Code contradicts
+  this for `:ssh` and empty ports. Direct fix: in URI mode, strip any colon-free suffix after the last `:`, including an
+  empty one. Caveat for the coordinator: whether a service name counts as a "port" is mildly reading-dependent;
+  downgrade to DECIDE (same question as the abbreviated-IPv4 item) if you want strictness.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Change `mokxqmpnszyqwwzxlorynuqnyosopoot`, bookmark `plan/triage-helm/01-host-short-names`,
+  [PR #4493](https://github.com/scode/farhelm/pull/4493/changes).
+
+## abbreviated-ipv4-short-label-scope-ambiguity.md
+
+- Outcome: `fix code`.
+- Assessment: A host registered as an SSH destination in IPv4 shorthand (`10.1`, which ssh reads as 10.0.0.1) shows the
+  short name `10` instead of the whole address. Verified: host_name.rs:39-48 uses Rust `IpAddr` parsing, which needs
+  four components, so shorthand falls through to first-label truncation (confirmed). SPEC.md:287-293 says "IP addresses
+  stay whole", which leaves open whether shorthand counts as an IP address.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Yes. Fix code by keeping an all-digits-and-dots destination whole; no
+  real DNS name has an all-numeric top-level label. Bundle with valid-ssh-uri-short-label-parsing.md. If the fix turns
+  out not to be straightforward, or needs significant additional complexity, stop and bring it back to the maintainer.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. Change `mokxqmpnszyqwwzxlorynuqnyosopoot`, bookmark `plan/triage-helm/01-host-short-names`,
+  [PR #4493](https://github.com/scode/farhelm/pull/4493/changes).

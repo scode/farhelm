@@ -5,13 +5,14 @@
 //! presentation policy shared with clients, never a host-resolution rule.
 //! Inputs and output retain raw peer text; renderers still escape and isolate it.
 
-use core::net::{IpAddr, Ipv6Addr};
+use core::net::Ipv6Addr;
 
 /// Derive the short form from this host alone, preserving an explicit alias.
 ///
 /// Without an alias, the local host is `Local`; an SSH destination loses its
 /// scheme, last-`@` user prefix, brackets and an explicit port before choosing
-/// the first hostname label. IP addresses (including scoped IPv6) stay whole.
+/// the first hostname label. SSH URIs can also end with a slash. Numeric
+/// address spellings (including IPv4 shorthand and scoped IPv6) stay whole.
 /// A leading dot retains the remainder rather than producing an empty label.
 ///
 /// This does not validate an SSH destination or disambiguate equal names. It
@@ -31,15 +32,22 @@ pub fn host_short_name(local: bool, destination: Option<&str>, alias: Option<&st
     let host = destination
         .rsplit_once('@')
         .map_or(destination, |(_, host)| host);
+    let host = if uri {
+        host.strip_suffix('/').unwrap_or(host)
+    } else {
+        host
+    };
     let host = destination_host(host, uri);
 
-    // A scope is part of the address's display spelling. Parsing the address
-    // separately also preserves scopes containing dots instead of treating one
-    // as the boundary of a hostname label.
-    let address = host.parse::<IpAddr>().is_ok()
-        || host
-            .split_once('%')
-            .is_some_and(|(address, _)| address.parse::<Ipv6Addr>().is_ok());
+    // The IPv6 parser takes the address alone. Keep the original host below so
+    // a dot in a scope cannot become a hostname-label boundary.
+    let ipv6 = host.split_once('%').map_or(host, |(address, _)| address);
+    // Keep digit-and-dot spellings whole so abbreviated IPv4 does not look
+    // like a different address. The caption has no need to resolve it.
+    let address = host
+        .bytes()
+        .all(|byte| byte.is_ascii_digit() || byte == b'.')
+        || ipv6.parse::<Ipv6Addr>().is_ok();
     if address {
         return host.to_owned();
     }
@@ -57,23 +65,34 @@ pub fn host_short_name(local: bool, destination: Option<&str>, alias: Option<&st
 fn destination_host(host: &str, uri: bool) -> &str {
     if let Some(bracketed) = host.strip_prefix('[')
         && let Some((address, suffix)) = bracketed.split_once(']')
-        && (suffix.is_empty() || suffix.strip_prefix(':').is_some_and(is_port))
+        && (suffix.is_empty()
+            || suffix
+                .strip_prefix(':')
+                .is_some_and(|port| is_port(port, uri)))
     {
         return address;
     }
     if uri
         && let Some((name, port)) = host.rsplit_once(':')
         && !name.contains(':')
-        && is_port(port)
+        && is_port(port, uri)
     {
         return name;
     }
     host
 }
 
-/// Recognize the explicit numeric suffix without validating its network range.
-fn is_port(value: &str) -> bool {
-    !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+/// An SSH URI can spell its port as a service name or leave it empty.
+///
+/// Preserve the numeric-only test after a bracketed non-URI address. In a URI
+/// the surrounding syntax marks the port, so the display name needs no service
+/// lookup. Colons and slashes belong to the address or the URI delimiters.
+fn is_port(value: &str, uri: bool) -> bool {
+    if uri {
+        !value.contains([':', '/'])
+    } else {
+        !value.is_empty() && value.bytes().all(|byte| byte.is_ascii_digit())
+    }
 }
 
 #[cfg(test)]
@@ -110,6 +129,9 @@ mod tests {
             ("first@last@build.example.com", "build"),
             ("ssh://user@build.example.com:2222", "build"),
             ("ssh://build:2222", "build"),
+            ("ssh://build:ssh", "build"),
+            ("ssh://build:", "build"),
+            ("ssh://build/", "build"),
             ("gpubox", "gpubox"),
             ("gpubox:2222", "gpubox:2222"),
             (".example.com", ".example.com"),
@@ -120,7 +142,7 @@ mod tests {
         assert_eq!(host_short_name(false, None, None), "");
     }
 
-    /// Addresses retain every segment, including URI ports and IPv6 zone spellings.
+    /// Address spellings stay whole after stripping URI port and bracket syntax.
     ///
     /// Cutting an IPv4 address at its first dot or treating an IPv6 segment as
     /// a port would turn the caption into a different and misleading identity.
@@ -128,10 +150,17 @@ mod tests {
     fn addresses_remain_whole() {
         for (destination, expected) in [
             ("192.0.2.7", "192.0.2.7"),
+            ("10.1", "10.1"),
+            ("ssh://192.0.2:2222", "192.0.2"),
             ("ssh://user@192.0.2.7:2222", "192.0.2.7"),
+            ("ssh://192.0.2.7:ssh", "192.0.2.7"),
+            ("ssh://192.0.2.7:", "192.0.2.7"),
+            ("ssh://192.0.2.7/", "192.0.2.7"),
             ("fe80::1", "fe80::1"),
             ("user@::1", "::1"),
             ("ssh://[::1]:22", "::1"),
+            ("ssh://[::1]:", "::1"),
+            ("ssh://[2001:db8::7]:ssh/", "2001:db8::7"),
             ("[2001:db8::7]:2222", "2001:db8::7"),
             ("fe80::1%en0", "fe80::1%en0"),
             ("fe80::1%interface.100", "fe80::1%interface.100"),
