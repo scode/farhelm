@@ -284,11 +284,9 @@ fn answer_new_reads(
         // The chip was used to bring in the saved preference. The scene shows the editor ready for the next word.
         let launcher =
             entry::open_launcher(window, cx).expect("the wrapper is in the open launcher");
-        launcher
-            .read(cx)
-            .search_for_golden()
-            .focus_handle(cx)
-            .focus(window, cx);
+        // Through the focus coordinator, as every focus move the app makes is: the launcher is the open dialog.
+        let field = launcher.read(cx).search_for_golden().focus_handle(cx);
+        crate::focus::focus_in_layer(&field, &crate::focus::Mark::take(cx), window, cx);
     } else if scene == LauncherScene::Yolo {
         state.after.set(Some(choose_yolo));
     } else if scene == LauncherScene::Narrow {

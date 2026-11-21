@@ -361,7 +361,8 @@ fn the_footer_keeps_launch_primary_and_reset_quiet(cx: &mut TestAppContext) {
             )
         });
         assert_eq!(palette.dark, appearance == Preference::Dark);
-        for (id, fill, border) in [("launcher-launch", palette.accent_fill, palette.accent_edge)] {
+        {
+            let (id, fill, border) = ("launcher-launch", palette.accent_fill, palette.accent_edge);
             let bounds = test_support::bounds(cx, id);
             assert!(!bounds.contains(&pointer), "the premise: {id} is unhovered");
             // The scene snaps the paint to device pixels. Match the button's own quad, since its parent may

@@ -502,12 +502,19 @@ pub struct TextInput {
 }
 
 /// Kit tracks the input frame separately from its editor. A click on a decoration must send typing to the
-/// same editor as a click on the text itself.
+/// same editor as a click on the text itself. The move goes through the focus coordinator like every other focus move
+/// the app makes for a press: inside the open dialog or menu when one holds focus (the launcher's address field), on
+/// the page otherwise.
 fn line_adornment(element: AnyElement, editor: FocusHandle) -> gpui::Div {
     div()
         .on_mouse_down(MouseButton::Left, move |_, window, cx| {
             window.prevent_default();
-            editor.focus(window, cx);
+            let mark = crate::focus::Mark::take(cx);
+            if crate::layers::focus_layer_open(window, cx) {
+                crate::focus::focus_in_layer(&editor, &mark, window, cx);
+            } else {
+                crate::focus::focus_control(&editor, &mark, window, cx);
+            }
         })
         .child(element)
 }

@@ -87,6 +87,10 @@ enum HostChoiceId {
 }
 
 /// A pick offered by the current store and account. Rendering and keys use the same ordered list.
+#[allow(
+    clippy::large_enum_variant,
+    reason = "a short list built per frame for the Host menu, never stored; boxing would only add allocations"
+)]
 enum HostChoice {
     Existing(HostView),
     New(LaunchTarget),

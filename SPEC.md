@@ -352,13 +352,12 @@ cannot answer at all (no key, an outage), Farhelm dials anyway rather than cutti
 The hosts panel offers **Suspend** for Tensorlake hosts unless they are suspended, suspending or resuming, including
 when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when
 an agent on that host is working, its status is unknown or stale, or activity cannot be checked completely. Immediate
-Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses.
-An offline or unknown host asks even when its cached listing is empty. Suspension preserves running processes and
-sessions. A session on a suspended host says **&lt;host&gt; is suspended; this session continues when it resumes** and
-offers **Resume host**. Farhelm does not suspend automatically. For now the desktop app refuses a launch on a suspended
-host and asks you to resume it in Hosts first. Resuming before the create is planned.
-
-A connected host with a pending or failed session refresh still asks before suspending.
+Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses. A
+connected host with a pending or failed session refresh still asks before suspending. An offline or unknown host asks
+even when its cached listing is empty. Suspension preserves running processes and sessions. A session on a suspended
+host says **&lt;host&gt; is suspended; this session continues when it resumes** and offers **Resume host**. Farhelm does
+not suspend automatically. For now the desktop app refuses a launch on a suspended host and asks you to resume it in
+Hosts first. Resuming before the create is planned.
 
 Once implemented, a launch on a suspended host resumes it first and waits for a fresh connection. While another
 operation on that host (a Suspend or Resume from elsewhere, setup, an update) holds it, the launch keeps asking within

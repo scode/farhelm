@@ -107,6 +107,10 @@ pub(super) fn command_pane_fits(window: &Window) -> bool {
 
 /// A remembered source and an empty pane's keyboard target both follow the row, never its current index.
 #[derive(Clone, Debug, PartialEq)]
+#[allow(
+    clippy::large_enum_variant,
+    reason = "at most two are held (the form's source and the keyboard target); boxing would gain nothing"
+)]
 pub(super) enum SetupSource {
     Recent(Option<i64>, SetupKey),
     Template(String),
