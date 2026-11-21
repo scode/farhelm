@@ -46,3 +46,58 @@ None.
 
 Independent source review caught a stale test label and a layout shift in longer lists. The revised test covers the cap
 label and the longer-list geometry. The reviewer verified the corrections. The commit wording passed a cold read.
+
+### Landing
+
+#### What landed with it
+
+hosts-small-fixes (Hosts, Add host and attention list fixes) landed just before this plan in the same round. Since the
+executor last rebased this plan onto main, main had gained only the terminal's Connecting color fix and TODO entries. An
+independent reviewer and I read both plans against each other; they change no file in common. The shared button style
+this plan changed has one user, the Templates list, so no other button looks or behaves differently; only the Templates
+list's reference pictures changed, in light and dark. The landing made no fixes of its own to this plan.
+
+#### Checks
+
+This round landed two plans together: hosts-small-fixes (the helm's host deletion and the desktop app's Hosts, Add host
+and attention list) and templates-list-bolt-and-key (the Templates list, a shared button style and four reference
+pictures). The landing ran the helm crate's and the desktop app GUI's test suites, the app's end-to-end smoke test and
+the main lint (clippy) on a separate arm64 Linux test machine, and the screenshot comparisons and small checks locally
+on x86_64, on both plans stacked together on main:
+
+- `cargo nextest run -p farhelm-helm`, on the test machine (recorder run `049389f8-eae4-4d17-88ce-879c0fcf4801`): all
+  1790 tests passed. The two skipped tests need a real Mac host and are always skipped in this run.
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `c296b28a-18cb-4854-a8a3-11b58412dd4b`): all
+  3227 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `e99d643b-a6fc-4676-ada5-f59e1299049b`):
+  every step passed but paste, which skips on Linux as it always does. Its steps include the Hosts attention list and
+  host menus.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `149c1a19-7377-4aa8-b6a0-dd70d3d438c1`): passed, with templates-list-bolt-and-key's four re-captured Templates
+  pictures.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+After hosts-small-fixes' landing fix (#4430), which changes one hover text in the Tensorlake Add host form and three
+spec sentences:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `db8c7155-3cde-46b1-a498-179efe457023`): all
+  3227 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine: passed. `cargo fmt --all -- --check` and
+  `dprint check`, locally: passed.
+
+The helm, smoke and screenshot runs above still apply to the fix, since it changes no helm code and no hover text is in
+a picture. Skipped: the rest of the workspace suite, since nothing outside the helm and the GUI changed; and Mac runs,
+since nothing here is Mac-specific.
+
+#### Things you should know that the report does not say
+
+When no template is marked with the lightning bolt, the list keeps a blank band about 21 points tall at its foot. It
+holds room for the key line that appears under a marked template, so that marking the first one does not resize the
+dialog and move the bolt out from under the pointer. The report mentions reserving the line but not that it shows as
+blank space while nothing is marked; the reviewer found it necessary rather than excessive.
+
+#### What you should still do
+
+Nothing.
