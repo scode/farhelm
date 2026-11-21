@@ -421,16 +421,20 @@ class StagedRunTest(unittest.TestCase):
 
     def test_every_harness_the_app_launches_by_name_is_wrapped(self):
         """A harness missing from STAGED_AGENTS would launch the vendor's real program in a staged run. Specified: the
-        names are exactly the programs the helm composes an agent launch with (`fn program` in
+        names are exactly the programs the helm composes a launch with (`fn program` in
         crates/farhelm-helm/src/launches.rs), read from that source, so a harness added there fails this until it is
-        added here; and each has its wrapper in the run's PATH directory. An arm the reader cannot take a name from
-        fails the read rather than being skipped, shown on a synthetic function with a constant arm."""
+        added here, either as an agent with its wrapper in the run's PATH directory or as one of the shells
+        (STAGED_REAL_SHELLS), which get none, since a staged shell session runs the machine's own shell. An arm the
+        reader cannot take a name from fails the read rather than being skipped, shown on a synthetic function with a
+        constant arm."""
         source = (pathlib.Path(__file__).resolve().parent.parent / "crates/farhelm-helm/src/launches.rs").read_text()
         programs = launch_programs(source)
         self.assertGreater(len(programs), 5, "premise: the match was found and read")
-        self.assertEqual(sorted(gui_agent.STAGED_AGENTS), sorted(programs))
-        for name in programs:
+        self.assertEqual(sorted(gui_agent.STAGED_AGENTS + gui_agent.STAGED_REAL_SHELLS), sorted(programs))
+        for name in gui_agent.STAGED_AGENTS:
             self.assertTrue(os.access(pathlib.Path(self.staging["bin"]) / name, os.X_OK), name)
+        for name in gui_agent.STAGED_REAL_SHELLS:
+            self.assertFalse((pathlib.Path(self.staging["bin"]) / name).exists(), name)
         synthetic = (
             "fn program(harness: LaunchHarness) -> &'static str {\n    match harness {\n"
             '        LaunchHarness::Codex => "codex",\n        LaunchHarness::Other => OTHER_PROGRAM,\n    }\n}\n'
