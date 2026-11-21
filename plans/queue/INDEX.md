@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `agent-add-host-takeover-hint.md` — point users to Add host (instead of a non-existent Take over row in Hosts) when an agent asks to add a host managed by another Farhelm
 - [complete] `template-placeholder-validation.md` — validate command placeholder quoting and joining when saving launch templates and close the matching review item
 - [in-flight 22f4c9] `auto-update-staged-payloads.md` — skip automatic remote-host updates when locally staged unsigned payloads (`FARHELM_HELM_PAYLOAD_DIR`) are active and close the matching review item
-- [pending] `harness-drift-tests.md` — add opt-in real-agent harness drift tests across all 10 supported harnesses (including live Antigravity conversation-report verification) with three-way verdicts and manual flow triggers
+- [in-flight 72121e] `harness-drift-tests.md` — add opt-in real-agent harness drift tests across all 10 supported harnesses (including live Antigravity conversation-report verification) with three-way verdicts and manual flow triggers
