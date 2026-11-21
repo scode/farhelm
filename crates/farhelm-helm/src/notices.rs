@@ -52,11 +52,9 @@ const SESSION_LIMIT_SCHEMA: &str = "
     CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
 ";
 
-/// A host's notices cascade with its registration. The partial unique index
-/// gives the app-wide condition one identity, since NULLs compare as distinct
-/// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
-/// exactly the same condition identity and cascade. AUTOINCREMENT prevents a
-/// stale panel's IDs naming later notices.
+/// The notices table as it stood before the late Delete notice kind. The upgrade step that added the desktop
+/// login-path notice rebuilds to exactly this, so a database passing through that step matches what that release
+/// created; the later late Delete step then rebuilds to [`SCHEMA`].
 const DESKTOP_PATH_SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -75,7 +73,12 @@ const DESKTOP_PATH_SCHEMA: &str = "
     CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
 ";
 
-/// Notice history and read marks share the same ID allocator across upgrades.
+/// A host's notices cascade with its registration. The partial unique index
+/// gives the app-wide condition one identity, since NULLs compare as distinct
+/// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
+/// exactly the same condition identity and cascade. AUTOINCREMENT prevents a
+/// stale panel's IDs naming later notices, so notice history and read marks
+/// share the same ID allocator across upgrades.
 pub(crate) const SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
