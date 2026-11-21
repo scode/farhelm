@@ -520,8 +520,9 @@ starter's job.
 - Every change to this crate needs a written justification in its pull request saying which client need it serves and
   why it cannot be met without changing the host. Fixing a bug that breaks this specification is such a need; adding a
   convenience is not.
-- The host's command line and the child spec are not cross-version surfaces: whoever starts a host starts it from a
-  program file of its own build, so both ends of them always come from the same version. They are kept stable anyway,
-  because changing them is still a change to this crate. Two fields are the exception: the tag and the initial snapshot
-  reach the wire unchanged (in `InfoReply` and as a snapshot record), so `MAX_TAG` and `MAX_SNAPSHOT` are wire bounds
-  too (see the bullet on limits).
+- The host's command line and child spec stay stable across builds. Linux starts the same program the supervisor is
+  running, and the Mac desktop app starts the supervisor's own versioned program. On a remote Mac, Update replaces the
+  program at the supervisor's path before restarting it. A host started in that interval must accept the command line
+  and child spec from the still-running supervisor for any supported Update. The tag and initial snapshot also reach the
+  wire unchanged (in `InfoReply` and as a snapshot record), so `MAX_TAG` and `MAX_SNAPSHOT` are wire bounds too (see the
+  bullet on limits).

@@ -12,10 +12,10 @@
 //! Three things here are deliberate, and each closes a way a host could hurt
 //! the sessions it serves:
 //!
-//! - **The program is the supervisor's own executable**, never the Mac
-//!   forwarder: see [`own_host_program`]. The host's command line is then
-//!   private to one build, and only its wire protocol is a cross-version
-//!   surface.
+//! - **The supervisor starts the host directly**, using [`own_host_program`]
+//!   to bypass the Mac forwarder. A remote Mac update can replace the
+//!   program at that path before the supervisor restarts. Startup stays
+//!   compatible across that change (`crates/terminal-host/SPEC.md`, "Change policy").
 //! - **The host's own environment is empty.** The child's environment
 //!   travels in the spec, on stdin, and nothing of the supervisor's reaches
 //!   the host process. That keeps the session markers (`FARHELM_SESSION_ID`

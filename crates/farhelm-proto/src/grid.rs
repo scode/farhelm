@@ -183,9 +183,9 @@
 //!   per frame (screen frames may be skipped; see "Flow control"). `cursor`
 //!   is `{"x":col,"y":row,"visible":bool,"shape":"block"|"underline"|"bar",
 //!   "blink":bool}` and lies on the screen (`x < cols`, `y < rows`). The
-//!   default cursor (one no program has styled) is sent with `blink: true`,
-//!   so that a cursor blinks unless the program says otherwise, as Farhelm's
-//!   cursor did before the grid (alacritty's own default is steady).
+//!   default cursor is sent with `blink: true`, as Farhelm's cursor did
+//!   before the grid. The emulator returns the same style for an explicit
+//!   steady block, so that request also produces a blinking block.
 //!
 //! A frame that changes `cols` or `rows` comes with `rows` for every non-blank
 //! row, since the client blanks every row a resizing frame does not update.

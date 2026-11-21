@@ -550,11 +550,8 @@ fn a_resizing_frame_sends_every_row() {
     assert!(client.shows(&emulator));
 }
 
-/// The cursor blinks unless the program chose a steady style, and hides
-/// when the program hides it.
-///
-/// Why: today's terminal blinks the cursor by default, where alacritty's
-/// default is steady; a program's choice of shape and blink is kept.
+/// The grid gives an unstyled cursor a blinking block to match Farhelm's
+/// previous default. Programs can still change its shape and visibility.
 /// Spec: by default a visible blinking block; after `CSI 4 q` a steady
 /// underline; after `CSI 5 q` a blinking bar; after `CSI ? 25 l` hidden.
 #[test]
