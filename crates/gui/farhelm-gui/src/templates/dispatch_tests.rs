@@ -512,8 +512,8 @@ fn a_model_only_template_picks_its_agent_type_from_the_catalog(cx: &mut TestAppC
         "the model field shows it: {shown:?}"
     );
     assert!(
-        shown.contains("Codex · "),
-        "the footer names Codex as the agent type: {shown:?}"
+        label(cx, "launcher-launch").is_some_and(|name| name.starts_with("Launch Codex · ")),
+        "the launch action names Codex as the agent type"
     );
 }
 
@@ -1000,7 +1000,7 @@ fn a_shortcut_refusal_shows_over_a_press_reason(cx: &mut TestAppContext) {
 
 /// SPEC.md: "In the session launcher, Enter instead applies the queued templates to the current draft without
 /// launching; each completed sequence is one refusal unit, and the pill says 'apply' instead of 'launch'", and an
-/// unbound key "shows a refusal above the search box without changing the draft". Specified: with New open and focus
+/// unbound key shows a refusal without changing the draft. With New open and focus
 /// moved to the host button, the prefix arms the "Apply sequence:" pill;
 /// `partial` and Enter put its folder in the draft and send nothing; `zzz` and Enter show "No template matches"; the
 /// unbound key 9 and Enter show "No template is bound to key 9" and open no Templates.

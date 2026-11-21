@@ -1,4 +1,4 @@
-//! The composer search box at the top of the launcher's body: a text field with its results floating under it, which
+//! The session launcher's command field in the header, with its results floating underneath, which
 //! turns a typed word into one choice in the draft. What a query offers is [`crate::launcher::search`]'s; this module
 //! draws it and applies the row the user takes.
 //!
@@ -18,12 +18,12 @@
 //!   then empties the box and closes the results, with focus back in the box for the next word; choosing Custom moves
 //!   focus on to its flags, as choosing it by hand does. An agent type or model taken on the Command tab switches to
 //!   the Agent tab, where they belong. A row that would change what this launcher holds fixed (Restart with's agent
-//!   type, host, folder and name; Replace with's host) is refused above the box, even when it names the current value;
-//!   the box keeps its text, and the results close so the reason shows.
+//!   type, host, folder and name; Replace with's host) is refused even when it names the current value.
+//!   When refused, the box keeps its text and the results close so the reason below the field shows.
 //! - **A `tl:` row** applies its template to the draft through the templates' own application path, as a template
 //!   shortcut's press in the open launcher does (`crate::templates::dispatch::search_row_batch`); a template that
-//!   does not apply changes nothing, and the launcher's refusal note says why above the box, where the old launcher
-//!   said why a template did not apply. While the helm cannot give its templates, `tl:` shows the helm's words in
+//!   does not apply changes nothing, and the launcher's refusal note says why below the field.
+//!   While the helm cannot give its templates, `tl:` shows the helm's words in
 //!   the results instead of rows.
 //!
 //! - **Rows from the chosen host's launch history.** A saved folder becomes the folder as a pick from the folder list
@@ -32,7 +32,7 @@
 //!   ([`Launcher::take_recent`]), drawn on two lines, and never launches, from Enter either: the old search row only
 //!   filled, and SPEC.md's Enter that launches is the strip's focused row. A setup carrying a retired container choice,
 //!   a new environment's setup in Replace with, or a folder or setup from a history that is no longer the chosen
-//!   host's, is refused above the box in the old words. While a new environment is chosen, every folder row and Browse
+//!   host's, is refused below the field. While a new environment is chosen, every folder row and Browse
 //!   is refused there too, in the old words: the environment's folder is its fixed home (`environment_refusal`). A
 //!   recent setup is still taken, with its own place.
 //!
@@ -46,16 +46,20 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
-    px,
+    px, svg,
 };
 
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
 use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, recent_hover, wrapper_tail};
-use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
+use crate::assets::{Icon, TERMINAL_FONT};
+use crate::components::{
+    HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chip, option_heading,
+};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::hosts::identity::short_name;
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{
     destination_label, permission_value, summary_before_permissions, summary_without_wrapper,
@@ -65,10 +69,25 @@ use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
 use crate::theme::{self, metrics};
 
-/// The box's accessible name, the old `aria-label`; the old end-to-end tests found the box by it.
-pub(super) const SEARCH_LABEL: &str = "Search folders, harnesses, models, and efforts";
-/// The hint the empty box shows, the old placeholder.
-pub(super) const SEARCH_PLACEHOLDER: &str = "Search names, hosts, folders, harnesses, models…";
+/// The input's name describes what typing there does and stays in place when a query hides its placeholder.
+const SEARCH_LABEL: &str = "Choose an agent, host, folder, model or session name";
+
+/// Keep the dialog's name and the empty field's opening words in step.
+pub(super) const fn command_title(mode: &Mode) -> &'static str {
+    match mode {
+        Mode::New => "New session",
+        Mode::Clone => "Clone session",
+        Mode::ReplaceWith { .. } => "Replace session",
+        Mode::RestartWith(_) => "Restart session",
+    }
+}
+
+/// The same Return symbol appears beside what it does in the empty field and on the action itself.
+pub(super) const RETURN_KEY: &str = "⏎";
+/// The header is the primary editing surface, with a slightly larger face than ordinary form fields.
+const COMMAND_FIELD_TEXT_SIZE: f32 = 14.5;
+/// Several lines of a message can stay visible without the header taking over a short window.
+const COMMAND_NOTICE_HEIGHT: f32 = 88.;
 /// The results' element id (`.launch-composer-search-results`), which tests find them by.
 const SEARCH_RESULTS: &str = "launcher-search-results";
 /// Why a saved folder or recent setup from an earlier host's history changed nothing, as the old launcher said it.
@@ -81,7 +100,7 @@ pub(super) struct SearchBox {
     /// box's text names, [`Results::default`]), and clamped when read, since the rows follow the store. Read as the
     /// first row while unset.
     list: FieldList,
-    /// Why the last row taken changed nothing (a field this launcher holds fixed), said above the box until the next
+    /// Why the last row taken changed nothing (a field this launcher holds fixed), said below the field until the next
     /// keystroke in it or the next row taken.
     refusal: Option<String>,
 }
@@ -198,7 +217,7 @@ impl Launcher {
         }
     }
 
-    /// Take `row`, from Enter or a click: refuse it above the box when it would change a field this launcher holds
+    /// Take `row`, from Enter or a click: refuse it below the field when it would change a field this launcher holds
     /// fixed, else make its one edit, empty the box, close the results and keep focus in the box (Custom's flags take
     /// it instead).
     fn take_search_row(&mut self, row: Row, window: &mut Window, cx: &mut Context<Self>) {
@@ -328,7 +347,7 @@ impl Launcher {
             // model row switches it first.
             Row::Harness(harness) => self.choose_harness(harness, window, cx),
             // Through the templates' application path, as a template shortcut's press in the open launcher: it waits
-            // for the catalog read if that is out, and a refusal changes nothing and is said above the box.
+            // for the catalog read if that is out. A refusal changes nothing and is said below the field.
             Row::Template(name) => self.apply_batch(
                 crate::templates::dispatch::search_row_batch(name),
                 window,
@@ -420,36 +439,112 @@ impl Launcher {
         self.search_box.list.close(window, cx);
     }
 
-    /// The search box, full width at the top of the body, with the last refusal above it.
+    /// The header's command field and the detail beneath its row with Close.
     ///
     /// It also forgets results the layer manager closed on its own (Escape, a press outside), which tells the box
     /// nothing; that relies on the launcher being drawn in every frame its dialog is, as the model field does.
-    pub(super) fn search_row(
+    pub(super) fn command_header(
         &mut self,
         palette: &theme::Palette,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> (AnyElement, Option<AnyElement>) {
         self.search_box.list.follow(window, cx);
         let tracker = self
             .search_box
             .list
             .track_anchor("launcher-search-anchor", window, cx);
         let weak = cx.weak_entity();
+        let empty = self.search.text(cx).is_empty();
+        let mark = div()
+            .debug_selector(|| "launcher-command-mark".into())
+            .flex()
+            .items_center()
+            .justify_center()
+            .size(px(24.))
+            .rounded(metrics::RADIUS_SM)
+            .border_1()
+            .border_color(theme::color(palette.border_dim))
+            .bg(theme::color(palette.bg_1))
+            .child(
+                svg()
+                    .path(Icon::Launch.path())
+                    .size(px(14.))
+                    .text_color(theme::color(palette.fg_0)),
+            );
+        let suffix = empty.then(|| {
+            key_chip(
+                format!("{RETURN_KEY} on empty launches"),
+                palette.fg_1,
+                palette,
+            )
+            .id("launcher-empty-launch-hint")
+            .debug_selector(|| "launcher-empty-launch-hint".into())
+            .role(Role::Label)
+            .aria_label("Enter on an empty field launches")
+        });
         let field = self.launcher_input(
             "launcher-search",
             &self.search,
             SEARCH_LABEL,
             HoverHelp::tooltip(
-                "Search: type a name, host, folder, harness, model, effort or permission, then Enter to choose it",
+                concat!(
+                    "Type a name, host, folder, harness, model, effort or permission, then press Enter to choose it. ",
+                    "Press Enter in an empty field to start this setup."
+                ),
             ),
         )
+        .height(px(48.))
+        .line_text_size(px(COMMAND_FIELD_TEXT_SIZE))
+        .line_prefix(mark)
+        .when_some(suffix, |field, suffix| field.line_suffix(suffix))
         .on_vertical(move |arrow, window, cx| {
             let _ = weak.update(cx, |launcher, cx| launcher.search_arrow(arrow, window, cx));
         });
-        // Above the box, where the old launcher said why a template did not apply (a taken `tl:` row, a shortcut's
-        // press or sequence here, a quick launch that opened New instead), as its own alert.
-        // One plain line in the warning ink, as the box's own refusal below it and the old template error were.
+        let field = div()
+            .id("launcher-search-row")
+            // Tests press the box by where its row is drawn, as they do the other fields' rows.
+            .debug_selector(|| "launcher-search-row".into())
+            .child(
+                div()
+                    .debug_selector(|| "launcher-search-box".into())
+                    .relative()
+                    .child(field)
+                    .child(tracker),
+            )
+            .into_any_element();
+        let guidance = match &self.draft.mode {
+            Mode::New | Mode::Clone => empty.then(|| self.command_hints(palette, cx)),
+            Mode::ReplaceWith { .. } => Some(command_summary(
+                "Start a new session, then delete the source",
+                palette,
+            )),
+            Mode::RestartWith(_) => Some(command_summary(
+                "Resume this session with different settings",
+                palette,
+            )),
+        };
+        let notices = self.command_notices(palette, window, cx);
+        let detail = (guidance.is_some() || notices.is_some()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .children(guidance)
+                .children(notices)
+                .into_any_element()
+        });
+        (field, detail)
+    }
+
+    /// Show command notices by the field even when the form below has scrolled away from its start. A refusal
+    /// can name many competing templates, so the notice can scroll on its own without displacing the form or footer.
+    fn command_notices(
+        &self,
+        palette: &theme::Palette,
+        window: &Window,
+        cx: &App,
+    ) -> Option<AnyElement> {
         let note = match &self.note {
             Some(super::Note::Refusal(sentence)) => Some(
                 div()
@@ -463,8 +558,6 @@ impl Launcher {
             ),
             Some(super::Note::Banner(_)) | None => None,
         };
-        // Above the box too, where the old launcher said why a taken row changed nothing, in the launcher's plain
-        // warning ink like its other inline refusals.
         let refusal = self.search_box.refusal.clone().map(|words| {
             div()
                 .id("launcher-search-refusal")
@@ -474,27 +567,97 @@ impl Launcher {
                 .text_color(theme::color(palette.warn))
                 .child(words)
         });
-        div()
-            .id("launcher-search-row")
-            // Tests press the box by where its row is drawn, as they do the other fields' rows.
-            .debug_selector(|| "launcher-search-row".into())
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .children(note)
-            .children(refusal)
-            .child(
-                div()
-                    // Tests compare what is drawn above the box with the box itself.
-                    .debug_selector(|| "launcher-search-box".into())
-                    .relative()
-                    .child(field)
-                    .child(tracker),
+        let repository = self.search_repository_note(window, cx);
+        (note.is_some() || refusal.is_some() || repository.is_some()).then(|| {
+            let messages = div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .children(note)
+                .children(refusal)
+                .children(repository);
+            ScrollBox::new(
+                "launcher-command-notices",
+                "Command field messages",
+                HoverHelp::tooltip("Read messages from the command field"),
+                Role::Region,
+                messages,
             )
-            // Under the box, an incomplete or failed scan for a `gh:` query (`checkout`).
-            .children(self.search_repository_note(window, cx))
+            .max_height(px(COMMAND_NOTICE_HEIGHT))
+            .into_any_element()
+        })
+    }
+
+    /// Keep the examples literal so they can be typed. The Host example uses a searchable short form of a real
+    /// host name so an SSH login and domain do not take up the hint row. Use the default example on an empty fleet.
+    fn command_hints(&self, palette: &theme::Palette, cx: &App) -> AnyElement {
+        let host = self
+            .store
+            .read(cx)
+            .collections()
+            .ordered::<HostView>()
+            .into_iter()
+            .filter(|host| !host.is_local() && !host.is_session_owned)
+            .find_map(|host| {
+                let short = short_name(host);
+                let name = short.raw();
+                (!name.is_empty()
+                    && !name.eq_ignore_ascii_case("local")
+                    && name
+                        .bytes()
+                        .all(|c| c.is_ascii_alphanumeric() || b"-.@_".contains(&c))
+                    && host
+                        .name
+                        .to_ascii_lowercase()
+                        .contains(&name.to_ascii_lowercase()))
+                .then(|| name.to_owned())
+            })
+            .unwrap_or_else(|| "build-box".to_owned());
+        let example_host = format!("host:{host}");
+        div()
+            .id("launcher-command-hints")
+            .debug_selector(|| "launcher-command-hints".into())
+            .flex()
+            .flex_wrap()
+            .gap_x(px(12.))
+            .gap_y(px(4.))
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(palette.fg_1))
+            .children(
+                [
+                    ("claude", "pick an agent"),
+                    (&example_host, "another host"),
+                    ("gh:owner/repo", "clone a repo"),
+                    ("tl:", "templates"),
+                    ("fix login bug", "names the session"),
+                ]
+                .into_iter()
+                .map(|(example, description)| {
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(px(4.))
+                        .child(
+                            key_chip(example.to_owned(), palette.accent, palette)
+                                .font_family(TERMINAL_FONT),
+                        )
+                        .child(description)
+                }),
+            )
             .into_any_element()
     }
+}
+
+/// The destructive modes keep the reason for their action visible regardless of the command field's query.
+fn command_summary(words: &'static str, palette: &theme::Palette) -> AnyElement {
+    div()
+        .id("launcher-mode-summary")
+        .role(Role::Label)
+        .aria_label(words)
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.fg_1))
+        .child(words)
+        .into_any_element()
 }
 
 /// Why `row` cannot apply while a new environment is chosen, or `None` when it can (SPEC.md, "Container sessions":

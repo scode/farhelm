@@ -13,11 +13,12 @@ column and a crop around them alone would cut the labels ("Where", "Harness", "E
 
 from docs_shots import Callout, Highlight, Shot
 
-# The launcher's own title: static, with no hover help or reaction, and above anything its popovers draw.
-LAUNCHER_PARK = "id:launcher-frame-title"
 # A remote host whose destination is a plain invented name (docs/docs-shots/scenario.json5), so its menu and settings
 # show nothing the capture's leak check refuses.
 HOST = "build-box"
+# The command field replaced the static title. The Destination label gives the pointer a place to rest without
+# showing help or changing the focus that the shot's steps left in the launcher.
+LAUNCHER_PARK = "id:launcher-destination-heading"
 
 
 # --- Steps -----------------------------------------------------------------------------------------------------------
@@ -119,17 +120,13 @@ SHOTS = [
     Shot(
         "launch-button",
         codex,
-        ["id:launcher-launch", "id:launcher-summary-target", "id:launcher-summary-choices"],
+        ["id:launcher-cancel", "id:launcher-launch"],
         park=LAUNCHER_PARK,
         annotations=[
             Highlight("id:launcher-launch", pad=3),
-            # Both above the footer, side by side, clear of the target line, the choices line and the buttons.
-            Callout("id:launcher-summary-target",
-                    "What Launch will start: the agent, host and directory. Launch stays grey until the setup is "
-                    "complete; hover it to see what is missing.", side="top", dx=-50),
-            Callout("id:launcher-summary-choices",
-                    "The choices the launch will use. Check it before launching: YOLO shows in red.", side="top",
-                    dx=350),
+            Callout("id:launcher-launch",
+                    "Starts the session with the choices in the form. If Launch is grey, hover over it to see "
+                    "what is missing.", side="top"),
         ],
     ),
     Shot(
@@ -180,12 +177,11 @@ SHOTS = [
             Callout("id:launcher-harness",
                     "Pick the agent first. Nothing is chosen when the launcher opens, and the choices below change to "
                     "what that agent offers.", side="right", dx=60, dy=-60),
-            # The whole row rather than the field, which ends mid-column: from the field the box would land on the
-            # launcher's own controls.
+            # Below the controls so the callout leaves the Model, Effort and Permissions row readable.
             Callout("id:launcher-model-row",
                     "Which model. Harness default leaves it to the agent's own setting. Type a family such as sol "
                     "and press Enter for its latest model, or any model ID the list doesn't show.",
-                    side="right", dx=60, dy=50),
+                    side="bottom", dy=50),
         ],
     ),
     Shot(
@@ -208,7 +204,9 @@ SHOTS = [
         "search",
         search_claude,
         ["id:launcher-search", "id:launcher-search-results"],
-        park=LAUNCHER_PARK,
+        # This query has enough results to cover the Destination label. The Harnesses heading is inside the list
+        # and can hold the pointer without highlighting an option.
+        park="id:launcher-search-group-Harnesses",
         annotations=[
             Callout("id:launcher-search",
                     "Type to find anything the launcher can set: hosts, agents, models, directories, recent setups.",
@@ -248,7 +246,7 @@ SHOTS = [
     Shot(
         "yolo-confirmation",
         yolo_question,
-        ["id:prompt", "id:launcher-summary-target"],
+        ["id:prompt", "id:launcher-launch"],
         park=LAUNCHER_PARK,
         annotations=[
             # Side by side below the answers, clear of the question's text.

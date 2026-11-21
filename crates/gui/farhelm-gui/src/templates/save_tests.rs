@@ -602,26 +602,19 @@ fn escape_or_cancel_puts_focus_back_in_the_search_box(cx: &mut TestAppContext) {
 }
 
 /// The rest of the old "save as template handles body Escape before the launcher", which pressed Escape with focus on
-/// the page body, outside the panel. The panel takes the launcher's Escape wherever focus is in the launcher, or an
-/// Escape pressed after stepping out of the panel would discard the whole draft. And leaving the panel puts focus in
-/// the search box at the top of the body, which the panel scrolls away; a focused box out of sight takes keys unseen.
-/// Specified: at 1100 by 560, the body overflows without the panel (Tab to the footer's Cancel leaves the search box
-/// out of view, so a closing panel cannot bring it back just by shrinking the body), and the search box is out of the
-/// launcher's body with the panel open; Shift+Tab moves focus out of the panel to a launcher control above it, and
-/// Escape then closes the panel and not New, which keeps its Codex choice, with focus in the search box shown whole in
-/// the body; opened again, Cancel (pressed by keyboard: it is below the fold) does the same; Escape then closes New.
+/// the page body, outside the panel. The panel takes Escape from anywhere in the launcher so stepping out of it
+/// does not discard the session draft. At 1100 by 560, the open panel scrolls in the body while the header stays
+/// visible. Both Escape after Shift+Tab leaves the panel and Cancel inside it close the panel and return focus to
+/// the pinned command field, preserving the draft's choice of Codex.
 #[gpui::test]
-fn escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view(
+fn escape_from_outside_the_panel_returns_focus_to_the_pinned_command_field(
     cx: &mut TestAppContext,
 ) {
     let (_helm, cx) = launcher_on(cx, codex_draft(), &[]);
     cx.simulate_resize(gpui::size(gpui::px(1100.), gpui::px(560.)));
     settle(cx);
-    let search_shown = |cx: &mut VisualTestContext| {
-        let search = test_support::bounds(cx, "launcher-search-box");
-        let body = test_support::bounds(cx, "launcher-body");
-        search.top() >= body.top() && search.bottom() <= body.bottom()
-    };
+    let command = test_support::bounds(cx, "launcher-search-box");
+    assert!(command.bottom() <= test_support::bounds(cx, "launcher-body").top());
     // The walks below are bounded by the launcher's few dozen stops, so each reaches its target or fails loudly.
     for _ in 0..40 {
         if test_support::focused_id(cx).as_deref() == Some("launcher-cancel") {
@@ -634,15 +627,16 @@ fn escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view(
         Some("launcher-cancel"),
         "the premise: Tab crossed the whole body"
     );
-    assert!(
-        !search_shown(cx),
-        "the premise: the body overflows without the panel, its last control's reveal hiding the search box"
-    );
     for leave in ["escape", "cancel"] {
         click(cx, "launcher-save-template");
         assert!(
-            !search_shown(cx),
-            "{leave}: the premise: the search box is out of view with the panel open"
+            drawn(cx, "save-template-panel"),
+            "{leave}: the panel opened"
+        );
+        assert!(
+            test_support::bounds(cx, "launcher-search-box").bottom()
+                <= test_support::bounds(cx, "launcher-body").top(),
+            "{leave}: the header is above the open panel's scrolling body"
         );
         if leave == "escape" {
             keys(cx, "shift-tab");
@@ -680,7 +674,8 @@ fn escape_from_outside_the_panel_closes_it_and_brings_the_search_box_into_view(
             "{leave}: not New"
         );
         assert!(search_focused(cx), "{leave}: focus is in the search box");
-        assert!(search_shown(cx), "{leave}: which is in view");
+        let command = test_support::bounds(cx, "launcher-search-box");
+        assert!(command.bottom() <= test_support::bounds(cx, "launcher-body").top());
     }
     keys(cx, "escape");
     assert!(!drawn(cx, "launcher"));
