@@ -757,10 +757,6 @@ consequences.
   Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
   presentation copy.
 
-- [`attention-update-accessible-name-omits-target.md`](attention-update-accessible-name-omits-target.md) —
-  Attention-list Update buttons omit their host and version from the accessible name, leaving identical actions
-  difficult to distinguish.
-
 - [`bulk-screenshot-test-expects-wrong-local-alias.md`](bulk-screenshot-test-expects-wrong-local-alias.md) — The
   bulk-action screenshot regression expects a local-host alias that its own fixture does not provide.
 

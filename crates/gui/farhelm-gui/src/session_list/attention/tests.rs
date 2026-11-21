@@ -992,10 +992,10 @@ fn always_update_asks_for_the_displayed_hosts_and_the_preference(cx: &mut TestAp
 /// Why this matters: an Update is refused while a session launch is in flight, and the Hosts panel's line that would
 /// say so is not drawn beside this list, so the list's own update actions must say why they wait instead of looking
 /// ready and doing nothing (the area owner's decision, in the words the launcher's triggers use for a pending launch).
-/// Specified: with a launch's create out, Update all, Always update and a row's Update are still focusable, each is
+/// Specified: with a launch's create out, Update all, Always update and each row's Update are still focusable, each is
 /// named "<label> unavailable: wait for the pending launch to finish" (a busy button's state reaches assistive
 /// technology only through its name) and has "Wait for the pending launch to finish" as its hover help, and pressing
-/// each sends nothing; once the create is answered, the row's Update is named and helped by its ordinary words again.
+/// each sends nothing. Two rows name their own hosts whether the buttons are ready or waiting.
 #[gpui::test]
 fn update_actions_wait_visibly_while_a_launch_is_in_flight(cx: &mut TestAppContext) {
     let listed = [
@@ -1013,7 +1013,8 @@ fn update_actions_wait_visibly_while_a_launch_is_in_flight(cx: &mut TestAppConte
     for (control, name) in [
         ("host-attention-update-all", "Update all"),
         ("host-attention-always-update", "Always update"),
-        ("host-attention-update-3", "Update"),
+        ("host-attention-update-3", "Update older"),
+        ("host-attention-update-6", "Update other"),
     ] {
         let focusable = node(&frame(cx), control).is_some_and(|node| node.flags.focusable);
         assert!(focusable, "{control} stays keyboard-reachable");
@@ -1033,7 +1034,9 @@ fn update_actions_wait_visibly_while_a_launch_is_in_flight(cx: &mut TestAppConte
 
     fake.reply(launch, 200, None);
     test_support::settle(cx);
-    assert_eq!(label(&frame(cx), "host-attention-update-3"), "Update");
+    let nodes = frame(cx);
+    assert_eq!(label(&nodes, "host-attention-update-3"), "Update older");
+    assert_eq!(label(&nodes, "host-attention-update-6"), "Update other");
     assert_ne!(
         hover_help(cx, "host-attention-update-3").as_deref(),
         Some(crate::session_list::menu::LAUNCH_PENDING)
