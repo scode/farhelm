@@ -3460,27 +3460,27 @@ whatever the agent renders is what you see. There is no composer, no message abs
   replaced, with nothing for the user to do (decided 2026-11-15).
 - Selecting text copies it to the system clipboard: a plain drag when the pane has no mouse reporting active, or
   Shift-drag (Option-drag on macOS) to force a local selection when it does — the same modifier xterm itself uses to win
-  a selection back from an app that has grabbed the mouse. A terminal program's own OSC 52 WRITE is honored the same
-  way, and is the only path that reaches the clipboard for a selection an app under mouse reporting makes for itself; an
-  OSC 52 READ is never answered with clipboard contents. A user-initiated paste intentionally sends the pasted content
-  to the selected terminal; it does not authorize a program to query the clipboard. Every completed selection re-copies,
-  even one identical to what is already on the clipboard. When a plain drag goes to a program under mouse reporting and
-  the program copies nothing (no OSC 52 write follows), the terminal shows a notice that the program handles selection
-  itself: use its own copy command, or hold the forcing modifier while dragging. It appears on every such drag, with its
-  bottom edge three terminal rows above the release pointer when it fits inside the terminal's pane and the window.
-  Otherwise its top edge sits three rows below; if neither fits, it falls back to six pixels above, clamped inside the
-  window. It stays centred horizontally on the pointer, clamped inside the window. It stays for 30 seconds, or until its
-  × is clicked or the next mouse press in that terminal. Dismissal preserves terminal focus and sends no input to the
-  program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the notice names Codex's
-  own copy key instead. It is guidance about the program, not a report of a clipboard failure. Any completed program
-  clipboard write, including a primary-selection write, suppresses it during the grace window. Clipboard operations are
-  explicitly best-effort and silent on failure — the operating system's clipboard behavior is outside this system's
-  control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule below, not a
-  lapse in it. Farhelm assumes the host's system clipboard works. Copies may be dropped while it is broken, hung or
-  slow. A paste the user starts on macOS may stall the window while the system clipboard supplies its contents. Farhelm
-  must stay responsive during other clipboard operations. On Wayland, keys typed while Farhelm is still fetching pasted
-  text from the system clipboard may reach the terminal before that text. After the program exits, the wheel, clicks and
-  drags act on the terminal itself even if the program was reporting mouse input.
+  a selection back from an app that has grabbed the mouse. After the program exits, the wheel, clicks and drags act on
+  the terminal itself even if the program was reporting mouse input. A terminal program's own OSC 52 WRITE also copies
+  to the clipboard, and is the only path that reaches it for a selection an app under mouse reporting makes for itself;
+  an OSC 52 READ is never answered with clipboard contents. A user-initiated paste intentionally sends the pasted
+  content to the selected terminal; it does not authorize a program to query the clipboard. Every completed selection
+  re-copies, even one identical to what is already on the clipboard. When a plain drag goes to a program under mouse
+  reporting and the program copies nothing (no OSC 52 write follows), the terminal shows a notice that the program
+  handles selection itself: use its own copy command, or hold the forcing modifier while dragging. It appears on every
+  such drag, with its bottom edge three terminal rows above the release pointer when it fits inside the terminal's pane
+  and the window. Otherwise its top edge sits three rows below; if neither fits, it falls back to six pixels above,
+  clamped inside the window. It stays centred horizontally on the pointer, clamped inside the window. It stays for 30
+  seconds, or until its × is clicked or the next mouse press in that terminal. Dismissal preserves terminal focus and
+  sends no input to the program; the rest of the notice is pointer-transparent. For a Codex session's agent terminal the
+  notice names Codex's own copy key instead. It is guidance about the program, not a report of a clipboard failure. Any
+  completed program clipboard write, including a primary-selection write, suppresses it during the grace window.
+  Clipboard operations are explicitly best-effort and silent on failure — the operating system's clipboard behavior is
+  outside this system's control — a deliberate, named exception to the Errors and diagnostics section's
+  surface-every-error rule below, not a lapse in it. Farhelm assumes the host's system clipboard works. Copies may be
+  dropped while it is broken, hung or slow. A paste the user starts on macOS may stall the window while the system
+  clipboard supplies its contents. Farhelm must stay responsive during other clipboard operations. On Wayland, keys
+  typed while Farhelm is still fetching pasted text from the system clipboard may reach the terminal before that text.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
