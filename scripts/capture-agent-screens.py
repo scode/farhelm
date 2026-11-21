@@ -50,7 +50,7 @@ from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from ipaddress import IPv6Address, IPv6Network
 
-from agent_screen_host import HostRun, default_farhelm
+from agent_screen_host import HostError, HostRun, default_farhelm
 
 REPO_ROOT = pathlib.Path(__file__).resolve().parent.parent
 # Fixed rather than configurable: the fixture tests read exactly this tree, and a capture written anywhere else would
@@ -327,6 +327,9 @@ class Recorder:
     ui_only: bool = False
     captured: list[str] = field(default_factory=list)
     missed: list[str] = field(default_factory=list)
+    # The terminal host could not be confirmed stopped. The screens it showed are still written; the run fails so
+    # the kept run directory (named in the error) gets looked at.
+    stop_failed: bool = False
 
     def save(self, expected: str, scenario: str, screen: str, title: str) -> None:
         """Write one fixture pair, refusing it if scrubbing left anything identifying behind."""
@@ -780,7 +783,14 @@ def capture_harness(
     try:
         drive(term, rec, work)
     finally:
-        term.close()
+        # A stop that cannot be confirmed must not throw away screens already captured with real vendor turns, nor
+        # skip the remaining harnesses: report it, keep the staged screens, and fail the run at the end.
+        try:
+            term.close()
+        except HostError as error:
+            print(f"{name} {version}: {error}", file=sys.stderr)
+            rec.missed.append(f"terminal host stop unconfirmed: {error}")
+            rec.stop_failed = True
     if not rec.captured:
         print(f"{name} {version}: nothing captured; leaving existing fixtures alone", file=sys.stderr)
         return rec
@@ -854,7 +864,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{name}: captured {', '.join(rec.captured) or 'nothing'}")
         for miss in rec.missed:
             print(f"{name}: {miss}")
-    status = 0 if all(rec.captured for rec in results.values()) else 1
+    status = 0 if all(rec.captured and not rec.stop_failed for rec in results.values()) else 1
     if not args.no_test:
         status = run_fixture_tests() or status
     return status

@@ -174,5 +174,41 @@ class HostRunTests(unittest.TestCase):
         self.assertFalse(self.run_dir.exists())
 
 
+class CaptureHarnessTests(unittest.TestCase):
+    """What one harness's capture leaves behind when its terminal host cannot be confirmed stopped."""
+
+    def test_unconfirmed_stop_still_writes_the_captured_screens_and_fails_the_harness(self):
+        """A capture spends real vendor turns, so a stop the host cannot confirm must not discard what it captured.
+
+        Specified: the screens staged before the stop are written to the fixture tree, the unconfirmed stop is reported
+        among the misses with the host's own message (which names the kept run directory), and the harness is marked
+        failed so the whole run exits nonzero."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        fixtures, work = root / "fixtures", root / "work"
+        work.mkdir()
+
+        def drive(term, rec, _work):
+            rec.save("idle", "fresh-prompt", "screen text", "title")
+
+        class StandIn:
+            def __init__(self, _farhelm):
+                pass
+
+            def close(self):
+                raise backend.HostError("stop unconfirmed; kept /tmp/fh-run for retry")
+
+        self.enterContext(mock.patch.dict(capture.HARNESSES, {"stub": (["stub", "--version"], drive)}))
+        self.enterContext(mock.patch.object(capture, "harness_version", return_value="1.2.3"))
+        self.enterContext(mock.patch.object(capture, "Terminal", StandIn))
+        self.enterContext(mock.patch.object(capture, "FIXTURES_ROOT", fixtures))
+        self.enterContext(mock.patch.object(capture.sys, "stderr", io.StringIO()))
+        scrubber = mock.Mock(scrub=lambda text: text, check=lambda _text: None)
+        rec = capture.capture_harness("stub", Path("farhelm"), work, scrubber, ui_only=False)
+        self.assertEqual(rec.captured, ["idle-fresh-prompt"], "premise: the stand-in drive captured one screen")
+        self.assertEqual((fixtures / "stub" / "1.2.3" / "idle-fresh-prompt.txt").read_text(), "screen text")
+        self.assertTrue(rec.stop_failed)
+        self.assertTrue(any("kept /tmp/fh-run for retry" in miss for miss in rec.missed), rec.missed)
+
+
 if __name__ == "__main__":
     unittest.main()
