@@ -114,7 +114,8 @@ pub(crate) async fn put_preferences(
     let trust_hint_changed = patch.claude_trust_hint_dismissed.is_some()
         || patch.codex_trust_hint_dismissed.is_some()
         || patch.muse_trust_hint_dismissed.is_some()
-        || patch.pi_trust_hint_dismissed.is_some();
+        || patch.pi_trust_hint_dismissed.is_some()
+        || patch.antigravity_trust_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
     let auto_update_changed = patch.auto_update_remote_hosts.is_some();
     if let Some(Some(raw)) = &patch.open_extensions {
@@ -1323,6 +1324,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -1450,6 +1452,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,

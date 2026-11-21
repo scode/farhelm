@@ -2866,6 +2866,7 @@ mod workspace_trust_tests {
             codex_trust: true,
             muse_trust: false,
             pi_trust: false,
+            antigravity_trust: false,
             root: Some("~/checkouts".into()),
             post_clone: None,
             config_revision: 1,
@@ -2977,11 +2978,11 @@ mod workspace_trust_tests {
         }
     }
 
-    /// The setting is scoped to a managed destination and the selected
-    /// harness. Disabled and ordinary-folder compositions remove old trust
-    /// instead of retaining a client or cloned source's choice.
+    /// The setting is scoped to the harness and its eligible destinations.
+    /// Only Antigravity can opt in for an ordinary folder. Disabled or
+    /// ineligible compositions remove any trust carried by the source.
     #[test]
-    fn settings_supply_trust_only_for_managed_supported_launches() {
+    fn settings_supply_workspace_trust_for_eligible_destinations() {
         for enabled in [false, true] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
                 keep_spare: true,
@@ -2989,6 +2990,7 @@ mod workspace_trust_tests {
                 codex_trust: enabled,
                 muse_trust: enabled,
                 pi_trust: enabled,
+                antigravity_trust: enabled,
                 root: None,
                 post_clone: None,
                 config_revision: 0,
@@ -3014,7 +3016,10 @@ mod workspace_trust_tests {
                             .agent_selection()
                             .unwrap()
                             .workspace_trust,
-                        (enabled && managed && harness.offers_workspace_trust()).then_some(true),
+                        (enabled
+                            && (managed || harness == LaunchHarness::Antigravity)
+                            && harness.offers_workspace_trust())
+                        .then_some(true),
                         "{harness:?}, setting {enabled}, managed {managed}",
                     );
                     assert_eq!(
@@ -3045,6 +3050,7 @@ mod workspace_trust_tests {
                 codex_trust,
                 muse_trust,
                 pi_trust,
+                antigravity_trust: false,
                 root: None,
                 post_clone: None,
                 config_revision: 0,
@@ -3483,27 +3489,25 @@ async fn resolve_and_restart_session(
             Ok(resolved) => resolved,
             Err(launch) => {
                 let config = state.store.resolve_checkout_config(None).await?;
-                let enabled = launch.agent_selection().is_some_and(|selection| {
-                    launches::workspace_trust_enabled(selection.harness, &config)
-                });
-                let managed = if enabled {
-                    let session = manager::drain_sessions(&client, claim.host)
-                        .await?
-                        .sessions
-                        .into_iter()
-                        .map(store::CachedRow::into_info)
-                        .find(|session| session.id == id)
-                        .ok_or_else(|| {
-                            invalid_request("the session to restart no longer exists".into())
-                        })?;
-                    // Live membership can outlast a replaced checkout, including
-                    // for a borrower. Use the same identity-checked read as New.
-                    // Restart cannot change cwd; the supervisor's recorded-cwd
-                    // check pins its launch to the canonical path independently.
-                    client.managed_checkout_for_cwd(&session.cwd).await?.1
-                } else {
-                    false
-                };
+                let managed =
+                    if crate::workspace_trust::needs_managed_checkout_lookup(&launch, &config) {
+                        let session = manager::drain_sessions(&client, claim.host)
+                            .await?
+                            .sessions
+                            .into_iter()
+                            .map(store::CachedRow::into_info)
+                            .find(|session| session.id == id)
+                            .ok_or_else(|| {
+                                invalid_request("the session to restart no longer exists".into())
+                            })?;
+                        // Live membership can outlast a replaced checkout, including
+                        // for a borrower. Use the same identity-checked read as New.
+                        // Restart cannot change cwd; the supervisor's recorded-cwd
+                        // check pins its launch to the canonical path independently.
+                        client.managed_checkout_for_cwd(&session.cwd).await?.1
+                    } else {
+                        false
+                    };
                 configured_launch_workspace_trust(launch, &config, managed)?
             }
         })

@@ -338,7 +338,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 92;
+pub(crate) const SCHEMA_VERSION: i64 = 93;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -644,7 +644,8 @@ const CHECKOUT_CONFIG_SCHEMA: &str = "\
                  codex_trust INTEGER NOT NULL DEFAULT 0 CHECK (codex_trust IN (0, 1)),
                  muse_trust INTEGER NOT NULL DEFAULT 0 CHECK (muse_trust IN (0, 1)),
                  pi_trust INTEGER NOT NULL DEFAULT 0 CHECK (pi_trust IN (0, 1)),
-                 keep_spare INTEGER NOT NULL DEFAULT 1 CHECK (keep_spare IN (0, 1))
+                 keep_spare INTEGER NOT NULL DEFAULT 1 CHECK (keep_spare IN (0, 1)),
+                 antigravity_trust INTEGER NOT NULL DEFAULT 0 CHECK (antigravity_trust IN (0, 1))
              ) STRICT;
              INSERT INTO checkout_config (singleton, root, post_clone, revision)
                  VALUES (1, NULL, NULL, 0);
@@ -1599,6 +1600,13 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub pi_trust_hint_dismissed: Option<Option<bool>>,
+    /// Null restores the Antigravity hint. An omitted field keeps its dismissal.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub antigravity_trust_hint_dismissed: Option<Option<bool>>,
     /// Null restores unseen; omission preserves the stored dismissal.
     #[serde(
         default,
@@ -3032,7 +3040,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  sound_approval INTEGER CHECK (sound_approval IN (0, 1)),
                  sound_turn_finished INTEGER CHECK (sound_turn_finished IN (0, 1)),
                  terminal_text_size INTEGER,
-                 sound_ssh_sign_in INTEGER CHECK (sound_ssh_sign_in IN (0, 1))
+                 sound_ssh_sign_in INTEGER CHECK (sound_ssh_sign_in IN (0, 1)),
+                 antigravity_trust_hint_dismissed INTEGER CHECK (antigravity_trust_hint_dismissed IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -3131,7 +3140,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 92;",
+              PRAGMA user_version = 93;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -5028,6 +5037,36 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 92")?;
         version = 92;
     }
+    if version == 92 {
+        // Historical migrations can create checkout_config from today's DDL.
+        // Independently check both columns before applying the upgrade.
+        for (table, column, declaration) in [
+            (
+                "checkout_config",
+                "antigravity_trust",
+                "INTEGER NOT NULL DEFAULT 0 CHECK (antigravity_trust IN (0, 1))",
+            ),
+            (
+                "preferences",
+                "antigravity_trust_hint_dismissed",
+                "INTEGER CHECK (antigravity_trust_hint_dismissed IN (0, 1))",
+            ),
+        ] {
+            let present: bool = tx.query_row(
+                "SELECT count(*) != 0 FROM pragma_table_info(?1) WHERE name = ?2",
+                rusqlite::params![table, column],
+                |row| row.get(0),
+            )?;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE {table} ADD COLUMN {column} {declaration};"
+                ))?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 93;")
+            .context("migrating helm.db to schema version 93")?;
+        version = 93;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5890,7 +5929,7 @@ impl HelmStore {
             conn
                 .query_row(
                     "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host, \
-                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in \
+                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -5920,6 +5959,7 @@ impl HelmStore {
                             codex_trust_hint_dismissed: row.get(4)?,
                             muse_trust_hint_dismissed: row.get(16)?,
                             pi_trust_hint_dismissed: row.get(17)?,
+                            antigravity_trust_hint_dismissed: row.get(32)?,
                             name_session_on_quick_launch: row.get(15)?,
                             color_terminal_frames: row.get(18)?,
                             open_extensions: row.get(20)?,
@@ -6010,6 +6050,7 @@ impl HelmStore {
             let codex_trust_hint_present = patch.codex_trust_hint_dismissed.is_some();
             let muse_trust_hint_present = patch.muse_trust_hint_dismissed.is_some();
             let pi_trust_hint_present = patch.pi_trust_hint_dismissed.is_some();
+            let antigravity_trust_hint_present = patch.antigravity_trust_hint_dismissed.is_some();
             let skip_host_remove_confirmation_present = patch.skip_host_remove_confirmation.is_some();
             let skip_host_setup_confirmation_present = patch.skip_host_setup_confirmation.is_some();
             let feedback_contact_present = patch.feedback_contact.is_some();
@@ -6051,6 +6092,7 @@ impl HelmStore {
             let codex_trust_hint = patch.codex_trust_hint_dismissed.flatten();
             let muse_trust_hint = patch.muse_trust_hint_dismissed.flatten();
             let pi_trust_hint = patch.pi_trust_hint_dismissed.flatten();
+            let antigravity_trust_hint = patch.antigravity_trust_hint_dismissed.flatten();
             let skip_host_remove_confirmation = patch.skip_host_remove_confirmation.flatten();
             let skip_host_setup_confirmation = patch.skip_host_setup_confirmation.flatten();
             let appearance_present = patch.appearance.is_some();
@@ -6073,8 +6115,8 @@ impl HelmStore {
                 .execute(
                     "INSERT INTO preferences \
                          (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts, \
-                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58) \
+                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58, ?60) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -6110,7 +6152,8 @@ impl HelmStore {
                          sound_approval = CASE WHEN ?53 THEN excluded.sound_approval ELSE sound_approval END, \
                          sound_turn_finished = CASE WHEN ?55 THEN excluded.sound_turn_finished ELSE sound_turn_finished END, \
                          terminal_text_size = CASE WHEN ?57 THEN excluded.terminal_text_size ELSE terminal_text_size END, \
-                         sound_ssh_sign_in = CASE WHEN ?59 THEN excluded.sound_ssh_sign_in ELSE sound_ssh_sign_in END",
+                         sound_ssh_sign_in = CASE WHEN ?59 THEN excluded.sound_ssh_sign_in ELSE sound_ssh_sign_in END, \
+                         antigravity_trust_hint_dismissed = CASE WHEN ?61 THEN excluded.antigravity_trust_hint_dismissed ELSE antigravity_trust_hint_dismissed END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -6170,7 +6213,9 @@ impl HelmStore {
                         terminal_text_size,
                         terminal_text_size_present,
                         sound_ssh_sign_in,
-                        sound_ssh_sign_in_present
+                        sound_ssh_sign_in_present,
+                        antigravity_trust_hint,
+                        antigravity_trust_hint_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -10668,7 +10713,9 @@ mod tests {
         {
             let conn = Connection::open(&path).unwrap();
             conn.execute_batch(
-                "ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in; PRAGMA user_version = 89;",
+                "ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
+                 PRAGMA user_version = 89;",
             )
             .unwrap();
             let version: i64 = conn
@@ -10828,6 +10875,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN sound_turn_finished;
                  ALTER TABLE preferences DROP COLUMN terminal_text_size;
                  ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
+                 ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
                  PRAGMA user_version = 84;",
             )
             .unwrap();
@@ -13947,6 +13995,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -13992,6 +14041,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -14036,6 +14086,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -14129,6 +14180,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -16775,14 +16827,17 @@ mod tests {
         );
     }
 
-    /// Historical fixtures must remove schema 85's preference columns before
-    /// rewinding any older preference column, for the same reason as
+    /// Historical fixtures must remove schema 85 and later preference columns
+    /// before rewinding any older preference column, for the same reason as
     /// [`rewind_environment_host_columns`]: left in place, they would sit in
     /// front of the older columns the ladder appends again, and the migrated
     /// table would no longer match a fresh one.
     fn rewind_former_device_setting_columns(conn: &Connection) {
-        conn.execute_batch("ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;")
-            .expect("a fresh schema declares the later sound preference");
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
+             ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;",
+        )
+        .expect("a fresh schema declares the later preferences");
         for (name, _) in FORMER_DEVICE_SETTING_COLUMNS {
             conn.execute_batch(&format!("ALTER TABLE preferences DROP COLUMN {name};"))
                 .unwrap_or_else(|error| panic!("rewind preferences.{name}: {error}"));
@@ -18360,6 +18415,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,
@@ -18453,6 +18509,7 @@ mod tests {
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
                 pi_trust_hint_dismissed: None,
+                antigravity_trust_hint_dismissed: None,
                 tunnel_consent: None,
                 auto_update_remote_hosts: None,
                 last_container_host: None,

@@ -141,7 +141,7 @@ pub(crate) async fn put_agent_trust(
 }
 
 /// SQL identifiers come only from this exhaustive capability map. A new
-/// harness must explicitly choose whether it supports a managed trust setting.
+/// harness must explicitly choose whether it supports a workspace trust setting.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
     match harness {
@@ -149,12 +149,12 @@ fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
         LaunchHarness::Codex => Ok("codex_trust"),
         LaunchHarness::Muse => Ok("muse_trust"),
         LaunchHarness::Pi => Ok("pi_trust"),
+        LaunchHarness::Antigravity => Ok("antigravity_trust"),
         LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity
         | LaunchHarness::Bash
         | LaunchHarness::Zsh => {
             anyhow::bail!("this harness has no managed-checkout trust setting")
@@ -178,12 +178,15 @@ fn agent_trust_state(
         LaunchHarness::Codex => (snapshot.codex_trust, preferences.codex_trust_hint_dismissed),
         LaunchHarness::Muse => (snapshot.muse_trust, preferences.muse_trust_hint_dismissed),
         LaunchHarness::Pi => (snapshot.pi_trust, preferences.pi_trust_hint_dismissed),
+        LaunchHarness::Antigravity => (
+            snapshot.antigravity_trust,
+            preferences.antigravity_trust_hint_dismissed,
+        ),
         LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity
         | LaunchHarness::Bash
         | LaunchHarness::Zsh => {
             anyhow::bail!("this harness has no managed-checkout trust setting")
@@ -597,7 +600,7 @@ mod claude_trust_tests {
             .await
             .unwrap()
             .revision;
-        for agent in ["claude", "codex", "muse", "pi"] {
+        for agent in ["claude", "codex", "muse", "pi", "antigravity"] {
             let response = harness
                 .router()
                 .oneshot(agent_request("GET", agent, serde_json::Value::Null))
@@ -612,7 +615,7 @@ mod claude_trust_tests {
                 serde_json::json!({"enabled":false,"hint_dismissed":false})
             );
         }
-        for agent in ["claude", "codex", "muse", "pi"] {
+        for agent in ["claude", "codex", "muse", "pi", "antigravity"] {
             let response = harness
                 .router()
                 .oneshot(agent_request(
@@ -642,6 +645,7 @@ mod claude_trust_tests {
             .update_preferences(crate::store::PreferencePatch {
                 codex_trust_hint_dismissed: Some(Some(true)),
                 pi_trust_hint_dismissed: Some(Some(true)),
+                antigravity_trust_hint_dismissed: Some(Some(true)),
                 ..Default::default()
             })
             .await
@@ -651,6 +655,7 @@ mod claude_trust_tests {
             ("codex", true),
             ("muse", false),
             ("pi", true),
+            ("antigravity", true),
         ] {
             let response = harness
                 .router()
@@ -675,6 +680,7 @@ mod claude_trust_tests {
         let snapshot = harness.store.checkout_config_snapshot(None).await.unwrap();
         assert!(!snapshot.claude_trust);
         assert!(snapshot.codex_trust && snapshot.muse_trust && snapshot.pi_trust);
+        assert!(snapshot.antigravity_trust);
         assert_eq!(snapshot.revision, revision);
         for agent in ["cursor", "goose", "omp", "open_code", "grok", "unknown"] {
             for method in ["GET", "PUT"] {
@@ -697,6 +703,71 @@ mod claude_trust_tests {
         assert_eq!(
             harness.store.checkout_config_snapshot(None).await.unwrap(),
             snapshot
+        );
+    }
+
+    /// Upgrading an actual schema-92 shape must leave Antigravity trust off
+    /// and its discovery hint available, independently of existing choices.
+    /// Both fields must survive reopening after an explicit save.
+    #[farhelm_testtrace::test]
+    async fn antigravity_trust_and_hint_migrate_from_schema_92() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        store
+            .set_agent_trust(LaunchHarness::Codex, true)
+            .await
+            .unwrap();
+        drop(store);
+        let conn = rusqlite::Connection::open(&path).unwrap();
+        conn.execute_batch(
+            "ALTER TABLE checkout_config DROP COLUMN antigravity_trust;
+             ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
+             PRAGMA user_version = 92;",
+        )
+        .unwrap();
+        drop(conn);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        let settings = store.resolve_checkout_config(None).await.unwrap();
+        assert!(settings.codex_trust);
+        assert!(!settings.antigravity_trust);
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .antigravity_trust_hint_dismissed,
+            None
+        );
+        store
+            .set_agent_trust(LaunchHarness::Antigravity, true)
+            .await
+            .unwrap();
+        store
+            .update_preferences(crate::store::PreferencePatch {
+                antigravity_trust_hint_dismissed: Some(Some(true)),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+        drop(store);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        assert!(
+            store
+                .resolve_checkout_config(None)
+                .await
+                .unwrap()
+                .antigravity_trust
+        );
+        assert_eq!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .antigravity_trust_hint_dismissed,
+            Some(true)
         );
     }
 
@@ -1192,6 +1263,8 @@ pub struct ResolvedCheckoutConfig {
     pub muse_trust: bool,
     /// Pi's per-launch project-resource approval for managed checkouts only.
     pub pi_trust: bool,
+    /// Antigravity opt-in for managed checkouts and plain folders.
+    pub antigravity_trust: bool,
     /// Where fresh checkouts are created. Stored unexpanded — `~` and
     /// `~/...` are expanded by the target supervisor, never here.
     pub root: Option<String>,
@@ -1219,6 +1292,8 @@ pub struct CheckoutConfigSnapshot {
     pub muse_trust: bool,
     /// Pi's global resource approval, independent of the root/hook override.
     pub pi_trust: bool,
+    /// Global Antigravity trust applies independently of host checkout overrides.
+    pub antigravity_trust: bool,
     pub global_root: Option<String>,
     pub global_post_clone: Option<String>,
     pub revision: i64,
@@ -1513,15 +1588,15 @@ fn read_snapshot(
     let _tx = conn
         .unchecked_transaction()
         .context("opening the checkout config snapshot transaction")?;
-    let (global_root, global_post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare): (Option<String>, Option<String>, i64, bool, bool, bool, bool, bool) = conn
+    let (global_root, global_post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare, antigravity_trust): (Option<String>, Option<String>, i64, bool, bool, bool, bool, bool, bool) = conn
         .query_row(
-            "SELECT root, post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare FROM checkout_config WHERE singleton = 1",
+            "SELECT root, post_clone, revision, claude_trust, codex_trust, muse_trust, pi_trust, keep_spare, antigravity_trust FROM checkout_config WHERE singleton = 1",
             [],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?)),
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?, row.get(5)?, row.get(6)?, row.get(7)?, row.get(8)?)),
         )
         .optional()
         .context("reading the global checkout config")?
-        .unwrap_or((None, None, 0, false, false, false, false, true));
+        .unwrap_or((None, None, 0, false, false, false, false, true, false));
     let host_override = match host {
         Some(host) => conn
             .query_row(
@@ -1544,6 +1619,7 @@ fn read_snapshot(
         codex_trust,
         muse_trust,
         pi_trust,
+        antigravity_trust,
         global_root,
         global_post_clone,
         revision,
@@ -1566,6 +1642,7 @@ fn resolve_snapshot(snapshot: &CheckoutConfigSnapshot) -> ResolvedCheckoutConfig
         codex_trust: snapshot.codex_trust,
         muse_trust: snapshot.muse_trust,
         pi_trust: snapshot.pi_trust,
+        antigravity_trust: snapshot.antigravity_trust,
         root: snapshot
             .host_override
             .as_ref()
@@ -2942,6 +3019,7 @@ mod tests {
                 codex_trust: false,
                 muse_trust: false,
                 pi_trust: false,
+                antigravity_trust: false,
                 root: None,
                 post_clone: None,
                 config_revision: 0
@@ -3501,6 +3579,7 @@ mod tests {
                  ALTER TABLE preferences DROP COLUMN sound_turn_finished;
                  -- A missing value still requires dropping the later sign-in sound column.
                  ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
+                 ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN terminal_text_size;
                  ALTER TABLE preferences DROP COLUMN last_container_host;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;

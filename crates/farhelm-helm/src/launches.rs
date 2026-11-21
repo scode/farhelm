@@ -686,7 +686,9 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     }
     // This final compiler-owned segment can also be replaced when cloning
     // a stored launch, without recomposing its historical permission flags.
-    argv.extend(
+    let trust_at = argv.len() - trust_custom_tail_len(&selection);
+    argv.splice(
+        trust_at..trust_at,
         workspace_trust_arguments(selection.harness, selection.workspace_trust)
             .iter()
             .map(|word| (*word).to_string()),
@@ -706,7 +708,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     })
 }
 
-/// Which all-hosts opt-in governs this harness's managed-checkout launches.
+/// Which all-hosts opt-in governs this harness's structured launches.
 /// The compiler itself never reads configuration: callers resolve this fact
 /// into the selection before composition, preserving exact YOLO verification.
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -718,15 +720,92 @@ pub(crate) fn workspace_trust_enabled(
         LaunchHarness::Codex => config.codex_trust,
         LaunchHarness::Muse => config.muse_trust,
         LaunchHarness::Pi => config.pi_trust,
+        LaunchHarness::Antigravity => config.antigravity_trust,
         LaunchHarness::Claude
         | LaunchHarness::Cursor
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp
         | LaunchHarness::Bash
         | LaunchHarness::Zsh => false,
+    }
+}
+
+/// An enabled managed-only harness needs proof from the target supervisor
+/// that the chosen folder belongs to a Farhelm checkout.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn workspace_trust_requires_managed_checkout(harness: LaunchHarness) -> bool {
+    match harness {
+        LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => true,
+        LaunchHarness::Antigravity
+        | LaunchHarness::Claude
+        | LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Grok
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => false,
+    }
+}
+
+/// The user's Antigravity settings take precedence over Farhelm's override.
+/// Words after a bare `--` are positional values.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn workspace_trust_blocked_by_selection(selection: &LaunchSelection) -> bool {
+    match selection.harness {
+        LaunchHarness::Antigravity => antigravity_custom_words(selection)
+            .iter()
+            .take_while(|word| word.as_str() != "--")
+            .any(|word| word == "--settings" || word.starts_with("--settings=")),
+        LaunchHarness::Claude
+        | LaunchHarness::Codex
+        | LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Grok
+        | LaunchHarness::Muse
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Pi
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => false,
+    }
+}
+
+/// Only Custom flags count as user-authored CLI options. Other permission
+/// modes use the compiler's own argument list.
+fn antigravity_custom_words(selection: &LaunchSelection) -> &[String] {
+    if selection.permissions == Some(LaunchPermission::Custom) {
+        selection.permission_flags.as_deref().unwrap_or_default()
+    } else {
+        &[]
+    }
+}
+
+/// Antigravity's settings option must precede a Custom end-of-options marker.
+/// Return the number of Custom words left after the compiler-owned trust slot.
+#[warn(clippy::wildcard_enum_match_arm)]
+fn trust_custom_tail_len(selection: &LaunchSelection) -> usize {
+    match selection.harness {
+        LaunchHarness::Antigravity => {
+            let words = antigravity_custom_words(selection);
+            words
+                .iter()
+                .position(|word| word == "--")
+                .map_or(0, |terminator| words.len() - terminator)
+        }
+        LaunchHarness::Claude
+        | LaunchHarness::Codex
+        | LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Grok
+        | LaunchHarness::Muse
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Pi
+        | LaunchHarness::Bash
+        | LaunchHarness::Zsh => 0,
     }
 }
 
@@ -759,10 +838,16 @@ fn workspace_trust_arguments(
             Some(false) => &["--no-approve"],
             None => &[],
         },
+        LaunchHarness::Antigravity => match trust {
+            Some(true) => &[
+                "--settings",
+                farhelm_supervisor::agent_kind::ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER,
+            ],
+            Some(false) | None => &[],
+        },
         LaunchHarness::Claude
         | LaunchHarness::Cursor
         | LaunchHarness::Grok
-        | LaunchHarness::Antigravity
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp
@@ -775,8 +860,9 @@ fn workspace_trust_arguments(
 ///
 /// Clones and inherited spawns keep the source's other words, including
 /// permission omissions and models no longer offered by today's catalog. The
-/// start command records the segment immediately before its final Farhelm marker; the resume command
-/// shares that entire prefix before adding its own conversation selector.
+/// start command records the segment before its final Farhelm marker or
+/// Antigravity's Custom positional tail. Resume shares that entire prefix
+/// before adding its conversation selector.
 /// This structural boundary keeps custom permission words out of the edit.
 /// Callers must check the original launch against the agent YOLO guard first:
 /// rewriting a copy must never erase the evidence that a source was forged.
@@ -800,28 +886,30 @@ pub(crate) fn with_workspace_trust(
     let old_prefix = start
         .strip_suffix(&[FARHELM_ARGS_PLACEHOLDER.to_string()])
         .ok_or("the stored launch has no final Farhelm argument boundary")?;
-    let prefix_len = old_prefix
+    let trust_end = old_prefix
         .len()
+        .checked_sub(trust_custom_tail_len(selection))
+        .ok_or("the stored launch has no workspace-trust boundary")?;
+    let trust_start = trust_end
         .checked_sub(old_words.len())
         .filter(|&index| {
-            old_prefix[index..]
+            old_prefix[index..trust_end]
                 .iter()
                 .map(String::as_str)
                 .eq(old_words.iter().copied())
         })
         .ok_or("the stored launch's workspace-trust segment does not match its selection")?;
-    let old_prefix_len = old_prefix.len();
     if let Some(resume) = resume {
         if !resume.starts_with(old_prefix) {
             return Err("the stored resume command does not share its start command's workspace-trust boundary".into());
         }
         resume.splice(
-            prefix_len..old_prefix_len,
+            trust_start..trust_end,
             new_words.iter().map(|word| (*word).to_string()),
         );
     }
     start.splice(
-        prefix_len..old_prefix_len,
+        trust_start..trust_end,
         new_words.iter().map(|word| (*word).to_string()),
     );
     selection.workspace_trust = trust;

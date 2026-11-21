@@ -7,7 +7,7 @@
 
 use crate::sessions::invalid_request;
 use crate::{AppState, SupervisorClient, launches};
-use farhelm_proto::SessionLaunch;
+use farhelm_proto::{LaunchSelection, SessionLaunch};
 
 /// A launch whose workspace-trust policy has been chosen for this operation.
 ///
@@ -74,14 +74,9 @@ pub(crate) async fn normalize_launch_workspace_trust(
         Err(launch) => launch,
     };
     let config = state.store.resolve_checkout_config(None).await?;
-    let enabled = launch
-        .agent_selection()
-        .is_some_and(|selection| launches::workspace_trust_enabled(selection.harness, &config));
-    let managed = if !enabled {
-        false
-    } else if fresh_checkout {
+    let managed = if fresh_checkout {
         true
-    } else {
+    } else if needs_managed_checkout_lookup(&launch, &config) {
         // This canonical ownership answer belongs to the pinned destination
         // supervisor. Neither the configured root nor source provenance
         // proves that an arbitrary existing cwd is a managed checkout.
@@ -90,8 +85,33 @@ pub(crate) async fn normalize_launch_workspace_trust(
             *cwd = canonical_cwd;
         }
         managed
+    } else {
+        false
     };
     configured_launch_workspace_trust(launch, &config, managed)
+}
+
+/// Off switches and user-authored settings cannot gain trust from a lookup.
+/// Antigravity already allows plain folders, so only managed-only agents need
+/// a supervisor read for a destination that is not known to be a fresh checkout.
+pub(crate) fn needs_managed_checkout_lookup(
+    launch: &SessionLaunch,
+    config: &crate::checkout_config::ResolvedCheckoutConfig,
+) -> bool {
+    launch.agent_selection().is_some_and(|selection| {
+        launches::workspace_trust_requires_managed_checkout(selection.harness)
+            && trust_enabled_for_selection(selection, config)
+    })
+}
+
+/// The setting can contribute trust only when it does not override the
+/// user's own Antigravity settings in Custom flags.
+fn trust_enabled_for_selection(
+    selection: &LaunchSelection,
+    config: &crate::checkout_config::ResolvedCheckoutConfig,
+) -> bool {
+    launches::workspace_trust_enabled(selection.harness, config)
+        && !launches::workspace_trust_blocked_by_selection(selection)
 }
 
 /// Resolve the setting into the selection while preserving non-trust argv.
@@ -105,7 +125,9 @@ pub(crate) fn configured_launch_workspace_trust(
     managed: bool,
 ) -> anyhow::Result<TrustResolvedLaunch> {
     let trust = launch.agent_selection().and_then(|selection| {
-        (managed && launches::workspace_trust_enabled(selection.harness, config)).then_some(true)
+        ((managed || !launches::workspace_trust_requires_managed_checkout(selection.harness))
+            && trust_enabled_for_selection(selection, config))
+        .then_some(true)
     });
     launches::with_workspace_trust(launch, trust)
         .map(TrustResolvedLaunch)
@@ -180,6 +202,78 @@ mod tests {
                     assert!(harness.offers_workspace_trust(), "{harness:?}");
                     assert_eq!(original, launch);
                 }
+            }
+        }
+    }
+
+    /// The approval and launch must use the same selection. User settings
+    /// win without claiming automatic trust. The option before a bare `--`
+    /// is still effective when later words merely spell `--settings`.
+    #[test]
+    fn antigravity_trust_preserves_custom_settings_and_positional_words() {
+        use farhelm_proto::LaunchPermission;
+        use farhelm_proto::session_launch::ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER as MARKER;
+
+        let config = crate::checkout_config::ResolvedCheckoutConfig {
+            keep_spare: false,
+            claude_trust: false,
+            codex_trust: false,
+            muse_trust: false,
+            pi_trust: false,
+            antigravity_trust: true,
+            root: None,
+            post_clone: None,
+            config_revision: 0,
+        };
+        for (words, expected) in [
+            (vec!["--settings", "{}"], None),
+            (vec!["--settings={}"], None),
+            (vec!["--", "--settings={}"], Some(true)),
+            (vec!["--mode", "auto"], Some(true)),
+        ] {
+            let mut selection = LaunchSelection {
+                harness: LaunchHarness::Antigravity,
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Custom),
+                permission_flags: Some(words.iter().map(ToString::to_string).collect()),
+                wrapper_prefix: None,
+                container: None,
+                workspace_trust: None,
+            };
+            let bare = launches::compile(selection.clone()).unwrap();
+            for managed in [false, true] {
+                assert!(!needs_managed_checkout_lookup(&bare, &config));
+                let resolved = configured_launch_workspace_trust(bare.clone(), &config, managed)
+                    .unwrap()
+                    .into_launch();
+                assert_eq!(
+                    resolved.agent_selection().unwrap().workspace_trust,
+                    expected
+                );
+                selection.workspace_trust = expected;
+                assert_eq!(resolved, launches::compile(selection.clone()).unwrap());
+                let start = resolved.start_argv().unwrap();
+                if expected.is_some() {
+                    let marker = start.iter().position(|word| word == MARKER).unwrap();
+                    assert_eq!(start[marker - 1], "--settings");
+                    assert!(
+                        start
+                            .iter()
+                            .position(|word| word == "--")
+                            .is_none_or(|index| marker < index)
+                    );
+                } else {
+                    assert_eq!(
+                        resolved, bare,
+                        "the caller's settings survive byte for byte"
+                    );
+                }
+                assert_eq!(
+                    launches::with_workspace_trust(resolved, None).unwrap(),
+                    bare,
+                    "clearing the opt-in preserves the complete original start and resume"
+                );
             }
         }
     }
