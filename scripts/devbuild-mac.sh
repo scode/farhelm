@@ -392,6 +392,8 @@ if [ "$have_rust" -eq 1 ]; then
       rustup show active-toolchain
     }
   ) || exit 1
+  # The reason for the active toolchain can be on a separate line or after its name.
+  rust_toolchain=${rust_toolchain%%$'\n'*}
   rust_toolchain=${rust_toolchain%% *}
   installed_targets=$(rustup target list --installed --toolchain "$rust_toolchain") || exit 1
 fi

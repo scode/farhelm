@@ -1702,37 +1702,6 @@
   reference: Fix the code (tiny): use the same timeout.
 - Execution: planned in `plans/queue/triage-helm.md`.
 
-## centos-rustup-missing-pin.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. With the old Rustup 1.28.0 and the pinned compiler not installed, the CentOS
-  provisioning test exits before building. Current Rustup installs the compiler automatically and is unaffected.
-  Verified: The script is unchanged (`test-provision-centos.sh` L264-265 has no explicit `rustup toolchain install`,
-  which `devbuild-mac.sh` L391 does have). The Rustup 1.28.0 behaviour is from upstream source and was not reproduced.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code (one line, mirroring devbuild-mac). Otherwise discard, since current Rustup is unaffected.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## devbuild-rustup-active-name.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. Mac devbuild aborts in preflight under Rustup 1.28.0, whose `show active-toolchain`
-  output spans several lines. Verified: Still present (`devbuild-mac.sh` ~L390-396 keeps everything before the first
-  space, so the newline stays in the name). Not reproduced.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code (take the first line). Otherwise discard, since current Rustup is unaffected.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
 ## trailing-environment-test-responders-heartbeat-control-decode.md
 
 - Outcome: `other`.
@@ -1780,36 +1749,6 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: discard
 - Execution: planned in `plans/queue/triage-podman.md`.
-
-## trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md
-
-- Outcome: `other`.
-- Assessment: None. A checkout that still holds an old `.ci-tmux-python` venv can have small generated files
-  auto-tracked by jj now that the ignore entry is gone. Verified: `.gitignore` has no `ci-tmux` entries (the last was
-  dropped in 7a7899dff, #4129). Only old local checkouts are affected, and jj's 1 MiB per-file cap applies.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: discard
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md
-
-- Outcome: `other`.
-- Assessment: None. With a shared `CARGO_TARGET_DIR`, another checkout's build can replace the farhelm binary between
-  cargo exiting and the Podman payload copy. Verified: still present (`scripts/build-podman-test-payloads.sh:36-46`).
-  The window is now short, since the tmux build in between is gone.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: discard
-- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md
 
@@ -1867,22 +1806,6 @@
   be deleted with the temporary directory. Verified: `scripts/readme_video.py:212-266` keeps backups under the
   `TemporaryDirectory` and `restore` can raise inside the `ExitStack`, after which the directory is removed. Needs a
   forward rename failure plus a failed rename-back in the same directory. Output is regenerable.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: discard
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## devbuild-state-comparison-uses-wrong-path.md
-
-- Outcome: `other`.
-- Assessment: None for users. The Mac devbuild script compares state paths with a shell `cd`/`pwd -P` fallback, so odd
-  spellings (trailing slash on a missing directory, symlink plus `..`) can seed the "remote updates off" default in the
-  wrong state directory. Verified: `scripts/devbuild-mac.sh:165-167` (`canonical_dir`) and 320-322. The seeded choice is
-  an ordinary preference the maintainer can flip in Settings.
 - Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
   page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
   of plans. please try to separate them by area of code so there is a good chance of them running concurrently."

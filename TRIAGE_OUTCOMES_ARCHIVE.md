@@ -34421,3 +34421,91 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   can preserve its unavailable verdict, and a completed sample still exports its two files. jj change `zrlsrywvqylx`,
   bookmark `plan/triage-tooling/06-release-and-brick-tooling`,
   [draft PR #4502](https://github.com/scode/farhelm/pull/4502/changes).
+
+## centos-rustup-missing-pin.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tooling. With the old Rustup 1.28.0 and the pinned compiler not installed, the CentOS
+  provisioning test exits before building. Current Rustup installs the compiler automatically and is unaffected.
+  Verified: The script is unchanged (`test-provision-centos.sh` L264-265 has no explicit `rustup toolchain install`,
+  which `devbuild-mac.sh` L391 does have). The Rustup 1.28.0 behaviour is from upstream source and was not reproduced.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix the code (one line, mirroring devbuild-mac). Otherwise discard, since current Rustup is unaffected.
+- Execution: Fixed. Standalone CentOS validation installs a missing checkout toolchain before querying or adding musl
+  targets. jj change `oxoqslsw`, bookmark `plan/triage-tooling/07-build-scripts`,
+  [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).
+
+## devbuild-rustup-active-name.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tooling. Mac devbuild aborts in preflight under Rustup 1.28.0, whose `show active-toolchain`
+  output spans several lines. Verified: Still present (`devbuild-mac.sh` ~L390-396 keeps everything before the first
+  space, so the newline stays in the name). Not reproduced.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix the code (take the first line). Otherwise discard, since current Rustup is unaffected.
+- Execution: Fixed. Mac devbuild extracts the active toolchain from the first line and accepts both Rustup display
+  forms. jj change `oxoqslsw`, bookmark `plan/triage-tooling/07-build-scripts`,
+  [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).
+
+## trailing-retired-ci-tmux-python-ignore-removed-without-residue-cleanup.md
+
+- Outcome: `other`.
+- Assessment: None. A checkout that still holds an old `.ci-tmux-python` venv can have small generated files
+  auto-tracked by jj now that the ignore entry is gone. Verified: `.gitignore` has no `ci-tmux` entries (the last was
+  dropped in 7a7899dff, #4129). Only old local checkouts are affected, and jj's 1 MiB per-file cap applies.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. Old generated virtual-environment files can appear in a development snapshot. The
+  review established cleanup noise for retained checkouts. jj change `oxoqslsw`, bookmark
+  `plan/triage-tooling/07-build-scripts`, [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).
+
+## trailing-podman-payload-cargo-artifact-identity-not-held-through-copy.md
+
+- Outcome: `other`.
+- Assessment: None. With a shared `CARGO_TARGET_DIR`, another checkout's build can replace the farhelm binary between
+  cargo exiting and the Podman payload copy. Verified: still present (`scripts/build-podman-test-payloads.sh:36-46`).
+  The window is now short, since the tmux build in between is gone.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: Fixed under Q14. The producer keeps its Cargo intermediates and final executable in the current checkout
+  before packaging. Sharing ordinary Cargo targets between checkouts can otherwise mix source revisions in test
+  evidence. jj change `oxoqslsw`, bookmark `plan/triage-tooling/07-build-scripts`,
+  [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).
+
+## devbuild-state-comparison-uses-wrong-path.md
+
+- Outcome: `other`.
+- Assessment: None for users. The Mac devbuild script compares state paths with a shell `cd`/`pwd -P` fallback, so odd
+  spellings (trailing slash on a missing directory, symlink plus `..`) can seed the "remote updates off" default in the
+  wrong state directory. Verified: `scripts/devbuild-mac.sh:165-167` (`canonical_dir`) and 320-322. The seeded choice is
+  an ordinary preference the maintainer can flip in Settings.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. Unusual path spellings can affect where an unset devbuild update preference is
+  initialized. The preference can be set in Settings. jj change `oxoqslsw`, bookmark
+  `plan/triage-tooling/07-build-scripts`, [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).

@@ -7,8 +7,8 @@
 #
 # The output is a release-shaped farhelm archive, the one payload provisioning
 # pushes to a Linux host, using the ordinary installer inputs. Packaged output
-# stays under the checkout's target/. Cargo honors CARGO_TARGET_DIR and
-# temporary copies are removed on exit.
+# stays under the checkout's target/. The producer keeps its Cargo build in
+# the checkout too, and temporary packaging copies are removed on exit.
 # stdout is only the payload directory, so the archive packer can reuse this producer.
 set -euo pipefail
 
@@ -27,13 +27,16 @@ esac
 payload_dir=${FARHELM_HELM_PAYLOAD_DIR:-${FARHELM_TEST_PODMAN_PAYLOAD_DIR:-}}
 if [ -z "$payload_dir" ]; then
   cd "$repo"
-  cargo_target_dir=${CARGO_TARGET_DIR:-$repo/target}
-  case "$cargo_target_dir" in /*) ;; *) cargo_target_dir="$repo/$cargo_target_dir" ;; esac
+  # Cargo releases its locks before the shell copies the binary. A shared
+  # target can then name another checkout's executable. Keep intermediates
+  # here too, since a shared build directory can reuse another source tree.
+  cargo_target_dir="$repo/target/podman-test-build"
   # As in the CentOS provisioning fixture, the separate native musl target
   # supplies a static payload for Ubuntu containers. A newer development host's
   # dynamically linked glibc binary is incompatible with those containers.
   rustup target add "$target" >&2
-  cargo build --locked -p farhelm --target "$target" >&2
+  CARGO_BUILD_BUILD_DIR="$cargo_target_dir" \
+    cargo build --locked -p farhelm --target "$target" --target-dir "$cargo_target_dir" >&2
   farhelm_payload="$cargo_target_dir/$target/debug/farhelm"
   "$repo/scripts/check-static-elf.sh" "$farhelm_payload" "$target" >&2
 

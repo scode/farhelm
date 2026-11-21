@@ -101,13 +101,14 @@ systemd or SSH substrate ran.
   `cargo nextest run -p farhelm --test e2e -E 'test(/^podman_environments::/)'`. Nextest reserves all four slots and
   allows 40 minutes for its 30-minute scenario, five-minute cleanup and teardown. The matching setup runs
   `bash scripts/build-podman-test-payloads.sh` once per selected suite. By default it adds the native musl Rust target,
-  builds this source's CLI, checks that it is a static ELF and stages the ordinary release-shaped `farhelm` archive
-  under `target/podman-test-payloads/`. Build tools include `musl-tools`, `file` and binutils. Only selections
-  containing this module trigger that payload build. `FARHELM_HELM_PAYLOAD_DIR` can supply an absolute directory of
-  matching staged payloads. Retain it intentionally with `--keep-farhelm-env FARHELM_HELM_PAYLOAD_DIR`. Automatic setup
-  exposes that variable only to matching tests through nextest's setup environment. Archive workers receive prebuilt
-  matching payloads from the Rust packer and retain its private `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the recorder.
-  Cargo is unavailable on those workers. An intentional opt-out sets `FARHELM_TEST_SKIP_PODMAN=1` and passes
+  builds this source's CLI in `target/podman-test-build/` to keep the build and copy in one checkout even when ordinary
+  Cargo targets are shared, checks that it is a static ELF and stages the release-shaped `farhelm` archive under
+  `target/podman-test-payloads/`. Build tools include `musl-tools`, `file` and binutils. Only selections containing this
+  module trigger that payload build. `FARHELM_HELM_PAYLOAD_DIR` can supply an absolute directory of matching staged
+  payloads. Retain it intentionally with `--keep-farhelm-env FARHELM_HELM_PAYLOAD_DIR`. Automatic setup exposes that
+  variable only to matching tests through nextest's setup environment. Archive workers receive prebuilt matching
+  payloads from the Rust packer and retain its private `FARHELM_TEST_PODMAN_PAYLOAD_DIR` through the recorder. Cargo is
+  unavailable on those workers. An intentional opt-out sets `FARHELM_TEST_SKIP_PODMAN=1` and passes
   `--keep-farhelm-env FARHELM_TEST_SKIP_PODMAN` to the recorder. Setup then skips the payload build and the test prints
   SKIPPED. Report that as missing real-environment coverage and exclude it from runtime pass evidence.
 - `bash -n scripts/build-podman-test-payloads.sh` and `shellcheck scripts/build-podman-test-payloads.sh` inspect the
@@ -1031,11 +1032,11 @@ systemd or SSH substrate ran.
   is cached after the first run.
 - `bash -n scripts/devbuild-mac.sh && bash -n scripts/test-provision-centos.sh` and
   `shellcheck scripts/devbuild-mac.sh scripts/test-provision-centos.sh` — syntax and shell checks for the build scripts
-  that add purpose-specific Rust targets. Target selection uses the checkout's pin even when invoked from elsewhere;
-  devbuild's printed install commands name that toolchain too. The helm's
-  `devbuild_startup_only_seeds_an_unset_remote_update_choice` test drives the helm's startup with the devbuild flag set.
-  It checks the saved opt-out and preservation of an explicit choice or a regular launch's default. Run when either
-  script or its corresponding startup logic changes.
+  that add purpose-specific Rust targets. CentOS setup installs a missing checkout pin before querying targets on older
+  Rustup. Devbuild accepts both Rustup display formats for the active toolchain and names it in the printed install
+  commands. The helm's `devbuild_startup_only_seeds_an_unset_remote_update_choice` test drives the helm's startup with
+  the devbuild flag set. It checks the saved opt-out and preservation of an explicit choice or a regular launch's
+  default. Run when either script or its corresponding startup logic changes.
 - `scripts/build-desktop-binary.sh --self-test` and `shellcheck scripts/build-desktop-binary.sh` — the build command of
   the release's desktop archive (`packaging/farhelm-desktop/dist.toml`). The self-test is the script's whole validation
   and builds nothing: against stand-in files it stages a good binary with the icon, and refuses a binary without
