@@ -424,6 +424,23 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   guides. Keep each eligible row's drawn write, acceptance-time refusal if busy, row-local failures, and cancellation on
   reconnect. Cover a batch larger than the channel limit and show that rows keep making progress after a refusal.
 
+- **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
+  next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
+  the viewer paints the default background there. Carry that cell's visible style through screen and history. Give the
+  viewer a way to distinguish the placeholder from a space the program actually printed. Sending an ordinary styled
+  space makes selection, printed-path detection and hyperlink joining treat the padding as text. The current client
+  infers padding from an uncovered last column before a wide glyph. The row format has only a wrap bit and styled runs,
+  so settle how to carry that distinction across versions before changing the encoder. Cover both a colored placeholder
+  and a real styled space before a wrapped wide glyph.
+
+- **Show the new background after erasing half of a wide terminal glyph.** If a program erases just the right column of
+  a wide character using a different background, the grid encoder sends the old two-column run and hides the erased
+  cell's style. Emit a one-column glyph and a separate erased cell when the continuation spacer is gone, on screen and
+  in scrollback. Also preserve the previous row's wide-wrap padding when the half-erased glyph starts a wrapped row. The
+  viewer currently recognizes that padding by the next run occupying two columns. With separate cells it needs the same
+  explicit wrap distinction as the colored-margin item above. Cover erasure both mid-row and just after a wrap,
+  including selection and links across the seam.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm

@@ -237,14 +237,6 @@ consequences.
   terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
   writing the post-echo prompt.
 
-- [`wide-wrap-placeholder-loses-final-cell-style.md`](wide-wrap-placeholder-loses-final-cell-style.md) — A wide glyph
-  wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
-  screen and history use the conversion.
-
-- [`partial-wide-erasure-loses-second-cell-background.md`](partial-wide-erasure-loses-second-cell-background.md) — A
-  program erasing only the second column of a wide glyph with a different background can leave grid viewers painting the
-  old first-cell background over that erased column.
-
 - [`resize-measurement-discards-arrival-timestamps.md`](resize-measurement-discards-arrival-timestamps.md) — The manual
   resize benchmark can report zero last-frame delivery time after it has transmitted its resize output.
 
