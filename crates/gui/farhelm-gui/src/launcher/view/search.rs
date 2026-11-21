@@ -52,13 +52,14 @@ use gpui::{
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
-use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal};
+use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, recent_hover, wrapper_tail};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{
-    destination_label, permission_value, selection_summary, summary_before_permissions,
+    destination_label, permission_value, summary_before_permissions, summary_without_wrapper,
+    wrapper_summary,
 };
 use crate::launcher::request::capitalized;
 use crate::launcher::search::{Inputs, Results, Row, Scope, scoped, search};
@@ -600,8 +601,10 @@ fn draw_search_rows(
             let id = format!("launcher-search-option-{index}");
             let words = row.words(SharedString::from(format!("{id}-words")));
             let label = words.accessible_name();
-            let help =
-                HoverHelp::sentence(row.help(harness, SharedString::from(format!("{id}-help"))));
+            let help = recent_hover(
+                row.help(harness, SharedString::from(format!("{id}-help"))),
+                matches!(&row, Row::Recent { entry, .. } if entry.selection.wrapper_prefix.is_some()),
+            );
             let weak = weak.clone();
             let taken = row.clone();
             let content = match row {
@@ -674,7 +677,7 @@ fn recent_lines(
                 .mt(px(2.))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(quiet))
-                .when(shell, |line| line.child(selection_summary(selection)))
+                .when(shell, |line| line.child(summary_without_wrapper(selection)))
                 .when(!shell, |line| {
                     // A custom model id is host-supplied text, so the line is drawn escaped.
                     line.child(
@@ -688,6 +691,13 @@ fn recent_lines(
                             .when(yolo, |word| word.text_color(theme::color(palette.danger)))
                             .child(permission_value(selection)),
                     )
+                })
+                .when_some(wrapper_summary(selection), |line, wrapper| {
+                    line.child(wrapper_tail(
+                        HostSentence::new(part("wrapper"))
+                            .text(" · ")
+                            .host(&HostText::from_host(wrapper)),
+                    ))
                 }),
         )
         .into_any_element()

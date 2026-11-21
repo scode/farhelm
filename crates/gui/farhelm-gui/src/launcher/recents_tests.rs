@@ -10,7 +10,7 @@ use farhelm_proto::{
 use super::recents::{
     DraftDestination, RecentFilter, destination_label, explicit_before_permissions, merged,
     permission_value, ranked, remembered_folder, selection_summary, strip,
-    summary_before_permissions, uses_guarded_default,
+    summary_before_permissions, uses_guarded_default, wrapper_summary,
 };
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
@@ -399,6 +399,18 @@ fn summaries_name_the_setup() {
         selection_summary(&custom),
         "Codex · Model: Default · Effort: Default · Permissions: Custom · --yolo 'a b'"
     );
+    // Two entries that restore different wrappers need distinct compact labels and complete hover names.
+    for harness in [LaunchHarness::Codex, LaunchHarness::Bash] {
+        for prefix in ["MODE=one", "MODE=two"] {
+            let saved = LaunchSelection {
+                wrapper_prefix: Some(vec!["env".into(), prefix.into()]),
+                ..selection(harness)
+            };
+            let label = format!("Wrapper: env {prefix}");
+            assert_eq!(wrapper_summary(&saved).as_deref(), Some(label.as_str()));
+            assert!(selection_summary(&saved).ends_with(&label));
+        }
+    }
 }
 
 /// The agent's default Guarded mode goes unsaid in a row (it reads "Defaults" when nothing else was set), Cursor's

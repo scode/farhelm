@@ -46,7 +46,7 @@ use crate::launcher::draft::{DestinationKind, Field, Mode, harness_label};
 use crate::launcher::recents::{
     ALL_DEFAULTS, DraftDestination, RecentFilter, SetupKey, destination_label,
     explicit_before_permissions, permission_value, placement, selection_summary, setup_key, strip,
-    uses_guarded_default,
+    uses_guarded_default, wrapper_summary,
 };
 use crate::layers;
 use crate::theme::{self, metrics};
@@ -279,12 +279,13 @@ impl Launcher {
                 verb,
                 palette,
             );
+            let help = recent_hover(whole, entry.selection.wrapper_prefix.is_some());
             let (clicked, entered) = (entry.clone(), entry);
             let (on_click, on_key) = (cx.weak_entity(), cx.weak_entity());
             let row = Button::new(
                 format!("launcher-recent-{index}"),
                 name,
-                HoverHelp::sentence(whole).beside_list(false),
+                help.beside_list(false),
                 Role::Button,
             )
             .tier(Tier::RecentSetup)
@@ -365,7 +366,8 @@ fn row_cells(
     // The choices cell's words, for its label; drawn below in parts, so YOLO can take the danger ink.
     let mut words = String::new();
     let mut choices = div().flex().min_w_0().truncate();
-    if explicit.is_empty() && !show_permission {
+    let wrapper = wrapper_summary(selection);
+    if explicit.is_empty() && !show_permission && wrapper.is_none() {
         words.push_str(ALL_DEFAULTS);
         choices = choices.child(ALL_DEFAULTS);
     } else if !explicit.is_empty() {
@@ -388,6 +390,19 @@ fn row_cells(
                 .when(yolo, |word| word.text_color(theme::color(palette.danger)))
                 .child(permission_value(selection)),
         );
+    }
+    if let Some(wrapper) = wrapper {
+        let lead = if words.is_empty() { "" } else { " · " };
+        let wrapper = HostSentence::new(id("wrapper"))
+            .text(lead)
+            .host(&HostText::from_host(wrapper));
+        words.push_str(&wrapper.accessible_name());
+        choices = div()
+            .flex()
+            .min_w_0()
+            .truncate()
+            .child(choices)
+            .child(wrapper_tail(wrapper));
     }
     let mono = entry.github_repo.is_none();
     div()
@@ -449,4 +464,24 @@ fn row_cells(
                 .child(format!("⏎ {verb}")),
         )
         .into_any_element()
+}
+
+/// Keep a short wrapper at the end of the line even when the earlier choices have to shrink. The accessible name
+/// and hover help carry the complete text when this display reaches its cap.
+pub(super) fn wrapper_tail(wrapper: HostSentence) -> impl IntoElement {
+    div()
+        .flex_none()
+        .max_w(px(144.))
+        .truncate()
+        .text_ellipsis_middle()
+        .child(wrapper)
+}
+
+/// The setup's wrapper comes last, where the ordinary line limit could hide it.
+pub(super) fn recent_hover(summary: HostSentence, has_wrapper: bool) -> HoverHelp {
+    if has_wrapper {
+        HoverHelp::paragraphs([summary])
+    } else {
+        HoverHelp::sentence(summary)
+    }
 }

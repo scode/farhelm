@@ -32,7 +32,7 @@ use farhelm_proto::{
     join_permission_flags,
 };
 
-use super::draft::harness_label;
+use super::draft::{harness_label, joined};
 use crate::host_text::HostText;
 use crate::permission::words::{effort_label, permission_display};
 
@@ -320,9 +320,25 @@ pub fn summary_before_permissions(selection: &LaunchSelection) -> String {
     words
 }
 
-/// `selection` in full, for a row's accessible name and hover help: "Codex · Model: … · Effort: … · Permissions: …",
-/// then Custom's flags.
+/// The wrapper as it appears in the editor, named in recents because it can distinguish otherwise identical
+/// setups. The session card's agent summary has its own, narrower list of choices.
+pub(super) fn wrapper_summary(selection: &LaunchSelection) -> Option<String> {
+    let prefix = joined(selection.wrapper_prefix.as_deref());
+    (!prefix.is_empty()).then(|| format!("Wrapper: {prefix}"))
+}
+
+/// A recent setup's complete choices for its accessible name and hover help, including any stored wrapper.
 pub fn selection_summary(selection: &LaunchSelection) -> String {
+    let mut words = summary_without_wrapper(selection);
+    if let Some(wrapper) = wrapper_summary(selection) {
+        words.push_str(" · ");
+        words.push_str(&wrapper);
+    }
+    words
+}
+
+/// The choices before the wrapper, or just the harness for a shell. The search row draws the wrapper in its own space.
+pub(super) fn summary_without_wrapper(selection: &LaunchSelection) -> String {
     if selection.harness.is_shell() {
         return format!("{} shell", harness_label(selection.harness));
     }

@@ -1517,6 +1517,6 @@ fn reconciliation_notice(before: &LaunchSelection, after: &LaunchSelection) -> O
 }
 
 /// A wrapper prefix's raw words as its editor shows them: joined with spaces, quotes and escapes kept as stored.
-fn joined(words: Option<&[String]>) -> String {
+pub(super) fn joined(words: Option<&[String]>) -> String {
     words.map(|words| words.join(" ")).unwrap_or_default()
 }

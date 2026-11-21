@@ -105,27 +105,6 @@
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## recent-setup-description-omits-wrapper-prefix.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The finding's own appended
-  section already names the desktop app, and it still holds. `selection_summary` and `summary_before_permissions`
-  (`crates/gui/farhelm-gui/src/launcher/recents.rs:311-340`), which build a recent row's visible text, hover help and
-  accessible name, never mention `wrapper_prefix`; the file has no mention of it at all. Meanwhile `SetupKey` compares
-  the whole `LaunchSelection`, so different prefixes stay separate recents (:96-123), and Enter restores and launches
-  the stored prefix. `launcher/view/recents.rs` doesn't add it either.
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes ("Recent setups don't show their
-  wrapper prefix"), with a test where practical. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment). The maintainer added a complexity gate: "if any of these
-  spiral into something very complicated, the executor should make a near term todo item to follow up on it instead of
-  adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback file, and say
-  so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
-
 ## sandbox-checkout-hides-required-folder-setting.md
 
 - Outcome: `fix code`.
