@@ -717,12 +717,19 @@ systemd or SSH substrate ran.
   access to the storage repository, pushes the pictures the storage lacks and rewrites the manifest's lines (a scene
   that no longer exists loses its line). It refuses captures taken against another manifest than the current one, so
   publish before rebasing, or run `--update` again after. Look at each picture its report names as changed or added
-  before committing the manifest with the change. A failure leaves the new captures in `gui-goldens/` beside the test
-  binary. Run it when anything under `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI
-  does not run it yet. The development profile optimizes the PNG, renderer and UI dependencies used here. In a
-  single-process planning trial on Linux, this reduced the 328-picture update from 668 to 89 seconds of render time with
-  identical files. At that point the update encoded each PNG twice. Expect a rebuild when first switching to this
-  profile.
+  before committing the manifest with the change. Update encodes each capture once. The runner marks the captures
+  complete only after a successful full run. An update and a publisher require exclusive access to the capture
+  directory. A comparison keeps the new PNG only when the reference is missing, unreadable or differs, at the reported
+  path under this checkout's `target/gui-goldens/compare-*/`. Its fetched references belong to the same run. A broken
+  scene is reported alongside the others, and later scenes still run. Run it when anything under
+  `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet. The development
+  profile optimizes the PNG, renderer and UI dependencies used here. In a single-process planning trial on Linux, this
+  reduced the 328-picture update from 668 to 89 seconds of render time with identical files. At that point the update
+  encoded each PNG twice. Expect a rebuild when first switching to this profile.
+- `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
+  references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
+  update receives a completion marker only after rendering. Failed or empty updates cannot be published. Run it when the
+  runner changes. Seconds, no renderer or network.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
