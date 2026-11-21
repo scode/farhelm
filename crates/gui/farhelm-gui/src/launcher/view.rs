@@ -107,6 +107,7 @@ pub(super) use folder_list::{
     recent_folders as recent_folders_for_tests, tail_label as tail_label_for_tests,
 };
 mod history;
+mod hook_question;
 mod host_picker;
 mod latest;
 mod model_field;
@@ -230,7 +231,9 @@ pub(super) fn show(
                 let Some(launcher) = dismissing.upgrade() else {
                     return layers::Dismissal::Close;
                 };
-                if launcher.read(cx).yolo_in_flight(cx) {
+                if launcher.read(cx).yolo_in_flight(cx)
+                    || launcher.read(cx).hook_write_in_flight(cx)
+                {
                     return layers::Dismissal::Stay;
                 }
                 if launcher.read(cx).save_panel.is_some() {
@@ -632,6 +635,9 @@ pub(crate) struct Launcher {
     /// The YOLO question for a launch the helm refused because its host asks first, from the refusal until it is
     /// answered or the draft changes (`yolo_question`).
     yolo: Option<yolo_question::YoloState>,
+    /// A settings read or question for the agent picked in this launcher. Templates have their own launch path.
+    hook_question: Option<hook_question::HookQuestion>,
+    hook_pick: u64,
     /// "Create a sandbox for this session?", from the press that needs it until it is answered or the draft changes
     /// (`sandbox_question`).
     sandbox: Option<sandbox_question::SandboxState>,
@@ -904,6 +910,8 @@ impl Launcher {
             cancel_focus: cx.focus_handle().tab_stop(true),
             layer: None,
             yolo: None,
+            hook_question: None,
+            hook_pick: 0,
             sandbox: None,
             sandbox_skip_spent: false,
             quick_launch_unseen: false,
@@ -957,6 +965,7 @@ impl Launcher {
         self.yolo = None;
         // So does the sandbox question, about the draft at its press.
         self.sandbox = None;
+        self.retire_hook_answer(cx);
         // A quick launch's banner or refusal speaks of the draft as it opened, a shortcut's refusal of the press before.
         self.note = None;
         self.save_refusal = None;
@@ -1281,9 +1290,14 @@ impl Launcher {
     /// layer closes, and the launcher waits for the reply out of sight. The press is the user's answer the reply's
     /// moved-on check counts from, so this runs in the handler of that press, never deferred.
     pub(super) fn press(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.press_at(Mark::take(cx), window, cx);
+    }
+
+    /// Use the input mark from the answer that started the work, even when it first needed to save a setting.
+    fn press_at(&mut self, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
-        if self.yolo_in_flight(cx) {
+        if self.yolo_in_flight(cx) || self.hook_answer_pending(cx) {
             return;
         }
         let shown = self
@@ -1299,7 +1313,7 @@ impl Launcher {
             }
             _ => SourceConsent::default(),
         };
-        self.submit(false, false, source, Mark::take(cx), window, cx);
+        self.submit(false, false, source, mark, window, cx);
     }
 
     /// The request a press would send now, with `confirm_yolo` as the user's answer to the YOLO question, or `None`
@@ -1448,7 +1462,7 @@ impl Launcher {
     /// would let the write change the host's setting with nothing left to say whether it did. Refused too while Save as
     /// template's save is out, as the old launcher's Cancel was, so its refusal can still be said in the panel.
     fn cancel(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.yolo_in_flight(cx) || self.template_saving(cx) {
+        if self.yolo_in_flight(cx) || self.hook_write_in_flight(cx) || self.template_saving(cx) {
             return;
         }
         if let Some(layer) = self.layer.take() {
@@ -2020,7 +2034,7 @@ impl Launcher {
                     )
                     .options(options)
                     .chosen(self.draft.command.agent.map_or(NO_AGENT, harness_label))
-                    .on_choose(move |value, _, cx| {
+                    .on_choose(move |value, window, cx| {
                         let agent = LaunchHarness::ALL
                             .iter()
                             .copied()
@@ -2028,6 +2042,7 @@ impl Launcher {
                         let _ = on_agent.update(cx, |launcher, cx| {
                             launcher.draft.choose_command_agent(agent);
                             launcher.changed(cx);
+                            launcher.check_hook_question(window, cx);
                         });
                     })
                     .on_enter(move |window, cx| {
@@ -2131,7 +2146,7 @@ impl Render for Launcher {
         let refusal = self.refusal(cx);
         let target = self.target(cx);
         // While the YOLO question's host write is out, the launcher holds still (`yolo_question`).
-        let holding = self.yolo_in_flight(cx);
+        let holding = self.yolo_in_flight(cx) || self.hook_write_in_flight(cx);
         let restart = matches!(self.draft.mode, Mode::RestartWith(_));
         if restart || matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
             let source = self.source_consent(cx);
@@ -2584,6 +2599,11 @@ impl Render for Launcher {
                 self.sandbox_inline()
                     .cloned()
                     .map(IntoElement::into_any_element)
+            })
+            .or_else(|| {
+                self.hook_inline(cx)
+                    .cloned()
+                    .map(IntoElement::into_any_element)
             });
         let notices = (warning.is_some()
             || note.is_some()
@@ -2679,7 +2699,7 @@ impl Render for Launcher {
             .tier(Tier::Primary)
             .refused(refusal.is_some())
             // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).
-            .busy(holding)
+            .busy(holding || self.hook_answer_pending(cx))
             .on_click(on_launcher(weak.clone(), Launcher::press)),
         );
         let title = search::command_title(&self.draft.mode);

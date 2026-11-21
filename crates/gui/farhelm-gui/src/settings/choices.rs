@@ -28,6 +28,7 @@ use super::Refused;
 use crate::assets::Icon;
 use crate::components::{Button, Checkbox, HoverHelp, IconButton, Tier};
 use crate::drafts::Draft;
+use crate::hook_setup::HookAgent;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, Work};
 use crate::sounds::Sound;
@@ -78,6 +79,8 @@ pub(super) enum Choice {
     ShowMuseTrustHint,
     /// Antigravity's hint covers ordinary directories and managed checkouts.
     ShowAntigravityTrustHint,
+    /// Restore both hook setup offers for this agent through one shared preference.
+    ShowHookSetupHint(HookAgent),
     /// Notifications, Sounds: Session waiting, on by default (the status sounds' switches read unset through
     /// [`Switches::from_preferences`], which the sounds' owner reads too).
     SoundWaiting,
@@ -104,6 +107,8 @@ impl Choice {
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
         Choice::ShowAntigravityTrustHint,
+        Choice::ShowHookSetupHint(HookAgent::Grok),
+        Choice::ShowHookSetupHint(HookAgent::Antigravity),
         Choice::SoundWaiting,
         Choice::SoundApproval,
         Choice::SoundTurnFinished,
@@ -115,6 +120,7 @@ impl Choice {
     pub(super) fn section(self) -> super::Section {
         use super::Section;
         match self {
+            Self::ShowHookSetupHint(agent) => Section::Agent(agent.harness()),
             Self::ShowWhatsNew => Section::App,
             Self::SkipSessionConfirmations
             | Self::NameSessionsOnQuickLaunch
@@ -138,6 +144,7 @@ impl Choice {
     /// The preference row's field this switch saves, as the wire names it.
     fn field(self) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(agent) => agent.dismissal_field(),
             Choice::ShowWhatsNew => "show_whats_new",
             Choice::SkipSessionConfirmations => "skip_session_confirmations",
             Choice::NameSessionsOnQuickLaunch => "name_session_on_quick_launch",
@@ -164,6 +171,7 @@ impl Choice {
     pub(super) fn stored(self, preferences: Option<&Preferences>) -> bool {
         let sound = |sound| Switches::from_preferences(preferences).enabled(sound);
         let field = preferences.and_then(|preferences| match self {
+            Choice::ShowHookSetupHint(agent) => agent.dismissal(preferences),
             Choice::ShowWhatsNew => preferences.show_whats_new,
             Choice::SkipSessionConfirmations => preferences.skip_session_confirmations,
             Choice::NameSessionsOnQuickLaunch => preferences.name_session_on_quick_launch,
@@ -191,7 +199,8 @@ impl Choice {
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
-            | Choice::ShowAntigravityTrustHint => field != Some(true),
+            | Choice::ShowAntigravityTrustHint
+            | Choice::ShowHookSetupHint(_) => field != Some(true),
             Choice::SkipSessionConfirmations
             | Choice::ColorTerminalFrames
             | Choice::SkipHostSetupConfirmation
@@ -206,7 +215,8 @@ impl Choice {
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
-            | Choice::ShowAntigravityTrustHint => !on,
+            | Choice::ShowAntigravityTrustHint
+            | Choice::ShowHookSetupHint(_) => !on,
             Choice::SkipSessionConfirmations
             | Choice::ShowWhatsNew
             | Choice::NameSessionsOnQuickLaunch
@@ -225,6 +235,7 @@ impl Choice {
     /// The switch's element id, which tests and the test bridge find it by.
     pub(super) fn id(self) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(agent) => agent.dismissal_id(),
             Choice::ShowWhatsNew => "settings-show-whats-new",
             Choice::SkipSessionConfirmations => "settings-skip-session-confirmations",
             Choice::NameSessionsOnQuickLaunch => "settings-name-quick-launches",
@@ -250,6 +261,7 @@ impl Choice {
 
     pub(super) fn label(self) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(_) => "Show the hook setup prompt and hint",
             Choice::ShowWhatsNew => "Show what's new after updates",
             Choice::SkipSessionConfirmations => "Skip session confirmations",
             Choice::NameSessionsOnQuickLaunch => "Name sessions on quick launch",
@@ -275,6 +287,9 @@ impl Choice {
     /// The hover help, the old row's `data-tooltip`.
     pub(super) fn tooltip(self) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(_) => {
+                "Offer hook setup when choosing this agent and in sessions where setup was skipped"
+            }
             Choice::ShowWhatsNew => "Show release highlights after Farhelm upgrades",
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click"
@@ -320,6 +335,7 @@ impl Choice {
     /// (SPEC.md: "Each switch explains the current behavior"). A sound uses its tooltip as its description.
     pub(super) fn help(self, on: bool) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(_) => self.tooltip(),
             Choice::ShowWhatsNew if on => {
                 "Show highlights at the next upgrade. All windows on this helm use this choice."
             }
@@ -382,6 +398,9 @@ impl Choice {
     /// refusal too (SPEC.md, "Errors and diagnostics"), so those lines are new, worded like the others.
     fn failure(self, sent: bool) -> &'static str {
         match self {
+            Choice::ShowHookSetupHint(_) => {
+                "Could not save whether to show the hook setup prompt and hint. Try again."
+            }
             Choice::ShowWhatsNew => "Could not save whether to show upgrade highlights. Try again.",
             Choice::SkipSessionConfirmations if !sent => {
                 "Confirmations may still be off for this helm. Try again."

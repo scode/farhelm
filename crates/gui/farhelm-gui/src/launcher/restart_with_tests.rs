@@ -226,6 +226,43 @@ fn restart_with_names_why_it_is_not_offered() {
     );
 }
 
+/// A declared command requires a captured conversation for Restart with. Its greyed action uses the same
+/// setup result as Restart while keeping its own action name and ordinary first-prompt timing.
+#[test]
+fn restart_with_explains_antigravity_hook_setup_from_the_launch() {
+    use super::entry::restart_with_reason;
+    use farhelm_proto::PersistentHookSetup;
+
+    let mut row = row(|value| {
+        value["agent_kind"] = json!("antigravity");
+        value["status"] = json!({"state": "running"});
+        value["restart_offer"] = json!("not_captured");
+        value["launch"] = json!({
+            "kind": "command",
+            "command": "agy {farhelm_args}",
+            "yolo": false,
+            "agent": "antigravity",
+            "resume": "agy --resume {conversation} {farhelm_args}"
+        });
+    });
+    row.info.persistent_hook_setup = PersistentHookSetup::NotRequested;
+    let missing = restart_with_reason(&row).expect("a command needs a captured conversation");
+    assert!(missing.contains("Settings → Agents → Antigravity"));
+    assert!(missing.contains("start a new session"));
+    row.info.persistent_hook_setup = PersistentHookSetup::Failed {
+        reason: "read-only directory".into(),
+    };
+    let failed = restart_with_reason(&row).unwrap();
+    assert!(failed.contains("read-only directory"));
+    assert!(!failed.contains("after your first prompt"));
+    row.info.persistent_hook_setup = PersistentHookSetup::Installed;
+    assert!(
+        restart_with_reason(&row)
+            .unwrap()
+            .contains("after your first prompt")
+    );
+}
+
 /// SPEC.md, "Restart with": the action reads "Stop and restart" while the shown agent is working, the launcher says it
 /// stops the agent first, and a press is the consent to that stop; Restart with sends the edited launch through the
 /// session's own restart route. Specified: with a running, Restart with of a after an effort edit marks the effort

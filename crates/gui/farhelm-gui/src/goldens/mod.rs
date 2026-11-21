@@ -714,6 +714,12 @@ static SCENES: &[Scene] = &[
         setup: session_details_bar_setup,
     },
     Scene {
+        name: "session-hook-setup-hint",
+        size: (780., 150.),
+        draw: hook_setup_hint,
+        setup: no_setup,
+    },
+    Scene {
         name: "session-details-copy-warning",
         size: (644., 102.),
         draw: session_details_copy_warning,
@@ -1020,6 +1026,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_yolo_setup,
     },
     Scene {
+        name: "launcher-hook-setup",
+        size: (1080., 1040.),
+        draw: session_lists_then,
+        setup: launcher_hook_setup,
+    },
+    Scene {
         name: "template-launcher",
         // The card at its widest, near the window's top as the layer manager places it. Tall enough that the layer
         // manager's height cap (75% of the window) leaves all three rows in view, as the reference's taller window did.
@@ -1183,6 +1195,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_antigravity_setup,
+    },
+    Scene {
+        name: "settings-grok",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_grok_setup,
     },
     Scene {
         name: "settings-cursor",

@@ -97,6 +97,7 @@ impl Launcher {
             .draft
             .choose_harness(harness, self.catalog.as_deref(), wrapper.as_deref());
         self.chose(edit, window, cx);
+        self.check_hook_question(window, cx);
     }
 
     pub(super) fn choose_effort(&mut self, effort: Option<LaunchEffort>, cx: &mut Context<Self>) {

@@ -90,6 +90,7 @@ pub mod feedback;
 pub mod focus;
 pub mod harness;
 pub mod help_menu;
+mod hook_setup;
 pub mod host_text;
 pub mod hosts;
 pub mod launcher;

@@ -1047,7 +1047,7 @@ fn a_refused_save_restores_the_stored_value_and_shows_the_error_beside_the_switc
 
 /// The switches must show the same defaults before and after the helm sends an empty row. Naming and automatic remote
 /// updates start on and respect a saved opt-out. Confirmation skips and frame coloring require an explicit opt-in.
-/// Trust hints use the inverse of their saved dismissal, and the sound rules test the sound defaults.
+/// Hints use the inverse of their saved dismissal, and the sound rules test the sound defaults.
 #[test]
 fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     let empty = Preferences::default();
@@ -1078,6 +1078,8 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
         Choice::ShowAntigravityTrustHint,
+        Choice::ShowHookSetupHint(crate::hook_setup::HookAgent::Grok),
+        Choice::ShowHookSetupHint(crate::hook_setup::HookAgent::Antigravity),
     ];
     for &choice in Choice::ALL.iter().filter(|&&choice| {
         choice != naming
@@ -1105,6 +1107,8 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
             "codex_trust_hint_dismissed": value,
             "muse_trust_hint_dismissed": value,
             "antigravity_trust_hint_dismissed": value,
+            "grok_hook_hint_dismissed": value,
+            "antigravity_hook_hint_dismissed": value,
         }))
         .unwrap()
     };
@@ -2150,19 +2154,24 @@ const TRUST_PATHS: [&str; 5] = [
     "/api/checkout-agent-trust/antigravity",
 ];
 
-/// A trust page sends exactly one read. The reply keeps the hint's own preference at its default.
+/// Answer one trust read and, on Antigravity's page, the separate hook setup read. Neither changes the hint preference.
 fn answer_trust(
     helm: &mut FakeHelm,
     reads: &[(u64, String)],
     enabled: bool,
     cx: &mut VisualTestContext,
 ) {
-    assert_eq!(reads.len(), 1);
+    let antigravity = reads[0].1 == TRUST_PATHS[4];
+    assert_eq!(reads.len(), if antigravity { 2 } else { 1 });
     helm.reply(
         reads[0].0,
         200,
         Some(json!({ "enabled": enabled, "hint_dismissed": false })),
     );
+    if antigravity {
+        assert_eq!(reads[1].1, "/api/agent-hook-setup/antigravity");
+        helm.reply(reads[1].0, 200, Some(json!({ "enabled": false })));
+    }
     settle(cx);
 }
 
@@ -2214,6 +2223,51 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
     click_section(cx, Section::Agent(LaunchHarness::Claude));
     assert_eq!(sent(&mut helm), [], "read once per opening");
     assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
+}
+
+/// An unknown setup switch cannot authorize a write. After reading Grok's choice, the switch writes to Grok alone,
+/// and its separate hint switch can restore the launcher question and the session hint together.
+#[gpui::test]
+fn grok_hook_setup_and_its_hint_are_independent_settings(cx: &mut TestAppContext) {
+    let (mut helm, cx, gear) = open_rail(
+        cx,
+        &Preferences {
+            grok_hook_hint_dismissed: Some(true),
+            ..Preferences::default()
+        },
+    );
+    let agent = crate::hook_setup::HookAgent::Grok;
+    cx.update(|window, cx| {
+        super::open_at_hook_setup(agent, &gear, &Mark::take(cx), window, cx);
+    });
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Grok"));
+    assert_eq!(available(cx, agent.id()), Some(false));
+    let reads = sent_reads(&mut helm);
+    let [(read, path)] = reads.as_slice() else {
+        panic!("only the Grok setup read: {reads:?}")
+    };
+    assert_eq!(path, "/api/agent-hook-setup/grok");
+    click(cx, agent.id());
+    assert!(sent(&mut helm).is_empty(), "unknown consent is unavailable");
+    helm.reply(*read, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    assert_eq!(switch_on(cx, agent.id()), Some(false));
+    assert_eq!(switch_on(cx, agent.dismissal_id()), Some(false));
+    click(cx, agent.id());
+    let writes = helm.commands();
+    let [write] = writes.as_slice() else {
+        panic!("one setting write: {writes:?}")
+    };
+    assert_eq!(write.method, farhelm_helm_client::Method::Put);
+    assert_eq!(write.path, "/api/agent-hook-setup/grok");
+    assert_eq!(write.body, Some(json!({ "enabled": true })));
+    helm.reply(write.id, 204, None);
+    settle(cx);
+    assert_eq!(switch_on(cx, agent.id()), Some(true));
+    click(cx, agent.dismissal_id());
+    let (_, body) = one_save(&mut helm);
+    assert_eq!(body, json!({ "grok_hook_hint_dismissed": false }));
 }
 
 /// Open through the trust hint and answer the page's one read. Each caller begins with that agent's switch focused.

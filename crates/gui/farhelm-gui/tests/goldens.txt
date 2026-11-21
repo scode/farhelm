@@ -122,6 +122,8 @@ linux/keyboard-shortcuts-dialog--dark.png bef6d89f6614d8f0a9ecd15d3ddf658d42eceb
 linux/keyboard-shortcuts-dialog--light.png 67b6ed0b4dfdaa9d4526024e5a29d59489678387
 linux/launcher-command-results--dark.png e32f4391ceacf56d41525e95f0ed6222667fbf12
 linux/launcher-command-results--light.png a8fa7e5ce8b41b040661c13bde16008298f1d625
+linux/launcher-hook-setup--dark.png 918c9878088c665680f1e50bf44b6ac2115e44c3
+linux/launcher-hook-setup--light.png b8ded053cd2a8404195e1c2e802fa3de233e56f9
 linux/launcher-host-menu--dark.png 54333d94c4cf20bb81738410f245f8cf7fe85eb8
 linux/launcher-host-menu--light.png 8908cac59773a90c3cbb1faa9fb192784d0566d8
 linux/launcher-more-options--dark.png 4a9690dcfefcf0cbde640e5caf2667df3f967391
@@ -188,6 +190,8 @@ linux/session-details-copy-warning--dark.png 747274a067fb5632032cc0aa4b719c74029
 linux/session-details-copy-warning--light.png e3b6157e59bc6799ee2a0af27602023f73b38461
 linux/session-environment-unavailable--dark.png 3b051db88432699700c0f52df5a243d058414fd0
 linux/session-environment-unavailable--light.png d87b73c986ea82145d6b41620af3d54bce9e8004
+linux/session-hook-setup-hint--dark.png b489d9a0dee82db386caab2db38d377d6f72f910
+linux/session-hook-setup-hint--light.png 7e44bb3fd6ca4cf7d385a7822f10ffaa8f94aa6a
 linux/session-interrupted-card--dark.png 9af1847a8512cd90eb3a58b97f15ff9d12c3af60
 linux/session-interrupted-card--light.png 675c23f99f1de214dcf1424344674fe158c02348
 linux/session-list--dark.png 08453a46a91d691811d6a3ecfa00083092adc242
@@ -220,8 +224,8 @@ linux/session-summary-card--dark.png 4a061b57c9ad71c730c592f044af9a70288b5bfe
 linux/session-summary-card--light.png e0d04359bc3fd84b96da5eff45dc82ab2bbb2e84
 linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
-linux/settings-antigravity--dark.png 7bbecef5bdd2f81b2a0330697f5a04012092b465
-linux/settings-antigravity--light.png ff7a4e6b1ab51a4c27dce65f53302deef3efac3d
+linux/settings-antigravity--dark.png 815657d7ac1db25d37803b7164a17d109b28ed0c
+linux/settings-antigravity--light.png 11873e8bea7f74408468b33f5914ea716e82c60b
 linux/settings-app--dark.png 751174693c9c95f547e1ede8337007154fd69451
 linux/settings-app--light.png c09f9598d6a6e1da2253f34d56d8a8896cc13a9a
 linux/settings-appearance--dark.png fe9e825946302ae7c9896070a88eba3030ea5f38
@@ -244,6 +248,8 @@ linux/settings-credentials--dark.png decb9d558ff39721801e31b7c86930de7c087a50
 linux/settings-credentials--light.png ec84168e50ff889233612d48077bf3301ab0a950
 linux/settings-cursor--dark.png 5fa066ca223da8f99078f99ebb9a61ec27c346a0
 linux/settings-cursor--light.png e85f90b71144cf4e17a0bee5c3668c55d04a3674
+linux/settings-grok--dark.png 1ed639b43bdbe87cc088bf17f7cde119a324ce90
+linux/settings-grok--light.png c31a8d715117e9fefbc0ffa0f0239ee59246fe59
 linux/settings-hosts--dark.png 7eea32215dba6671b90cec20e6bd9a2e945def94
 linux/settings-hosts--light.png 7279d4bab53b6b6b4663dc3e82676072965d3ff6
 linux/settings-notifications--dark.png 981eb3929756588721a0236b3e6e05d1b0f45900

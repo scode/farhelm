@@ -11,6 +11,14 @@ use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px}
 
 use super::SceneState;
 
+/// The one-off hint appears above the terminal while the open Grok session has yet to report a conversation.
+pub(super) fn hook_setup_hint(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    div()
+        .w(px(740.))
+        .child(crate::session_pane::hook_band_golden(cx))
+        .into_any_element()
+}
+
 /// The open session's details bar for every kind of status and host it draws differently, from a fake helm's snapshot:
 /// running on the local host (`Local (this machine)`, the red laptop), waiting on a remote that left its mark at the
 /// cloud, exited with a stop annotation, interrupted (the amber ended color), a launch failure whose long detail ends in

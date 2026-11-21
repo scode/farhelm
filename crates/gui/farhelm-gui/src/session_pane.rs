@@ -107,6 +107,9 @@
 pub(crate) mod card;
 pub(crate) mod details;
 pub(crate) mod header;
+mod hook_band;
+#[cfg(test)]
+pub(crate) use hook_band::golden as hook_band_golden;
 mod retired;
 pub(crate) mod trust_band;
 pub(crate) mod unavailable;
@@ -223,6 +226,7 @@ pub struct SessionPane {
     new: FocusHandle,
     /// The trust hint band's state ([`trust_band`]), drawn above the open session's terminal while it applies.
     trust_band: Entity<trust_band::TrustBand>,
+    hook_band: Entity<hook_band::HookBand>,
     /// Act on a change of the selection, of the user's choice, of the connection and of the open session's card, and
     /// redraw when the trust hint band's state changes.
     _observing: Vec<Subscription>,
@@ -371,6 +375,8 @@ impl SessionPane {
         }));
         let trust_band = cx.new(trust_band::TrustBand::new);
         observing.push(cx.observe(&trust_band, |_, _, cx| cx.notify()));
+        let hook_band = cx.new(hook_band::HookBand::new);
+        observing.push(cx.observe(&hook_band, |_, _, cx| cx.notify()));
         // After the window's first frame exists rather than during its construction, as the focus coordinator's own
         // first recovery is: the terminal becomes home, and home takes focus.
         cx.defer_in(window, Self::sync);
@@ -384,6 +390,7 @@ impl SessionPane {
             _card: follow,
             new,
             trust_band,
+            hook_band,
             _observing: observing,
         }
     }
@@ -650,6 +657,10 @@ impl Render for SessionPane {
         let trust = row
             .as_ref()
             .and_then(|row| trust_band::draw(&self.trust_band, &key, row, agent_shown, cx));
+        let hooks = row
+            .as_ref()
+            .filter(|_| agent_shown)
+            .and_then(|row| hook_band::draw(&self.hook_band, &key, row, cx));
         // The band reads trust on the ticker's clock exactly while it shows.
         let trust_shown = trust.is_some();
         self.trust_band
@@ -701,6 +712,7 @@ impl Render for SessionPane {
             .child(header)
             .children(lines)
             .children(trust)
+            .children(hooks)
             .children(band)
             .child(
                 div()

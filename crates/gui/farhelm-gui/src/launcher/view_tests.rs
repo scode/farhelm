@@ -201,6 +201,97 @@ pub(super) fn has_node(cx: &mut VisualTestContext, id: &str) -> bool {
         .any(|node| node.element_id.as_deref() == Some(id))
 }
 
+/// A one-off launch leaves consent off. The persistent answer needs a successful write before sending a create,
+/// even when the normal Launch button is pressed while that write is waiting.
+#[gpui::test]
+fn hook_setup_launch_waits_for_consent_and_keeps_the_one_off_answer(cx: &mut TestAppContext) {
+    use farhelm_helm_client::Method;
+    use serde_json::json;
+
+    let draft = LaunchDraft::new(Some(1), "~".into(), None);
+    let (mut helm, cx) = launcher_on(cx, draft);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+
+    test_support::click(cx, "launcher-harness-Grok");
+    settle(cx);
+    let reads = helm.commands();
+    let [read] = reads.as_slice() else {
+        panic!("one setup read: {reads:?}")
+    };
+    assert_eq!(read.method, Method::Get);
+    assert_eq!(read.path, "/api/agent-hook-setup/grok");
+    assert!(!has_node(cx, "hook-setup-consent"));
+    helm.reply(read.id, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    let consent = name_of(cx, "hook-setup-consent").expect("the first pick asks for consent");
+    assert!(consent.contains("outside Farhelm"), "{consent}");
+    assert!(consent.contains("every machine"), "{consent}");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+
+    test_support::click(cx, "prompt-alternative-1");
+    settle(cx);
+    let writes = helm.commands();
+    let [write] = writes.as_slice() else {
+        panic!("save before create: {writes:?}")
+    };
+    assert_eq!(write.method, Method::Put);
+    assert_eq!(write.path, read.path);
+    assert_eq!(write.body, Some(json!({ "enabled": true })));
+    test_support::click(cx, "launcher-launch");
+    assert!(helm.commands().is_empty());
+
+    helm.reply(write.id, 503, Some(json!("fixture refused hook setup")));
+    settle(cx);
+    assert!(
+        has_node(cx, "hook-setup-consent"),
+        "a refusal keeps the decision open"
+    );
+    assert!(helm.commands().is_empty(), "a failed write starts nothing");
+    test_support::click(cx, "prompt-confirm");
+    let creates = super::launch_tests::creates(&mut helm, cx);
+    assert_eq!(creates.len(), 1, "one launch after the one-off answer");
+    assert_eq!(
+        creates[0].body.as_ref().unwrap()["launch"]["harness"],
+        "grok"
+    );
+}
+
+/// Installing hooks from the first-run question uses the same settings route as the switch. A successful save
+/// resumes the draft once, through the normal launch path.
+#[gpui::test]
+fn hook_setup_success_continues_the_launch_once(cx: &mut TestAppContext) {
+    use serde_json::json;
+
+    let draft = LaunchDraft::new(Some(1), "~".into(), None);
+    let (mut helm, cx) = launcher_on(cx, draft);
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    test_support::click(cx, "launcher-harness-Grok");
+    settle(cx);
+    let reads = helm.commands();
+    let [read] = reads.as_slice() else {
+        panic!("one setup read: {reads:?}")
+    };
+    assert_eq!(read.path, "/api/agent-hook-setup/grok");
+    helm.reply(read.id, 200, Some(json!({ "enabled": false })));
+    settle(cx);
+    test_support::click(cx, "prompt-alternative-1");
+    settle(cx);
+    let writes = helm.commands();
+    let [write] = writes.as_slice() else {
+        panic!("one setup write: {writes:?}")
+    };
+    assert_eq!(write.path, read.path);
+    assert_eq!(write.body, Some(json!({ "enabled": true })));
+    helm.reply(write.id, 204, None);
+    settle(cx);
+    let creates = super::launch_tests::creates(&mut helm, cx);
+    assert_eq!(creates.len(), 1);
+    assert!(
+        !crate::test_support::any_open(cx),
+        "the launcher hides for its create"
+    );
+}
+
 /// The checked state an element under `id` reports in a fresh frame.
 fn toggled(cx: &mut VisualTestContext, id: &str) -> Option<gpui::Toggled> {
     test_support::frame(cx)

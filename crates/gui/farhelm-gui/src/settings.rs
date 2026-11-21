@@ -77,6 +77,7 @@ mod file_types;
 #[cfg(test)]
 mod file_types_tests;
 mod frame;
+mod hook_settings;
 mod ntfy;
 #[cfg(test)]
 mod recipe_credential_tests;
@@ -131,6 +132,7 @@ use crate::operations::{Command, OpKey, Outcome};
 use crate::session;
 use crate::theme::{self, Preference};
 
+use crate::hook_setup::HookAgent;
 use agent_trust::Trust;
 use choices::{Choice, Switch};
 use configured::Configured;
@@ -320,6 +322,43 @@ pub fn open_at_agent_trust(
     };
     dialog.update(cx, |dialog, _| dialog.focus_on = Some(handover));
     Some(layer)
+}
+
+/// Open the agent's settings and focus the setup switch once the helm confirms its current value.
+pub(crate) fn open_at_hook_setup(
+    agent: HookAgent,
+    opener: &FocusHandle,
+    mark: &Mark,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
+    let (layer, dialog) = open_dialog(Section::Agent(agent.harness()), opener, mark, window, cx)?;
+    let handover = Handover {
+        target: Target::HookSetup(agent),
+        mark: *mark,
+        window: window.window_handle(),
+    };
+    dialog.update(cx, |dialog, _| dialog.focus_on = Some(handover));
+    Some(layer)
+}
+
+/// Read explicit consent from its configuration route. Failed reads never stand for an off switch.
+pub(crate) fn read_hook_setup(
+    agent: HookAgent,
+    cx: &mut App,
+    on_read: impl FnOnce(Result<bool, crate::host_text::HostText>, &mut App) + 'static,
+) {
+    configured::read_enabled(agent.route(), cx, on_read);
+}
+
+/// Persist the same all-hosts switch from Settings and the launch prompt.
+pub(crate) fn hook_setup_command(agent: HookAgent, enabled: bool) -> Result<Command, PathError> {
+    configured::enabled_command(agent.route(), enabled)
+}
+
+/// Store the dismissal both surfaces observe, using the Settings preference field and operation key.
+pub(crate) fn dismiss_hook_setup_command(agent: HookAgent) -> Result<Command, PathError> {
+    Choice::ShowHookSetupHint(agent).command(false)
 }
 
 /// `PUT /api/preferences` turning `agent`'s "Show the hint when ... asks about a managed checkout" off, exactly as its
@@ -714,6 +753,8 @@ pub(crate) struct SettingsDialog {
     tunnels: TunnelConsent,
     /// Trust switches, in [`TrustAgent::ALL`]'s order. Each page reads its own switch the first time it is shown.
     trust: Vec<Trust>,
+    /// Configuration switches are read on demand by the two agent pages.
+    hooks: [hook_settings::HookSwitch; 2],
     /// Checkouts' two explicitly saved fields, made the first time the section is shown in this opening, which is when
     /// they read their routes.
     checkout_fields: Option<CheckoutFields>,
@@ -820,6 +861,11 @@ impl SettingsDialog {
                     read_started: false,
                 })
                 .collect(),
+            hooks: HookAgent::ALL.map(|_| hook_settings::HookSwitch {
+                state: Configured::new(),
+                focus: cx.focus_handle().tab_stop(true),
+                read_started: false,
+            }),
             checkout_fields: None,
             spare: Configured::new(),
             spare_focus: cx.focus_handle().tab_stop(true),
@@ -967,6 +1013,20 @@ impl SettingsDialog {
                 let _ = dialog.update(cx, |dialog, cx| dialog.trust_known(agent, answer, cx));
             });
         }
+        if let Section::Agent(harness) = section
+            && let Some(agent) = HookAgent::for_harness(harness)
+            && !self.hooks[agent.index()].read_started
+        {
+            self.hooks[agent.index()].read_started = true;
+            let dialog = cx.weak_entity();
+            read_hook_setup(agent, cx, move |answer, cx| {
+                let _ = dialog.update(cx, |dialog, cx| {
+                    dialog.hooks[agent.index()].state.read_answered(answer);
+                    dialog.finish_handover(cx);
+                    cx.notify();
+                });
+            });
+        }
         cx.notify();
     }
 
@@ -1009,6 +1069,10 @@ impl SettingsDialog {
             Target::Trust(agent) => {
                 let trust = &self.trust[agent.index()];
                 trust.state.available().then(|| trust.focus.clone())
+            }
+            Target::HookSetup(agent) => {
+                let switch = &self.hooks[agent.index()];
+                switch.state.available().then(|| switch.focus.clone())
             }
             Target::AppUpdates => self.start(Section::App, cx),
             Target::AppCheck => Section::App
@@ -1089,6 +1153,7 @@ impl SettingsDialog {
             if matches!(
                 target,
                 Target::Trust(_)
+                    | Target::HookSetup(_)
                     | Target::SpareCheckout
                     | Target::NtfySwitch(_)
                     | Target::TensorlakeAsk
@@ -1480,11 +1545,12 @@ impl SettingsDialog {
                     .chain(std::iter::once(card::rows([spare], cx).into_any_element()))
                     .collect()
             }
-            Section::Agent(harness) => match TrustAgent::for_harness(harness) {
-                Some(agent) => {
+            Section::Agent(harness) => {
+                let mut panels = Vec::new();
+                if let Some(agent) = TrustAgent::for_harness(harness) {
                     let trust = &self.trust[agent.index()];
                     let weak = cx.weak_entity();
-                    vec![
+                    panels.push(
                         agent_trust::block(
                             trust,
                             &self.refused,
@@ -1504,17 +1570,51 @@ impl SettingsDialog {
                             cx,
                         )
                         .into_any_element(),
-                    ]
+                    );
                 }
-                None => vec![
-                    div()
-                        .id(NO_AGENT_SETTINGS_ID)
-                        .role(Role::Label)
-                        .aria_label(NO_AGENT_SETTINGS)
-                        .child(card::help(NO_AGENT_SETTINGS, cx))
+                if let Some(agent) = HookAgent::for_harness(harness) {
+                    let index = agent.index();
+                    let weak = cx.weak_entity();
+                    let opt_in = hook_settings::row(
+                        agent,
+                        &self.hooks[index],
+                        &self.refused,
+                        move |on, _, cx| {
+                            let _ = weak.update(cx, |dialog, cx| {
+                                dialog.toggle_configured(
+                                    agent.id(),
+                                    move |dialog| &mut dialog.hooks[index].state,
+                                    on,
+                                    |on| hook_setup_command(agent, on),
+                                    cx,
+                                );
+                            });
+                        },
+                        cx,
+                    );
+                    panels.push(
+                        card::rows(
+                            [
+                                opt_in.into_any_element(),
+                                self.switch(Choice::ShowHookSetupHint(agent), preferences, cx),
+                            ],
+                            cx,
+                        )
                         .into_any_element(),
-                ],
-            },
+                    );
+                }
+                if panels.is_empty() {
+                    panels.push(
+                        div()
+                            .id(NO_AGENT_SETTINGS_ID)
+                            .role(Role::Label)
+                            .aria_label(NO_AGENT_SETTINGS)
+                            .child(card::help(NO_AGENT_SETTINGS, cx))
+                            .into_any_element(),
+                    );
+                }
+                panels
+            }
             Section::Notifications => std::iter::once(self.sounds(preferences, cx))
                 .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
                 .collect(),

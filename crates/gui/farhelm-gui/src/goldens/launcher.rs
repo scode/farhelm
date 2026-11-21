@@ -27,6 +27,7 @@ enum LauncherScene {
     Replace,
     Narrow,
     Yolo,
+    HookSetup,
 }
 
 /// Show New with a chosen agent, so the screenshot covers the model, effort and permission controls and the prompt.
@@ -72,6 +73,11 @@ pub(super) fn launcher_narrow_setup(state: &SceneState, window: &mut Window, cx:
 /// Ask the ordinary inline YOLO question, leaving the real launcher actions and both panes drawn around it.
 pub(super) fn launcher_yolo_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Yolo, window, cx);
+}
+
+/// Show the first-pick consent question with an off switch and no suppressed hint.
+pub(super) fn launcher_hook_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::HookSetup, window, cx);
 }
 
 fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut App) {
@@ -289,24 +295,65 @@ fn answer_new_reads(
         crate::focus::focus_in_layer(&field, &crate::focus::Mark::take(cx), window, cx);
     } else if scene == LauncherScene::Yolo {
         state.after.set(Some(choose_yolo));
+    } else if scene == LauncherScene::HookSetup {
+        state.after.set(Some(pick_grok));
     } else if scene == LauncherScene::Narrow {
         state.after.set(Some(type_launcher_query));
-    } else if recent.is_none() {
-        state.after.set(Some(answer_new_reads));
-    } else if scene == LauncherScene::Results {
-        state.after.set(Some(apply_fixture_setup));
-    } else if scene == LauncherScene::Restart {
-        assert!(
-            !recent.unwrap().flags.click,
-            "a held recent row stays in the pane and cannot apply"
-        );
-        assert!(
-            nodes.iter().any(
-                |node| node.element_id.as_deref() == Some("launcher-held-harness")
-                    && node.label.as_deref() == Some("Agent: Claude")
-            ),
-            "Restart names the fixed harness without an editable harness control"
-        );
+    } else {
+        let Some(recent) = recent else {
+            state.after.set(Some(answer_new_reads));
+            return;
+        };
+        if scene == LauncherScene::Results {
+            state.after.set(Some(apply_fixture_setup));
+        } else if scene == LauncherScene::Restart {
+            assert!(
+                !recent.flags.click,
+                "a held recent row stays in the pane and cannot apply"
+            );
+            assert!(
+                nodes.iter().any(|node| node.element_id.as_deref()
+                    == Some("launcher-held-harness")
+                    && node.label.as_deref() == Some("Agent: Claude")),
+                "Restart names the fixed harness without an editable harness control"
+            );
+        }
+    }
+}
+
+/// Pick Grok after the catalog, then wait for the question from the setting's off reply.
+fn pick_grok(_: &Entity<SessionList>, state: &SceneState, window: &mut Window, cx: &mut App) {
+    state.after.set(Some(
+        if click_control(window, cx, "launcher-harness-Grok") {
+            answer_hook_setup
+        } else {
+            pick_grok
+        },
+    ));
+}
+
+fn answer_hook_setup(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+        .expect("the launcher scene keeps its fake helm");
+    for command in helm.commands() {
+        let answer =
+            (command.path == "/api/agent-hook-setup/grok").then(|| json!({ "enabled": false }));
+        helm.reply(command.id, 200, answer);
+    }
+    if !window
+        .driver_nodes()
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some("hook-setup-consent"))
+    {
+        state.after.set(Some(answer_hook_setup));
     }
 }
 
