@@ -33683,3 +33683,37 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   a textless signal and counts it toward suppressing drag guidance. Change `rxwuvpstytkk`, bookmark
   `plan/triage-terminal-host/05-primary-selection-signal`,
   [PR #4484](https://github.com/scode/farhelm/pull/4484/changes).
+
+## steady-block-cursor-contract-conflict.md
+
+- Outcome: `fix code`.
+- Assessment: When a program asks for a steady block cursor, grid terminals blink it anyway. That is a documented
+  accepted difference in one module, but the grid wire-format docs say only an unstyled cursor blinks. Verified:
+  grid_output.rs:42-48 explicitly accepts the difference. farhelm-proto grid.rs:185-187 says "The default cursor (one no
+  program has styled) is sent with `blink: true`". Neither SPEC.md nor SPEC_impl.md mentions it. Honoring the request
+  would need a vendor change to tell an explicit steady block from the default.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected. The grid wire documentation now includes the accepted steady-block blink exception. Change
+  `pttloxtklyvw`, bookmark `plan/triage-terminal-host/06-text-corrections`,
+  [PR #4485](https://github.com/scode/farhelm/pull/4485/changes).
+
+## mac-host-start-same-build-contract.md
+
+- Outcome: `fix code`.
+- Assessment: Updating a remote Mac. During the Update window, the old supervisor can start a terminal host from the
+  newly installed program file. The terminal-host spec says starter and host always come from the same build. Verified:
+  Confirmed. `hosts/spawn.rs` `own_host_program` uses the path on the Mac (only the app layout is versioned), and the
+  remote Mac's flat layout is replaced in place. `crates/terminal-host/SPEC.md` "Change policy" (~L523-524) claims
+  same-build startup. No incompatible pair is known, and the startup fields are "kept stable anyway".
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected. The terminal host startup contract documents the remote Mac update window and its cross-build
+  compatibility obligation. Change `pttloxtklyvw`, bookmark `plan/triage-terminal-host/06-text-corrections`,
+  [PR #4485](https://github.com/scode/farhelm/pull/4485/changes).

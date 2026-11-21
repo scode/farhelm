@@ -728,9 +728,8 @@ fn an_oversized_child_spec_is_refused() {
 /// The command line is exactly `--socket <absolute path>`; anything else
 /// is a usage error.
 ///
-/// Why: the host's command line is private to one build, but a malformed
-/// one must fail loudly at once rather than start a host on a socket nobody
-/// will find. A relative path is one of those: the host changes to `/`
+/// A malformed command line must fail before starting a host on a socket
+/// nobody will find. A relative path is one of those: the host changes to `/`
 /// before it binds, so it would be checked in one directory and bound in
 /// another (SPEC.md, "Command line and child spec"). Spec: no arguments, an
 /// empty path, a relative path, another flag, and an extra argument each

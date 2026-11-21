@@ -178,10 +178,6 @@ consequences.
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
 
-- [`steady-block-cursor-contract-conflict.md`](steady-block-cursor-contract-conflict.md) — Grid terminals deliberately
-  blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
-  unless the program says otherwise.
-
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.
@@ -370,9 +366,6 @@ consequences.
 - [`mac-setup-confirmation-misses-installed-app.md`](mac-setup-confirmation-misses-installed-app.md) — An old Mac setup
   confirmation can install the remote supervisor after Farhelm.app is installed; the pre-confirmation exception's scope
   remains uncertain.
-
-- [`mac-host-start-same-build-contract.md`](mac-host-start-same-build-contract.md) — Remote Mac Update contradicts the
-  declared same-build startup invariant; no incompatible startup data or runtime failure was demonstrated.
 
 - [`centos-rustup-missing-pin.md`](centos-rustup-missing-pin.md) — Standalone CentOS validation cannot install its
   target with Rustup 1.28.0 when the pinned compiler is absent; current Rustup auto-install avoids this route.
