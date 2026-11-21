@@ -411,8 +411,8 @@ fn attach_refusal(state: &HostState) -> Option<BackendFailure> {
     Some(BackendFailure::new(sentence, ""))
 }
 
-/// The same remedy applies whether the actor or the provisioning probe
-/// learned that the host is managed elsewhere.
+/// A listed host offers Take over in Hosts, whether the connection actor
+/// or the provisioning probe learned that another Farhelm manages it.
 fn owner_refusal(owner: &farhelm_proto::HelmOwnerRefusal) -> String {
     format!(
         "Another Farhelm ({}) manages this host. Use Take over in Hosts first.",
@@ -1021,17 +1021,30 @@ impl ProvisioningService {
                 dial_farhelm,
                 dial_state_dir,
             } => {
-                if from_agent
-                    || !matches!(
-                        &registration,
-                        ProbeRegistration::Ssh {
-                            new_entry: Some(_),
-                            ..
-                        }
-                    )
-                    || host_identity.is_none()
-                {
+                if !matches!(
+                    &registration,
+                    ProbeRegistration::Ssh {
+                        new_entry: Some(_),
+                        ..
+                    }
+                ) {
                     return Err(ProvisioningRequestError::Refused(owner_refusal(&owner)).into());
+                }
+                // A new entry has no row offering Take over, and its probe
+                // must report an install identity before Add host can offer it.
+                if host_identity.is_none() {
+                    return Err(ProvisioningRequestError::Refused(format!(
+                        "Another Farhelm ({}) manages this host. Farhelm cannot take it over because the host reported no install identity.",
+                        owner.tag
+                    ))
+                    .into());
+                }
+                if from_agent {
+                    return Err(ProvisioningRequestError::Refused(format!(
+                        "Another Farhelm ({}) manages this host. Add it yourself with Add host to take it over.",
+                        owner.tag
+                    ))
+                    .into());
                 }
                 let probe_id = uuid::Uuid::new_v4().to_string();
                 let mut memory = self.memory.lock().await;
