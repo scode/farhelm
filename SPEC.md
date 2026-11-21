@@ -1429,24 +1429,25 @@ or host, choosing a repository or template, and naming the session. Replace with
 explanation below the field. A separate scrolling column beside the form shows up to three recent setups and all launch
 templates while the field is empty. The row that filled the form remains marked, and the form names its source until
 Reset choices or another fill. Down from the empty field moves a keyboard highlight into the list. Up from its first row
-returns Enter to the field's Launch action. Enter on a highlighted template applies it. The list adds no Tab stops. A
-mouse pick returns focus to the command field. With text in the field, grouped results take over the column and the form
-dims while staying editable. Escape or clicking outside the results hides them and keeps the query. When the window is
-too narrow to fit both sides, the column is hidden and typed results appear below the field. Use `recent:` and `tl:` to
-reach setups and templates there. The Destination card heads the form, followed by the Agent and Command tabs and their
-fields. The selected tab is underlined. Labels sit above the fields with short notes where needed. The Agent tab shows
-the session list's harness marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a
-row when they fit. **More options** folds the conversation selector, when offered, and Wrapper prefix together at the
-bottom of the Agent form. The folded row names the fields and shows a pill for each set value, with the wrapper prefix
-in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is required,
-refused or invalid. After a correction, the user can close it once no field needs attention. The footer's actions sit on
-the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main action comes last
-with a Return key cap. Its accessible name keeps the operation and target. Tab follows the command field, Close, the
-visible body controls, then the footer actions. More options is a Tab stop, with its editors following it when expanded.
-New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel. Refusals, destructive
-warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region, so long content cannot
-displace those actions. The save-as-template panel remains inline in the scrolling body. Project registration
-(associating metadata with a directory) is optional convenience and never a prerequisite.
+returns Enter to the field's Launch action. Enter on a highlighted template applies it. In Replace with, a highlighted
+recent setup's key cap reads "⏎ Replace", since Enter there replaces, and so deletes, the source. The list adds no Tab
+stops. A mouse pick returns focus to the command field. With text in the field, grouped results take over the column and
+the form dims while staying editable. Escape or clicking outside the results hides them and keeps the query. When the
+window is too narrow to fit both sides, the column is hidden and typed results appear below the field. Use `recent:` and
+`tl:` to reach setups and templates there. The Destination card heads the form, followed by the Agent and Command tabs
+and their fields. The selected tab is underlined. Labels sit above the fields with short notes where needed. The Agent
+tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions
+share a row when they fit. **More options** folds the conversation selector, when offered, and Wrapper prefix together
+at the bottom of the Agent form. The folded row names the fields and shows a pill for each set value, with the wrapper
+prefix in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is
+required, refused or invalid. After a correction, the user can close it once no field needs attention. The footer's
+actions sit on the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main
+action comes last with a Return key cap. Its accessible name keeps the operation and target. Tab follows the command
+field, Close, the visible body controls, then the footer actions. More options is a Tab stop, with its editors following
+it when expanded. New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel.
+Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region,
+so long content cannot displace those actions. The save-as-template panel remains inline in the scrolling body. Project
+registration (associating metadata with a directory) is optional convenience and never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
@@ -5246,11 +5247,11 @@ classification. Captured resumable conversations offer Restart, and agents never
 reconnects running containers and leaves paused containers paused.
 
 Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
-cube. The footer names the new container and its host. Its session-owned host appears in Hosts, update eligibility and
-the existing attention area, with no permanent rail icon or ordinary launch/template/agent destination choice. A
-container host cannot be removed or retargeted while any environment row references it, including stopped environments
-and cleanup leftovers, or while recipe state records images or helpers there. The refusal names the environments or
-recipes to clean up first. This keeps the route available for confirmed resource cleanup.
+cube. The launch action's accessible name names the new container and its host. Its session-owned host appears in Hosts,
+update eligibility and the existing attention area, with no permanent rail icon or ordinary launch/template/agent
+destination choice. A container host cannot be removed or retargeted while any environment row references it, including
+stopped environments and cleanup leftovers, or while recipe state records images or helpers there. The refusal names the
+environments or recipes to clean up first. This keeps the route available for confirmed resource cleanup.
 
 Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent
 after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays

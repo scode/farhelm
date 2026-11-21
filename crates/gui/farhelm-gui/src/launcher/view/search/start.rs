@@ -296,6 +296,7 @@ impl Launcher {
                             "",
                             active && !disabled && entry.selection.container.is_none(),
                             selected,
+                            recent_enter_cap(&self.draft.mode),
                             palette,
                         ),
                     )
@@ -427,6 +428,7 @@ fn recent_choice(
     query: &str,
     active: bool,
     selected: bool,
+    enter_cap: SharedString,
     palette: &Palette,
 ) -> AnyElement {
     let selection = &entry.selection;
@@ -509,8 +511,26 @@ fn recent_choice(
                         .child(details),
                 ),
         )
-        .when(active, |row| row.child(key_chip(RETURN_KEY, ink, palette)))
+        .when(active, |row| {
+            row.child(
+                key_chip(enter_cap.clone(), ink, palette)
+                    .id("launcher-recent-enter")
+                    .role(Role::Label)
+                    .aria_label(enter_cap),
+            )
+        })
         .into_any_element()
+}
+
+/// The key cap a highlighted recent setup shows. In Replace with, Enter on it replaces the source session, which
+/// deletes that session, so the cap names the verb, as the old recent strip's "⏎ Replace" hint did; elsewhere Enter
+/// launches the setup and the bare key says enough. Only one row is highlighted at a time, so the cap's id is unique.
+fn recent_enter_cap(mode: &super::Mode) -> SharedString {
+    if matches!(mode, super::Mode::ReplaceWith { .. }) {
+        format!("{RETURN_KEY} Replace").into()
+    } else {
+        RETURN_KEY.into()
+    }
 }
 
 /// Explain a result's effect where the group and name alone leave it unclear. The row keeps the same full accessible
@@ -532,6 +552,7 @@ pub(super) fn typed_choice(
             query,
             selected,
             selected,
+            recent_enter_cap(&launcher.draft.mode),
             palette,
         );
     }
