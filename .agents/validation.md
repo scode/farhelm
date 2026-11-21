@@ -1028,6 +1028,9 @@ systemd or SSH substrate ran.
   anchor. Bun is the package manager the Vercel project is configured with, so the lockfile is `bun.lock`; commit it
   with any dependency change. Vercel itself never builds on a push; see `.agents/vercel.md`. The build itself runs under
   Node (the `astro` binary's shebang), and Astro refuses Node older than 22.12; the CI job pins Node for that reason.
+- `node --test website/scripts/release-notes.test.mjs` — after installing website dependencies, checks the release-notes
+  generator's app feed for the version floor, draft exclusion, styled highlights, folded counts and screenshot links.
+  The website build also checks the generated page against the checked-in changelog. Run both on generator changes.
 - `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
   and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
   cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).

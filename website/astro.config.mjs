@@ -38,10 +38,9 @@ export default defineConfig({
     },
   },
   integrations: [
-    // The Release notes page is generated from the repository's CHANGELOG.md
-    // before anything else reads the content collection, for `astro dev` and
-    // `astro build` alike; scripts/release-notes.mjs says why and what it
-    // writes. addWatchFile marks the changelog as a restart input, but does
+    // Generate the Release notes page and the app's upgrade highlights from
+    // CHANGELOG.md before Astro reads the content collection or public files.
+    // addWatchFile marks the changelog as a restart input, but does
     // not subscribe the dev watcher to files outside the website root. The
     // server hook subscribes both sources and rewrites the generated page;
     // the content collection then picks up that page's changes as usual.

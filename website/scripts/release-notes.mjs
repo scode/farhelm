@@ -1,6 +1,6 @@
-// Builds the docs website's Release notes page from the repository's
-// CHANGELOG.md, every time the site is built or the preview server starts
-// (astro.config.mjs runs it from an integration hook).
+// Builds the docs website's Release notes page and the desktop app's upgrade
+// highlights from CHANGELOG.md. The Astro config runs it before Astro loads
+// the content collection or copies the public assets.
 //
 // CHANGELOG.md stays the one source of release notes: it is written for
 // someone running Farhelm, and cargo-dist copies each release's section from
@@ -9,7 +9,7 @@
 // cannot disagree. The generated page is gitignored; nothing here is meant to
 // be edited by hand.
 //
-// It writes one file, src/content/docs/docs/release-notes.mdx: a short
+// The page, src/content/docs/docs/release-notes.mdx, starts with a short
 // introduction, then each release newest first, as a heading the page owns
 // (so the right-hand "On this page" column lists the versions) followed by
 // that release's section of CHANGELOG.md. The changelog's own opening
@@ -50,7 +50,11 @@
 // matched against a release's screenshot list: a shot whose PR only the fold
 // cites is unplaced and fails the build, rather than showing up folded away
 // (or twice, when a PR has a highlight and an unrelated full-list entry).
+// The same pass gives each screenshot disclosure a version-and-PR anchor.
+// The upgrade feed uses those anchors, and omits draft notes so a new app
+// can wait for the site to publish its own release's finalized highlights.
 
+import { fromMarkdown } from 'mdast-util-from-markdown';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -64,6 +68,16 @@ export const changelogPath = join(websiteDir, '..', 'CHANGELOG.md');
 export const screenshotsDir = join(websiteDir, 'src', 'release-notes');
 
 const pagePath = join(websiteDir, 'src', 'content', 'docs', 'docs', 'release-notes.mdx');
+const upgradeNotesPath = join(websiteDir, 'public', 'whats-new.json');
+
+const DRAFT_NOTICE = '**DRAFT release notes - not yet finalized**';
+const HIGHLIGHT_NAMES = new Map([
+  ['### 💥 Breaking', 'Breaking'],
+  ['### 🚀 Added', 'Added'],
+  ['### 🔄 Changed', 'Changed'],
+  ['### 🔧 Fixes worth highlighting', 'Fixes worth highlighting'],
+  ['### 🗑️ Removed', 'Removed'],
+]);
 
 /**
  * The folded full list's frame lines, exactly as releasing/check-changelog.py
@@ -142,16 +156,64 @@ function screenshotsFor(tag) {
 }
 
 /**
- * One release's section as MDX: the changelog lines, escaped, with each entry
- * that has screenshots followed by a <ReleaseScreenshots> placed inside its
- * list item (indented under the bullet, after a blank line).
+ * Only stable releases using the highlights and folded full-list format
+ * belong in the app's feed. Older releases still go on the website.
  */
-function releaseBody(tag, lines) {
-  const shots = screenshotsFor(tag);
+function hasUpgradeNotes({ version, lines }) {
+  const stable = /^(\d+)\.(\d+)\.\d+$/.exec(version);
+  return stable !== null && (Number(stable[1]) > 0 || Number(stable[2]) >= 42)
+    && lines.find((line) => line.trim()) !== DRAFT_NOTICE;
+}
+
+/** Convert one highlight to styled text. Link labels can contain styling, but their destinations stay on the page. */
+function entryPieces(entry) {
+  const pieces = [];
+  function append(node, style) {
+    if (node.type === 'strong') style = 'bold';
+    if (node.type === 'emphasis') style = 'plain';
+    if (node.type === 'inlineCode') style = 'code';
+
+    if (node.children) {
+      for (const child of node.children) append(child, style);
+      return;
+    }
+    const text = node.value ?? node.alt;
+    if (!text) return;
+    const previous = pieces.at(-1);
+    if (previous?.style === style) previous.text += text;
+    else pieces.push({ style, text });
+  }
+  append(fromMarkdown(entry), 'plain');
+  return pieces;
+}
+
+/** The changelog checker accepts indented continuations, even after blank lines. */
+function continuationEnd(lines, start) {
+  let end = start;
+  for (let next = start + 1; next < lines.length; next++) {
+    if (!lines[next].trim()) continue;
+    if (!lines[next].startsWith('  ')) break;
+    end = next;
+  }
+  return end;
+}
+
+/**
+ * Render a release section and collect its app highlights in the same pass.
+ * Eligibility, screenshot placement and the folded list determine what the
+ * app can link to, so the page and feed share those decisions here.
+ */
+function releaseBody(release, shots) {
+  const { version, date, lines } = release;
+  const tag = `v${version}`;
+  const notes = hasUpgradeNotes(release) ? { version, date, highlights: [], additionalChanges: 0 } : null;
   const placed = new Set();
+  const citationCounts = new Map();
   const out = [];
   let inFold = false;
-  for (const line of lines) {
+  let entries = null;
+  for (let index = 0; index < lines.length; index++) {
+    const line = lines[index];
     if (FOLD_FRAME.has(line)) {
       if (line === '<details>') inFold = true;
       if (line === '</details>') inFold = false;
@@ -165,27 +227,55 @@ function releaseBody(tag, lines) {
     // always rendered: published release notes are frozen.
     const category = line.startsWith('### ') || (inFold && line.startsWith('#### '));
     out.push(category ? `#${escapeMdx(line)}` : escapeMdx(line));
-    if (inFold || !line.startsWith('- ')) continue;
-    const cited = citedNumbers(line);
+    if (notes && category && !inFold) {
+      const name = HIGHLIGHT_NAMES.get(line);
+      entries = name ? [] : null;
+      if (entries) notes.highlights.push({ name, entries });
+    }
+    if (!line.startsWith('- ')) continue;
+    if (inFold) {
+      if (notes) notes.additionalChanges++;
+      continue;
+    }
+    const end = continuationEnd(lines, index);
+    const continuation = lines.slice(index + 1, end + 1);
+    out.push(...continuation.map(escapeMdx));
+    index = end;
+    const entry = [line.slice(2), ...continuation].map((part) => part.trim()).filter(Boolean).join(' ');
+    const cited = citedNumbers(entry);
     const mine = shots.filter((shot) => cited.includes(shot.entry));
+    // Published entries can cite the same PR. Number repeated citations
+    // even if an entry has no shots, so screenshot metadata cannot move a link.
+    const first = cited[0];
+    const occurrence = (citationCounts.get(first) ?? 0) + 1;
+    citationCounts.set(first, occurrence);
+    const suffix = occurrence === 1 ? '' : `-${occurrence}`;
+    const anchor = mine.length ? `${tag}-pr-${first}${suffix}` : null;
+    if (entries) {
+      const pieces = entryPieces(entry);
+      entries.push(anchor ? { pieces, screenshotUrl: `https://farhelm.io/docs/release-notes/#${anchor}` } : { pieces });
+    }
     if (mine.length === 0) continue;
     for (const shot of mine) placed.add(shot);
     const list = JSON.stringify(mine.map(({ name, alt }) => ({ name, alt })));
-    out.push('', `  <ReleaseScreenshots shots={${list}} />`, '');
+    out.push('', `  <ReleaseScreenshots anchor="${anchor}" shots={${list}} />`, '');
   }
   const unplaced = shots.filter((shot) => !placed.has(shot));
   if (unplaced.length > 0) {
     const numbers = unplaced.map((shot) => `#${shot.entry}`).join(', ');
     throw new Error(`website/src/release-notes/${tag}.json: no entry of ${tag} cites ${numbers}`);
   }
-  return out.join('\n').trim();
+  return { body: out.join('\n').trim(), notes };
 }
 
-/** Write the page. Synchronous, so the config hook can call it. */
-export function writeReleaseNotes() {
-  const sections = releases(readFileSync(changelogPath, 'utf8')).map((release) => {
+/** Generate the page and the versioned JSON together so a feed link always names an anchor on that page. */
+export function renderReleaseNotes(changelog, loadScreenshots = screenshotsFor) {
+  const data = { formatVersion: 1, releases: [] };
+  const sections = releases(changelog).map((release) => {
     const tag = `v${release.version}`;
-    return `<a id="${tag}"></a>\n\n## ${tag}\n\nReleased ${release.date}.\n\n${releaseBody(tag, release.lines)}\n`;
+    const { body, notes } = releaseBody(release, loadScreenshots(tag));
+    if (notes) data.releases.push(notes);
+    return `<a id="${tag}"></a>\n\n## ${tag}\n\nReleased ${release.date}.\n\n${body}\n`;
   });
 
   const page = `---
@@ -203,11 +293,18 @@ their changes appear under the stable release that follows them. Farhelm on your
 
 ${sections.join('\n')}`;
 
-  mkdirSync(dirname(pagePath), { recursive: true });
-  writeFileSync(pagePath, page);
+  return { page, data };
 }
 
-// Running the file directly regenerates the page, for a look at the output.
+/** Write both generated files synchronously before Astro reads them. */
+export function writeReleaseNotes() {
+  const { page, data } = renderReleaseNotes(readFileSync(changelogPath, 'utf8'));
+  mkdirSync(dirname(pagePath), { recursive: true });
+  writeFileSync(pagePath, page);
+  writeFileSync(upgradeNotesPath, `${JSON.stringify(data)}\n`);
+}
+
+// Running the file directly regenerates both files for inspection.
 if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
   writeReleaseNotes();
 }
