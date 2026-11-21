@@ -50,11 +50,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
-  interrupted archive written by older development code can move a replacement folder after device/inode reuse when
-  birth time is unavailable. Current permanent deletion refuses this birthless case; a proven older-release variant may
-  be filtered.
-
 - [`container-token-read-blocks-host-admission.md`](container-token-read-blocks-host-admission.md) — A blocking
   configured token file can hold up other session creates and deletes across the host.
 

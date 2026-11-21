@@ -847,7 +847,9 @@ no crash or interruption point may lose it.
 
 Installing a release older than the installer's handoff floor runs that release's own published installer, with the
 protections it had then. Those installers do not protect an unrelated app put at `~/Applications/Farhelm.app` while they
-build its replacement.
+build its replacement. Defects in the installers of releases older than the handoff floor (0.31.1), and in state those
+installers or development builds left behind, are not addressed unless the problem is highly catastrophic and not a very
+rare edge case.
 
 "Built it" covers the whole bundle. Once the installer recognizes `Farhelm.app` as one it made, everything inside it is
 the installer's to replace or remove, old version folders included, along with anything a user put in them. The same
