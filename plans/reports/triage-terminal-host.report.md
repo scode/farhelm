@@ -102,3 +102,71 @@ fixture that witnesses the pending bytes and can detect a silent drop.
 Every PR passed the plan's independent source review and cold wording review. Review exposed the shared wide-wrap
 representation issue, a possible discarded Restart reply, clipboard ordering, and test premises that needed stronger
 evidence. Those findings drove the deferrals and corrections above. The report received a separate cold read.
+
+### Landing
+
+#### What landed with it
+
+The plan's eight PRs merged with no landing fix. triage-gui-sessions landed just before it, in the previous round. That
+plan changed the desktop app's session list and only comments in its terminal code, so the two plans meet only in the
+shared bookkeeping files. Every one of this plan's commits conflicted there, in TODO.md and the triage archive, where
+both plans add entries. I resolved them by keeping both sides, with a script that refuses anything but pure additions,
+and checked that both plans' entries are present.
+
+A script checked that all 21 findings left the queue and the open ledger and that each decision moved to the archive. An
+independent reviewer read the eight PRs against the triage decisions and found no blocker:
+
+- **Outcomes.** Each was carried out as decided.
+- **Wide-character fixes.** Deferring the two wide-character rendering fixes to TODO entries holds up. Both need a
+  decision on how the viewer tells wrap padding from a printed space.
+- **Primary selection.** The new primary-selection signal reuses an existing message, which older and newer desktop apps
+  both read correctly.
+- **Terminal hosts.** No terminal host code or protocol changed, so the terminal host's rule that running hosts outlive
+  every release is untouched.
+- **Vendored library.** The vendored terminal library's patch file applies to the published crate and reproduces the
+  vendored code exactly.
+
+#### Checks
+
+The plan changes the terminal path's tests and code (the supervisor's grid output, grid stream and host terminal
+runtime, the helm's terminal relay, the grid protocol module, test-state cleanup), the vendored terminal library with
+its patch file, the terminal host's tests and spec, the GUI's terminal tests, SPEC_impl.md, changelog notes, TODO.md and
+the review queue and triage ledger. The landing ran the Rust workspace suite, the vendored crates' tests, the lint runs
+and the end-to-end smoke test on a separate arm64 Linux test machine, and the goldens and small checks locally on
+x86_64.
+
+On the plan stacked on main, with the bookkeeping conflicts resolved:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine: the first run (recorder run
+  `c0d42938-f9de-4974-a1ac-84111793ca17`) ran no tests, because the compiler was killed for lack of memory while
+  building the helm's tests, which has happened on that machine twice before. The rerun (recorder run
+  `7f2046e7-575f-48c9-b6c2-cca6a5cc418d`) passed all 8221; the 86 skipped are ignored by default.
+- The vendored crates' tests, on the test machine: vte (recorder run `36dd0a0d-8c1a-483d-993a-03b906ccdecb`, 62 passed),
+  alacritty_terminal (recorder run `b75cdd68-6916-4bb1-8f29-2ab2e44fed31`, 166 passed) and the paired tests (recorder
+  run `0b8bf4d3-c65c-4749-95ef-78d5cd371354`, 3 passed).
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's own
+  two clippy runs, on the test machine, not through the recorder: passed, with no errors in the output.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `fa31f735-6158-4b73-bfb2-967b0d5c2d71`):
+  every step passed but paste, which skips on Linux as it always does.
+- `python3 scripts/check-gui-goldens.py`, the full comparison, locally (recorder run
+  `199c0a3a-3c3a-4b61-ad6c-c0a5219afc4f`): passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check`,
+  `python3 scripts/check-agents-md.py` and `python3 releasing/check-changelog.py format`, locally: passed.
+- A script comparing the deleted feedback files, removed index lines and archived ledger entries: all 21 match.
+
+Skipped: the terminal host's coverage and mutation runs, which the validation guide calls for when the crate's code
+changes, since only its tests and spec changed; the desktop app shell's own tests, which the workspace run leaves out,
+since the lint runs compiled it and nothing in it changed (the desktop GUI's tests, including the drag-guidance test
+this plan changed, ran in the workspace suite); macOS, because the landing has no Mac test machine, so the one Mac-only
+change, which keeps a test run's files when a truncated process listing leaves cleanup unsure a test terminal host is
+gone, has only been read, never run, in execution or at landing; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+Possible follow-ups the reviewer found, none of them blocking:
+
+- The report calls the synchronized-output tests strengthened, but the rewrite dropped one check. A program can start a
+  batched screen update and never finish it; the tests no longer confirm that later output is still drawn and the screen
+  is not left waiting on that update. A regression there could leave a frozen screen with nothing to catch it.
+- The fix that lets Restart stop waiting for scrollback when the old terminal is shut down partway through sending it
+  has no test of its own, and its code comment describes the hazard only loosely.

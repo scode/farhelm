@@ -5,7 +5,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 0d4a6c] `agent-hook-setup.md` — give every agent type its own Settings section, and let Grok and Antigravity users opt in once to Farhelm installing its Restart hooks into those agents on every machine, asked in the launcher and explained on the greyed Restart (after `launcher-command-field.md`)
 - [pending] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
 - [pending] `triage-supervisor.md` — execute the 2026-11-21 triage outcomes for the supervisor (session lifecycle, shell sessions, cleanup), in grouped PRs
-- [landing 25bfe1] `triage-terminal-host.md` — execute the 2026-11-21 triage outcomes for the terminal host and terminal emulation, in grouped PRs
 - [in-flight 144998] `triage-helm.md` — execute the 2026-11-21 triage outcomes for the helm (hosts, provisioning, automatic update, desktop startup), in grouped PRs
 - [in-flight 362cf1] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
