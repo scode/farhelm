@@ -2443,13 +2443,21 @@ impl HostTerminal {
     /// (the emulator is kept), or the emulator was lost. Callers tell a
     /// stopping supervisor from the rest themselves.
     pub async fn history_seed(&self, max_bytes: usize) -> Option<Snapshot> {
-        let (reply, answer) = oneshot::channel();
+        let (reply, mut answer) = oneshot::channel();
         self.inner
             .control
             .send(Control::Seed { max_bytes, reply })
             .await
             .ok()?;
-        answer.await.ok().flatten()
+        tokio::select! {
+            biased;
+            result = &mut answer => result.ok().flatten(),
+            // An abort drops the receiver without draining it. A request
+            // sent by an outstanding permit can still hold its reply.
+            // A completed reply takes precedence even if it arrived between
+            // the two polls. The runtime sends its last reply before closing.
+            () = self.inner.control.closed() => answer.try_recv().ok().flatten(),
+        }
     }
 
     /// The host process this runtime adopted, pinned to its start identity
@@ -3035,7 +3043,8 @@ impl Runtime {
         }
         // So that the emulator is home for `read` once the runtime ends.
         self.settle_encoding().await;
-        self.finish();
+        drop(conn);
+        self.finish().await;
     }
 
     /// Send what waits, then wait for one thing to happen and act on it.
@@ -4289,7 +4298,7 @@ impl Runtime {
             ended,
             peer,
         });
-        self.finish();
+        self.finish().await;
     }
 
     /// The second try of a shutdown whose connection ended before the host
@@ -4345,19 +4354,23 @@ impl Runtime {
         *peer = Some(adopted);
     }
 
-    /// Settle every input still held when the runtime ends: what was never
-    /// sent is not sent, and what is in flight is unknown.
-    fn finish(mut self) {
+    /// Settle requests when the runtime ends normally. In-flight input is
+    /// unknown, unsent input is reported as such, and control replies close.
+    /// A sender may already hold a permit when the receiver closes. Drain
+    /// until those sends arrive or release their permits.
+    async fn finish(mut self) {
+        self.input_rx.close();
+        self.control_rx.close();
         for lost in self.in_flight.drain(..) {
             resolve(lost.fate, InputFate::Unknown);
         }
         for waiting in self.pending.drain(..) {
             resolve(waiting.into_fate(), InputFate::NotSent);
         }
-        self.input_rx.close();
-        while let Ok(request) = self.input_rx.try_recv() {
+        while let Some(request) = self.input_rx.recv().await {
             request.not_sent();
         }
+        while self.control_rx.recv().await.is_some() {}
     }
 }
 

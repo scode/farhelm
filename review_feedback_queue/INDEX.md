@@ -25,10 +25,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`retired-runtime-retains-restart-seed-reply.md`](retired-runtime-retains-restart-seed-reply.md) — An input/paste
-  reserved before retirement can remain retained with no receipt; the same late-send lifetime on the runtime's control
-  channel can also leave an accepted Restart waiting for a history-seed reply after the runtime has ended.
-
 - [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
