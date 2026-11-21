@@ -4898,6 +4898,11 @@ whereas an empty hook override explicitly disables it. Configuration stays with 
 stays with the installation identity. Host settings exposes the root override only; the effective root continues to
 resolve from the current global default at launch rather than being copied when a host is added.
 
+Discovery, preview and creation share the same effective checkout settings for a host. If a session-owned host has no
+configured root, those three paths pass `~` for expansion by the target supervisor. Configuration reads for Settings and
+the command line continue to report the stored values and inheritance. A new environment launch can be admitted before
+it has a host row or a checkout folder.
+
 `POST /api/github-checkout-preview` asks the target supervisor to expand/canonicalize the configured root and propose
 the exact destination, without writing it. Responses include the configuration revision and installation/incarnation
 claim, never the hook. A missing root resolves by canonicalizing its deepest existing directory ancestor and appending

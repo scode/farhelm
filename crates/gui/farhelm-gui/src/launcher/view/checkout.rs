@@ -329,8 +329,8 @@ pub(in crate::launcher) fn repository_choices(
 impl Launcher {
     /// The chosen host as the store holds it now, while it is connected with an installation identity: the only host
     /// either read can ask about, since the helm binds both to that identity. None while a new environment is chosen:
-    /// its checkout's folder is previewed by the helm once the environment's Farhelm connects, and the host's checkout
-    /// folder setup is not its concern (SPEC.md, "Managed checkouts": a recipe-target launch "is another exception").
+    /// the helm previews the path once the new environment's Farhelm connects. The checkout can use that machine's
+    /// home when the default checkout folder is unset.
     fn checkout_host(&self, cx: &App) -> Option<HostView> {
         if self.draft.target.is_some() {
             return None;
@@ -1089,7 +1089,8 @@ impl Launcher {
         let setup = self.setup_field(window, cx);
         let setup_shown = setup.is_some();
         rows.extend(setup);
-        if !setup_shown
+        if self.draft.target.is_none()
+            && !setup_shown
             && let Some((field, _)) = &self.checkout.setup
             && let Some(reason) = field.read(cx).refusal()
         {
@@ -1186,12 +1187,19 @@ impl Launcher {
         let key = self.suggest_key(window, cx)?;
         let palette = theme::palette(cx);
         match self.checkout.suggestions.answer_for(&key)? {
-            Ok(reply) => match &reply.scan_error {
-                Some(error) => Some(status_line(id, error.clone(), palette)),
-                // A quiet hint, but announced as the other notes are.
-                None if reply.truncated => Some(help_line(INCOMPLETE, palette).role(Role::Status)),
-                None => None,
-            },
+            Ok(reply) => {
+                // The source host's missing folder can limit suggestions. A new environment still accepts a
+                // manually entered repository, so show the incomplete search without the setup warning.
+                let source_needs_setup = self.draft.target.is_some() && reply.needs_checkout_root;
+                match reply.scan_error.as_ref().filter(|_| !source_needs_setup) {
+                    Some(error) => Some(status_line(id, error.clone(), palette)),
+                    // A quiet hint, announced as the other notes are.
+                    None if reply.truncated => {
+                        Some(help_line(INCOMPLETE, palette).role(Role::Status))
+                    }
+                    None => None,
+                }
+            }
             Err(words) => Some(status_line(id, words.raw().to_owned(), palette)),
         }
     }

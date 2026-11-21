@@ -31,15 +31,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **Set up the default checkout folder from a new environment launch.** The session launcher offers a managed checkout
-  in a new environment even when the all-hosts default checkout folder is unset. The helm refuses it before creating the
-  environment and sends the user to Settings. Read the all-hosts setting, show the shared inline folder field when it is
-  missing, and wait until the saved setting is confirmed before enabling Launch. A host's own override cannot satisfy
-  this requirement. The recipe exception applies to previewing the checkout path, so correct the comment at the
-  installed-host preview check. Keep quick launch waiting for the global read. Cover an unset default with a host
-  override, a configured default, and a shortcut that reveals the setup field when the default is missing or the read
-  error when the setting could not be loaded. Plan: `plans/queue/environment-checkout-without-setup.md`.
-
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
   resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
   (interim, decided 2026-11-17). Tensorlake suspends an idle sandbox after 30 minutes, including once the app quits, so

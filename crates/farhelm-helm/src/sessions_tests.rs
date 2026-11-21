@@ -378,10 +378,23 @@ mod captured_create_history {
 /// This also proves ordinary host selection cannot reuse the owned machine.
 #[farhelm_testtrace::test]
 async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
-    use farhelm_proto::ControlMsg;
-    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::launcher::TemplateNameKind;
+    assert_new_environment_checkout(Some("~/work"), "/environment-home/work").await;
+}
 
+/// Without a stored default, the target's home is the actual root sent to
+/// discovery, preview, and create. The chosen folder is still bound to that
+/// same installation before the one permitted create.
+#[farhelm_testtrace::test]
+async fn a_recipe_checkout_uses_its_environment_home_without_setup() {
+    assert_new_environment_checkout(None, "/environment-home").await;
+}
+
+/// Register the same session-owned host that provisioning publishes. The
+/// caller supplies a protocol peer to verify what travels over that route.
+async fn environment_checkout_harness(
+    peer: tokio::io::DuplexStream,
+    sessions: Vec<farhelm_proto::SessionInfo>,
+) -> (rest_harness::Harness, store::HostId) {
     let h = rest_harness::idle_helm().await;
     let owned = h
         .store
@@ -402,8 +415,39 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
         .admit_tensorlake_install(owned, "/fixture/farhelm", "/fixture/state")
         .await
         .unwrap();
-    h.store.set_checkout_root(None, "~/work").await.unwrap();
+    h.fleet.edit(owned, |script| {
+        *script = rest_harness::HostScript {
+            identity: Some("fresh-recipe-install".into()),
+            sessions,
+            peer: Some(peer),
+            ..rest_harness::HostScript::default()
+        }
+    });
+    (h, owned)
+}
+
+/// Exercise the real preview/name retry and one accepted create with both
+/// an inherited default and the home fallback, on a registered environment.
+async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_root: &'static str) {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::launcher::TemplateNameKind;
+
     let (client_side, peer) = tokio::io::duplex(64 * 1024);
+    let (h, owned) = environment_checkout_harness(client_side, Vec::new()).await;
+    if let Some(root) = root {
+        h.store.set_checkout_root(None, root).await.unwrap();
+    }
+    assert_eq!(
+        h.store
+            .resolve_checkout_config(None)
+            .await
+            .unwrap()
+            .root
+            .as_deref(),
+        root
+    );
+    let requested_root = root.unwrap_or("~");
     let (done, mut finished) = tokio::sync::oneshot::channel();
     let responder = tokio::spawn(async move {
         let (read, write) = tokio::io::split(peer);
@@ -420,10 +464,18 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
                 frame = reader.read_frame() => frame.unwrap().expect("owned fixture remains connected"),
             };
             let reply = match parse_control(&frame).unwrap() {
+                ControlMsg::GithubRepoSearch { req_id, root, .. } => {
+                    assert_eq!(root.as_deref(), Some(requested_root));
+                    ControlMsg::GithubRepoResults {
+                        req_id,
+                        repos: Vec::new(),
+                        truncated: false,
+                    }
+                }
                 ControlMsg::GithubCheckoutPreview { req_id, request } => {
                     assert_eq!(request.host.as_deref(), Some(owned.to_string().as_str()));
                     assert_eq!(request.repo, "acme/project");
-                    assert_eq!(request.root.as_deref(), Some("~/work"));
+                    assert_eq!(request.root.as_deref(), Some(requested_root));
                     let title = request.title.unwrap();
                     previews.push(title.clone());
                     if title == "review" {
@@ -438,9 +490,9 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
                         ControlMsg::GithubCheckoutPreviewed {
                             req_id,
                             preview: farhelm_proto::GithubPreviewResponse {
-                                canonical_root: "/new-home/work".into(),
+                                canonical_root: canonical_root.into(),
                                 basename: "project-review-2".into(),
-                                cwd: "/new-home/work/project-review-2".into(),
+                                cwd: format!("{canonical_root}/project-review-2"),
                                 config_revision: request.config_revision.unwrap(),
                                 claim_context: farhelm_proto::ClaimContext {
                                     host: owned.to_string(),
@@ -463,8 +515,11 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
                     );
                     assert_eq!(title.as_deref(), Some("review-2"));
                     let checkout = github_checkout.expect("exact managed-checkout admission");
-                    assert_eq!(checkout.root, "~/work");
-                    assert_eq!(checkout.preview.cwd, "/new-home/work/project-review-2");
+                    assert_eq!(checkout.root, requested_root);
+                    assert_eq!(
+                        checkout.preview.cwd,
+                        format!("{canonical_root}/project-review-2")
+                    );
                     assert_eq!(checkout.preview.basename, "project-review-2");
                     let mut session = rest_harness::session("recipe-child", 100);
                     session.title = title.unwrap();
@@ -477,16 +532,19 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
         }
         (previews, creates)
     });
-    h.fleet.edit(owned, |script| {
-        *script = rest_harness::HostScript {
-            identity: Some("fresh-recipe-install".into()),
-            peer: Some(client_side),
-            ..rest_harness::HostScript::default()
-        }
-    });
     h.manager.sync_registry().await.unwrap();
     h.await_refreshed(owned).await;
     assert!(h.manager.status(owned).unwrap().is_session_owned);
+    let (status, discovery) = post_text(
+        &h,
+        "/api/github-repositories",
+        serde_json::json!({"host": owned, "query": "acme"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{discovery}");
+    let discovery: serde_json::Value = serde_json::from_str(&discovery).unwrap();
+    assert_eq!(discovery["needs_checkout_root"], false);
+    assert_eq!(discovery["scan_error"], serde_json::Value::Null);
     let refused = super::create_target(&h.state, Some(owned))
         .err()
         .expect("owned destination refused");
@@ -503,7 +561,7 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
         "github_checkout": { "repo": "acme/project", "title": "review" },
     }))
     .unwrap();
-    request.validate_sandbox_launch(&h.state).await.unwrap();
+    request.validate_sandbox_launch().unwrap();
     let session = tokio::time::timeout(
         Duration::from_secs(15),
         super::create_in_session_sandbox(&h.state, owned, request, Some(TemplateNameKind::Base)),
@@ -512,7 +570,7 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
     .expect("initial checkout must finish within the owned fixture's lifetime")
     .unwrap();
     assert_eq!(session.title, "review-2");
-    assert_eq!(session.cwd, "/new-home/work/project-review-2");
+    assert_eq!(session.cwd, format!("{canonical_root}/project-review-2"));
     assert!(
         session.id.ends_with(":recipe-child"),
         "reply must be host-qualified: {}",
@@ -522,6 +580,131 @@ async fn a_recipe_checkout_binds_its_new_machine_preview_before_one_create() {
     let (previews, creates) = responder.await.unwrap();
     assert_eq!(previews, ["review", "review-2"]);
     assert_eq!(creates, 1);
+}
+
+/// The home fallback also applies when Replace with starts a fresh checkout
+/// on an existing session-owned host. The accepted preview and the create
+/// agree on the target's root before the original session is deleted.
+#[farhelm_testtrace::test]
+async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+
+    let (client, peer) = tokio::io::duplex(64 * 1024);
+    let (h, host) =
+        environment_checkout_harness(client, vec![rest_harness::session("source", 1)]).await;
+    assert!(
+        h.store
+            .resolve_checkout_config(None)
+            .await
+            .unwrap()
+            .root
+            .is_none()
+    );
+    let fleet = h.fleet.clone();
+    let (done, mut finished) = tokio::sync::oneshot::channel();
+    let responder = tokio::spawn(async move {
+        let (read, write) = tokio::io::split(peer);
+        let mut reader = FrameReader::new(read);
+        let mut writer = FrameWriter::new(write);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let frame = reader.read_frame().await.unwrap().unwrap();
+        let ControlMsg::GithubCheckoutPreview { req_id, request } = parse_control(&frame).unwrap()
+        else {
+            panic!("expected checkout preview");
+        };
+        assert_eq!(request.root.as_deref(), Some("~"));
+        let cwd = "/environment-home/bar-review";
+        writer
+            .write_control(&ControlMsg::GithubCheckoutPreviewed {
+                req_id,
+                preview: farhelm_proto::GithubPreviewResponse {
+                    canonical_root: "/environment-home".into(),
+                    basename: "bar-review".into(),
+                    cwd: cwd.into(),
+                    config_revision: request.config_revision.unwrap(),
+                    claim_context: farhelm_proto::ClaimContext {
+                        host: host.to_string(),
+                        incarnation: request.expected_incarnation.unwrap(),
+                    },
+                },
+            })
+            .await
+            .unwrap();
+        let frame = reader.read_frame().await.unwrap().unwrap();
+        let ControlMsg::CreateSession {
+            req_id,
+            github_checkout: Some(checkout),
+            ..
+        } = parse_control(&frame).unwrap()
+        else {
+            panic!("expected managed checkout create");
+        };
+        assert_eq!(checkout.root, "~");
+        assert_eq!(checkout.preview.cwd, cwd);
+        let mut replacement = rest_harness::session("replacement", 2);
+        replacement.cwd = cwd.into();
+        fleet.edit(host, |script| script.sessions.push(replacement.clone()));
+        writer
+            .write_control(&ControlMsg::SessionCreated {
+                req_id,
+                session: replacement,
+            })
+            .await
+            .unwrap();
+
+        let frame = reader.read_frame().await.unwrap().unwrap();
+        let ControlMsg::DeleteSession {
+            req_id, session_id, ..
+        } = parse_control(&frame).unwrap()
+        else {
+            panic!("expected removal of the source after create");
+        };
+        assert_eq!(session_id, "source");
+        fleet.edit(host, |script| {
+            script.sessions.retain(|session| session.id != "source")
+        });
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                archived: false,
+                notice: None,
+            })
+            .await
+            .unwrap();
+        tokio::select! {
+            biased;
+            frame = reader.read_frame() => panic!("unexpected operation after replacement: {frame:?}"),
+            result = &mut finished => result.unwrap(),
+        }
+    });
+    h.manager.sync_registry().await.unwrap();
+    h.await_refreshed_as(host, "fresh-recipe-install", 1).await;
+    assert!(h.manager.status(host).unwrap().is_session_owned);
+    let (status, preview) = post_text(
+        &h,
+        "/api/github-checkout-preview",
+        serde_json::json!({"host": host, "repo": "acme/bar", "title": "review"}),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{preview}");
+    let preview: serde_json::Value = serde_json::from_str(&preview).unwrap();
+    let (status, result) = post_text(
+        &h,
+        &h.session_uri(host, "/api/sessions/source/replace"),
+        serde_json::json!({
+            "with": {
+                "cwd": "", "command": {"command": "true", "yolo": false},
+                "github_checkout": {"repo": "acme/bar", "title": "review", "preview": preview},
+            },
+        }),
+    )
+    .await;
+    assert_eq!(status, axum::http::StatusCode::OK, "{result}");
+    done.send(()).unwrap();
+    responder.await.unwrap();
 }
 
 /// The composer reads its release-owned catalog and its successful-create

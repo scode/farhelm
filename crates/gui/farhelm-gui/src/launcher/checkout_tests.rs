@@ -1686,6 +1686,49 @@ fn a_host_without_a_checkout_folder_offers_the_setup_inline(cx: &mut TestAppCont
     );
 }
 
+/// A new container can use a typed repository when the source host has no checkout folder. The suggestions can still
+/// be incomplete, so the launcher keeps the hint for typing a repository while dropping the source's setup warning.
+#[gpui::test]
+fn new_container_checkout_ignores_the_source_hosts_missing_folder(cx: &mut TestAppContext) {
+    use super::environment_launch_tests::{answer_except, plain_preferences, window_with};
+    use super::view_tests::{fixture_hosts, pick_host_menu_row};
+
+    let (mut helm, cx) = window_with(
+        cx,
+        command_draft(1),
+        fixture_hosts(&[0, 1, 2]),
+        plain_preferences(),
+    );
+    answer_except(&mut helm, cx, |_| false);
+    test_support::click(cx, "launcher-destination-Managed checkout");
+    test_support::advance(cx, Duration::from_millis(160));
+    let reads = answer_except(&mut helm, cx, |command| command.path == REPOSITORIES);
+    let [suggestions] = reads.as_slice() else {
+        panic!("the original host should be asked once for repository suggestions");
+    };
+    let mut response = repositories(&[], true, Some("no checkout folder is configured"));
+    response["needs_checkout_root"] = json!(true);
+    helm.reply(suggestions.id, 200, Some(response));
+    settle(cx);
+    assert!(cx.debug_bounds("launcher-checkout-setup").is_some());
+    answer_except(&mut helm, cx, |_| false);
+
+    pick_host_menu_row(cx, "launcher-host-option-New container");
+    assert!(draft(cx).target.is_some());
+    assert_eq!(draft(cx).destination_kind(), DestinationKind::Checkout);
+    click_in_body(cx, "launcher-repository");
+    assert!(read(cx, |launcher, window, cx| launcher
+        .repository_focused(window, cx)));
+    assert!(cx.debug_bounds("launcher-checkout-setup").is_none());
+    assert!(name_of(cx, "launcher-repository-note").is_none());
+    assert!(test_support::frame(cx).iter().any(|node| {
+        node.label
+            .as_ref()
+            .is_some_and(|label| label.starts_with("Repository search is incomplete"))
+    }));
+    assert!(to(&sent(&mut helm, cx), "/api/checkout-root").is_empty());
+}
+
 /// A CLI change can resolve a failed preview while the launcher is open. The stale save must be refused,
 /// but the folder discovered by the refetch still lets the launcher refresh that preview and dismiss setup.
 #[gpui::test]
