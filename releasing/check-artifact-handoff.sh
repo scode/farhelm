@@ -5,7 +5,10 @@ set -euo pipefail
 
 directory=$1
 phase=$2
-mapfile -t archives <<<"${RELEASE_ARCHIVES:?release archive names are required}"
+archive_list=${RELEASE_ARCHIVES:?release archive names are required}
+# YAML already terminates its block with a newline. Pass its bytes through
+# so Bash does not append another newline and invent an empty archive name.
+mapfile -t archives < <(printf '%s' "$archive_list")
 
 require_file() {
   if [[ ! -f "$1" || ! -s "$1" || -L "$1" ]]; then
