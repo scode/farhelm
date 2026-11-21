@@ -4,6 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 454f61] `gui-launcher-feedback-fixes.md` — show recent setups' wrapper prefix, the inline default-folder field for a new sandbox checkout, a correct Restart explanation for older Muse sessions and the Discord link's ↗, closing four triage outcomes
 - [in-flight be1841] `hosts-small-fixes.md` — disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
-- [pending] `terminal-exit-and-placeholder-fixes.md` — let an exited agent's oldest line scroll into view and make the connecting placeholder readable in light appearance, closing two triage outcomes
+- [in-flight b1aebc] `terminal-exit-and-placeholder-fixes.md` — let an exited agent's oldest line scroll into view and make the connecting placeholder readable in light appearance, closing two triage outcomes
 - [pending] `desktop-updater-unreadable-optout.md` — treat an unreadable automatic-update setting as off, closing its triage outcome
 - [pending] `container-delete-and-link-group-tests.md` — add regression tests for legacy container Delete's removal and snapshot link grouping, closing two triage outcomes
