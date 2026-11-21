@@ -66,7 +66,7 @@ impl Supervisor {
         .into())
     }
 
-    /// Admit one manually configured Grok callback through the shared
+    /// Admit one Grok callback (from hooks Farhelm installed on opt-in or the user did) through the shared
     /// ownership and capture transaction.
     ///
     /// `SessionStart` is the only selecting event. Its vendor timestamp is
