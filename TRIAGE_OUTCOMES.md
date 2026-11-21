@@ -1773,24 +1773,6 @@
   reference: Discard. It matters only for an unusual diagnostic run mode and leaks nothing.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## fixture-private-ipv6-url-guard.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. The agent-screen capture tool and its Rust check would let through a screen showing a
-  private IPv6 proxy URL (fd00::/8 and similar) and commit it to the public repo. Verified: Confirmed. Neither
-  `screen_fixtures.rs` `contains_local_url` (~L219-244) nor the `LOCAL_URL` regex in `capture-agent-screens.py`
-  (~L99-104) knows any IPv6 address other than ::1. `docs/agent-screen-fixtures.md` promises to scrub URLs into "its
-  private network". No real capture contains one.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code in one small PR together with capture-scrubber-misses-multiple-at-signs and
-  fixture-url-guard-consumes-adjacent-at-sign.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
 ## capture-startup-metadata-cleanup.md
 
 - Outcome: `other`.
@@ -1821,38 +1803,6 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code: resolve the path once. One line.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## capture-scrubber-misses-multiple-at-signs.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. A local proxy URL whose password contains a raw "@" passes the capture scrubber
-  unscrubbed. The Rust check catches it unless the run uses `--no-test`. Verified: Confirmed. `LOCAL_URL` in
-  `capture-agent-screens.py` (~L100) allows only a userinfo without "@". The Rust `contains_local_url` uses
-  `rsplit('@')` and does catch it.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code, in the same PR as fixture-private-ipv6-url-guard.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## fixture-url-guard-consumes-adjacent-at-sign.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. The Rust fixture privacy check misses `http://localhost:8080,user@example.com` because
-  it treats the prose after the comma as userinfo. A hand-made fixture could slip through. Verified: Confirmed.
-  `screen_fixtures.rs` ~L221-225 splits the authority only on "/?#" and whitespace, then takes the text after the last
-  "@", which is "example.com". The Python scrubber does catch this exact input.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code, in the same PR.
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## landing-tests-import-unregistered-module.md

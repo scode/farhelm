@@ -46,8 +46,9 @@ import subprocess
 import sys
 import tempfile
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from ipaddress import IPv6Address, IPv6Network
 
 from agent_screen_host import HostRun, default_farhelm
 
@@ -94,17 +95,70 @@ class Scrubber:
     # A URL that points into this machine or its private network: an agent shows one when its configuration sends it
     # through a local proxy (Codex warns that its base URL is overridden). It says how the capture host is set up, so
     # its scheme, host and port become a neutral placeholder. `host` is the scrubbed host name, so a URL to this
-    # machine by name is caught after the word replacements too. Userinfo belongs to the authority, not the host,
-    # and must disappear with it: a configured proxy URL can carry a password before `@`.
-    LOCAL_URL = re.compile(
-        r"\b[a-z][a-z0-9+.-]*://(?:[^\s/?#@]+@)?"
-        r"(?:localhost|host|\[::1\]|0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}"
-        r"|192\.168(?:\.\d{1,3}){2}|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})(?::\d+)?(?=[/?#\s.,;)]|$)",
+    # machine by name is caught after the word replacements too.
+    LOCAL_IPV4 = (
+        r"(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}"
+        r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})"
+    )
+    UNIQUE_LOCAL_IPV6 = IPv6Network("fc00::/7")
+    URL = re.compile(
+        r"\b[a-z][a-z0-9+.-]*://(?=([^\s/?#\"<>`]+)(/|[?#](?=[^\s\"'<>`)\]}]))?)",
         re.IGNORECASE,
     )
+    URL_HOST_PORT = re.compile(
+        r"(?:\[(?P<ipv6>[0-9a-f:.]+)(?:%[a-z0-9._~-]+)?\]|(?P<name>[a-z0-9._~-]+))(?::[0-9]*)?",
+        re.IGNORECASE,
+    )
+    URL_PUNCTUATION = re.compile(r"[,;)'\]}]")
     LOCAL_URL_PLACEHOLDER = "http://proxy.invalid"
     # The fixture tests exempt exactly this address too, so a scrubbed screen passes both checks.
     EMAIL_PLACEHOLDER = "user@example.com"
+
+    @classmethod
+    def _local_authority(cls, authority: str) -> bool | None:
+        """Classify a complete host and port after the final userinfo separator, or None if they are incomplete."""
+
+        endpoint = authority.rstrip(".").rsplit("@", 1)[-1]
+        match = cls.URL_HOST_PORT.fullmatch(endpoint)
+        if match is None:
+            return None
+        literal = match["ipv6"]
+        if literal is None:
+            name = match["name"].rstrip(".").lower()
+            return name in ("localhost", "host") or re.fullmatch(cls.LOCAL_IPV4, name) is not None
+        try:
+            address = IPv6Address(literal)
+        except ValueError:
+            return None
+        mapped = address.ipv4_mapped
+        return (
+            address.is_loopback
+            or address.is_unspecified
+            or address.is_link_local
+            or address in cls.UNIQUE_LOCAL_IPV6
+            or (mapped is not None and re.fullmatch(cls.LOCAL_IPV4, str(mapped)) is not None)
+        )
+
+    @classmethod
+    def _local_url_spans(cls, text: str) -> Iterator[tuple[int, int]]:
+        """Find the private authorities to replace, together with any credentials they carry.
+
+        A complete authority followed by a path or a nonempty query or fragment gives its userinfo context.
+        In bare text a comma can end a URL and introduce prose. Prefer the longest private candidate so punctuation
+        inside credentials cannot cause a partial replacement.
+        """
+
+        for url in cls.URL.finditer(text):
+            authority, suffix = url.groups()
+            complete = cls._local_authority(authority)
+            if complete:
+                yield url.start(), url.end() + len(authority.rstrip("."))
+            elif not suffix or complete is None:
+                for boundary in reversed(list(cls.URL_PUNCTUATION.finditer(authority))):
+                    prefix = authority[:boundary.start()].rstrip(".")
+                    if cls._local_authority(prefix):
+                        yield url.start(), url.end() + len(prefix)
+                        break
 
     @classmethod
     def for_host(cls, work_root: pathlib.Path) -> Scrubber:
@@ -147,7 +201,9 @@ class Scrubber:
         text = self.EMAIL.sub(self.EMAIL_PLACEHOLDER, text)
         for value, placeholder in self.words:
             text = re.sub(rf"(?i)\b{re.escape(value)}\b", placeholder, text)
-        return self.LOCAL_URL.sub(self.LOCAL_URL_PLACEHOLDER, text)
+        for start, end in reversed(list(self._local_url_spans(text))):
+            text = text[:start] + self.LOCAL_URL_PLACEHOLDER + text[end:]
+        return text
 
     def check(self, text: str) -> str | None:
         """Name the first identifying value still present in `text`, or None when it is clean."""
@@ -158,7 +214,7 @@ class Scrubber:
                 return value
         if self.EMAIL.search(text.replace(self.EMAIL_PLACEHOLDER, "")):
             return "an email address"
-        if self.LOCAL_URL.search(text):
+        if next(self._local_url_spans(text), None) is not None:
             return "a URL into this machine or its network"
         return None
 
