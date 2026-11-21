@@ -346,8 +346,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   "rename" shows cmd-l). Plan: `plans/queue/menu-shortcut-hints.md`.
 
 - **Antigravity session id reporting still broken.** in 0.43.0 session id reporting for antigravity still doesnt work.
-  (Screenshot: an Antigravity CLI 1.5.13 session that has answered one prompt, with no session id shown anywhere in the
-  session view.)
+  the point is "restart" button is grey because farhelm doesn't know the session id. (Screenshot: an Antigravity CLI
+  1.5.13 session that has answered one prompt, with the Restart button in the session toolbar greyed out.)
 
 ## Mid term
 
