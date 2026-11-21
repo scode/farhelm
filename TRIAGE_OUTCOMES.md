@@ -42,94 +42,6 @@
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
-## block-copy-omits-wide-continuation-column.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): A block (Alt-drag) copy
-  takes the same columns on every row through `GridRow::text(from, to)`
-  (`crates/gui/farhelm-grid-model/src/selection.rs:325-340`). When `from` falls on a wide character's second cell,
-  `text` drops the character and emits no blank for that cell (`crates/gui/farhelm-grid-model/src/lib.rs:117-149`,
-  "Starting on its spacer cell omits it"). That row's copied text is then one column shorter on the left than the other
-  rows. The module still says the rules derive from xterm (`selection.rs:3-4`), and xterm emits a blank there.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## bold-brightening-ignores-redefined-palette.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The supervisor sends an
-  unredefined palette entry as its index, and sends only redefined entries as direct colors
-  (`crates/farhelm-supervisor/src/grid_output.rs:266-288`). The desktop renderer then promotes indices 0-7 to 8-15 for
-  bold from its own theme (`crates/gui/farhelm-gui/src/theme.rs:432-445`). If a program redefines bright red (9) but not
-  red (1), bold red still arrives as `Palette(1)` and is drawn with the theme's 9, not the program's.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## combined-punctuation-word-selection-differs.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): Desktop double-click word
-  selection was ported from the old grid client's algorithm (`crates/gui/farhelm-grid-model/src/selection.rs:3-11`,
-  113-171). Its separator test compares a single UTF-16 unit, the first unit of each cell (`separator` at 139-143,
-  applied through `cell_start` and `cell_end` at 154-158). Punctuation carrying a combining mark therefore still counts
-  as a separator by its base character. xterm, which the module says the rules derive from, compares the whole cell
-  string.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## container-tab-close-overpromises-process-termination.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop tab Close
-  question still says "Closing kills this terminal's shell and every process it started", and the Confirm help says
-  "ending its shell and everything it started" (`crates/gui/farhelm-gui/src/terminal/set.rs:160-162, 197-202, 726-734`).
-  The protocol's `CloseTab` docs still promise every process it left behind
-  (`crates/farhelm-proto/src/lib.rs:3872-3880`). SPEC.md:2209-2214 has exceptions: a `podman exec` without a terminal
-  keeps running inside the container, a container whose Podman monitor sits in a separate scope is not stopped, and
-  hosts without a usable systemd user manager have narrower cleanup (2192-2204).
-- Decision: the maintainer picked "Make the spec match the app" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q3), whose recommendation discards this one: the Close warning errs on the side of caution.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## credential-cancel-erases-delivery-report.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop Credentials
-  section keeps the old behavior on purpose. Back and Cancel close the editor with an empty failure list
-  (`crates/gui/farhelm-gui/src/settings/credentials/editor.rs:433-445`, `close_editor(..., Vec::new(), ...)`).
-  `close_editor` replaces the overview's delivery-failure lines unconditionally (`settings/credentials.rs:362-376`). The
-  module docs say so: "until the next editor closes (Back and Cancel clear them, as the old app's did)" (lines 30-32).
-- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
-  triage page for findings that cited removed UI code, Q6) and did not name this one, so it is discarded.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## desktop-smoke-supervisor-precedes-cleanup-record.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app still
-  spawns its supervisor detached and only then writes `desktop-supervisor.json`
-  (`crates/farhelm-desktop/src/lib.rs:1431-1448`; a failed write is only logged). The smoke harness's `stop` finds the
-  supervisor only through that record (`scripts/gui-agent.py:2048-2058` `supervisor_to_stop`, used at 2735-2737), so a
-  supervisor the app started but never recorded is not stopped.
-- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
-  findings that cited removed UI code, Q5).
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## desktop-updater-read-failure-enables-auto-install.md
 
 - Outcome: `fix code`.
@@ -149,40 +61,6 @@
   follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/desktop-updater-unreadable-optout.md`.
-
-## drag-preview-neighbor-diverges-from-drop-unresolved.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop pin drag
-  recomputes the drop target only on pointer moves, edge-scroll ticks and release
-  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs:1170-1177, 1275-1278`, `resample_pin_drag` at 1440). The
-  layout-change resample runs only for Shift sweeps, not pin moves (`resample_sweep_after_layout`, 1514-1524). The drop
-  line is drawn on the pin it names, so if the list scrolls under a still pointer (a wheel scroll mid-drag), the line
-  stays on the old neighbor and the release moves the pin next to a different one. On macOS GPUI repeats the last move
-  every 16 ms while the button is held (module docs 53-56), which re-samples, so this route is Linux-only. Not
-  reproduced at runtime.
-- Decision: the maintainer picked "Acceptable, and say so in the spec" (2026-11-21 six-question triage page for findings
-  that cited removed UI code, Q2); the principle ("a control the screen still shows after its target changed may be
-  used, as long as the helm refuses what is no longer valid or the result is trivially undone") is added under
-  `frozen-sandbox-retains-header-lifecycle-answers.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## environment-launch-opens-earliest-session.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): This is current desktop
-  code. When an environment launch's run completes, the launcher reads `GET /api/sessions?host=<new host>` and opens the
-  session with the smallest `created_at` (`crates/gui/farhelm-gui/src/launcher/launch.rs:871-899`). It is a timestamp
-  guess rather than the exact session the launch created, so two sessions on the new host with tied or out-of-order
-  whole-second timestamps could open the wrong one. No shipped sequence that puts a second session there before
-  completion has been shown.
-- Decision: the maintainer picked "Acceptable, and say so in the spec" (2026-11-21 six-question triage page for findings
-  that cited removed UI code, Q2); the principle ("a control the screen still shows after its target changed may be
-  used, as long as the helm refuses what is no longer valid or the result is trivially undone") is added under
-  `frozen-sandbox-retains-header-lifecycle-answers.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
 
 ## exit-notice-hides-oldest-scrollback-row.md
 
@@ -266,71 +144,6 @@
   feedback file and its index entry.
 - Execution: `pending`.
 
-## grid-input-omits-x10-only-mouse-reporting.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The emulator still does
-  not track X10 mouse mode 9. `crates/farhelm-terminal-emulator/src/modes.rs:12-27,51-54,83-92` has no X10 state and
-  reports Off, and `crates/farhelm-supervisor/src/grid_input.rs:52-53` documents that "a program that sets only it gets
-  no reports". The finding's comparison point, the raw-stream browser terminal that honoured mode 9, is gone. Every
-  terminal is now this kind, so a mode-9-only program gets no clicks anywhere. DECRQM 9 answers "not recognized", so a
-  program that asks first can tell.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## grid-shift-enter-loses-independent-altgraph.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app has the
-  same blind spot one layer lower. GPUI's Linux backend builds modifiers from Shift, Alt, Ctrl and Logo only
-  (`vendor/gpui-pre-linux/src/linux/platform.rs:1669-1680`), so AltGr (ISO Level 3) never shows up. The input mapper
-  documents "no ... AltGraph bit" (`crates/gui/farhelm-input-mapping/src/keys.rs:44`). AltGr+Shift+Enter therefore
-  reaches the supervisor as Enter with Shift, which `crates/farhelm-supervisor/src/grid_input.rs:291-312` rewrites to
-  Farhelm's newline (ESC CR) on the stated assumption that AltGraph never arrives.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## hovered-link-double-click-selects-one-word.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop selection
-  press handler (`crates/gui/farhelm-gui/src/terminal/attached.rs:4001-4017`) uses `view.word_range(cell)` for every
-  double click, even though the same handler has already resolved the pressed link (`pressed_link`, around 3960-3964). A
-  double click on a multi-word hovered link therefore selects one word, where xterm.js would select the link's whole
-  range. SPEC.md does not say which a double click should select.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## initial-oversized-grid-cannot-attach.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The supervisor half the
-  finding was narrowed to is unchanged. The helm forwards the client's attach size as is
-  (`crates/farhelm-helm/src/terminal.rs:286`), and the host accepts each dimension up to 10000
-  (`crates/terminal-host/src/protocol.rs:142-147`, `crates/farhelm-supervisor/src/hosts/terminal.rs:2346-2348`).
-  `grid_output::screen` copies the emulator's size into the screen with no 1000 cap
-  (`crates/farhelm-supervisor/src/grid_output.rs:329-363`). The grid stream's `hello` (`service/grid_stream.rs:445`)
-  then fails to encode and ends the attachment (816-821). The desktop app's fit clamps to 1000
-  (`terminal/attached.rs:1846-1864`), so only a non-shipped client can trigger it.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## legacy-quickstart-stops-surviving-supervisor.md
 
 - Outcome: `fix code`.
@@ -370,33 +183,6 @@
   follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
-
-## literal-deleted-suffix-breaks-desktop-owner.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): `process_image` in
-  `crates/farhelm-supervisor/src/procs.rs:275` still strips a trailing ` (deleted)` on every platform, macOS included.
-  An executable actually named that way is recorded under a different path, and `ManagedSupervisor::started_from` /
-  `observe` (`crates/farhelm-supervisor/src/managed_supervisor.rs:229-262`) compare paths, so the app treats its own
-  supervisor as foreign. The development override (`FARHELM_DESKTOP_FARHELM`,
-  `crates/farhelm-desktop/src/bundle.rs:43,253-264`) still accepts arbitrary paths.
-- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
-  findings that cited removed UI code, Q5).
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## literal-this-machine-alias-rewritten-in-full-labels.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app's full
-  display name (`crates/gui/farhelm-gui/src/hosts/identity.rs:36-38`) calls `named(&host.name, host.is_local())`, which
-  rewrites any local host whose name is exactly "this machine" to "Local (this machine)" (74-80). An alias of "this
-  machine" on the local host produces that same name, so the rail tooltip, Hosts rows and launcher show "Local (this
-  machine)". The helm does not refuse that alias.
-- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
-  triage page for findings that cited removed UI code, Q6) and did not name this one, so it is discarded.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
 
 ## muse-capability-docstring-denies-reporting-and-resume.md
 
@@ -442,25 +228,6 @@
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## pointer-capture-drop-crosses-new-modal-unresolved.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app's pin drag
-  follows the pointer through capture-phase window handlers
-  (`crates/gui/farhelm-gui/src/session_list/pin_drag.rs:917-990`), which receive the release whatever layer covers the
-  list. Its docs say app shortcuts still act mid-drag and name a Rename dialog opened by its shortcut during a drag
-  (:21-24,36-38). The drag cancels when its row stops being movable, when the listing goes away, when Hosts takes the
-  list's place, or when the window deactivates (:69-73), but not when a dialog opens. `pin_drag_released` (:1261-1307)
-  then sends the move from the rows as last drawn, with no check for an open layer: `focus_layer_open` is consulted only
-  for Escape (:1011,1027). The finding's open premise about the WebKit native event path has no GPUI counterpart, so the
-  route is established in source.
-- Decision: the maintainer picked "Acceptable, and say so in the spec" (2026-11-21 six-question triage page for findings
-  that cited removed UI code, Q2); the principle ("a control the screen still shows after its target changed may be
-  used, as long as the helm refuses what is no longer valid or the result is trivially undone") is added under
-  `frozen-sandbox-retains-header-lifecycle-answers.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## program-selected-cursor-color-never-reaches-viewer.md
 
 - Outcome: `fix spec`.
@@ -477,20 +244,6 @@
 - Completion criteria: SPEC.md (Terminal experience) states: the terminal targets what common agent CLIs and shells use
   and need not match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not
   supported. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## progress-hover-keeps-short-host-name.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app's host
-  progress card titles itself with the host's short name (`crates/gui/farhelm-gui/src/hosts/progress/card.rs:411,442`:
-  `identity::short_name`). That card is the hover of the attention list's working rows, and those rows also show the
-  short name (`session_list/attention.rs:474,836,1011`). For two hosts whose names share a first label, nothing on the
-  attention row or its hover card tells them apart. The Hosts panel's own row uses the full display name
-  (`hosts.rs:806`), so the problem is limited to the attention list.
-- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
-  triage page for findings that cited removed UI code, Q6) and did not name this one, so it is discarded.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
 - Execution: `pending`.
 
 ## recent-setup-description-omits-wrapper-prefix.md
@@ -533,20 +286,6 @@
   changelog fragment). Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## request-cards-cover-tunnel-controls.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The open-tunnels list is
-  an ordinary popover on rung 2 of the layer ladder, dropping below the pill in the session's top row
-  (`crates/gui/farhelm-gui/src/terminal/tunnels.rs:30-36`, `layers.rs:139-145`). The approval region sits on rung 5,
-  above every layer that is not raised (`layers.rs:155-156`). It starts 12 px below the terminal area's top, centered,
-  up to 660 px wide (`approvals/region.rs:17-21`), and nothing reserves or avoids the tunnel list's area. Only the
-  tunnel warning is raised above the cards. The rendered overlap depends on pane width and was not measured.
-- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
-  triage page for findings that cited removed UI code, Q6) and did not name this one, so it is discarded.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## sandbox-checkout-hides-required-folder-setting.md
 
 - Outcome: `fix code`.
@@ -586,38 +325,6 @@
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the feedback file
   and its index entry.
 - Execution: planned in `plans/queue/container-delete-and-link-group-tests.md`.
-
-## suspended-sandbox-keeps-row-confirmations-enabled.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): A row's Stop or Replace
-  question is opened through `ask_about_row` (`crates/gui/farhelm-gui/src/session_list/menu.rs:555-598`) and closes only
-  when its subject (the session) is gone or its anchor row is no longer drawn (`prompt.rs:80-86`). A row that becomes
-  frozen (suspended, stopped, deleting) stays drawn. The confirm handlers `stop::confirm`
-  (`session_list/stop.rs:224-235`) and `replace::confirm` (`session_list/replace.rs:269-278`) send the frozen request
-  without checking `Environment::frozen` or `held`. The module docs say frozen and deleting phases withhold Stop and
-  Replace (`session_list/environment.rs:15-29`), and only the menu and header controls enforce that.
-- Decision: the maintainer picked "Acceptable, and say so in the spec" (2026-11-21 six-question triage page for findings
-  that cited removed UI code, Q2); the principle ("a control the screen still shows after its target changed may be
-  used, as long as the helm refuses what is no longer valid or the result is trivially undone") is added under
-  `frozen-sandbox-retains-header-lifecycle-answers.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## trailing-deleted-raw-pty-cursor-control-sequence-oracle.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): No current test sends DEL,
-  an arrow key's escape sequence or Ctrl+C through a real attachment to a raw-mode program and checks the bytes it
-  received. Each layer has its own check, but nothing covers the whole path.
-  `crates/farhelm-supervisor/src/grid_input/tests.rs` pins the key encoder's bytes.
-  `crates/farhelm/tests/terminal_host_runtime.rs:266` sends only `go\r` to the child, and
-  `crates/farhelm/tests/terminal_host_client.rs:688` sends only ESC+CR (Shift+Enter). In
-  `crates/farhelm/tests/e2e/host_processes.rs:323`, `typed_line` types text and Enter only.
-- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
-  findings that cited removed UI code, Q5).
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
 
 ## trailing-legacy-container-delete-existing-object-removal-oracle-lost.md
 
@@ -679,20 +386,6 @@
   fragment). Remove the feedback file and its index entry.
 - Execution: `pending`.
 
-## trailing-recipe-place-status-error-discards-success-and-has-no-retry.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app ports this
-  behaviour on purpose. `crates/gui/farhelm-gui/src/settings/recipes/places.rs:17-21` says an unreadable places
-  collection "drops every line for its reason … and it offers no Retry loading of its own", and `place_lines` (:175-179)
-  draws only the error, with no Rebuild controls. The helm re-reads pushed collections only on a feed bump or a command
-  (`crates/farhelm-proto/src/ui_channel.rs:290-296`; `crates/farhelm-helm/src/ui_channel_tests.rs:481`), so a failed
-  read stays failed while nothing else changes.
-- Decision: the maintainer picked "fix code for the ones I name" for the minor cosmetic group (2026-11-21 six-question
-  triage page for findings that cited removed UI code, Q6) and did not name this one, so it is discarded.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## trailing-tensorlake-add-host-inline-container-recipe-compatibility.md
 
 - Outcome: `fix code`.
@@ -737,49 +430,3 @@
   instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/hosts-small-fixes.md`.
-
-## triple-click-truncates-long-logical-line.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop grid model's
-  triple-click `line_range` still caps the wrapped-line walk at 1000 rows in each direction:
-  `self.wrapped_span(position.line, 1000, usize::MAX)` at `crates/gui/farhelm-grid-model/src/selection.rs:173-178`. Its
-  doc calls this "the pinned client's 1000-row search cap", but the finding showed xterm.js has no such cap. A logical
-  line longer than 1000 wrapped rows on either side of the click is selected and copied only partly.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## typed-name-matching-repeats-quadratic-prefix-work.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop port keeps the
-  same shape. `matching_names` in `crates/gui/farhelm-gui/src/templates/sequence.rs:501-524` checks
-  `tiers[tier].contains(&name)` (a linear `Vec` scan) for every matching name, which is quadratic in the number of
-  matches before the display cap. Tab, Enter and the indicator use it through `match_word` (`:530`). As in the finding,
-  no user-visible slowness was measured.
-- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
-  findings that cited removed UI code, Q5).
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
-## wide-wrap-inference-drops-real-boundary-space.md
-
-- Outcome: `discard`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop grid model
-  ported the same guess. `pads_wide_wrap` (`crates/gui/farhelm-grid-model/src/selection.rs:357-371`) treats a wrapped
-  row with no run in its last column, followed by a wide character, as emulator padding. Copy (`selection.rs:280, 344`)
-  and printed-link text windows (`selection.rs:241-280`) then drop that column. The supervisor's row encoder still
-  strips default-style spaces, including ones the program printed
-  (`crates/farhelm-supervisor/src/grid_output.rs:210-233`). So a real space at the right edge before a wide character
-  looks the same as padding, and the doc's claim that it tells a printed space apart is not true for default-style
-  spaces.
-- Decision: the maintainer picked "Not required; state it once" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q4); the principle ("the terminal targets what common agent CLIs and shells use and need not
-  match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not supported") is
-  added under `program-selected-cursor-color-never-reaches-viewer.md`, and this finding is discarded under it.
-- Completion criteria: No code or spec change. Remove the feedback file and its index entry.
-- Execution: `pending`.
