@@ -206,24 +206,6 @@
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## program-selected-cursor-color-never-reaches-viewer.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The grid protocol still
-  has no cursor-color field. `Cursor` carries position, visibility, shape and blink
-  (`crates/farhelm-proto/src/grid.rs:1034-1042`), and `TerminalState` carries only default foreground and background
-  overrides (:1121-1146). The desktop app paints the cursor in the fixed theme color:
-  `TerminalColor::of(TERMINAL.cursor)` at `crates/gui/farhelm-gui/src/terminal.rs:1309`. The emulator still accepts OSC
-  12 and answers queries from the stored value, so a program that sets the cursor color sees it reported back but never
-  drawn.
-- Decision: the maintainer picked "Not required; state it once" for terminal behavior in rare cases (2026-11-21
-  six-question triage page for findings that cited removed UI code, Q4). This entry carries the spec change for the
-  group of ten.
-- Completion criteria: SPEC.md (Terminal experience) states: the terminal targets what common agent CLIs and shells use
-  and need not match xterm in rare modes, chords and wide-character edge cases; a program-set cursor color is not
-  supported. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## recent-setup-description-omits-wrapper-prefix.md
 
 - Outcome: `fix code`.

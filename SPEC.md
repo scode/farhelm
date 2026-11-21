@@ -3141,6 +3141,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
 
 - Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here. The
   default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
+- Decided 2026-11-21: that fidelity targets what common agent CLIs and shells use. The terminal need not match xterm in
+  rare modes, chords and wide-character edge cases (only the oldest X10 mouse mode, AltGr held with Shift+Enter, copying
+  across a wide character cut by a selection edge, lines wrapped over a thousand rows). A program-set cursor color is
+  not supported: the cursor keeps the theme's color.
 - Settings can color the thin frame around every session's terminal with that session's host identity color. This is off
   by default and shared by every device. When on, a host with the default color uses the ordinary foreground color;
   every other host uses its chosen icon color at full strength. A host color change updates open session frames through

@@ -594,10 +594,6 @@ consequences.
   wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
   screen and history use the conversion.
 
-- [`program-selected-cursor-color-never-reaches-viewer.md`](program-selected-cursor-color-never-reaches-viewer.md) — A
-  program that changes its text cursor color continues to show the theme's fixed cursor color, even though Farhelm's
-  emulator accepts the new color.
-
 - [`partial-wide-erasure-loses-second-cell-background.md`](partial-wide-erasure-loses-second-cell-background.md) — A
   program erasing only the second column of a wide glyph with a different background can leave grid viewers painting the
   old first-cell background over that erased column.
