@@ -353,10 +353,6 @@ consequences.
   may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
   replacement-folder grant.
 
-- [`installer-prerequisite-test-conflates-two-guards.md`](installer-prerequisite-test-conflates-two-guards.md) —
-  Supplying neither prerequisite cannot show that each prerequisite is independently required. The test can miss removal
-  of either production guard; no shipped installer defect is established.
-
 - [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
   regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
 

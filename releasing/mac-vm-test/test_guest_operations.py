@@ -271,12 +271,23 @@ mistake it for a provider error. It cannot mark the requested sample completed.
             operations.dispatch('install_candidate')
 
     def test_old_installer_waits_for_both_fixture_and_verified_inputs(self):
-        """A clean Mac alone cannot justify overwriting an old or dirty Linux fixture later in setup."""
+        """Either missing premise must keep the old installer from running.
+
+        Give the installer one premise at a time so each refusal depends
+        on the other premise still being required.
+        """
         self.value['check_id'] = 'old-fixture'
-        operations = self.operations(runner=lambda *args, **kwargs: self.fail('installer ran before its premises'))
-        with self.assertRaisesRegex(RuntimeError, 'clean and verified'):
-            operations.dispatch('install_previous')
-        self.assertIsNotNone(operations.failure)
+        for completed in ('fixture_clean', 'verify_previous'):
+            with self.subTest(completed=completed):
+                output = self.pass_dir / completed / 'output'
+                (output / 'work').mkdir(parents=True)
+                operations = self.operations(
+                    output=output, runner=lambda *args, **kwargs: self.fail('installer ran before its premises'))
+                operations.completed.add(completed)
+                self.assertEqual(operations.completed, {completed})
+                with self.assertRaisesRegex(RuntimeError, 'clean and verified'):
+                    operations.dispatch('install_previous')
+                self.assertIsNotNone(operations.failure)
 
     def test_installer_entrypoints_distinguish_fresh_fixtures_from_updates(self):
         """The new installer's update-only refusal must not prevent fresh or old-fixture setup.
