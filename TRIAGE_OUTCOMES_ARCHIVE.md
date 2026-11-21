@@ -34509,3 +34509,148 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: No change under Q14. Unusual path spellings can affect where an unset devbuild update preference is
   initialized. The preference can be set in Settings. jj change `oxoqslsw`, bookmark
   `plan/triage-tooling/07-build-scripts`, [draft PR #4503](https://github.com/scode/farhelm/pull/4503/changes).
+
+## linux-docs-capture-follow-ups.md
+
+- Outcome: `fix code`.
+- Assessment: None. Three small follow-ups for the screenshot tooling: the README hero wrapper's Linux default (1x), an
+  unreferenced Templates-button crop below the publisher's 2,000-byte minimum, and a template-search crop that catches a
+  folder warning. Verified: `scripts/docs-shots/launch-templates.py` still has `templates_button` and the search-shot
+  framing. The in-flight plan `docs-shots-targeted-runs.md` does not address these. The maintainer already rated them
+  low priority.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text under Q12. The README hero’s explicit local Linux refresh uses the scenario scale of 2.
+  The Launch templates button is now referenced and subject to the existing PNG size floor. The staged directories
+  already cover the Folder check at the edge of the template-search crop. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## desktop-smoke-misparses-space-bearing-run-path.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The desktop smoke gate falsely fails if a maintainer points `DESKTOP_SMOKE_DIR` at a
+  path containing a space. Verified: Accepted from the file: an unbounded `split()` on /proc/net/unix rows, plus
+  unquoted redirections at two other spots.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: No. Discard; the scratch-space convention (`/tmp/farhelm-tmp/<uuid>`) never has spaces.
+- Execution: Discarded as moot. The old webview desktop smoke script and its custom path parser were removed in
+  1eb4e3751 (#3407). jj change `pnuwusoq`, bookmark `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## trailing-deflake-current-driver-downgrades-historical-recorder-required-tmux-policy.md
+
+- Outcome: `other`.
+- Assessment: None. A deflake sweep run with `--base` older than the tmux removal no longer builds or requires that
+  revision's pinned tmux, so the old recorder only warns. Verified: still present per the record. `deflake/bin/deflake`
+  now uses any working tmux (:1149-1154). This only matters for bases from before 2026-11-12.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: Deferred under the complexity gate to “Keep deflake evidence tied to the selected revision’s prerequisites”
+  in TODO.md. The older recorder can warn and proceed on the wrong tmux. Restoring the old gate also requires deciding
+  which historical batteries and bases the current driver supports. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## failed-demo-rollback-can-remove-previous-preview.md
+
+- Outcome: `other`.
+- Assessment: None for users. If the demo-video recorder's rollback itself fails, the previous generated demo output can
+  be deleted with the temporary directory. Verified: `scripts/readme_video.py:212-266` keeps backups under the
+  `TemporaryDirectory` and `restore` can raise inside the `ExitStack`, after which the directory is removed. Needs a
+  forward rename failure plus a failed rename-back in the same directory. Output is regenerable.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. A second rename failure during rollback can lose regenerable preview files. The review
+  established loss of generated output. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## docs-shot-cleanup-hides-primary-error.md
+
+- Outcome: `other`.
+- Assessment: None for users. When a docs screenshot capture and its cleanup both fail, the report keeps only the
+  cleanup error and later shots may run on an unrestored fixture. Verified: `scripts/docs_shots.py:392-418` runs cleanup
+  in `finally` and stores `str(error)` of the last exception; `release-notes.py:70-81` re-raises after `remove_group()`.
+  Not covered by `plans/queue/docs-shots-targeted-runs.md`.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. A cleanup exception can hide the capture diagnostic and leave the staged group for the
+  next shot. A reported shot failure still prevents a complete publish record. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## docs-shot-guard-ends-before-cleanup.md
+
+- Outcome: `other`.
+- Assessment: None for users. The screenshot runner checks staged session IDs before a shot's cleanup runs, not after.
+  Verified: `scripts/docs_shots.py:405-411`. The only current cleanup (group delete) changes no session IDs.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. The guard runs before cleanup. The current cleanup removes a temporary group and
+  changes membership, with no session ID changes established. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## docs-group-shot-lacks-drawn-membership-check.md
+
+- Outcome: `other`.
+- Assessment: None for users. The session-group release screenshot waits for the helm to record membership, not for the
+  GUI to draw the row under its group. Verified: `scripts/docs-shots/release-notes.py:64-77` polls `/api/sessions`.
+  Whether a published image was wrong is unknown. Release shots get human review.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. The capture checks the helm’s saved association. A published screenshot with the wrong
+  placement was not established. jj change `pnuwusoq`, bookmark `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
+
+## docs-group-shot-wait-exceeds-budget.md
+
+- Outcome: `other`.
+- Assessment: None for users. A stalled staged helm can make the group shot's 10-second wait last about a minute.
+  Verified: the probe uses a request helper with its own timeout (`release-notes.py:64-77`); the poll checks elapsed
+  time only between probes. Helper timeout value not re-read.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: No change under Q14. A request timeout can extend the group poll past its nominal wait. The reviewed
+  consequence is a delayed capture diagnostic. jj change `pnuwusoq`, bookmark
+  `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
+  [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).

@@ -89,9 +89,9 @@ name has left the procedure and should stop.
 
 ## Refreshing the image
 
-The hero refresh runs on Linux, like the docs screenshots (`docs/docs-shots/SPEC.md`): the run's private headless Mutter
-renders the scenario's viewport at its scale of 2. It needs what `docs/gui-agent.md` lists for a Linux run, and no
-passwordless ssh to the machine itself.
+The hero refresh uses `--local` on Linux, like the docs screenshots (`docs/docs-shots/SPEC.md`). This selects local
+capture even when `FARHELM_MEDIA_MAC` is set. The run's private headless Mutter renders the scenario's viewport at its
+scale of 2. It needs the Linux prerequisites in `docs/gui-agent.md` and uses its own sshd for the staged fleet.
 
 - `scripts/readme-screenshot.sh --local` prints the PNG's path (`target/readme-hero/readme-hero.png` unless `--output`
   says otherwise). The capture refuses a picture that shows a machine path, the account's ssh spelling or the hostname,

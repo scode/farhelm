@@ -43,9 +43,9 @@ staged path a terminal shows the hover a resting pointer would, until the pointe
 terminal. Hosts are matched by alias, and every scenario host gets its values, an empty list included, so nothing real
 shows through.
 
-Staging also creates every `~` folder the scenario names inside the run's private home, which every staged supervisor,
-local and remote, expands `~` against. The launcher's folder check therefore finds them for real and shows no "does not
-exist" warning.
+Staging also creates every `~` directory the scenario names inside the run's private home. Each staged supervisor
+expands `~` against that home, so the launcher's directory check finds the path. This matters for the Launch templates
+search shot, where the crop around Search and its suggestions can include the top of the Folder field.
 
 The docs engine also stores the scenario's launch templates through the helm's real `PUT /api/templates/<name>` API. A
 template's host key becomes that host's install identity from `GET /api/hosts`. No shot saves or deletes a template. For
@@ -90,7 +90,8 @@ checksum. A run with any `--only` selector deletes that record, as does a full r
 exits 3 and explains why. The harness asks cargo where it builds, so `CARGO_TARGET_DIR` does not affect this decision.
 
 The publisher refuses a partial record, a referenced shot the run did not produce, or a shot whose bytes changed after
-capture. This preserves one identifiable UI version across the published set.
+capture. This preserves one identifiable UI version across the published set. The publisher also checks PNG type and a
+2,000-byte minimum, including for the compact Templates button crop on the Launch templates page.
 
 ## Release shots are frozen
 
