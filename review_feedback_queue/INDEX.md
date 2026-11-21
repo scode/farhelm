@@ -567,9 +567,6 @@ consequences.
   terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
   writing the post-echo prompt.
 
-- [`exit-notice-hides-oldest-scrollback-row.md`](exit-notice-hides-oldest-scrollback-row.md) — Once an agent's program
-  exits, scrolling to the beginning of its retained output can still leave the oldest row clipped out of view.
-
 - [`wide-wrap-placeholder-loses-final-cell-style.md`](wide-wrap-placeholder-loses-final-cell-style.md) — A wide glyph
   wrapping from the final column leaves a default-background hole where the terminal actually holds a styled blank; both
   screen and history use the conversion.
