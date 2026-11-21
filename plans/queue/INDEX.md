@@ -11,3 +11,9 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 362cf1] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
 - [pending] `triage-tooling.md` — execute the 2026-11-21 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs
+- [pending] `environment-checkout-without-setup.md` — let a managed checkout in a session's own sandbox or container use the default checkout folder or else the machine's home folder, never asking or refusing over a missing folder
+- [pending] `exited-terminal-scrollback.md` — let every retained terminal line be scrolled to and selected after an agent exits (or the red status line shows), including history under a killed full-screen agent
+- [pending] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
+- [pending] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
+- [pending] `agent-trust-every-folder.md` — make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live (after `agent-hook-setup.md`)
+- [pending] `status-mark-hover-ring.md` — stop drawing the hover ring around status icons (agent mark, idle time and the like) while controls keep it
