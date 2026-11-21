@@ -245,6 +245,20 @@ pub(crate) fn search_row_batch(
     }
 }
 
+/// Describe a held-field conflict while drawing a template choice, without reading its model catalog or applying it.
+pub(crate) fn held_row_refusal(
+    draft: &LaunchDraft,
+    name: &str,
+    hosts: &[HostView],
+    cx: &App,
+) -> Option<HostSentence> {
+    let store = session::current_store(cx)?;
+    let template = store.read(cx).collections().get::<LaunchTemplate>(name)?;
+    let held = apply::snapshot(draft, hosts);
+    apply::held_refusal(draft, template, &held)
+        .map(|error| sentence(LAUNCHER_REFUSAL, &[Part::Host(error.to_string())]))
+}
+
 /// Apply `templates` to the open launcher's draft as one batch ([`apply_from_store`]), saying the refusal, if any, in
 /// the launcher's words: a template press's or a taken `tl:` row's.
 fn apply_in_launcher(
@@ -257,6 +271,7 @@ fn apply_in_launcher(
         .map(|applied| BatchApplied {
             notice: applied.notice,
             note: None,
+            template: applied.template,
             switched_agent: applied.switched_agent,
             escalation: applied.escalation,
         })
@@ -337,6 +352,7 @@ pub fn pick_from_switcher(name: &str, window: &mut Window, cx: &mut App) {
                     .map(|applied| BatchApplied {
                         notice: applied.notice,
                         note: banner,
+                        template: applied.template,
                         switched_agent: applied.switched_agent,
                         escalation: applied.escalation,
                     })

@@ -1132,26 +1132,26 @@ agent choice is independent of that destination:
   permission actions. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and
   `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
   `Local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
-  moves focus to its flags editor. Enter on an empty box launches only a complete, valid selection through the ordinary
-  Launch path; an incomplete attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's
-  hover names what is missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request
-  refusals appear there too, within the initial dialog viewport. Unmatched unlabelled text offers one visible **Set
-  session name** row; accepting it sets the name and clears the box without launching. Scoped queries with no results
-  show a live reason in the results area: a missing name, no matching choice, a pending model or template list, or the
-  owner/repo form a repository needs. Unknown model ids belong in the model field. On the agent tab, an unmatched effort
-  or permission word, or an `effort:` or `perms:` query with no offered row, asks for a harness first when none is
-  chosen. Input refusals and request errors in the launcher use yellow warning colors; loading messages and typing hints
-  keep the ordinary text color, while permission danger stays red. Spaces alone ask for a search or an empty box and
-  never launch. Escape or a click outside search closes its rows or message without clearing the query. Enter on a
-  nonempty query with the area closed first reopens it; a separate Enter picks the visible highlighted row, or leaves
-  the explanation in place when there is none. Enter on a choice button (launch-kind tab, harness, effort, or
-  permissions) applies that choice and then launches through the ordinary Launch path, or shows its refusal beside
-  Launch; custom instead selects the mode and focuses its required flags editor. Enter on the closed host picker,
-  agent-type or effort dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them;
-  those native controls retain their Space and arrow behavior. Action buttons keep their normal press. The search box,
-  model field, YOLO confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field,
-  Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before.
-  A held Enter never launches.
+  moves focus to its flags editor. With no row highlighted, Enter on an empty field launches only a complete, valid
+  selection through the ordinary Launch path; an incomplete attempt says why beside Launch, as does a refused Launch
+  press, and the greyed-out button's hover names what is missing. Enter when the launcher itself has focus uses that
+  same Launch path and refusal. Request refusals appear there too, within the initial dialog viewport. Unmatched
+  unlabelled text offers one visible **Set session name** row; accepting it sets the name and clears the box without
+  launching. Scoped queries with no results show a live reason in the results area: a missing name, no matching choice,
+  a pending model or template list, or the owner/repo form a repository needs. Unknown model ids belong in the model
+  field. On the agent tab, an unmatched effort or permission word, or an `effort:` or `perms:` query with no offered
+  row, asks for a harness first when none is chosen. Input refusals and request errors in the launcher use yellow
+  warning colors; loading messages and typing hints keep the ordinary text color, while permission danger stays red.
+  Spaces alone ask for a search or an empty box and never launch. Escape or a click outside search closes its rows or
+  message without clearing the query. Enter on a nonempty query with the area closed first reopens it; a separate Enter
+  picks the visible highlighted row, or leaves the explanation in place when there is none. Enter on a choice button
+  (launch-kind tab, harness, effort, or permissions) applies that choice and then launches through the ordinary Launch
+  path, or shows its refusal beside Launch; custom instead selects the mode and focuses its required flags editor. Enter
+  on the closed host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox launches with the values
+  shown, without changing them; those native controls retain their Space and arrow behavior. Action buttons keep their
+  normal press. The search box, model field, YOLO confirmation, and save-as-template panel keep their own Enter rules.
+  In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted
+  entry it launches as before. A held Enter never launches.
 
   An exact family word in launcher search preselects its latest model, using the first matching harness when none is
   chosen. When a word names both an agent and a model family, such as `grok`, typing it alone chooses that agent if none
@@ -1382,18 +1382,19 @@ agent choice is independent of that destination:
   and Shift+Enter, cancel and reach their normal target; Meta, Control and Shift on their own do not cancel. Repeated
   held keys add nothing and never launch again.
 - Recent setups: the helm remembers bounded successful agent-launch combinations and used folders per target-install
-  identity. A recent row fills every saved choice and destination; clicking it never launches, and pressing Enter on a
-  focused row launches the filled setup through the ordinary Launch path. A retargeted registry row cannot expose the
-  replaced install's history. Folder search uses that bounded history, not a recursive filesystem walk; explicit
-  browsing asks the selected supervisor for one bounded directory level. Recent-setup rows appear only when the current
-  filter actually matches history; the dialog reserves no space for them when it does not. The editable folder field
-  opens a grouped dropdown on focus or ArrowDown: up to eight remembered folders, newest first, under "Recent", and
-  "Home" (~ on this host) and "Local home" (~ on this machine) under "Reset". Untouched prefilled fields show the newest
-  eight; typing filters by case-insensitive substring. Long labels retain the path's end, with the whole path accessible
-  and available on hover. Only arrow navigation highlights an entry. Choosing fills the destination without launching;
-  local home also pins the local host. Escape closes an open dropdown first, then can close the launcher. Tab, blur and
-  choosing close the list; typing reopens it. Enter that submits a launch also closes the list, whether the launch is
-  accepted or refused, leaving a refused launch's controls reachable. Managed-checkout mode has no folder dropdown.
+  identity. A recent row fills every saved choice and destination. Clicking it fills the form. When the empty command
+  field's keyboard highlight is on that row, Enter also launches it through the ordinary Launch path. A query result for
+  a recent setup fills the form without launching. A retargeted registry row cannot expose the replaced install's
+  history. Folder search uses that bounded history, not a recursive filesystem walk; explicit browsing asks the selected
+  supervisor for one bounded directory level. The Recent group appears only when there are matches for the current
+  filter. The editable folder field opens a grouped dropdown on focus or ArrowDown: up to eight remembered folders,
+  newest first, under "Recent", and "Home" (~ on this host) and "Local home" (~ on this machine) under "Reset".
+  Untouched prefilled fields show the newest eight; typing filters by case-insensitive substring. Long labels retain the
+  path's end, with the whole path accessible and available on hover. Only arrow navigation highlights an entry. Choosing
+  fills the destination without launching; local home also pins the local host. Escape closes an open dropdown first,
+  then can close the launcher. Tab, blur and choosing close the list; typing reopens it. Enter that submits a launch
+  also closes the list, whether the launch is accepted or refused, leaving a refused launch's controls reachable.
+  Managed-checkout mode has no folder dropdown.
 - Folder check: in plain-folder mode on a connected host, the launcher checks the folder 150 ms after the host or path
   stops changing. A missing folder or a path that is not a directory marks the field and says so underneath, naming the
   host. The warning is advisory and never disables Launch; the supervisor still validates the folder at launch time.
@@ -1425,21 +1426,27 @@ address and drops below it when the form is narrow. Held values show as text. Th
 header's first control. It starts with the launcher mark and a placeholder naming its mode, with Close alongside it.
 While empty, it shows the Return shortcut for launching. New and Clone also show examples below it for picking an agent
 or host, choosing a repository or template, and naming the session. Replace with and Restart with keep their mode
-explanation below the field. A mouse pick from recent setups returns focus to the command field. Recent setups precede
-the Destination card in the scrolling body, followed by the Agent and Command tabs and their fields. The selected tab is
-underlined. Labels sit above the fields with short notes where needed. The Agent tab shows the session list's harness
-marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a row when they fit. **More
-options** folds the conversation selector, when offered, and Wrapper prefix together at the bottom of the Agent form.
-The folded row names the fields and shows a pill for each set value, with the wrapper prefix in the terminal font. With
-both empty it says "none set". It opens and stays open while a field inside is required, refused or invalid. After a
-correction, the user can close it once no field needs attention. The footer's actions sit on the right. Cancel comes
-first, then quiet Reset choices and Save as template where offered. The main action comes last with a Return key cap.
-Its accessible name keeps the operation and target. Tab follows the command field, Close, the visible body controls,
-then the footer actions. More options is a Tab stop, with its editors following it when expanded. New, Clone and Replace
-with open with focus in the command field. Restart with opens on Cancel. Refusals, destructive warnings and the inline
-YOLO question remain adjacent to the actions in a bounded scroll region, so long content cannot displace those actions.
-The save-as-template panel remains inline in the scrolling body. Project registration (associating metadata with a
-directory) is optional convenience and never a prerequisite.
+explanation below the field. A separate scrolling column beside the form shows up to three recent setups and all launch
+templates while the field is empty. The row that filled the form remains marked, and the form names its source until
+Reset choices or another fill. Down from the empty field moves a keyboard highlight into the list. Up from its first row
+returns Enter to the field's Launch action. Enter on a highlighted template applies it. The list adds no Tab stops. A
+mouse pick returns focus to the command field. With text in the field, grouped results take over the column and the form
+dims while staying editable. Escape or clicking outside the results hides them and keeps the query. When the window is
+too narrow to fit both sides, the column is hidden and typed results appear below the field. Use `recent:` and `tl:` to
+reach setups and templates there. The Destination card heads the form, followed by the Agent and Command tabs and their
+fields. The selected tab is underlined. Labels sit above the fields with short notes where needed. The Agent tab shows
+the session list's harness marks on its chips, with a rule before Bash and Zsh. Model, Effort and Permissions share a
+row when they fit. **More options** folds the conversation selector, when offered, and Wrapper prefix together at the
+bottom of the Agent form. The folded row names the fields and shows a pill for each set value, with the wrapper prefix
+in the terminal font. With both empty it says "none set". It opens and stays open while a field inside is required,
+refused or invalid. After a correction, the user can close it once no field needs attention. The footer's actions sit on
+the right. Cancel comes first, then quiet Reset choices and Save as template where offered. The main action comes last
+with a Return key cap. Its accessible name keeps the operation and target. Tab follows the command field, Close, the
+visible body controls, then the footer actions. More options is a Tab stop, with its editors following it when expanded.
+New, Clone and Replace with open with focus in the command field. Restart with opens on Cancel. Refusals, destructive
+warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll region, so long content cannot
+displace those actions. The save-as-template panel remains inline in the scrolling body. Project registration
+(associating metadata with a directory) is optional convenience and never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
@@ -2093,24 +2100,24 @@ submission and focus-return behavior.
   held value as a no-op; an actual change is refused without applying any edits. Kind and agent compare with the active
   launch kind and its agent, host with its usable recorded install identity, folder with the same text ignoring trailing
   slashes, and name with the raw title byte for byte. Paths are not expanded or resolved. Initial prompts and clearing a
-  command's resume choice remain refused. Search results and recent setups that set a held field are still refused even
-  when they name its current value. A template containing only equal held values applies silently as nothing. The held
-  agent type, host and folder remain visible. Replace with can change the harness or folder, and Clone can change the
-  host. The launcher shows the current settings and marks edited fields, and its primary action is inactive until a
-  setting changes or a conversation selector is entered. For an agent launch with a stored resume command, it is
-  available even without a captured conversation; then its conversation field is required and explains why. Cursor and
-  OpenCode have no stored resume command, so they do not gain Restart with. Muse launches created before conversation
-  tracking also retain their missing resume command until recreated. The launcher's ordinary controls, templates,
-  validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while the shown agent is
-  working. The form shows the held agent type, host and folder, and the action's accessible name includes them. A
-  working agent is stopped first with the user's confirmation on that action; a live agent in any other status is
-  stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it before
-  anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal leaves
-  the dialog and its edits visible with the reason. The held folder never uses or updates the per-host folder default;
-  its advisory check still applies. Restart with runs the resume command, so an edited start command of a command launch
-  takes effect the next time it is cloned or replaced. Command launches offer this action exactly when Restart is. Its
-  entry in the header's Restart menu remains visible but greyed out otherwise, with a hover tooltip and accessible
-  description explaining why.
+  command's resume choice remain refused. Search results and recent setups that set a held field show as disabled even
+  when they name its current value. Their help explains which field stays fixed. A template containing only equal held
+  values applies silently as nothing. The held agent type, host and folder remain visible. Replace with can change the
+  harness or folder, and Clone can change the host. The launcher shows the current settings and marks edited fields, and
+  its primary action is inactive until a setting changes or a conversation selector is entered. For an agent launch with
+  a stored resume command, it is available even without a captured conversation; then its conversation field is required
+  and explains why. Cursor and OpenCode have no stored resume command, so they do not gain Restart with. Muse launches
+  created before conversation tracking also retain their missing resume command until recreated. The launcher's ordinary
+  controls, templates, validation and Enter rules apply. Its primary action reads "Restart", or "Stop and restart" while
+  the shown agent is working. The form shows the held agent type, host and folder, and the action's accessible name
+  includes them. A working agent is stopped first with the user's confirmation on that action; a live agent in any other
+  status is stopped first without it, as for Restart. The edited launch is validated exactly as a create validates it
+  before anything is stopped, so an invalid edit leaves the agent running and the dialog open with the reason. A refusal
+  leaves the dialog and its edits visible with the reason. The held folder never uses or updates the per-host folder
+  default; its advisory check still applies. Restart with runs the resume command, so an edited start command of a
+  command launch takes effect the next time it is cloned or replaced. Command launches offer this action exactly when
+  Restart is. Its entry in the header's Restart menu remains visible but greyed out otherwise, with a hover tooltip and
+  accessible description explaining why.
 - **Clone** opens an ordinary, editable create form pre-filled from an existing session's host, title, and launch — the
   fresh-conversation counterpart to restart's resumed one unless the user names a conversation for this start. A session
   in a managed checkout starts on a managed checkout of the same repository, named `<title>-clone` with the first free

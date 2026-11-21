@@ -447,6 +447,9 @@ impl Render for SavePanel {
                     )
                     .child(
                         div()
+                            .id("save-template-choices-heading")
+                            .role(Role::Label)
+                            .aria_label("Choose which parts of this setup the template keeps")
                             .text_size(metrics::TEXT_MD)
                             .font_weight(FontWeight::SEMIBOLD)
                             .text_color(theme::color(palette.fg_0))

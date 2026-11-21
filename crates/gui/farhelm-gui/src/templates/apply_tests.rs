@@ -1296,8 +1296,11 @@ fn a_batch_reports_any_switch_and_leaves_an_untouched_notice() {
     let applied = fixture.apply(&mut draft, &[folder]).unwrap();
     assert_eq!(
         applied,
-        Applied::default(),
-        "nothing to show, and the notice is left as it is"
+        Applied {
+            template: Some("folder".into()),
+            ..Applied::default()
+        },
+        "the form records the applied template and leaves the agent notice alone"
     );
 }
 

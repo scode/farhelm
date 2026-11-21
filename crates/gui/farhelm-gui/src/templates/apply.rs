@@ -174,6 +174,8 @@ pub struct Applied {
     /// it, as the last agent edit in the batch said; `None` when the batch made no edit that reports one, so the shown
     /// notice stays.
     pub notice: Option<Option<String>>,
+    /// The last template with an applicable edit. Repeating only held values leaves the form's source alone.
+    pub(crate) template: Option<String>,
     /// Some step of the batch changed the agent type, even if a later step changed it back. A banner an earlier action
     /// raised goes away then, since its Undo would also take back this batch.
     pub switched_agent: bool,
@@ -241,6 +243,11 @@ pub fn apply(
     });
     Ok(Applied {
         notice,
+        template: cleaned
+            .iter()
+            .rev()
+            .find(|entry| entry.template.fields != TemplateFields::default())
+            .map(|entry| entry.template.name.clone()),
         switched_agent,
         escalation,
     })
@@ -401,6 +408,27 @@ fn remove_held(fields: &mut TemplateFields, held: &LauncherState, draft: &Launch
         // template base.
         fields.name_kind = None;
     }
+}
+
+/// Preview only a mode's held-field refusal. Catalog and placement checks still run when the template is applied.
+/// Use the same no-op rule as the actual apply so a template can repeat the current host, folder or agent.
+pub(super) fn held_refusal(
+    draft: &LaunchDraft,
+    template: &LaunchTemplate,
+    held: &LauncherState,
+) -> Option<TemplateRefusal> {
+    let mut template = template.clone();
+    remove_held(&mut template.fields, held, draft);
+    restart_refusal(draft, &template).or_else(|| {
+        let fields = &template.fields;
+        (draft.holds(Field::Host)
+            && (fields.host.is_some() || fields.recipe.is_some() || fields.target.is_some()))
+        .then_some(TemplateRefusal {
+            template: template.name,
+            field: "host",
+            reason: "cannot change here: this dialog keeps the session's host".into(),
+        })
+    })
 }
 
 /// Restart with's refusal of a template that still sets a field the mode holds after [`remove_held`], naming the

@@ -77,6 +77,8 @@ pub struct OptionRow {
     help: HoverHelp,
     role: Role,
     selected: bool,
+    disabled: bool,
+    compact: bool,
     children: Vec<AnyElement>,
     on_click: Option<Handler>,
 }
@@ -99,6 +101,8 @@ impl OptionRow {
                 .ring_radius(metrics::RADIUS_SM - px(1.)),
             role,
             selected: false,
+            disabled: false,
+            compact: false,
             children: Vec::new(),
             on_click: None,
         }
@@ -114,6 +118,18 @@ impl OptionRow {
     /// reported selected. See the module docs for which content keeps its own color.
     pub fn selected(mut self, selected: bool) -> Self {
         self.selected = selected;
+        self
+    }
+
+    /// Keep a choice visible with its refusal in hover help. A press keeps the field's focus and makes no edit.
+    pub(crate) fn disabled(mut self, disabled: bool) -> Self {
+        self.disabled = disabled;
+        self
+    }
+
+    /// Use the command pane's denser padding so two-line choices fit alongside a form.
+    pub(crate) fn compact(mut self) -> Self {
+        self.compact = true;
         self
     }
 
@@ -136,6 +152,7 @@ impl OptionRow {
 impl RenderOnce for OptionRow {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
+        let (vertical, horizontal) = if self.compact { (5., 7.) } else { PAD };
         let (fill, edge, hover_fill, ink) = if self.selected {
             (
                 palette.accent_fill,
@@ -162,15 +179,18 @@ impl RenderOnce for OptionRow {
             .min_w_0()
             .flex()
             .flex_col()
-            .py(px(PAD.0))
-            .px(px(PAD.1))
+            .py(px(vertical))
+            .px(px(horizontal))
             .border_1()
             .border_color(theme::color(edge))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))
             .text_color(theme::color(ink))
-            .cursor_pointer()
-            .hover(move |style| style.bg(theme::color(hover_fill)))
+            .when(!self.disabled, |row| {
+                row.cursor_pointer()
+                    .hover(move |style| style.bg(theme::color(hover_fill)))
+            })
+            .when(self.disabled, |row| row.opacity(0.55))
             // A press of any mouse button is this control's, though it takes no focus. Marked, it leaves focus on the
             // field under the page's empty-space rule, which runs on every button (as a disabled button's press does);
             // a dialog whose empty space takes focus ignores the mark, which is why the module docs limit where the row
@@ -183,7 +203,7 @@ impl RenderOnce for OptionRow {
             self.help
         };
         let row = super::with_hover_help(row, &self.id, &help, true, None, window, cx);
-        row.when_some(self.on_click, |row, handler| {
+        row.when_some(self.on_click.filter(|_| !self.disabled), |row, handler| {
             row.on_click(move |event, window, cx| handler(event, window, cx))
         })
     }

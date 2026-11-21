@@ -42,7 +42,7 @@
 //! or two lines). Launch text holding invisible characters is spelled out by `shown_text`. The model field is
 //! `model_field`, the host picker
 //! `host_picker`, Restart with's "● Changed" markers `changed`, the managed-checkout destination `checkout`, Browse
-//! `browse`, the recent setups strip `recents`, the escalation banner `escalation`, Save as template's side `save`. The
+//! `browse`, recent setup edits `recents`, the escalation banner `escalation`, Save as template's side `save`. The
 //! floating lists under the model, folder, search and repository fields share `field_list`, and the debounced reads
 //! (the checkout's and the folder check's) share `latest`.
 
@@ -55,11 +55,12 @@ use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
 };
 use farhelm_proto::{DeleteGuard, LaunchHarness, LaunchPermission, SessionLaunch, SessionStatus};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity,
     FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity,
-    Window, div, px,
+    Window, div, px, svg,
 };
 
 use super::draft::DestinationKind;
@@ -73,6 +74,7 @@ use super::words::agent_note;
 use crate::components::{
     Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
     TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier, key_chip,
+    scroll_from_controls, scroll_handle,
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
@@ -130,6 +132,9 @@ const ADDRESS_HOST_WIDTH: f32 = 188.;
 const ADDRESS_MIN_WIDTH: f32 = 348.;
 /// The Name column can drop beneath the address as the available form width contracts.
 const DESTINATION_NAME_WIDTH: f32 = 170.;
+/// The Container host menu matches its control's width. Reserve room for labels and unavailable reasons before
+/// letting the held home and Name share its row.
+const CONTAINER_HOST_MIN_WIDTH: f32 = 370.;
 /// `.launch-composer-columns`: the destination block and the choices are 20 pixels apart.
 const SECTION_GAP: f32 = 20.;
 /// The Command tab's agent type select's value for no declared agent; every other value is an agent's label, which are
@@ -219,10 +224,8 @@ pub(super) fn show(
             // session launcher, Restart with".
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Opener,
-            // Escape discards the draft, as Cancel and the header Close do, except while the YOLO question's host
-            // write is out (Cancel and Close refuse then too, in `Launcher::cancel`). With the Save as template panel
-            // open, Escape anywhere in the launcher closes the panel instead, as the old panel took the launcher's
-            // Escape first ("Escape returns to the launcher"), and does nothing while the panel's save is out.
+            // Escape closes the Save as template panel or the command field's inline results before it discards
+            // the draft. While the YOLO question's host write is out, Escape, Cancel, and Close all wait.
             on_dismiss: Some(Rc::new(move |window, cx| {
                 let Some(launcher) = dismissing.upgrade() else {
                     return layers::Dismissal::Close;
@@ -232,6 +235,9 @@ pub(super) fn show(
                 }
                 if launcher.read(cx).save_panel.is_some() {
                     launcher.update(cx, |launcher, cx| launcher.close_save_panel(window, cx));
+                    return layers::Dismissal::Stay;
+                }
+                if launcher.update(cx, |launcher, cx| launcher.dismiss_command_pane(window, cx)) {
                     return layers::Dismissal::Stay;
                 }
                 layers::Dismissal::Close
@@ -365,6 +371,12 @@ pub fn prepare_unseen(
 const QUICK_LAUNCH_FOLDER_UNREAD: &str = "Couldn't prepare quick launch: this host's recent setups could not be read, so its last folder is unknown; check the folder and launch";
 
 impl Launcher {
+    /// Stage golden queries through GPUI Kit's real edit event and the launcher's normal input subscription.
+    #[cfg(test)]
+    pub(crate) fn search_for_golden(&self) -> TextInputState {
+        self.search.clone()
+    }
+
     /// Go on with a quick launch prepared out of sight, its templates applied: wait for New's folder default first
     /// (SPEC_impl.md, "Launch templates": "a hidden quick launch waits for it"), then wait for a managed checkout's
     /// preview, as the old app's quick launch did (`checkout`), then start. Returns `true` while it waits out of
@@ -488,9 +500,7 @@ fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
                         Ok(catalog) => launcher.catalog = Some(catalog),
                         Err(error) => launcher.catalog_error = Some(error),
                     }
-                    // The catalog's models, and which past models it lists, change the search's rows under the
-                    // highlight.
-                    launcher.reset_search_highlight(cx);
+                    // The new model rows affect preselection. Any explicit keyboard target still follows its row.
                     cx.notify();
                     std::mem::take(&mut launcher.waiting_batches)
                 })
@@ -543,6 +553,8 @@ type BatchResult = Result<BatchApplied, HostSentence>;
 pub(crate) struct BatchApplied {
     pub(crate) notice: Option<Option<String>>,
     pub(crate) note: Option<Note>,
+    /// The last template in the successful batch, which the command pane marks as the form's source.
+    pub(crate) template: Option<String>,
     /// Whether the batch switched the agent type, which takes an earlier escalation banner away
     /// (`view::escalation`).
     pub(crate) switched_agent: bool,
@@ -606,8 +618,6 @@ pub(crate) struct Launcher {
     folder_list: folder_list::FolderList,
     /// The chosen host's launch history, which the folder list and the recent setups offer again (`history`).
     history: history::LaunchHistory,
-    /// The recent setups strip's rows' focus handles (`recents`).
-    recents: recents::RecentsStrip,
     /// The managed-checkout destination's fields, suggestions and preview (`checkout`).
     checkout: checkout::CheckoutState,
     /// The host button's focus handle; leaving it closes the host list.
@@ -887,7 +897,6 @@ impl Launcher {
             folder_check: folder_check::FolderCheck::default(),
             folder_list: folder_list::FolderList::default(),
             history: history::LaunchHistory::default(),
-            recents: recents::RecentsStrip::default(),
             checkout,
             host_focus,
             command,
@@ -1022,6 +1031,7 @@ impl Launcher {
             Ok(BatchApplied {
                 notice,
                 note,
+                template,
                 switched_agent,
                 escalation,
             }) => {
@@ -1033,6 +1043,9 @@ impl Launcher {
                 let kept = if unchanged { self.yolo.take() } else { None };
                 self.changed(cx);
                 self.yolo = kept;
+                if let Some(name) = template {
+                    self.search_box.source = Some(search::SetupSource::Template(name));
+                }
                 self.follow_escalation(switched_agent, escalation, notice_before, cx);
                 // After the edit, which takes away what the launcher was saying. A banner (a switcher pick's) goes on its
                 // own after the same while as a quick launch's, counted from now, when its template has applied.
@@ -1405,6 +1418,7 @@ impl Launcher {
                 remembered_permission(preferences.remembered_permissions.as_deref())
             });
         self.draft.reset_choices(remembered);
+        self.search_box.source = None;
         self.notice = None;
         // The old Reset also emptied the search box and closed its results.
         self.search.set_text("", window, cx);
@@ -1625,6 +1639,30 @@ fn section_label(text: &'static str, palette: &theme::Palette) -> Div {
         .child(text)
 }
 
+/// Restart holds its launch kind. Keep the name and mark in the form without offering another editable choice.
+fn held_harness(harness: LaunchHarness, palette: &theme::Palette) -> AnyElement {
+    let name = harness_label(harness);
+    let mark = crate::harness::glyph(harness);
+    div()
+        .id("launcher-held-harness")
+        .role(Role::Label)
+        .aria_label(format!("Agent: {name}"))
+        .flex()
+        .items_center()
+        .gap(px(6.))
+        .text_size(metrics::TEXT_MD)
+        .child(
+            svg()
+                .path(crate::harness::icon(mark).path())
+                .size(px(14.))
+                .text_color(theme::color(
+                    crate::harness::ink(mark, palette).unwrap_or(palette.fg_1),
+                )),
+        )
+        .child(name)
+        .into_any_element()
+}
+
 /// What the main action would start, phrased for a screen reader.
 struct TargetWords {
     /// Whether the Command tab is chosen, which the words open with.
@@ -1744,7 +1782,9 @@ impl Launcher {
     ) -> Vec<AnyElement> {
         let mut fields = Vec::new();
         let harness = self.draft.agent.harness;
-        if !self.draft.holds(Field::AgentType) {
+        if self.draft.holds(Field::AgentType) {
+            fields.extend(harness.map(|harness| held_harness(harness, palette)));
+        } else {
             fields.push(self.harness_choices(palette, cx).into_any_element());
         }
         if let Some(error) = &self.catalog_error {
@@ -1880,6 +1920,15 @@ impl Launcher {
             )
             .into_any_element(),
         ];
+        if self.draft.holds(Field::AgentType) {
+            fields.splice(
+                0..0,
+                self.draft
+                    .command
+                    .agent
+                    .map(|harness| held_harness(harness, palette)),
+            );
+        }
         if Input::Command.present(&self.draft, &self.opened).read_only {
             fields.push(shown_text::clear_button(
                 "launcher-clear-command",
@@ -2076,6 +2125,7 @@ impl Render for Launcher {
             self.sync_fields(window, cx);
         }
         self.folder_list.list.follow(window, cx);
+        self.reflow_search(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refusal = self.refusal(cx);
@@ -2142,7 +2192,7 @@ impl Render for Launcher {
         };
         // An unnamed managed checkout's name field reserves the placeholder for the `<repo>-N` it will get.
         let placeholder = if self.draft.checkout.is_none() {
-            "Left empty, Farhelm names it".to_owned()
+            "Farhelm names it".to_owned()
         } else {
             self.checkout_name_placeholder(cx)
         };
@@ -2150,7 +2200,7 @@ impl Render for Launcher {
             self.name.set_placeholder(placeholder.clone(), window, cx);
             self.checkout.name_placeholder = placeholder;
         }
-        let name = if self.draft.holds(Field::Name) {
+        let mut name = if self.draft.holds(Field::Name) {
             None
         } else {
             // In a managed checkout, a launch template's base name says so beside the label and, once taken, under
@@ -2184,7 +2234,12 @@ impl Render for Launcher {
                     ),
                 )
                 .children(taken);
-            Some(row("launcher-name-row", caption, field, palette))
+            Some(
+                row("launcher-name-row", caption, field, palette)
+                    .flex_basis(px(DESTINATION_NAME_WIDTH))
+                    .min_w(px(DESTINATION_NAME_WIDTH))
+                    .flex_grow(0.3),
+            )
         };
         // Host always has a segment. When Recipe or Repository needs more room, its fields replace the right side
         // of the address and use their own rows. Keep the host picker as the way back to an existing host.
@@ -2210,8 +2265,8 @@ impl Render for Launcher {
                     .flex_col()
                     .gap(px(LABEL_GAP))
                     .flex_grow_1()
-                    .flex_basis(px(164.))
-                    .min_w(px(164.))
+                    .flex_basis(px(CONTAINER_HOST_MIN_WIDTH))
+                    .min_w(px(CONTAINER_HOST_MIN_WIDTH))
                     .child(row(
                         "launcher-container-host-row",
                         "Container host",
@@ -2231,7 +2286,8 @@ impl Render for Launcher {
                     .child(row("launcher-folder-row", "Folder", folder, palette))
                     .into_any_element()
             } else {
-                // A new environment starts at its home. Give the held value the same edge and height as its neighbor.
+                // A new environment starts at its home. The short, held Folder segment leaves the host menu room
+                // for its reasons and keeps the same edge and height as the editable fields around it.
                 let held = div()
                     .bg(theme::color(palette.well))
                     .border_1()
@@ -2239,8 +2295,10 @@ impl Render for Launcher {
                     .rounded(metrics::RADIUS_SM)
                     .child(folder);
                 let folder = row("launcher-folder-row", "Folder", held, palette)
-                    .w(px(84.))
+                    .w(px(60.))
                     .flex_none();
+                // Recipe needs the full address row. The held home leaves enough room beside Container host
+                // for Name to share the next row, which still wraps on a narrow window.
                 rows.child(
                     div()
                         .flex()
@@ -2248,7 +2306,8 @@ impl Render for Launcher {
                         .items_start()
                         .gap(px(ROW_GAP))
                         .children(container_host)
-                        .child(folder),
+                        .child(folder)
+                        .children(name.take()),
                 )
                 .into_any_element()
             }
@@ -2316,13 +2375,13 @@ impl Render for Launcher {
                     .flex_basis(px(ADDRESS_MIN_WIDTH))
                     .min_w(px(ADDRESS_MIN_WIDTH))
                     .max_w_full()
+                    // Environment editors use the address's full width for recipe names and unavailable reasons.
+                    .when(environment.is_some(), |fields| {
+                        fields.flex_basis(gpui::relative(1.))
+                    })
                     .child(address),
             )
-            .children(name.map(|name| {
-                name.flex_basis(px(DESTINATION_NAME_WIDTH))
-                    .min_w(px(DESTINATION_NAME_WIDTH))
-                    .flex_grow(0.3)
-            }));
+            .children(name);
         // Under the host, as the old launcher said it there as well as beside Launch: the folder was taken on the
         // installation this host row named before.
         let installation_moved = self
@@ -2432,19 +2491,47 @@ impl Render for Launcher {
             .gap(px(ROW_GAP))
             .children(tabs)
             .children(fields);
-        // Recent setups sit above the destination, and take no room without rows (`recents`). They
-        // show while a new environment is chosen too, as the old strip did: each restores its own placement.
-        let recents = self.recents_strip(palette, window, cx);
+        let results_open = self.search_open(window, cx);
         let body = div()
             .flex()
             .flex_col()
             .gap(px(SECTION_GAP))
-            .children(recents)
+            .children(self.setup_source(palette))
             .child(destination)
             .child(choices)
             // After the choices, as the old listing was (`browse`).
             .children(self.browse_listing(palette, window, cx))
             .children(self.save_panel.clone());
+        let wide = search::command_pane_fits(window);
+        let body = if wide {
+            let pane = self.command_pane(palette, window, cx);
+            let scroll = scroll_handle("launcher-form-scroll".into(), window, cx);
+            let form = div()
+                .id("launcher-body")
+                .debug_selector(|| "launcher-body".into())
+                .flex_1()
+                .min_w_0()
+                .min_h_0()
+                .py(metrics::DIALOG_PAD.0)
+                .px(metrics::DIALOG_PAD.1)
+                .overflow_y_scroll()
+                .track_scroll(&scroll)
+                .when(results_open, |form| form.opacity(0.55))
+                .child(body);
+            div()
+                .flex()
+                .size_full()
+                .min_h_0()
+                .child(pane)
+                .child(crate::focus::scroll_region(
+                    scroll_from_controls(form, &scroll),
+                    &scroll,
+                ))
+                .into_any_element()
+        } else {
+            body.when(results_open, |form| form.opacity(0.55))
+                .into_any_element()
+        };
 
         // What a press has to say: the draft's own reason after a press it refused, or the helm's words refusing the
         // last launch. The helm's words are host text and are drawn escaped, as their own element.
@@ -2596,11 +2683,11 @@ impl Render for Launcher {
             .on_click(on_launcher(weak.clone(), Launcher::press)),
         );
         let title = search::command_title(&self.draft.mode);
-        let (command, guidance) = self.command_header(palette, window, cx);
+        let (command, guidance, command_anchor) = self.command_header(palette, window, cx);
         // Across the top of the launcher, pinned while the body scrolls, as the old sticky banner was.
         let escalation = self.escalation_band(holding, palette, window, cx);
         let mut frame = DialogFrame::new("launcher", title, body, answers)
-            .heading_control(command, guidance)
+            .heading_control(command, guidance, command_anchor)
             .width(px(WIDTH))
             .flat_margin_when_wide()
             .close(
@@ -2609,6 +2696,16 @@ impl Render for Launcher {
                 closing_held,
                 on_launcher(weak.clone(), Launcher::cancel),
             );
+        if wide {
+            // Two independent scroll viewports need the same finite space between the pinned header and actions.
+            // Give the inline Save panel room in a tall window, and let the frame cap it to the current viewport.
+            let height = if self.save_panel.is_some() {
+                1000.
+            } else {
+                704.
+            };
+            frame = frame.fixed_height(px(height)).split_body();
+        }
         if let Some(notices) = notices {
             // Under the actions row: the refusal, the Replace and Restart warnings and the YOLO question follow it.
             frame = frame.notices(notices).notices_below();
