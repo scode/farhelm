@@ -44,7 +44,7 @@ reached 159 MB of versions in three days), so a fresh checkout's first run will 
 (`--filter=blob:none`, fetching the manifest's blobs on demand) or a cache shared between checkouts would fix it.
 
 `publish` takes a directory of captures written by `scripts/check-gui-goldens.py --update` (default
-`target/gui-goldens/captures`): `<platform>/<file>`, a `<platform>.complete` marker the golden test writes once every
+`target/gui-goldens/captures`): `<platform>/<file>`, a `<platform>.complete` marker the runner writes once every
 scene of that platform is captured, and `manifest.sha256`, the digest of the manifest the captures were taken against.
 It pushes every capture the store lacks, then rewrites the manifest's lines for each captured platform: changed
 pictures get their new id, new scenes are added, and scenes with no capture are dropped (other platforms' lines are
@@ -72,6 +72,7 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable
 
@@ -156,6 +157,24 @@ def record_manifest(captures: Path, manifest: Path) -> None:
     (captures / MANIFEST_DIGEST).write_text(manifest_digest(manifest) + "\n", encoding="utf-8")
 
 
+@contextmanager
+def capture_lock(captures: Path):
+    """Keep the update and publisher on one generation of captures, from the first clear through the last read.
+
+    The lock is beside the replaceable directory. An update passes the descriptor to its renderer, so a killed
+    wrapper cannot release the lock while the renderer can still write. Closing the last descriptor releases it.
+    """
+    import fcntl
+
+    captures.parent.mkdir(parents=True, exist_ok=True)
+    with captures.with_name(f".{captures.name}.lock").open("a") as lock:
+        try:
+            fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as error:
+            raise Refused(f"another golden update or publish is using {captures}") from error
+        yield lock.fileno()
+
+
 # --- the cache repository -------------------------------------------------------------------------------------------
 
 
@@ -237,7 +256,7 @@ def read_captures(captures: Path, manifest: Path) -> dict[str, Path]:
     """The captured pictures by manifest path, refusing anything but complete platforms of well-named pictures taken
     against `manifest` as it is now.
 
-    A platform counts only with its `<platform>.complete` marker, holding the number of pictures the golden test wrote,
+    A platform counts only with its `<platform>.complete` marker, holding the number of pictures the runner counted,
     and only when that many are there: a run that stopped partway, or a directory copied in part, would otherwise drop
     every missing scene from the manifest."""
     if not captures.is_dir():
@@ -373,7 +392,9 @@ def main(argv: list[str]) -> int:
         if args.command == "fetch":
             print(fetch(args.manifest.resolve(), args.dir.resolve(), REMOTE, args.cache.resolve()))
         elif args.command == "publish":
-            print(publish(args.captures.resolve(), MANIFEST, REMOTE, CACHE))
+            captures = args.captures.resolve()
+            with capture_lock(captures):
+                print(publish(captures, MANIFEST, REMOTE, CACHE))
         else:
             parser.error("name a command: fetch or publish (or --self-test)")
     except Refused as refusal:
@@ -406,7 +427,7 @@ class SelfTest(unittest.TestCase):
         self.tmp.cleanup()
 
     def captures(self, pictures: dict[str, bytes], platform: str = "linux", manifest: Path | None = None) -> Path:
-        """A fresh capture directory, laid out and marked as `check-gui-goldens.py --update` and the golden test leave
+        """A fresh capture directory, laid out and marked as `check-gui-goldens.py --update` leaves
         it, taken against `manifest` (this test's own by default) as it is now."""
         self.runs += 1
         out = self.root / f"captures-{self.runs}"

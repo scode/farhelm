@@ -33,7 +33,7 @@
 //! with the keyboard's ring.
 //!
 //! These are test references, not documentation media: they pin what each component draws, so a change to a token, a
-//! padding or a font shows up as a failing test with the new picture beside the old one, instead of drifting unnoticed.
+//! padding or a font shows up as a failing test that names the new picture and its reference.
 //! They render with the bundled fonts only and the platform's headless renderer (software Vulkan on Linux), so the same
 //! tree gives the same pixels from run to run; a different renderer version can still move antialiased edges, which is
 //! why references are per platform and rewritten deliberately. They are ignored in ordinary test runs because they
@@ -43,9 +43,10 @@
 //! keeps the manifest `tests/goldens.txt`, one line per picture with its git blob id, and that script fetches the
 //! pictures it names and publishes new ones. The test itself knows nothing of that: it reads the references from the
 //! directory `FARHELM_GOLDENS_DIR` names, and fails rather than skips when the variable is unset or a picture is
-//! missing. After an intended visual change, `scripts/check-gui-goldens.py --update` runs it with
-//! `FARHELM_UPDATE_GOLDENS` naming a directory for the captures instead, and `scripts/gui-goldens.py publish` pushes
-//! them and rewrites the manifest's lines, which the change's PR then carries ([`GoldenRun`]).
+//! missing. Only failures write a capture under `FARHELM_GOLDEN_CAPTURE_DIR`, a directory of the comparison run's own.
+//! After an intended visual change, `scripts/check-gui-goldens.py --update` runs it with `FARHELM_UPDATE_GOLDENS`
+//! naming a directory for all the captures. The script marks the full successful run complete so
+//! `scripts/gui-goldens.py publish` can push its pictures and rewrite the manifest ([`GoldenRun`]).
 //!
 //! The scene functions live in one file per area beside this one (`foundations.rs`, `session_list.rs` and so on), which
 //! marks the ones `SCENES` names `pub(super)` for this file's glob imports; this file keeps the shared harness, the
@@ -1427,7 +1428,6 @@ fn settle(
     cx: &mut gpui::HeadlessAppContext,
     window: gpui::AnyWindowHandle,
     view: &Entity<SceneView>,
-    name: &str,
 ) -> anyhow::Result<image::RgbaImage> {
     let mut previous = None;
     for _ in 0..MAX_SETTLE_FRAMES {
@@ -1452,28 +1452,28 @@ fn settle(
         state.after.get().is_some() || settings::settings_scene_pending(state)
     });
     anyhow::bail!(
-        "{name} never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"
+        "never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"
     )
 }
 
-/// What a golden run does, read from the two variables `scripts/check-gui-goldens.py` sets. The references are not in
-/// the tree (the module docs say why), so there is no default to fall back on: a run with neither variable fails.
+/// Holds the per-run output path and, in compare mode, the immutable reference directory.
 enum GoldenRun {
-    /// `FARHELM_GOLDENS_DIR`: compare every capture with `<dir>/<os>/<scene>--<appearance>.png`, the layout
-    /// `scripts/gui-goldens.py fetch` writes. A missing file is a failure like a differing one, never a skip.
-    Compare(PathBuf),
-    /// `FARHELM_UPDATE_GOLDENS`: write every capture to `<dir>/<os>/` and compare nothing, then write
-    /// `<dir>/<os>.complete` holding the number of captures, which `scripts/gui-goldens.py publish` requires before it
-    /// takes the directory: a run that stopped partway would otherwise drop every scene it never reached.
-    Update(PathBuf),
+    /// Save the pixels of every scene for publication by `scripts/gui-goldens.py publish`.
+    Update { captures: PathBuf },
+    /// Save a capture only if its reference is missing, unreadable or has different pixels.
+    Compare {
+        references: PathBuf,
+        captures: PathBuf,
+    },
 }
 
 impl GoldenRun {
-    /// The run the environment asks for. Both variables hold absolute paths, as `scripts/check-gui-goldens.py` sets
-    /// them, since the test runs in the crate's directory rather than wherever the caller stood.
+    /// The script supplies absolute paths because Cargo runs the test from the crate's directory.
     fn from_env() -> anyhow::Result<Self> {
         if let Some(captures) = std::env::var_os("FARHELM_UPDATE_GOLDENS") {
-            return Ok(Self::Update(captures.into()));
+            return Ok(Self::Update {
+                captures: captures.into(),
+            });
         }
         let references = std::env::var_os("FARHELM_GOLDENS_DIR").ok_or_else(|| {
             anyhow::anyhow!(
@@ -1481,104 +1481,136 @@ impl GoldenRun {
                  scripts/check-gui-goldens.py, which fetches them"
             )
         })?;
-        Ok(Self::Compare(references.into()))
+        let captures = std::env::var_os("FARHELM_GOLDEN_CAPTURE_DIR").ok_or_else(|| {
+            anyhow::anyhow!(
+                "FARHELM_GOLDEN_CAPTURE_DIR is unset: run scripts/check-gui-goldens.py, \
+                 which gives each comparison its own output directory"
+            )
+        })?;
+        Ok(Self::Compare {
+            references: references.into(),
+            captures: captures.into(),
+        })
+    }
+
+    /// Keep comparison failures next to each other without writing an image for a passing comparison.
+    fn check(&self, name: &str, screenshot: &image::RgbaImage) -> anyhow::Result<()> {
+        use anyhow::Context as _;
+
+        let os = std::env::consts::OS;
+        let captures = match self {
+            Self::Update { captures } | Self::Compare { captures, .. } => captures,
+        };
+        let directory = captures.join(os);
+        let capture = directory.join(name);
+        let save = || -> anyhow::Result<()> {
+            std::fs::create_dir_all(&directory)?;
+            screenshot
+                .save(&capture)
+                .with_context(|| format!("write {}", capture.display()))
+        };
+        let Self::Compare { references, .. } = self else {
+            return save();
+        };
+        let reference = references.join(os).join(name);
+        let problem = match image::open(&reference).map(|expected| expected.into_rgba8()) {
+            Ok(expected) if &expected == screenshot => return Ok(()),
+            Ok(_) => format!("differs from {}", reference.display()),
+            Err(error) => format!("could not read {}: {error}", reference.display()),
+        };
+        save().with_context(|| problem.clone())?;
+        anyhow::bail!("{problem} (capture in {})", capture.display());
     }
 }
 
-/// Every scene in both appearances matches its reference exactly. Run through `scripts/check-gui-goldens.py`, which
-/// selects the headless renderer and fetches the references; its `--update` sets `FARHELM_UPDATE_GOLDENS` instead,
-/// for captures to publish ([`GoldenRun`]).
+/// Draw one appearance in the headless app that belongs to it.
+fn render_capture(
+    cx: &mut gpui::HeadlessAppContext,
+    scene: &'static Scene,
+    preference: Preference,
+) -> anyhow::Result<image::RgbaImage> {
+    cx.update(|cx| {
+        theme::follow_system(WindowAppearance::Light, cx);
+        theme::set_preference(preference, cx);
+    });
+    let mut view = None;
+    let window = cx.open_window(size(px(scene.size.0), px(scene.size.1)), |window, cx| {
+        let state = SceneState {
+            input: TextInputState::new(window, cx),
+            growing: [
+                TextInputState::new_growing(3, window, cx),
+                TextInputState::new_growing(3, window, cx),
+            ],
+            kept: [
+                TextInputState::new_keeping_line_breaks(window, cx),
+                TextInputState::new_keeping_line_breaks(window, cx),
+            ],
+            tooltip_owner: cx.new(|_| TooltipOwner::default()),
+            anchor: Rc::new(RefCell::new(None)),
+            ring: cx.focus_handle().tab_stop(true),
+            terminals: Rc::new(RefCell::new(Vec::new())),
+            attached: Rc::new(RefCell::new(Vec::new())),
+            lists: Rc::new(RefCell::new(Vec::new())),
+            keep: Rc::new(RefCell::new(Vec::new())),
+            after: Rc::new(Cell::new(None)),
+        };
+        let scene_view = cx.new(|cx| SceneView {
+            scene,
+            state,
+            root: root::attach(window, cx),
+        });
+        view = Some(scene_view.clone());
+        cx.new(|cx| Root::new(scene_view, window, cx))
+    })?;
+    let view = view.ok_or_else(|| anyhow::anyhow!("the scene view was not built"))?;
+    // One frame first, so what the scene draws (an anchor's bounds, a focusable button) exists for its setup.
+    cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
+    cx.update_window(window.into(), |_, window, cx| {
+        // Cheap clones: handles and shared cells.
+        let staged = view.read(cx).state.clone();
+        (scene.setup)(&staged, window, cx);
+    })?;
+    settle(cx, window.into(), &view)
+}
+
+/// Give a fixture panic the same scene-level context as an ordinary render error. The panic hook still reports
+/// the original location in the failed libtest's output.
+fn catch_render_panic<T>(render: impl FnOnce() -> anyhow::Result<T>) -> anyhow::Result<T> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(render)).unwrap_or_else(|payload| {
+        let detail = payload
+            .downcast_ref::<String>()
+            .map(String::as_str)
+            .or_else(|| payload.downcast_ref::<&str>().copied())
+            .unwrap_or("unknown panic");
+        Err(anyhow::anyhow!("scene panicked: {detail}"))
+    })
+}
+
+/// Reports scene failures together so a broken fixture cannot hide failures or changes further down the catalog.
 #[test]
 #[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
 fn component_goldens() -> anyhow::Result<()> {
     let run = GoldenRun::from_env()?;
-    let os = std::env::consts::OS;
-    // Captures go beside the test binary, inside the build directory, so a failure leaves the new picture to compare.
-    let captures = std::env::current_exe()?
-        .parent()
-        .map(|deps| deps.join("gui-goldens"))
-        .ok_or_else(|| anyhow::anyhow!("the test binary has no directory"))?;
-    std::fs::create_dir_all(&captures)?;
-    if let GoldenRun::Update(dir) = &run {
-        std::fs::create_dir_all(dir.join(os))?;
-    }
-    let mut written = 0;
     let mut failures = Vec::new();
     for scene in SCENES {
         for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
             let name = format!("{}--{appearance}.png", scene.name);
-            let mut cx = test_support::headless()?;
-            cx.update(|cx| {
-                theme::follow_system(WindowAppearance::Light, cx);
-                theme::set_preference(preference, cx);
-            });
-            let mut view = None;
-            let window =
-                cx.open_window(size(px(scene.size.0), px(scene.size.1)), |window, cx| {
-                    let state = SceneState {
-                        input: TextInputState::new(window, cx),
-                        growing: [
-                            TextInputState::new_growing(3, window, cx),
-                            TextInputState::new_growing(3, window, cx),
-                        ],
-                        kept: [
-                            TextInputState::new_keeping_line_breaks(window, cx),
-                            TextInputState::new_keeping_line_breaks(window, cx),
-                        ],
-                        tooltip_owner: cx.new(|_| TooltipOwner::default()),
-                        anchor: Rc::new(RefCell::new(None)),
-                        ring: cx.focus_handle().tab_stop(true),
-                        terminals: Rc::new(RefCell::new(Vec::new())),
-                        attached: Rc::new(RefCell::new(Vec::new())),
-                        lists: Rc::new(RefCell::new(Vec::new())),
-                        keep: Rc::new(RefCell::new(Vec::new())),
-                        after: Rc::new(Cell::new(None)),
-                    };
-                    let scene_view = cx.new(|cx| SceneView {
-                        scene,
-                        state,
-                        root: root::attach(window, cx),
-                    });
-                    view = Some(scene_view.clone());
-                    cx.new(|cx| Root::new(scene_view, window, cx))
-                })?;
-            let view =
-                view.ok_or_else(|| anyhow::anyhow!("{name}: the scene view was not built"))?;
-            // One frame first, so what the scene draws (an anchor's bounds, a focusable button) exists for its setup.
-            cx.update_window(window.into(), |_, window, cx| window.draw(cx).clear(cx))?;
-            cx.update_window(window.into(), |_, window, cx| {
-                // Cheap clones: handles and shared cells.
-                let staged = view.read(cx).state.clone();
-                (scene.setup)(&staged, window, cx);
-            })?;
-            let screenshot = settle(&mut cx, window.into(), &view, &name)?;
-            screenshot.save(captures.join(&name))?;
-            let references = match &run {
-                GoldenRun::Update(dir) => {
-                    screenshot.save(dir.join(os).join(&name))?;
-                    written += 1;
-                    continue;
-                }
-                GoldenRun::Compare(dir) => dir.join(os),
-            };
-            let reference = references.join(&name);
-            match image::open(&reference).map(|expected| expected.into_rgba8()) {
-                Ok(expected) if expected == screenshot => {}
-                Ok(_) => failures.push(format!(
-                    "{name} differs from its reference (capture in {})",
-                    captures.display()
-                )),
-                Err(error) => failures.push(format!("{}: {error}", reference.display())),
+            let result = catch_render_panic(|| {
+                let mut cx = test_support::headless()?;
+                // Teardown may flush deferred fixture callbacks. Catch the render's panic first so teardown runs
+                // outside that unwind. The outer catch can then report a teardown panic and the batch continues.
+                catch_render_panic(|| render_capture(&mut cx, scene, preference))
+            })
+            .and_then(|screenshot| run.check(&name, &screenshot));
+            if let Err(error) = result {
+                failures.push(format!("{name}: {error:#}"));
             }
         }
     }
-    if let GoldenRun::Update(dir) = &run {
-        std::fs::write(dir.join(format!("{os}.complete")), format!("{written}\n"))?;
-    }
     anyhow::ensure!(
         failures.is_empty(),
-        "golden failures: {}",
-        failures.join("; ")
+        "golden failures:\n{}",
+        failures.join("\n")
     );
     Ok(())
 }
