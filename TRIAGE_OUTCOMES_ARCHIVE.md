@@ -33717,3 +33717,117 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Corrected. The terminal host startup contract documents the remote Mac update window and its cross-build
   compatibility obligation. Change `pttloxtklyvw`, bookmark `plan/triage-terminal-host/06-text-corrections`,
   [PR #4485](https://github.com/scode/farhelm/pull/4485/changes).
+
+## stalled-input-test-accepts-discarded-bytes.md
+
+- Outcome: `other`.
+- Assessment: None in the product. A terminal-host test of "controls work beside blocked input" would also pass if the
+  blocked input were silently discarded. Verified: host_lifecycle.rs `until_before_ack` checks only `written < total`
+  and ignores `discarded`. Child liveness is not asserted (confirmed).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: assert `discarded == 0` and that the child is alive.
+- Execution: Fixed. The fixture requires a live child and rejects discarded input while exercising control requests
+  against a full terminal input buffer. Change `xunrpqstslyw`, bookmark
+  `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).
+
+## preclient-output-test-connects-during-wait.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The "output before any client connects is kept" test connects clients while waiting
+  for the child to exit, so it may not test its premise. Verified: host_lifecycle.rs:31-35 calls `host.connect(true)`
+  inside the `eventually` loop (confirmed).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: wait on a marker file the child writes after printing, then connect.
+- Execution: Fixed. The fixture waits for the program to write its output and exit before the first protocol handshake.
+  Change `xunrpqstslyw`, bookmark `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).
+
+## late-output-test-does-not-distinguish-flush-order.md
+
+- Outcome: `other`.
+- Assessment: None in the product. A test that an overdue synchronized frame is drawn before newer output would also
+  pass with the steps reversed. Verified: sync.rs `output_after_the_deadline_flushes_the_update_first` checks only the
+  final `held after` and no deadline. Plain text appended into the held update gives the same observations (confirmed).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: feed a new BEGIN plus text after the deadline and assert that "held" is visible while the new text is
+  still held.
+- Execution: Fixed. The test starts another synchronized update and independently checks that the first update became
+  visible while the second stayed held. Change `xunrpqstslyw`, bookmark
+  `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).
+
+## shift-enter-test-lacks-reader-readiness.md
+
+- Outcome: `other`.
+- Assessment: None in the product. A Shift+Enter integration test uses a 200 ms sleep instead of proving the reader is
+  already waiting. A deterministic host-level test already covers the single-write behavior. Verified: Accepted from the
+  file. The file notes host.rs:4536-4569 covers the boundary deterministically.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Narrow the test's docstring so it does not claim the write boundary (tiny), or discard.
+- Execution: Corrected the test description to claim the first block the program read. The existing atomic-input test
+  covers the host write boundary. Change `xunrpqstslyw`, bookmark
+  `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).
+
+## reflow-property-timeout-retains-workers.md
+
+- Outcome: `other`.
+- Assessment: None in the product. If the one-column reflow bug ever returned, this property test would keep stuck,
+  memory-allocating threads alive and start more while proptest shrinks, instead of failing fast. Verified: narrow.rs
+  `bounded` panics on timeout and relies on process exit. It is called inside `proptest!`, which catches panics and
+  keeps shrinking (confirmed from source; proptest internals not re-read).
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix code: print a message and `std::process::abort()` on timeout.
+- Execution: Fixed. A timed-out worker can keep allocating. The test process reports the timeout and exits before
+  shrinking can start another worker. Change `xunrpqstslyw`, bookmark
+  `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).
+
+## mac-process-lookup-truncates-live-host-command.md
+
+- Outcome: `other`.
+- Assessment: None in the product. On a Mac whose `ps` listing exceeds 8 MiB, test cleanup can decide a stopped test
+  terminal host is gone, delete its socket and leave the process orphaned on the developer's machine. Verified:
+  teststate hosts.rs `serving_process` (macOS branch) checks `stdout.complete` but not `omitted_bytes`. process.rs
+  documents `complete` as "EOF observed", independent of omission (confirmed). An 8 MiB listing is unusual but possible.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix code: treat `omitted_bytes != Some(0)` as an error.
+- Execution: Fixed. A complete process-list capture is required before cleanup can treat a host as absent. An omitted
+  suffix leaves the run available for diagnosis and retry. Change `xunrpqstslyw`, bookmark
+  `plan/triage-terminal-host/07-host-emulator-and-cleanup-test-gaps`,
+  [PR #4487](https://github.com/scode/farhelm/pull/4487/changes).

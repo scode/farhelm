@@ -293,8 +293,13 @@ fn serving_process(socket: &Path) -> Result<Option<u32>, String> {
             &limits,
         )
         .map_err(|error| format!("running ps: {error:?}"))?;
-        if !outcome.status.is_some_and(|status| status.success()) || !outcome.stdout.complete {
-            return Err("ps did not list the processes".into());
+        // Reaching EOF says nothing about whether the capture kept every
+        // command line. An omitted suffix cannot prove the socket is unused.
+        if !outcome.status.is_some_and(|status| status.success())
+            || !outcome.stdout.complete
+            || outcome.stdout.omitted_bytes != Some(0)
+        {
+            return Err("ps did not provide a complete process list".into());
         }
         let suffix = format!(" --socket {}", socket.display());
         for line in String::from_utf8_lossy(&outcome.stdout.prefix).lines() {

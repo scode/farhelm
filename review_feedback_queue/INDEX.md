@@ -151,28 +151,9 @@ consequences.
 - [`valid-ssh-uri-short-label-parsing.md`](valid-ssh-uri-short-label-parsing.md) — Valid SSH URIs with a trailing slash,
   service-name port or empty port can show an incorrectly shortened host label.
 
-- [`stalled-input-test-accepts-discarded-bytes.md`](stalled-input-test-accepts-discarded-bytes.md) — The stalled-input
-  regression accepts discarded typing rather than proving that controls remain responsive beside pending input.
-
-- [`preclient-output-test-connects-during-wait.md`](preclient-output-test-connects-during-wait.md) — The pre-client
-  output regression connects during its premise wait, so it can pass without output preceding the first negotiated
-  client.
-
-- [`late-output-test-does-not-distinguish-flush-order.md`](late-output-test-does-not-distinguish-flush-order.md) — The
-  overdue-frame regression cannot distinguish flushing before new output from flushing afterward; production order is
-  currently correct.
-
-- [`reflow-property-timeout-retains-workers.md`](reflow-property-timeout-retains-workers.md) — If an allocating
-  regression returns, property-test shrinking can retain timed-out workers and start more; no current emulator defect or
-  measured memory exhaustion is claimed.
-
 - [`runtime-recorder-guidance-conflict.md`](runtime-recorder-guidance-conflict.md) — Run-all-tests gives conflicting
   directions about whether emulator stress and memory tests require the runtime-test recorder; taking the optional
   direction can leave future failures without the normally required retained run record.
-
-- [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
-  with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
-  that host unreachable for future cleanup.
 
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
@@ -184,9 +165,6 @@ consequences.
 
 - [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
   input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
-
-- [`shift-enter-test-lacks-reader-readiness.md`](shift-enter-test-lacks-reader-readiness.md) — This integration test can
-  report success without establishing the already-waiting reader its documentation requires.
 
 - [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
   short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live

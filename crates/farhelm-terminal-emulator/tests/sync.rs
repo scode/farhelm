@@ -85,15 +85,24 @@ fn a_child_exit_flushes_an_open_update() {
 /// first, even if the owner's wake-up has not happened yet.
 ///
 /// Why: the deadline is a promise that the frame is drawn by then; a late
-/// timer must not let the stalled update swallow newer output.
+/// timer must not let the stalled update swallow the start of a new one.
+/// Once the first expires, its text is visible while the new update is held.
 #[test]
 fn output_after_the_deadline_flushes_the_update_first() {
     let mut emulator = emulator(20, 3);
     feed(&mut emulator, &[BEGIN, b"held"].concat());
+    assert!(emulator.sync_deadline().is_some());
+    assert_eq!(emulator.screen_tail(100), "");
     let mut effects = Collected::default();
-    emulator.feed(b" after", t0() + DEADLINE * 2, FeedMode::Live, &mut effects);
-    assert_eq!(emulator.screen_tail(100), "held after");
-    assert_eq!(emulator.sync_deadline(), None);
+    let late = t0() + DEADLINE * 2;
+    emulator.feed(
+        &[BEGIN, b" after"].concat(),
+        late,
+        FeedMode::Live,
+        &mut effects,
+    );
+    assert_eq!(emulator.screen_tail(100), "held");
+    assert_eq!(emulator.sync_deadline(), Some(late + DEADLINE));
 }
 
 /// An update that ends within the same output is drawn at once and leaves no

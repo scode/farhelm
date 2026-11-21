@@ -36,9 +36,9 @@ const LIMIT: Duration = Duration::from_secs(10);
 /// Run `work` on a thread of its own and return its result, or fail if it
 /// takes longer than [`LIMIT`].
 ///
-/// On a timeout the thread is left running and the test panics; nextest runs
-/// each test in a process of its own, so the process and the runaway thread
-/// end with the failure. A panic in `work` is passed on as is.
+/// A timed-out worker may still be allocating, so exit the test process
+/// immediately. A panic would let proptest catch it and start more workers
+/// while shrinking. A panic in `work` is passed on as is.
 fn bounded<T: Send + 'static>(what: &str, work: impl FnOnce() -> T + Send + 'static) -> T {
     let (sender, receiver) = mpsc::channel();
     let worker = thread::spawn(move || {
@@ -46,11 +46,18 @@ fn bounded<T: Send + 'static>(what: &str, work: impl FnOnce() -> T + Send + 'sta
     });
     match receiver.recv_timeout(LIMIT) {
         Ok(result) => result,
-        Err(RecvTimeoutError::Timeout) => panic!(
-            "{what} did not finish within {LIMIT:?}: the one-column reflow fix \
-             (vendor/README.md, \"Bug fixes\") may have regressed into its \
-             endless, allocating loop"
-        ),
+        Err(RecvTimeoutError::Timeout) => {
+            use std::io::Write as _;
+
+            // Write past libtest's capture buffer, which exit will not flush.
+            let _ = writeln!(
+                std::io::stderr().lock(),
+                "{what} did not finish within {LIMIT:?}: the one-column reflow fix \
+                 (vendor/README.md, \"Bug fixes\") may have regressed into its \
+                 endless, allocating loop"
+            );
+            std::process::exit(1);
+        }
         Err(RecvTimeoutError::Disconnected) => match worker.join() {
             Err(panic) => std::panic::resume_unwind(panic),
             Ok(()) => unreachable!("the worker sends before it returns"),
