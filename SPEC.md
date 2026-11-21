@@ -538,12 +538,11 @@ recipes always built snapshots, and hosts using older snapshots, need `gh` insta
 missing, the token file is still installed, the connection remains usable, and host details warn that private clones
 need gh. The next connection or credential replacement retries it.
 
-In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
-actions, delete confirmation, and refusal messages stay visible at the bottom of the scrolling panel, above Close.
-Switching Settings sections hides those actions with the editor. In Add host, the same answers use the dialog's pinned
-footer. The question about saving before leaving appears centered over whichever dialog hosts the editor. Keyboard
-navigation reaches the footer after the fields. As with other framed dialogs, a very short window scrolls the whole card
-when its header and footer cannot fit.
+In Settings the editor opens at its top, with Back beside its title. Its actions sit in the pinned footer next to Close.
+The delete question replaces that row while open. Refusals and progress stay visible above it. Switching Settings
+sections hides the editor and its actions. Add host places its editor's answers in its own pinned footer. The question
+about saving before leaving is centered over the dialog. Keyboard navigation reaches the footer after the fields. As
+with other framed dialogs, a very short window scrolls the whole card when the header and footer cannot fit.
 
 Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-`, `farhelm-sess-`,
 `farhelm-build-` or `farhelm-prepare-` that no host or recipe build or preparation on this helm owns. A session-owned
@@ -2458,6 +2457,12 @@ pending operations and sends the remaining saves one at a time. The first failur
 affected page with its error. Two different unsaved Tensorlake keys leave Settings open on Credentials with a message to
 save the desired key first. When Settings closes, focus returns to the gear.
 
+Related controls and list rows share cards, with separators between rows and actions such as Refresh, New recipe and Add
+in their group headings. The Containers delete question opens inside the leftovers card. The recipe editor keeps Name,
+Size, Software, Tunnels, GitHub and Agents in separate cards. Size belongs to Tensorlake sandboxes. The software choices
+are a two-by-two grid. Each agent's mark precedes the mode and fields for its sign-in. The credential editor keeps its
+fields in one card and shows the session marks beside the agent login choices.
+
 The **Search** field above the section list finds settings by section, label or help text. While a query is active, the
 list shows the sections with matches under their group headings and gives each section's count. Cmd+F on a Mac or Ctrl+F
 on Linux moves focus there from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or
@@ -2491,66 +2496,65 @@ saved-key metadata immediately; each keeps its own unsaved replacement draft. Cr
 the stored Tensorlake key.
 
 **Appearance** chooses **System**, **Dark** or **Light**, with System as the default. The three illustrated choices
-share one keyboard radio group. System's preview shows both palettes. System follows each device's
-current appearance, including changes while Farhelm stays open; an explicit choice overrides it. The choice is a helm
-preference shared by every client of the helm, and a change applies live in the open window (the maintainer decided on
-2026-11-13 that appearance is a helm preference rather than a per-device one; the old app's per-device choice is not
-carried over, so everyone starts at System). The resolved palette applies before application content appears, and
-changes live. The terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session
-confirmations** switch. Its help names Stop, Delete, Replace, Restart and tab Close and excludes YOLO, host and trash
-questions (see Lifecycle operations). Beside it, **Name sessions on quick launch** is on by default, including when the
-helm has never stored a choice. Turning it off disables the naming prompt for quick launches. Beside it, **Color
-terminal frames by host** starts off and colors every session's thin terminal frame to match its host icon when turned
-on. The **Hosts** section has the switches `Set up new hosts without asking` and `Remove hosts without asking`, on when
-the respective confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same choice
-as the host dialog's permanent answer. Changes take effect immediately in the current client. Each switch explains the
-current behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts also has
-**Update remote hosts automatically**, on unless explicitly turned off, with help explaining that the helm updates
-remote hosts as soon as updates are available while Farhelm is open, and never updates its own machine this way. This
-shared choice survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the
-last known value and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts
-and sessions that are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins
-"EXPERIMENTAL:", says Tensorlake support is early and experimental and will change between releases, and makes the user
-responsible for sandboxes not running and billing when they do not want them to; it shows whether or not the section's
-settings load. Its API key is explicitly saved helm configuration, shared by every client and kept outside the
-preference row like the ntfy token: the helm stores it unencrypted in its state directory, and the section says so
-plainly. The key is never returned; the form shows only whether one is saved. Pasting a key and pressing **Save** stores
-or replaces it (surrounding whitespace is dropped), a blank field keeps the saved key, and **Clear** removes it.
-**Test** lists the account's sandboxes with the saved key and reports how many it can see, or why Tensorlake refused,
-inline. Test uses the saved key, never unsaved text in the field. Until Farhelm's own Tensorlake SSH key (see
-[Security](#security)) exists, the section offers **Create SSH key**; opening Settings never creates it. Once it exists,
-the section shows the one-time command that registers it with the user's Tensorlake account,
-`tl sbx ssh keys add --name farhelm-<tag> '<public key>'`, with a **Copy** button. The command carries the public key's
-text, so it works on any machine where Tensorlake's `tl` CLI is signed in. The section says that Farhelm cannot check
-the registration, because an API key cannot list SSH keys. `<tag>` is the helm tag: four lowercase letters or digits
-derived from the helm's registry, stable for the life of its state, which the names of the sandboxes this helm creates
-also carry. Recipes and their editor live in the separate **Recipes** section (see [Topology](#topology)). **Sandboxes
-not on this helm** keeps its heading and Refresh visible even when none are found. The off-by-default **Create
-Tensorlake sandboxes without asking** switch saves only when the helm acknowledges it and shows only the stored choice;
-`Set up new hosts without asking` never covers creating a sandbox. The section also notes that on Tensorlake's Usage
-Credits plan Tensorlake suspends an ordinary host sandbox after 24 hours without a connection from Farhelm. Session
-sandboxes are always created with a fixed 30-minute idle timeout. The creation switch's help covers both hosts and
-sessions and explains that timeout. The **Terminal** section chooses whether web links open in Farhelm without passing
-the click on (the default), open in Farhelm and also pass the click on, or only pass the click on. The latter two
-choices explain the risk of a second browser tab and that a program without mouse reporting cannot act on a click. This
-choice is the helm's and takes effect in every mounted terminal immediately. The three choices share one keyboard radio
-group in the **Web links** card. In the Mac app, where tunnels open (see
-[Terminal experience](#terminal-experience)), the **Terminal** section also has tunnel consent; other desktop apps,
-which open no tunnels, leave it out. In every desktop app, the **Terminal** section also has a free-form,
+share one keyboard radio group. System's preview shows both palettes. System follows each device's current appearance,
+including changes while Farhelm stays open; an explicit choice overrides it. The choice is a helm preference shared by
+every client of the helm, and a change applies live in the open window (the maintainer decided on 2026-11-13 that
+appearance is a helm preference rather than a per-device one; the old app's per-device choice is not carried over, so
+everyone starts at System). The resolved palette applies before application content appears, and changes live. The
+terminal keeps its dark colors in both palettes. Sessions has an off-by-default **Skip session confirmations** switch.
+Its help names Stop, Delete, Replace, Restart and tab Close and excludes YOLO, host and trash questions (see Lifecycle
+operations). Beside it, **Name sessions on quick launch** is on by default, including when the helm has never stored a
+choice. Turning it off disables the naming prompt for quick launches. Beside it, **Color terminal frames by host**
+starts off and colors every session's thin terminal frame to match its host icon when turned on. The **Hosts** section
+has the switches `Set up new hosts without asking` and `Remove hosts without asking`, on when the respective
+confirmation is skipped. Turning one off restores that confirmation; turning one on makes the same choice as the host
+dialog's permanent answer. Changes take effect immediately in the current client. Each switch explains the current
+behavior, and each host dialog's permanent answer points to the gear as the place to undo it. Hosts also has **Update
+remote hosts automatically**, on unless explicitly turned off, with help explaining that the helm updates remote hosts
+as soon as updates are available while Farhelm is open, and never updates its own machine this way. This shared choice
+survives helm restarts, and the helm acts on a committed change immediately. A failed save restores the last known value
+and shows an adjacent error. The **Tensorlake** section holds the helm's Tensorlake account, for hosts and sessions that
+are Tensorlake sandboxes. It opens, above the API key, with a large red warning that begins "EXPERIMENTAL:", says
+Tensorlake support is early and experimental and will change between releases, and makes the user responsible for
+sandboxes not running and billing when they do not want them to; it shows whether or not the section's settings load.
+Its API key is explicitly saved helm configuration, shared by every client and kept outside the preference row like the
+ntfy token: the helm stores it unencrypted in its state directory, and the section says so plainly. The key is never
+returned; the form shows only whether one is saved. Pasting a key and pressing **Save** stores or replaces it
+(surrounding whitespace is dropped), a blank field keeps the saved key, and **Clear** removes it. **Test** lists the
+account's sandboxes with the saved key and reports how many it can see, or why Tensorlake refused, inline. Test uses the
+saved key, never unsaved text in the field. Until Farhelm's own Tensorlake SSH key (see [Security](#security)) exists,
+the section offers **Create SSH key**; opening Settings never creates it. Once it exists, the section shows the one-time
+command that registers it with the user's Tensorlake account, `tl sbx ssh keys add --name farhelm-<tag> '<public key>'`,
+with a **Copy** button. The command carries the public key's text, so it works on any machine where Tensorlake's `tl`
+CLI is signed in. The section says that Farhelm cannot check the registration, because an API key cannot list SSH keys.
+`<tag>` is the helm tag: four lowercase letters or digits derived from the helm's registry, stable for the life of its
+state, which the names of the sandboxes this helm creates also carry. Recipes and their editor live in the separate
+**Recipes** section (see [Topology](#topology)). **Sandboxes not on this helm** keeps its heading and Refresh visible
+even when none are found. The off-by-default **Create Tensorlake sandboxes without asking** switch saves only when the
+helm acknowledges it and shows only the stored choice; `Set up new hosts without asking` never covers creating a
+sandbox. The section also notes that on Tensorlake's Usage Credits plan Tensorlake suspends an ordinary host sandbox
+after 24 hours without a connection from Farhelm. Session sandboxes are always created with a fixed 30-minute idle
+timeout. The creation switch's help covers both hosts and sessions and explains that timeout. The **Terminal** section
+chooses whether web links open in Farhelm without passing the click on (the default), open in Farhelm and also pass the
+click on, or only pass the click on. The latter two choices explain the risk of a second browser tab and that a program
+without mouse reporting cannot act on a click. This choice is the helm's and takes effect in every mounted terminal
+immediately. The three choices share one keyboard radio group in the **Web links** card. In the Mac app, where tunnels
+open (see [Terminal experience](#terminal-experience)), the **Terminal** section also has tunnel consent; other desktop
+apps, which open no tunnels, leave it out. In every desktop app, the **Terminal** section also has a free-form,
 comma-separated **File types to open with Cmd-click** field (Ctrl-click outside macOS). It defaults to
 `md, txt, json, png, jpg, jpeg, gif, webp, bmp, avif`; saving an empty list disables opening while downloads still save.
 This field requires an explicit, acknowledged save, but its value lives in the shared preference row. The dialog shows
 one prominent warning beside the field for each listed type outside `md`, `txt`, `json`, `log` and the image types in
 that default; HTML-like types have a browser-specific warning, and all other unrecognized types have a generic warning.
 The warnings follow the draft as typed, including when another entry is malformed. A refused save leaves the draft and
-current helm policy unchanged and shows the reason inline. Under **Notifications**, **Sounds** has four switches
-that save separate helm preferences (see Status). Each row has its own play button for hearing that sound once.
-**ntfy alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`),
-topic, optional access token, and priority (Min, Low, Default, High, Urgent; default Default). These ntfy settings are
-explicitly saved helm configuration, shared by every client, outside the preference row. Save refusals appear inline.
-The stored token is never returned: the form shows whether one exists and allows replacing or clearing it. Changing to
-another server clears a saved token unless a new one is entered, and the form says so before saving. **Send test** uses
-the saved configuration, even while disabled, and reports success or failure inline. The **Checkouts** section holds the
+current helm policy unchanged and shows the reason inline. Under **Notifications**, **Sounds** has four switches that
+save separate helm preferences (see Status). Each row has its own play button for hearing that sound once. **ntfy
+alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and
+priority (Min, Low, Default, High, Urgent; default Default). These ntfy settings are explicitly saved helm
+configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
+never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
+a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
+configuration, even while disabled, and reports success or failure inline. The **Checkouts** section holds the
 explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command field and the
 default-on **Keep a checkout ready for faster launches** switch (see [Managed checkouts](#managed-checkouts)). The
 switch's help explains one extra checkout's disk space per repository and host, promptless login-shell preparation,

@@ -6112,9 +6112,11 @@ from Farhelm's committed layers.
 
 Settings → Recipes owns the shared catalog/editor and per-place readiness and Rebuild. Settings → Tensorlake retains
 account/key/create-confirmation settings and sandbox leftovers. Settings → Containers exposes cached probe results and
-container leftovers. The launcher and template editor share Existing host, New container and New sandbox placement, with
-a recipe/place pair for either environment segment. Provider UI differences remain exhaustive decisions in one module.
-Launch progress and errors reuse the existing operation surfaces, with no placeholder session.
+container leftovers. Settings pages hold their own card bodies so a list's rows, pending questions and outcomes stay
+with the controls that own them. The recipe editor uses that layout only in Settings. The launcher and template editor
+share Existing host, New container and New sandbox placement, with a recipe/place pair for either environment segment.
+Provider UI differences remain exhaustive decisions in one module. Launch progress and errors reuse the existing
+operation surfaces, with no placeholder session.
 
 ### Podman places, creation and images
 

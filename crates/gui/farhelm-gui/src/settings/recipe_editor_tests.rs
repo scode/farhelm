@@ -220,6 +220,10 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
     );
 
     fill(cx, "recipe-name", "scratch");
+    assert_eq!(
+        label_of(cx, "settings-unsaved").as_deref(),
+        Some("Recipe has unsaved changes")
+    );
     click(cx, "recipe-back");
     click(cx, "prompt-alternative-0");
     assert_eq!(sent(&mut helm), [], "closing sends nothing");

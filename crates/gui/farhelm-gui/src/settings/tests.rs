@@ -3801,6 +3801,7 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     click(cx, FOOTER_SAVE);
     assert_eq!(sent(&mut helm), [], "the key held the field back");
     assert_eq!(busy_line(cx, "checkout-post-clone"), busy_alert());
+    into_view(cx, super::checkouts::SPARE_ID);
     click(cx, super::checkouts::SPARE_ID);
     assert_eq!(sent(&mut helm), []);
     assert_eq!(busy_line(cx, super::checkouts::SPARE_ID), busy_alert());

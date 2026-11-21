@@ -1237,16 +1237,16 @@ with unsaved changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/r
   `container_hosts_are_checked_once_and_the_push_brings_the_checks_outcome`; the look, the golden
   `settings-recipes-places`.
 - "Settings keeps recipe answers sticky and isolated to Tensorlake in ${palette}": New recipe opens the editor in place
-  with focus on Back, Cancel and Save pinned with the dialog's footer above the Close row, and Back returning to the
-  list, `new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list`; Tab from the editor's fields reaching the
-  pinned Cancel, then Save, `tab_from_the_editors_fields_reaches_its_pinned_cancel_then_save`; switching sections hides
-  the answers and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's
-  and the helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
+  with focus on Back, Cancel and Save pinned in the same row as Close, and Back returning to the list,
+  `new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list`; Tab from the editor's fields reaching the pinned
+  Cancel, then Save, `tab_from_the_editors_fields_reaches_its_pinned_cancel_then_save`; switching sections hides the
+  answers and keeps the editor, `switching_sections_hides_the_answers_and_keeps_the_open_editor`; the invalid name's and
+  the helm's refusals beside the pinned answers, `a_bad_name_or_size_is_refused_locally_until_the_next_edit` and
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
   from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out, the
   credential choices included, `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden
-  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). The centered leave question and
-  inline delete confirmation are covered by `every_way_out_asks_first_and_keep_editing_stays` and
+  `settings-recipe-editor` and `settings-recipe-editor-end` show the editor's pinned actions. The centered leave
+  question and inline delete confirmation are covered by `every_way_out_asks_first_and_keep_editing_stays` and
   `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them. The reference screens have neither, and the
   old case attached pictures for review. A refused save takes the leave question away and reveals the helm's words in
   the editor, covered by `a_refused_save_takes_an_open_question_away`.
@@ -1635,14 +1635,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   confirmations reports save failure and recovers"). Here every session confirmation reads the helm's stored choice, so
   a refused save leaves them skipped, the switch back on and its failure line shown. The maintainer chose this on
   2026-11-14 (follow the helm), and SPEC.md's "Errors and diagnostics" says so.
-- **Checkouts does not fit the full-size dialog.** The old section fit the 780-pixel dialog with about 25 pixels to
-  spare; here it is about 30 pixels taller than the dialog's body, so the body scrolls. Unscrolled, its last control,
-  the spare switch's documentation link, sits at the body's visible edge with its descenders and underline below it
-  (`settings-checkouts` golden); scrolled to the end, the link lies wholly inside the body, above the footer
-  (`the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end`), so nothing sits under the footer for good.
-  The two causes are recorded below: the taller header (about 10 pixels) and the link on a line of its own. Putting the
-  link back at the end of the help's last sentence is not cheap: the host-text sentence pieces (`HostSentence`) join
-  text parts only, and GPUI has no inline flow for a control inside a paragraph.
 - **A refused checkout field keeps its reason until the next save starts.** The old folder and post-clone fields cleared
   the line on the next keystroke. The checkout field discards a refused edit and fetches the current value before
   editing can resume. The reason stays visible through the refresh and the next edit.
@@ -1712,16 +1704,9 @@ Where the port does not match the old app, and why. Each stays until the work na
   note read "Save an API key above to build snapshots.", which was already inaccurate in the old app, whose key forms
   were in Tensorlake and Credentials, both listed below Recipes. The key form is in Credentials here, so the note reads
   "Save an API key in Settings → Credentials to build snapshots."
-- **The editor's answers are a band of the dialog's footer.** The old Cancel and Save stuck to the bottom of the section
-  panel's column (`.recipe-editor-sticky-actions`, `position: sticky`), as wide as that column, with a rule above them
-  and the dialog's own footer rule under them. GPUI has no sticky positioning, so Settings pins them in its frame's
-  footer region above the Close row (the region the launcher's pinned question uses), as wide as the dialog, ruled off
-  from the Close row by a rule of its own; above them the footer's rule stands in for the old band's. Switching sections
-  hides them with the editor, as before. No reference scene pictures the editor, so the comparison is with the old
-  stylesheet; the golden `settings-recipe-editor` pins the band.
 - **The editor opens with focus on Back, not its title.** The old editor focused its title, a heading made focusable;
-  headings are not controls here. Back sits right above the title, so moving focus there brings the editor's top into
-  view as the old focus did.
+  headings are not controls here. Back sits beside the title, so moving focus there brings the editor's top into view as
+  the old focus did.
 - **Size and port fields are text fields.** The old ones were number inputs with the browser's step arrows; here they
   are plain text fields, and Save refuses anything but a whole number in the old words ("CPUs must be a whole number",
   "Tunnel ports must be from 1 to 65535").
@@ -1822,8 +1807,6 @@ Where the port does not match the old app, and why. Each stays until the work na
 - **Focus moves to a field, not the editor's title.** The old editor put focus on its title (a heading made focusable)
   and Back returned it to the section's heading; headings are not controls here. Opening puts focus on Name for a new
   credential and on the secret for a saved one, and closing puts it on the list's Add button.
-- **The editor's answers scroll with it.** The old Delete, Cancel and Save stuck to the bottom of the dialog's body
-  (`position: sticky`); GPUI has no sticky positioning, so they follow the editor's content, below the warning.
 - **Saves of one credential refuse each other**, with "Not saved: another operation was in progress" under the editor:
   every save and delete of a credential is work on that credential's own operation key, which this section added. The
   Tensorlake API key saves under the preference row's key, as all other helm configuration in Settings does.

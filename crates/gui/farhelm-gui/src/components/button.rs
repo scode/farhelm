@@ -74,6 +74,8 @@ pub enum Tier {
     Primary,
     /// `.btn-danger`: the solid red fill of a destructive confirmation.
     Danger,
+    /// A destructive action in a row of ordinary controls. Reserve the solid danger fill for its confirmation.
+    DangerGhost,
     /// `.btn-danger.btn-outline`: red text and a red outline on no fill, with a subdued red hover. The permanent answer
     /// beside a one-off danger answer (the YOLO confirmation's "Start, and don't ask again on this host" beside "Start
     /// YOLO session anyway"): a filled button draws the reflex click, and the answer that turns a question off for good
@@ -842,6 +844,10 @@ impl Button {
                 Some(palette.danger_soft),
                 palette.on_fill,
             ),
+            Tier::DangerGhost if self.disabled || self.busy => {
+                (None, palette.bg_2, None, palette.fg_2)
+            }
+            Tier::DangerGhost => (None, palette.danger_bg_dim, None, palette.danger),
             Tier::DangerOutline if self.disabled => retired,
             Tier::DangerOutline => (
                 None,
@@ -953,6 +959,7 @@ impl RenderOnce for Button {
             | Tier::Neutral
             | Tier::Primary
             | Tier::Danger
+            | Tier::DangerGhost
             | Tier::DangerOutline
             | Tier::PrimaryOutline
             | Tier::BrowseRow => metrics::BUTTON_PAD,
@@ -973,6 +980,7 @@ impl RenderOnce for Button {
             | Tier::Neutral
             | Tier::Primary
             | Tier::Danger
+            | Tier::DangerGhost
             | Tier::DangerOutline
             | Tier::PrimaryOutline
             | Tier::Rail

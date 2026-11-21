@@ -50,7 +50,8 @@ use gpui::{
     Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
-use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::card;
+use super::choices;
 use super::tensorlake_key::TensorlakeKey;
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::{self, Mark};
@@ -63,13 +64,6 @@ pub(super) use editor::Editor;
 
 /// `.host-settings-section`'s gap between a group's rows.
 const GROUP_GAP: f32 = 14.;
-/// `.host-settings-section + .host-settings-section`: the rule's padding above each group after the first.
-const GROUP_RULE_PAD: f32 = 20.;
-/// `.recipe-list`'s gap between rows.
-const ROW_GAP: f32 = 6.;
-/// `.credential-storage-warning p`'s size, and its line: `line-height: normal` at 13 pixels in the bundled face.
-const WARNING_TEXT: f32 = 13.;
-const WARNING_LINE_HEIGHT: f32 = 15.7;
 
 /// The old editor's words for a name outside the recipe-name grammar.
 const NAME_RULE: &str = "Use lowercase letters, digits and hyphens; start with a letter, end with a letter or digit, and \
@@ -226,7 +220,7 @@ pub(super) fn search_lists() -> impl Iterator<Item = (&'static str, &'static str
         .map(|list| (list.add_id, list.heading, list.add))
 }
 
-pub(super) const INTRO: &str = "Secrets Farhelm hands to hosts for you. Recipes refer to them by name, so replacing \
+pub(super) const INTRO: &str = "Recipes refer to these by name, so replacing \
                                a token here never means editing a recipe.";
 pub(super) const STORAGE_LABEL: &str = "Not encrypted on disk";
 pub(super) const STORAGE_ID: &str = "credentials-storage-warning";
@@ -311,6 +305,16 @@ impl Credentials {
     pub(super) fn reveal_key(&mut self, cx: &mut Context<Self>) {
         self.key_revealed = self.editor.is_some();
         cx.notify();
+    }
+
+    /// Start the agent login editor for its golden, with the agent choices visible from the first frame.
+    #[cfg(test)]
+    pub(super) fn open_agent_editor_for_golden(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.open_editor(Group::AGENT_LOGINS, None, window, cx);
     }
 
     /// The overview's copy of the Tensorlake key has a separate draft over the same account.
@@ -438,25 +442,17 @@ impl Credentials {
                 let _ = weak.update(cx, |view, cx| view.open_editor(group, None, window, cx));
             }
         });
-        let heading = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .justify_between()
-            .gap(px(12.))
-            .child(
-                div()
-                    .id(ElementId::Name(
-                        format!("{}-heading", group.words().add_id).into(),
-                    ))
-                    .role(Role::Heading)
-                    .text_size(px(LABEL_TEXT))
-                    .line_height(px(LABEL_LINE_HEIGHT))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(group.words().heading),
-            )
-            .child(add);
+        let heading = card::heading(
+            group.words().heading,
+            None,
+            Some(add.into_any_element()),
+            cx,
+        )
+        .id(ElementId::Name(
+            format!("{}-heading", group.words().add_id).into(),
+        ))
+        .role(Role::Heading)
+        .aria_label(group.words().heading);
         let listed: Vec<&Credential> = self
             .catalog
             .iter()
@@ -479,10 +475,6 @@ impl Credentials {
                 .flex()
                 .items_center()
                 .gap(px(10.))
-                .py(px(8.))
-                .px(px(10.))
-                .rounded(metrics::RADIUS_SM)
-                .bg(theme::color(palette.bg_1))
                 .child(
                     div()
                         .flex()
@@ -538,11 +530,7 @@ impl Credentials {
             .flex_col()
             .gap(px(GROUP_GAP))
             .min_w_0()
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim))
-            .pt(px(GROUP_RULE_PAD))
             .child(heading)
-            .children(none)
             .child(
                 div()
                     .id(ElementId::Name(
@@ -553,13 +541,17 @@ impl Credentials {
                     .aria_label(group.words().heading)
                     .flex()
                     .flex_col()
-                    .gap(px(ROW_GAP))
                     .child(layers::beside_edge(
                         format!("{}-help-edge", group.words().add_id),
                         window,
                         cx,
                     ))
-                    .children(rows),
+                    .child(card::rows(
+                        none.into_iter()
+                            .map(IntoElement::into_any_element)
+                            .chain(rows.map(IntoElement::into_any_element)),
+                        cx,
+                    )),
             )
     }
 
@@ -611,7 +603,20 @@ impl Credentials {
             );
         }
         parts.push(storage_warning(STORAGE_ID, STORAGE_HELP, cx).into_any_element());
-        parts.push(self.key.clone().into_any_element());
+        parts.push(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .child(card::heading(
+                    "Tensorlake API key",
+                    super::tensorlake_key::Place::Credentials.heading_note(),
+                    None,
+                    cx,
+                ))
+                .child(card::rows([self.key.clone()], cx))
+                .into_any_element(),
+        );
         if self.catalog.is_none() && self.unreadable.is_none() {
             parts.push(
                 choices::help("Loading credentials…", cx)
@@ -641,13 +646,11 @@ impl Credentials {
                 retry,
             ));
         }
-        // The lists stack with no gap, on each other and on whatever precedes them, as the old sections did
-        // (`.host-settings-section + .host-settings-section` adds only the rule and its padding): each list's rule sits
-        // right under the Tensorlake key form's buttons, the list before, or a failed load's Retry loading, and only
-        // the parts above them are spaced by GROUP_GAP.
+        // Each list's heading pairs the catalog name with the Add action for that kind.
         div()
             .flex()
             .flex_col()
+            .gap(px(GROUP_GAP))
             .min_w_0()
             .child(
                 div()
@@ -708,16 +711,16 @@ pub(super) fn storage_warning(
         .bg(theme::color(palette.danger_bg_dim))
         .child(
             div()
-                .text_size(px(LABEL_TEXT))
-                .line_height(px(LABEL_LINE_HEIGHT))
-                .font_weight(FontWeight::BOLD)
+                .text_size(metrics::TEXT_MD)
+                .line_height(px(18.))
+                .font_weight(FontWeight::SEMIBOLD)
                 .text_color(theme::color(palette.danger))
                 .child(STORAGE_LABEL),
         )
         .child(
             div()
-                .text_size(px(WARNING_TEXT))
-                .line_height(px(WARNING_LINE_HEIGHT))
+                .text_size(px(12.))
+                .line_height(px(17.))
                 .text_color(theme::color(palette.fg_0))
                 .child(body),
         )

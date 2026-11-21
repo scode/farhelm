@@ -10,7 +10,14 @@ use gpui::{AnyElement, App, IntoElement as _, Window, div, point, px};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::{Pending, SceneState, take_pending};
+use super::SceneState;
+
+/// The recipe editor's footer differs for an unsaved recipe, a saved recipe and an open delete question.
+#[derive(Clone, Copy)]
+enum RecipeEditorFixture {
+    New,
+    Saved { ask_delete: bool },
+}
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-tensorlake`,
@@ -22,7 +29,7 @@ use super::{Pending, SceneState, take_pending};
 /// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
 /// ready, Notifications' read of the ntfy settings with the helm's defaults
 /// (off, `https://ntfy.sh`, no topic, Default priority, no token), Credentials' and Tensorlake's reads of the account
-/// with no key saved and sandboxes created only after asking, Credentials' read with an empty catalog, Recipes' read of
+/// with no key saved and sandboxes created only after asking, Credentials' catalog with one GitHub token, Recipes' read of
 /// the Tensorlake account with a key saved (so the rows offer their builds) over an empty pushed catalog and no pushed
 /// places, and Containers' reads with the reference's three container hosts, all ready, and no leftovers; nothing else
 /// is answered, so the checks Containers then asks for stay unanswered and the rows keep the first read's state. The
@@ -50,9 +57,12 @@ struct SettingsFixture {
     /// The platform the Terminal section decides its tunnel switch for, instead of this machine's, through the
     /// dialog's test-only setter (`settings::decide_tunnels_for_opened`) applied as it opens.
     tunnels: Option<farhelm_input_mapping::Platform>,
-    /// Open a new recipe's editor as the dialog opens (`settings::open_new_recipe_for_opened`), as New recipe does; the
-    /// section must be Recipes.
-    recipe_editor: bool,
+    /// Open an editor in the Recipes section with the corresponding footer actions.
+    recipe_editor: Option<RecipeEditorFixture>,
+    /// Show the new subscription login editor and both agent choices.
+    credential_editor: bool,
+    /// Give Containers one leftover to confirm deleting. Its deletion is never sent.
+    container_leftover: bool,
     /// Answer the Tensorlake account read with a key saved whatever the section, as Recipes always does; Tensorlake
     /// then reads its list of sandboxes not on this helm, which [`settings_tensorlake_sandboxes`] answers.
     tensorlake_key: bool,
@@ -95,6 +105,8 @@ fn settings_scene_with(
         hosts,
         tunnels,
         recipe_editor,
+        credential_editor,
+        container_leftover,
         tensorlake_key,
         search,
     } = fixture;
@@ -138,8 +150,17 @@ fn settings_scene_with(
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::settings::open_at(section, &opener, &mark, window, cx);
-            if recipe_editor {
-                crate::settings::open_new_recipe_for_opened(window, cx);
+            match recipe_editor {
+                Some(RecipeEditorFixture::New) => {
+                    crate::settings::open_new_recipe_for_opened(window, cx);
+                }
+                Some(RecipeEditorFixture::Saved { ask_delete }) => {
+                    crate::settings::open_saved_recipe_for_opened(ask_delete, window, cx);
+                }
+                None => {}
+            }
+            if credential_editor {
+                crate::settings::open_agent_credential_for_opened(window, cx);
             }
             if let Some(query) = search {
                 crate::settings::search_for_opened(query, window, cx);
@@ -148,7 +169,12 @@ fn settings_scene_with(
         if let Some(platform) = tunnels {
             crate::settings::decide_tunnels_for_opened(platform, cx);
         }
-        answer_settings_reads(&mut answering.borrow_mut(), section, tensorlake_key);
+        answer_settings_reads(
+            &mut answering.borrow_mut(),
+            section,
+            tensorlake_key,
+            container_leftover,
+        );
     });
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
@@ -161,6 +187,7 @@ fn answer_settings_reads(
     helm: &mut FakeHelm,
     section: crate::settings::Section,
     tensorlake_key: bool,
+    container_leftover: bool,
 ) {
     for read in helm.commands() {
         let trust = read.path.starts_with("/api/checkout-claude-trust")
@@ -172,7 +199,24 @@ fn answer_settings_reads(
                 "/api/checkout-root" => serde_json::json!({ "root": null }),
                 "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                 "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
+                "/api/credentials" if section == crate::settings::Section::Credentials => {
+                    serde_json::json!([{
+                        "name": "team-github",
+                        "kind": "github_token",
+                        "created_at": 1_793_714_525_i64,
+                        "updated_at": 1_793_714_525_i64,
+                        "revision": 1,
+                        "used_by": ["rust-dev"],
+                    }])
+                }
                 "/api/credentials" => serde_json::json!([]),
+                "/api/container-orphans" if container_leftover => serde_json::json!([{
+                    "id": "a".repeat(64),
+                    "name": "build-check",
+                    "place": { "kind": "podman_host", "host": 2 },
+                    "role": "session",
+                    "host": null,
+                }]),
                 "/api/container-orphans" => serde_json::json!([]),
                 // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
                 // pictures rows that can build, which takes a saved key, and so does Tensorlake's list of
@@ -220,17 +264,65 @@ pub(super) fn settings_recipes_setup(state: &SceneState, window: &mut Window, cx
 
 /// Stage an edited name so the golden shows the draft note beside the recipe editor's pinned answers.
 pub(super) fn settings_recipe_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    recipe_editor_scene(state, RecipeEditorFixture::New, window, cx);
+    stage_draft(state, crate::settings::Section::Recipes, DraftStep::Edit);
+}
+
+fn recipe_editor_scene(
+    state: &SceneState,
+    editor: RecipeEditorFixture,
+    window: &mut Window,
+    cx: &mut App,
+) {
     settings_scene_with(
         state,
         crate::settings::Section::Recipes,
         SettingsFixture {
-            recipe_editor: true,
+            recipe_editor: Some(editor),
             ..SettingsFixture::default()
         },
         window,
         cx,
     );
-    stage_draft(state, crate::settings::Section::Recipes, DraftStep::Edit);
+}
+
+/// Keep the editor's final groups and its footer in the same picture.
+pub(super) fn settings_recipe_editor_end_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    recipe_editor_scene(
+        state,
+        RecipeEditorFixture::Saved { ask_delete: false },
+        window,
+        cx,
+    );
+    stage_scroll_end(state, true);
+}
+
+/// Show the Software choices and the following groups between the recipe editor's top and end views.
+pub(super) fn settings_recipe_editor_middle_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    recipe_editor_scene(state, RecipeEditorFixture::New, window, cx);
+    stage_scroll(state, true, 0.46);
+}
+
+/// A saved recipe's inline delete question replaces the ordinary footer controls before any deletion is sent.
+pub(super) fn settings_recipe_editor_delete_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    recipe_editor_scene(
+        state,
+        RecipeEditorFixture::Saved { ask_delete: true },
+        window,
+        cx,
+    );
 }
 
 /// Settings at Recipes with recipes in the states a row draws differently, against the reference `settings-recipes`,
@@ -392,6 +484,30 @@ pub(super) fn settings_tensorlake_sandboxes_setup(
     window: &mut Window,
     cx: &mut App,
 ) {
+    tensorlake_with_sandboxes(state, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(super::Pending(Cell::new(true))));
+}
+
+/// The middle viewport covers the API key actions and SSH key between the top and the leftovers.
+pub(super) fn settings_tensorlake_keys_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    tensorlake_with_sandboxes(state, window, cx);
+    stage_scroll(state, false, 0.34);
+}
+
+/// Keep the Creating sandboxes card and its Usage Credits note visible below the leftovers.
+pub(super) fn settings_tensorlake_end_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    tensorlake_with_sandboxes(state, window, cx);
+    stage_scroll_end(state, false);
+}
+
+fn tensorlake_with_sandboxes(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene_with(
         state,
         crate::settings::Section::Tensorlake,
@@ -403,9 +519,10 @@ pub(super) fn settings_tensorlake_sandboxes_setup(
         cx,
     );
     window.set_driver_enabled(true);
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(SandboxListAnswered(std::cell::Cell::new(false))));
-    keep.push(Box::new(super::Pending(std::cell::Cell::new(true))));
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(SandboxListAnswered(Cell::new(false))));
 }
 
 /// The list's answer: four leftovers in the states a row draws differently. One of this helm's, running, with its
@@ -457,6 +574,16 @@ pub(super) fn settings_tensorlake_sandboxes(
                 answered.0.set(answered.0.get() || body.is_some());
                 helm.reply(command.id, 200, body);
             }
+        } else if keep.iter().any(|item| item.is::<ScrollEnd>()) {
+            // Measure only when the rendered viewport contains the list's rows, which changed its scroll range.
+            if window
+                .driver_nodes()
+                .iter()
+                .any(|node| node.element_id.as_deref() == Some("tensorlake-sandbox-0-delete"))
+            {
+                drop(keep);
+                return settings_scroll_end(state, window, cx);
+            }
         } else if super::take_pending(state) {
             // After this frame is drawn, so the record holds where it put the heading.
             window.defer(cx, |window, cx| {
@@ -487,10 +614,33 @@ pub(super) fn settings_tensorlake_sandboxes(
     gpui::div().into_any_element()
 }
 
-/// Settings at Credentials, as in the reference: nothing saved in any list and no Tensorlake key saved. Focus starts
-/// on the dialog itself, since every control waits for the section's reads.
+/// One saved GitHub token exercises its Edit row. The other credential lists are empty and no Tensorlake key is set.
+/// Focus starts on the dialog itself until the section's reads settle.
 pub(super) fn settings_credentials_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Credentials, window, cx);
+}
+
+/// Picture the agent login editor with both agent marks in the segmented choice.
+pub(super) fn settings_credential_editor_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::Credentials,
+        SettingsFixture {
+            credential_editor: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+    stage_draft(
+        state,
+        crate::settings::Section::Credentials,
+        DraftStep::Edit,
+    );
 }
 
 /// Settings at Terminal, the default link choice chosen because the row stores none, and, decided for the Mac on every
@@ -514,8 +664,23 @@ pub(super) fn settings_terminal_setup(state: &SceneState, window: &mut Window, c
 /// no containers left behind, as in the reference. Focus starts on the dialog itself (`Section::first`), so no ring
 /// shows.
 pub(super) fn settings_containers_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    containers_scene(state, false, window, cx);
+}
+
+fn containers_scene(
+    state: &SceneState,
+    container_leftover: bool,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let mut hosts = crate::hosts::tests::reference_hosts();
-    for host in &mut hosts {
+    use farhelm_proto::host_appearance::HostColor;
+    for (host, color) in
+        hosts
+            .iter_mut()
+            .zip([HostColor::Copper, HostColor::Teal, HostColor::Orchid])
+    {
+        host.color = color;
         host.container_check = Some(farhelm_proto::ui_channel::ContainerCheckView {
             checked_at: Some(1_800_000_000),
             refreshing: false,
@@ -525,6 +690,7 @@ pub(super) fn settings_containers_setup(state: &SceneState, window: &mut Window,
     }
     let fixture = SettingsFixture {
         hosts,
+        container_leftover,
         ..SettingsFixture::default()
     };
     settings_scene_with(
@@ -536,10 +702,64 @@ pub(super) fn settings_containers_setup(state: &SceneState, window: &mut Window,
     );
 }
 
+/// Wait for the fake leftover read before taking a picture of the inline question.
+struct ContainerQuestion(Rc<Cell<bool>>);
+
+pub(super) fn settings_containers_question_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    containers_scene(state, true, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(ContainerQuestion(Rc::new(Cell::new(false)))));
+}
+
+pub(super) fn settings_containers_question(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    let keep = state.keep.borrow();
+    if let Some(ContainerQuestion(asked)) = keep
+        .iter()
+        .find_map(|item| item.downcast_ref::<ContainerQuestion>())
+        && !asked.get()
+    {
+        let asked = asked.clone();
+        window.defer(cx, move |window, cx| {
+            asked.set(crate::settings::ask_first_container_for_opened(window, cx));
+        });
+    }
+    div().into_any_element()
+}
+
 /// Settings at Checkouts, its fields empty and the spare switch on, as in the reference. Focus starts on the dialog
 /// itself (`Section::first`), so no ring shows.
 pub(super) fn settings_checkouts_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Checkouts, window, cx);
+}
+
+/// At the application's minimum width and height, the page end and footer still have room.
+pub(super) fn settings_checkouts_capped_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_checkouts_edited_setup(state, window, cx);
+    stage_scroll_end(state, false);
+}
+
+/// Show Save and Discard after the edited field has scrolled away at the minimum supported window size.
+pub(super) fn settings_checkouts_capped(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    settings_edited(state, window, cx);
+    settings_scroll_end(state, window, cx)
 }
 
 /// Agent trust at the top of the section, the view paired with the old app's reference.
@@ -554,29 +774,53 @@ pub(super) fn settings_agent_trust_end_setup(
     cx: &mut App,
 ) {
     settings_agent_trust_setup(state, window, cx);
-    state
-        .keep
-        .borrow_mut()
-        .push(Box::new(Pending(Cell::new(true))));
+    stage_scroll_end(state, false);
 }
 
-/// Wait for the dialog to have a drawn body before sending the wheel event it needs to receive.
-pub(super) fn settings_agent_trust_end(
+/// A pending focus reveal can move the viewport back to the top. Finish only after the laid-out body reaches its end.
+struct ScrollEnd {
+    wait_for_recipe_back: bool,
+    fraction: f32,
+    done: Cell<bool>,
+}
+
+fn stage_scroll_end(state: &SceneState, wait_for_recipe_back: bool) {
+    stage_scroll(state, wait_for_recipe_back, 1.);
+}
+
+/// A scroll target is relative to the laid-out content so the middle and end views survive spacing changes.
+fn stage_scroll(state: &SceneState, wait_for_recipe_back: bool, fraction: f32) {
+    state.keep.borrow_mut().push(Box::new(ScrollEnd {
+        wait_for_recipe_back,
+        fraction,
+        done: Cell::new(false),
+    }));
+}
+
+/// A scene only settles once its reported offset reaches the requested part of the measured viewport.
+pub(super) fn settings_scroll_end(
     state: &SceneState,
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    if crate::layers::any_open(window, cx) && take_pending(state) {
-        window.defer(cx, |window, cx| {
-            window.dispatch_event(
-                gpui::PlatformInput::Scroll(gpui::ScrollEvent {
-                    position: point(px(500.), px(415.)),
-                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-4000.))),
-                    ..Default::default()
-                }),
-                cx,
-            );
-        });
+    let keep = state.keep.borrow();
+    if let Some(end) = keep
+        .iter()
+        .find_map(|item| item.downcast_ref::<ScrollEnd>())
+        && !end.done.get()
+        && let Some(scroll) =
+            crate::settings::page_scroll_for_opened(end.wait_for_recipe_back, window, cx)
+        && scroll.max_offset().y > px(0.)
+    {
+        let target = -scroll.max_offset().y * end.fraction;
+        if (scroll.offset().y - target).abs() <= px(1.) {
+            end.done.set(true);
+        } else {
+            window.defer(cx, move |window, _| {
+                scroll.set_offset(point(px(0.), target));
+                window.refresh();
+            });
+        }
     }
     div().into_any_element()
 }
@@ -613,10 +857,16 @@ fn stage_draft(state: &SceneState, section: crate::settings::Section, first: Dra
 }
 
 /// A stable frame can precede the second form's read. Do not finish a draft screenshot during that gap.
-pub(super) fn draft_pending(state: &SceneState) -> bool {
+pub(super) fn settings_scene_pending(state: &SceneState) -> bool {
     state.keep.borrow().iter().any(|item| {
         item.downcast_ref::<DraftScene>()
             .is_some_and(|draft| draft.step.get() != DraftStep::Done)
+            || item
+                .downcast_ref::<ContainerQuestion>()
+                .is_some_and(|question| !question.0.get())
+            || item
+                .downcast_ref::<ScrollEnd>()
+                .is_some_and(|end| !end.done.get())
     })
 }
 
@@ -703,7 +953,7 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             .iter()
             .find_map(|item| item.downcast_ref::<Rc<RefCell<FakeHelm>>>())
             .expect("the second page reads from the scene's helm");
-        answer_settings_reads(&mut helm.borrow_mut(), section, false);
+        answer_settings_reads(&mut helm.borrow_mut(), section, false, false);
     }
     if let Some(input) = settings::draft_input_for_opened(section, cx) {
         let text = match section {
@@ -711,6 +961,7 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             Section::Checkouts => "~/work/managed",
             Section::Notifications => "farhelm-lab",
             Section::Recipes => "rust-tools",
+            Section::Credentials => "preview-only-token",
             _ => unreachable!("the scene only edits its staged fields"),
         };
         let next = match step {

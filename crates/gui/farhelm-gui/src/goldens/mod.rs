@@ -976,6 +976,24 @@ static SCENES: &[Scene] = &[
         setup: settings_recipe_editor_setup,
     },
     Scene {
+        name: "settings-recipe-editor-end",
+        size: (800., 830.),
+        draw: settings_scroll_end,
+        setup: settings_recipe_editor_end_setup,
+    },
+    Scene {
+        name: "settings-recipe-editor-middle",
+        size: (800., 830.),
+        draw: settings_scroll_end,
+        setup: settings_recipe_editor_middle_setup,
+    },
+    Scene {
+        name: "settings-recipe-editor-delete",
+        size: (720., 560.),
+        draw: empty,
+        setup: settings_recipe_editor_delete_setup,
+    },
+    Scene {
         name: "settings-recipes-rows",
         size: (800., 900.),
         draw: empty,
@@ -1000,10 +1018,28 @@ static SCENES: &[Scene] = &[
         setup: settings_tensorlake_sandboxes_setup,
     },
     Scene {
+        name: "settings-tensorlake-keys",
+        size: (800., 830.),
+        draw: settings_tensorlake_sandboxes,
+        setup: settings_tensorlake_keys_setup,
+    },
+    Scene {
+        name: "settings-tensorlake-end",
+        size: (800., 830.),
+        draw: settings_tensorlake_sandboxes,
+        setup: settings_tensorlake_end_setup,
+    },
+    Scene {
         name: "settings-credentials",
         size: (800., 830.),
         draw: empty,
         setup: settings_credentials_setup,
+    },
+    Scene {
+        name: "settings-credential-editor",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_credential_editor_setup,
     },
     Scene {
         name: "settings-terminal",
@@ -1024,6 +1060,12 @@ static SCENES: &[Scene] = &[
         setup: settings_containers_setup,
     },
     Scene {
+        name: "settings-containers-question",
+        size: (800., 830.),
+        draw: settings_containers_question,
+        setup: settings_containers_question_setup,
+    },
+    Scene {
         name: "settings-checkouts",
         size: (800., 830.),
         draw: empty,
@@ -1036,6 +1078,12 @@ static SCENES: &[Scene] = &[
         setup: settings_checkouts_edited_setup,
     },
     Scene {
+        name: "settings-checkouts-capped",
+        size: (720., 560.),
+        draw: settings_checkouts_capped,
+        setup: settings_checkouts_capped_setup,
+    },
+    Scene {
         name: "settings-agent-trust",
         size: (800., 830.),
         draw: empty,
@@ -1044,7 +1092,7 @@ static SCENES: &[Scene] = &[
     Scene {
         name: "settings-agent-trust-end",
         size: (800., 830.),
-        draw: settings_agent_trust_end,
+        draw: settings_scroll_end,
         setup: settings_agent_trust_end_setup,
     },
     Scene {
@@ -1387,7 +1435,7 @@ fn settle(
         let ready = cx.update_window(window, |_, window, cx| {
             window.draw(cx).clear(cx);
             let state = &view.read(cx).state;
-            state.after.get().is_none() && !settings::draft_pending(state)
+            state.after.get().is_none() && !settings::settings_scene_pending(state)
         })?;
         if !ready {
             previous = None;
@@ -1401,7 +1449,7 @@ fn settle(
     }
     let pending = cx.update(|cx| {
         let state = &view.read(cx).state;
-        state.after.get().is_some() || settings::draft_pending(state)
+        state.after.get().is_some() || settings::settings_scene_pending(state)
     });
     anyhow::bail!(
         "{name} never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"

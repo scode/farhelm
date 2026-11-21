@@ -286,6 +286,15 @@ fn delete_asks_then_deletes_under_the_recipes_key(cx: &mut TestAppContext) {
         Some("prompt-cancel"),
         "a risky action starts on Cancel"
     );
+    // The footer question's long warning must wrap inside the dialog, where the whole consequence can be read.
+    let prompt_bounds = bounds(cx, "prompt");
+    let footer_bounds = bounds(cx, "settings-answers");
+    assert!(prompt_bounds.left() >= footer_bounds.left());
+    assert!(prompt_bounds.right() <= footer_bounds.right());
+    assert!(
+        !drawn(cx, "settings-footer-close"),
+        "the question owns the footer"
+    );
     click(cx, "prompt-cancel");
     assert_eq!(sent(&mut helm), [], "Cancel sends nothing");
 

@@ -237,7 +237,7 @@ impl TunnelRow {
 /// Where an editor is open (the module docs, "Two hosts, one editor"): what decides the parts that differ between its
 /// hosting dialogs, and where its departures go.
 pub(in crate::settings) enum Host {
-    /// Settings → Recipes, in place of the list: Back above the title, where focus starts. Departures go to the
+    /// Settings → Recipes, in place of the list: Back beside the title, where focus starts. Departures go to the
     /// section ([`Recipes::depart`]).
     Recipes(WeakEntity<Recipes>),
     /// Add host's Tensorlake sandbox, in place of its fields, for "New recipe…": no Back, and focus starting in Name.
@@ -389,6 +389,22 @@ impl Editor {
             Host::Recipes(_) => self.back.clone(),
             Host::AddHost(_) => self.name.state.focus_handle(cx),
         }
+    }
+
+    /// Open the same inline question as Delete and check that it owns the footer.
+    #[cfg(test)]
+    pub(in crate::settings) fn ask_delete_for_golden(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ask_delete(window, cx);
+        assert!(
+            self.delete_question
+                .as_ref()
+                .is_some_and(|question| question.is_open(cx)),
+            "the golden's saved recipe must have an open delete question"
+        );
     }
 
     /// The draft the form holds now: every field's text, the chosen base, the tunnel rows and the credential choices.
@@ -664,7 +680,19 @@ impl Editor {
             .delete_question
             .as_ref()
             .filter(|delete| delete.is_open(cx))
-            .map(|delete| delete.clone().into_any_element());
+            .map(|delete| {
+                // The pinned action row sizes its children by their contents. Give the whole question the available
+                // width so its warning wraps inside the footer before Cancel and Delete are laid out.
+                if pinned {
+                    div()
+                        .min_w_0()
+                        .w_full()
+                        .child(delete.clone())
+                        .into_any_element()
+                } else {
+                    delete.clone().into_any_element()
+                }
+            });
         let confirming = question.is_some();
         let row = question.unwrap_or_else(|| {
             let delete = this.saved.is_some().then(|| {
@@ -675,8 +703,11 @@ impl Editor {
                     HoverHelp::tooltip("Delete this recipe").below(),
                     Role::Button,
                 )
-                .tier(if pinned { Tier::Danger } else { Tier::Neutral })
-                .quiet(pinned)
+                .tier(if pinned {
+                    Tier::DangerGhost
+                } else {
+                    Tier::Neutral
+                })
                 .disabled(this.saving)
                 .busy(this.deleting)
                 .on_click(move |_, window, cx| {
@@ -797,22 +828,42 @@ fn field(
         )
 }
 
+/// Settings separates a group's heading from the card. Add host places the same contents in its own form.
+fn editor_group(heading: gpui::Div, contents: gpui::Div, in_settings: bool, cx: &App) -> gpui::Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(LABEL_GAP))
+        .child(heading)
+        .child(if in_settings {
+            crate::settings::card::rows([contents], cx)
+        } else {
+            contents
+        })
+}
+
 impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
+        let in_settings = self.host.has_back();
         // Mark the same text differences the editor uses to decide whether leaving needs an answer. Add host
         // hosts this editor inside its own form and keeps its original labels.
-        let edited = |input: &Input, saved: &str| self.host.has_back() && input.text(cx) != saved;
-        let caption_with_dot = |text, changed| {
-            let caption = caption(text, cx);
-            if self.host.has_back() && changed {
-                caption
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .child(crate::settings::editing::dot(false, palette))
+        let edited = |input: &Input, saved: &str| in_settings && input.text(cx) != saved;
+        let caption_with_dot = |text, changed: bool| {
+            if in_settings {
+                crate::settings::editing::caption(text, changed.then_some(palette))
+                    .text_size(metrics::TEXT_MD)
+                    .font_weight(FontWeight::SEMIBOLD)
             } else {
-                caption
+                caption(text, cx)
+            }
+        };
+        // The body is also used to create a recipe during Add host. Its wording, order and spacing are shared.
+        let wrap = |content| {
+            if in_settings {
+                crate::settings::card::rows([content], cx)
+            } else {
+                content
             }
         };
         let weak = cx.weak_entity();
@@ -832,6 +883,7 @@ impl Render for Editor {
                 Role::Button,
             )
             .tier(Tier::Neutral)
+            .compact()
             .focus(&self.back)
             .disabled(busy)
             .on_click(move |_, window, cx| {
@@ -843,8 +895,16 @@ impl Render for Editor {
             .debug_selector(|| "recipe-editor-title".to_owned())
             .role(Role::Heading)
             .aria_label(title.clone())
-            .text_size(px(TITLE_TEXT))
-            .font_weight(FontWeight::BOLD)
+            .text_size(if in_settings {
+                metrics::TEXT_MD
+            } else {
+                px(TITLE_TEXT)
+            })
+            .font_weight(if in_settings {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::BOLD
+            })
             .text_color(theme::color(palette.fg_0))
             .child(title.clone());
 
@@ -922,6 +982,11 @@ impl Render for Editor {
                 .on_change(move |&base, _, cx| {
                     let _ = weak.update(cx, |editor, cx| editor.choose_base(base, cx));
                 })
+        };
+        let cards = if in_settings {
+            cards.card_columns(2)
+        } else {
+            cards
         };
         // The chosen base's own fields, then the custom-base note under any base but managed Ubuntu.
         let mut base_fields: Vec<AnyElement> = match self.base {
@@ -1110,21 +1175,13 @@ impl Render for Editor {
             }
         });
 
-        div()
-            .id("recipe-editor")
-            .role(Role::Region)
-            .aria_label(title)
+        let title_row = div()
             .flex()
-            .flex_col()
-            .gap(px(EDITOR_GAP))
-            .w_full()
-            .min_w_0()
-            .children(self.host.has_back().then(|| div().flex().child(back)))
-            .child(heading)
-            .child(choices::help(
-                "Software and credentials for new container and sandbox sessions.",
-                cx,
-            ))
+            .items_center()
+            .gap(px(10.))
+            .children(in_settings.then_some(back))
+            .child(heading);
+        let name = wrap(div().flex().flex_col().gap(px(EDITOR_GAP))
             .child(field(
                 "Name",
                 "recipe-name",
@@ -1137,54 +1194,71 @@ impl Render for Editor {
             .child(choices::help(
                 "Can't be changed later. Hosts refer to their recipe by name. Lowercase letters, digits and hyphens.",
                 cx,
-            ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(LABEL_GAP))
-                    .child(caption("Size (Tensorlake sandboxes only)", cx))
-                    .child(size),
-            )
-            .child(choices::help("Tensorlake decides which sizes your plan allows.", cx))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(LABEL_GAP))
-                    .child(caption_with_dot("Software", self.base != self.baseline.base))
-                    .child(cards),
-            )
+            )));
+        let size_heading = if in_settings {
+            crate::settings::card::heading("Size", Some("Tensorlake sandboxes only"), None, cx)
+        } else {
+            caption("Size (Tensorlake sandboxes only)", cx)
+        };
+        let size = editor_group(
+            size_heading,
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(EDITOR_GAP))
+                .child(size)
+                .child(choices::help(
+                    "Tensorlake decides which sizes your plan allows.",
+                    cx,
+                )),
+            in_settings,
+            cx,
+        );
+        // Build help distinguishes the container artifact from the billed Tensorlake snapshot.
+        let software = editor_group(
+            caption_with_dot("Software", self.base != self.baseline.base),
+            div().flex().flex_col().gap(px(EDITOR_GAP)).child(cards)
             .children(base_fields)
             .child(packages)
             .child(choices::help(
                 "Optional. Separated by spaces or new lines. Changes take effect at the next recipe build.",
                 cx,
             ))
-            // The shared catalog must explain both artifacts without implying that a container build creates a billed
-            // Tensorlake snapshot.
-            .child(choices::help(
-                environment_ui::recipe_build_help(&self.draft(cx).recipe_base()),
-                cx,
-            ))
-            .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(LABEL_GAP))
-                    .child(caption_with_dot(
-                        "Tunnels to your side",
-                        self.tunnels.iter().map(|row| row.draft(cx)).ne(self.baseline.tunnels.iter().cloned()),
-                    ))
-                    .children(tunnels)
-                    .child(div().flex().child(add_tunnel)),
-            )
+            .child(choices::help(environment_ui::recipe_build_help(&self.draft(cx).recipe_base()), cx)),
+            in_settings, cx);
+        let tunnels = editor_group(
+            caption_with_dot(
+                "Tunnels to your side",
+                self.tunnels.iter().map(|row| row.draft(cx)).ne(self.baseline.tunnels.iter().cloned()),
+            ),
+            div().flex().flex_col().gap(px(EDITOR_GAP))
+            .child(div().flex().flex_col().gap(px(LABEL_GAP))
+                .children(tunnels)
+                .child(div().flex().child(add_tunnel)))
             .child(choices::help(
                 "Programs in the sandbox reach 127.0.0.1 at the sandbox port, and Farhelm carries the connection to \
                  the host and port as seen from this helm's machine. Anything in the sandbox, agents included, can use \
                  a tunnel.",
                 cx,
+            )), in_settings, cx);
+        div()
+            .id("recipe-editor")
+            .role(Role::Region)
+            .aria_label(title)
+            .flex()
+            .flex_col()
+            .gap(px(EDITOR_GAP))
+            .w_full()
+            .min_w_0()
+            .child(title_row)
+            .child(choices::help(
+                "Software and credentials for new container and sandbox sessions.",
+                cx,
             ))
+            .child(name)
+            .child(size)
+            .child(software)
+            .child(tunnels)
             .children(self.credential_blocks(cx))
             .children(self.saved.is_some().then(|| {
                 choices::help(

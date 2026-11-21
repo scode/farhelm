@@ -19,7 +19,7 @@ use farhelm_helm_client::{ApiPath, PathError};
 use gpui::{App, Div, ParentElement as _, Role, Styled as _, Window, div, px};
 
 use super::Refused;
-use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices::{self, GROUP_GAP};
 use super::configured::{self, Configured};
 use crate::components::{Button, Checkbox, HoverHelp, Tier};
 use crate::host_text::HostText;
@@ -73,10 +73,7 @@ pub(super) fn read_spare(
 /// The switch with its help, the documentation link, its failure line and the line saying why a press sent nothing
 /// (`refused`, [`choices::busy_line`]). `on_toggle` is what a toggle does.
 ///
-/// NOTE: The link sits on its own line under the help, where the old one ended the help's last sentence: GPUI lays text
-/// out in blocks and has no inline flow for a control inside a paragraph, and the host-text sentence pieces join only
-/// text. With the taller header, that line puts the link at the foot of the dialog's body even at its full height, so
-/// the section scrolls a little where the old one fit. Both are recorded in the parity file.
+/// The docs link has its own line so it can be focused independently of the switch and its summary.
 pub(super) fn spare(
     spare: &Configured,
     focus: &gpui::FocusHandle,
@@ -84,22 +81,18 @@ pub(super) fn spare(
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
 ) -> Div {
-    let switch = div()
-        .text_size(px(LABEL_TEXT))
-        .line_height(px(LABEL_LINE_HEIGHT))
-        .child(
-            Checkbox::new(
-                SPARE_ID,
-                SPARE_LABEL,
-                HoverHelp::tooltip(SPARE_TOOLTIP),
-                Role::Switch,
-            )
-            .switch()
-            .focus(focus)
-            .checked(spare.shown())
-            .disabled(!spare.available())
-            .on_toggle(on_toggle),
-        );
+    let switch = Checkbox::new(
+        SPARE_ID,
+        SPARE_LABEL,
+        HoverHelp::tooltip(SPARE_TOOLTIP),
+        Role::Switch,
+    )
+    .switch()
+    .content(super::card::switch_copy(SPARE_LABEL, SPARE_HELP, cx))
+    .focus(focus)
+    .checked(spare.shown())
+    .disabled(!spare.available())
+    .on_toggle(on_toggle);
     let link = Button::new(
         SPARE_DOCS_ID,
         "How prepared checkouts differ from a fresh clone ↗",
@@ -120,7 +113,6 @@ pub(super) fn spare(
         .gap(px(GROUP_GAP))
         .min_w_0()
         .child(switch)
-        .child(choices::help(SPARE_HELP, cx))
         // In a row of its own, so the link is as wide as its words rather than stretched across the column.
         .child(div().flex().child(link))
         .children(failure)

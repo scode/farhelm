@@ -428,6 +428,15 @@ pub(crate) fn draft_input_for_opened(
             .read(cx)
             .field("recipe-name")
             .cloned(),
+        Section::Credentials => Some(
+            dialog
+                .credentials
+                .as_ref()?
+                .read(cx)
+                .visible_editor()?
+                .read(cx)
+                .secret_for_golden(),
+        ),
         _ => None,
     }
 }
@@ -458,6 +467,69 @@ pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
         Some(recipes) => recipes.update(cx, |recipes, cx| recipes.open_editor(None, window, cx)),
         None => panic!("no Settings dialog shows Recipes to open the recipe editor in"),
     }
+}
+
+/// Stage the real saved-recipe editor and optionally open its inline delete question.
+#[cfg(test)]
+pub(crate) fn open_saved_recipe_for_opened(ask_delete: bool, window: &mut Window, cx: &mut App) {
+    let saved = recipe_tests::entry("rust-dev", recipe_tests::idle(), serde_json::Value::Null);
+    let saved = serde_json::from_value(saved).expect("the saved recipe fixture decodes");
+    let recipes = layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).recipes.clone())
+        .expect("Settings is open at Recipes for its golden");
+    let editor = recipes.update(cx, |recipes, cx| {
+        recipes.open_editor(Some(&saved), window, cx);
+        recipes.editor().expect("the saved recipe editor is open")
+    });
+    if ask_delete {
+        editor.update(cx, |editor, cx| editor.ask_delete_for_golden(window, cx));
+    }
+}
+
+/// Open the in-place agent login editor on a staged Credentials page.
+#[cfg(test)]
+pub(crate) fn open_agent_credential_for_opened(window: &mut Window, cx: &mut App) {
+    let credentials = layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).credentials.clone())
+        .expect("Settings is open at Credentials for its golden");
+    credentials.update(cx, |credentials, cx| {
+        credentials.open_agent_editor_for_golden(window, cx)
+    });
+}
+
+/// A staged inline question has to wait for the fake helm's leftovers response.
+#[cfg(test)]
+pub(crate) fn ask_first_container_for_opened(window: &mut Window, cx: &mut App) -> bool {
+    let Some(containers) = layers::last_opened::<SettingsDialog>(cx)
+        .and_then(|dialog| dialog.read(cx).containers.clone())
+    else {
+        return false;
+    };
+    let Some(row) = containers.read(cx).first_leftover_for_golden() else {
+        return false;
+    };
+    containers.update(cx, |containers, cx| {
+        containers.ask_for_golden(row, window, cx)
+    });
+    true
+}
+
+/// Wait for the recipe editor's initial focus before moving the viewport in its end scene.
+#[cfg(test)]
+pub(crate) fn page_scroll_for_opened(
+    wait_for_recipe_back: bool,
+    window: &Window,
+    cx: &App,
+) -> Option<ScrollHandle> {
+    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
+    let dialog = dialog.read(cx);
+    if wait_for_recipe_back {
+        let editor = dialog.recipes.as_ref()?.read(cx).editor()?;
+        if !editor.read(cx).start(cx).is_focused(window) {
+            return None;
+        }
+    }
+    Some(dialog.page_scroll.clone())
 }
 
 /// The helm's preference row, if it pushed one.
@@ -1385,13 +1457,22 @@ impl SettingsDialog {
                     },
                     cx,
                 );
-                let mut body = Vec::new();
-                if let Some(fields) = &self.checkout_fields {
-                    body.push(fields.folder.clone().into_any_element());
-                    body.push(fields.post_clone.clone().into_any_element());
-                }
-                body.push(spare.into_any_element());
-                body
+                self.checkout_fields
+                    .iter()
+                    .map(|fields| {
+                        div()
+                            .flex()
+                            .flex_col()
+                            .gap(px(8.))
+                            .child(card::heading("New checkouts", None, None, cx))
+                            .child(card::rows(
+                                [fields.folder.clone(), fields.post_clone.clone()],
+                                cx,
+                            ))
+                            .into_any_element()
+                    })
+                    .chain(std::iter::once(card::rows([spare], cx).into_any_element()))
+                    .collect()
             }
             Section::AgentTrust => self
                 .trust

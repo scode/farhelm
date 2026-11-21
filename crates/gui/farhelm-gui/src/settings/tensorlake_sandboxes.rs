@@ -45,12 +45,13 @@ use farhelm_helm_client::{Collections, Method};
 use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
-    App, Context, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div, px,
+    App, Context, Div, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
+    px,
 };
 
-use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::card;
+use super::choices;
 use super::tensorlake_key::{TensorlakeAccount, path};
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::Mark;
@@ -74,14 +75,8 @@ const DELETE_ERROR_ID: &str = "tensorlake-sandboxes-delete-error";
 pub(super) const HEADING: &str = "Sandboxes not on this helm";
 pub(super) const HELP: &str = "These Farhelm sandboxes have no host or snapshot build on this helm. Nothing is deleted automatically.";
 
-/// The section's gap and the room above its heading under the rule, as the section's other parts.
-const PART_GAP: f32 = 14.;
-const RULE_PAD: f32 = 20.;
-/// `.host-settings-section-title`'s size.
-const TITLE_TEXT: f32 = 11.;
-/// A row's gap between its lines, and between rows.
+/// Keep a sandbox's identity, state and cleanup failure together inside its row.
 const ROW_GAP: f32 = 4.;
-const ROWS_GAP: f32 = 12.;
 
 /// What the list knows of the account that decides whether and when it reads: whether a key is saved, and how many
 /// key saves this opening has had. A change of either reads the list again (the module docs).
@@ -406,25 +401,31 @@ impl Sandboxes {
         div()
             .debug_selector(move || id.clone())
             .flex()
-            .flex_col()
-            .gap(px(ROW_GAP))
+            .items_center()
+            .gap(px(10.))
             .min_w_0()
             .child(
                 div()
-                    .text_size(px(LABEL_TEXT))
-                    .line_height(px(LABEL_LINE_HEIGHT))
-                    .text_color(theme::color(palette.fg_0))
-                    .child(host_text::element(&HostText::from_host(row.name.clone()))),
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(ROW_GAP))
+                    .child(
+                        div()
+                            .text_size(metrics::TEXT_MD)
+                            .text_color(theme::color(palette.fg_0))
+                            .child(host_text::element(&HostText::from_host(row.name.clone()))),
+                    )
+                    .child(
+                        div()
+                            .text_size(metrics::TEXT_SM)
+                            .text_color(theme::color(palette.fg_1))
+                            .child(details),
+                    )
+                    .children(cleanup_failure),
             )
-            .child(
-                div()
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child(details),
-            )
-            .children(cleanup_failure)
-            // In a row of its own, so the button is as wide as its words.
-            .child(div().flex().child(delete))
+            .child(div().flex_none().child(delete))
     }
 
     /// A status line: "Checking…" or "None found · checked <time>".
@@ -445,7 +446,6 @@ impl Render for Sandboxes {
             // Hidden rather than empty: an empty child would still take a gap in the section's column.
             return div().id(ID).hidden();
         }
-        let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refresh = self.key_saved().then(|| {
             Button::new(
@@ -464,22 +464,15 @@ impl Render for Sandboxes {
                 let _ = weak.update(cx, |list, cx| list.refresh(cx));
             })
         });
-        let heading = div()
-            .flex()
-            .items_center()
-            .gap(px(12.))
-            .child(
-                div()
-                    .id(SharedString::from(format!("{ID}-heading")))
-                    .role(Role::Heading)
-                    .aria_label(HEADING)
-                    .flex_1()
-                    .text_size(px(TITLE_TEXT))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child(HEADING),
-            )
-            .children(refresh);
+        let heading = card::heading(
+            HEADING,
+            None,
+            refresh.map(IntoElement::into_any_element),
+            cx,
+        )
+        .id(SharedString::from(format!("{ID}-heading")))
+        .role(Role::Heading)
+        .aria_label(HEADING);
         let zone = local_time::zone(cx);
         let status = if self.checking {
             Some(Self::status("Checking…".into(), cx))
@@ -494,11 +487,11 @@ impl Render for Sandboxes {
         } else {
             None
         };
-        let rows = div().flex().flex_col().gap(px(ROWS_GAP)).children(
+        let rows = status.into_iter().map(IntoElement::into_any_element).chain(
             self.rows
                 .iter()
                 .enumerate()
-                .map(|(index, row)| self.row(row, index, zone, cx)),
+                .map(|(index, row)| self.row(row, index, zone, cx).into_any_element()),
         );
         let failure = |id: &'static str, reason: &HostText| {
             choices::host_failure_line(id, HostSentence::new(id).host(reason), cx)
@@ -509,27 +502,31 @@ impl Render for Sandboxes {
             .aria_label(HEADING)
             .flex()
             .flex_col()
-            .gap(px(PART_GAP))
+            .gap(px(8.))
             .w_full()
             .min_w_0()
-            .pt(px(RULE_PAD))
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim))
             .child(heading)
+            .child(card::rows(
+                rows.chain(
+                    self.question
+                        .as_ref()
+                        .filter(|question| question.is_open(cx))
+                        .cloned()
+                        .map(IntoElement::into_any_element),
+                )
+                .chain(
+                    self.failure
+                        .as_ref()
+                        .map(|reason| failure(ERROR_ID, reason).into_any_element()),
+                )
+                .chain(
+                    self.delete_failure
+                        .as_ref()
+                        .map(|reason| failure(DELETE_ERROR_ID, reason).into_any_element()),
+                ),
+                cx,
+            ))
             .child(choices::help(HELP, cx))
-            .children(status)
-            .child(rows)
-            .children(self.question.clone())
-            .children(
-                self.failure
-                    .as_ref()
-                    .map(|reason| failure(ERROR_ID, reason)),
-            )
-            .children(
-                self.delete_failure
-                    .as_ref()
-                    .map(|reason| failure(DELETE_ERROR_ID, reason)),
-            )
     }
 }
 

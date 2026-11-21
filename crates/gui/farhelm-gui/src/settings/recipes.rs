@@ -90,8 +90,8 @@ use gpui::{
     div, px,
 };
 
-use super::choices;
 use super::tensorlake_key::TensorlakeAccount;
+use super::{card, choices};
 use crate::components::{Button, HoverHelp, Tier, pulse_opacity};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
@@ -106,10 +106,7 @@ use crate::ticker;
 
 /// `.tensorlake-recipes`' gap between the section's parts.
 const PART_GAP: f32 = 8.;
-/// `.recipe-list`'s gap between rows.
-const ROW_GAP: f32 = 6.;
-/// `.recipe-row`'s padding, top and bottom then left and right, and its gap between the row's text and its controls.
-const ROW_PAD: (f32, f32) = (8., 10.);
+/// The gap between row status and its Edit control.
 const ROW_INNER_GAP: f32 = 10.;
 /// `.recipe-row-main`'s and `.recipe-row-snapshot`'s gap between lines.
 const LINE_GAP: f32 = 2.;
@@ -896,12 +893,8 @@ impl Recipes {
             .role(Role::ListItem)
             .aria_label(SharedString::from(name.clone()))
             .flex()
-            .items_center()
+            .items_start()
             .gap(px(ROW_INNER_GAP))
-            .py(px(ROW_PAD.0))
-            .px(px(ROW_PAD.1))
-            .rounded(metrics::RADIUS_SM)
-            .bg(theme::color(palette.bg_1))
             .child(
                 div()
                     .flex()
@@ -945,32 +938,34 @@ impl Recipes {
     ) -> Option<AnyElement> {
         match catalog {
             None => Some(
-                choices::help("Loading recipes…", cx)
-                    .id("recipes-loading")
-                    .role(Role::Status)
-                    .into_any_element(),
+                card::rows(
+                    [choices::help("Loading recipes…", cx)
+                        .id("recipes-loading")
+                        .role(Role::Status)],
+                    cx,
+                )
+                .into_any_element(),
             ),
             Some(catalog) if catalog.rows.is_empty() && catalog.unavailable.is_some() => None,
             Some(catalog) if catalog.rows.is_empty() => Some(
-                choices::help("No recipes yet.", cx)
-                    .id("recipes-empty")
-                    .into_any_element(),
+                card::rows(
+                    [choices::help("No recipes yet.", cx).id("recipes-empty")],
+                    cx,
+                )
+                .into_any_element(),
             ),
             Some(catalog) => Some(
-                div()
-                    .id("recipes-list")
-                    .role(Role::List)
-                    .aria_label("Recipes")
-                    .flex()
-                    .flex_col()
-                    .gap(px(ROW_GAP))
-                    .children(
-                        catalog
-                            .rows
-                            .iter()
-                            .map(|view| self.row(view, places, pulse, now, zone, cx)),
-                    )
-                    .into_any_element(),
+                card::rows(
+                    catalog
+                        .rows
+                        .iter()
+                        .map(|view| self.row(view, places, pulse, now, zone, cx)),
+                    cx,
+                )
+                .id("recipes-list")
+                .role(Role::List)
+                .aria_label("Recipes")
+                .into_any_element(),
             ),
         }
     }
@@ -1070,10 +1065,14 @@ impl Render for Recipes {
             .relative()
             .child(layers::beside_edge("recipes-help-edge", window, cx))
             .child(choices::help(HELP, cx))
+            .child(card::heading(
+                "Recipes",
+                None,
+                Some(new_recipe.into_any_element()),
+                cx,
+            ))
             .children(self.listing(catalog.as_ref(), &places, pulse, now, zone, cx))
             .children(self.read_failure(catalog.as_ref(), cx))
-            // `.recipe-new`: below the list and any failure, as wide as its words.
-            .child(div().flex().child(new_recipe))
     }
 }
 

@@ -32,7 +32,7 @@ use farhelm_helm_client::{ApiPath, PathError};
 use farhelm_proto::{LaunchHarness, SessionInfo};
 use gpui::{
     AnyElement, App, Div, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Role, Styled as _, Window, div, px, svg,
+    ParentElement as _, Role, Styled as _, Window, div, px,
 };
 
 use super::choices::{self, Choice};
@@ -408,22 +408,12 @@ pub(super) fn block(
     hint: impl FnOnce(Choice) -> AnyElement,
     cx: &App,
 ) -> Div {
-    let palette = theme::palette(cx);
     let agent = trust.agent;
-    let mark = crate::harness::glyph(agent.harness());
     let contents = div()
         .flex()
         .items_start()
         .gap(px(8.))
-        .child(
-            svg()
-                .path(crate::harness::icon(mark).path())
-                .size(px(16.))
-                .flex_none()
-                .text_color(theme::color(
-                    crate::harness::ink(mark, palette).unwrap_or(palette.fg_1),
-                )),
-        )
+        .child(card::agent_mark(agent.harness(), cx))
         .child(
             div()
                 .flex_1()

@@ -1,12 +1,26 @@
 //! Settings shows related rows inside one card. Padding and separators live here so a page can build its controls
 //! without handling the card's geometry.
 
+use farhelm_proto::LaunchHarness;
 use gpui::{
     AnyElement, App, Div, FontWeight, IntoElement, ParentElement as _, SharedString, Styled as _,
-    div, prelude::FluentBuilder as _, px,
+    Svg, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use crate::theme::{self, metrics};
+
+/// Reuse the session list's drawing and identity ink when an agent leads a Settings row.
+pub(super) fn agent_mark(agent: LaunchHarness, cx: &App) -> Svg {
+    let palette = theme::palette(cx);
+    let mark = crate::harness::glyph(agent);
+    svg()
+        .path(crate::harness::icon(mark).path())
+        .size(px(16.))
+        .flex_none()
+        .text_color(theme::color(
+            crate::harness::ink(mark, palette).unwrap_or(palette.fg_1),
+        ))
+}
 
 /// Draw the section's content on the card ground, one line of padding per row and a hairline between rows.
 pub(super) fn rows<T: IntoElement>(rows: impl IntoIterator<Item = T>, cx: &App) -> Div {

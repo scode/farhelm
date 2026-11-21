@@ -267,12 +267,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   one host-and-folder field and a More options fold, and the footer loses its summary line. Plan:
   `plans/queue/launcher-command-field.md`.
 
-- **Settings dialog: grouped sections, cards and a pinned Save.** The settings dialog "still feels very "basic"", "not
-  really feeling reasonably modern", and "a bit flat, like lack of colors. especially the menu to the left". For long
-  pages, the overall cancel/save/etc must always be visible without scrolling. Agreed on mockups of every page: sections
-  in three groups with one hue per group, settings in cards under a sticky page heading, a pinned footer carrying the
-  shown page's Save, and closing with unsaved changes asks first. Plan: `plans/queue/settings-dialog-refresh.md`.
-
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm

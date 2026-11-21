@@ -253,14 +253,13 @@ impl Recipes {
             .role(Role::Status)
             .aria_label(sentence.accessible_name())
             .flex()
-            .flex_wrap()
             .items_center()
             .gap(px(PLACE_GAP))
             .min_w_0()
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_1))
-            .child(sentence)
-            .child(rebuild);
+            .child(div().flex_1().min_w_0().child(sentence))
+            .child(div().flex_none().child(rebuild));
         Some(line)
     }
 }
