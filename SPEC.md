@@ -5450,6 +5450,10 @@ view. A drop lands where the pointer was released. A Cancel and a submit of the 
 a redraw may still submit, and confirming a dialog that another one covers confirms that dialog. Guards this spec names
 explicitly, such as the approval cards' 700 ms pause and the preconditions destructive prompts carry, still hold.
 
+Decided 2026-10-26: convenience state in the GUI (labels, marks, remembered folders and selections, the order dialogs
+open in) may lag behind a delayed reply from the helm or a change an agent or the command line made. Only what a
+destructive action or a launch is shown and fenced against has to be current.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is

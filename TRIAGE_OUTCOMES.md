@@ -205,21 +205,6 @@
   block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/installer-expect-hyphen-value.md`.
 
-## add-host-refusal-bypasses-dialog-admission.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: If
-  Settings opens while confirmed host setup waits, a later refusal reopens the Add-host form outside the admission
-  wrapper, and the two dialogs make each other inert. The trigger is a GUI–helm setup request whose reply arrives late.
-  The finding rates this "likely", says browser behavior is unverified, and proposes two shapes (defer the reopen, or
-  hand off the active modal).
-- Decision: the user picked "Accepted: discard all, and state the principle" (2026-10-26 ten-question triage page, Q3).
-- Completion criteria: SPEC.md's GUI concurrency text gains the principle: convenience state in the GUI (labels, marks,
-  remembered folders and selections, dialog order) may lag behind a delayed reply or another client's change; only what
-  a destructive action or a launch is shown and fenced against has to be current. No code change. Remove the feedback
-  file and its index entry.
-- Execution: `pending`.
-
 ## spare-test-fifo-write-can-outlive-reader.md
 
 - Outcome: `other`.
