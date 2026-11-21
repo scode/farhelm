@@ -476,6 +476,7 @@ async fn shift_enter_is_one_input() {
 async fn unacknowledged_input_stays_within_the_window() {
     let mut pair = connected().await;
     let chunk = vec![b'x'; MAX_INPUT];
+    let refused = vec![b'y'; MAX_INPUT];
     let Pair {
         client,
         server,
@@ -487,7 +488,7 @@ async fn unacknowledged_input_stays_within_the_window() {
             for _ in 0..3 {
                 client.send_input(&chunk).await.unwrap();
             }
-            client.send_input(&chunk).await
+            client.send_input(&refused).await
         },
         async {
             for _ in 0..3 {
@@ -527,7 +528,8 @@ async fn unacknowledged_input_stays_within_the_window() {
     }));
     let (sent, received) = tokio::join!(client.send_input(&chunk), read_frame(server, buf));
     sent.unwrap();
-    assert!(matches!(received, ClientMessage::Input(_)));
+    // Bytes that leaked from the refused send cannot stand in for the retry.
+    assert_eq!(received, ClientMessage::Input(chunk));
 }
 
 /// An acknowledgement that breaks the counts' rules ends the connection:

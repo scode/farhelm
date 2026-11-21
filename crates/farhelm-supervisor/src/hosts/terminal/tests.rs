@@ -2255,6 +2255,13 @@ async fn a_paste_goes_out_whole_and_is_closed_after_a_loss() {
     }
     assert_eq!(pieces.concat(), data);
     server.ack(MAX_INPUT as u64).await;
+    // A later output record proves the runtime handled the first ack
+    // before we check whether the paste receipt is ready.
+    server.output(0, b"ack fence").await;
+    wait_until(&terminal, "output after the first ack", |terminal| {
+        terminal.status().position.offset == b"ack fence".len() as u64
+    })
+    .await;
     let mut written = Box::pin(receipt.fate());
     assert!(pending_once(&mut written).await, "written after one piece");
     server.ack(data.len() as u64).await;
@@ -2274,7 +2281,11 @@ async fn a_paste_goes_out_whole_and_is_closed_after_a_loss() {
     server.ack((data.len() + MAX_INPUT) as u64).await;
     let _second = server.input().await;
     drop(server);
-    let (mut server, _) = stand_in.accept(&info).await;
+    let mut resumed = info;
+    resumed.end = b"ack fence".len() as u64;
+    resumed.delivered_end = resumed.end;
+    let (mut server, from) = stand_in.accept(&resumed).await;
+    assert_eq!(from.offset, resumed.end);
     assert_eq!(server.input().await, PASTE_END);
     assert_eq!(fate(receipt).await, InputFate::Unknown);
 
