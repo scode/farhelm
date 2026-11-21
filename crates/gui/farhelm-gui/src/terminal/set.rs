@@ -531,9 +531,12 @@ impl TerminalSet {
                 .get::<SessionRow>(&self.key)
                 .map(|row| row.info.tabs.iter().map(|tab| tab.id.clone()).collect())
         });
-        // A missing row is still waiting for its first list. An empty list from a real row settles the choice.
-        let restore = listed.as_ref().and_then(|_| self.restore.take());
-        let listed = listed.unwrap_or_default();
+        // An omitted row tells us nothing about its terminals. A real row, including one listing no tabs, settles
+        // the roster and any remembered choice. The pane itself closes if the listing proves the session gone.
+        let Some(listed) = listed else {
+            return;
+        };
+        let restore = self.restore.take();
         // Most pushes change something else about the row (its activity, its status): nothing to do then. A tab whose
         // terminal could not be made (the font did not measure) is tried again at the next change of the list.
         let unchanged = listed.len() == self.tabs.len()

@@ -36689,3 +36689,42 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: No change. The leak is conditional on an already-failed retirement in a legacy tmux fixture. The original
   test failure remains visible, with no demonstrated loss of recorded evidence. jj change `unszrnxm`, bookmark
   `plan/triage-supervisor/08-test-harness-items`, https://github.com/scode/farhelm/pull/4546/changes.
+
+## omitted-session-row-drops-live-tabs.md
+
+- Outcome: `fix code`.
+- Assessment: terminal/set.rs `follow_tabs` (~528–537) maps a missing row to an empty tab list
+  (`listed.unwrap_or_default()`), dropping tabs and falling back to the agent. Its own comment says "A missing row is
+  still waiting for its first list." The cut case needs one host with more than 500 sessions, far above the stated "tens
+  of sessions" scale. Basis: SPEC_impl.md (~402): "a host or status filter, or the cap, can leave that session out of
+  the list while the selection and its terminal stay". Fix: leave the tabs untouched when the row is missing.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed in jj change `ylpypzon`, bookmark `plan/triage-gui-misc/01-terminal-view`,
+  [draft PR #4526](https://github.com/scode/farhelm/pull/4526/changes).
+
+## remembered-terminal-restore-keeps-unavailable-tab.md
+
+- Outcome: `fix code`.
+- Assessment: When you reopen a session whose remembered shell tab's host cannot be read until the supervisor restarts,
+  the view stays on that tab, reconnecting forever, instead of falling back to the working agent terminal. Verified:
+  Confirmed in the parts checked. The supervisor refuses an unreadable tab host with an Unavailable kind (handlers.rs
+  ~1561-1577). The helm maps only NotFound to tab_closed (helm terminal.rs ~310-315), so the client keeps retrying.
+  SPEC.md ~2299: "It shows the agent terminal if you chose Agent or if the remembered tab is gone or unavailable to
+  attach." The rule is stated in so many words, but the fix has several possible shapes (a new detach code, or fallback
+  logic in the GUI), so this is not SETTLED.
+- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Fall back in the GUI"
+  (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we definitely need to batch
+  these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them
+  running concurrently."
+- Completion criteria: When restoring a remembered tab gets an "unavailable" refusal, the GUI shows the agent terminal,
+  as SPEC (~2299) says. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Deferred to the Near term TODO.md entry “Show the main terminal when a remembered shell tab cannot attach.”
+  A supervisor connection drop can carry the same detach code as a refusal, and fallback must preserve pending upload
+  notices. jj change `ylpypzon`, bookmark `plan/triage-gui-misc/01-terminal-view`,
+  [draft PR #4526](https://github.com/scode/farhelm/pull/4526/changes).

@@ -3,7 +3,9 @@
 //! `SCENES` with each scene's name and size, stays in `mod.rs`.
 
 use crate::session;
-use crate::terminal::attached::{AttachedTerminal, OpenStream, TerminalTarget};
+use crate::session_list::SessionList;
+use crate::terminal::attached::{AttachedTerminal, Hold, OpenStream, TerminalTarget};
+use crate::terminal::set::TerminalSet;
 use crate::terminal::{CellMetrics, CursorPhase, TerminalView, TextSize};
 use crate::theme;
 use farhelm_grid_model::GridOutput;
@@ -16,7 +18,7 @@ use gpui::{
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use super::SceneState;
+use super::{SceneState, defer_after, session_list_scene_opening};
 
 /// One terminal's whole output for a golden scene, in the grid protocol's JSON description, decoded the way a live
 /// attachment's frames are: a hello at `cols` by `rows`, plain state, the given rows, and one frame with `cursor`.
@@ -324,6 +326,85 @@ fn replayed_stream(exit: Option<i32>, keep: Kept, then: fn(&mut FakeTerminal)) -
         keep.borrow_mut().push(Box::new(fake));
         (handle, events)
     })
+}
+
+/// Render the session's shell both before and after the capped list omits its row.
+pub(super) fn terminal_cut_row_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::session_list::tests::{change, listing_meta, session as fixture};
+    use farhelm_proto::ui_channel::SessionRow;
+
+    session_list_scene_opening(state, &[fixture("a").tabs(1), fixture("b")], Some("a"), cx);
+    let connection = session::connection(cx).unwrap();
+    let keep = Rc::downgrade(&state.keep);
+    connection.update(cx, |connection, _| {
+        connection.serve_terminals(move |attach| {
+            replayed_stream(None, keep.upgrade().unwrap(), |_| {})(attach)
+        });
+    });
+    state.after.set(Some(|_, state, window, cx| {
+        let connection = session::connection(cx).unwrap();
+        let session = connection.read(cx).session().unwrap().clone();
+        let metrics = CellMetrics::measure(TextSize::DEFAULT, cx).unwrap();
+        let hold = Rc::new(|_: &App| Hold::Nothing);
+        let set = cx.new(|cx| TerminalSet::new(&session, "a".into(), metrics, hold, cx));
+        let mark = crate::focus::Mark::take(cx);
+        set.update(cx, |set, cx| {
+            set.choose(Some("tab-0".into()), &mark, window, cx)
+        });
+        state.keep.borrow_mut().push(Box::new(set));
+        state.after.set(Some(cut_row));
+    }));
+
+    /// Hold staging through the shell's replay and the store's removal of the row.
+    fn cut_row(_: &Entity<SessionList>, state: &SceneState, _: &mut Window, cx: &mut App) {
+        let set = cut_row_terminal(state).unwrap();
+        let set = set.read(cx);
+        assert_eq!(set.chosen(), Some("tab-0"));
+        if !set.shown().unwrap().read(cx).is_live() {
+            state.after.set(Some(cut_row));
+            return;
+        }
+        let mut keep = state.keep.borrow_mut();
+        let helm = keep
+            .iter_mut()
+            .find_map(|entry| entry.downcast_mut::<FakeHelm>())
+            .unwrap();
+        helm.push(change(listing_meta(&["b"], 502, true), &[], &["a"]));
+        // The next staging frame drains the fake's push before drawing.
+        state.after.set(Some(|_, state, _, cx| {
+            let store = session::current_store(cx).unwrap();
+            let sessions = store.read(cx).collections();
+            assert!(sessions.get::<SessionRow>("a").is_none());
+            let set = cut_row_terminal(state).unwrap();
+            assert_eq!(set.read(cx).chosen(), Some("tab-0"));
+        }));
+    }
+}
+
+/// The pane belongs to the open session for the whole scene, even when its sidebar row disappears.
+fn cut_row_terminal(state: &SceneState) -> Option<Entity<TerminalSet>> {
+    state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|entry| entry.downcast_ref::<Entity<TerminalSet>>().cloned())
+}
+
+/// The still-open terminal pane and the still-selected shell after the session list omits its row.
+pub(super) fn terminal_cut_row(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    defer_after(state, window, cx);
+    let ground = div().size_full().flex().flex_col();
+    let Some(set) = cut_row_terminal(state) else {
+        return ground.into_any_element();
+    };
+    ground
+        .child(TerminalSet::strip(&set, window, cx))
+        .child(div().flex_1().min_h_0().child(set))
+        .into_any_element()
 }
 
 /// The attached terminals a scene made, one above the other, each in a pane of a fixed size.

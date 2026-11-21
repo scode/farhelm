@@ -618,6 +618,12 @@ static SCENES: &[Scene] = &[
         setup: terminal_status_setup,
     },
     Scene {
+        name: "terminal-cut-session-row",
+        size: (520., 260.),
+        draw: terminal_cut_row,
+        setup: terminal_cut_row_setup,
+    },
+    Scene {
         name: "terminal-file-disclosures",
         size: (420., 520.),
         draw: terminal_file_disclosures,
