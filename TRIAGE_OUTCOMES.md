@@ -205,25 +205,6 @@
   block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/installer-expect-hyphen-value.md`.
 
-## older-development-archive-moves-replacement-folder.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Claims
-  a pending checkout-archive journal written by pre-fix code can, on recovery, move a replacement folder that reuses the
-  recorded device/inode when birth time is unavailable. The finding itself marks the development-build remainder
-  AMBIGUOUS and says real occurrence is unverified. The released-writer subcase may fall under FILTER.md "Upgrades from
-  older releases combined with another rare condition", but development builds are not "an older Farhelm release".
-  Current recovery in `crates/farhelm-supervisor/src/working_copies.rs` still moves the archive back.
-- Decision: the user picked "Accepted, discard all" (2026-10-26 ten-question triage page, Q2), adding "and SPEC. We do
-  not concern our selves with thold generation installers prior to 0.31.1 unless it is a highly catastastrophic problem
-  that isn't in some super rare edge case."
-- Completion criteria: SPEC.md (installation) states the principle: defects in the installers of releases older than
-  0.31.1 (the handoff floor), and in state they or development builds left behind, are not addressed unless the problem
-  is highly catastrophic and not a very rare edge case. Coordinate with `installer-link-noreplace` (its spec PR adds the
-  related sentence that an older release's installer keeps the protections it had); one paragraph may carry both. No
-  code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## add-host-refusal-bypasses-dialog-admission.md
 
 - Outcome: `fix spec`.
