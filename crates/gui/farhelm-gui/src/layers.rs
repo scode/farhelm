@@ -720,7 +720,7 @@ pub struct Dialog {
     /// and a control the dialog routes through [`dismiss`] (its header Close). [`Dismissal::Stay`] keeps it open and
     /// the dismissal does nothing else (Escape closes no tooltip or lower layer either): for a dialog busy with work it
     /// must not lose, such as an editor whose save is in flight, or one that asks first, such as an editor leaving an
-    /// unsaved draft (SPEC.md for the template editor: "Leaving an unsaved draft asks Keep editing, Discard, or Save"),
+    /// edited draft (SPEC.md for the template editor: "Leaving asks Keep editing, Discard, or Save"),
     /// which opens its question from the hook and closes itself once the answer says so. The hook lives with the layer,
     /// not in the dialog's view, because a key handler in the view would miss the case where the dialog itself holds
     /// focus (after a click on its empty space): the layer manager's element sits around that view.

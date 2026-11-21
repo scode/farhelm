@@ -941,10 +941,10 @@ fn a_guarded_dialog_refuses_an_outside_press(cx: &mut TestAppContext) {
     );
 }
 
-/// SPEC.md asks a question when the user leaves an editor with an unsaved draft ("Leaving an unsaved draft asks Keep
-/// editing, Discard, or Save in that reading order, with initial focus still on Save"), so a dismissal must be able to
-/// keep the editor open and ask, then leave the closing to the answer. A yes-or-no guard cannot say that, and an
-/// editor asking from its own key handler would miss Escape while the dialog itself holds focus.
+/// SPEC.md asks a question when the user leaves an editor with an edited draft ("Leaving asks Keep editing, Discard, or
+/// Save in that reading order", and "starts with focus on Save"), so a dismissal must be able to keep the editor open
+/// and ask, then leave the closing to the answer. A yes-or-no guard cannot say that, and an editor asking from its own
+/// key handler would miss Escape while the dialog itself holds focus.
 ///
 /// Specified, for a dialog whose hook asks a three-answer question and answers Stay: Escape, and a dismissal the way a
 /// header Close makes it ([`layers::dismiss`]), leave the dialog open under the open question; then Keep editing

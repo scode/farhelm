@@ -26,7 +26,7 @@
 //! value.
 //!
 //! A question may carry more answers ([`Question::alternative`]), drawn in the order added between Cancel and Confirm:
-//! the template editor's "Keep editing, Discard, or Save" (SPEC.md: "in that reading order, with initial focus still on
+//! the template editor's "Keep editing, Discard, or Save" (SPEC.md: "in that reading order", and "starts with focus on
 //! Save"), the old host setup confirmation's "Set up, don't ask again" between Cancel and Set up, and SPEC.md's YOLO
 //! confirmation, "Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time
 //! YOLO answer". They follow the same rules: each acts on the frozen value, they are among the answers the first one
@@ -108,21 +108,21 @@
 //!
 //! [`ask_inline`] hands the question to its owner, which draws it inside its own surface, as the old app drew the
 //! launcher's YOLO question in the launcher's body. It is not a layer: no veil, no header Close, no subject (it goes
-//! when its owner stops drawing it), and Tab
-//! passes through it as through the rest of the owner's dialog. Where it is drawn is the owner's; how it looks and
-//! answers are the prompt's. Focus moves into it when it opens, onto its starting answer, unless the user has moved on
-//! since `mark` (then it shows and waits), and an answer pressed while focus is inside it, or clicked, returns focus to
-//! what held it when it opened, inside the owner's dialog. A click counts wherever focus is when the answer runs: on
-//! macOS a click focuses no button, so its press falls through to the owning dialog's empty-space rule, and in a dialog
-//! whose empty space takes focus (Templates, Trash) focus is on the dialog itself by then. Inside a dialog both moves
-//! go through the focus coordinator's [`focus::focus_in_layer`], which waits for the frame that first draws the
-//! starting answer and scrolls it into view as Tab would, so the owner scrolls nothing itself; on the page they go
-//! through [`focus::focus_control`]. Escape while focus is in it means Cancel and is taken there, so the owning dialog
-//! stays open; Escape anywhere else in the dialog is the dialog's. Enter presses the focused answer; the question holds
-//! no focus of its own, so a press on its empty space does what the owning dialog's empty-space rule says. It draws in
-//! one of two looks: plain text and answers (`.templates-departure` in the old app), on whatever band its
-//! owner puts it in, or loud ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its
-//! title as a red heading (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
+//! when its owner stops drawing it), and Tab passes through it as through the rest of the owner's dialog. Where it is
+//! drawn is the owner's; how it looks and answers are the prompt's. Focus moves into it when it opens, onto its
+//! starting answer, unless the user has moved on since `mark` (then it shows and waits), and an answer pressed while
+//! focus is inside it, or clicked, returns focus to what held it when it opened, inside the owner's dialog. A click
+//! counts wherever focus is when the answer runs: on macOS a click focuses no button, so its press falls through to the
+//! owning dialog's empty-space rule, and in a dialog whose empty space takes focus (Templates, Trash) focus is on the
+//! dialog itself by then. Inside a dialog both moves go through the focus coordinator's [`focus::focus_in_layer`],
+//! which waits for the frame that first draws the starting answer and scrolls it into view as Tab would, so the owner
+//! scrolls nothing itself; on the page they go through [`focus::focus_control`]. Escape while focus is in it means
+//! Cancel and is taken there, so the owning dialog stays open; Escape anywhere else in the dialog is the dialog's.
+//! Enter presses the focused answer; the question holds no focus of its own, so a press on its empty space does what
+//! the owning dialog's empty-space rule says. It draws in one of two looks: plain text and answers
+//! (`.templates-departure` in the old app), on whatever band its owner puts it in, or loud ([`Question::loud`]), the
+//! old YOLO confirmation's red-edged, red-washed block with its title as a red heading (`.yolo-confirmation`). Decided
+//! by the migration's orchestrator on 2026-11-14.
 //!
 //! A question may carry one link ([`Question::link`]), drawn after its lines and before its answers in every
 //! presentation: SPEC.md's sandbox question, asked inline in the launcher, links Tensorlake pricing there. It opens in

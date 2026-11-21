@@ -242,7 +242,7 @@ type ExtraAnswerCase = (
 );
 
 /// The extra answers must not change where a question starts or what Enter does there: SPEC.md's template leave
-/// question keeps "initial focus still on Save", so a question that started on an extra answer would discard a draft on
+/// question "starts with focus on Save", so a question that started on an extra answer would discard a draft on
 /// Enter. And their place in reading and Tab order is between Cancel and Confirm, in the order added (SPEC.md's YOLO
 /// confirmation: "Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time
 /// YOLO answer"; the leave question's "Keep editing, Discard, or Save").
