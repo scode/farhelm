@@ -33977,3 +33977,57 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The independent guard checks punctuation boundaries so adjacent prose cannot mask a local authority.
   jj change `nounvszuwpoy`, bookmark `plan/triage-tooling/01-fixture-privacy-guards`,
   [draft PR #4491](https://github.com/scode/farhelm/pull/4491/changes).
+
+## capture-failed-stop-erases-recovery.md
+
+- Outcome: `other`.
+- Assessment: None for users. When the agent-screen capture tool cannot confirm its terminal host stopped, it hides the
+  failure and deletes the run directory needed to retry the stop. Verified: Confirmed (`scripts/agent_screen_host.py`
+  ~223-231: `check=False`, exceptions swallowed, unconditional `rmtree`). Whether a process survives was not shown.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code, small (keep the directory and report the failure when the stop is not confirmed). Discard is also
+  reasonable.
+- Execution: Fixed. An unconfirmed stop retains the run and reports its recovery path and diagnostic. jj change
+  `sqzmtxmvtpqy`, bookmark `plan/triage-tooling/02-capture-host-lifecycle`,
+  [draft PR #4494](https://github.com/scode/farhelm/pull/4494/changes).
+
+## capture-startup-metadata-cleanup.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tooling. If writing the pid file fails, or Ctrl-C lands in a tiny window right after a screen
+  capture's agent starts, the detached capture process and its terminal host keep running and nothing stops them.
+  Verified: Confirmed. `agent_screen_host.py` `HostRun.start` (~L132-133) writes the pid with no cleanup on error, and
+  callers have no handle to stop it yet.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Discard. The window is tiny and the run directory stays for manual recovery. Or fix with a try/except if
+  bundled with capture-local-program-path.
+- Execution: Fixed. Startup attempts to stop its controller if readiness or metadata fails. When an interrupt leaves its
+  child handle unknown, it retains the run directory for a retry. jj change `sqzmtxmvtpqy`, bookmark
+  `plan/triage-tooling/02-capture-host-lifecycle`, [draft PR #4494](https://github.com/scode/farhelm/pull/4494/changes).
+
+## capture-local-program-path.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tooling. `--farhelm ./farhelm` checks the local file but launches whichever `farhelm` is on
+  PATH, so screen capture can silently use another build. Verified: Confirmed. `agent_screen_host.py` checks
+  `farhelm.is_file()` and records `resolve()`, but runs `str(farhelm)`, and Path turns "./farhelm" into "farhelm".
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix the code: resolve the path once. One line.
+- Execution: Fixed. Validation, launch and the recovery marker use the same resolved binary. jj change `sqzmtxmvtpqy`,
+  bookmark `plan/triage-tooling/02-capture-host-lifecycle`,
+  [draft PR #4494](https://github.com/scode/farhelm/pull/4494/changes).
