@@ -121,3 +121,93 @@ Each of the eight drafts passed an independent source review and a cold wording 
 screen-fixture privacy checks independent and the summary fix within its existing ledger parser. The worker staging and
 historical deflake findings went through the complexity gate. The draft descriptions and archive receipts account for
 all 40 records.
+
+### Landing
+
+#### What landed with it
+
+The plan's eight PRs merged with a landing fix, #4511. No other plan landed in this round, and main had gained nothing
+since the executor based the plan. A script checked that all 40 findings left the queue and the open ledger and that
+each decision moved to the archive. An independent reviewer read the eight PRs against the triage decisions. Its
+findings:
+
+- **Privacy guards.** The fixture privacy checks in the capture script and in the Rust fixture test agree on every new
+  case.
+- **Release and brick-test tooling.** No guard is weakened.
+- **Instruction files.** They match the code, and the validation guide and the full-test-run list are updated for every
+  changed script.
+- **Tools the landing relies on.** The recorder, the test worker's script and the landing scripts behave the same for an
+  existing caller, with two exceptions. A recorder run started inside another recorder run now keeps its evidence
+  instead of deleting it. And the script that runs a test on the test worker and copies its evidence back exits 1 when
+  the remote run passed but the copy failed.
+
+#### Fixes made while landing
+
+One, in [#4511](https://github.com/scode/farhelm/pull/4511/changes). Capturing agent screens spends real vendor turns.
+This plan's #4494 made an unconfirmed stop of the capture's terminal host raise an error, so a capture whose host could
+not be confirmed stopped lost everything it had captured. The error escaped before the screens were copied into the
+fixture tree, the scratch directory holding them was deleted, the remaining agents were skipped, and the command ended
+in a traceback. Now the unconfirmed stop is reported, with the host's message naming the run directory it kept. The
+screens already captured are written, and the run exits nonzero. A new test covers it.
+
+#### Checks
+
+The plan changes maintainer tooling (agent-screen capture and its privacy guards, the test recorder and its summaries,
+the test worker's script, the landing scripts' tests, brick-test tooling, build scripts), one Rust fixture test,
+instruction files, changelog notes, TODO.md and the review queue and triage ledger. Nothing that ships changed. The
+landing ran each tool's own tests locally and the Rust parts on the separate arm64 Linux test worker.
+
+On the plan as delivered:
+
+- `python3 -B scripts/test-record-test-run.py`, `python3 -B scripts/test-summarize-test-runs.py`,
+  `python3 -B scripts/test-capture-agent-screens.py`, `python3 -B scripts/plans-landing/test-landing.py`,
+  `deno check scripts/plans-landing/idle-watch.ts`, `python3 -B deflake/test-deflake.py`,
+  `python3 -B scripts/test-gui-e2e-smoke.py` and `python3 -B scripts/test-docs-shots.py`, locally under Python 3.15, run
+  directly rather than through the recorder since they are the tools' own unit tests: passed.
+- The brick-test harness's unit tests (`python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py'`),
+  locally (recorder run `8f4f4429-c82a-4595-ac72-aa2f327e45f2`): passed.
+- `cargo nextest run -p farhelm-supervisor --lib` selecting the agent screen and status-line fixture tests, on the test
+  worker (recorder run `0e5276d8-3640-4769-b0c7-3ec6b01628b5`): passed.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker,
+  not through the recorder: passed, with no errors in the output.
+- `shellcheck` on the test worker's script and remote scripts and on the three build scripts, `bash -n` on the build
+  scripts, `python3 -m py_compile` on the driver's prune script, `cargo fmt --all -- --check`, `dprint check`,
+  `python3 scripts/check-agents-md.py` with its `--self-test`, and `python3 releasing/check-changelog.py format`,
+  locally: passed.
+- A script comparing the deleted feedback files, removed index lines and archived ledger entries: all 40 match.
+
+After the landing fix (#4511):
+
+- `python3 -B scripts/test-capture-agent-screens.py`, locally: all 10 passed, the new test among them.
+- `python3 -B scripts/agent-tui.py self-test`, on the test worker with a freshly built CLI (recorder run
+  `90d2ce17-d8fc-4624-a336-c4757d95e2af`): passed. It is a real start and stop with no vendor turns, which shows a
+  normal stop still succeeds and cleans up now that an unconfirmed one fails. The instructions ask for it after changing
+  the tool, and the executor ran only the mocked tests.
+- `cargo fmt --all -- --check`, `dprint check` and `python3 releasing/check-changelog.py format`, locally: passed.
+- `python3 -B scripts/test-test-run-summary.py` (the summary's classifier tests, for the flake-ledger fix), on the
+  landed main under Python 3.15: passed. The landing tests passed under 3.15 too; the executor ran them under 3.14.
+
+Skipped: the executor's two one-off stand-in fixtures for the evidence copy and the build tooling, whose behavior the
+scripts' own tests above cover; a real agent-screen capture, which spends vendor turns and runs only when asked; the Mac
+brick test itself; the workspace suite, since the only Rust change is a fixture test that ran above; CI, which runs only
+on demand.
+
+#### Things you should know that the report does not say
+
+- Unlike what the report's opening implies, five of the outcomes were fixed where the triage decision said to discard
+  them or leave the code alone. Their archive entries say only "Fixed":
+  - a capture that failed while starting could leave an agent process running;
+  - a test of the test-run summary's archive handling went around the summary command;
+  - two of the summary's tests had assertions too loose to catch the problem they were for (two outcomes);
+  - the summary could count a flake on the wrong side of its ledger's boundary, which arguably is evidence being
+    misattributed.
+
+  The changes are small and harmless, and reverting them would only be churn. Accepting them at review is enough.
+- When the remote run passes but copying its evidence back fails, the test worker's script exits 1, the same status as a
+  failed remote command. A caller has to read the error text to tell them apart. A status of its own would be clearer;
+  it is not in TODO.md, so ask for an entry if you want it.
+- The Podman test payload now builds in a folder of its own in each checkout and on the test worker, so the first Podman
+  test run after this lands builds it from scratch.
+- Older, not caused by this plan: neither privacy guard treats link-local addresses (169.254.0.0/16) or the
+  100.64.0.0/10 range tailnets use as private, so a captured screen showing such an address would reach a committed
+  fixture. It is not in TODO.md either; ask for an entry if you want it closed.
