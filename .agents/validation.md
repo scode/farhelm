@@ -1144,7 +1144,8 @@ systemd or SSH substrate ran.
   the script changes; seconds, no other network.
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check scripts/plans-landing/idle-watch.ts`,
   `deno test -A scripts/plans-landing/idle-watch.ts` and `shellcheck scripts/plans-landing/notify.sh` — the landing
-  monitor's round tooling (`scripts/plans-landing/README.md`): the monitor log edits a resume relies on (Status and
+  monitor's round tooling (`scripts/plans-landing/README.md`): importing the landing tool with postponed dataclass
+  annotations (check the Python command on 3.14 when changing its loader), the log edits a resume relies on (Status and
   entry sharing one stamp, a stopped monitor's Status refused, the claim line replaced once or refused), the round
   files, the claim check before every push and merge (exact slug and claim id), the landing notes' placeholder and
   line-length rules, the review page's escaping, and the idle watcher's reading of `queue status` (between rounds, and

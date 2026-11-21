@@ -106,20 +106,6 @@ consequences.
 - [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
   leftover sandbox whose name has no helm tag is labelled as another helm's.
 
-- [`plan-deferral-survives-replacement-question.md`](plan-deferral-survives-replacement-question.md) — After the
-  maintainer answers one large plan question, a later ordinary question from that plan can remain excluded from
-  automatic handling. Whether the operational-artifact exclusion covers this workflow defect is ambiguous.
-
-- [`stale-plan-answer-clears-new-question.md`](stale-plan-answer-clears-new-question.md) — A delayed answer can be
-  attached to a plan's replacement question and make that plan eligible again, even when the new question was reserved
-  for the maintainer. Actual unauthorized execution is unestablished.
-
-- [`closed-conflicting-pr-does-not-wake-executor.md`](closed-conflicting-pr-does-not-wake-executor.md) — A waiting plan
-  can remain unstarted after the last conflicting PR closes, until unrelated activity or a manual drain.
-
-- [`old-executor-close-resets-new-holder-bookmarks.md`](old-executor-close-resets-new-holder-bookmarks.md) — An old
-  executor's prescribed full-close cleanup can reset plan bookmarks already being used by the new holder.
-
 - [`host-permission-copy-quotes-retired-labels.md`](host-permission-copy-quotes-retired-labels.md) — Specifications and
   helm refusal text quote old host-permission labels rather than the controls users now see.
 
@@ -268,10 +254,6 @@ consequences.
   terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
   does not establish output pressure. This is a new coverage-description error, with no observed product stall.
 
-- [`landing-tests-import-unregistered-module.md`](landing-tests-import-unregistered-module.md) — The documented
-  landing-tool validation command can crash during import before testing any safeguards, because its dynamically loaded
-  module is absent from Python's module registry.
-
 - [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
   runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
   empty overall filter selection.
@@ -299,18 +281,6 @@ consequences.
 
 - [`devbuild-rustup-active-name.md`](devbuild-rustup-active-name.md) — Mac devbuild misparses Rustup 1.28.0's multiline
   active-toolchain output and aborts preflight even with the compiler installed; current one-line output is unaffected.
-
-- [`overdue-plan-protection-ages-out.md`](overdue-plan-protection-ages-out.md) — The plan picker can forget that a
-  repeatedly skipped plan is overdue when older claims leave its bounded history.
-
-- [`plan-pass-count-includes-precreation-claims.md`](plan-pass-count-includes-precreation-claims.md) — A plan with a
-  long edit history can be treated as overdue using claims made before that plan existed.
-
-- [`plan-pass-pagination-follows-moving-main.md`](plan-pass-pagination-follows-moving-main.md) — The plan picker can
-  count an in-flight claim as a skipped pass when main changes while history pages are read.
-
-- [`dependency-block-counts-held-plan-time.md`](dependency-block-counts-held-plan-time.md) — A plan temporarily blocked
-  by an abandoned dependency can accumulate overdue passes from time it was explicitly on hold.
 
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed

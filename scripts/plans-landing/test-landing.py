@@ -19,6 +19,8 @@ import unittest
 
 _spec = importlib.util.spec_from_file_location("landing", pathlib.Path(__file__).with_name("landing.py"))
 landing = importlib.util.module_from_spec(_spec)
+# Dataclass processing can resolve postponed annotations through the module registry during import.
+sys.modules[_spec.name] = landing
 _spec.loader.exec_module(landing)
 
 LOG = """## Status
