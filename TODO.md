@@ -320,8 +320,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     ID check and conditional update that discards old-session state and notifies only on change. Keep separate globals
     for the observers. In `hosts/setup.rs:888–922` and `hosts/remove.rs:429–465`, share permanent-answer save admission,
     clearing on admission and handling a busy preferences key or refused reply. Pass each panel's wording.
-  - `launcher-repeats-choices-and-summary-formatting.md`. Recheck these call sites after the launcher redesign
-    (`plans/queue/launcher-command-field.md`). Share the lowercase effort spelling and `default` fallback for search and
+  - `launcher-repeats-choices-and-summary-formatting.md`. Recheck these call sites against the landed
+    `launcher-command-field` plan's redesign. Share the lowercase effort spelling and `default` fallback for search and
     the change notice beside the labels in `permission/words.rs:16–27`, used from `launcher/search.rs:413–419` and
     `launcher/view/changed.rs:104–110`. Share default-effort help across the select, radio group and search at
     `launcher/view/choices.rs:231–235,260–265` and `launcher/search.rs:361–362`. Share `gh:owner/name` on top of
