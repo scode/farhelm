@@ -1116,7 +1116,7 @@ fn a_closed_tab_reports_its_cut_off_uploads_in_the_agent_terminal(cx: &mut TestA
 /// A failure the user has not read yet, and an upload cut off by leaving the session, must still be there when the
 /// session's terminal is back, or the file vanishes without a word. Specified: a session's agent terminal that goes
 /// away (the session left) with a failure on its strip and an upload running leaves both, the upload as cut off; the
-/// session's next agent terminal shows them, in that order. Replaces the old spec's "an upload failure stays on screen
+/// session's next shown terminal shows them, in that order. Replaces the old spec's "an upload failure stays on screen
 /// across a reconnect" (here across the terminal being made again) and "leaving mid-upload and reopening leaves exactly
 /// one set of hooks" (a reopened terminal uploads nothing twice: it never saw the first upload).
 #[gpui::test]
@@ -1194,7 +1194,7 @@ fn a_reset_reports_a_cut_off_upload_in_the_new_agent_terminal(cx: &mut TestAppCo
 /// The lines a reset leaves must not stay for the life of the app once their session is gone, while those of a session
 /// still there must wait for it (SPEC_impl.md, "One failure path: the reset"). Specified: a reset cutting off an upload
 /// in session `s1` and one in `s2` leaves lines for both; the next snapshot's complete listing names `s1` only, and
-/// with it `s2`'s lines go while `s1`'s stay, so `s1`'s next agent terminal shows its line and `s2`'s shows nothing.
+/// with it `s2`'s lines go while `s1`'s stay, so `s1`'s next shown terminal shows its line and `s2`'s shows nothing.
 #[gpui::test]
 fn after_a_reset_the_lines_of_a_session_gone_from_the_listing_go(cx: &mut TestAppContext) {
     let mut h = harness(cx);

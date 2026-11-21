@@ -1799,7 +1799,7 @@ impl AttachedTerminal {
         self.blink = None;
         self.paste = None;
         self.put_drag_notice_away(cx);
-        // The uploads stop with the terminal, and say so in the session's next agent terminal.
+        // The uploads stop with the terminal. The session's next shown terminal receives their interruption lines.
         self.attachments
             .update(cx, |attachments, cx| attachments.hand_over(cx));
         cx.notify();

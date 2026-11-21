@@ -406,6 +406,10 @@ fn rows_group_problems_then_work_then_updates_in_registry_order() {
         ]
     );
     assert_eq!(rows[2].steps, Some(steps));
+    assert!(
+        rows[2].warning,
+        "show the unresolved warning beside progress"
+    );
 }
 
 /// Why this matters: a problem row's words are all the list says about what is wrong, and SPEC.md names the problems

@@ -59,20 +59,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## interrupted-upload-notice-lost-on-session-removal.md
-
-- Outcome: `fix code`.
-- Assessment: terminal/attachments.rs `Carried` keeps the interruption line by session key, and `prune_carried` drops it
-  once the listing proves the session gone, without showing it. Basis: SPEC.md "Attachments" (~3540): "Upload failures
-  must be visible; an attachment must never disappear silently." Fix: surface the line as a notice when its session is
-  pruned, or when the user has moved to another session.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
-
 ## session-delete-shortcut-ignores-composition.md
 
 - Outcome: `fix code`.
@@ -376,25 +362,6 @@
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## working-attention-row-hides-warning-edge.md
-
-- Outcome: `fix code`.
-- Assessment: session_list/attention.rs ~253 sets `warning: kind == Kind::Problem && status.warned`, so a Working row
-  (live progress) never carries the edge. hosts/status.rs `follow` keeps the warning latched during a Running retry and
-  clears it only on Completed or when Hosts opens. The cue bookkeeping (~395-419) drops the reason while the row is
-  Working, so the cue can replay when work ends. Basis: SPEC.md "Hosts needing attention" (~2868): "An attention row
-  keeps an amber left edge while SSH needs an answer or retry, a setup or update failure needs attention, or a host has
-  an identity or ownership problem." The same section makes live progress take precedence for the row's content only.
-  Fix: set `warning` from `status.warned` for Working rows too (and SignIn rows, if wanted). Keeping the reason present
-  also stops the cue from replaying. Caveat for the coordinator: this reads "needs attention" as including a failure
-  whose retry is running. That fits the latch in status.rs, but demote to DECIDE if that reading is in doubt.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-template-approval-misstates-permission.md
 
@@ -1753,19 +1720,6 @@
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## retired-terminal-comment-names-agent-recipient.md
-
-- Outcome: `fix code`.
-- Assessment: None. A code comment says interrupted-upload notices go to "the session's next agent terminal". They go to
-  whichever terminal is shown. Verified: terminal/attached.rs:1802 still says so. The same phrase appears in
-  attachments/tests.rs docstrings at 1119 and 1197.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## retargeted-ssh-alias-can-forget-live-container.md
 

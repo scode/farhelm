@@ -33191,3 +33191,56 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A sweep released outside the rows applies a waiting order immediately and retains its marks. jj
   change `uxslpowwqoyl`, bookmark `plan/triage-gui-sessions/01-session-list-actions`,
   [draft PR #4469](https://github.com/scode/farhelm/pull/4469/changes).
+
+## interrupted-upload-notice-lost-on-session-removal.md
+
+- Outcome: `fix code`.
+- Assessment: terminal/attachments.rs `Carried` keeps the interruption line by session key, and `prune_carried` drops it
+  once the listing proves the session gone, without showing it. Basis: SPEC.md "Attachments" (~3540): "Upload failures
+  must be visible; an attachment must never disappear silently." Fix: surface the line as a notice when its session is
+  pruned, or when the user has moved to another session.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO.md entry “Keep interrupted uploads visible after their session goes away.”
+  Moving the file details to window notices and handling Delete or Replace under an active filter exceeds the size gate.
+  jj change `votqulzktmpz`, bookmark `plan/triage-gui-sessions/02-attention-and-upload-notices`,
+  [draft PR #4477](https://github.com/scode/farhelm/pull/4477/changes).
+
+## working-attention-row-hides-warning-edge.md
+
+- Outcome: `fix code`.
+- Assessment: session_list/attention.rs ~253 sets `warning: kind == Kind::Problem && status.warned`, so a Working row
+  (live progress) never carries the edge. hosts/status.rs `follow` keeps the warning latched during a Running retry and
+  clears it only on Completed or when Hosts opens. The cue bookkeeping (~395-419) drops the reason while the row is
+  Working, so the cue can replay when work ends. Basis: SPEC.md "Hosts needing attention" (~2868): "An attention row
+  keeps an amber left edge while SSH needs an answer or retry, a setup or update failure needs attention, or a host has
+  an identity or ownership problem." The same section makes live progress take precedence for the row's content only.
+  Fix: set `warning` from `status.warned` for Working rows too (and SignIn rows, if wanted). Keeping the reason present
+  also stops the cue from replaying. Caveat for the coordinator: this reads "needs attention" as including a failure
+  whose retry is running. That fits the latch in status.rs, but demote to DECIDE if that reading is in doubt.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. A host retry keeps the amber warning beside its live progress until the warning clears. jj change
+  `votqulzktmpz`, bookmark `plan/triage-gui-sessions/02-attention-and-upload-notices`,
+  [draft PR #4477](https://github.com/scode/farhelm/pull/4477/changes).
+
+## retired-terminal-comment-names-agent-recipient.md
+
+- Outcome: `fix code`.
+- Assessment: None. A code comment says interrupted-upload notices go to "the session's next agent terminal". They go to
+  whichever terminal is shown. Verified: terminal/attached.rs:1802 still says so. The same phrase appears in
+  attachments/tests.rs docstrings at 1119 and 1197.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the comment and test descriptions to name the next shown terminal. jj change `votqulzktmpz`,
+  bookmark `plan/triage-gui-sessions/02-attention-and-upload-notices`,
+  [draft PR #4477](https://github.com/scode/farhelm/pull/4477/changes).

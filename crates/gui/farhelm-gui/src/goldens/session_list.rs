@@ -66,14 +66,18 @@ pub(super) fn session_list_selected_stale_setup(state: &SceneState, _: &mut Wind
 /// stylesheet's `.host-rail-state`, `.host-rail-update`, `.host-rail-attention`, progress-ring and
 /// `.hosts-toggle-update` rules: the local host connected (a green dot); a remote on an older build (the amber `↑`); a
 /// remote refused for a lower protocol (a red dot and the `↑`, which turns the Hosts control's `↑` red); an unreachable
-/// remote (its mark dimmed, an amber dot); a remote with an Update run going on (the dashed ring), chosen as the
-/// host filter so its ring is drawn in the pressed avatar's inverse ink; and a remote whose Update failed while Hosts
-/// was closed (the warning mark at the lower left).
+/// remote (its mark dimmed, an amber dot); a remote retrying a failed Update, chosen as the host filter so its ring
+/// is drawn in the pressed avatar's inverse ink while its attention row keeps the amber edge; and a remote whose
+/// Update failed while Hosts was closed (the warning mark at the lower left).
 pub(super) fn host_rail_status_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::progress::tests::step;
     use crate::hosts::tests::{aliased, connected, host, hosts as registry, progress, run, skew};
     use crate::session_list::host_rail::tests::{old_build, unreachable};
     use farhelm_proto::provisioning::ProvisioningOperation::Update;
-    use farhelm_proto::provisioning::RunStatus::{Failed, Running};
+    use farhelm_proto::provisioning::{
+        RunStatus::{Failed, Running},
+        StepStatus,
+    };
     let remote = |id, alias: &str, state| {
         aliased(
             host(id, "ssh", state),
@@ -94,13 +98,33 @@ pub(super) fn host_rail_status_setup(state: &SceneState, _: &mut Window, cx: &mu
             remote(5, "busy", connected()),
             remote(6, "failed", connected()),
         ]),
-        progress(&[run(5, Update, Running), run(6, Update, Failed)]),
+        progress(&[run(5, Update, Failed), run(6, Update, Failed)]),
     ]);
     state.lists.borrow_mut().push(cx.new(SessionList::new));
     // Chosen once the list has drawn under its UI session (a choice before that has no session to belong to); it shows
     // pressed at once, and the helm's answer to its query is not needed for the rail.
-    state.after.set(Some(|list, _, _, cx| {
-        list.update(cx, |list, cx| list.choose_host(Some(5), cx))
+    state.after.set(Some(|list, state, _, cx| {
+        // Allow the failed run to latch its warning before the new progress takes over the row.
+        let mut retry = run(5, Update, Running);
+        retry.run_id = Some("run-5-retry".into());
+        retry.steps = vec![
+            step("Read the installed version", StepStatus::Completed),
+            step("Install the update", StepStatus::Running),
+        ];
+        let changed = progress(&[retry, run(6, Update, Failed)]);
+        state
+            .keep
+            .borrow_mut()
+            .iter_mut()
+            .find_map(|item| item.downcast_mut::<FakeHelm>())
+            .expect("the scene's helm")
+            .push(CollectionChanges {
+                collection: changed.collection,
+                meta: changed.meta,
+                upsert: changed.entries,
+                remove: Vec::new(),
+            });
+        list.update(cx, |list, cx| list.choose_host(Some(5), cx));
     }));
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));

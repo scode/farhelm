@@ -402,6 +402,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Keep interrupted uploads visible after their session goes away.** The terminal leaves a line for each interrupted
+  upload in `terminal/attachments.rs` (`Carried` and `prune_carried`), then the desktop can discard the lines when it
+  learns the session is gone. SPEC.md's “Attachments” says upload failures must be visible. Preserve the file name and
+  whether the upload was never sent or its result is unknown. Show the line on a surface that outlives the terminal,
+  either when the user moves to another session or when removal is established. Reuse the notice center and account for
+  a successful Delete or Replace behind a filter, when an incomplete list cannot prove absence. Cover leaving during a
+  transfer and losing its source session without reopening it, including when there are no terminals left to draw it.
+
 - **Keep bulk Stop and Delete bound to what the user saw.** In the desktop session list's marked bar, the click reads
   fresh confirmation preferences and shell guards. Capture the drawn targets, guards, confirmation preference, and the
   environment scope in the control as the single-row `Actionable` path does. Check that the connection, host identity
