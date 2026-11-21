@@ -16,6 +16,9 @@ structural code smells from a whole-codebase assessment, grouped by kind with a 
 but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
 way. Within a bucket, no order unless the bucket explicitly says so.
 
+Near term's "Plan follow-up" subsection holds the entries that came out of plans (follow-ups asked for in review,
+leftovers from reports and landing notes), kept apart from the rest of the near-term work.
+
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
 product fix out of "Deflake" rather than changing user-visible behavior as a test correction.
@@ -396,6 +399,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
 
   Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
+
+### Plan follow-up
 
 ### Tensorlake
 

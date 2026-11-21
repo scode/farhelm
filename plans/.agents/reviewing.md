@@ -51,8 +51,9 @@ Act on each submission:
 
 - an "approve" pick is an approval (`queue approve`, as the approve item in this section says;
   `scripts/plans-landing/landing.py approve` runs it for several plans in a row from a plain git clone);
-- a comment with an instruction is that instruction, whether or not "approve" is selected: a follow-up, a TODO.md entry,
-  a question to answer, or anything else it asks for;
+- a comment with an instruction is that instruction, whether or not "approve" is selected: a follow-up, a TODO.md entry
+  (in the subsection `plans/AGENTS.md`, "Follow-up TODO entries", names), a question to answer, or anything else it asks
+  for;
 - an unselected report without a comment means the maintainer did not get to it. Leave it for later. It is never a
   follow-up or a rejection.
 
@@ -79,7 +80,8 @@ what landed, the things they should know, the open questions and possible follow
   (`plans/.agents/queue.md`, "States, and the script that moves them"). When the maintainer wants the follow-up planned
   but not built yet, add `--hold`.
 - something that deserves its own plan or a TODO.md entry: that is a separate request handled the usual way (planning,
-  or a TODO edit as `AGENTS.md`, "TODO.md and FLAKES.md", describes), after which this plan can be approved.
+  or a TODO edit as `AGENTS.md`, "TODO.md and FLAKES.md", describes, placed per `plans/AGENTS.md`, "Follow-up TODO
+  entries"), after which this plan can be approved.
 - leave it for later, which changes nothing.
 
 For each blocked plan, start with the same context, then present the Blocked question, and ask for a decision:
