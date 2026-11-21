@@ -54,7 +54,7 @@ use gpui::{
     Styled as _, WeakEntity, Window, div, px, svg,
 };
 
-use crate::actions::OpenSourceNotices;
+use crate::actions::{KEYBOARD_SHORTCUTS_SHORTCUT_NAME, OpenSourceNotices};
 use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, MenuHeader, MenuItem, Role, Tier, rail_entry};
 use crate::focus::{self, Mark};
@@ -404,6 +404,7 @@ impl Render for HelpMenu {
             crate::announcements::has_history(cx),
             cfg!(target_os = "linux"),
         );
+        let can_hint_shortcut = crate::shortcuts::preferences_arrived(cx);
         let entries = shown.into_iter().enumerate().map(|(at, item)| {
             let (button, opener) = (self.button.clone(), self.opener.clone());
             let entry = MenuItem::new(
@@ -414,6 +415,10 @@ impl Render for HelpMenu {
                 Role::MenuItem,
             )
             .description(item.description())
+            .when(
+                item == Item::KeyboardShortcuts && can_hint_shortcut,
+                |entry| entry.shortcut(KEYBOARD_SHORTCUTS_SHORTCUT_NAME),
+            )
             .on_click(move |_, window, cx| {
                 // Taken in the handler, after the coordinator counted this press or key.
                 let mark = Mark::take(cx);
