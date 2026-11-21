@@ -16,13 +16,6 @@ consequences.
 - [`folder-suggestion-enter-can-submit-launcher.md`](folder-suggestion-enter-can-submit-launcher.md) — Enter on a
   visible folder suggestion can submit the launcher. A successful Replace with can retire the source session.
 
-- [`quick-switcher-enter-can-run-a-different-template.md`](quick-switcher-enter-can-run-a-different-template.md) — If
-  the template list changes, Enter can start a different saved setup from the one still shown as selected.
-
-- [`antigravity-historical-restart-can-target-child.md`](antigravity-historical-restart-can-target-child.md) — After an
-  update, Restart can stop Antigravity’s main session and try to resume a child conversation recorded by the previous
-  version.
-
 - [`guarded-delete-replace-omits-surviving-shell-work.md`](guarded-delete-replace-omits-surviving-shell-work.md) —
   Delete or Replace can end surviving main-shell work after a confirmation that mentions only extra tabs or says nothing
   is running.
@@ -78,10 +71,6 @@ consequences.
   — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-environment-d-drops-explicit-empty-proxy.md`](trailing-podman-environment-d-drops-explicit-empty-proxy.md)
-  — Empty proxy variables disappear after the container user manager restarts. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md`](trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md)
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -96,10 +85,6 @@ consequences.
 - [`interrupted-upload-notice-lost-on-session-removal.md`](interrupted-upload-notice-lost-on-session-removal.md) — When
   you switch away during an upload and the old session is replaced or deleted, Farhelm can cancel the upload without
   ever showing you that it stopped.
-
-- [`upload-path-pastes-into-restarted-agent.md`](upload-path-pastes-into-restarted-agent.md) — If you restart a session
-  during an upload, the file can finish normally while its path is pasted into the new agent, possibly in a different
-  conversation.
 
 - [`session-delete-shortcut-ignores-composition.md`](session-delete-shortcut-ignores-composition.md) — Pressing the
   session Delete shortcut while composing text can delete the open session, including its processes, when Skip session
@@ -141,25 +126,8 @@ consequences.
   automatic updates until it reconnects or Farhelm reopens if a manual operation takes the host first and leaves it
   outdated.
 
-- [`provisioning-waits-use-fleet-slots.md`](provisioning-waits-use-fleet-slots.md) — If four host operations are waiting
-  for user input, another accepted operation can sit idle until one of those prompts is answered or cancelled.
-
-- [`desktop-relaunch-sleep-depends-on-path.md`](desktop-relaunch-sleep-depends-on-path.md) — Restart to update can close
-  the app without reopening it if the original PATH cannot find `sleep`.
-
-- [`desktop-path-handoff-exceeds-linux-entry-limit.md`](desktop-path-handoff-exceeds-linux-entry-limit.md) — On Linux,
-  an inherited PATH the app can start with can still prevent its supervisor from starting, including after the previous
-  supervisor stops.
-
-- [`deferred-template-changes-unpresented-launch.md`](deferred-template-changes-unpresented-launch.md) — A delayed
-  template can change the program or wrapper before the launcher shows the change, and Launch can submit it in that
-  interval.
-
 - [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
   agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
-
-- [`filtered-tab-reset-can-route-input-before-display.md`](filtered-tab-reset-can-route-input-before-display.md) — A
-  session-list update can send a key to the main shell while the extra tab is still on screen.
 
 - [`remembered-terminal-restore-keeps-unavailable-tab.md`](remembered-terminal-restore-keeps-unavailable-tab.md) —
   Reopening a session can leave it on a remembered shell tab that cannot attach, even while the main terminal is
@@ -271,25 +239,12 @@ consequences.
   blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
   unless the program says otherwise.
 
-- [`repeated-resizes-clear-missing-history-notice.md`](repeated-resizes-clear-missing-history-notice.md) — After
-  restoring a checkpoint that omitted old scrollback, repeated taller/shorter resizes can remove the missing-output
-  notice without replacing the old history.
-
-- [`empty-history-clear-keeps-missing-history-notice.md`](empty-history-clear-keeps-missing-history-notice.md) — When a
-  recovered checkpoint contains no scrollback because it omitted all the old history, an explicit clear-scrollback
-  command does not dismiss the missing-output notice; the warning remains until enough new lines scroll or a full
-  terminal reset occurs.
-
 - [`uri-spare-capacity-missing-from-memory-budget.md`](uri-spare-capacity-missing-from-memory-budget.md) — Hyperlink
   allocations can be larger than the terminal memory estimate counts, although the logical storage counter still obeys
   its cap.
 
 - [`host-restart-history-painter-omits-palette.md`](host-restart-history-painter-omits-palette.md) — Restart into a
   fresh terminal host changes retained scrollback colors when the previous program redefined terminal colors.
-
-- [`restored-capped-title-loses-boundary-whitespace.md`](restored-capped-title-loses-boundary-whitespace.md) — Recovery
-  can change a retained terminal title and its saved title-stack entries by removing trailing whitespace exposed by the
-  title-size cap.
 
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
@@ -304,10 +259,6 @@ consequences.
 - [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
   short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
   terminal.
-
-- [`reconnect-replay-keeps-obsolete-event-count-fence.md`](reconnect-replay-keeps-obsolete-event-count-fence.md) — After
-  a resize write interrupts replay and reconnects, Farhelm can keep refusing prompts as still restoring even after the
-  terminal has caught up. More output or replacement of that runtime can clear it.
 
 - [`paste-receipt-test-checks-before-ack-processing.md`](paste-receipt-test-checks-before-ack-processing.md) — The
   regression does not prove that a long paste stays unconfirmed until all its pieces are acknowledged. It can miss a
@@ -373,11 +324,6 @@ consequences.
   tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
   lost terminal contents.
 
-- [`mixed-input-acknowledgements-misattribute-written-bytes.md`](mixed-input-acknowledgements-misattribute-written-bytes.md)
-  — After a transient Linux terminal-write allocation failure, input discarded by the terminal host can be reported as
-  written when a later input succeeds before their acknowledgements are sent. The conditional source route is
-  established; production prompts are disabled, and no user-work loss is claimed.
-
 - [`joined-link-spec-omits-cursor-tail-exception.md`](joined-link-spec-omits-cursor-tail-exception.md) — The broad
   joined-link comparison promise omits an accepted cursor-positioned tail exception.
 
@@ -405,24 +351,12 @@ consequences.
   failure descriptions bypass normal cleaning and redaction before reaching clients. An actual provider description
   containing a credential remains unverified after investigation.
 
-- [`retired-connection-leaves-suspend-progress-stuck.md`](retired-connection-leaves-suspend-progress-stuck.md) — A
-  failed Suspend on a retired connection can leave the host showing Suspending with lifecycle controls disabled until a
-  separate recovery action.
-
 - [`unreadable-sandbox-ssh-key-reports-ready.md`](unreadable-sandbox-ssh-key-reports-ready.md) — A damaged or unreadable
   saved SSH key pair can still be presented as ready, postponing the failure until later sandbox operations.
 
 - [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
   suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The
   resulting failing scheduler ordering remains unverified after investigation.
-
-- [`tunnel-control-exit-can-open-new-ssh-connection.md`](tunnel-control-exit-can-open-new-ssh-connection.md) — Closing
-  an old tunnel can start a new SSH connection if the control handshake fails after connecting. The deployed ordering
-  and resulting delay remain unverified after investigation.
-
-- [`snapshot-cleanup-races-new-host-registration.md`](snapshot-cleanup-races-new-host-registration.md) — Snapshot
-  cleanup can remove a generated snapshot before a newly admitted host records its use, causing setup failure and
-  rebuild cost.
 
 - [`tunnel-fixture-assumes-simple-short-temporary-root.md`](tunnel-fixture-assumes-simple-short-temporary-root.md) — The
   tunnel transport tests can reject correct behavior when the temporary root needs path escaping or is too long for SSH
@@ -431,31 +365,9 @@ consequences.
 - [`redirect-regression-omits-location-header.md`](redirect-regression-omits-location-header.md) — The redirect
   regression does not supply a redirect destination, so it cannot prove that Farhelm refuses to follow one.
 
-- [`cancelled-ssh-capture-can-retain-local-readers.md`](cancelled-ssh-capture-can-retain-local-readers.md) — Cancelling
-  an SSH capture may leave local helpers or pipe readers alive beyond the caller. Their actual surviving lifetime
-  remains unverified after investigation.
-
-- [`package-name-trailing-minus-requests-removal.md`](package-name-trailing-minus-requests-removal.md) — A recipe
-  package ending in a minus sign is passed to apt with its removal meaning instead of being rejected or treated as a
-  literal package name.
-
-- [`recipe-destination-refuses-absolute-dns-name.md`](recipe-destination-refuses-absolute-dns-name.md) — A valid final
-  DNS dot is refused in recipe tunnel destinations and agent endpoint hostnames.
-
 - [`package-repair-does-not-wait-for-dpkg-lock.md`](package-repair-does-not-wait-for-dpkg-lock.md) — The repair step
   does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
   package-manager trigger remains unverified after investigation.
-
-- [`apt-regex-fallback-can-accept-package-typo.md`](apt-regex-fallback-can-accept-package-typo.md) — A misspelled
-  package may be accepted through apt's pattern fallback instead of failing plainly. The shipped distribution behavior
-  remains unverified after investigation.
-
-- [`snapshot-state-races-build-admission.md`](snapshot-state-races-build-admission.md) — Adding a host as a build
-  finishes can select a just-deleted snapshot or start an unnecessary charged build.
-
-- [`automatic-update-opt-out-can-roll-back.md`](automatic-update-opt-out-can-roll-back.md) — A power loss can roll back
-  opting out of automatic updates and allow later unattended updates. Whether the general preference-loss acceptance
-  covers this authorization remains unresolved.
 
 - [`terminal-attachment-trace-retains-raw-session-id.md`](terminal-attachment-trace-retains-raw-session-id.md) —
   Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
@@ -547,9 +459,6 @@ consequences.
   confirmation can install the remote supervisor after Farhelm.app is installed; the pre-confirmation exception's scope
   remains uncertain.
 
-- [`mac-uninstall-unresolved-loaded-plist.md`](mac-uninstall-unresolved-loaded-plist.md) — A removed loaded plist can
-  bypass uninstall's service-path comparison; the nonstandard-layout exception's applicability remains uncertain.
-
 - [`mac-host-start-same-build-contract.md`](mac-host-start-same-build-contract.md) — Remote Mac Update contradicts the
   declared same-build startup invariant; no incompatible startup data or runtime failure was demonstrated.
 
@@ -562,9 +471,6 @@ consequences.
 - [`stopped-host-update-floor-unresolved.md`](stopped-host-update-floor-unresolved.md) — A stopped host running Farhelm
   below the minimum update version can still be updated without checking its installed version. Whether the
   minimum-version rule is intended to cover stopped supervisors remains unresolved.
-
-- [`cleanup-retry-omits-recovery-step-times.md`](cleanup-retry-omits-recovery-step-times.md) — After a cleanup failure,
-  Retry can report zero time for recovery steps that actually ran, weakening its diagnostic timing report.
 
 - [`overdue-plan-protection-ages-out.md`](overdue-plan-protection-ages-out.md) — The plan picker can forget that a
   repeatedly skipped plan is overdue when older claims leave its bounded history.
@@ -726,10 +632,6 @@ consequences.
   — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-shared-recipe-container-base-summary-raw-presentation.md`](trailing-shared-recipe-container-base-summary-raw-presentation.md)
-  — Recipe summaries render literal container-base formatting characters. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-account-observation-exec-guesses-root-home.md`](trailing-podman-account-observation-exec-guesses-root-home.md)
   — Custom-image login lookup unnecessarily requires /root. Abbreviated collection; confidence, proposed dismissals and
   unresolved consequences are preserved in the entry.
@@ -772,14 +674,6 @@ consequences.
 
 - [`trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md`](trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md)
   — The detach timeout test yields before establishing writer backpressure. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md`](trailing-podman-place-typed-ssh-refusal-reasons-missing-final-ui-escaping.md)
-  — Typed SSH capacity reasons bypass final display escaping. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md`](trailing-ui-retained-whole-environment-question-stale-unreachable-rationale.md)
-  — Retained whole-environment warning can misstate current reachability. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)
@@ -961,19 +855,11 @@ consequences.
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
   typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
 
-- [`wayland-drop-lost-before-file-list-arrives.md`](wayland-drop-lost-before-file-list-arrives.md) — Releasing a file
-  over a terminal before the file manager has returned its list can do nothing. Farhelm gives no indication that it
-  missed the drop.
-
 - [`checkout-status-bypasses-host-text.md`](checkout-status-bypasses-host-text.md) — A launcher status line can show
   repository-search errors without Farhelm’s usual treatment of invisible or right-to-left characters.
 
 - [`gui-command-debug-includes-secret-body.md`](gui-command-debug-includes-secret-body.md) — A future diagnostic that
   prints a GUI command could expose a token or login file included in that request.
-
-- [`linux-second-launch-lost-during-quit.md`](linux-second-launch-lost-during-quit.md) — If you reopen Farhelm while the
-  old window is quitting, the new process can say it handed off to that window and exit. The old process then exits too,
-  leaving no window.
 
 - [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
   without typing can undo a host rename that just happened through an approved agent request.
@@ -1078,35 +964,14 @@ consequences.
 - [`connection-refusal-tests-release-port-too-early.md`](connection-refusal-tests-release-port-too-early.md) — Two tests
   can reach a different process if it starts listening after the test gives up the port it reserved.
 
-- [`checkout-use-default-presentation.md`](checkout-use-default-presentation.md) — Use default can clear a freshly
-  loaded checkout-folder override before the editor shows it.
-
 - [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
   preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
-
-- [`group-divider-can-change-shift-sweep-range.md`](group-divider-can-change-shift-sweep-range.md) — Shift-dragging
-  across group spacing can change the end of the marked session range.
-
-- [`launcher-catalog-moves-model-highlight.md`](launcher-catalog-moves-model-highlight.md) — A model catalog update can
-  move the highlight so Enter picks a different model for the launch draft.
-
-- [`macos-shift-sweep-can-miss-release.md`](macos-shift-sweep-can-miss-release.md) — A macOS Shift sweep can keep
-  scrolling and marking after a release with changed modifiers.
-
-- [`mute-menu-expiry-preview-can-go-stale.md`](mute-menu-expiry-preview-can-go-stale.md) — A mute menu left open across
-  the morning cutoff can save a mute that lasts a day longer than the menu shows.
 
 - [`older-catalog-model-overrides-custom-owner.md`](older-catalog-model-overrides-custom-owner.md) — Switching agents in
   the launcher can keep a custom model because the destination has an older catalog entry with the same name.
 
 - [`session-groups-lose-membership-in-accessibility-tree.md`](session-groups-lose-membership-in-accessibility-tree.md) —
   The sidebar can omit a session's group membership from screen-reader information.
-
-- [`settings-search-key-hidden-by-open-editor.md`](settings-search-key-hidden-by-open-editor.md) — The Tensorlake key
-  search result can take you back to an open credential editor and keep the key field hidden.
-
-- [`shift-sweep-can-mark-through-sidebar-clip.md`](shift-sweep-can-mark-through-sidebar-clip.md) — In a narrow macOS
-  window, a Shift sweep can keep changing the selection when the pointer is beside the clipped sidebar.
 
 - [`sidebar-order-stays-held-after-shift-sweep.md`](sidebar-order-stays-held-after-shift-sweep.md) — Releasing a Shift
   sweep outside the sidebar can leave the previous list order visible for up to five seconds.
@@ -1117,21 +982,8 @@ consequences.
 - [`test-worker-sync-precedes-lock.md`](test-worker-sync-precedes-lock.md) — A second SSH test request can change the
   checkout used by the run already in progress.
 
-- [`add-host-close-reads-live-sign-in.md`](add-host-close-reads-live-sign-in.md) — Clicking Cancel SSH sign-in can
-  cancel a later question or close Add Host and discard the destination and alias you typed.
-
-- [`session-sign-in-suppresses-connection-diagnosis.md`](session-sign-in-suppresses-connection-diagnosis.md) — A session
-  can say to answer a sign-in question to reconnect even when the host still needs an update or another Farhelm manages
-  it.
-
 - [`auto-sign-in-uses-session-anchor.md`](auto-sign-in-uses-session-anchor.md) — If the sidebar Answer button is below
   the fold, an automatic sign-in popover can open beside the selected session’s card instead.
-
-- [`sidebar-sign-in-hides-launch-refusal.md`](sidebar-sign-in-hides-launch-refusal.md) — Sign in from the sidebar or the
-  session card can appear to do nothing while a launch is pending. The reason shows only inside Hosts.
-
-- [`new-host-attention-cue-can-be-lost.md`](new-host-attention-cue-can-be-lost.md) — A new reason to sign in can lose
-  its visual cue when the host already has a cue pending or playing.
 
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
@@ -1215,9 +1067,6 @@ consequences.
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
 
-- [`desktop-ignores-empty-login-path.md`](desktop-ignores-empty-login-path.md) — An explicitly empty login PATH triggers
-  fallback and makes tools available that the shell excluded.
-
 - [`notice-panel-marks-offscreen-rows.md`](notice-panel-marks-offscreen-rows.md) — Opening and closing Notifications can
   mark an off-screen PATH warning as read. Clear resolved can also remove unseen history.
 
@@ -1235,9 +1084,6 @@ consequences.
 
 - [`shell-recovery-spec-omits-replace.md`](shell-recovery-spec-omits-replace.md) — The Status spec omits Replace as a
   way to recover an interrupted Bash or Zsh session.
-
-- [`shell-idle-plays-agent-turn-finished.md`](shell-idle-plays-agent-turn-finished.md) — The optional Turn finished
-  sound can play when a Bash or Zsh screen goes quiet, even while its command is still running.
 
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.
@@ -1270,9 +1116,6 @@ consequences.
 - [`shell-stop-and-suspend-wording-untested.md`](shell-stop-and-suspend-wording-untested.md) — Stop and suspend tests
   can pass if its confirmation goes back to calling Bash or Zsh an agent.
 
-- [`shell-tab-label-omitted-row.md`](shell-tab-label-omitted-row.md) — An open shell can show an Agent tab when the
-  session list omits its row.
-
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.
 
@@ -1281,9 +1124,6 @@ consequences.
 
 - [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
   its normal launch path.
-
-- [`late-tab-restore-hides-upload-notice.md`](late-tab-restore-hides-upload-notice.md) — An interrupted upload can go
-  unreported while the reopened session is usable but still missing from the list.
 
 - [`retired-terminal-comment-names-agent-recipient.md`](retired-terminal-comment-names-agent-recipient.md) — The
   terminal retirement comment still sends maintainers looking for notices on Agent even when they follow the selected
