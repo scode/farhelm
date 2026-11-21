@@ -41,6 +41,11 @@ impl AutomaticUpdates {
     /// Subscribe before the initial scan so startup and enabling cannot miss a
     /// host transition between observing the fleet and waiting for a revision.
     pub(crate) fn start(service: &Arc<ProvisioningService>) -> Self {
+        if !service.payloads.allows_automatic_updates() {
+            tracing::info!(
+                "automatic remote-host updates are skipped with locally staged payloads"
+            );
+        }
         let mut events = service.manager.events().subscribe();
         let service = Arc::downgrade(service);
         #[cfg(test)]
@@ -101,11 +106,15 @@ fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> 
 /// Start at most one attempt per host incarnation for this helm lifetime.
 /// Reserve before planning, not after run completion: a failed run clears busy
 /// and publishes its own revision before the start caller necessarily resumes.
-/// Manual starts still arbitrate through the provisioning service's busy claim.
+/// Skip a manual-only payload source before making any plan or recording any
+/// attempt. Manual starts still arbitrate through the service's busy claim.
 pub(super) async fn scan(
     service: &Arc<ProvisioningService>,
     attempted: &mut HashMap<HostId, u64>,
 ) -> anyhow::Result<()> {
+    if !service.payloads.allows_automatic_updates() {
+        return Ok(());
+    }
     let hosts = service.manager.snapshots();
     let live: HashSet<_> = hosts.iter().map(|host| host.id).collect();
     attempted.retain(|id, _| live.contains(id));

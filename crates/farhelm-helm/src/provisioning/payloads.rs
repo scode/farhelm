@@ -74,10 +74,16 @@ static ACTIVE_DIRECTORY_MATERIALIZATIONS: OnceLock<Mutex<HashMap<PathBuf, usize>
 /// `Debug` is a supertrait so that a source, once erased behind
 /// `Arc<dyn PayloadSource>`, can still say which one it is: the wiring in
 /// [`production_payloads`] is a policy decision (D13) worth logging and
-/// worth testing, and the erased handle carries no other way to ask.
+/// worth testing, and the erased handle carries no other way to name the source.
 /// Implementations should render their identity, not their contents.
 #[async_trait]
 pub trait PayloadSource: std::fmt::Debug + Send + Sync {
+    /// Whether an unattended update may use this source. A staged directory
+    /// needs the user's Update action to authorize installing its local files.
+    fn allows_automatic_updates(&self) -> bool {
+        true
+    }
+
     async fn path(&self, target: PayloadTarget) -> anyhow::Result<PathBuf>;
 }
 
@@ -90,8 +96,8 @@ pub enum PayloadSelection {
     /// refuses, since no release carries its version; see
     /// [`UnreleasedPayloads`]).
     Default,
-    /// `HelmArgs::payload_dir`: read published release files staged in this
-    /// directory, verifying nothing (D3, operator-trusted).
+    /// `HelmArgs::payload_dir`: use operator-staged release archives (D3).
+    /// Host updates from this directory require a user's Update action.
     Directory(PathBuf),
     /// Download from this base URL instead of the default, this build's own
     /// release on get.farhelm.io, on ANY build (not just a release-shaped
@@ -229,6 +235,10 @@ impl DirectoryPayloads {
 
 #[async_trait]
 impl PayloadSource for DirectoryPayloads {
+    fn allows_automatic_updates(&self) -> bool {
+        false
+    }
+
     /// Re-materializes `asset` into a brand-new, uniquely named file in the
     /// private cache on EVERY call (F2, review round 1 and 2) rather than
     /// trusting — or sharing — whatever an earlier call already produced.

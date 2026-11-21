@@ -2837,9 +2837,6 @@ consequences.
   The missing-file test depends on a machine-wide file path staying absent instead of controlling that premise in its
   fixture.
 
-- [`staged-payloads-and-automatic-host-updates.md`](staged-payloads-and-automatic-host-updates.md) — Whether automatic
-  host updates can push an operator-staged, unverified payload directory without a per-host action has not been checked.
-
 - [`checkout-use-default-presentation.md`](checkout-use-default-presentation.md) — Use default can clear a freshly
   loaded checkout-folder override before the editor shows it.
 
