@@ -385,10 +385,6 @@ fn a_defaults_only_setup_clears_explicit_choices_without_launching(cx: &mut Test
     assert_eq!((after.agent.model, after.agent.effort), (None, None));
     // Codex's request permission defaults to Guarded after it drops the earlier explicit YOLO.
     assert_eq!(after.agent.permissions, Some(LaunchPermission::Guarded));
-    assert_eq!(
-        name_of(cx, "launcher-summary-choices").as_deref(),
-        Some("Model: Default · Effort: Default · Permissions: Guarded")
-    );
     assert!(creates(&mut helm, cx).is_empty());
 }
 
@@ -708,9 +704,35 @@ fn clone_and_replace_with_start_focus_in_the_search_box(cx: &mut TestAppContext)
     }
 }
 
-/// Replace with keeps its host fixed, so a host row is refused above the box with Replace with's word, and the host
-/// stays (a recorded deviation: the old search did not refuse it). Why: Replace with keeps its source's host (SPEC.md:
-/// "Replace with can change the harness or folder", not the host), so a search must not move it.
+/// The example in the empty header uses a short query that still selects its host. A full SSH login and domain
+/// would consume space meant for the other examples.
+#[gpui::test]
+fn the_command_field_shows_a_searchable_short_host_example(cx: &mut TestAppContext) {
+    let mut hosts = fixture_hosts(&[0, 1]);
+    let host = &mut hosts.entries[1].value;
+    host["name"] = serde_json::json!("deploy@buildbox.example.invalid");
+    host["alias"] = serde_json::Value::Null;
+    host["destination"] = host["name"].clone();
+    let (_helm, cx) = launcher_with_hosts(cx, LaunchDraft::new(Some(1), "~".into(), None), hosts);
+    assert!(
+        crate::session_list::tests::painted(&test_support::frame(cx))
+            .iter()
+            .any(|text| text == "host:buildbox"),
+        "the header offers the actual host's short name"
+    );
+    assert!(search_focused(cx), "typing goes to the command editor");
+    type_in(cx, "host:buildbox");
+    assert!(
+        name_of(cx, "launcher-search-option-0")
+            .is_some_and(|name| name.contains("deploy@buildbox.example.invalid")),
+        "the displayed example matched the host"
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).host, Some(2));
+}
+
+/// Replace with keeps its host fixed. Even if the user has scrolled the form down, taking a host result must explain
+/// that refusal at the command field and leave the launch action reachable.
 #[gpui::test]
 fn replace_with_refuses_a_host_row(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(None, None, None));
@@ -719,6 +741,15 @@ fn replace_with_refuses_a_host_row(cx: &mut TestAppContext) {
         LaunchDraft::replace_with("a", &source, Some(1)),
         fixture_hosts(&[0, 1]),
     );
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    let top = test_support::bounds(cx, "launcher-folder-row").top();
+    super::browse_tests::scroll_body(cx, -4000.);
+    assert!(
+        test_support::bounds(cx, "launcher-folder-row").top() < top,
+        "the premise: the form scrolled down separately from the field"
+    );
+    assert!(search_focused(cx), "the command editor still has focus");
     type_in(cx, "host:host2");
     keys(cx, "enter");
     assert_eq!(
@@ -726,6 +757,14 @@ fn replace_with_refuses_a_host_row(cx: &mut TestAppContext) {
         Some("Host cannot change here: this dialog keeps host fixed for replace")
     );
     assert_eq!(draft(cx).host, Some(1), "the host stays");
+    let nodes = test_support::frame(cx);
+    for id in ["launcher-search-refusal", "launcher-launch"] {
+        let node = nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .expect("the command refusal and launch action are both drawn");
+        assert_eq!(node.visible_bounds, node.bounds, "{id} stays in view");
+    }
 }
 
 // ---- Templates -------------------------------------------------------------------------------------------------------
@@ -913,11 +952,11 @@ fn a_tl_row_that_escalates_raises_the_banner(cx: &mut TestAppContext) {
 }
 
 /// SPEC.md: a template that does not apply "is refused with a message naming the field, and nothing from it is
-/// applied", and the old launcher said so above its search box. Applying part of it would leave a draft the user did
+/// applied", and the launcher says so beneath its command field. Applying part of it would leave a draft the user did
 /// not ask for. Specified: `tl:nowhere` and Enter leave the folder `~` and show the refusal, naming `nowhere`, in the
-/// launcher's note, drawn in the search row above the box.
+/// launcher's note, drawn below the field.
 #[gpui::test]
-fn a_refused_tl_row_changes_nothing_and_says_why_above_the_box(cx: &mut TestAppContext) {
+fn a_refused_tl_row_changes_nothing_and_says_why_below_the_field(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_launcher_with_templates(cx, None);
     answer_catalog(&mut helm, cx, Some(serde_json::json!([])));
     type_in(cx, "tl:nowhere");
@@ -930,8 +969,8 @@ fn a_refused_tl_row_changes_nothing_and_says_why_above_the_box(cx: &mut TestAppC
         test_support::bounds(cx, "launcher-search-box"),
     );
     assert!(
-        note.bottom() <= field.top(),
-        "the refusal is drawn above the box: {note:?} over {field:?}"
+        note.top() >= field.bottom(),
+        "the refusal is drawn below the field: {note:?} after {field:?}"
     );
 }
 

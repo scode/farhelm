@@ -87,11 +87,9 @@ fn the_name_row_shows_the_pill_until_the_user_types(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "launcher-name-policy"));
 }
 
-/// SPEC.md: "an advanced name also shows "(<base> is taken)"", so the user can tell why the name is not the template's,
-/// and the pill must stay inside the label column, as the old one wrapped inside it, never over the field or the note.
-/// Specified: on a base name the helm already answered as taken once, the field shows `review-2` and the note under it
-/// reads "(review is taken)", beside the pill; the pill's right edge is left of the Name field and of the note. (The
-/// live answer moving the name on is the launcher's own case, and the dispatcher's numbered quick launch.)
+/// An advanced name explains why it differs from the template's base. The mode pill stays in the Name label area,
+/// above the input, with the reason below the input. This keeps the pill and note from covering the name when the
+/// destination card wraps its fields.
 #[gpui::test]
 fn a_taken_base_says_so_under_the_field(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, advanced_draft(), &[]);
@@ -106,7 +104,10 @@ fn a_taken_base_says_so_under_the_field(cx: &mut TestAppContext) {
     let field = test_support::bounds(cx, "launcher-name");
     let taken = test_support::bounds(cx, "launcher-name-taken");
     assert!(
-        pill.right() <= field.left() && pill.right() <= taken.left(),
-        "{pill:?} beside {field:?} and {taken:?}"
+        pill.left() >= field.left()
+            && pill.right() <= field.right()
+            && pill.bottom() <= field.top()
+            && field.bottom() <= taken.top(),
+        "the pill {pill:?}, field {field:?}, and reason {taken:?} fit in the Name column"
     );
 }

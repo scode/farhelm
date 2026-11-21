@@ -184,9 +184,8 @@ fn the_registration_note_shows_and_copies_the_command(cx: &mut TestAppContext) {
 
 /// With no recipe in the catalog, entering New sandbox or New container chooses none (an empty name), and the footer
 /// and Launch's name used to say "new  sandbox", with two spaces around the missing recipe, as the old footer did too.
-/// SPEC.md, "Creation": the footer names the target, and Launch's accessible name keeps it, so a screen reader reads
-/// these words aloud. Specified: with an empty catalog and a usable account, New sandbox's footer target is "Command ·
-/// new sandbox · ~" and Launch's name "Launch" before it; New container's are "Command · new container on host1 · ~".
+/// SPEC.md, "Creation": Launch's accessible name describes the target. With no recipe chosen it names only the
+/// environment, its host when known, and the path.
 /// New sandbox also shows the SSH-key registration note with no recipe chosen, as the old launcher did.
 #[gpui::test]
 fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppContext) {
@@ -214,7 +213,6 @@ fn a_new_environment_without_a_recipe_is_named_without_one(cx: &mut TestAppConte
             "the premise: {segment} with no recipe"
         );
         let words = format!("Command · {named} · ~");
-        assert_eq!(name_of(cx, "launcher-summary-target"), Some(words.clone()));
         assert_eq!(
             name_of(cx, "launcher-launch"),
             Some(format!("Launch {words}"))

@@ -4,12 +4,12 @@
 //! the old app's `list/create_form.rs` and `launch_controls.rs`, and the `.create-session-form` and `.launch-composer-*`
 //! rules in its stylesheet, at reference commit `24bc0580`. Here's the TLDR:
 //!
-//! - **The frame.** The shared dialog frame, 960 pixels wide, with the old header (the Launch tile, a title and a
-//!   summary naming the mode, and Close), a scrolling body, and a pinned footer: a summary of what Launch would start,
-//!   then Cancel, Reset choices (Agent tab), Save as template (not in Replace with) and the main action, with what a
-//!   press of it has to say pinned under them, as the old footer's column did. Save as template opens its inline panel
+//! - **The frame.** The shared dialog frame, 960 pixels wide. The command field and Close keep their own line in the
+//!   header above its guidance and bounded notices. The pinned footer holds Cancel, Reset choices (Agent tab),
+//!   Save as template (where offered) and the main action. Confirmations and refusals are bounded beneath them.
+//!   Save as template opens its inline panel
 //!   at the end of the body (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
-//! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
+//! - **The body**, in reading and Tab order: the recent setups while any match
 //!   ([`recents`]), the Destination card (Folder or Managed checkout, then the Host, Folder and Browse address and
 //!   Name). Host also offers new environments, which put their placement controls beside Host in place of the
 //!   editable folder ([`placement`]). A managed checkout puts Repository and the preview there. Next come the
@@ -59,7 +59,7 @@ use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, ClickEvent, Context, Div, ElementId, Entity,
     FontWeight, Global, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity,
-    Window, div, px, svg,
+    Window, div, px,
 };
 
 use super::draft::DestinationKind;
@@ -70,17 +70,15 @@ use super::draft::{
 use super::launch::{self, Request};
 use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target};
 use super::words::agent_note;
-use crate::assets::Icon;
 use crate::components::{
-    self, Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select,
-    SelectOption, TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier,
+    Button, Checkbox, DialogFrame, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption,
+    TabOption, TabStrip, TextInput, TextInputEvent, TextInputState, Tier, key_chip,
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::{display_name, phase};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::operations::OpKey;
-use crate::permission::words::{effort_label, permission_display};
 use crate::prompt::ActionFrame;
 use crate::session_list::replace;
 use crate::store::HelmStore;
@@ -134,8 +132,6 @@ const ADDRESS_MIN_WIDTH: f32 = 348.;
 const DESTINATION_NAME_WIDTH: f32 = 170.;
 /// `.launch-composer-columns`: the destination block and the choices are 20 pixels apart.
 const SECTION_GAP: f32 = 20.;
-/// `.create-session-form .dialog-tile .action-icon`: the header tile's glyph size.
-const TILE_ICON: f32 = 22.;
 /// The Command tab's agent type select's value for no declared agent; every other value is an agent's label, which are
 /// unique.
 const NO_AGENT: &str = "none";
@@ -159,8 +155,7 @@ const TEMPLATE_PANEL_OPEN: &str = "Finish or cancel saving the template before l
 /// user's action that asked for it; nothing opens if the user moved on since (the layer manager's rule) or no UI
 /// session is connected. Returns the launcher's layer.
 ///
-/// Focus starts on the search box, Restart with's on Cancel (SPEC.md: "Ordinary launches still start focus on search;
-/// Restart starts on Cancel"). Closing returns focus to whatever held it when the launcher opened.
+/// Focus starts in the command field, or on Cancel for Restart with. Closing returns focus to the opener.
 pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
     open_noted(draft, None, None, mark, window, cx)
 }
@@ -168,7 +163,7 @@ pub fn open(draft: LaunchDraft, mark: &Mark, window: &mut Window, cx: &mut App) 
 /// [`open`], with `host_note` said under the Host row until the user picks a host: why an opening did not keep the host
 /// its source names (Clone's, as the old launcher's `.create-session-host-note` said it); and `note`, if any, said
 /// from the first frame until the draft is next edited or Launch is pressed: a quick launch's banner, in the notices
-/// region, or its refusal, above the search box ([`Note`]; `super::entry::open_with`).
+/// region, or its refusal below the command field ([`Note`]; `super::entry::open_with`).
 pub(in crate::launcher) fn open_noted(
     draft: LaunchDraft,
     host_note: Option<&'static str>,
@@ -275,8 +270,8 @@ pub(super) struct Shown {
 impl Global for Shown {}
 
 /// What the launcher says for a quick launch that did not start, or a template that changed nothing, until the draft is
-/// next edited: a banner in the notices region, a refusal above the search box. The words are the caller's, as a host sentence, so template names
-/// in them are drawn escaped.
+/// next edited: a banner in the notices region or a refusal below the command field. A host sentence keeps any
+/// template name escaped.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Note {
     /// A prominent banner: a quick launch's templates need more choices before they can launch (SPEC.md, "Quick
@@ -736,7 +731,14 @@ impl Launcher {
         let model_input = field(&model_field::model_display(&draft), window, cx);
         // The search box is not a plain text edit either: what is typed is a query, and Enter takes a row (`search`).
         let search = TextInputState::new(window, cx);
-        search.set_placeholder(search::SEARCH_PLACEHOLDER, window, cx);
+        search.set_placeholder(
+            format!(
+                "{}: type an agent, host, folder, model or name…",
+                search::command_title(&draft.mode)
+            ),
+            window,
+            cx,
+        );
         let search_events = search.subscribe(
             window,
             cx,
@@ -1623,7 +1625,7 @@ fn section_label(text: &'static str, palette: &theme::Palette) -> Div {
         .child(text)
 }
 
-/// What Launch would start, in words, as the footer and the main action's name share them.
+/// What the main action would start, phrased for a screen reader.
 struct TargetWords {
     /// Whether the Command tab is chosen, which the words open with.
     command: bool,
@@ -1649,21 +1651,6 @@ impl TargetWords {
 }
 
 impl Launcher {
-    /// The mode's title and summary for the header.
-    fn heading(&self) -> (&'static str, &'static str) {
-        match self.draft.mode {
-            Mode::RestartWith(_) => (
-                "Restart session",
-                "Resume this session with different settings",
-            ),
-            Mode::ReplaceWith { .. } => (
-                "Replace session",
-                "Start a new session, then delete the source",
-            ),
-            Mode::New | Mode::Clone => ("New session", "Start an agent or a command on any host"),
-        }
-    }
-
     /// The main action's visible words: Launch, Replace or Restart, and "Stop and restart" while Restart with's source
     /// reads working (SPEC.md, "Restart with": its primary action reads "Restart", or "Stop and restart" while the shown
     /// agent is working).
@@ -1691,7 +1678,7 @@ impl Launcher {
             .is_some_and(|row| row.info.status == SessionStatus::Running)
     }
 
-    /// What the draft would start, in the old footer's words: "Command" on the Command tab, the agent type (on the Agent
+    /// The target named by the main action: "Command" on the Command tab, the agent type (on the Agent
     /// tab, or a Restart with command's declared one), the host's display name and the folder. The host and folder are
     /// host-supplied text (a Clone's folder comes from its source), so they are only shown escaped.
     ///
@@ -1738,123 +1725,6 @@ impl Launcher {
                 .checkout_summary(cx)
                 .unwrap_or_else(|| HostText::from_host(self.draft.folder.value().as_str())),
         }
-    }
-
-    /// The footer's summary (`.launch-composer-footer-summary`): what Launch would start, and on the Agent tab the
-    /// choices it would carry, each cut to one line. Each line is one labelled node holding its full text, since a cut
-    /// line's drawn words are not all on screen (SPEC.md: "Long summaries may truncate visually; their full text remains
-    /// accessible"), and the target line's full text is its hover help too, as the old one's tooltip was.
-    fn summary(&self, target: &TargetWords, window: &mut Window, cx: &mut App) -> AnyElement {
-        let palette = theme::palette(cx);
-        let full = target
-            .sentence("launcher-summary-target-name")
-            .accessible_name();
-        let mut line = div()
-            .id("launcher-summary-target")
-            .role(Role::Label)
-            .aria_label(full.clone())
-            .flex()
-            .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap();
-        if target.command {
-            line = line.child("Command · ");
-        }
-        if let Some(harness) = target.harness {
-            line = line.child(format!("{harness} · "));
-        }
-        line = line
-            .child(host_text::element(&target.host).flex_none())
-            .child(" · ");
-        line = line.child(
-            host_text::element(&target.folder)
-                .font_family(crate::assets::TERMINAL_FONT)
-                .truncate(),
-        );
-        let line = components::with_hover_help(
-            line,
-            &SharedString::from("launcher-summary-target"),
-            &HoverHelp::sentence(target.sentence("launcher-summary-target-help")),
-            false,
-            None,
-            window,
-            cx,
-        );
-        let mut summary = div()
-            .debug_selector(|| "launcher-summary".into())
-            .flex()
-            .flex_col()
-            .min_w_0()
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(palette.fg_1))
-            .child(line);
-        if self.draft.tab == Tab::Agent
-            && !self
-                .draft
-                .agent
-                .harness
-                .is_some_and(LaunchHarness::is_shell)
-        {
-            summary = summary.child(self.choices(palette));
-        }
-        summary.into_any_element()
-    }
-
-    /// The Agent tab's line of choices (`.launch-composer-summary`): model, effort, permissions with YOLO in the danger
-    /// color (SPEC.md: "permission danger stays red"), the line count of a prompt this launch would send, and a stored
-    /// container the launch still carries. The model is host text, from a stored launch.
-    fn choices(&self, palette: &theme::Palette) -> AnyElement {
-        let agent = &self.draft.agent;
-        let model = agent.model.as_deref().map(HostText::from_host);
-        let permission = agent.harness.map_or(agent.permissions, |harness| {
-            harness.request_permission(agent.permissions)
-        });
-        let tail = format!(" · Effort: {} · Permissions: ", effort_label(agent.effort));
-        let mut name = HostSentence::new("launcher-summary-choices-name").text("Model: ");
-        name = match &model {
-            Some(model) => name.host(model),
-            None => name.text("Default"),
-        };
-        let mut rest = String::new();
-        if let Some(lines) = self
-            .draft
-            .active_prompt()
-            .map(|prompt| prompt.split('\n').count())
-        {
-            rest.push_str(&format!(
-                " · Prompt: {lines} line{}",
-                if lines == 1 { "" } else { "s" }
-            ));
-        }
-        if agent.container.is_some() {
-            rest.push_str(" · retired container");
-        }
-        let shown_permission = permission_display(permission);
-        name = name.text(format!("{tail}{shown_permission}{rest}"));
-        let mut line = div()
-            .id("launcher-summary-choices")
-            .role(Role::Label)
-            .aria_label(name.accessible_name())
-            .flex()
-            .min_w_0()
-            .overflow_hidden()
-            .whitespace_nowrap()
-            .child("Model: ");
-        line = match &model {
-            Some(model) => line.child(host_text::element(model).flex_none()),
-            None => line.child("Default"),
-        };
-        line = line.child(tail);
-        line = if permission == Some(LaunchPermission::Yolo) {
-            line.child(
-                div()
-                    .text_color(theme::color(palette.danger))
-                    .child(shown_permission),
-            )
-        } else {
-            line.child(shown_permission)
-        };
-        line.child(rest).into_any_element()
     }
 
     /// The main action's accessible name: the operation and its target, as the old one had ("Launch Codex · Local (this
@@ -2484,7 +2354,12 @@ impl Render for Launcher {
                     .justify_between()
                     .items_center()
                     .gap(px(8.))
-                    .child(section_label("DESTINATION", palette))
+                    .child(
+                        section_label("DESTINATION", palette)
+                            .id("launcher-destination-heading")
+                            .role(Role::Label)
+                            .aria_label("Destination"),
+                    )
                     .children(destination_switch),
             )
             .children(self.replacement_checkout_warning(palette, cx))
@@ -2557,15 +2432,13 @@ impl Render for Launcher {
             .gap(px(ROW_GAP))
             .children(tabs)
             .children(fields);
-        let search = self.search_row(palette, window, cx);
-        // Recent setups sit between the search box and the destination, and take no room without rows (`recents`). They
+        // Recent setups sit above the destination, and take no room without rows (`recents`). They
         // show while a new environment is chosen too, as the old strip did: each restores its own placement.
         let recents = self.recents_strip(palette, window, cx);
         let body = div()
             .flex()
             .flex_col()
             .gap(px(SECTION_GAP))
-            .child(search)
             .children(recents)
             .child(destination)
             .child(choices)
@@ -2612,7 +2485,7 @@ impl Render for Launcher {
         // question's answers launch with the warning's guard, so the warning must be on screen at that click. This
         // launcher's banner (a quick launch's needs-more-choices or number-key banner) comes right after the warning,
         // as its own element: it answers what the user did last, and the question or alert below it still shows. A
-        // refusal note is drawn above the search box instead (`view::search`).
+        // Template and command-field refusals are shown below that field (`view::search`).
         let warning = self.source_warning_line(palette, cx);
         let note = self.note_element(palette);
         let save_refusal = self.save_refusal_line(palette);
@@ -2670,7 +2543,7 @@ impl Render for Launcher {
                     }),
                     Role::Button,
                 )
-                .tier(Tier::Neutral)
+                .tier(Tier::Ghost)
                 // Busy while the YOLO question's host write is out, as the old button was disabled while busy.
                 .busy(holding)
                 .on_click(on_launcher(weak.clone(), Launcher::reset_choices)),
@@ -2679,6 +2552,11 @@ impl Render for Launcher {
         // Save as template, after Reset choices and before the main action (`save`).
         answers.extend(self.save_template_button(holding, cx));
         let verb = self.verb(cx);
+        let key_ink = if refusal.is_some() || holding {
+            palette.fg_2
+        } else {
+            palette.on_accent_dim
+        };
         let help = match &refusal {
             Some(Refusal::Plain(words)) => HoverHelp::tooltip(words.clone()),
             Some(reason @ Refusal::ResumeHost { .. }) => {
@@ -2703,28 +2581,28 @@ impl Render for Launcher {
                 help,
                 Role::Button,
             )
-            .content(verb)
+            .content(
+                div().flex().items_center().gap(px(8.)).child(verb).child(
+                    key_chip(search::RETURN_KEY, key_ink, palette)
+                        .px(px(4.))
+                        .py(px(0.))
+                        .border_color(theme::color(key_ink)),
+                ),
+            )
             .tier(Tier::Primary)
             .refused(refusal.is_some())
             // Busy while the YOLO question's host write is out, when a press does nothing (`Launcher::press`).
             .busy(holding)
             .on_click(on_launcher(weak.clone(), Launcher::press)),
         );
-        let (title, summary) = self.heading();
+        let title = search::command_title(&self.draft.mode);
+        let (command, guidance) = self.command_header(palette, window, cx);
         // Across the top of the launcher, pinned while the body scrolls, as the old sticky banner was.
         let escalation = self.escalation_band(holding, palette, window, cx);
         let mut frame = DialogFrame::new("launcher", title, body, answers)
-            .summary(summary)
-            // `.create-session-form .dialog-tile .action-icon`: the launch glyph at 22 pixels.
-            .tile(
-                svg()
-                    .path(Icon::Launch.path())
-                    .size(px(TILE_ICON))
-                    .text_color(theme::color(palette.fg_0)),
-            )
+            .heading_control(command, guidance)
             .width(px(WIDTH))
             .flat_margin_when_wide()
-            .footer_lead(self.summary(&target, window, cx))
             .close(
                 "Close session launcher",
                 HoverHelp::tooltip("Close: discard this session setup"),
@@ -2745,7 +2623,7 @@ impl Render for Launcher {
 impl Launcher {
     /// This launcher's banner ([`Note::Banner`]) as drawn at the top of the notices region, in the old
     /// `.partial-template-banner` look (a warning-colored edge on the left, the raised background and the ordinary ink,
-    /// the words in bold). A refusal note is drawn above the search box instead (`view::search`).
+    /// the words in bold). A template refusal note sits below the command field (`view::search`).
     fn note_element(&self, palette: &theme::Palette) -> Option<AnyElement> {
         let sentence = match self.note.as_ref()? {
             Note::Refusal(_) => return None,

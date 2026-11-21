@@ -10,6 +10,9 @@ and the save-as-template panel is filled in and left unsaved.
 
 from docs_shots import Callout, Shot
 
+# The command field occupies the old title's spot. Keep its focus and move the pointer clear of its help.
+LAUNCHER_PARK = "id:launcher-destination-heading"
+
 
 # --- Steps ------------------------------------------------------------------------------------------------------------
 
@@ -46,19 +49,19 @@ def apply(bridge):
 def applied(bridge):
     """Apply codex-deep and then api-repo in a new launcher, the stacking case the page describes.
 
-    One template picks the agent and how it runs, the next picks where, and the launcher's footer then shows both.
+    One template picks the agent and how it runs, the next picks where, and the launcher form shows both.
     Each search narrows to one template, so its first option is the one meant.
     """
     bridge.click("id:new-session-button")
     bridge.type_into_focused("id:launcher-search", "tl:codex")
     bridge.wait("id:launcher-search-option-0")
     bridge.click("id:launcher-search-option-0")
-    # The choices line's drawn tail, one text run, shows codex-deep's effort took. The target line cannot serve as the
-    # oracle for api-repo: its harness, host and folder are separate runs, and `wait_text` matches one run at a time.
-    bridge.wait_text(" · Effort: High · Permissions: ")
+    # The empty launcher has no Codex effort row. Wait for the first template's agent controls before stacking.
+    bridge.wait("id:launcher-effort-High")
     bridge.type_into_focused("id:launcher-search", "tl:api")
     bridge.wait("id:launcher-search-option-0")
     bridge.click("id:launcher-search-option-0")
+    bridge.wait_text("~/src/api", target="id:launcher-folder")
 
 
 def save_as_template(bridge):
@@ -131,8 +134,7 @@ SHOTS = [
         "apply",
         apply,
         ["id:launcher-search", "id:launcher-search-results"],
-        # The static title has no hover help or reaction and stays above the search results, clear of their popover.
-        park="id:launcher-frame-title",
+        park=LAUNCHER_PARK,
         annotations=[
             Callout("id:launcher-search", "tl: lists your templates. Type part of a name to narrow the list.",
                     side="left"),
@@ -147,27 +149,21 @@ SHOTS = [
     Shot(
         "applied",
         applied,
-        ["id:launcher-summary-target", "id:launcher-summary-choices", "id:launcher-launch"],
-        park="id:launcher-frame-title",
-        # Both lines stretch to the footer's buttons, past their words, and an arrow from above ends level with its
-        # box's centre. So each box is shifted until its arrow lands on words: the first on the target line's host, the
-        # second at the end of the choices line, and the second sits wholly above the first, its arrow passing beside
-        # it, since side by side the two boxes would overlap and the engine would push the second down over the
-        # footer's buttons.
+        ["id:launcher-destination-section", "id:launcher-model-row", "id:launcher-effort-row"],
+        park=LAUNCHER_PARK,
         annotations=[
-            Callout("id:launcher-summary-target",
-                    "After codex-deep, then api-repo: Codex from the first, build-box and ~/src/api from the second.",
-                    side="top", dx=-127),
-            Callout("id:launcher-summary-choices",
-                    "The model and effort codex-deep set. Change anything before you launch.", side="top", dx=42,
-                    dy=-150),
+            Callout("id:launcher-host",
+                    "api-repo sets build-box and ~/src/api.", side="left"),
+            Callout("id:launcher-effort-row",
+                    "codex-deep sets Codex, the model and effort. Change any choice before you launch.",
+                    side="bottom", dy=50),
         ],
     ),
     Shot(
         "save-as-template",
         save_as_template,
         ["id:save-template-panel"],
-        park="id:launcher-frame-title",
+        park=LAUNCHER_PARK,
         annotations=[
             # Down the left of the launcher, each level with what it explains.
             Callout("id:save-template-name", "A new name. One already in use is refused.", side="left", dy=-20),

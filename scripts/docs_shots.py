@@ -277,9 +277,18 @@ class Bridge:
         """Send a key to the focused control, including Escape through the layer manager."""
         self._call("press", key)
 
-    def wait_text(self, text: str):
-        """Wait for visible text as the shot's readiness oracle, using the bridge's bounded wait."""
-        self._call("wait", "--text", text)
+    def wait_text(self, text: str, *, target: str | None = None):
+        """Wait for visible text, scoped to a control when the same words can appear elsewhere in the window."""
+        if target is None:
+            self._call("wait", "--text", text)
+            return
+        target = self.resolve(target)
+
+        def shown():
+            actual = self._call("get", "text", target).strip()
+            return (True if text in actual else None), f"{target} drew {actual!r}"
+
+        self.gui.poll(f"{text!r} in {target}", shown, 10, 0.25)
 
     def wait_gone_text(self, text: str):
         """Wait until a dismissed fixture no longer appears on screen."""

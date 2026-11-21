@@ -154,8 +154,8 @@ fn the_banner_shows_eight_seconds_unless_hovered_or_focused(cx: &mut TestAppCont
     settle(cx);
     test_support::advance(cx, Duration::from_millis(1_500));
     assert!(banner(cx).is_some(), "the rest still running");
-    // Focus on Dismiss (Shift+Tab from the search box, the band coming before the body) stops it again.
-    keys(cx, "shift-tab");
+    // Tab from the command field through Close and Undo to Dismiss. Focus inside the band stops its timer.
+    keys(cx, "tab tab tab");
     assert_eq!(
         test_support::focused_id(cx).as_deref(),
         Some("launcher-escalation-dismiss"),
