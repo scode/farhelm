@@ -26230,3 +26230,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `zsxsvzpxxqluormurvvspqumutnutyoq`, bookmark
   `plan/launcher-folder-refusal-order/01-earliest-refusal-phrase`,
   [PR #4387](https://github.com/scode/farhelm/pull/4387/changes).
+
+## spare-test-fifo-write-can-outlive-reader.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: Claim:
+  in `crates/farhelm/tests/spare_builder.rs` (FIFO at 747-750, `tokio::fs::write` at 775), the test can block in a FIFO
+  open if the guarded shell exits before the test releases it. nextest's outer timeout still bounds the run. The code is
+  unchanged on current main.
+- Decision: the user picked "Discard: fix flakes when observed" (2026-10-26 ten-question triage page, Q4), adding
+  "unless the fix is obvious and trivial in which case it's worth fixing with complexity gate"
+- Completion criteria: at execution, fix the test only if the fix is obvious and trivial (one clear shape, about 30
+  lines or less, no new test mechanism); otherwise treat this as a discard and say so in the execution record. Either
+  way, remove the feedback file and its index entry.
+- Execution: change `zuqmrnvytwpnxuwkmknwopmqpqmoppuz`, bookmark
+  `plan/spare-builder-fifo-release/01-nonblocking-fifo-release`,
+  [PR #4390](https://github.com/scode/farhelm/pull/4390/changes).

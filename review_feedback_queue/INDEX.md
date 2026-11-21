@@ -333,9 +333,6 @@ consequences.
 - [`repository-search-reports-empty-before-reply.md`](repository-search-reports-empty-before-reply.md) — Partial
   repository search reports no matches while discovery is still pending.
 
-- [`spare-test-fifo-write-can-outlive-reader.md`](spare-test-fifo-write-can-outlive-reader.md) — A completion test's
-  FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
-
 - [`canonical-folder-history-contract-conflict.md`](canonical-folder-history-contract-conflict.md) — Host canonical-path
   replies become remembered folder text, despite a product rule saying those replies must not choose remembered
   defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are
