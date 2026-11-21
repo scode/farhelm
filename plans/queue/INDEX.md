@@ -10,7 +10,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `triage-helm.md` — execute the 2026-11-21 triage outcomes for the helm (hosts, provisioning, automatic update, desktop startup), in grouped PRs
 - [in-flight 362cf1] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
-- [pending] `triage-tooling.md` — execute the 2026-11-21 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs
+- [in-flight c95a49] `triage-tooling.md` — execute the 2026-11-21 triage outcomes for maintainer tooling and test infrastructure, in grouped PRs
 - [pending] `environment-checkout-without-setup.md` — let a managed checkout in a session's own sandbox or container use the default checkout folder or else the machine's home folder, never asking or refusing over a missing folder
 - [pending] `exited-terminal-scrollback.md` — let every retained terminal line be scrolled to and selected after an agent exits (or the red status line shows), including history under a killed full-screen agent
 - [pending] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
