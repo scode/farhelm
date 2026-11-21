@@ -25988,3 +25988,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and its index entry.
 - Execution: change `mympxszkymkvxwprrprsxvkkkuqxmvws`, bookmark `pr/spec-session-view-start-time`,
   [PR #4376](https://github.com/scode/farhelm/pull/4376/changes).
+
+## download-interruption-promise-omits-crash-exception.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  SPEC.md:2053-2054 promises "no partial file after failure or interruption" for desktop downloads. SPEC_impl.md:98-107
+  ("Cleanup on quit") leaves crashes and force-quits uncovered by default. The finding itself says its key premise is
+  unverified: that SPEC.md's "interruption" covers process death.
+- Decision: the user picked "Fix each with the smallest truthful correction" (2026-10-26 ten-question triage page, Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: change `vtsmqnyqlvslxykovovsltptysvpszww`, bookmark `pr/spec-download-crash-exception`,
+  [PR #4377](https://github.com/scode/farhelm/pull/4377/changes).
