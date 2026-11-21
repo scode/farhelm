@@ -3452,19 +3452,19 @@ whatever the agent renders is what you see. There is no composer, no message abs
   2026-10-17): a trailing space only makes a file less openable, and in the usual case the program that could plant such
   a name can already write the file it imitates. Files must be readable regular files no larger than 100 MB, including
   while transferring; directories are refused. The desktop app saves into Downloads under a unique name and shows where
-  it went, with no partial file after failure or interruption. Status appears at the top of that terminal: success fades
-  after a few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the
-  desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the
-  saved file's final extension is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json
-  and the common image types .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same
-  final extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the
-  save successful and says why it was not opened. The hover uses a file icon and bright name, the host and full
-  directory on a second line, and decimal size with the action hints on a third. A left stripe and size color show under
-  1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral
-  stripe. Only an eligible desktop file has the opening hint. Any file the session's account can read is in reach,
-  within the existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm
-  can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http, https and file; every
-  other scheme is ignored.
+  it went, with no partial file after failure or interruption, except that a crash or force-quit mid-transfer can leave
+  its partial file behind. Status appears at the top of that terminal: success fades after a few seconds, while a
+  failure stays until the next click or download there. Plain click only downloads. In the desktop app, Cmd-click on
+  macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the saved file's final extension
+  is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json and the common image types
+  .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same final extension as the
+  path disclosed at hover. Other types are saved without opening; an opening failure leaves the save successful and says
+  why it was not opened. The hover uses a file icon and bright name, the host and full directory on a second line, and
+  decimal size with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe
+  with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only an eligible desktop
+  file has the opening hint. Any file the session's account can read is in reach, within the existing shell authority;
+  hover discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file
+  reads. OSC hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.
 
 ## Attachments
 

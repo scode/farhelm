@@ -331,9 +331,6 @@ consequences.
 - [`removed-host-strands-tunnel-listeners.md`](removed-host-strands-tunnel-listeners.md) — Removing a host leaves its
   tunnel ports occupied while individual close requests fail.
 
-- [`download-interruption-promise-omits-crash-exception.md`](download-interruption-promise-omits-crash-exception.md) —
-  The product's partial-download cleanup promise omits the newly accepted crash and force-quit exception.
-
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
