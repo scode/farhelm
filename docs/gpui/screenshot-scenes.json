@@ -2829,6 +2829,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-more-options",
+      "title": "New session with a saved wrapper prefix visible in the folded More options row",
+      "reference": null
+    },
+    {
       "golden": "templates-dialog",
       "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key, the editor not opened yet",
       "reference": "templates-dialog"

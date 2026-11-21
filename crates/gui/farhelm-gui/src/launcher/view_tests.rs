@@ -165,6 +165,7 @@ fn is_open(cx: &mut VisualTestContext) -> bool {
 #[derive(Clone, Copy)]
 pub(crate) enum Field {
     Folder,
+    Conversation,
     Wrapper,
     Prompt,
     /// The Custom permission flags.
@@ -178,6 +179,7 @@ pub(crate) fn focused(cx: &mut VisualTestContext, field: Field) -> bool {
     read(cx, |launcher, window, cx| {
         let state = match field {
             Field::Folder => &launcher.folder,
+            Field::Conversation => &launcher.conversation,
             Field::Wrapper => &launcher.wrapper,
             Field::Prompt => &launcher.prompt,
             Field::Flags => &launcher.flags,
@@ -264,9 +266,14 @@ fn new_opens_on_the_agent_tab_with_focus_in_the_search_box(cx: &mut TestAppConte
         "the folder is an editable field"
     );
     assert!(drawn(cx, "launcher-tabs"));
+    assert!(drawn(cx, "launcher-more-options"), "the Agent tab is shown");
     assert!(
-        drawn(cx, "launcher-wrapper-row"),
-        "the Agent tab's fields show"
+        !drawn(cx, "launcher-wrapper-row"),
+        "More options starts closed"
+    );
+    assert_eq!(
+        name_of(cx, "launcher-more-options").as_deref(),
+        Some("More options. Wrapper prefix. None set.")
     );
     assert!(
         !drawn(cx, "launcher-command-row"),
@@ -665,6 +672,7 @@ fn typing_in_the_folder_edits_the_draft(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_tabs_switch_fields_and_keep_each_draft(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    click_in_body(cx, "launcher-more-options");
     click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
@@ -734,6 +742,7 @@ fn restart_with_starts_on_cancel_and_says_restart_error(cx: &mut TestAppContext)
 #[gpui::test]
 fn reset_choices_empties_the_wrapper_field(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    click_in_body(cx, "launcher-more-options");
     click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
@@ -799,25 +808,127 @@ fn clear_initial_prompt_empties_the_prompt(cx: &mut TestAppContext) {
     assert!(!drawn(cx, "launcher-clear-prompt"));
 }
 
-/// A wrapper prefix that does not parse is said at once under its field, not only after a press, as the old launcher's
-/// inline error was; one that parses says nothing.
+/// The draft may arrive with a malformed wrapper. Reveal its error and keep the editor mounted through the
+/// correction, so the user can keep typing. A valid prefix can be folded into its summary.
 #[gpui::test]
 fn a_wrapper_prefix_that_does_not_parse_is_said_at_once(cx: &mut TestAppContext) {
-    let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    start.edit_wrapper("nice '".into());
+    let (_helm, cx) = launcher_on(cx, start);
+    assert!(
+        has_node(cx, "launcher-wrapper-error"),
+        "the invalid prefix opened More options"
+    );
+    click_in_body(cx, "launcher-more-options");
+    assert!(
+        has_node(cx, "launcher-wrapper-error"),
+        "the error cannot be folded away"
+    );
     click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
         "the premise: the click focused the wrapper prefix"
     );
-    keys(cx, "n i c e");
+    keys(cx, "end backspace");
     assert!(
         !has_node(cx, "launcher-wrapper-error"),
         "a prefix that parses says nothing"
     );
-    keys(cx, "space '");
     assert!(
-        has_node(cx, "launcher-wrapper-error"),
-        "an unclosed quote is said under the field"
+        focused(cx, Field::Wrapper),
+        "correcting the text kept the editor focused"
+    );
+    click_in_body(cx, "launcher-more-options");
+    assert!(!drawn(cx, "launcher-wrapper-row"));
+    assert_eq!(
+        name_of(cx, "launcher-more-options-wrapper").as_deref(),
+        Some("nice ")
+    );
+}
+
+/// A folded row must surface both launch values. Changing Destination can refuse the named start without editing
+/// its selector, so it must reopen the disclosure and explain how to resolve that conflict.
+#[gpui::test]
+fn a_checkout_reveals_the_folded_conversation_it_refuses(cx: &mut TestAppContext) {
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    start.choose_harness(LaunchHarness::Claude, None, None);
+    start.edit_conversation("named-target".into());
+    start.edit_wrapper("nice".into());
+    let (_helm, cx) = launcher_on(cx, start);
+    assert!(!drawn(cx, "launcher-conversation-row"));
+    assert!(!drawn(cx, "launcher-wrapper-row"));
+    assert_eq!(
+        name_of(cx, "launcher-more-options").as_deref(),
+        Some(
+            "More options. Conversation ID · Wrapper prefix. Conversation ID: named-target. Wrapper prefix: nice."
+        )
+    );
+    assert_eq!(
+        name_of(cx, "launcher-more-options-conversation").as_deref(),
+        Some("named-target")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-more-options-wrapper").as_deref(),
+        Some("nice")
+    );
+    assert!(!has_node(cx, "launcher-more-options-none"));
+    click_in_body(cx, "launcher-destination-Managed checkout");
+    assert!(
+        draft(cx).checkout.is_some(),
+        "the destination switched to a checkout"
+    );
+    assert!(drawn(cx, "launcher-conversation-row"));
+    assert_eq!(
+        name_of(cx, "launcher-conversation-error").as_deref(),
+        Some(super::request::CONVERSATION_IN_CHECKOUT)
+    );
+    click_in_body(cx, "launcher-more-options");
+    assert!(
+        drawn(cx, "launcher-conversation-row"),
+        "the field remains refused"
+    );
+    click_in_body(cx, "launcher-destination-Folder");
+    assert!(
+        draft(cx).checkout.is_none(),
+        "the destination switched back to a folder"
+    );
+    assert!(!has_node(cx, "launcher-conversation-error"));
+    assert!(
+        drawn(cx, "launcher-conversation-row"),
+        "the user can still edit the selector"
+    );
+    click_in_body(cx, "launcher-more-options");
+    assert!(!drawn(cx, "launcher-conversation-row"));
+}
+
+/// A restart with no captured conversation always exposes its selector, even once there is a usable value to send.
+#[gpui::test]
+fn a_required_conversation_cannot_be_folded(cx: &mut TestAppContext) {
+    let mut source = super::draft_tests::session(codex(None, None, None));
+    source.restart_offer = RestartOffer::default();
+    let mut restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
+    assert!(
+        restart.requires_conversation(),
+        "the source has no captured conversation"
+    );
+    restart.edit_conversation("have a space".into());
+    let (_helm, cx) = launcher_on(cx, restart);
+    assert!(drawn(cx, "launcher-conversation-row"));
+    assert!(has_node(cx, "launcher-conversation-error"));
+    click_in_body(cx, "launcher-conversation");
+    assert!(
+        focused(cx, Field::Conversation),
+        "the click focused the required text input"
+    );
+    keys(cx, "end shift-home");
+    cx.simulate_input("named-target");
+    settle(cx);
+    assert_eq!(draft(cx).conversation, "named-target");
+    assert!(!has_node(cx, "launcher-conversation-error"));
+    click_in_body(cx, "launcher-more-options");
+    assert!(
+        drawn(cx, "launcher-conversation-row"),
+        "the valid selector is still required"
     );
 }
 
@@ -1598,6 +1709,12 @@ fn restart_with_shows_an_unsafe_stored_wrapper_prefix_escaped(cx: &mut TestAppCo
         "wrapper\u{202e} --",
         "the premise: the draft holds the raw words"
     );
+    assert!(
+        name_of(cx, "launcher-more-options")
+            .unwrap()
+            .contains("wrapper<U+202E> --")
+    );
+    click_in_body(cx, "launcher-more-options");
     escaped_until_cleared(
         cx,
         "launcher-wrapper",
@@ -1669,6 +1786,7 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
     click_in_body(cx, "launcher-harness-Codex");
     assert_eq!(wrapper(cx), "with-endpoint --profile 'codex profile' --");
     click_in_body(cx, "launcher-harness-Claude");
+    click_in_body(cx, "launcher-more-options");
     escaped_until_cleared(
         cx,
         "launcher-wrapper",
@@ -2110,6 +2228,9 @@ fn prompt_and_conversation_rows_follow_the_agents_capabilities(cx: &mut TestAppC
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
     assert!(!drawn(cx, "launcher-prompt-row"));
     assert!(!drawn(cx, "launcher-conversation-row"));
+    click_in_body(cx, "launcher-more-options");
+    assert!(drawn(cx, "launcher-wrapper-row"));
+    assert!(!drawn(cx, "launcher-conversation-row"));
     let warns = |cx: &mut VisualTestContext| {
         crate::session_list::tests::painted(&test_support::frame(cx))
             .iter()
@@ -2151,6 +2272,7 @@ fn prompt_and_conversation_rows_follow_the_agents_capabilities(cx: &mut TestAppC
     );
     assert!(!drawn(cx, "launcher-prompt-row"));
     assert!(!drawn(cx, "launcher-conversation-row"));
+    assert!(!drawn(cx, "launcher-more-options"));
     assert!(!warns(cx));
 }
 

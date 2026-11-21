@@ -1158,24 +1158,24 @@ agent choice is independent of that destination:
   is selected, even while models are loading. With an agent selected, the word searches for models on that agent.
   `model:grok` explicitly searches for the model family.
 
-- Conversation selector: New, Clone and Replace with offer an optional one-time selector for agent launches. Claude,
-  Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP
-  session file. Empty preserves an ordinary fresh start. The selector is not saved in templates, history, defaults or
-  the session's reusable launch, so a later Clone starts fresh. It is passed literally as one argument, without a shell
-  or checking that the conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces,
-  quotes, backslashes, control characters and oversized values are refused by the existing conversation-id checks.
-  Session-file paths may be absolute or relative to the session directory; a leading tilde is refused because it does
-  not expand. New managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show
-  that Farhelm will not capture the named conversation and later Restart will be unavailable.
+- Conversation selector: New, Clone and Replace with offer an optional one-time selector under **More options** for
+  agent launches. Claude, Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id;
+  Cursor chat id; Pi and OMP session file. Empty preserves an ordinary fresh start. The selector is not saved in
+  templates, history, defaults or the session's reusable launch, so a later Clone starts fresh. It is passed literally
+  as one argument, without a shell or checking that the conversation exists. Leading dashes, reserved locator tokens and
+  Farhelm placeholders, spaces, quotes, backslashes, control characters and oversized values are refused by the existing
+  conversation-id checks. Session-file paths may be absolute or relative to the session directory; a leading tilde is
+  refused because it does not expand. New managed-checkout destinations and command launches refuse a selector. Goose,
+  Cursor and OpenCode show that Farhelm will not capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
-  scrolls, directly after the conversation selector for supported agents. The label note says it sends once as the
-  agent's first message. Hover help says that Restart, Clone and Replace do not send it again. The summary adds
-  `Prompt: N lines` for a nonempty message. Enter edits the message without launching. Goose, Pi, shells and command
-  launches offer no box. The draft survives recent-setup selection and switching tabs; unsupported selections omit it
-  from the request. A Clone or Replace-with prefill clears it. Template messages with invisible formatting are shown
-  escaped and read-only until explicitly cleared; ordinary newlines and tabs remain editable. The message travels with
-  the create request, including managed checkouts and named conversations where supported, and for a create the command
-  line or an agent sends with an idempotency key, its exact value is part of that key's retry identity.
+  scrolls, above **More options** for supported agents. The label note says it sends once as the agent's first message.
+  Hover help says that Restart, Clone and Replace do not send it again. The summary adds `Prompt: N lines` for a
+  nonempty message. Enter edits the message without launching. Goose, Pi, shells and command launches offer no box. The
+  draft survives recent-setup selection and switching tabs; unsupported selections omit it from the request. A Clone or
+  Replace-with prefill clears it. Template messages with invisible formatting are shown escaped and read-only until
+  explicitly cleared; ordinary newlines and tabs remain editable. The message travels with the create request, including
+  managed checkouts and named conversations where supported, and for a create the command line or an agent sends with an
+  idempotency key, its exact value is part of that key's retry identity.
 - Command launch: a command launch takes a command line run through `bash -c`, non-login and non-interactive. Farhelm
   first checks the start and resume commands with a literal shell-word splitter, which can refuse valid Bash source.
   Accepted text reaches Bash unchanged except for Farhelm's placeholders, so `~`, variables, globs, newlines, comments,
@@ -1425,15 +1425,20 @@ address and drops below it when the form is narrow. Held values show as text. Th
 Close, a scrolling body and a pinned footer. Search and recent setups precede the Destination card, followed by the
 Agent and Command tabs and their fields. The selected tab is underlined. Labels sit above the fields with short notes
 where needed. The Agent tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model,
-Effort and Permissions share a row when they fit. The footer shows the chosen agent type or command, host and
-destination beside a compact Launch, Replace or Restart action; its accessible name retains that operation and target.
-Agent launches also retain the model, effort, permissions and nonempty prompt's line count in the footer summary. Long
-summaries may truncate visually; their full text remains accessible. Cancel comes first in the action row, then Reset
-choices where offered, Save as template where offered, and the main action last. Native Tab follows Close, the fields in
-their existing relative order, then the footer actions. Ordinary launches still start focus on search; Restart starts on
-Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the actions in a bounded scroll
-region, so long content cannot displace those actions. The save-as-template panel remains inline in the scrolling body.
-Project registration (associating metadata with a directory) is optional convenience and never a prerequisite.
+Effort and Permissions share a row when they fit. **More options** folds the conversation selector, when offered, and
+Wrapper prefix together at the bottom of the Agent form. The folded row names the fields and shows a pill for each set
+value, with the wrapper prefix in the terminal font. With both empty it says "none set". It opens and stays open while a
+field inside is required, refused or invalid. After a correction, the user can close it once no field needs attention.
+The footer shows the chosen agent type or command, host and destination beside a compact Launch, Replace or Restart
+action; its accessible name retains that operation and target. Agent launches also retain the model, effort, permissions
+and nonempty prompt's line count in the footer summary. Long summaries may truncate visually; their full text remains
+accessible. Cancel comes first in the action row, then Reset choices where offered, Save as template where offered, and
+the main action last. Native Tab follows Close, the visible body controls in order, then the footer actions. More
+options is a Tab stop, with its editors following it in the order when expanded. Ordinary launches still start focus on
+search; Restart starts on Cancel. Refusals, destructive warnings and the inline YOLO question remain adjacent to the
+actions in a bounded scroll region, so long content cannot displace those actions. The save-as-template panel remains
+inline in the scrolling body. Project registration (associating metadata with a directory) is optional convenience and
+never a prerequisite.
 
 After submitting a launch, including Restart with or Replace with, the launcher hides while the request is pending. The
 user can switch sessions, type in their terminals and act on other sessions. The same launcher remains busy and cannot
