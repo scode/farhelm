@@ -195,3 +195,26 @@ SHOTS += [
         ],
     ),
 ]
+
+# --- v0.43.0 --------------------------------------------------------------------------------------------------------
+
+
+def shell_sessions(bridge):
+    """Show both shell choices together as they appear before a session starts."""
+    bridge.click("id:new-session-button")
+    bridge.wait("id:launcher-shells-Bash")
+    bridge.wait("id:launcher-shells-Zsh")
+
+
+SHOTS += [
+    Shot(
+        "v0-43-0-shell-sessions",
+        shell_sessions,
+        ["id:launcher-shells-row"],
+        park="id:launcher-frame-title",
+        annotations=[
+            Callout("id:launcher-shells-Zsh", "Start a shell session.", side="right"),
+        ],
+        max_width=480,
+    ),
+]
