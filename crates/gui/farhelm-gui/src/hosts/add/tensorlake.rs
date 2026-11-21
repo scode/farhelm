@@ -26,7 +26,7 @@
 //!   footer in place of Cancel and Continue (pinned there, so they never scroll away with the editor, which is taller
 //!   than the dialog), and the kind choice hidden until it closes. Its Cancel, or a done Save, brings the fields back
 //!   with focus on Recipe, and a done Save chooses the new recipe. Closing Add host while the editor holds unsaved
-//!   changes asks the editor's "Save these changes before leaving?" first, and its Save or Discard then closes Add
+//!   changes asks "Save these changes before leaving?" over Add host. Its Save or Discard then closes Add
 //!   host. The old dialog swapped its body and footer for the editor's the same way (`in_add_host`).
 //! - **Continue asks the helm for a creation plan.** Continue, or Enter in Name, is unavailable until both Name and
 //!   Recipe are set; Enter with either missing says which. It refuses while a session launch is in flight, as Add
