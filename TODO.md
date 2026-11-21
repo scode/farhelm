@@ -240,6 +240,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
+- **Antigravity workspace trust and discovery hint.** Add an off-by-default Antigravity switch under Settings → Agent
+  trust that suppresses Antigravity's "trust this directory?" prompt on all Antigravity launches (managed checkouts and
+  plain folders alike) via Antigravity's per-launch `--settings` flag (`{"trustedWorkspaces":["<canonical-cwd>"]}`)
+  without editing Antigravity's saved `settings.json`, omitting Farhelm's `--settings` when Custom permission flags
+  already pass `--settings`. Recognize Antigravity's trust prompt on screen so the session reports Waiting while it is
+  up and shows the non-modal discovery banner above the terminal when the switch is off. Plan:
+  `plans/queue/antigravity-workspace-trust.md`.
+
+- **Consider consistent workspace-trust scope across agents.** Antigravity's workspace-trust switch applies to all
+  launches (including plain folders), whereas Claude, Codex, Muse and Pi under Settings → Agent trust currently apply
+  only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
+  also "Fix 'answer trust dialog' for Claude Code").
+
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
