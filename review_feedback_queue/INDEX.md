@@ -51,10 +51,6 @@ consequences.
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md`](trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md)
-  — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md`](trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md)
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

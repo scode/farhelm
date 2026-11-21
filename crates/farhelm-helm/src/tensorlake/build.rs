@@ -1815,6 +1815,7 @@ impl RecipeBuilds {
         Ok(DeleteGuard {
             builds: Arc::clone(self),
             name: name.to_owned(),
+            forget_missing_captures: false,
         })
     }
 
@@ -2651,9 +2652,23 @@ enum ReconcileFailure {
 pub(crate) struct DeleteGuard {
     builds: Arc<RecipeBuilds>,
     name: String,
+    forget_missing_captures: bool,
 }
 
 impl DeleteGuard {
+    /// Apply the recipe Delete request's explicit consent to settle an
+    /// unanswered capture if its image is still absent. All other callers
+    /// retain ordinary cleanup, including builds retiring incomplete work.
+    pub(crate) fn with_missing_capture_consent(mut self, confirmed: bool) -> Self {
+        self.forget_missing_captures = confirmed;
+        self
+    }
+
+    /// Consent applies only to a positively observed absent capture tag.
+    pub(crate) fn may_forget_missing_captures(&self) -> bool {
+        self.forget_missing_captures
+    }
+
     /// A guard from another registry or recipe grants no cleanup authority.
     pub(crate) fn check(&self, builds: &RecipeBuilds, name: &str) -> anyhow::Result<()> {
         anyhow::ensure!(

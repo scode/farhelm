@@ -1095,6 +1095,12 @@ static SCENES: &[Scene] = &[
         setup: settings_recipe_editor_delete_setup,
     },
     Scene {
+        name: "settings-recipe-editor-delete-anyway",
+        size: (720., 560.),
+        draw: empty,
+        setup: settings_recipe_editor_delete_anyway_setup,
+    },
+    Scene {
         name: "settings-recipes-rows",
         size: (800., 900.),
         draw: empty,

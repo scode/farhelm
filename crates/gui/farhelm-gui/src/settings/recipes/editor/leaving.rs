@@ -37,6 +37,8 @@
 //!   2026-11-15, recorded in `docs/gpui/parity/settings-and-hosts.md`, "Deviations"). The status alone tells the two
 //!   apart: the helm answers any cleanup failure of the timeout kind with a 504 too, so such a failure inside the
 //!   bound also closes the editor, and the row then shows the helm's own words for it while the recipe stays listed.
+//!   An absent image from an unanswered capture has its own refusal marker. The editor asks again in the footer before
+//!   letting the helm forget the capture, because the image may still appear afterwards.
 //! - **The words outlive the recipe on its key, harmlessly.** Once the recipe leaves the list its key keeps the 504's
 //!   words, drawn under no row. A recipe created again under that name cannot show them: every create in this app goes
 //!   through the editor's Save on the same key, and a start on a key clears its refusal. So nothing forgets the key
@@ -44,13 +46,13 @@
 //!   a recipe that left while Settings was closed).
 
 use farhelm_helm_client::Method;
-use gpui::{App, Context, Window};
+use gpui::{App, AppContext as _, Context, Window};
 
 use super::{Editor, path};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::layers::{self, Dismissal};
-use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
+use crate::operations::{Command, HelmMarker, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
 
@@ -229,26 +231,54 @@ impl Editor {
             return;
         }
         let mark = Mark::take(cx);
+        self.ask_recipe_delete(name, false, &mark, window, cx);
+    }
+
+    /// Both Delete questions start on Cancel. Only an answer to the second
+    /// can authorize forgetting a capture whose image is still absent.
+    pub(super) fn ask_recipe_delete(
+        &mut self,
+        name: String,
+        forget_missing_captures: bool,
+        mark: &Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         // A build may finish while the editor stays open, so the words warn about every place's cleanup whatever the
         // row showed: only Farhelm-built artifacts belong to the recipe, and containers can still keep its images in
         // use.
-        let question = Question::new(
-            format!(
-                "Delete recipe {name}? Running builds are cancelled and Farhelm's images and snapshots for this \
+        let (words, confirm) = if forget_missing_captures {
+            (
+                format!(
+                    "Delete recipe {name} anyway? Farhelm couldn't confirm an image save. \
+                     The image could still appear on a container host after Delete and need cleanup."
+                ),
+                answer(
+                    "Delete anyway",
+                    "Forget the unfinished image capture and delete this recipe",
+                    Tier::Danger,
+                ),
+            )
+        } else {
+            (
+                format!(
+                    "Delete recipe {name}? Running builds are cancelled and Farhelm's images and snapshots for this \
                  recipe are deleted. Images in use must be released first."
-            ),
-            answer("Delete", "Delete this recipe", Tier::Danger),
-            name,
-        )
+                ),
+                answer("Delete", "Delete this recipe", Tier::Danger),
+            )
+        };
         // SPEC.md, "Opening and closing": a risky action that cannot be undone starts on Cancel. Deleting cancels the
         // recipe's builds and deletes its snapshots and images, which only a billed rebuild brings back.
-        .starts_on_cancel();
+        let question = Question::new(words, confirm, name).starts_on_cancel();
         let editor = cx.weak_entity();
         let inline = prompt::ask_inline(
             question,
-            &mark,
+            mark,
             move |name, _, cx| {
-                let _ = editor.update(cx, |editor, cx| editor.delete(name, cx));
+                let _ = editor.update(cx, |editor, cx| {
+                    editor.delete(name, forget_missing_captures, cx)
+                });
             },
             window,
             cx,
@@ -258,11 +288,18 @@ impl Editor {
     }
 
     /// The confirmed delete of the recipe `name` (the module docs).
-    fn delete(&mut self, name: String, cx: &mut Context<Self>) {
+    fn delete(&mut self, name: String, forget_missing_captures: bool, cx: &mut Context<Self>) {
         if self.busy() {
             return;
         }
-        let path = match path(Some(&name)) {
+        let path = path(Some(&name)).and_then(|path| {
+            if forget_missing_captures {
+                path.with_query(&[("forget_missing_captures", "true")])
+            } else {
+                Ok(path)
+            }
+        });
+        let path = match path {
             Ok(path) => path,
             Err(error) => {
                 tracing::debug!(?error, "recipe delete not built");
@@ -278,12 +315,11 @@ impl Editor {
         let forgetting = key.clone();
         let mark = Mark::take(cx);
         let editor = cx.weak_entity();
+        let window = self.window;
         let started = operations.update(cx, |operations, cx| {
             operations.start(&key, command, cx, move |settled, cx| {
                 let refusal = match &settled.outcome {
-                    Outcome::Refused(refusal) if refusal.status != CARRIES_ON => {
-                        refusal.words.clone()
-                    }
+                    Outcome::Refused(refusal) if refusal.status != CARRIES_ON => refusal,
                     // Gone, or going: either way the editor has nothing left to edit. A deletion that carries on keeps
                     // its words on the key, where the row shows them until the recipe leaves the list.
                     Outcome::Done(_) | Outcome::Accepted(_) | Outcome::Refused(_) => {
@@ -294,14 +330,28 @@ impl Editor {
                         return;
                     }
                 };
-                let shown = editor
-                    .update(cx, |editor, cx| {
-                        editor.set_deleting(false, cx);
-                        let draft = editor.draft(cx);
-                        editor.error = Some((refusal, draft));
-                        cx.notify();
+                let shown = if refusal.has(HelmMarker::RecipeCaptureConfirmation)
+                    && !forget_missing_captures
+                {
+                    cx.update_window(window, |_, window, cx| {
+                        editor
+                            .update(cx, |editor, cx| {
+                                editor.set_deleting(false, cx);
+                                editor.ask_recipe_delete(name, true, &mark, window, cx);
+                            })
+                            .is_ok()
                     })
-                    .is_ok();
+                    .unwrap_or(false)
+                } else {
+                    editor
+                        .update(cx, |editor, cx| {
+                            editor.set_deleting(false, cx);
+                            let draft = editor.draft(cx);
+                            editor.error = Some((refusal.words.clone(), draft));
+                            cx.notify();
+                        })
+                        .is_ok()
+                };
                 // Shown here, so it leaves the key the row's build shares, as a refused save does.
                 if shown && let Some(operations) = session::current_operations(cx) {
                     operations.update(cx, |operations, cx| operations.forget(&forgetting, cx));

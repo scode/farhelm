@@ -2,6 +2,7 @@
 //! controls and an agent with no controls. `SCENES` in `mod.rs` names each scene and sets its viewport.
 
 use crate::focus::Mark;
+use crate::settings::SavedRecipeQuestion;
 use crate::{session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
@@ -15,7 +16,9 @@ use super::SceneState;
 #[derive(Clone, Copy)]
 enum RecipeEditorFixture {
     New,
-    Saved { ask_delete: bool },
+    Saved {
+        question: Option<SavedRecipeQuestion>,
+    },
 }
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
@@ -153,8 +156,8 @@ fn settings_scene_with(
                 Some(RecipeEditorFixture::New) => {
                     crate::settings::open_new_recipe_for_opened(window, cx);
                 }
-                Some(RecipeEditorFixture::Saved { ask_delete }) => {
-                    crate::settings::open_saved_recipe_for_opened(ask_delete, window, cx);
+                Some(RecipeEditorFixture::Saved { question }) => {
+                    crate::settings::open_saved_recipe_for_opened(question, window, cx);
                 }
                 None => {}
             }
@@ -296,7 +299,7 @@ pub(super) fn settings_recipe_editor_end_setup(
 ) {
     recipe_editor_scene(
         state,
-        RecipeEditorFixture::Saved { ask_delete: false },
+        RecipeEditorFixture::Saved { question: None },
         window,
         cx,
     );
@@ -321,7 +324,29 @@ pub(super) fn settings_recipe_editor_delete_setup(
 ) {
     recipe_editor_scene(
         state,
-        RecipeEditorFixture::Saved { ask_delete: true },
+        RecipeEditorFixture::Saved {
+            question: Some(SavedRecipeQuestion::Delete),
+        },
+        window,
+        cx,
+    );
+}
+
+/// The second Delete question shows the risk of forgetting a capture in the
+/// same footer. Begin with keyboard input to make Cancel's default focus
+/// visible in the capture.
+pub(super) fn settings_recipe_editor_delete_anyway_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    window.activate_window();
+    super::press_tab(window, cx);
+    recipe_editor_scene(
+        state,
+        RecipeEditorFixture::Saved {
+            question: Some(SavedRecipeQuestion::DeleteAnyway),
+        },
         window,
         cx,
     );
