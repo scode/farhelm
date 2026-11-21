@@ -40,7 +40,7 @@
   of these spiral into something very complicated, the executor should make a near term todo item to follow up on it
   instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback
   file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
 ## block-copy-omits-wide-continuation-column.md
 
@@ -148,7 +148,7 @@
   gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
   follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/desktop-updater-unreadable-optout.md`.
 
 ## drag-preview-neighbor-diverges-from-drop-unresolved.md
 
@@ -205,7 +205,7 @@
   complexity gate: "if any of these spiral into something very complicated, the executor should make a near term todo
   item to follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket),
   remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
 
 ## feedback-discord-link-omits-external-indicator.md
 
@@ -222,7 +222,7 @@
 - Completion criteria: The feedback dialog's Chat on Discord link ends in the external-link ↗, matching the desktop
   links that already carry it. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
   queue removal or a changelog fragment). Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
 ## frozen-sandbox-retains-header-lifecycle-answers.md
 
@@ -369,7 +369,7 @@
   gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
   follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
 
 ## literal-deleted-suffix-breaks-desktop-owner.md
 
@@ -440,7 +440,7 @@
   gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
   follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
 ## pointer-capture-drop-crosses-new-modal-unresolved.md
 
@@ -512,7 +512,7 @@
   spiral into something very complicated, the executor should make a near term todo item to follow up on it instead of
   adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback file, and say
   so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
 ## replace-selection-focus-contract.md
 
@@ -568,7 +568,7 @@
   "if any of these spiral into something very complicated, the executor should make a near term todo item to follow up
   on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the
   feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
 ## snapshot-comparison-ignores-link-grouping.md
 
@@ -585,7 +585,7 @@
   changed link grouping"), so the product regression it names would fail a test. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/container-delete-and-link-group-tests.md`.
 
 ## suspended-sandbox-keeps-row-confirmations-enabled.md
 
@@ -635,7 +635,7 @@
   removes an old container"), so the product regression it names would fail a test. Size gate: about 100 lines of diff
   (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the feedback file
   and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/container-delete-and-link-group-tests.md`.
 
 ## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
 
@@ -657,7 +657,7 @@
   complexity gate: "if any of these spiral into something very complicated, the executor should make a near term todo
   item to follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket),
   remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
 ## trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md
 
@@ -714,7 +714,7 @@
   "if any of these spiral into something very complicated, the executor should make a near term todo item to follow up
   on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the
   feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
 ## trailing-ui-host-lifecycle-provider-and-start-wording.md
 
@@ -736,7 +736,7 @@
   these spiral into something very complicated, the executor should make a near term todo item to follow up on it
   instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback
   file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: `pending`.
+- Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
 ## triple-click-truncates-long-logical-line.md
 
