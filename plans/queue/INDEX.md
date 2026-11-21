@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
 - [pending] `triage-supervisor.md` — execute the 2026-11-21 triage outcomes for the supervisor (session lifecycle, shell sessions, cleanup), in grouped PRs
 - [in-flight 144998] `triage-helm.md` — execute the 2026-11-21 triage outcomes for the helm (hosts, provisioning, automatic update, desktop startup), in grouped PRs
-- [in-flight 362cf1] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
+- [complete] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
 - [pending] `environment-checkout-without-setup.md` — let a managed checkout in a session's own sandbox or container use the default checkout folder or else the machine's home folder, never asking or refusing over a missing folder
 - [in-flight 069386] `exited-terminal-scrollback.md` — let every retained terminal line be scrolled to and selected after an agent exits (or the red status line shows), including history under a killed full-screen agent
