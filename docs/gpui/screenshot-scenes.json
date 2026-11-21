@@ -2292,12 +2292,12 @@
     },
     {
       "id": "app-settings-agent-trust",
-      "title": "Settings at Agent trust on a fresh helm: every agent's trust switch off and every hint shown",
+      "title": "Claude Code's Settings page with its trust switch off, caution and hint switch",
       "reference": "settings-agent-trust",
       "mockup": false,
       "start": ["--sessions", "1", "--scripted-hosts"],
       "steps": [
-        ["click", "id:settings-section-agent-trust"],
+        ["click", "id:settings-section-claude"],
         ["wait", "--text", "Answer Claude's"],
         ["wait", "500"],
         ["hover", "id:settings-heading"]
@@ -2890,7 +2890,7 @@
     },
     {
       "golden": "settings-sessions",
-      "title": "Settings as the gear opens it, at Sessions (only Sessions, Appearance, Hosts, Recipes, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications are listed so far)",
+      "title": "Settings as the gear opens it, at Sessions, with Credentials in General and one page per agent",
       "reference": "settings-sessions"
     },
     {
@@ -3004,13 +3004,18 @@
       "reference": null
     },
     {
-      "golden": "settings-agent-trust",
-      "title": "Settings at Agent trust, every agent's trust off and every hint shown",
+      "golden": "settings-claude",
+      "title": "Claude Code's page with its trust switch, caution and hint switch",
       "reference": "settings-agent-trust"
     },
     {
-      "golden": "settings-agent-trust-end",
-      "title": "Settings at Agent trust scrolled to Antigravity's switch, its help and its hint switch",
+      "golden": "settings-antigravity",
+      "title": "Antigravity's page with its trust and hint switches",
+      "reference": null
+    },
+    {
+      "golden": "settings-cursor",
+      "title": "Cursor's Settings page with no settings to configure",
       "reference": null
     },
     {

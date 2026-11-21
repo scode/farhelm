@@ -1741,11 +1741,11 @@ symlinks are refused. A root whose resolution changed since preview is still ref
 supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
 hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
 
-Settings offers an off-by-default, all-hosts choice under **Agent trust** to answer Claude's "trust this folder?" for
-new managed checkouts, including agent-requested checkouts and checkouts initially started with another agent. It never
-applies to a directory the user selects themselves. After clone and the post-clone command succeed, immediately before
-the agent starts, Farhelm marks that checkout trusted in Claude's own configuration on that host. Turning it on affects
-future checkouts only, and changing it does not invalidate an already displayed path preview.
+Settings offers an off-by-default, all-hosts choice under **Agents → Claude Code** to answer Claude's "trust this
+folder?" for new managed checkouts, including agent-requested checkouts and checkouts initially started with another
+agent. It never applies to a directory the user selects themselves. After clone and the post-clone command succeed,
+immediately before the agent starts, Farhelm marks that checkout trusted in Claude's own configuration on that host.
+Turning it on affects future checkouts only, and changing it does not invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
 `~/.claude.json`), which also holds sign-in, settings and per-directory state. It changes only that directory's trust
@@ -1760,24 +1760,23 @@ repository hooks and commands just as answering Yes does. The mechanism is expli
 While Claude's trust question is visible in the agent terminal of a managed checkout, the setting is off, and the hint
 has not been dismissed, an informational band appears above the terminal, below its tabs. It takes layout space rather
 than covering the question, is announced without taking focus, and explains that answering automatically would require
-editing Claude's own settings with caveats. Settings and caveats opens **Agent trust** in Settings at Claude's switch;
-Don't show again stores a shared dismissal, reversible beside the switch. × hides only the current occurrence, until the
+editing Claude's own settings with caveats. Settings and caveats opens Claude's Settings page at its trust switch; Don't
+show again stores a shared dismissal, reversible beside the switch. × hides only the current occurrence, until the
 question leaves the screen. A change made elsewhere updates the hint band as it happens; Settings reads the current
 shared values when opened. A failed Don't show again save restores the band with an adjacent error while that session is
 still shown; leaving the session drops the error. If the corrective settings read also fails, only the save error
 appears until trust is known to be off again, without the normal explanation or its actions.
 
-The **Agent trust** section also offers separate off-by-default, all-hosts trust switches for Codex, Muse and Pi. Each
-applies only when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and
-an existing managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust
-for its destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a
-per-launch trusted directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project
-settings and extensions. These switches never edit the agent's saved configuration. Their help states that the
-repository's hooks, settings and commands may then run as if the user had approved them. Ordinary user-selected
-directories receive no trust override, even when the client or a cloned source carries an old trust choice. Plain
-Restart and plain Replace keep their stored launch. Settings changes affect newly composed attempts; an accepted
-fresh-checkout retry retains its original trust choice, and an ordinary keyed retry whose resolved launch changes may
-refuse the reused key.
+The Settings pages for Codex, Muse and Pi each offer their own off-by-default, all-hosts trust switch. Each applies only
+when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and an existing
+managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust for its
+destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a per-launch
+trusted directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project settings and
+extensions. These switches never edit the agent's saved configuration. Their help states that the repository's hooks,
+settings and commands may then run as if the user had approved them. Ordinary user-selected directories receive no trust
+override, even when the client or a cloned source carries an old trust choice. Plain Restart and plain Replace keep
+their stored launch. Settings changes affect newly composed attempts; an accepted fresh-checkout retry retains its
+original trust choice, and an ordinary keyed retry whose resolved launch changes may refuse the reused key.
 
 Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
 ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument trusts the
@@ -1788,10 +1787,10 @@ and Replace reuse the saved launch. Literal Command launches supply their own ar
 Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
 checkout's agent terminal, their switch is off, and their own hint has not been dismissed. Antigravity follows the same
 rule in any directory when the session has an Antigravity agent launch. The hint names the agent, offers Settings at its
-switch in **Agent trust** and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent and
-reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no hint band: its
-project-resource approval is not currently recognized as a trust question. Older stored session snapshots default the
-new hint evidence to absent; the legacy Claude hint remains Claude-only.
+switch on the agent's Settings page and Don't show again, and has an occurrence-only ×. Each shared dismissal is
+independent and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no
+hint band: its project-resource approval is not currently recognized as a trust question. Older stored session snapshots
+default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed later in
@@ -2470,24 +2469,26 @@ these preferences, by an agent or the command line included, reaches the open wi
 selection chooses from the visits as the helm last pushed them, template shortcuts read their bindings on each
 invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear at the
 foot of the host rail opens a settings dialog. Its left sidebar groups **Sessions**, **Appearance**, **Terminal**,
-**Notifications** and **App** under **General**. App appears only in a desktop app whose updater is active. **Where
-sessions run** holds **Hosts**, **Checkouts**, **Containers**, **Recipes** and **Tensorlake**. **Agents** holds **Agent
-trust** and **Credentials**. Section icons sit on tiles that are blue, teal or orchid by group. The selected row uses
-the solid selection fill with a white-tinted tile. The selected page's heading stays above its scrollable content and
-shows its icon, name, description and scope. Notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog
-keeps one height across sections, capped by the window. The header, footer and search field stay in place while the page
-and section list scroll independently. At 620px wide and below, the dialog shows either the selected section or the
-list. **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch, including at
-phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view. Section buttons
-follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and pending saves. A
-dot marks each edited field and section. The footer stays visible as the page scrolls. Switches outside forms save at
-once. Forms have one Save and Discard in the footer on pages with unsaved changes. The recipe and credential editors
-place their own actions there as well. For Checkouts, the same Save writes the changed folder and command in order.
-Closing with unsaved changes, from Escape or either Close control, asks once with the affected forms named and offers
-**Keep editing**, **Discard** and **Save**. Discard is absent while a save is in flight. A close that saves waits for
-pending operations and sends the remaining saves one at a time. The first failure keeps Settings open and shows the
-affected page with its error. Two different unsaved Tensorlake keys leave Settings open on Credentials with a message to
-save the desired key first. When Settings closes, focus returns to the gear.
+**Notifications**, **Credentials** and **App** under **General**. App appears only in a desktop app whose updater is
+active. **Where sessions run** holds **Hosts**, **Checkouts**, **Containers**, **Recipes** and **Tensorlake**.
+**Agents** has a page for every launch agent. An agent without controls has a page that says so, so users looking for
+that agent can find it and know they have reached the right place. Bash and Zsh are shell choices. Section icons sit on
+tiles that are blue, teal or orchid by group. The selected row uses the solid selection fill with a white-tinted tile.
+The selected page's heading stays above its scrollable content and shows its icon, name, description and scope.
+Notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by
+the window. The header, footer and search field stay in place while the page and section list scroll independently. At
+620px wide and below, the dialog shows either the selected section or the list. **‹ Settings** returns to the list. The
+gear always opens sessions and focuses its first switch, including at phone width. Trust hints open the agent's page and
+focus its trust switch when it is available. Section buttons follow the platform's normal Tab rules. Switching sections
+preserves unsaved fields, outcome lines and pending saves. A dot marks each edited field and section. The footer stays
+visible as the page scrolls. Switches outside forms save at once. Forms have one Save and Discard in the footer on pages
+with unsaved changes. The recipe and credential editors place their own actions there as well. For Checkouts, the same
+Save writes the changed folder and command in order. Closing with unsaved changes, from Escape or either Close control,
+asks once with the affected forms named and offers **Keep editing**, **Discard** and **Save**. Discard is absent while a
+save is in flight. A close that saves waits for pending operations and sends the remaining saves one at a time. The
+first failure keeps Settings open and shows the affected page with its error. Two different unsaved Tensorlake keys
+leave Settings open on Credentials with a message to save the desired key first. When Settings closes, focus returns to
+the gear.
 
 Related controls and list rows share cards, with separators between rows and actions such as Refresh, New recipe and Add
 in their group headings. The Containers delete question opens inside the leftovers card. The recipe editor keeps Name,

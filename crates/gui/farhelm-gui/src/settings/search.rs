@@ -12,9 +12,10 @@ use gpui::{
 };
 
 use super::{
-    Choice, SOUNDS_HELP, SOUNDS_ID, SOUNDS_LABEL, Section, SettingsDialog, TrustAgent, agent_trust,
-    app, appearance, card, checkout_field, checkouts, containers, credentials, file_types, ntfy,
-    recipes, tensorlake, tensorlake_key, tensorlake_sandboxes, tensorlake_ssh_key, terminal,
+    Choice, NO_AGENT_SETTINGS, NO_AGENT_SETTINGS_ID, SOUNDS_HELP, SOUNDS_ID, SOUNDS_LABEL, Section,
+    SettingsDialog, TrustAgent, agent_trust, app, appearance, card, checkout_field, checkouts,
+    containers, credentials, file_types, ntfy, recipes, tensorlake, tensorlake_key,
+    tensorlake_sandboxes, tensorlake_ssh_key, terminal,
 };
 use crate::actions::Dismiss;
 use crate::assets::Icon;
@@ -143,7 +144,8 @@ impl Entry {
             (Section::Terminal, Target::Tunnels) => "tunnel",
             (Section::Terminal, Target::Top) if self.id == terminal::ID => "links browser",
             (Section::Checkouts, _) => "clone git",
-            (Section::AgentTrust, _) => "trust",
+            (Section::Agent(_), Target::Trust(_) | Target::Choice(_)) => "agent trust",
+            (Section::Agent(_), Target::Top) if self.id == agent_trust::CAUTION_ID => "agent trust",
             (Section::Notifications, Target::Choice(_)) => "sound bell",
             (Section::Notifications, Target::Top) if self.id == SOUNDS_ID => "sound bell",
             (Section::Notifications, _) => "push phone",
@@ -161,7 +163,7 @@ impl Entry {
 /// live state the catalog does not see.
 fn catalog(platform: Platform) -> Vec<Entry> {
     let mut entries = Vec::new();
-    for &section in Section::ALL {
+    for section in Section::all() {
         let add = |id, label, help: &[&str], target| {
             Entry::new(section, id, label, help.iter().copied(), target)
         };
@@ -178,7 +180,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
         // Results follow the drawing order. Every section draws its switches before its other controls, except App,
         // which draws the updater's controls first and the Show what's new switch after them.
         let choices_last = section == Section::App;
-        if section != Section::AgentTrust && !choices_last {
+        if !matches!(section, Section::Agent(_)) && !choices_last {
             entries.extend(section_choices());
         }
         match section {
@@ -327,8 +329,8 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     ),
                 ]);
             }
-            Section::AgentTrust => {
-                for agent in TrustAgent::ALL {
+            Section::Agent(harness) => {
+                if let Some(agent) = TrustAgent::for_harness(harness) {
                     entries.push(Entry::new(
                         section,
                         agent.id(),
@@ -345,6 +347,13 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         ));
                     }
                     entries.extend(agent.hint().map(Entry::choice));
+                } else {
+                    entries.push(add(
+                        NO_AGENT_SETTINGS_ID,
+                        NO_AGENT_SETTINGS,
+                        &[],
+                        Target::Top,
+                    ));
                 }
             }
             Section::Notifications => {
@@ -630,10 +639,11 @@ impl Search {
         let palette = theme::palette(cx);
         let query = self.input.text(cx);
         let count = self.matches.len();
+        // An agent page can match by name even when it has no controls to configure.
         let heading = match count {
-            0 => format!("No settings match “{}”", query.trim()),
-            1 => format!("1 setting matches “{}”", query.trim()),
-            _ => format!("{count} settings match “{}”", query.trim()),
+            0 => format!("No matches for “{}”", query.trim()),
+            1 => format!("1 match for “{}”", query.trim()),
+            _ => format!("{count} matches for “{}”", query.trim()),
         };
         let mut rows = Vec::new();
         let mut position = 0;

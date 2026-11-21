@@ -14,6 +14,7 @@ use std::rc::Rc;
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::{
     Collection, CollectionChanges, CollectionState, HostView, KeyedEntry, PREFERENCES_KEY,
     Preferences,
@@ -78,22 +79,29 @@ impl Render for Rail {
     }
 }
 
-/// The section button that shows `section`. The harness finds elements by `'static` ids, so these are spelled out.
+/// The section button that shows `section`, also used to check which control kept focus.
 pub(super) fn section_button(section: Section) -> &'static str {
-    match section {
-        Section::Sessions => "settings-section-sessions",
-        Section::Hosts => "settings-section-hosts",
-        Section::Recipes => "settings-section-recipes",
-        Section::Tensorlake => "settings-section-tensorlake",
-        Section::Containers => "settings-section-containers",
-        Section::Credentials => "settings-section-credentials",
-        Section::Appearance => "settings-section-appearance",
-        Section::Terminal => "settings-section-terminal",
-        Section::Checkouts => "settings-section-checkouts",
-        Section::AgentTrust => "settings-section-agent-trust",
-        Section::Notifications => "settings-section-notifications",
-        Section::App => "settings-section-app",
+    section.button_id()
+}
+
+/// Select a section through the sidebar. The agent pages can be outside the clipped part of the navigation.
+pub(super) fn click_section(cx: &mut VisualTestContext, section: Section) {
+    let selector = section_button(section);
+    let viewport = bounds(cx, "settings-navigation-region");
+    let row = bounds(cx, selector);
+    if row.bottom() > viewport.bottom() || row.top() < viewport.top() {
+        cx.simulate_event(gpui::ScrollEvent {
+            position: viewport.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(
+                px(0.),
+                viewport.center().y - row.center().y,
+            )),
+            ..Default::default()
+        });
+        settle(cx);
     }
+    assert!(shows_whole(cx, selector, "settings-navigation-region"));
+    click(cx, selector);
 }
 
 /// Keep a fake desktop updater as the app's, as the desktop app does at startup when its updater runs, with automatic
@@ -306,6 +314,7 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Appearance".to_string(), Some(Toggled::False)),
             ("Terminal".to_string(), Some(Toggled::False)),
             ("Notifications".to_string(), Some(Toggled::False)),
+            ("Credentials".to_string(), Some(Toggled::False)),
             ("Where sessions run".to_string(), None),
             ("Hosts".to_string(), Some(Toggled::False)),
             ("Checkouts".to_string(), Some(Toggled::False)),
@@ -313,8 +322,16 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("Recipes".to_string(), Some(Toggled::False)),
             ("Tensorlake".to_string(), Some(Toggled::False)),
             ("Agents".to_string(), None),
-            ("Agent trust".to_string(), Some(Toggled::False)),
-            ("Credentials".to_string(), Some(Toggled::False)),
+            ("Cursor".to_string(), Some(Toggled::False)),
+            ("Codex".to_string(), Some(Toggled::False)),
+            ("Claude Code".to_string(), Some(Toggled::False)),
+            ("Muse Code".to_string(), Some(Toggled::False)),
+            ("Goose".to_string(), Some(Toggled::False)),
+            ("Pi".to_string(), Some(Toggled::False)),
+            ("OMP".to_string(), Some(Toggled::False)),
+            ("OpenCode".to_string(), Some(Toggled::False)),
+            ("Grok".to_string(), Some(Toggled::False)),
+            ("Antigravity".to_string(), Some(Toggled::False)),
         ]
     );
 }
@@ -343,14 +360,23 @@ fn app_is_listed_under_general_while_the_desktop_updater_runs(cx: &mut TestAppCo
             "Appearance",
             "Terminal",
             "Notifications",
+            "Credentials",
             "App",
             "Hosts",
             "Checkouts",
             "Containers",
             "Recipes",
             "Tensorlake",
-            "Agent trust",
-            "Credentials",
+            "Cursor",
+            "Codex",
+            "Claude Code",
+            "Muse Code",
+            "Goose",
+            "Pi",
+            "OMP",
+            "OpenCode",
+            "Grok",
+            "Antigravity",
         ]
     );
     click(cx, section_button(Section::App));
@@ -840,7 +866,7 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
     assert_eq!(bounds(cx, "settings-section-sessions"), sessions);
 }
 
-/// At the minimum window height, the sidebar needs to scroll to reveal Credentials.
+/// At the minimum window height, the sidebar needs to scroll to reach the last agent.
 /// Wheel the section list and verify it exposes that row while the search field and page stay put.
 #[gpui::test]
 fn long_settings_navigation_scrolls_without_moving_search_or_page(cx: &mut TestAppContext) {
@@ -849,7 +875,7 @@ fn long_settings_navigation_scrolls_without_moving_search_or_page(cx: &mut TestA
     settle(cx);
     open_settings(cx);
     let list = bounds(cx, "settings-navigation-region");
-    let bottom = section_button(Section::Credentials);
+    let bottom = section_button(Section::Agent(LaunchHarness::Antigravity));
     let search = bounds(cx, "settings-search-field");
     let heading = bounds(cx, "settings-heading");
     assert!(
@@ -2115,7 +2141,7 @@ pub(super) fn sent_reads(helm: &mut FakeHelm) -> Vec<(u64, String)> {
         .collect()
 }
 
-/// The independent trust routes, in the section's order.
+/// The independent trust routes, indexed by the agent's stable trust slot.
 const TRUST_PATHS: [&str; 5] = [
     "/api/checkout-claude-trust",
     "/api/checkout-agent-trust/codex",
@@ -2124,69 +2150,73 @@ const TRUST_PATHS: [&str; 5] = [
     "/api/checkout-agent-trust/antigravity",
 ];
 
-/// Answer `reads` (in the section's order) with each agent's trust as `enabled`, the hint not dismissed.
-fn answer_trust<const N: usize>(
+/// A trust page sends exactly one read. The reply keeps the hint's own preference at its default.
+fn answer_trust(
     helm: &mut FakeHelm,
     reads: &[(u64, String)],
-    enabled: [bool; N],
+    enabled: bool,
     cx: &mut VisualTestContext,
 ) {
-    for ((id, _), enabled) in reads.iter().zip(enabled) {
-        helm.reply(
-            *id,
-            200,
-            Some(json!({ "enabled": enabled, "hint_dismissed": false })),
-        );
-    }
+    assert_eq!(reads.len(), 1);
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(json!({ "enabled": enabled, "hint_dismissed": false })),
+    );
     settle(cx);
 }
 
-/// Open Settings and show Agent trust, returning the reads that sent.
+/// Open Claude's trust page and return its read. The Sessions default sends no commands.
 fn show_agent_trust(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<(u64, String)> {
     open_settings(cx);
     assert_eq!(sent(helm), [], "the premise: Sessions reads nothing");
-    click(cx, "settings-section-agent-trust");
-    assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
+    click_section(cx, Section::Agent(LaunchHarness::Claude));
+    assert_eq!(heading(cx).as_deref(), Some("Claude Code"));
     sent_reads(helm)
 }
 
-/// The trust switches live behind routes the helm does not push, so the section reads them once when it is shown, and
-/// SPEC.md: "Failed settings reads never count as an off switch": a switch must not offer a toggle over a choice it
-/// does not know. Specified: showing Agent trust sends one GET per agent, in the section's order; until they answer,
-/// a click on a switch sends nothing; once answered (Claude on, the others off), each switch shows its agent's choice,
-/// and showing another section and Agent trust again reads nothing more.
+/// Each agent page reads only its own choice on the first visit. A pending read keeps its switch unavailable. Claude's
+/// answer stays in Claude's page while visiting Codex, and an agent with no settings has a discoverable empty page.
 #[gpui::test]
 fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let reads = show_agent_trust(&mut helm, cx);
     let paths: Vec<&str> = reads.iter().map(|(_, path)| path.as_str()).collect();
-    assert_eq!(paths, TRUST_PATHS);
+    assert_eq!(paths, [TRUST_PATHS[0]]);
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "an unknown choice takes no toggle");
 
-    answer_trust(&mut helm, &reads, [true, false, false, false, false], cx);
-    let shown: Vec<Option<bool>> = TrustAgent::ALL
-        .iter()
-        .map(|agent| switch_on(cx, agent.id()))
-        .collect();
+    answer_trust(&mut helm, &reads, true, cx);
+    assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
+    assert!(!drawn(cx, TrustAgent::Codex.id()));
+
+    click_section(cx, Section::Agent(LaunchHarness::Codex));
+    let reads = sent_reads(&mut helm);
     assert_eq!(
-        shown,
-        [
-            Some(true),
-            Some(false),
-            Some(false),
-            Some(false),
-            Some(false)
-        ]
+        reads
+            .iter()
+            .map(|(_, path)| path.as_str())
+            .collect::<Vec<_>>(),
+        [TRUST_PATHS[1]]
     );
-    click(cx, "settings-section-hosts");
-    click(cx, "settings-section-agent-trust");
+    answer_trust(&mut helm, &reads, false, cx);
+    assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(false));
+    assert!(!drawn(cx, TrustAgent::Claude.id()));
+
+    click_section(cx, Section::Agent(LaunchHarness::Cursor));
+    assert_eq!(heading(cx).as_deref(), Some("Cursor"));
+    assert_eq!(
+        label(cx, super::NO_AGENT_SETTINGS_ID).as_deref(),
+        Some(super::NO_AGENT_SETTINGS)
+    );
+    assert_eq!(sent(&mut helm), [], "an empty page reads nothing");
+
+    click_section(cx, Section::Agent(LaunchHarness::Claude));
     assert_eq!(sent(&mut helm), [], "read once per opening");
+    assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
 }
 
-/// Open Settings at Agent trust for `agent`, as its trust hint does, answer the reads with every agent's trust off, and
-/// check that `agent`'s switch then holds focus. The trust hint's way in is also the test's way to a switch below the
-/// dialog's fold, which a click cannot reach.
+/// Open through the trust hint and answer the page's one read. Each caller begins with that agent's switch focused.
 fn open_trust_at(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
@@ -2199,7 +2229,11 @@ fn open_trust_at(
     });
     settle(cx);
     let reads = sent_reads(helm);
-    answer_trust(helm, &reads, [false; 5], cx);
+    assert_eq!(
+        reads.first().map(|(_, path)| path.as_str()),
+        Some(TRUST_PATHS[agent.index()])
+    );
+    answer_trust(helm, &reads, false, cx);
     assert_eq!(
         focused_id(cx).as_deref(),
         Some(agent.id()),
@@ -2267,37 +2301,38 @@ fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut Tes
     );
 }
 
-/// A failed read must leave the switch unknown, not off, and say why. Specified: Claude's read refused, its switch
-/// takes no click and its block shows "Could not save or read Claude trust settings:" with the helm's words, while
-/// Codex's switch, read fine, shows its choice.
+/// Claude's failed read keeps its switch unavailable and explains the refusal. Codex's independent read still
+/// supplies a usable switch when its page is opened.
 #[gpui::test]
 fn a_failed_trust_read_leaves_the_switch_unavailable_with_its_reason(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let reads = show_agent_trust(&mut helm, cx);
     helm.reply(reads[0].0, 503, Some(json!("fixture trust read refused")));
-    answer_trust(&mut helm, &reads[1..], [true; 4], cx);
+    settle(cx);
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "no toggle over an unknown choice");
     assert_eq!(
         trust_failure(cx, TrustAgent::Claude).as_deref(),
         Some("Could not save or read Claude trust settings: fixture trust read refused")
     );
+    click_section(cx, Section::Agent(LaunchHarness::Codex));
+    let reads = sent_reads(&mut helm);
+    answer_trust(&mut helm, &reads, true, cx);
     assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(true));
 }
 
 /// A read answers only the opening it was sent for: a slow reply from an earlier opening must not fill in a newer one,
 /// which has its own read in flight. Each opening is a dialog of its own, so this guards against trust state shared
-/// between openings (a cache), not against how the reply holds its dialog. Specified: Agent trust shown, Settings
-/// closed before the reads answer and opened at Agent trust again, which reads again; answering the first opening's
-/// reads (all on) leaves the new switches unknown and off; answering the new ones shows them.
+/// between openings. Close Settings while Claude's read is out, reopen the page, then answer in order. The closed
+/// page's reply leaves the new switch unavailable until its own reply arrives.
 #[gpui::test]
 fn a_trust_read_reaches_only_the_opening_it_was_sent_for(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let first = show_agent_trust(&mut helm, cx);
     keys(cx, "escape");
     let second = show_agent_trust(&mut helm, cx);
-    assert_eq!(second.len(), 5, "the new opening reads again");
-    answer_trust(&mut helm, &first, [true; 5], cx);
+    assert_eq!(second.len(), 1, "the new opening reads again");
+    answer_trust(&mut helm, &first, true, cx);
     assert_eq!(
         switch_on(cx, TrustAgent::Claude.id()),
         Some(false),
@@ -2305,32 +2340,19 @@ fn a_trust_read_reaches_only_the_opening_it_was_sent_for(cx: &mut TestAppContext
     );
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "and the switch is still unknown");
-    answer_trust(&mut helm, &second, [true; 5], cx);
+    answer_trust(&mut helm, &second, true, cx);
     assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
 }
 
 /// SPEC.md: a hint's Don't show again "stores a shared dismissal, reversible beside the switch". The hint switches are
-/// that dismissal inverted, in the shared preference row the band reads. Specified: with nothing stored, Claude's,
-/// Codex's and Muse's hint switches show on and Pi has none; Codex's, reached by Tab from Codex's trust switch and
-/// turned off with Space, sends only `{"codex_trust_hint_dismissed": true}` to `PUT /api/preferences`; a pushed row
-/// dismissing Muse's shows it off.
+/// Each agent's hint switch uses the same pushed dismissal as its band. Codex's switch starts on and a toggle writes
+/// just Codex's dismissal. Antigravity's switch on its own page follows an independent dismissal pushed later.
 #[gpui::test]
 fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
     open_trust_at(&mut helm, cx, &gear, TrustAgent::Codex);
-    for hint in [
-        Choice::ShowClaudeTrustHint,
-        Choice::ShowCodexTrustHint,
-        Choice::ShowMuseTrustHint,
-        Choice::ShowAntigravityTrustHint,
-    ] {
-        assert_eq!(
-            switch_on(cx, hint.id()),
-            Some(true),
-            "{hint:?} shows the hint"
-        );
-    }
-    assert!(!drawn(cx, "settings-pi-trust-hint"), "Pi has no hint");
+    assert_eq!(switch_on(cx, Choice::ShowCodexTrustHint.id()), Some(true));
+    assert!(!drawn(cx, Choice::ShowClaudeTrustHint.id()));
     keys(cx, "tab");
     assert_eq!(
         focused_id(cx).as_deref(),
@@ -2341,6 +2363,13 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
     assert_eq!(body, json!({ "codex_trust_hint_dismissed": true }));
     helm.reply(id, 204, None);
     settle(cx);
+    click_section(cx, Section::Agent(LaunchHarness::Antigravity));
+    let reads = sent_reads(&mut helm);
+    answer_trust(&mut helm, &reads, false, cx);
+    assert_eq!(
+        switch_on(cx, Choice::ShowAntigravityTrustHint.id()),
+        Some(true)
+    );
     push(
         &mut helm,
         &Preferences {
@@ -2355,13 +2384,8 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
     );
 }
 
-/// A trust hint's "Settings and caveats" opens Agent trust at its agent's switch and brings it into view (SPEC.md:
-/// "Trust hints instead open agent trust at the relevant switch and scroll its block into view"), but the switch cannot
-/// hold focus until its read answers. Antigravity needs both halves: its read is answered last, so a handover
-/// keyed on the wrong agent would focus an earlier switch, and its switch is the last in the section, below the fold
-/// when the dialog opens, so a move that did not scroll would leave focus on a switch the user cannot see, where a
-/// Space meant to scroll would turn Antigravity's trust on unseen. The test checks the switch lies wholly inside
-/// the dialog body once its read hands over focus. Escape closes Settings and returns focus to the opening button.
+/// The trust hint opens Antigravity's own page and waits for its switch to become available before taking focus.
+/// Escape returns focus to the opening button, even when it did not have focus when Settings opened.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -2374,19 +2398,18 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         super::open_at_agent_trust(TrustAgent::Antigravity, &gear, &mark, window, cx);
     });
     settle(cx);
-    assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
+    assert_eq!(heading(cx).as_deref(), Some("Antigravity"));
     assert!(
         dialog_holds_focus(cx),
         "the dialog itself holds focus while the reads are out"
     );
-    assert!(
-        !shows_whole(cx, TrustAgent::Antigravity.id(), DIALOG_BODY),
-        "the premise: Antigravity's switch starts out of view: {:?} in {:?}",
-        bounds(cx, TrustAgent::Antigravity.id()),
-        bounds(cx, DIALOG_BODY)
-    );
+    assert_eq!(available(cx, TrustAgent::Antigravity.id()), Some(false));
     let reads = sent_reads(&mut helm);
-    answer_trust(&mut helm, &reads, [false; 5], cx);
+    assert_eq!(
+        reads.first().map(|(_, path)| path.as_str()),
+        Some(TRUST_PATHS[4])
+    );
+    answer_trust(&mut helm, &reads, false, cx);
     assert_eq!(
         focused_id(cx).as_deref(),
         Some(TrustAgent::Antigravity.id())
@@ -2444,7 +2467,7 @@ fn a_trust_read_that_answers_after_the_user_moved_on_moves_no_focus(cx: &mut Tes
         moved_to.is_some() && !dialog_holds_focus(cx),
         "the premise: the Tab moved focus to a control: {moved_to:?}"
     );
-    answer_trust(&mut helm, &reads, [false; 4], cx);
+    answer_trust(&mut helm, &reads, false, cx);
     assert_eq!(
         available(cx, TrustAgent::Codex.id()),
         Some(true),
@@ -2478,7 +2501,7 @@ fn a_click_that_leaves_focus_on_the_dialog_still_stops_the_trust_handover(cx: &m
         dialog_holds_focus(cx),
         "the premise: the click left the dialog itself holding focus"
     );
-    answer_trust(&mut helm, &reads, [false; 4], cx);
+    answer_trust(&mut helm, &reads, false, cx);
     assert_eq!(
         available(cx, TrustAgent::Codex.id()),
         Some(true),
@@ -3360,15 +3383,24 @@ pub(super) fn fill(cx: &mut VisualTestContext, selector: &'static str, text: &st
 }
 
 /// Tab until the control with element id `id` holds focus, which scrolls it into view: the form is taller than the
-/// dialog's body, so a click cannot reach its lower controls.
+/// dialog's body, so a click cannot reach its lower controls. Allow one pass through the presented focus targets,
+/// including the navigation rows, so adding pages does not shorten the part of the form this helper can reach.
 pub(super) fn reach(cx: &mut VisualTestContext, id: &str) {
-    for _ in 0..40 {
+    let presented = frame(cx);
+    assert!(
+        presented
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(id) && node.flags.focusable),
+        "{id} must be focusable before stepping Tab"
+    );
+    let focusable = presented.iter().filter(|node| node.flags.focusable).count();
+    for _ in 0..=focusable {
         if focused_id(cx).as_deref() == Some(id) {
             return;
         }
         keys(cx, "tab");
     }
-    panic!("Tab never reached {id}");
+    panic!("Tab never reached {id} in a frame with {focusable} focusable nodes");
 }
 
 /// Press Save, and return the one command it sent, which must be the settings' `PUT`: its id and body.

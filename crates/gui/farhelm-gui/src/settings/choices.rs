@@ -68,15 +68,15 @@ pub(super) enum Choice {
     SkipHostSetupConfirmation,
     /// Hosts: Remove hosts without asking, on when the removal confirmation is skipped.
     SkipHostRemoveConfirmation,
-    /// Agent trust: Show the hint when Claude asks about a managed checkout. On unless the shared dismissal is stored,
+    /// Claude's page shows this hint switch. It is on unless the shared dismissal is stored,
     /// so the switch is the dismissal inverted: turning it off stores `claude_trust_hint_dismissed: true`, which the
     /// band's Don't show again stores too (SPEC.md: "a shared dismissal, reversible beside the switch").
     ShowClaudeTrustHint,
-    /// Agent trust: the same for Codex's hint.
+    /// Codex's page uses its own shared hint dismissal.
     ShowCodexTrustHint,
-    /// Agent trust: the same for Muse's hint. Pi has no hint, so no switch.
+    /// Muse's page uses its own shared hint dismissal.
     ShowMuseTrustHint,
-    /// Agent trust: show Antigravity's hint in plain folders and managed checkouts.
+    /// Antigravity's hint covers ordinary directories and managed checkouts.
     ShowAntigravityTrustHint,
     /// Notifications, Sounds: Session waiting, on by default (the status sounds' switches read unset through
     /// [`Switches::from_preferences`], which the sounds' owner reads too).
@@ -122,10 +122,12 @@ impl Choice {
             Self::AutoUpdateRemoteHosts
             | Self::SkipHostSetupConfirmation
             | Self::SkipHostRemoveConfirmation => Section::Hosts,
-            Self::ShowClaudeTrustHint
-            | Self::ShowCodexTrustHint
-            | Self::ShowMuseTrustHint
-            | Self::ShowAntigravityTrustHint => Section::AgentTrust,
+            Self::ShowClaudeTrustHint => Section::Agent(super::TrustAgent::Claude.harness()),
+            Self::ShowCodexTrustHint => Section::Agent(super::TrustAgent::Codex.harness()),
+            Self::ShowMuseTrustHint => Section::Agent(super::TrustAgent::Muse.harness()),
+            Self::ShowAntigravityTrustHint => {
+                Section::Agent(super::TrustAgent::Antigravity.harness())
+            }
             Self::SoundWaiting
             | Self::SoundApproval
             | Self::SoundTurnFinished
@@ -567,7 +569,7 @@ pub(super) fn busy_line(refused: &Refused, control: &str, cx: &App) -> Option<St
 }
 
 /// A help paragraph: the old `.host-settings-help` in Settings, in the quieter text color at its line height. Takes
-/// fixed text or text built at run time (Agent trust's).
+/// fixed text or text built at run time (such as a trust read or save failure).
 pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
     let palette = theme::palette(cx);
     div()

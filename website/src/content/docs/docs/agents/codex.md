@@ -27,13 +27,13 @@ specific to Codex.
 - **Restart** becomes available only after you submit your first prompt. A Codex session you never prompted cannot be
   restarted; replace it instead.
 - To skip Codex's directory-trust question in
-  [managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts), enable its switch under **Agent trust**
-  in **Settings**. It is off by default and applies across hosts when Farhelm starts a new launch in a directory it
+  [managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts), enable its switch under **Settings →
+  Agents → Codex**. It is off by default and applies across hosts when Farhelm starts a new launch in a directory it
   manages. Farhelm passes a trust argument for that launch without changing Codex's saved configuration. Trust lets the
   repository's own hooks, settings and commands run as if you had approved them. Directories outside managed checkouts
   keep Codex's own trust behavior. While the switch is off and Codex asks this in a managed checkout, a
   [note above the session's terminal](/docs/using/start-a-session/#trust-in-managed-checkouts) says Farhelm can answer
-  it, and its **Settings** opens **Agent trust** at Codex's switch. Sessions started from the **Command** tab show no
+  it, and its **Settings** opens Codex's page at its trust switch. Sessions started from the **Command** tab show no
   note.
 - **Restart** resumes the conversation Farhelm last learned of. After `/clear`, Farhelm learns of the new conversation
   when you send your next prompt, and restart can resume it once Codex has finished that reply. Restarting before you

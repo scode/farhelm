@@ -3,6 +3,7 @@
 
 use farhelm_helm_client::Method;
 use farhelm_input_mapping::Platform;
+use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{KeyDownEvent, Keystroke, TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
@@ -11,7 +12,7 @@ use super::{Entry, Target, catalog, fold, highlights};
 use crate::actions::THIS_PLATFORM;
 use crate::layers;
 use crate::settings::tests::{
-    drawn, open_rail, open_settings, section_button, sent, show_checkouts, wheel,
+    click_section, drawn, open_rail, open_settings, section_button, sent, show_checkouts, wheel,
 };
 use crate::settings::{Choice, Section, SettingsDialog, decide_tunnels_for_opened};
 use crate::test_support::{
@@ -132,8 +133,23 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
     for (query, section, id) in [
         (
             "half-written",
-            Section::AgentTrust,
+            Section::Agent(LaunchHarness::Claude),
             super::agent_trust::CAUTION_ID,
+        ),
+        (
+            "agent trust",
+            Section::Agent(LaunchHarness::Claude),
+            super::agent_trust::CAUTION_ID,
+        ),
+        (
+            "agent trust",
+            Section::Agent(LaunchHarness::Antigravity),
+            super::TrustAgent::Antigravity.id(),
+        ),
+        (
+            "agent trust",
+            Section::Agent(LaunchHarness::Codex),
+            Choice::ShowCodexTrustHint.id(),
         ),
         ("stays quiet", Section::Notifications, super::SOUNDS_ID),
         ("dashboard", Section::Credentials, super::tensorlake_key::ID),
@@ -465,8 +481,8 @@ fn every_catalog_entry_corresponds_to_something_drawn(cx: &mut TestAppContext) {
     cx.update(|_, cx| decide_tunnels_for_opened(Platform::Mac, cx));
     settle(cx);
     let entries = catalog(Platform::Mac);
-    for &section in Section::ALL {
-        click(cx, section_button(section));
+    for section in Section::all() {
+        click_section(cx, section);
         assert_eq!(
             heading(cx).as_deref(),
             Some(section.label()),
