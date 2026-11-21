@@ -53,6 +53,7 @@ pub mod state;
 mod tab_reach;
 mod time_zone;
 pub mod updater;
+mod whats_new;
 pub mod window_state;
 
 use bundle::{bundled_farhelm, desktop_state_dir, helm_payload_dir};
@@ -310,6 +311,7 @@ fn updater_host(handle: updater::UpdaterHandle) -> farhelm_gui::desktop::Updater
         restart_to_update: Box::new(move || restart.start_relaunch()),
         automatic_updates: Box::new(move || read.automatic_updates()),
         set_automatic_updates: Box::new(move |on| set.set_automatic_updates(on)),
+        upgrade_notes: whats_new::host(env!("CARGO_PKG_VERSION")),
     }
 }
 

@@ -95,6 +95,7 @@ fn counting_updater(checks: &Rc<Cell<u32>>) -> UpdaterHost {
         restart_to_update: Box::new(|| false),
         automatic_updates: Box::new(|| false),
         set_automatic_updates: Box::new(|_| Ok(())),
+        upgrade_notes: None,
     }
 }
 

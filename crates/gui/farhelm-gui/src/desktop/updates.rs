@@ -23,6 +23,8 @@ use gpui::{App, AppContext as _, Entity, Global, Task};
 
 use crate::update_readout::Readout;
 
+pub mod notes;
+
 /// The next readout the updater publishes: resolves when its state changes, with the readout for the state it has
 /// then (latest wins: changes in between are not reported one by one), or with `None` once the updater has stopped
 /// publishing, after which it is not called again. Called again only once the previous call's future has resolved: the
@@ -50,6 +52,8 @@ pub struct UpdaterHost {
     /// Turn automatic updates on or off; a failure carries a short reason for the setting's control to show, and the
     /// setting then stays as it was.
     pub set_automatic_updates: Box<dyn Fn(bool) -> Result<(), String>>,
+    /// Stable installs can request release highlights without performing an update check.
+    pub upgrade_notes: Option<notes::UpgradeNotesHost>,
 }
 
 /// The running updater's state on the window side: the readout it published last and its commands, with the task that
@@ -61,6 +65,7 @@ pub struct Updater {
     check_now: Box<dyn Fn()>,
     restart_to_update: Box<dyn Fn() -> bool>,
     set_automatic_updates: Box<dyn Fn(bool) -> Result<(), String>>,
+    upgrade_notes: Option<notes::UpgradeNotesHost>,
     _feed: Task<()>,
 }
 
@@ -90,6 +95,7 @@ pub(crate) fn keep(host: Option<UpdaterHost>, cx: &mut App) {
         restart_to_update,
         automatic_updates,
         set_automatic_updates,
+        upgrade_notes,
     } = host;
     let updater = cx.new(|cx| Updater {
         readout: first_readout,
@@ -97,6 +103,7 @@ pub(crate) fn keep(host: Option<UpdaterHost>, cx: &mut App) {
         check_now,
         restart_to_update,
         set_automatic_updates,
+        upgrade_notes,
         _feed: cx.spawn(async move |updater, cx| {
             while let Some(readout) = next_readout().await {
                 // An updater state change that leaves the readout as it was (a record refresh, say) redraws nothing.
@@ -159,6 +166,12 @@ pub fn automatic_updates(cx: &App) -> Option<bool> {
     entity(cx).map(|updater| updater.read(cx).automatic)
 }
 
+/// The notes capability, kept with the installed-app gate so Settings and startup ask the same question.
+pub fn upgrade_notes(cx: &App) -> Option<&notes::UpgradeNotesHost> {
+    let Kept(updater) = cx.try_global::<Kept>()?;
+    updater.read(cx).upgrade_notes.as_ref()
+}
+
 /// Turn automatic updates on or off, returning a failure's short reason for the switch to show. A saved change is
 /// kept and notifies the entity's observers; a failed one leaves the setting as it was. With no updater there is no
 /// switch to change, which is an error rather than a silent success.
@@ -186,6 +199,7 @@ pub(crate) fn fixture(readout: Readout, cx: &mut App) -> Entity<Updater> {
         check_now: Box::new(|| {}),
         restart_to_update: Box::new(|| false),
         set_automatic_updates: Box::new(|_| Err("a fixture updater saves nothing".to_string())),
+        upgrade_notes: None,
         _feed: Task::ready(()),
     })
 }

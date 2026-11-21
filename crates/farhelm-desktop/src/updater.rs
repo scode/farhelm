@@ -1639,7 +1639,7 @@ fn fetch_optional_capped(
 /// a runtime waits for that resolver, even after the HTTP deadline has fired.
 /// Shutdown without waiting lets the worker continue; an outstanding resolver
 /// retains its thread until the OS call finishes. It owns no updater state.
-fn fetch_on_worker(
+pub(crate) fn fetch_on_worker(
     url: &str,
     cap: usize,
     timeout: Duration,
