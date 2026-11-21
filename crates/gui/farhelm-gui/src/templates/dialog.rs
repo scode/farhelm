@@ -1329,7 +1329,7 @@ impl Render for TemplatesDialog {
             );
         // `section.templates-editor`: the open template, or what to do to open one.
         let weak = cx.weak_entity();
-        let editor = match &self.editor {
+        let editor = match &mut self.editor {
             Some(editor) => editor.render(busy, &bindings, self.catalog.as_deref(), &weak, cx),
             None => div()
                 .id("templates-editor")

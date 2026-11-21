@@ -236,6 +236,9 @@ pub(super) struct Editor {
     leave_baseline: Draft,
     /// The template being edited.
     draft: Draft,
+    /// The last stored definition and its delete label. Draft edits redraw the
+    /// footer but need not reparse the stored definition's command placeholders.
+    stored_delete: Option<(LaunchTemplate, DeleteKind)>,
     /// The text inputs of the fields the draft sets, and of its name. The Custom permission words live only in theirs,
     /// as typed: the draft holds them parsed, or none while they do not parse, and an input is put back to the draft's
     /// words only when its own text would not parse to them, so a half-typed quote stays as typed.
@@ -300,6 +303,7 @@ impl Editor {
             previous,
             baseline,
             draft,
+            stored_delete: None,
             inputs: HashMap::new(),
             add_open: false,
             add_focus: cx.focus_handle().tab_stop(true),
@@ -416,11 +420,22 @@ impl Editor {
     /// Which Delete the footer offers ([`DeleteKind`]), judged on the stored template, not the draft: Delete removes
     /// the stored value even when unsaved edits have repaired it, and Undo would have to save that value back. A name
     /// the store no longer holds reads as an ordinary Delete, whose press then refuses on its own.
-    fn delete_kind(&self, cx: &App) -> DeleteKind {
-        match self.stored(cx) {
-            Some(stored) if check_template_shape(&stored).is_err() => DeleteKind::Permanent,
-            _ => DeleteKind::Restorable,
+    fn delete_kind(&mut self, cx: &App) -> DeleteKind {
+        let Some(stored) = self.stored(cx) else {
+            return DeleteKind::Restorable;
+        };
+        if let Some((checked, kind)) = &self.stored_delete
+            && checked == &stored
+        {
+            return *kind;
         }
+        let kind = if check_template_shape(&stored).is_ok() {
+            DeleteKind::Restorable
+        } else {
+            DeleteKind::Permanent
+        };
+        self.stored_delete = Some((stored, kind));
+        kind
     }
 
     /// The stored template this editor holds, as the store has it now.
@@ -974,7 +989,7 @@ impl Editor {
     /// add menu, the hint and the footer with Save. `busy` is whether the dialog has any write in flight, this editor's
     /// or a ⚡ or number-key write.
     pub(super) fn render(
-        &self,
+        &mut self,
         busy: bool,
         bindings: &Bindings,
         catalog: Option<&[LaunchCatalogModel]>,
@@ -1213,7 +1228,7 @@ impl Editor {
     /// Duplicate and Delete for a stored template, then Save, at its right. Save is busy, and so greyed and inert while
     /// keeping focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`).
     fn footer(
-        &self,
+        &mut self,
         busy: bool,
         weak: &WeakEntity<TemplatesDialog>,
         palette: &Palette,

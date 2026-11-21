@@ -4,8 +4,9 @@
 //!
 //! Templates belong to the helm, one catalog for every host it manages. The
 //! helm checks only a template's shape when storing it (a usable name,
-//! fields of a bounded size, editable commands, no unknown field); whether its fields apply is
-//! decided when it is applied, against the launcher as it is then
+//! fields of a bounded size, editable commands with whole unquoted
+//! placeholders, no unknown field). Whether its fields apply is decided
+//! when it is applied, against the launcher as it is then
 //! (`farhelm_proto::launcher::apply_template`). Writes come from these routes
 //! and from an agent's `farhelm agent template` verbs, which share
 //! [`store_template`] and [`remove_template`] with them; an agent's write
@@ -246,6 +247,67 @@ mod tests {
             .await;
             assert_eq!(status, axum::http::StatusCode::BAD_REQUEST);
         }
+    }
+
+    /// Partial templates may supply either command before the rest of the
+    /// launch is known. A refused placement must not replace a saved template.
+    #[farhelm_testtrace::test]
+    async fn template_put_refuses_bad_placeholder_placement_without_writing() {
+        use axum::http::StatusCode;
+        use serde_json::json;
+
+        let harness = rest_harness::idle_helm().await;
+        let path = "/api/templates/partial";
+        let fields =
+            json!({"command": "tool {farhelm_args}", "resume_command": "tool {conversation}"});
+        let (status, saved) = request(&harness, "PUT", path, Some(fields.clone())).await;
+        assert_eq!(status, StatusCode::OK, "{saved}");
+        assert_eq!(saved["fields"], fields);
+        let saved =
+            serde_json::from_value::<farhelm_proto::launcher::LaunchTemplate>(saved).unwrap();
+        assert_eq!(
+            harness.store.launch_templates().await.unwrap().as_slice(),
+            std::slice::from_ref(&saved)
+        );
+
+        for (key, label) in [
+            ("command", "launch command"),
+            ("resume_command", "resume command"),
+        ] {
+            for invalid in ["tool '{cwd}'", "tool --dir={cwd}"] {
+                let mut rejected = fields.clone();
+                rejected[key] = json!(invalid);
+                let (status, body) = request(&harness, "PUT", path, Some(rejected)).await;
+                assert_eq!(status, StatusCode::BAD_REQUEST, "{body}");
+                assert!(body.to_string().contains(label), "{body}");
+                assert_eq!(
+                    harness.store.launch_templates().await.unwrap().as_slice(),
+                    std::slice::from_ref(&saved)
+                );
+            }
+        }
+    }
+
+    /// The save rule applies to new writes. A row saved before it must still
+    /// reach the editor with enough information to repair or delete it.
+    #[farhelm_testtrace::test]
+    async fn template_get_returns_a_legacy_quoted_placeholder_as_stored() {
+        let harness = rest_harness::idle_helm().await;
+        let legacy = farhelm_proto::launcher::LaunchTemplate {
+            name: "legacy".into(),
+            fields: farhelm_proto::launcher::TemplateFields {
+                command: Some("tool '{cwd}'".into()),
+                ..Default::default()
+            },
+        };
+        harness
+            .store
+            .put_launch_template(legacy.clone())
+            .await
+            .unwrap();
+        let (status, body) = request(&harness, "GET", "/api/templates", None).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(body["templates"], serde_json::json!([legacy]));
     }
 
     /// A GUI or old client's whole-template PUT still accepts true, false and

@@ -448,6 +448,29 @@ fn a_template_failing_save_rules_is_deleted_permanently(cx: &mut TestAppContext)
     assert!(!drawn(cx, "templates-undo-notice"));
 }
 
+/// A template saved before placeholder checks can still open with its command
+/// intact. Delete is permanent because Undo would have to save that command.
+/// A replacement under the same name changes the label on the next frame.
+#[gpui::test]
+fn a_template_with_a_quoted_placeholder_can_be_opened_and_deleted(cx: &mut TestAppContext) {
+    let mut list = templates();
+    let command = "tool '{cwd}'";
+    list[2].fields.command = Some(command.into());
+    let (mut helm, cx) = open_header(cx, &list, None);
+    open_editor(&mut helm, "template-open-webbuilder", cx);
+    assert_eq!(draft(cx).fields.command.as_deref(), Some(command));
+    assert!(painted(cx).contains("Delete permanently"));
+    let mut repaired = list.clone();
+    repaired[2].fields.command = Some("tool {cwd}".into());
+    push(&mut helm, &repaired, Availability::Available, cx);
+    assert!(!painted(cx).contains("Delete permanently"));
+    assert!(drawn(cx, "templates-delete"));
+    push(&mut helm, &list, Availability::Available, cx);
+    assert!(painted(cx).contains("Delete permanently"));
+    delete_open(&mut helm, "webbuilder", &list[..2], cx);
+    assert!(!drawn(cx, "templates-undo-notice"));
+}
+
 /// SPEC.md: "The label the user saw decides: a click on "Delete permanently" never offers undo, and a click on plain
 /// "Delete" always does, even if the template list changed in between". The press hands the dialog the kind its
 /// label was drawn with; this drives that hand-over directly with a kind the store would no longer decide. Specified:

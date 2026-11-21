@@ -521,7 +521,9 @@ pub fn check_new_template_name(name: &str) -> Result<(), String> {
 /// literal message data, while other controls are refused.
 /// Names must also survive use as a URL segment: `.` and `..` navigate instead
 /// of naming a template, even when percent-encoded.
-/// Whether fields apply is decided against the launcher when applied.
+/// A command placeholder's placement can be checked without knowing the rest
+/// of the launch. Requirements that depend on the assembled launch, such as
+/// which placeholders the command may use, are checked when it is launched.
 pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if (template.fields.host.is_some() && template.fields.launch_target().is_some())
         || (template.fields.recipe.is_some() && template.fields.target.is_some())
@@ -566,19 +568,18 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if name.chars().any(char::is_control) {
         return Err("a template name cannot contain control characters".to_string());
     }
-    for (field, command) in [
+    let command = template.fields.command.as_deref();
+    let resume = template
+        .fields
+        .resume_command
+        .as_ref()
+        .and_then(|value| value.as_deref());
+    for (field, text) in [
         ("session name", template.fields.name.as_deref()),
-        ("launch command", template.fields.command.as_deref()),
-        (
-            "resume command",
-            template
-                .fields
-                .resume_command
-                .as_ref()
-                .and_then(|value| value.as_deref()),
-        ),
+        ("launch command", command),
+        ("resume command", resume),
     ] {
-        if command.is_some_and(|command| command.chars().any(crate::text::is_presentation_unsafe)) {
+        if text.is_some_and(|text| text.chars().any(crate::text::is_presentation_unsafe)) {
             return Err(format!(
                 "a template's {field} cannot contain control or invisible formatting characters"
             ));
@@ -589,6 +590,13 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
         return Err(format!(
             "a template's fields are {bytes} bytes, exceeding the {TEMPLATE_FIELDS_CAP}-byte limit"
         ));
+    }
+    // Only parse bounded commands. A partial template can leave the agent or
+    // opt-in to Resume to another template or the launcher's draft.
+    for (field, command) in [("launch command", command), ("resume command", resume)] {
+        if let Some(command) = command {
+            crate::command_shell::validate_command_placeholders(field, command)?;
+        }
     }
     Ok(())
 }
@@ -2392,12 +2400,57 @@ mod tests {
             },
             TemplateFields {
                 command: Some("echo '世界 ❤️'".into()),
-                resume_command: Some(Some("tool --resume '{conversation}'".into())),
+                resume_command: Some(Some("tool --resume {conversation}".into())),
                 ..Default::default()
             },
         ] {
             check_template_shape(&template("ordinary", fields)).unwrap();
         }
+    }
+
+    /// Every template writer shares this check. A placeholder's quoting and
+    /// joining can be judged on either command alone, even for a partial template.
+    #[test]
+    fn template_save_checks_placeholder_placement_in_both_commands() {
+        for (word, valid) in [("{cwd}", true), ("'{cwd}'", false), ("--dir={cwd}", false)] {
+            for (field, fields) in [
+                (
+                    "launch command",
+                    TemplateFields {
+                        command: Some(format!("tool {word}")),
+                        ..Default::default()
+                    },
+                ),
+                (
+                    "resume command",
+                    TemplateFields {
+                        resume_command: Some(Some(format!("tool {word}"))),
+                        ..Default::default()
+                    },
+                ),
+            ] {
+                let result = check_template_shape(&template("partial", fields));
+                if valid {
+                    assert_eq!(result, Ok(()), "{field}: {word}");
+                } else {
+                    let refusal = result.unwrap_err();
+                    assert!(
+                        refusal.starts_with(field) && refusal.contains("{cwd}"),
+                        "{refusal}"
+                    );
+                }
+            }
+        }
+        // These rules depend on where the completed launch uses the command.
+        check_template_shape(&template(
+            "partial",
+            TemplateFields {
+                command: Some("tool {farhelm_args} {conversation}".into()),
+                resume_command: Some(Some("tool {cwd}".into())),
+                ..Default::default()
+            },
+        ))
+        .unwrap();
     }
 
     /// A saved session name is relayed into a single-line launcher field.
