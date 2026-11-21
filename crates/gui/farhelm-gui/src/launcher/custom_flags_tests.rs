@@ -272,7 +272,7 @@ fn a_custom_model_keeps_its_effort(cx: &mut TestAppContext, typed: &str, id: &st
         launch_help(cx).is_some_and(|help| help.contains("custom permission flags")),
         "the premise: {typed:?} leaves the launch incomplete"
     );
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         focused(cx, Field::Model),
         "the premise: the click focused the model field"
@@ -375,7 +375,7 @@ fn a_trailing_space_keeps_the_words_and_a_new_word_changes_them(cx: &mut TestApp
     assert_eq!(body["launch"]["permission_flags"], json!(["--mode", "ask"]));
     refuse(&mut helm, cx, first.id);
 
-    click_in_body(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags"
@@ -396,7 +396,7 @@ fn a_trailing_space_keeps_the_words_and_a_new_word_changes_them(cx: &mut TestApp
         "the space survived the press"
     );
 
-    click_in_body(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags again"
@@ -475,7 +475,7 @@ fn sends_the_stored_words_then_an_edits(
     );
     refuse(&mut helm, cx, first.id);
 
-    click_in_body(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags");
     assert!(
         focused(cx, Field::Flags),
         "the premise: the click focused the flags"

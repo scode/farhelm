@@ -4,8 +4,8 @@
 //!
 //! How it behaves, as the old one did:
 //!
-//! - **Closed**, the field shows the chosen model, or "Harness default", with a hint beside it saying how many catalog
-//!   models the agent type has. Field and list are at most 440 pixels wide.
+//! - **Closed**, the field shows the chosen model, or "Harness default", with a label note saying how many catalog
+//!   models the agent type has. The field grows within the model and permissions row, and the list matches its width.
 //! - **Focusing it** empties it for typing and opens the list under it: the default, the agent type's catalog models
 //!   (or every type's, after the "Show every harness's models" row), filtered by what is typed. The list is the layer
 //!   manager's non-focusing popover, so focus and every key stay in the field; Up and Down move the highlighted row
@@ -33,7 +33,11 @@ use gpui::{
 
 use super::changed::Changed;
 use super::field_list::{Drawn, FieldList};
-use super::{Launcher, choices::status_line, row};
+use super::{
+    Launcher,
+    choices::{MODEL_ROW_CONTROL_HEIGHT, status_line},
+    label_with_note, row,
+};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Field, LaunchDraft, harness_label};
@@ -41,11 +45,8 @@ use crate::launcher::model::{
     ModelEnterTarget, ModelOption, NEEDS_HARNESS, OLDER_MODELS, family_target, model_enter_target,
     model_options, owned_elsewhere_message,
 };
-use crate::theme::{self, metrics};
+use crate::theme;
 
-/// `.launch-composer-listbox`: `width: min(100%, 440px)`; the field is held to the same width so the list, as wide as
-/// its anchor, matches it.
-const MAX_WIDTH: f32 = 440.;
 /// What the model field and its first row say for the agent type's own configured model.
 pub(super) const HARNESS_DEFAULT: &str = "Harness default";
 /// The list's element id, which tests find it by.
@@ -307,36 +308,26 @@ impl Launcher {
                     "Model: type to filter, pick a family with its short name, or enter a custom model id",
                 ),
             )
+            .height(MODEL_ROW_CONTROL_HEIGHT)
             .monospace()
             .on_vertical(move |arrow, window, cx| {
                 let _ = weak.update(cx, |launcher, cx| launcher.model_arrow(arrow, window, cx));
             });
-        let control = div()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap(px(10.))
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_w_0()
-                    .max_w(px(MAX_WIDTH))
-                    .child(field)
-                    .child(tracker),
+        let control = div().relative().min_w_0().child(field).child(tracker);
+        let note = div()
+            .id("launcher-model-hint")
+            .role(Role::Label)
+            .aria_label(SharedString::from(hint.clone()))
+            .child(hint);
+        let mut rows = vec![
+            row(
+                "launcher-model-row",
+                label_with_note("Model", note, palette),
+                control,
+                palette,
             )
-            .child(
-                div()
-                    .id("launcher-model-hint")
-                    .role(Role::Label)
-                    .aria_label(SharedString::from(hint.clone()))
-                    .flex_none()
-                    .text_size(metrics::TEXT_SM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child(hint),
-            );
-        let mut rows =
-            vec![row("launcher-model-row", "Model", control, palette).into_any_element()];
+            .into_any_element(),
+        ];
         rows.extend(self.changed_marker(Changed::Model, palette));
         if let Some(error) = &self.model_field.error {
             rows.push(

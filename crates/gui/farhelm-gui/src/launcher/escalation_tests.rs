@@ -11,7 +11,7 @@ use farhelm_proto::{LaunchHarness, LaunchPermission};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 
 use super::draft::LaunchDraft;
-use super::view_tests::{draft, launcher_on, read};
+use super::view_tests::{click_in_body, draft, launcher_on, read};
 use crate::test_support::{self, keys, settle};
 
 /// The banner's words for an explicit Guarded moved to OpenCode, which runs only in YOLO.
@@ -203,7 +203,7 @@ fn a_cross_agent_model_pick_shows_the_escalation_banner(cx: &mut TestAppContext)
     assert!(before.agent.permissions_explicit);
     assert_eq!(banner(cx), None);
 
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     test_support::click(cx, "launcher-model-show-all");
     test_support::click(cx, "launcher-model-option-Pi-pi-warning-model");
     assert_eq!(draft(cx).agent.model.as_deref(), Some("pi-warning-model"));

@@ -466,7 +466,7 @@ fn managed_checkout_hides_the_folder_until_a_repository_is_chosen(cx: &mut TestA
 #[gpui::test]
 fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .repository_focused(window, cx)),
@@ -540,7 +540,7 @@ fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext
 #[gpui::test]
 fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     test_support::keys(cx, "a c m e / q u x");
     test_support::advance(cx, Duration::from_millis(160));
     let reads = to(&sent(&mut helm, cx), REPOSITORIES);
@@ -560,7 +560,7 @@ fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
 #[gpui::test]
 fn repository_arrows_keep_the_highlight_visible_through_wrapping(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
     test_support::advance(cx, Duration::from_millis(160));
@@ -611,7 +611,7 @@ fn repository_arrows_keep_the_highlight_visible_through_wrapping(cx: &mut TestAp
 #[gpui::test]
 fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     test_support::advance(cx, Duration::from_millis(160));
     let reads = to(&sent(&mut helm, cx), REPOSITORIES);
     assert_eq!(reads.len(), 1, "the premise: discovery is waiting");
@@ -640,7 +640,7 @@ fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppCon
         "the premise: the chosen repository has a ready preview"
     );
 
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(read(cx, |launcher, window, cx| launcher
         .name
         .focus_handle(cx)
@@ -687,7 +687,7 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
         name_of(cx, "launcher-search-message").as_deref(),
         Some("No host matches")
     );
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     assert!(!super::view_tests::has_node(cx, "launcher-search-results"));
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
@@ -884,7 +884,7 @@ fn a_gh_query_shows_its_scan_note_and_holds_launch_until_a_pick(cx: &mut TestApp
             && name_of(cx, "launcher-repository-note").is_none(),
         "with the query still in the box, its note stays under the box and is not repeated under the field"
     );
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     test_support::keys(cx, "a c m e / b a r");
     test_support::click(cx, "launcher-repository-option-acme/bar");
     assert_eq!(
@@ -1026,7 +1026,7 @@ fn what_a_preview_answers_for_asks_again_and_late_answers_never_apply(cx: &mut T
     edit(cx, |draft| draft.choose_repository(repo("acme", "bar")));
     let first = to(&sent(&mut helm, cx), PREVIEW);
     assert_eq!(first.len(), 1, "the premise: the first preview is out");
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     let name_focused = |cx: &mut VisualTestContext| {
         read(cx, |launcher, window, cx| {
             launcher.name.focus_handle(cx).is_focused(window)
@@ -1881,7 +1881,7 @@ fn a_guarded_wait_does_not_follow_a_taken_base_name(cx: &mut TestAppContext) {
 #[gpui::test]
 fn an_edit_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppContext) {
     let (mut helm, cx, preview) = guarded_waiting(cx);
-    click_in_body(cx, "launcher-prompt-row");
+    click_in_body(cx, "launcher-prompt");
     test_support::keys(cx, "h i");
     assert_eq!(
         draft(cx).prompt,
@@ -1961,7 +1961,7 @@ fn another_preview_cancels_the_guarded_answers_waiting_launch(cx: &mut TestAppCo
 #[gpui::test]
 fn escape_closes_the_suggestions_before_the_launcher(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
-    test_support::click(cx, "launcher-repository-row");
+    click_in_body(cx, "launcher-repository");
     assert!(
         cx.debug_bounds("launcher-repository-list").is_some(),
         "the premise: the list is open"

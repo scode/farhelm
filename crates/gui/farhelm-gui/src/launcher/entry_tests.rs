@@ -22,7 +22,7 @@ use super::entry::HOST_NOT_CARRIED;
 use super::entry::{new_available, open_clone, open_new, open_new_named, open_replace_with};
 use super::environment_launch_tests::{answer_except, catalog};
 use super::launch_tests::{HostChange, created, creates, start_host_change};
-use super::view_tests::{draft, fixture_hosts, name_of, read, shown_refusal};
+use super::view_tests::{click_in_body, draft, fixture_hosts, name_of, read, shown_refusal};
 use crate::actions::NewSession;
 use crate::layers;
 use crate::local_state;
@@ -444,7 +444,7 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
         ("/srv/work<U+200B>box".into(), "fix<U+202E> login".into())
     );
 
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(read(cx, |launcher, window, cx| launcher
         .folder
         .focus_handle(cx)
@@ -454,7 +454,7 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
     // The recent-folder list covers the name field. Escape dismisses the list while keeping Clone open.
     test_support::keys(cx, "backspace escape");
 
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(read(cx, |launcher, window, cx| launcher
         .name
         .focus_handle(cx)
@@ -484,7 +484,7 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
     // A hidden character typed or pasted into the field is spelled out at once (the edit resyncs the field), and a
     // spelling typed by hand stands for the character it names.
     assert!(clone(cx, "e"), "the source can be copied again");
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(read(cx, |launcher, window, cx| launcher
         .name
         .focus_handle(cx)
@@ -528,7 +528,7 @@ fn a_managed_clones_numbered_name_spells_out_its_source_title(cx: &mut TestAppCo
         read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),
         "fix<U+202E> login-clone-2"
     );
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(read(cx, |launcher, window, cx| launcher
         .name
         .focus_handle(cx)

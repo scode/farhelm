@@ -10,12 +10,12 @@
 //!   press of it has to say pinned under them, as the old footer's column did. Save as template opens its inline panel
 //!   at the end of the body (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
 //! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
-//!   ([`recents`]), the destination rows (Where, Runs on, Host, a managed checkout's repository and preview, Folder,
+//!   ([`recents`]), the Destination card (Where, Runs on, Host, a managed checkout's repository and preview, Folder,
 //!   Name; with a new environment chosen, Runs on's Recipe, Container host and note stand in for Host, a folder
 //!   destination is its fixed home, and a managed checkout is cloned inside it: [`placement`]), the
 //!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
-//!   (SPEC.md: "switching tabs keeps each tab's draft"). The Agent tab's harness, effort and permission choices are
-//!   drawn by [`choices`].
+//!   (SPEC.md: "switching tabs keeps each tab's draft"). Where the Agent tab offers model, effort and permissions,
+//!   [`choices`] keeps them together and wraps entire fields to fit the available width.
 //! - **Input to edits.** Every field's change becomes one of the draft's edit methods; nothing here decides a launch
 //!   rule. A field the draft changes on its own (Reset choices clearing the wrapper prefix) is put back in step after
 //!   the edit.
@@ -122,11 +122,9 @@ pub(in crate::launcher) mod yolo_question;
 
 /// `.launch-composer-backdrop .create-session-form`: `width: min(960px, 100%)`.
 const WIDTH: f32 = 960.;
-/// `.launch-composer-row`: the label column (`grid-template-columns: 104px minmax(0, 1fr)`), and the gaps between
-/// rows and between a label and its control.
-const LABEL_COLUMN: f32 = 104.;
+/// The gap between form fields. Each label sits close to the field it describes.
 const ROW_GAP: f32 = 12.;
-const LABEL_GAP: f32 = 12.;
+const LABEL_GAP: f32 = 4.;
 /// `.launch-composer-columns`: the destination block and the choices are 20 pixels apart.
 const SECTION_GAP: f32 = 20.;
 /// `.create-session-form .dialog-tile .action-icon`: the header tile's glyph size.
@@ -711,6 +709,7 @@ impl Launcher {
         let wrapper = TextInputState::new(window, cx);
         wrapper.set_placeholder("with-endpoint --profile work --", window, cx);
         let prompt = TextInputState::new_growing(PROMPT_ROWS, window, cx);
+        prompt.set_placeholder(prompt_placeholder(draft.agent.harness), window, cx);
         let flags = TextInputState::new(window, cx);
         let command = TextInputState::new(window, cx);
         let resume = TextInputState::new(window, cx);
@@ -1064,6 +1063,8 @@ impl Launcher {
     /// value is left alone, so its caret and selection stay where they were. Edits also resync fields whose spelling
     /// can change, for example when a paste introduces an invisible character or completes its spelling.
     fn sync_fields(&self, window: &mut Window, cx: &mut Context<Self>) {
+        self.prompt
+            .set_placeholder(prompt_placeholder(self.draft.agent.harness), window, cx);
         let present = |which: Input| which.present(&self.draft, &self.opened);
         for (state, shown) in [
             (&self.wrapper, present(Input::Wrapper)),
@@ -1474,12 +1475,8 @@ impl Launcher {
     }
 }
 
-/// One labelled row: the label in the left column, its control beside it (`.launch-composer-row`). `selector` names the
-/// row twice: as its debug selector, which the in-process tests find a field by, and as its element id, which the
-/// test-automation bridge sees (a debug selector is invisible to it). The id is what lets a docs screenshot's crop take
-/// in the label column: the controls inside have ids of their own, but their union starts at the control column, so a
-/// crop around them alone cuts "Folder", "Harness" and the other labels off. The label is usually its words; the Name
-/// row's carries a launch template's pill beside them.
+/// A launcher field keeps its label above the control, leaving the control the full width of its column.
+/// `selector` names the whole field in tests and docs captures so a crop includes the label and any note beside it.
 fn row(
     selector: &'static str,
     label: impl IntoElement,
@@ -1490,50 +1487,67 @@ fn row(
         .id(selector)
         .debug_selector(move || selector.into())
         .flex()
-        .items_start()
+        .flex_col()
         .gap(px(LABEL_GAP))
         .min_w_0()
         .child(
             div()
-                .flex_none()
-                .w(px(LABEL_COLUMN))
-                // Level with the control's text: a field's padding above it.
-                .pt(px(8.))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.fg_1))
                 .child(label),
         )
-        .child(div().flex_1().min_w_0().child(control))
+        .child(div().min_w_0().child(control))
 }
 
-/// A quiet line of help under a control, in the control's column.
+/// Put brief guidance beside the label while the control keeps its width.
+fn label_with_note(label: &'static str, note: impl IntoElement, palette: &theme::Palette) -> Div {
+    div()
+        .flex()
+        .flex_wrap()
+        .items_baseline()
+        .gap(px(4.))
+        .child(format!("{label} ·"))
+        .child(div().text_color(theme::color(palette.fg_2)).child(note))
+}
+
+/// A template, search pick or harness chip can change who will receive the prompt while the launcher stays open.
+fn prompt_placeholder(harness: Option<LaunchHarness>) -> String {
+    let name = harness.map_or("the agent", harness_label);
+    format!("What should {name} start on?")
+}
+
+/// A quiet line of help under a control.
 ///
 /// It is a labelled node named by its words, since plain text is not in the accessibility tree and a screen reader
 /// would otherwise never hear it. Its id is its words: no two help lines of one launcher say the same thing.
 fn help_line(text: impl Into<SharedString>, palette: &theme::Palette) -> Stateful<Div> {
+    labelled_note(text).text_color(theme::color(palette.fg_1))
+}
+
+/// Keep a standalone sentence accessible wherever the form draws it, including beside a field label.
+fn labelled_note(text: impl Into<SharedString>) -> Stateful<Div> {
     let text: SharedString = text.into();
-    help_line_container(palette)
+    div()
         .id(ElementId::Name(text.clone()))
         .role(Role::Label)
         .aria_label(text.clone())
+        .text_size(metrics::TEXT_SM)
         .child(text)
 }
 
-/// Align help with its control and inherit the same styling for host-supplied text.
+/// The quiet ink and size shared by ordinary help and help that names a host value.
 fn help_line_container(palette: &theme::Palette) -> Div {
     div()
-        .pl(px(LABEL_COLUMN + LABEL_GAP))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.fg_1))
 }
 
-/// A section's heading (`.launch-composer-section-label`). Elsewhere the old app drew a rule after it, but the
-/// launcher's stylesheet took that away (`::after { content: none }`), so none is drawn here.
+/// The small heading for a group of launcher fields. The card supplies the outline.
 fn section_label(text: &'static str, palette: &theme::Palette) -> Div {
     div()
-        .text_size(metrics::TEXT_MD)
+        .text_size(px(11.))
         .font_weight(FontWeight::SEMIBOLD)
-        .text_color(theme::color(palette.fg_0))
+        .text_color(theme::color(palette.fg_1))
         .child(text)
 }
 
@@ -1794,10 +1808,8 @@ impl Launcher {
         format!("{} {}", self.verb(cx), sentence.accessible_name()).into()
     }
 
-    /// The Agent tab's fields that exist so far, in the old order: the harness, effort and permission choices (with a
-    /// failed catalog read said under the harness row), the conversation selector and the initial prompt once an agent
-    /// that offers them is chosen (the prompt not in Restart with, which holds it), the Custom flags while Custom is
-    /// chosen, the wrapper prefix, what the last choice changed, and a note for an agent type that lacks something.
+    /// The Agent tab starts with its harness and model choices. What appears below depends on the harness and the
+    /// mode. Restart with holds the agent type and prompt, and Custom permissions adds an editor for its flags.
     fn agent_fields(
         &self,
         model: Option<Vec<AnyElement>>,
@@ -1806,17 +1818,15 @@ impl Launcher {
     ) -> Vec<AnyElement> {
         let mut fields = Vec::new();
         let harness = self.draft.agent.harness;
-        let mut choices = self.choice_rows(palette, cx);
-        // Under the harness row, where the old launcher had the catalog's failure and then the model, or first when
-        // Restart with holds the agent type and draws no harness row.
-        let at = usize::from(!self.draft.holds(Field::AgentType));
-        let mut after_harness = Vec::new();
-        if let Some(error) = &self.catalog_error {
-            after_harness.push(self.catalog_error_line(error, palette, cx));
+        if !self.draft.holds(Field::AgentType) {
+            fields.push(self.harness_choices(palette, cx).into_any_element());
         }
-        after_harness.extend(model.into_iter().flatten());
-        choices.splice(at..at, after_harness);
-        fields.extend(choices);
+        if let Some(error) = &self.catalog_error {
+            fields.push(self.catalog_error_line(error, palette, cx));
+        }
+        if model.is_some() || !harness.is_some_and(LaunchHarness::is_shell) {
+            fields.push(self.model_choices(model, palette, cx).into_any_element());
+        }
         if let Some(harness) = harness.filter(|harness| harness.offers_named_conversation()) {
             let required = matches!(&self.draft.mode, Mode::RestartWith(restart) if restart.conversation_required);
             let label = conversation_label(harness);
@@ -1864,23 +1874,21 @@ impl Launcher {
             fields.push(
                 row(
                     "launcher-prompt-row",
-                    "Initial prompt",
+                    label_with_note(
+                        "Initial prompt",
+                        labelled_note(format!(
+                            "sent once, as {}'s first message",
+                            harness_label(harness)
+                        )),
+                        palette,
+                    ),
                     self.launcher_input(
                         "launcher-prompt",
                         &self.prompt,
                         "Initial prompt",
-                        HoverHelp::tooltip("Initial prompt: sent once when this session starts"),
-                    ),
-                    palette,
-                )
-                .into_any_element(),
-            );
-            fields.push(
-                help_line(
-                    format!(
-                        "Sent once, as {}'s first message when it starts. Restart, Clone and Replace do not send it \
-                         again.",
-                        harness_label(harness)
+                        HoverHelp::tooltip(
+                            "Initial prompt: sent once when this session starts. Restart, Clone and Replace do not send it again.",
+                        ),
                     ),
                     palette,
                 )
@@ -1893,7 +1901,6 @@ impl Launcher {
             if !self.draft.prompt.is_empty() {
                 fields.push(
                     div()
-                        .pl(px(LABEL_COLUMN + LABEL_GAP))
                         .child(
                             Button::new(
                                 "launcher-clear-prompt",
@@ -1914,14 +1921,18 @@ impl Launcher {
         fields.push(
             row(
                 "launcher-wrapper-row",
-                "Wrapper prefix",
+                label_with_note(
+                    "Wrapper prefix",
+                    labelled_note("runs through Bash before the agent command"),
+                    palette,
+                ),
                 self.launcher_input(
                     "launcher-wrapper",
                     &self.wrapper,
                     "Wrapper prefix",
                     HoverHelp::tooltip(
-                        "Wrapper prefix: Bash text before Farhelm's agent command; quotes and expansions keep their \
-                         shell meaning; no placeholders",
+                        "Wrapper prefix: Bash text before Farhelm's agent command. Leave blank for none. Quotes and \
+                         expansions keep their shell meaning. There are no placeholders.",
                     ),
                 )
                 .monospace(),
@@ -1938,13 +1949,6 @@ impl Launcher {
                 cx,
             ));
         }
-        fields.push(
-            help_line(
-                "Runs through Bash before the agent command; blank means none.",
-                palette,
-            )
-            .into_any_element(),
-        );
         // Said as soon as the prefix stops parsing, not only after a press (`launch-composer-choice-error`), so the
         // user sees which field Launch's reason is about while still typing in it.
         let wrapper_error = (!self.draft.agent.wrapper.is_empty())
@@ -1958,7 +1962,6 @@ impl Launcher {
                     .id("launcher-wrapper-error")
                     .role(Role::Status)
                     .aria_label(words.clone())
-                    .pl(px(LABEL_COLUMN + LABEL_GAP))
                     .text_size(metrics::TEXT_SM)
                     .text_color(theme::color(palette.warn))
                     .child(words)
@@ -2161,7 +2164,6 @@ impl Launcher {
                 let (on_resume, on_resume_enter) = (weak.clone(), weak.clone());
                 fields.push(
                     div()
-                        .pl(px(LABEL_COLUMN + LABEL_GAP))
                         .child(
                             Checkbox::new(
                                 "launcher-resume",
@@ -2261,7 +2263,6 @@ impl Render for Launcher {
             self.checkout_folder_field()
         } else if self.draft.holds(Field::Destination) || self.draft.target.is_some() {
             div()
-                .pt(px(8.))
                 .font_family(crate::assets::TERMINAL_FONT)
                 .text_size(metrics::TEXT_MD)
                 .child(
@@ -2297,8 +2298,12 @@ impl Render for Launcher {
                 .child(tracker)
                 .into_any_element()
         };
-        // An unnamed managed checkout's name field shows the `<repo>-N` it will get.
-        let placeholder = self.checkout_name_placeholder(cx);
+        // An unnamed managed checkout's name field reserves the placeholder for the `<repo>-N` it will get.
+        let placeholder = if self.draft.checkout.is_none() {
+            "Left empty, Farhelm names it".to_owned()
+        } else {
+            self.checkout_name_placeholder(cx)
+        };
         if placeholder != self.checkout.name_placeholder {
             self.name.set_placeholder(placeholder.clone(), window, cx);
             self.checkout.name_placeholder = placeholder;
@@ -2309,17 +2314,11 @@ impl Render for Launcher {
             // In a managed checkout, a launch template's base name says so beside the label and, once taken, under
             // the field (`crate::templates::checkout_name`).
             let template_base = checkout_name::template_base(&self.draft);
-            let caption = div()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap(px(6.))
-                .child("Name (optional)")
-                .children(
-                    template_base
-                        .as_ref()
-                        .map(|_| checkout_name::pill(palette, window, cx)),
-                );
+            let caption = label_with_note("Name", "optional", palette).children(
+                template_base
+                    .as_ref()
+                    .map(|_| checkout_name::pill(palette, window, cx)),
+            );
             let taken = template_base
                 .filter(|(_, taken)| *taken)
                 .map(|(base, _)| checkout_name::taken_note(&base, palette, window, cx));
@@ -2377,7 +2376,12 @@ impl Render for Launcher {
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))
-            .child(section_label("Destination", palette))
+            .p(px(12.))
+            .bg(theme::color(palette.card))
+            .border_1()
+            .border_color(theme::color(palette.border_dim))
+            .rounded(px(6.))
+            .child(section_label("DESTINATION", palette))
             .children(where_row)
             .children(self.replacement_checkout_warning(palette, cx))
             .children(placement)
@@ -2405,6 +2409,7 @@ impl Render for Launcher {
                 "Launch kind",
                 HoverHelp::tooltip("Launch an agent, a shell, or a custom command"),
             )
+            .underlined()
             .tab(TabOption::new(
                 "Agent",
                 HoverHelp::tooltip(

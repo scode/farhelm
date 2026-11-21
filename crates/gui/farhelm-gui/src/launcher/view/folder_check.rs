@@ -37,10 +37,10 @@ use std::time::Duration;
 use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::session_requests::{BrowseDirectoryBody, BrowseDirectoryReply};
 use farhelm_proto::ui_channel::HostStateView;
-use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, div, px};
+use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, div};
 
+use super::Launcher;
 use super::latest::Latest;
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::display_name;
 use crate::operations;
@@ -230,7 +230,6 @@ impl Launcher {
             .text(".");
         Some(
             div()
-                .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.warn_bright))
                 .child(words)

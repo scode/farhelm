@@ -35,7 +35,7 @@ use gpui::{
 };
 use std::rc::Rc;
 
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher, after_reads, row};
+use super::{Launcher, after_reads, row};
 use crate::components::{CommandWell, HoverHelp, Role};
 use crate::environment_ui::ProviderUi;
 use crate::host_text::{HostSentence, HostText};
@@ -232,7 +232,6 @@ impl Launcher {
                 .debug_selector(|| "launcher-place-note".into())
                 .role(Role::Status)
                 .aria_label(sentence.accessible_name())
-                .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.fg_1))
                 .child(sentence)
@@ -263,7 +262,6 @@ impl Launcher {
         Some(
             div()
                 .debug_selector(|| "launcher-registration-note".into())
-                .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .flex()
                 .flex_col()
                 .gap(px(6.))

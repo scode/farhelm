@@ -14,15 +14,14 @@
 //!   tab applied it and launched (SPEC.md, "Creation": "Enter on a choice button (launch-kind tab, ...) applies that
 //!   choice and then launches"). A held Enter does nothing, so holding it never launches twice. Without `on_enter`,
 //!   Enter chooses. Space and a click choose.
-//! - **The look**: a row of tabs over a one-pixel rule, the chosen tab filled with the accent and its ink inverted, the
-//!   others quiet text, 14-pixel semibold words (`.launch-kind-tab`).
+//! - **The look**: a row of tabs over a one-pixel rule. The default draws the chosen tab with the accent fill and
+//!   inverse ink. The launcher uses [`TabStrip::underlined`] to put the accent beneath its chosen tab.
 //!
 //! It holds no state: its owner says which tab is chosen and hears each choice. Focus follows the platform's control
 //! rule ([`crate::focus::OnPress::Control`]), as the other choice controls do.
 //!
-//! Built for one consumer, the launcher, and documented for the next: a second strip of choices extends this one rather
-//! than adding another. The session view's terminal tabs are not one: each tab carries its own close button, so they
-//! are the terminal set's own pressed-state buttons.
+//! The launcher and Add Host both use this strip to choose a form. The session view's terminal tabs each carry a close
+//! button, so they are the terminal set's own pressed-state buttons.
 
 use std::rc::Rc;
 
@@ -74,6 +73,7 @@ pub struct TabStrip<V: Clone + PartialEq + 'static> {
     help: HoverHelp,
     tabs: Vec<TabOption<V>>,
     chosen: Option<V>,
+    underlined: bool,
     on_choose: Option<OnChoose<V>>,
     on_enter: Option<OnEnter>,
 }
@@ -92,6 +92,7 @@ impl<V: Clone + PartialEq + 'static> TabStrip<V> {
             help,
             tabs: Vec::new(),
             chosen: None,
+            underlined: false,
             on_choose: None,
             on_enter: None,
         }
@@ -106,6 +107,13 @@ impl<V: Clone + PartialEq + 'static> TabStrip<V> {
     /// Which tab is chosen.
     pub fn chosen(mut self, chosen: V) -> Self {
         self.chosen = Some(chosen);
+        self
+    }
+
+    /// Use a compact selection underline for tabs embedded between the launcher's form sections. The underline
+    /// takes no layout space, so changing the choice keeps the tabs and the form below them in place.
+    pub fn underlined(mut self) -> Self {
+        self.underlined = true;
         self
     }
 
@@ -211,8 +219,14 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
             on_choose: self.on_choose.clone(),
         });
         let mut tabs = Vec::with_capacity(self.tabs.len());
+        let (pad_x, gap) = if self.underlined {
+            (4., 12.)
+        } else {
+            (TAB_PAD.1, TAB_GAP)
+        };
         for (index, tab) in self.tabs.iter().enumerate() {
             let selected = index == chosen;
+            let filled = selected && !self.underlined;
             let ring = focus::shows_ring(&handles[index], window, cx);
             let element = div()
                 .id(ElementId::Name(ids[index].clone()))
@@ -222,19 +236,37 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                 .aria_label(tab.label.clone())
                 .aria_selected(selected)
                 .py(px(TAB_PAD.0))
-                .px(px(TAB_PAD.1))
+                .px(px(pad_x))
                 .rounded_tl(metrics::RADIUS_SM)
                 .rounded_tr(metrics::RADIUS_SM)
-                .text_size(px(TAB_TEXT))
-                .font_weight(FontWeight::SEMIBOLD)
-                .cursor_pointer()
-                .when(selected, |tab| {
-                    tab.bg(theme::color(palette.accent_fill))
-                        .text_color(theme::color(palette.on_fill))
+                .text_size(if self.underlined {
+                    metrics::TEXT_SM
+                } else {
+                    px(TAB_TEXT)
                 })
-                .when(!selected, |tab| tab.text_color(theme::color(palette.fg_1)))
+                .when(selected || !self.underlined, |tab| {
+                    tab.font_weight(FontWeight::SEMIBOLD)
+                })
+                .cursor_pointer()
+                .text_color(theme::color(match (selected, filled) {
+                    (_, true) => palette.on_fill,
+                    (true, false) => palette.fg_bright,
+                    (false, false) => palette.fg_1,
+                }))
+                .when(filled, |tab| tab.bg(theme::color(palette.accent_fill)))
                 .relative()
                 .child(tab.label.clone())
+                .when(selected && self.underlined, |tab| {
+                    tab.child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(2.))
+                            .bg(theme::color(palette.accent_fill)),
+                    )
+                })
                 // The keyboard ring, drawn over the tab since GPUI has no outline, so it moves nothing: the inverse ink
                 // on the chosen tab's fill, the accent elsewhere, as the other controls' rings.
                 .when(ring, |tab| {
@@ -248,7 +280,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                             .border_2()
                             .rounded_tl(metrics::RADIUS_SM)
                             .rounded_tr(metrics::RADIUS_SM)
-                            .border_color(theme::color(if selected {
+                            .border_color(theme::color(if filled {
                                 palette.on_fill
                             } else {
                                 palette.accent
@@ -292,7 +324,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
             .aria_label(self.label.clone())
             .aria_description(self.help.description())
             .flex()
-            .gap(px(TAB_GAP))
+            .gap(px(gap))
             .border_b_1()
             .border_color(theme::color(palette.border))
             .children(tabs)

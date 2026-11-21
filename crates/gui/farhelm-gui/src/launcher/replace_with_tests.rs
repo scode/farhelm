@@ -14,7 +14,7 @@ use super::draft::Mode;
 use super::entry::open_replace_with;
 use super::entry_tests::{destination, environment_window, window_with};
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{Field, draft, focused, name_of, shown_refusal};
+use super::view_tests::{Field, click_in_body, draft, focused, name_of, shown_refusal};
 use crate::local_state;
 use crate::session_list::tests::{change, listing_meta, session};
 use crate::test_support::{self, any_open, keys, settle};
@@ -177,7 +177,7 @@ fn replace_with_explains_the_sources_checkout_under_folder(cx: &mut TestAppConte
         Some("Managed checkout of acme/widget")
     );
 
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(focused(cx, Field::Folder), "the edit goes to Folder");
     keys(cx, "end");
     cx.simulate_input("/tmp");
