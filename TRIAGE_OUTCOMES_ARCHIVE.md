@@ -28742,3 +28742,25 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   fragment). Remove the feedback file and its index entry.
 - Execution: change `xzwzoqtqxsuvrnsnkwwyonlytwtrxynw`, bookmark `pr/spec-container-leftover-failure-lifetime`,
   [PR #4400](https://github.com/scode/farhelm/pull/4400/changes).
+
+## muse-capability-docstring-denies-reporting-and-resume.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The cited docstring
+  survives in `crates/farhelm-proto/src/launch.rs:433-435` (on `offers_named_conversation`): "Muse, Cursor and OpenCode
+  accept a one-time selector but still have no conversation reporting or stored resume command". A few lines below,
+  `captures_named_conversation` (`launch.rs:477-492`) returns true for Muse, and Muse has a supervisor integration
+  (`crates/farhelm-supervisor/src/agent_kind/mod.rs`). The comment is wrong about Muse. Nothing user-visible depends on
+  it.
+- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
+  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
+  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
+  of complexity."
+- Completion criteria: Fix within the current spec what the Assessment describes ("Developer note wrongly says Muse has
+  no conversation reporting"), with a test where practical. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity gate: "if any
+  of these spiral into something very complicated, the executor should make a near term todo item to follow up on it
+  instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback
+  file, and say so in the execution record. Remove the feedback file and its index entry.
+- Execution: change `nwusxmrxtsoqtwzsuouqwqmrnrpoxqtq`, bookmark `pr/muse-capability-docstring`,
+  [PR #4401](https://github.com/scode/farhelm/pull/4401/changes).

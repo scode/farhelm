@@ -420,10 +420,6 @@ consequences.
   registration can bypass a host row's execution lock, but a supported differing-path transition with lasting
   consequences remains missing.
 
-- [`muse-capability-docstring-denies-reporting-and-resume.md`](muse-capability-docstring-denies-reporting-and-resume.md)
-  — A capability docstring still says Muse lacks reporting and Resume command support although the current integration
-  provides both.
-
 - [`automatic-update-mutates-unadopted-skewed-installation.md`](automatic-update-mutates-unadopted-skewed-installation.md)
   — Automatic Update can change a replacement installation at the saved SSH destination before discovering its new
   identity and refusing attachment.

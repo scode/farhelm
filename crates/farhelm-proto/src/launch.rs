@@ -430,9 +430,10 @@ impl LaunchHarness {
 
     /// Whether the launcher can start this harness in a conversation the user names.
     ///
-    /// This says nothing about later Restart: Muse, Cursor and OpenCode accept
-    /// a one-time selector but still have no conversation reporting or stored
-    /// resume command. Keep the match exhaustive when adding a harness.
+    /// This says nothing about later Restart: Cursor and OpenCode accept a
+    /// one-time selector but still have no conversation reporting or stored
+    /// resume command. (Muse has both; see [`Self::captures_named_conversation`].)
+    /// Keep the match exhaustive when adding a harness.
     pub const fn offers_named_conversation(self) -> bool {
         match self {
             LaunchHarness::Claude
