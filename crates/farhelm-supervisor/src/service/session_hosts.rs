@@ -550,7 +550,7 @@ impl SessionHosts {
     /// Carry every host tab's containment selection into Delete, including
     /// placeholders whose tag could not be read. Only adding true tags
     /// would let the agent's scope hide unscoped tabs from the fallback.
-    /// Existing derived-name manager policy is preserved independently.
+    /// A tag recording a scope also gives Delete durable evidence to confirm that scope.
     pub(crate) fn add_tab_scopes(&self, session_id: &str, units: &mut super::sweep::ScopeUnits) {
         for tab in self.tabs.iter().chain(&self.placeholder_tabs) {
             units.extend_tab(

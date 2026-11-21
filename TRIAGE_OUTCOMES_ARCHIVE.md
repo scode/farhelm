@@ -35611,3 +35611,99 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Remove the feedback file and its index entry.
 - Execution: Fixed. jj change `rqurxrnq`, bookmark `plan/triage-supervisor/01-shell-hangup`,
   [draft PR #4520](https://github.com/scode/farhelm/pull/4520/changes).
+
+## gone-terminal-retained-handle-hides-recovery.md
+
+- Outcome: `fix code`.
+- Assessment: When a session's terminal host process dies but the supervisor stays up, the desktop can keep trying to
+  attach to the dead terminal instead of showing the recovery card with Restart/Replace. Verified: Partly confirmed.
+  `status.rs` ~341 sets `terminal_missing = entry.terminal.is_none()`, so a retained handle in `Liveness::Gone` reports
+  false. `host_attach_refusal` lets Gone handles attach, and the forwarder ends with TerminalEnded. Not traced: what the
+  GUI does after TerminalEnded, i.e. whether it really stays reconnecting. SPEC.md ~2304: "When a reachable host reports
+  that a session has no agent terminal, the pane shows ... a recovery card". SPEC_impl.md ~8321: set "when it holds no
+  agent terminal"; an unreadable (Unavailable) handle keeps the flag clear. Gone is not mentioned either way.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code. Report a Gone handle as missing so the recovery card shows,
+  and keep Unavailable as it is. If the fix turns out not to be straightforward, or needs significant additional
+  complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. jj change `mkytnlrp`, bookmark `plan/triage-supervisor/02-lifecycle-and-cleanup`,
+  https://github.com/scode/farhelm/pull/4527/changes.
+
+## trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md
+
+- Outcome: `fix code`.
+- Assessment: Hypothetical. After a failed Restart, if the systemd scope could not be confirmed but the portable sweep
+  came back clean, Farhelm restores the old terminal. A missed descendant could then run beside a later agent. Verified:
+  still at `service/core/host_restart.rs:765-782` (`ScopeKillFailure::Warn`, then `definitive`). Per the record this
+  predates the review range. Nobody has shown the portable sweep missing a descendant. The independent drop check
+  (2026-11-21) disagreed with filtering this: SPEC.md names ordinary programs the sweep misses, and
+  host_restart.rs:765-782 sweeps with Warn and returns definitive, giving up the recorded scope.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: make failed-relaunch cleanup fail, and keep the scope record, when the
+  sweep cannot confirm, per SPEC.md's "Cleanup of failed launches ... follows the same rule" (~2226, 2233-2237); also
+  the same Warn sweep at host_restart.rs:808 (the independent drop check's lead). If the fix turns out not to be
+  straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Both cleanup paths refuse an unconfirmed scope. Durable retry after the session row is deleted is deferred
+  to TODO.md, “Retain failed Restart cleanup when the session was deleted.” jj change `mkytnlrp`, bookmark
+  `plan/triage-supervisor/02-lifecycle-and-cleanup`, https://github.com/scode/farhelm/pull/4527/changes.
+
+## trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md
+
+- Outcome: `fix code`.
+- Assessment: Deleting a session can report cleanup finished without checking a tab's recorded cgroup scope. This
+  happens when the agent itself was unscoped, a tab was scoped, and the host's systemd user manager just timed out or
+  answered "none". A scrubbed tab daemon could survive. Verified: SPEC_impl.md:4688-4697 says Stop, Restart, Delete and
+  tab close on "a tab whose host's tag records a scope" refuse during the probe cooldown and get one re-probe after a
+  definite negative. The code differs. In teardown.rs:402-429, scoped tabs go through `ScopeUnits::extend_tab`, which
+  sweep.rs:1360-1367 files as _derived_. A re-probe happens only for `entry.scope`. sweep.rs:1540-1560 skips derived
+  names silently when the manager is unusable. The code says this is deliberate ("Delete historically treats tab names
+  as derived ... Retain that manager policy"), so this is not SETTLED. Behavior was not reproduced.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix the code: in Delete, treat a tab whose tag records a scope as a
+  recorded unit, and keep the spec as it is. If the fix turns out not to be straightforward, or needs significant
+  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
+  item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. jj change `mkytnlrp`, bookmark `plan/triage-supervisor/02-lifecycle-and-cleanup`,
+  https://github.com/scode/farhelm/pull/4527/changes.
+
+## trailing-delete-held-gone-host-skips-adopted-process-confirmation.md
+
+- Outcome: `fix code`.
+- Assessment: Deleting a session could report it gone while one of its terminal hosts still runs. This happens only if
+  the supervisor's view of a tab's host already says "gone" and its process search missed the live process. Verified:
+  still true. `end_launch_host` (supervisor `service/core/host_launch.rs:705`) treats a runtime's `Liveness::Gone` as
+  ended without signalling the adopted process. Tab close (`host_tabs.rs:1063` `end_tab_host`) deliberately checks the
+  adopted process first, and its comment explains why: "the socket file can go while the host process still runs".
+  Delete (`session_hosts.rs:730/738`), Restart and reclaim call `end_launch_host` directly. SPEC_impl.md ~2147-2157:
+  "whenever that does not confirm the end ... the verified signal to the process the runtime adopted ... so Delete never
+  reports a session gone while one of its hosts may still run". Unverified: a real producer of Gone for a live host
+  (connect converts Gone to Unavailable when the process search finds the host; only a per-row read miss slips through).
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code. Move the Gone-to-adopted-process check from `end_tab_host`
+  into `end_launch_host` so every caller gets it. If the fix turns out not to be straightforward, or needs significant
+  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
+  item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. jj change `mkytnlrp`, bookmark `plan/triage-supervisor/02-lifecycle-and-cleanup`,
+  https://github.com/scode/farhelm/pull/4527/changes.

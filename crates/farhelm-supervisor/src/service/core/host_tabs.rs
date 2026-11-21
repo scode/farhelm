@@ -1050,24 +1050,10 @@ impl Supervisor {
         }
     }
 
-    /// End a tab's host for its close and confirm it ended.
-    ///
-    /// `Supervisor::end_launch_host`, except for a runtime that has already
-    /// judged its host gone: a runtime judges that from its socket (missing,
-    /// or refusing for the refusal window), and the socket file can go while
-    /// the host process still runs. A tab would then be forgotten with its
-    /// record removed and nothing left that finds its host, so for such a
-    /// runtime the process it adopted is ended (or seen gone) by the
-    /// verified signal first, which checks that the process is still that
-    /// host before it signals anything.
+    /// End a tab's host through the shared shutdown and adopted-process checks.
     async fn end_tab_host(&self, session_id: &str, tab: &HostTab) -> Result<(), String> {
         if let Some(fault) = self.seams.faults.tab_host_end_fault() {
             fault()?;
-        }
-        if matches!(tab.host.liveness(), Liveness::Gone)
-            && let Some(adopted) = tab.host.adopted_process()
-        {
-            return self.end_adopted_process(adopted, tab.host.socket()).await;
         }
         self.end_launch_host(Some(&tab.host), tab.host.socket(), session_id)
             .await

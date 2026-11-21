@@ -87,12 +87,10 @@
 //! ([`Supervisor::unwind_failed_host_relaunch`]): a host the start may
 //! have left is ended, the launch's files and process tree are cleaned up,
 //! and the failure is definitive, so the previous run's record and terminal
-//! come back (under the orderly stop's fence, as any publication). Only a
-//! replacement host that cannot be confirmed ended keeps the launching
-//! record; the session then holds no
-//! terminal, the old runtime is stopped, and the hosts of both generations
-//! stay reachable by their launch records (Delete), and by their tags (the
-//! next startup).
+//! come back (under the orderly stop's fence, as any publication). An
+//! unconfirmed host, scope or process sweep keeps the launching row. The
+//! session then holds no terminal, the old runtime is stopped, and both
+//! generations' hosts stay reachable through their records or tags.
 
 use std::path::Path;
 use std::sync::Arc;
@@ -728,9 +726,9 @@ impl Supervisor {
     /// A start that left nothing, or a host it may have left that is then
     /// confirmed ended ([`Supervisor::end_launch_host`], by the protocol
     /// or the verified signal, never a host another tag names), has its
-    /// unconsumed spec, waypoint and launch record removed and its process
-    /// tree reaped (`scope` is the failed launch's own unit, which the scope
-    /// wrapper may have created): definitive, so the previous run's record
+    /// process tree reaped and its unconsumed artifacts removed
+    /// (`scope` is the failed launch's own unit, which the scope wrapper
+    /// may have created). A definitive failure lets the previous run's record
     /// and terminal come back. A host that cannot be confirmed ended, or a
     /// reap that cannot be confirmed, keeps the launching record and the
     /// launch record, ambiguous: an agent may run under the new
@@ -759,10 +757,6 @@ impl Supervisor {
         let mut error = artifacts
             .remove_unconsumed_relaunch_fail_closed(error)
             .await;
-        if !artifacts.remove_host_record_best_effort().await {
-            error =
-                error.context("and the failed relaunch's launch host record could not be removed");
-        }
         // The start's child may have run for a moment (a host that ended
         // before it could be adopted). Reap through its confirmed scope
         // when sufficient, otherwise through the portable sweep; ending
@@ -773,13 +767,19 @@ impl Supervisor {
             None,
             id,
             &SweepTarget::AgentOnly,
-            ScopeKillFailure::Warn,
+            ScopeKillFailure::Refuse,
         )
         .await
         {
             return RelaunchFailure::ambiguous(error.context(format!(
                 "and the failed launch's process tree could not be swept ({sweep:#})"
             )));
+        }
+        // Retain the failed generation's launch record while its recorded
+        // scope could still hold descendants. A later cleanup needs both.
+        if !artifacts.remove_host_record_best_effort().await {
+            error =
+                error.context("and the failed relaunch's launch host record could not be removed");
         }
         if let Err(crash) = self.host_restart_fault(HostRestartStage::ReplacementUnwound) {
             return RelaunchFailure::ambiguous(crash);
@@ -790,9 +790,9 @@ impl Supervisor {
     /// Tear down a host relaunch whose session's row is gone (a delete
     /// committed while it ran): its agent's process tree, its new host, and
     /// the old host it was replacing, with their launch records once each
-    /// is confirmed ended, and the launch's files. Nothing is left for a
-    /// record to fence once the row is gone, so a host that cannot be
-    /// confirmed ended is named in the error rather than kept.
+    /// is confirmed ended, and the launch's files. Keep the new launch
+    /// record if its host or process tree could still run. With the session
+    /// row gone, the error must name what cleanup could not confirm.
     async fn tear_down_relaunch_deleted_meanwhile(
         &self,
         id: &str,
@@ -804,22 +804,24 @@ impl Supervisor {
         let mut teardown = Vec::new();
         // The tree first: ending a host hangs up its child and nothing
         // beyond it.
-        if let Err(error) = reap_process_tree(
+        let swept = reap_process_tree(
             &self.seams.scopes,
             ScopeUnits::recorded(scope.map(str::to_string)),
             None,
             id,
             &SweepTarget::AgentOnly,
-            ScopeKillFailure::Warn,
+            ScopeKillFailure::Refuse,
         )
-        .await
-        {
+        .await;
+        let tree_ended = swept.is_ok();
+        if let Err(error) = swept {
             teardown.push(format!("the new agent's process tree ({error:#})"));
         }
         match self.end_launch_host(Some(new), new.socket(), id).await {
-            Ok(()) => {
+            Ok(()) if tree_ended => {
                 artifacts.remove_host_record_best_effort().await;
             }
+            Ok(()) => {}
             Err(why) => teardown.push(format!(
                 "its new terminal host at {} ({why})",
                 new.socket().display()
@@ -853,5 +855,58 @@ impl Supervisor {
             )
         };
         RelaunchFailure::ambiguous(RequestError::new(ErrorKind::Conflict, message).into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use super::super::tests::{StateDir, dummy_exe};
+    use super::super::{RelaunchDisposition, SupervisorSeams, SupervisorTimeouts};
+    use super::*;
+
+    /// The portable sweep cannot confirm a scrubbed process in a recorded scope.
+    /// Restart keeps the failed generation when the scope manager is unavailable.
+    #[farhelm_testtrace::test]
+    async fn failed_relaunch_keeps_its_record_when_its_scope_cannot_be_confirmed() {
+        let state = StateDir::new();
+        let scopes = crate::scope::ScopeManager::fake_reprobing(false, false, Arc::new(|_| {}));
+        let seams = SupervisorSeams {
+            scopes: Arc::new(scopes),
+            ..SupervisorSeams::default()
+        };
+        let sup = Supervisor::new_with_seams(
+            state.path(),
+            dummy_exe(),
+            SupervisorTimeouts::default(),
+            seams,
+        )
+        .await
+        .unwrap();
+        let id = uuid::Uuid::new_v4().to_string();
+        let scope = crate::scope::unit_name(&id, 1).unwrap();
+        let artifacts = LaunchArtifacts::for_launch(state.path(), &id, 1);
+        let record = super::super::host_launch::LaunchHostRecord {
+            socket: crate::hosts::free_host_name(state.path()).unwrap(),
+            starter: crate::hosts::HostProcess {
+                pid: std::process::id(),
+                start: 0,
+            },
+        };
+        std::fs::write(artifacts.host(), record.encode())
+            .expect("failed generation's record exists");
+        let failure = sup
+            .unwind_failed_host_relaunch(
+                &id,
+                Some(&scope),
+                HostLeft::Nothing,
+                &artifacts,
+                anyhow::anyhow!("start failed"),
+            )
+            .await;
+        assert_eq!(failure.disposition, RelaunchDisposition::Ambiguous);
+        assert!(format!("{:#}", failure.error).contains(&scope));
+        assert!(artifacts.host().exists());
     }
 }

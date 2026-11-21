@@ -1021,8 +1021,8 @@ pub struct SessionInfo {
     /// The current generation's result, so advice about Restart reflects what this launch attempted.
     #[serde(default, skip_serializing_if = "PersistentHookSetup::is_not_requested")]
     pub persistent_hook_setup: PersistentHookSetup,
-    /// The supervisor holds no agent terminal for this session. A terminal
-    /// it still holds may be unreachable or may retain an exited agent's
+    /// The session has no agent terminal or its terminal host is known gone.
+    /// An unreadable host may recover, and an exited agent's host may retain
     /// output. Older cached rows omit this field and keep the ordinary
     /// attach behavior until a fresh report says otherwise.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]

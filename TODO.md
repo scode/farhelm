@@ -393,6 +393,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Retain failed Restart cleanup when the session was deleted.** When Delete removes the session row while Restart is
+  launching its replacement, `tear_down_relaunch_deleted_meanwhile` reports an unconfirmed replacement scope and keeps
+  the replacement's host record. That record carries the socket and starter identity, while the deleted row held the
+  scope selection. Startup can remove the record after finding the host gone even if its scope still holds a detached
+  descendant. Preserve the unresolved scope selection across row removal and supervisor restart. Retry cleanup using the
+  session and generation's derived scope name, and retire the obligation once the scope is confirmed gone. Cover a gone
+  host with an unconfirmed scope that becomes checkable on a later start.
+
 - **Keep deflake evidence tied to the selected revision's prerequisites.** Running the current deflake driver with an
   older `--base` uses that revision's recorder with today's battery list and system tmux. Before the pinned tmux
   removal, the driver ran the selected revision's `scripts/build-pinned-tmux-ci.sh` and passed `--tmux required` for

@@ -662,7 +662,8 @@ impl Supervisor {
     /// Through its runtime's `Shutdown` first, when `host` is that runtime,
     /// within [`RUNTIME_SHUTDOWN_BOUND`]. When that does not confirm the
     /// end (the bound ran out, the runtime had already ended as running,
-    /// exited or unavailable, or an earlier caller stopped it), the runtime
+    /// exited or unavailable, its socket went away while its adopted process
+    /// could still run, or an earlier caller stopped it), the runtime
     /// is stopped ([`HostTerminal::abort`], so that it does not take the host
     /// back) and the process it adopted ([`HostTerminal::adopted_process`],
     /// fixed at adoption) is ended with the verified signal, without
@@ -701,7 +702,7 @@ impl Supervisor {
                     self.remove_ended_socket(socket).await;
                     return Ok(());
                 }
-                Ok(Err(Liveness::Gone)) => {
+                Ok(Err(Liveness::Gone)) if host.adopted_process().is_none() => {
                     self.remove_ended_socket(socket).await;
                     return Ok(());
                 }

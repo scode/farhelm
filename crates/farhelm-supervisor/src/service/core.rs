@@ -10311,7 +10311,7 @@ impl Supervisor {
                                 .get(&row.id)
                                 .is_none_or(|held| held.terminal_missing)
                         },
-                        |entry| entry.terminal.is_none(),
+                        |entry| super::status::agent_terminal_missing(entry.terminal.as_ref()),
                     )
                 };
                 let info = SessionInfo {
@@ -11904,7 +11904,7 @@ impl Supervisor {
         // launch stays recorded for the next supervisor.
         let mut sessions = self.sessions.lock().await;
         let terminal = self.publishable(Some(terminal));
-        info.terminal_missing = terminal.is_none();
+        info.terminal_missing = super::status::agent_terminal_missing(terminal.as_ref());
         sessions.insert(
             id,
             Arc::new(SessionEntry {
@@ -12831,7 +12831,7 @@ impl Supervisor {
                 .unwrap_or_else(|| entry.info.clone());
             // Hold the availability of the terminal being replaced. The last
             // listing can predate its loss, and the entry's row is a snapshot.
-            held.terminal_missing = entry.terminal.is_none();
+            held.terminal_missing = super::status::agent_terminal_missing(entry.terminal.as_ref());
             self.restarting_rows
                 .lock()
                 .expect("restarting-rows mutex poisoned")
@@ -13180,7 +13180,7 @@ impl Supervisor {
     /// to do with the restart.
     async fn restart_reply(&self, info: SessionInfo) -> Result<SessionInfo, RelaunchFailure> {
         let session_id = info.id.clone();
-        self.with_checkout_metadata(info).await.map_err(|e| {
+        let mut info = self.with_checkout_metadata(info).await.map_err(|e| {
             RelaunchFailure::published(e.context(format!(
                 "the restart of session {session_id} SUCCEEDED and its new generation is \
                  published and running; only describing its checkout failed, so this reply \
@@ -13188,7 +13188,16 @@ impl Supervisor {
                  session normally, and restarting again would kill the agent this one started",
                 session_id = truncate_for_error(&session_id)
             )))
-        })
+        })?;
+        // Old-host cleanup and checkout metadata can wait. Re-sample the new terminal
+        // so a reply cannot mask the recovery card if that host went away in the meantime.
+        info.terminal_missing = self
+            .sessions
+            .lock()
+            .await
+            .get(&session_id)
+            .is_none_or(|entry| super::status::agent_terminal_missing(entry.terminal.as_ref()));
+        Ok(info)
     }
 
     /// Put a relaunched session back on the map under its NEW generation,
@@ -13284,7 +13293,7 @@ impl Supervisor {
             // (`Self::publishable`); after, the confirmed launch is the next
             // supervisor's to adopt by its tag.
             let terminal = self.publishable(Some(terminal));
-            info.terminal_missing = terminal.is_none();
+            info.terminal_missing = super::status::agent_terminal_missing(terminal.as_ref());
             let published = relaunched_entry(
                 entry,
                 info.clone(),
@@ -20470,8 +20479,8 @@ pub(crate) mod tests {
         assert_restart_window_listing(true).await;
     }
 
-    /// Check the same restart window while replacing a retained terminal and
-    /// while recovering one removed after the cached listing was made.
+    /// Check the same restart window with a working terminal and with a
+    /// retained terminal whose host went away after the cached listing.
     async fn assert_restart_window_listing(terminal_lost: bool) {
         let (reached_tx, reached_rx) = tokio::sync::oneshot::channel::<()>();
         let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
@@ -20522,9 +20531,7 @@ pub(crate) mod tests {
                 .await
                 .expect("shut down the original terminal");
             assert!(ended.ended, "the old terminal ended: {ended:?}");
-            sup.forget_agent_terminal_for_test(&created.id)
-                .await
-                .expect("forget the ended terminal");
+            assert!(matches!(host.liveness(), crate::hosts::Liveness::Gone));
             // Save the expected row locally, leaving the supervisor's
             // last-listed snapshot as it was before the terminal was lost.
             before.terminal_missing = true;

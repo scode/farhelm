@@ -418,13 +418,13 @@ impl Supervisor {
         // not conceal an unscoped tab's detached jobs from cleanup.
         hosts.add_tab_scopes(session_id, &mut units);
         // Settle a stale "no manager" verdict BEFORE enumerating. The row's
-        // recorded launch unit is the durable evidence that earns one
+        // recorded launch or tab unit is the durable evidence that earns one
         // re-probe, and the sweep below would spend it anyway; spending it
         // after the globs had been skipped would kill only the names the
         // session's runtimes still listed, missing older generations and closed tabs, and then
         // publish "deleted" over them. A second negative stays final, so the
         // sweep's own re-probe costs nothing extra.
-        if entry.scope.is_some() && !self.seams.scopes.available().await {
+        if units.has_recorded() && !self.seams.scopes.available().await {
             self.seams.scopes.reprobe().await;
         }
 
@@ -437,10 +437,9 @@ impl Supervisor {
         {
             match self.seams.scopes.units_matching(&glob).await {
                 Ok(found) => units.extend_derived(found),
-                // Only a host with a usable manager can be asked at
-                // all; where there is none this is not a failure,
-                // it is the sweep-only world M2 already lived in.
-                Err(e) if !self.seams.scopes.available().await => debug!(
+                // With recorded scope evidence, a later recovery of the manager
+                // cannot compensate for skipping the older generations' listing.
+                Err(e) if !units.has_recorded() && !self.seams.scopes.available().await => debug!(
                     session = %session_id, error = %format!("{e:#}"),
                     "no systemd user manager to enumerate this session's scopes; \
                      the process-tree sweep is the whole mechanism"

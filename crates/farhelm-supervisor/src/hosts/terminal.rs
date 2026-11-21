@@ -4318,14 +4318,17 @@ impl Runtime {
     /// whether the host acknowledged and whether it was confirmed ended,
     /// and updates `peer` to what may still end it.
     ///
-    /// A socket that is gone confirms the end. Another process serving the
-    /// socket than the adopted host (as `reconnect` checks) is not shut
+    /// A gone socket confirms the end only when there is no known process.
+    /// Another process serving the socket than the adopted host is not shut
     /// down: the terminal becomes unavailable as `Replaced`, and only the
     /// adopted host's own process is waited for.
     async fn shut_down_anew(&self, peer: &mut Option<HostProcess>) -> (bool, bool) {
         let limit = self.deadlines.shutdown;
         match HostConnection::connect_with(&self.socket, self.deadlines).await {
-            Err(ConnectError::Gone(_)) => (false, true),
+            Err(ConnectError::Gone(_)) => (
+                false,
+                peer.is_none() || wait_for_end(&self.socket, *peer, limit).await,
+            ),
             Err(
                 ConnectError::Busy { peer: found } | ConnectError::Unavailable { peer: found, .. },
             ) => {

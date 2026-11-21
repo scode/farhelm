@@ -4201,7 +4201,9 @@ async fn delete_never_signals_an_unrecorded_placeholders_unreadable_socket() {
 /// host tab whose stand-in host was adopted (premise: its adopted process is
 /// this test process) and whose launch record names its socket, the socket
 /// file is removed and the connection dropped, so the runtime reads the
-/// host gone; closing the tab fails saying the host could not be confirmed
+/// host gone; shared shutdown checks the adopted process so Delete cannot
+/// treat the lost socket as confirmation. Closing the tab fails saying
+/// the host could not be confirmed
 /// ended; the tab is still in the session's cell, marked as a failed end
 /// with a retry time; and its record is still there.
 #[farhelm_testtrace::test]
@@ -4268,6 +4270,11 @@ async fn closing_a_tab_whose_runtime_reads_gone_confirms_its_process_first() {
         matches!(host.liveness(), Liveness::Gone)
     })
     .await;
+    let error = sup
+        .end_launch_host(Some(&host), &socket, "s1")
+        .await
+        .expect_err("shared shutdown must confirm the process, even without a socket");
+    assert!(error.contains("could not be ended"), "{error}");
     let refused = sup
         .close_tab("s1", tab_id)
         .await
