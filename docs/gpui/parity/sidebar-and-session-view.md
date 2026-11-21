@@ -323,14 +323,15 @@ ring, and focus moving on or Escape takes it away) by
 crates/gui/farhelm-gui/src/layers/beside_tests.rs `card_help_falls_back_without_cues_in_a_window_too_narrow`;
 `a stale card is dim while row marks keep their own hover`: `a_card_leaves_out_what_the_session_does_not_say` (the stale
 status still named; its grey is `CardStatus`'s ink, which no test pins) and
-`every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring` (the marks' own help);
+`status_marks_show_help_beside_the_sidebar_without_a_ring` (the marks' own help);
 `a legacy session card omits unavailable facts` and `an unplaced host keeps its name without a locality mark`:
 `a_card_leaves_out_what_the_session_does_not_say`; `hovering a row mark shows its text beside the list after the delay`:
-`every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring` and the `session-row-hover-beside` golden (the age's
-ring and notch); `every visible session-row hover opts in, including the notification bell`:
-`every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring` (the dot, host, agent, age, pin, bell, actions button
-and stale cause, with the open row's on-fill ring) and `a_compact_row_shows_the_same_card_with_its_hidden_folder` (the
-compact ended mark and clock), and on keyboard focus the marks that hold focus, the bell and the actions button, by
+`status_marks_show_help_beside_the_sidebar_without_a_ring` and the `session-row-hover-beside` golden (the age's notch,
+with no ring on a status mark); `every visible session-row hover opts in, including the notification bell`:
+`status_marks_show_help_beside_the_sidebar_without_a_ring` (the dot, host, agent and age) and
+`row_controls_show_help_beside_the_sidebar_with_a_ring` (the pin, bell, actions button and stale cause, with the open
+row's on-fill ring) and `a_compact_row_shows_the_same_card_with_its_hidden_folder` (the compact ended mark and clock),
+and on keyboard focus the marks that hold focus, the bell and the actions button, by
 `a_focused_row_mark_shows_its_own_help_beside_the_sidebar_not_the_card` (each its own help beside the sidebar with its
 ring, not the card); `moving to the next mark while a tooltip shows replaces it at once`: the layer manager's
 crates/gui/farhelm-gui/src/components/tests/hover_help.rs
@@ -504,7 +505,7 @@ the hold ends, is crates/gui/farhelm-gui/src/session_list/pin_drag_tests.rs
 `movable_pins_have_a_named_grip_revealed_by_the_pointer`), `drag pins within their group and cancel interrupted moves`
 (pin_drag_tests.rs `movable_pins_have_a_named_grip_revealed_by_the_pointer` for the grip on movable pins only, its name
 and its reveal, with its help beside the sidebar in crates/gui/farhelm-gui/src/session_list/summary_tests.rs
-`every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring`;
+`row_controls_show_help_beside_the_sidebar_with_a_ring`;
 `a_drop_on_the_drop_line_sends_one_move_that_the_hold_shows_at_once` and
 `a_drop_below_the_last_pins_middle_goes_after_it` for the lift, the drop line, the rows unchanged until the helm's
 reply, the one request and the moved order under the hold; `escape_a_lost_release_and_a_release_outside_send_nothing`
@@ -2079,8 +2080,8 @@ Where the port does not match the old app, and why. Each stays until the work na
   `a_compact_rows_help_says_what_its_hidden_lines_would` and `session_list/summary_tests.rs`
   `a_compact_row_shows_the_same_card_with_its_hidden_folder`.
 - Every row hover the old app placed beside the list is placed there, the notification bell's included
-  (`session_list/summary_tests.rs` `every_row_mark_shows_its_help_beside_the_sidebar_with_its_ring`), the pin grip's
-  included; the managed-checkout mark is not ported, so it has no help to place.
+  (`session_list/summary_tests.rs` `row_controls_show_help_beside_the_sidebar_with_a_ring`), the pin grip's included;
+  the managed-checkout mark is not ported, so it has no help to place.
 - The summary card's agent line names a command launch's program by the first word of its command line, as the menu
   header does; the old card split the line as a shell would, so a quoted program name holding a space read whole.
 - A row's menu and the questions its commands ask open beside its button, the menu's left edge 10 pixels past the
