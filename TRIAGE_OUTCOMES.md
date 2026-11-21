@@ -32,29 +32,6 @@
   over it, block and bring it back. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/launcher-repository-search-loading.md`.
 
-## folder-refusal-classifier-matches-path-text.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
-  reviewed. `FolderProblem::recognize` (crates/farhelm-ui/src/list/create_form.rs:1354-1366) checks the three supervisor
-  phrases in a fixed order (Missing first) with `contains` over the whole refusal. The supervisor appends the literal
-  cwd after its phrase (crates/farhelm-supervisor/src/service/core.rs:3551, 3556, 3574). A not-a-directory refusal for a
-  path whose text contains "working directory does not exist: " is therefore classified as Missing, and the folder field
-  says "This folder does not exist on <host>" for an existing file. The type's own docs say the marking "only points at
-  the field the refusal is about", which means the classification must follow the supervisor's actual phrase, not text
-  inside the path. The marking authorizes nothing, so the impact is an advisory annotation only.
-- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
-  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
-  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
-  revise it.
-- Completion criteria: `recognize` picks the phrase that occurs earliest in the message (the supervisor's own sentence
-  comes before the path it appends), not the first phrase in list order. Extend
-  `folder_refusals_are_recognized_by_the_supervisor_words` with a not-a-directory refusal whose path contains the "does
-  not exist: " phrase, and an unusable refusal whose path contains another phrase, each asserting its true problem. Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-folder-refusal-order.md`.
-
 ## shutdown-wait-test-does-not-witness-waiting.md
 
 - Outcome: `fix code`.
