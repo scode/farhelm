@@ -14,6 +14,8 @@
 use crate::harness::*;
 use crate::hook_identity::ServeTask;
 
+mod drift;
+
 /// How much of the visible screen [`screen`] reads: far more than a 100x30
 /// terminal's screen text, so the whole screen always comes back.
 const SCREEN_BYTES: usize = 64 * 1024;
