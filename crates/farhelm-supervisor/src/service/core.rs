@@ -99,8 +99,8 @@ use crate::store::{
 use crate::terminal_process::TerminalProbe;
 use anyhow::Context;
 use farhelm_proto::{
-    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, RestartOffer, SessionInfo, SessionLaunch,
-    SessionStatus, TabInfo,
+    AgentKind, ControlMsg, DetachCode, ErrorKind, Frame, LaunchKind, RestartOffer, SessionInfo,
+    SessionLaunch, SessionStatus, TabInfo,
 };
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
@@ -2638,6 +2638,8 @@ impl DestinationResolution {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SessionSnapshot {
     pub kind: AgentKind,
+    /// The durable launch category. A command can declare the same agent kind as a composed agent launch.
+    pub launch_kind: LaunchKind,
     pub resume_template: Option<Vec<String>>,
     pub captured_conversation: Option<String>,
     /// The launch generation that owns `captured_conversation`.
@@ -3658,9 +3660,10 @@ fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
     // `restart_session` refuses first, knowing whether the session ended;
     // this keeps the pure function's own guarantee that an unavailable
     // offer never yields an argv.
-    if let Some(reason) = snapshot
-        .restart_offer
-        .unavailable_reason(snapshot.kind, false)
+    if let Some(reason) =
+        snapshot
+            .restart_offer
+            .unavailable_reason(snapshot.kind, snapshot.launch_kind, false)
     {
         return Err(RequestError::new(
             ErrorKind::Conflict,
@@ -7505,6 +7508,7 @@ impl Supervisor {
             restart_offer,
             resume_argv,
             kind: snapshot.kind,
+            launch_kind: row.launch.launch_kind(),
             resume_template: snapshot.resume_template,
             captured_conversation: captured,
             generation: row.generation,
@@ -12338,9 +12342,11 @@ impl Supervisor {
             LastOutcome::Exited { .. } | LastOutcome::Interrupted | LastOutcome::Error { .. }
         );
         if restart_with.is_none()
-            && let Some(reason) = snapshot
-                .restart_offer
-                .unavailable_reason(snapshot.kind, ended)
+            && let Some(reason) = snapshot.restart_offer.unavailable_reason(
+                snapshot.kind,
+                snapshot.launch_kind,
+                ended,
+            )
         {
             return Err(RequestError::new(
                 ErrorKind::Conflict,
@@ -12358,9 +12364,11 @@ impl Supervisor {
             // The same reason a plain restart's refusal gives
             // (`relaunch_argv`), so Restart with's dialog can show it.
             if named_start.is_none()
-                && let Some(reason) = snapshot
-                    .restart_offer
-                    .unavailable_reason(snapshot.kind, ended)
+                && let Some(reason) = snapshot.restart_offer.unavailable_reason(
+                    snapshot.kind,
+                    snapshot.launch_kind,
+                    ended,
+                )
             {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
@@ -17139,6 +17147,7 @@ pub(crate) mod tests {
         };
         SessionSnapshot {
             kind,
+            launch_kind: LaunchKind::Agent,
             resume_template,
             captured_conversation,
             generation: 0,
@@ -17171,7 +17180,7 @@ pub(crate) mod tests {
         ] {
             let snapshot = snapshot_offering(offer);
             let result = relaunch_argv(&snapshot);
-            match offer.unavailable_reason(snapshot.kind, false) {
+            match offer.unavailable_reason(snapshot.kind, snapshot.launch_kind, false) {
                 None => assert!(result.is_ok(), "{offer:?}: {result:?}"),
                 Some(reason) => {
                     let error = result.expect_err("an unavailable offer must not relaunch");

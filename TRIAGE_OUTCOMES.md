@@ -82,29 +82,6 @@
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
 
-## older-muse-restart-refusal-blames-command-mode.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The supervisor still
-  offers `RestartOffer::NoResumeCommand` for any integrated launch with no resume template, including an older Muse
-  agent launch (`crates/farhelm-supervisor/src/agent_kind/mod.rs:1911-1916`). The desktop app's `offer_clause` turns
-  that offer unconditionally into "this command launch did not opt into Resume, so it has no resume command and Replace
-  starts it over" (`crates/gui/farhelm-gui/src/session_list/restart.rs:115-118`). The Restart hover help and the
-  interrupted card (`session_pane/card.rs:293`) both use that clause. The protocol's own explanation says the same
-  (`crates/farhelm-proto/src/lib.rs:1440-1444`). The launcher's Restart-with text already tells the two apart
-  (`launcher/entry.rs:358-362`).
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes ("Restart explanation calls an older
-  Muse agent session a "command launch""), with a test where practical. Size gate: about 100 lines of diff (code, tests
-  and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity
-  gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
-  follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
-  the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
-
 ## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
 
 - Outcome: `fix code`.

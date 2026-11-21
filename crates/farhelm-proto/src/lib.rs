@@ -1381,8 +1381,8 @@ pub enum RestartOffer {
     /// the session runs a command Farhelm does not know as an agent type.
     NoConversationReporting,
     /// The session's agent type reports conversations, but its launch has
-    /// no resume command: a command launch that declared the type without
-    /// opting into Resume. Farhelm never derives one from the start command.
+    /// no resume command. A command launch can omit Resume, and an older
+    /// agent launch can predate it. Farhelm never derives one from the start command.
     NoResumeCommand,
 }
 
@@ -1411,7 +1411,13 @@ impl RestartOffer {
     /// still coming. It carries no invitation to send feedback: agents read
     /// it through the `farhelm` command, where the app's help menu means
     /// nothing.
-    pub fn unavailable_reason(self, kind: AgentKind, ended: bool) -> Option<String> {
+    /// The launch kind distinguishes a missing stored command from an explicit choice on a command launch.
+    pub fn unavailable_reason(
+        self,
+        kind: AgentKind,
+        launch_kind: LaunchKind,
+        ended: bool,
+    ) -> Option<String> {
         let reason = match self {
             RestartOffer::Resume => return None,
             RestartOffer::NotCaptured => {
@@ -1435,6 +1441,10 @@ impl RestartOffer {
             RestartOffer::NoConversationReporting => {
                 "Restart needs this session's own conversation, and Farhelm has no conversation \
                  reporting for its agent; Replace starts the session over"
+                    .to_string()
+            }
+            RestartOffer::NoResumeCommand if launch_kind == LaunchKind::Agent => {
+                "This agent launch has no stored resume command and Replace starts the session over"
                     .to_string()
             }
             RestartOffer::NoResumeCommand => {
@@ -5732,6 +5742,30 @@ mod tests {
         let _ = resolved;
     }
 
+    /// A command can declare Muse for reporting without opting into Resume. An older composed Muse launch can
+    /// report conversations too, but its missing stored resume command was never a choice on the Command tab.
+    #[farhelm_testtrace::test]
+    fn no_resume_reason_follows_the_launch_kind() {
+        let offer = RestartOffer::NoResumeCommand;
+        assert_eq!(
+            offer
+                .unavailable_reason(AgentKind::Muse, LaunchKind::Agent, false)
+                .as_deref(),
+            Some(
+                "This agent launch has no stored resume command and Replace starts the session over"
+            )
+        );
+        assert_eq!(
+            offer
+                .unavailable_reason(AgentKind::Muse, LaunchKind::Command, false)
+                .as_deref(),
+            Some(
+                "Restart resumes through the launch's resume command, and this command launch did not opt \
+                 into Resume; Replace starts the session over"
+            )
+        );
+    }
+
     /// Spec: every agent kind that reports conversations has a display name
     /// and a restart-readiness moment, each moment words a clause for both
     /// readers, only the user-facing wording says "you", and kinds without
@@ -5765,7 +5799,7 @@ mod tests {
                 assert_eq!(name, expected_name);
                 assert_eq!(readiness, None);
                 let reason = RestartOffer::NotCaptured
-                    .unavailable_reason(kind, false)
+                    .unavailable_reason(kind, LaunchKind::Agent, false)
                     .unwrap();
                 assert!(!reason.contains("normally becomes available"), "{reason}");
                 continue;
@@ -5781,10 +5815,10 @@ mod tests {
                 "{kind:?}: {neutral}"
             );
             let reason = RestartOffer::NotCaptured
-                .unavailable_reason(kind, false)
+                .unavailable_reason(kind, LaunchKind::Agent, false)
                 .unwrap();
             let ended = RestartOffer::NotCaptured
-                .unavailable_reason(kind, true)
+                .unavailable_reason(kind, LaunchKind::Agent, true)
                 .unwrap();
             assert!(
                 ended.contains(&format!(
@@ -7958,7 +7992,9 @@ mod tests {
             );
             assert_eq!(
                 offer.can_restart(),
-                offer.unavailable_reason(AgentKind::Codex, false).is_none(),
+                offer
+                    .unavailable_reason(AgentKind::Codex, LaunchKind::Agent, false)
+                    .is_none(),
                 "{offer:?}: an offer either restarts or says why it cannot"
             );
         }
