@@ -46,3 +46,46 @@ None.
 
 The independent source review and commit wording read passed. The review led to a simulated non-root effective UID in
 both fixtures, so the root-owned parent case detects a regression when the tests run as root.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since this plan's work started, main gained only three test-only changes, to the
+release brick test and the supervisor's installer code, none of which touches the test recorder or the deflake sweep.
+
+#### Fixes made while landing
+
+One went in as a second PR, [#4389](https://github.com/scode/farhelm/pull/4389/changes). The plan added the test
+recorder's own tests to the "run all tests and fix" list, where they were already listed further down, so following the
+list would have run them twice. The new entry now names only the deflake sweep's tests.
+
+#### Checks
+
+The plan changes only developer tooling: the test recorder and the deflake sweep, their own tests, their docs and two
+agent instruction files. No product code changed, so the landing ran those tools' own test suites and the instruction
+and formatting checks, all locally on x86_64:
+
+- `python3 -B scripts/test-record-test-run.py` (the recorder's own tests), through the recorder (recorder run
+  `19da6dde-3b1d-4b26-9837-176f74483960`): all 58 passed.
+- `python3 -B deflake/test-deflake.py` (the deflake sweep's own tests), through the recorder (recorder run
+  `87706b5c-6540-4f79-8e40-1a04dbbd6406`): all 16 passed.
+- `dprint check`, `python3 scripts/check-agents-md.py` and `python3 releasing/check-changelog.py format` (formatting,
+  instruction and changelog lints): passed.
+
+The landing fix (#4389) changes one line of agent instructions: `dprint check` and `python3 scripts/check-agents-md.py`
+passed again. Reused: the executor's end-to-end evaluation run of the deflake sweep (in its report), since neither the
+rebase nor the landing fix touched the sweep. Skipped: every Rust, desktop app and smoke run, since no product code
+changed.
+
+#### Things you should know that the report does not say
+
+An independent reviewer and I checked that the stricter rule refuses none of the directory layouts the project's own
+tools, test harnesses and CI use. The only parent it newly refuses is one marked sticky that belongs to another non-root
+account. The tools create their default parent themselves, so it belongs to the running user. The system temporary
+directory belongs to root, on macOS too. The test worker, boat and Tensorlake harnesses each run as a single account,
+and CI and release jobs write under the runner's own temporary directory.
+
+#### What you should still do
+
+Nothing.
