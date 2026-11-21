@@ -51,10 +51,6 @@ consequences.
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`trailing-new-container-proxy-snapshot-capability-cache.md`](trailing-new-container-proxy-snapshot-capability-cache.md)
-  — New containers can permanently inherit a cached host proxy environment. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-rebuild-retires-fallback-before-success.md`](trailing-podman-rebuild-retires-fallback-before-success.md)
   — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -298,20 +294,12 @@ consequences.
   — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md`](trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md)
-  — Stopped actors retain strong manager references across idle waits. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md`](trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md)
   — Unanswered-status regression test can skip the settled failure boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md`](trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md)
   — Suspended view documentation retains the known Tensorlake-only vocabulary. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md`](trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md)
-  — Dial documentation incorrectly exempts Podman from the provider status gate. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md`](trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md)
@@ -337,10 +325,6 @@ consequences.
 - [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
   — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-dial-kind-advances-before-process-marker.md`](trailing-podman-dial-kind-advances-before-process-marker.md)
-  — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
 
 - [`trailing-podman-account-observation-exec-guesses-root-home.md`](trailing-podman-account-observation-exec-guesses-root-home.md)
   — Custom-image login lookup unnecessarily requires /root. Abbreviated collection; confidence, proposed dismissals and

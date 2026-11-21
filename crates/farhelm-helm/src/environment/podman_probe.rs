@@ -448,6 +448,17 @@ impl PodmanPlaces {
         .context("the container host's fresh Podman check did not finish in time")?
     }
 
+    /// A new session container inherits the place's environment at setup.
+    /// Cached capabilities can outlive a change to the manager's settings.
+    pub(super) async fn creation_proxy(
+        &self,
+        store: &HelmStore,
+        host: HostId,
+    ) -> anyhow::Result<BTreeMap<String, String>> {
+        let route = base_route(&current_row(store, host).await?)?;
+        read_proxy(self.commands.as_ref(), &route).await
+    }
+
     /// All provider commands retain the probe's lowering, scrub and capture
     /// contract, with operation-specific bounds and truthful exit statuses.
     pub(crate) async fn command(
@@ -681,40 +692,7 @@ async fn probe_inner(
     )
     .await?;
     let version = validate_info(&info)?;
-    let mut busctl = vec!["busctl".to_string(), "--user".into()];
-    busctl.extend(MANAGER_ENVIRONMENT_BUSCTL_ARGS.map(str::to_string));
-    let environment = match commands
-        .run(route, &busctl)
-        .await
-        .ok()
-        .and_then(|text| ManagerEnvironment::from_busctl_json(&text).ok())
-    {
-        Some(environment) => environment,
-        None => {
-            let text = run(
-                commands,
-                route,
-                &["systemctl", "--user", "show-environment"],
-                "could not read the container host's user manager environment",
-            )
-            .await?;
-            ManagerEnvironment::from_show_environment_exact(&text).map_err(|_| {
-                anyhow::anyhow!("the user manager returned an unreadable environment")
-            })?
-        }
-    };
-    let mut proxy = BTreeMap::new();
-    for name in PROXY_VARIABLES {
-        match environment.get_exact(name) {
-            ManagerValue::Absent => {}
-            ManagerValue::Value(value) => {
-                proxy.insert(name.to_string(), value);
-            }
-            ManagerValue::Unreadable => {
-                anyhow::bail!("the user manager returned an unreadable proxy value")
-            }
-        }
-    }
+    let proxy = read_proxy(commands, route).await?;
     let unit = format!("farhelm-env-probe-{}.scope", uuid::Uuid::new_v4().simple());
     let scope = run(
         commands,
@@ -749,6 +727,49 @@ async fn probe_inner(
         podman,
         proxy,
     })
+}
+
+/// Keep exact proxy values, including empty ones, private to the caller.
+/// The systemctl fallback supports hosts without structured busctl output.
+async fn read_proxy(
+    commands: &dyn PlaceCommands,
+    route: &BaseRoute,
+) -> anyhow::Result<BTreeMap<String, String>> {
+    let mut busctl = vec!["busctl".to_string(), "--user".into()];
+    busctl.extend(MANAGER_ENVIRONMENT_BUSCTL_ARGS.map(str::to_string));
+    let environment = match commands
+        .run(route, &busctl)
+        .await
+        .ok()
+        .and_then(|text| ManagerEnvironment::from_busctl_json(&text).ok())
+    {
+        Some(environment) => environment,
+        None => {
+            let text = run(
+                commands,
+                route,
+                &["systemctl", "--user", "show-environment"],
+                "could not read the container host's user manager environment",
+            )
+            .await?;
+            ManagerEnvironment::from_show_environment_exact(&text).map_err(|_| {
+                anyhow::anyhow!("the user manager returned an unreadable environment")
+            })?
+        }
+    };
+    let mut proxy = BTreeMap::new();
+    for name in PROXY_VARIABLES {
+        match environment.get_exact(name) {
+            ManagerValue::Absent => {}
+            ManagerValue::Value(value) => {
+                proxy.insert(name.to_string(), value);
+            }
+            ManagerValue::Unreadable => {
+                anyhow::bail!("the user manager returned an unreadable proxy value")
+            }
+        }
+    }
+    Ok(proxy)
 }
 
 /// Reject unknown configuration instead of inferring rootless/systemd from a

@@ -387,7 +387,22 @@ impl Podman {
         bound: Duration,
     ) -> anyhow::Result<String> {
         let (_, _, ready) = self.place(place).await?;
-        let script = format!("{}\n{script}", build::proxy_exports(&ready.proxy));
+        self.script_with_proxy(place, container, user, script, bound, &ready.proxy)
+            .await
+    }
+
+    /// Initial installation supplies its own fresh values. Use the same map
+    /// for private exports and stderr masking so a failed import stays private.
+    async fn script_with_proxy(
+        &self,
+        place: HostId,
+        container: &str,
+        user: ContainerUser,
+        script: &str,
+        bound: Duration,
+        proxy: &BTreeMap<String, String>,
+    ) -> anyhow::Result<String> {
+        let script = format!("{}\n{script}", build::proxy_exports(proxy));
         let route = self.route(place, container, user).await?;
         let RemoteRoute::PodmanExec { via, .. } = &route else {
             unreachable!()
@@ -412,7 +427,7 @@ impl Podman {
         if output.code != Some(0) {
             // A step killed outright (out of memory, say) or one that exits
             // without a word still needs a reason on record: its status.
-            let shown = script_failure_output(&output.stderr, &ready.proxy);
+            let shown = script_failure_output(&output.stderr, proxy);
             anyhow::bail!(
                 "container setup failed: {}",
                 if shown.is_empty() {
@@ -653,8 +668,7 @@ impl Podman {
         // names enter systemctl's argv; set-environment NAME=value would expose
         // passwords even when the enclosing script arrived over private stdin.
         let mut script = format!(
-            "{}\nsystemctl --user unset-environment {} || exit 1\n",
-            build::proxy_exports(values),
+            "systemctl --user unset-environment {} || exit 1\n",
             PROXY_NAMES.join(" ")
         );
         if !values.is_empty() {
@@ -667,7 +681,7 @@ impl Podman {
                     .join(" ")
             ));
         }
-        self.script(place, id, user.clone(), &script, COMMAND)
+        self.script_with_proxy(place, id, user.clone(), &script, COMMAND, values)
             .await?;
         Ok(())
     }
@@ -1314,7 +1328,6 @@ impl EnvironmentProvider for Podman {
                     .as_ref()
                     .context("the host is no longer a container")?
                     .login_user()?;
-                let (_, _, ready) = self.place(current.place_host).await?;
                 self.script(
                     current.place_host,
                     &info.id,
@@ -1323,7 +1336,12 @@ impl EnvironmentProvider for Podman {
                     Duration::from_secs(45),
                 )
                 .await?;
-                self.proxies(current.place_host, &info.id, &login, &ready.proxy)
+                let proxy = self
+                    .0
+                    .places
+                    .creation_proxy(&self.0.store, current.place_host)
+                    .await?;
+                self.proxies(current.place_host, &info.id, &login, &proxy)
                     .await?;
                 let backend = self
                     .0
