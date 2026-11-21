@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.43.0 - 2026-11-20
 
-**DRAFT release notes - not yet finalized**
-
 ### 🚀 Added
 
 - You can now start a plain Bash or Zsh shell as a session, just like you can start agents. Typing "bash" or "zsh" in the launcher text field is the quickest way to do so. (#4333, #4336)
