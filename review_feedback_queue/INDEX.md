@@ -184,13 +184,6 @@ consequences.
 - [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
   completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
 
-- [`abbreviated-ipv4-short-label-scope-ambiguity.md`](abbreviated-ipv4-short-label-scope-ambiguity.md) — A valid
-  abbreviated IPv4 destination can lose address components in its short label; whether such forms count as IP literals
-  under the display contract is unresolved.
-
-- [`valid-ssh-uri-short-label-parsing.md`](valid-ssh-uri-short-label-parsing.md) — Valid SSH URIs with a trailing slash,
-  service-name port or empty port can show an incorrectly shortened host label.
-
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.

@@ -288,10 +288,11 @@ the local host can carry one too.
 Whenever a surface uses a host's **short name**, it derives it from that host alone: an explicit alias exactly as
 stored, otherwise `Local` for the local host, otherwise the first label of its SSH hostname. For that last case it
 removes `ssh://`, a user prefix through the last `@`, brackets, and a port only in an SSH URI or after a bracketed
-address. IP addresses stay whole, including IPv6 scope suffixes. A dot-less name stays as it is; a leading dot keeps the
-whole remainder instead of producing an empty label. Short names may coincide. They are display only, never a
-host-resolution key, and deriving one never stores an alias or changes the helm's display name. If the derived form is
-empty, the UI shows the full display name instead, including for a newer host kind with no destination.
+address. In SSH URIs the port can be a service name or empty, and a trailing slash is removed. IP addresses stay whole,
+including abbreviated IPv4 spellings and IPv6 scope suffixes. A dot-less name stays as it is. A leading dot keeps the
+whole remainder. Short names may coincide. They are display only, never a host-resolution key, and deriving one never
+stores an alias or changes the helm's display name. If the derived form is empty, the UI shows the full display name
+instead, including for a newer host kind with no destination.
 
 The add host dialog takes an optional alias beside the destination, and the host is added with it. Adding a destination
 that is already a host entry is refused, naming that entry, before anything contacts the destination: it is almost
