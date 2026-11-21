@@ -1521,8 +1521,9 @@ struct InstallArgs {
     #[arg(long)]
     replace_legacy_bundle: Option<u64>,
     /// The app updater's expectation (`FARHELM_INSTALL_EXPECT`), in
-    /// `farhelm_supervisor::installation::Expectation`'s text form.
-    #[arg(long)]
+    /// `farhelm_supervisor::installation::Expectation`'s text form. A missing
+    /// installation ID leaves a leading dash in the separate argument.
+    #[arg(long, allow_hyphen_values = true)]
     expect: Option<String>,
 }
 
@@ -2845,6 +2846,48 @@ async fn stdio_proxy(
 
 #[cfg(test)]
 mod tests {
+    /// The updater writes a leading dash for a two-field installation record. The shell passes
+    /// that expectation as a separate word, so clap must leave it intact for the installer.
+    #[farhelm_testtrace::test]
+    fn install_cli_accepts_an_expectation_without_an_id() {
+        use super::{Cli, Cmd, InternalCmd};
+        use clap::Parser as _;
+        use farhelm_supervisor::installation::Expectation;
+
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "internal",
+            "install",
+            "--staging",
+            "staging",
+            "--version",
+            "1.2.4",
+            "--applications",
+            "Applications",
+            "--bin-dir",
+            "bin",
+            "--link",
+            "bin/farhelm",
+            "--expect",
+            "-:0:1.2.3",
+        ])
+        .expect("the installer CLI accepts a separate expectation with a leading dash");
+        let Cmd::Internal {
+            command: InternalCmd::Install(args),
+        } = cli.command
+        else {
+            panic!("expected the internal install subcommand");
+        };
+        assert_eq!(
+            args.expect.as_deref().and_then(Expectation::parse),
+            Some(Expectation {
+                id: None,
+                generation: 0,
+                installed: Some("1.2.3".into()),
+            }),
+        );
+    }
+
     /// Spec: `farhelm agent create --recipe` becomes the environment verb,
     /// with `--container-host` only beside `--recipe`; `--recipe` refuses
     /// `--host` and `--idempotency-key`; `clone` may omit `--host` (SPEC.md,
