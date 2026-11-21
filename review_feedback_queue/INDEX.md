@@ -345,10 +345,6 @@ consequences.
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
-- [`removal-destination-collapses-distinguishing-spaces.md`](removal-destination-collapses-distinguishing-spaces.md) —
-  Removal/refusal destinations and manual startup paths collapse distinguishing spaces; live SSH examples, clipboard
-  serialization and harmful startup reliance remain unverified.
-
 - [`session-view-fallback-omits-start-time.md`](session-view-fallback-omits-start-time.md) — The promised fallback for
   clipped hover details omits a session's separate start time.
 
