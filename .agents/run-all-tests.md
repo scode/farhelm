@@ -29,7 +29,7 @@ Before starting, read these in full, and again after any compaction or resume:
 ## Ground rules
 
 - Nothing runs twice locally. The deflake sweep owns the routine runtime batteries. The tooling checks and live agent
-  suite below have their own commands.
+  suite below have their own commands. Do not "warm up" by running a battery the sweep will run anyway.
 - Fix what is straightforward, on one linear jjstack stack, one draft PR per fix, with the per-PR gates from
   `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, and a cold-read commit message. Straightforward
   means a clear cause and a small, low-risk fix inside the existing design: a test that assumes an old limit, a lint, a
@@ -236,7 +236,10 @@ rerunning the check.
 
 Run `python3 -B scripts/run-harness-drift.py` on Linux as part of this explicitly requested flow, before the sweep. Each
 tracked agent spends a real vendor turn. Record PASSED, COULD NOT RUN and FAILED separately with the recorder run IDs.
-Missing credentials or manual hooks leave coverage unknown for that agent. Keep going through the rest of this flow and
+Missing credentials or manual hooks leave coverage unknown for that agent; never sign in, edit hook files or accept a
+vendor update to get past them. A FAILED case is handled like any other failure under the ground rules: fixed when the
+fix is straightforward, otherwise recorded in `TODO.md` with its evidence (it is drift in a vendor's CLI, not a flake),
+and either way it does not hold back the sweep or the release gate. Keep going through the rest of this flow and
 preserve the evidence for any failures.
 
 ## 3. Deflake sweep
