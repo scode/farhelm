@@ -478,6 +478,9 @@ impl ProvisioningService {
         };
         let service = self.clone();
         let task_run = run_id.clone();
+        // Failed first launches can purge the host before setup takes its
+        // first step. Purge must see the registered task.
+        let mut memory = self.memory.lock().await;
         let task = tokio::spawn(async move {
             use futures_util::FutureExt as _;
             let _slot = service
@@ -523,7 +526,7 @@ impl ProvisioningService {
                 service.end_panicked_launch(host, &task_run).await;
             }
         });
-        self.memory.lock().await.tasks.insert(host, task);
+        memory.tasks.insert(host, task);
         Ok((
             RunAccepted {
                 host_id: host,
@@ -997,6 +1000,8 @@ impl ProvisioningService {
             .await;
         self.manager.events().bump();
         let service = Arc::clone(&self);
+        // Serialize handle registration with host purge, as for a session launch.
+        let mut memory = self.memory.lock().await;
         let task = tokio::spawn(async move {
             let _slot = Arc::clone(&service.run_slots)
                 .acquire_owned()
@@ -1004,7 +1009,7 @@ impl ProvisioningService {
                 .expect("run slots stay open");
             service.execute_tensorlake_add(host, plan, host_write).await;
         });
-        self.memory.lock().await.tasks.insert(host, task);
+        memory.tasks.insert(host, task);
         Ok(RunAccepted {
             host_id: host,
             run_id,

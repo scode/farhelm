@@ -5838,9 +5838,11 @@ working on Farhelm itself: a supervisor started by hand with `farhelm supervisor
 one run by a unit the user wrote or changed with drop-ins, one at paths other than the layout setup installs, or a host
 provisioning does not target. Do not spend significant complexity making setup or Update detect, adapt to, coexist with,
 or preserve such setups; refusing with a clear message is enough. A remote Mac with the desktop app installed is refused
-for setup, Update and uninstall as Topology specifies; it is not offered a manual-start workaround. Setup and Update may
-treat the layout they install as their own, including re-applying their background-service settings and, on Linux, start
-at boot and linger, on every run. The rules above about shared directories and unrelated host configuration still hold.
+for setup, Update and uninstall as Topology specifies; it is not offered a manual-start workaround. If the Mac setup
+confirmation probe reports that no supervisor is running, Farhelm checks again for the desktop app before installing.
+Setup and Update may treat the layout they install as their own, including re-applying their background-service settings
+and, on Linux, start at boot and linger, on every run. The rules above about shared directories and unrelated host
+configuration still hold.
 
 Confirmed 2026-10-14: editing a Farhelm service unit by hand voids Farhelm's guarantees about how operations that read
 that unit identify its owning installation and treat its service. This applies to the hosts panel's setup, Update and
