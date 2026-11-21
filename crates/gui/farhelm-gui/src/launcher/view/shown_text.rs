@@ -33,9 +33,9 @@
 //! remembered wrapper prefix".
 
 use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
-use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Styled as _, Window, div, px};
+use gpui::{AnyElement, Context, IntoElement, ParentElement as _, Window, div};
 
-use super::{Input, LABEL_COLUMN, LABEL_GAP, Launcher, on_launcher};
+use super::{Input, Launcher, on_launcher};
 use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::launcher::draft::{LaunchDraft, Mode};
 
@@ -212,7 +212,7 @@ impl Input {
     }
 }
 
-/// A Clear button under a field shown read-only, indented to the fields' column: `id`, its words, and its hover help.
+/// A Clear button under a read-only value lets the user replace it with ordinary editable text.
 pub(super) fn clear_button(
     id: &'static str,
     words: &'static str,
@@ -221,7 +221,6 @@ pub(super) fn clear_button(
     cx: &mut Context<Launcher>,
 ) -> AnyElement {
     div()
-        .pl(px(LABEL_COLUMN + LABEL_GAP))
         .child(
             Button::new(id, words, HoverHelp::tooltip(help), Role::Button)
                 .tier(Tier::Neutral)

@@ -332,7 +332,7 @@ fn the_footer_keeps_launch_primary_and_reset_neutral(cx: &mut TestAppContext) {
         Some("Launch: start the session"),
         "the premise: Launch is available"
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         folder_focused(cx),
         "the premise: neither footer button owns focus"
@@ -441,6 +441,41 @@ fn the_footer_actions_follow_reading_order_and_wrap_to_close(cx: &mut TestAppCon
     }
 }
 
+/// At the minimum width, the shell divider and both chips can join the other choices on the second line.
+/// A third line would spend launcher height even when the remaining chips fit beside each other.
+#[gpui::test]
+fn the_harness_picker_uses_at_most_two_lines_at_the_minimum_width(cx: &mut TestAppContext) {
+    let (_, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    let chips: Vec<_> = test_support::frame(cx)
+        .into_iter()
+        .filter(|node| {
+            node.role == Some(Role::Button)
+                && node.element_id.as_ref().is_some_and(|id| {
+                    id.starts_with("launcher-harness-") || id.starts_with("launcher-shells-")
+                })
+        })
+        .collect();
+    assert_eq!(
+        chips.len(),
+        crate::launcher::words::HARNESS_PICKER_ORDER.len(),
+        "the premise: every harness chip was drawn"
+    );
+    let mut lines: Vec<_> = chips
+        .iter()
+        .map(|chip| chip.bounds.top().as_f32())
+        .collect();
+    lines.sort_by(f32::total_cmp);
+    lines.dedup();
+    assert!(lines.len() <= 2, "the chips start at {lines:?}");
+    assert_eq!(
+        test_support::bounds(cx, "launcher-shells-Bash").top(),
+        test_support::bounds(cx, "launcher-shells-Zsh").top(),
+        "the shell chips stay together"
+    );
+}
+
 /// With every placement offered, Tab follows the visible launch groups: search and recents, destination and
 /// placement, host and path, then the active launch tab and its agent choices.
 #[gpui::test]
@@ -529,7 +564,7 @@ fn the_footer_reads_an_agent_launchs_choices(cx: &mut TestAppContext) {
         name_of(cx, "launcher-summary-target").as_deref(),
         Some("Codex · host1 · /src/project")
     );
-    test_support::click(cx, "launcher-prompt-row");
+    click_in_body(cx, "launcher-prompt");
     assert!(
         focused(cx, Field::Prompt),
         "the premise: the click focused the prompt"
@@ -563,7 +598,7 @@ fn a_refused_press_says_why_beside_the_main_action(cx: &mut TestAppContext) {
         shown_refusal(cx).as_deref(),
         Some("Not launched. Choose a structured harness before launching")
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         folder_focused(cx),
         "the premise: the click focused the folder field"
@@ -616,7 +651,7 @@ pub(crate) fn launch_help(cx: &mut VisualTestContext) -> Option<String> {
 #[gpui::test]
 fn typing_in_the_folder_edits_the_draft(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "".into(), None));
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         folder_focused(cx),
         "the premise: the click focused the folder field"
@@ -633,7 +668,7 @@ fn typing_in_the_folder_edits_the_draft(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_tabs_switch_fields_and_keep_each_draft(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
-    test_support::click(cx, "launcher-wrapper-row");
+    click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
         "the premise: the click focused the wrapper prefix"
@@ -702,7 +737,7 @@ fn restart_with_starts_on_cancel_and_says_restart_error(cx: &mut TestAppContext)
 #[gpui::test]
 fn reset_choices_empties_the_wrapper_field(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
-    test_support::click(cx, "launcher-wrapper-row");
+    click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
         "the premise: the click focused the wrapper prefix"
@@ -747,13 +782,18 @@ fn clear_initial_prompt_empties_the_prompt(cx: &mut TestAppContext) {
         !drawn(cx, "launcher-clear-prompt"),
         "nothing to clear while the prompt is empty"
     );
-    test_support::click(cx, "launcher-prompt-row");
+    click_in_body(cx, "launcher-prompt");
     assert!(
         focused(cx, Field::Prompt),
         "the premise: the click focused the prompt"
     );
     keys(cx, "h i");
-    test_support::click(cx, "launcher-clear-prompt");
+    assert_eq!(
+        draft(cx).prompt,
+        "hi",
+        "the premise: the prompt holds the typed text"
+    );
+    click_in_body(cx, "launcher-clear-prompt");
     assert_eq!(draft(cx).prompt, "");
     assert_eq!(
         read(cx, |launcher, _, cx| launcher.prompt.text(cx).to_string()),
@@ -767,7 +807,7 @@ fn clear_initial_prompt_empties_the_prompt(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_wrapper_prefix_that_does_not_parse_is_said_at_once(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
-    test_support::click(cx, "launcher-wrapper-row");
+    click_in_body(cx, "launcher-wrapper");
     assert!(
         focused(cx, Field::Wrapper),
         "the premise: the click focused the wrapper prefix"
@@ -1336,7 +1376,7 @@ fn model_field_open(
     let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(host, "~".into(), None));
     answer_catalog(&mut helm, cx, Some(model_catalog()));
     test_support::click(cx, "launcher-harness-Codex");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .model_input
@@ -1486,20 +1526,28 @@ fn leaving_the_model_field_closes_its_list(cx: &mut TestAppContext) {
 
 // ---- Stored values shown escaped ----------------------------------------------------------------------------------
 
-/// Click a launcher body control after scrolling it clear of the pinned footer. GPUI reports debug bounds for
-/// clipped elements too, so a click at a reported center could otherwise go to a footer action.
+/// Click the control itself after scrolling it clear of the pinned footer. Field rows also cover their labels and
+/// notes, so their center is no longer a reliable target for focusing the input.
 pub(super) fn click_in_body(cx: &mut VisualTestContext, selector: &'static str) {
+    let bounds = |cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(selector))
+            .map_or_else(|| test_support::bounds(cx, selector), |node| node.bounds)
+    };
     let body = test_support::bounds(cx, "launcher-body");
-    let target = test_support::center(cx, selector);
+    let target = bounds(cx).center();
     if !body.contains(&target) {
         super::browse_tests::scroll_body(cx, f32::from(body.center().y - target.y));
     }
     let body = test_support::bounds(cx, "launcher-body");
+    let target = bounds(cx).center();
     assert!(
-        body.contains(&test_support::center(cx, selector)),
+        body.contains(&target),
         "the premise: {selector} is visible in the launcher body"
     );
-    test_support::click(cx, selector);
+    cx.simulate_click(target, gpui::Modifiers::none());
+    test_support::check(cx);
 }
 
 /// The contract every field shown escaped keeps (`view::stored`): the field in row `field` shows `shown`; a click and
@@ -1555,7 +1603,7 @@ fn restart_with_shows_an_unsafe_stored_wrapper_prefix_escaped(cx: &mut TestAppCo
     );
     escaped_until_cleared(
         cx,
-        "launcher-wrapper-row",
+        "launcher-wrapper",
         "launcher-clear-wrapper",
         "wrapper<U+202E> --",
         |launcher| &launcher.wrapper,
@@ -1626,7 +1674,7 @@ fn an_agent_switch_shows_an_unsafe_remembered_prefix_escaped(cx: &mut TestAppCon
     click_in_body(cx, "launcher-harness-Claude");
     escaped_until_cleared(
         cx,
-        "launcher-wrapper-row",
+        "launcher-wrapper",
         "launcher-clear-wrapper",
         "env CLAUDE_PROFILE=work<U+202E>",
         |launcher| &launcher.wrapper,
@@ -1673,7 +1721,7 @@ fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestApp
     );
     escaped_until_cleared(
         cx,
-        "launcher-prompt-row",
+        "launcher-prompt",
         "launcher-clear-prompt",
         "do<U+202E>it",
         |launcher| &launcher.prompt,
@@ -1690,7 +1738,7 @@ fn agent_launch_text_holding_invisible_characters_shows_escaped(cx: &mut TestApp
         ),
         "the line goes with the read-only prompt"
     );
-    click_in_body(cx, "launcher-flags-row");
+    click_in_body(cx, "launcher-flags");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .flags
@@ -1740,7 +1788,7 @@ fn copied_command_text_holding_invisible_characters_shows_escaped_and_editable(
         "editable, so no Clear"
     );
     assert_eq!(draft(cx).command.command, "run\u{200b} {farhelm_args}");
-    test_support::click(cx, "launcher-command-row");
+    click_in_body(cx, "launcher-command");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .command
@@ -1764,7 +1812,7 @@ fn copied_command_text_holding_invisible_characters_shows_escaped_and_editable(
         "a newly entered invisible character is spelled out too"
     );
 
-    test_support::click(cx, "launcher-resume-command-row");
+    click_in_body(cx, "launcher-resume-command");
     assert!(read(cx, |launcher, window, cx| launcher
         .resume
         .focus_handle(cx)
@@ -1790,7 +1838,7 @@ fn restart_with_model_enter_chooses_without_restarting(cx: &mut TestAppContext) 
     let restart = LaunchDraft::restart_with("missing", &source, Some(1)).unwrap();
     let (mut helm, cx) = launcher_on(cx, restart);
     answer_catalog(&mut helm, cx, Some(model_catalog()));
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         has_node(cx, "launcher-model-list"),
         "the premise: the list is open"
@@ -1817,7 +1865,7 @@ fn restart_with_model_enter_chooses_without_restarting(cx: &mut TestAppContext) 
     // field shows the picked model now, and typing would add to it, so focus leaves it (Tab) and comes back with a
     // click, which empties it.
     keys(cx, "tab");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert_eq!(
         model_text(cx),
         "",
@@ -1871,7 +1919,7 @@ fn the_model_list_heading_keeps_older_rows_keyboard_selectable(cx: &mut TestAppC
         ])),
     );
     assert_eq!(draft(cx).agent.harness, None);
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(has_node(cx, "launcher-model-list"));
     assert!(read(cx, |launcher, window, cx| launcher
         .model_input
@@ -1910,7 +1958,7 @@ fn a_catalog_model_picked_first_chooses_its_agent(cx: &mut TestAppContext) {
         None,
         "the premise: no agent chosen"
     );
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         !has_node(cx, "launcher-model-show-all"),
         "all owners are already offered"
@@ -1937,7 +1985,7 @@ fn a_family_word_highlights_and_applies_only_the_current_model(cx: &mut TestAppC
         ])),
     );
     assert_eq!(draft(cx).agent.harness, None);
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(has_node(cx, "launcher-model-list"));
     let latest = "launcher-model-option-Codex-gpt-6.2-sol";
     keys(cx, "s o");
@@ -1955,7 +2003,7 @@ fn a_family_word_highlights_and_applies_only_the_current_model(cx: &mut TestAppC
     assert_eq!(draft(cx).agent.model.as_deref(), Some("claude-fable-5"));
 
     test_support::click(cx, "launcher-harness-Codex");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     keys(cx, "s o l");
     assert_eq!(selected_state(cx, latest), Some(true));
     assert_eq!(
@@ -1983,7 +2031,7 @@ fn the_model_field_explains_wrong_agent_choices_and_applies_grok_under_pi(cx: &m
         ])),
     );
     test_support::click(cx, "launcher-harness-Codex");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(has_node(cx, "launcher-model-list"));
     for (query, instruction) in [
         ("fable", "choose Claude to use it."),
@@ -2006,7 +2054,7 @@ fn the_model_field_explains_wrong_agent_choices_and_applies_grok_under_pi(cx: &m
     }
 
     test_support::click(cx, "launcher-harness-Pi");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     keys(cx, "g r o k");
     assert_eq!(model_text(cx), "grok");
     assert_eq!(
@@ -2024,7 +2072,7 @@ fn the_model_field_explains_wrong_agent_choices_and_applies_grok_under_pi(cx: &m
 fn a_family_word_waits_for_the_release_catalog(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
     test_support::click(cx, "launcher-harness-Codex");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(has_node(cx, "launcher-model-list"));
     keys(cx, "s o l");
     assert_eq!(
@@ -2114,7 +2162,7 @@ fn prompt_and_conversation_rows_follow_the_agents_capabilities(cx: &mut TestAppC
 fn a_custom_id_with_no_agent_says_to_choose_one(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
     answer_catalog(&mut helm, cx, Some(model_catalog()));
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .model_input
@@ -2147,7 +2195,7 @@ fn the_model_error_lasts_until_a_pick_or_escape(cx: &mut TestAppContext) {
         has_node(cx, "launcher-model-error"),
         "leaving the field keeps it"
     );
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert!(
         !has_node(cx, "launcher-model-error"),
         "focusing the field again starts over"
@@ -2161,7 +2209,7 @@ fn the_model_error_lasts_until_a_pick_or_escape(cx: &mut TestAppContext) {
     assert!(!has_node(cx, "launcher-model-error"), "Escape clears it");
     // The field shows the chosen model again, and typing would add to it, so it is focused afresh, which empties it.
     keys(cx, "tab");
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     assert_eq!(
         model_text(cx),
         "",
@@ -2196,7 +2244,7 @@ fn the_model_list_stops_at_260_pixels(cx: &mut TestAppContext) {
         Some("30 for Codex"),
         "the test needs a populated model catalog"
     );
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     let list = test_support::bounds(cx, "launcher-model-list");
     let first = test_support::bounds(cx, "launcher-model-default");
     assert!(
@@ -2310,7 +2358,7 @@ fn the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one(cx: &mut
 }
 
 /// The host button is as wide as the chosen host's words (at least the old 12em), not the row, and 36 pixels high;
-/// Browse, as high, sits on its own line right under the Host row, from the row's left edge; the host list is as wide
+/// Browse, as high, sits four pixels below the Host row, from the row's left edge; the host list is as wide
 /// as the hosts it offers, not the button. Why: the old launcher drew a compact picker (`min-width: 12em; height:
 /// 36px`) and its block layout put Browse under the row, and the port first stretched the button across the row with
 /// Browse beside it, which the bridge drive caught beside the reference pictures; a list tied to the narrow button
@@ -2335,8 +2383,8 @@ fn the_host_button_is_as_wide_as_its_host_with_browse_under_it(cx: &mut TestAppC
     assert_eq!(browse.size.height, gpui::px(36.), "Browse's height");
     assert_eq!(
         browse.top(),
-        row.bottom(),
-        "Browse sits right under the Host row"
+        row.bottom() + gpui::px(4.),
+        "the gap keeps the Host and Browse borders distinct"
     );
     assert_eq!(browse.left(), row.left(), "from the row's left edge");
     assert_eq!(
@@ -2368,7 +2416,7 @@ fn re_picking_the_shown_host_counts_as_a_hand_pick(cx: &mut TestAppContext) {
         !draft(cx).host_chosen,
         "the premise: New's host is a prefill"
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     // Browse sits between the folder and the host button in Tab order, as the old app's did.
     keys(cx, "shift-tab shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
@@ -2392,7 +2440,7 @@ fn re_picking_the_shown_host_counts_as_a_hand_pick(cx: &mut TestAppContext) {
 #[gpui::test]
 fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "x");
     // Browse sits between the folder and the host button in Tab order, as the old app's did.
     keys(cx, "shift-tab shift-tab");
@@ -2427,7 +2475,7 @@ fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
 #[gpui::test]
 fn typeahead_finds_a_host_and_escape_cancels(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     // Browse sits between the folder and the host button in Tab order, as the old app's did.
     keys(cx, "shift-tab shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
@@ -2474,7 +2522,7 @@ pub(super) fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<boo
 #[gpui::test]
 fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         folder_focused(cx),
         "the premise: the click focused the folder"
@@ -2532,7 +2580,7 @@ fn unmatched_typeahead_keeps_the_chosen_host(cx: &mut TestAppContext) {
 fn a_click_opened_host_list_owns_the_keyboard_on_macos(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     cx.update(|_, cx| crate::focus::set_click_focuses_controls(false, cx));
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         folder_focused(cx),
         "the premise: the folder field has focus"
@@ -2603,7 +2651,7 @@ fn a_mac_click_on_the_host_button_from_the_search_box_opens_the_list_and_focuses
 #[gpui::test]
 fn a_press_outside_closes_the_host_list_without_picking(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     // Browse is between the folder and host button in Tab order. End opens the list with another host highlighted.
     keys(cx, "shift-tab shift-tab");
     assert!(
@@ -2833,7 +2881,7 @@ fn the_prefix_in_a_launcher_field_begins_a_sequence_only_with_nothing_selected(
     keys(cx, "escape");
     assert!(!sequence_armed(cx), "the premise: Escape ended it");
 
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         focused(cx, Field::Folder),
         "the premise: the folder field holds focus"

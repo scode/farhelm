@@ -12,7 +12,7 @@ use gpui::{Keystroke, VisualTestContext};
 use serde_json::json;
 
 use super::draft::{LaunchDraft, Tab};
-use super::view_tests::{launcher_on, name_of, read, shown_refusal};
+use super::view_tests::{click_in_body, launcher_on, name_of, read, shown_refusal};
 use crate::local_state;
 use crate::notices::{self, Notice};
 use crate::session_list::tests::{listing, session};
@@ -279,7 +279,7 @@ fn a_refused_launch_brings_the_launcher_back_with_the_helms_words(cx: &mut gpui:
         "true",
         "with its draft"
     );
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     keys(cx, "n");
     assert_eq!(shown_refusal(cx), None, "an edit takes the refusal away");
 }
@@ -398,7 +398,7 @@ fn a_refusal_the_user_moved_on_from_waits_behind_a_notice(cx: &mut gpui::TestApp
 fn a_held_enter_in_a_field_never_launches(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, command_draft());
     creates(&mut helm, cx);
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .name
@@ -486,7 +486,7 @@ fn a_second_enter_while_launch_waits_leaves_selection_alone(cx: &mut gpui::TestA
     ];
     let (mut helm, cx) = super::view_tests::launcher_over(cx, command_draft(), snapshot);
     creates(&mut helm, cx);
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     keys(cx, "enter");
     let sent = creates(&mut helm, cx);
     let [create] = &sent[..] else {

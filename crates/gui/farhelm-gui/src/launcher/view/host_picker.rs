@@ -33,7 +33,7 @@ use gpui::{
     Styled as _, WeakEntity, Window, div, px,
 };
 
-use super::{Launcher, row};
+use super::{LABEL_GAP, Launcher, row};
 use crate::components::{Button, HoverHelp, OptionRow, Role, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::HostSentence;
@@ -323,7 +323,6 @@ impl Launcher {
             // The footer's words: the registry's name with its phase, else the source session's own host name.
             let words = HostSentence::new("launcher-host-name").host(&self.target(cx).host);
             let held = div()
-                .pt(px(8.))
                 .flex()
                 .items_center()
                 .gap(px(MARK_GAP))
@@ -402,14 +401,12 @@ impl Launcher {
         self.with_browse_below(host, cx)
     }
 
-    /// The Host row with Browse on its own line right under it, from the row's left edge, where the old launcher drew
-    /// it: its `.launch-composer-destination-row` held the Host row and Browse, and the placement row around it set it
-    /// to `display: block` (`app.css` near line 10235 at reference commit `24bc0580`), so Browse fell under the row
-    /// with no gap. Browse comes between the host and the folder in reading and Tab order, as there.
+    /// Browse follows Host in reading and Tab order. A small gap keeps the buttons' adjacent borders distinct.
     fn with_browse_below(&self, host: impl IntoElement, cx: &mut Context<Self>) -> AnyElement {
         div()
             .flex()
             .flex_col()
+            .gap(px(LABEL_GAP))
             .items_start()
             .child(div().w_full().child(host))
             .children(self.browse_button(cx))

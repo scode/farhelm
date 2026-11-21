@@ -93,10 +93,8 @@
 //!   `crates/gui/farhelm-gui/src/harness.rs`:
 //!   which mark an agent type and a legacy session's stored kind draw, each
 //!   mark's bundled picture and identity color, the agent's product name, and
-//!   the status-line words for a mode without checks. Only the row reads them
-//!   today; the module sits at the app level because the launcher, the quick
-//!   switcher, templates and Settings are expected to read the same answers
-//!   (the migration's orchestrator placed it there on 2026-11-14). The row's
+//!   the status-line words for a mode without checks. The launcher reads the
+//!   same mark and identity ink for its harness chips. The row's
 //!   permission shield describes an agent launch with the launcher's
 //!   permission help. The copy instruction the terminal's "this drag did not
 //!   copy" notice offers is `copy_hint` in

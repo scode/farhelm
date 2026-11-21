@@ -20,7 +20,7 @@ use serde_json::{Value, json};
 use super::draft::{FolderDefault, LaunchDraft, Tab};
 use super::entry::open_new;
 use super::entry_tests::window_with;
-use super::view_tests::{draft, name_of, read, shown_refusal};
+use super::view_tests::{click_in_body, draft, name_of, read, shown_refusal};
 use crate::layers;
 use crate::test_support::{self, any_open, settle};
 
@@ -505,7 +505,7 @@ fn a_recent_folder_from_the_folder_list_refuses_launch_on_a_retargeted_host(
     cx: &mut TestAppContext,
 ) {
     let (_helm, _cx, folder) = refused_after_retarget(cx, |cx| {
-        test_support::click(cx, "launcher-folder-row");
+        click_in_body(cx, "launcher-folder");
         assert_eq!(
             name_of(cx, "launcher-folder-0").as_deref(),
             Some("/srv/saved"),

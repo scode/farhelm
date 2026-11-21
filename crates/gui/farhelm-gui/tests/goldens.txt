@@ -118,6 +118,8 @@ linux/inline-prompt--dark.png 8250e424c4f5da2573166f4e375ead472ce66c56
 linux/inline-prompt--light.png ba01554c80aabc7ec6293f52d47d6f34a60fce58
 linux/keyboard-shortcuts-dialog--dark.png bef6d89f6614d8f0a9ecd15d3ddf658d42eceb5a
 linux/keyboard-shortcuts-dialog--light.png 67b6ed0b4dfdaa9d4526024e5a29d59489678387
+linux/launcher-new--dark.png 0db4e9293a385c1e954d39aa80f4361758358886
+linux/launcher-new--light.png 276b47671d002054d68723afa75c8fa012023f4a
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
 linux/notice-banner--dark.png d296fc1a9d4afa4ddad8ceb978bd5220dcb043e3
@@ -142,8 +144,8 @@ linux/prompt-host-text--dark.png 87148068a8e79b6733f8e5a9cfc882ccab5fdec7
 linux/prompt-host-text--light.png db1bc0e50fda30480979891bed1aa07c38ed76c7
 linux/radio-group--dark.png 3adb6fb7f2e805c3ce864c425514cd4393733d07
 linux/radio-group--light.png cc098c74f133370656d43591659defac9665f8b5
-linux/radio-group-variants--dark.png b2a97502a0d10da51d60dea4a2ff6b2e74521f4a
-linux/radio-group-variants--light.png d0711be0b302f8887ff11ffc4e71e9acab458826
+linux/radio-group-variants--dark.png 1373e64c33657cce5b528f4833b930197d741fd6
+linux/radio-group-variants--light.png 1e9d6fd034be441863aab23c2f575f6f71d4037a
 linux/rename-dialog--dark.png 1d3f1de61c295d86e269ac5dfb62f2fafd7ea145
 linux/rename-dialog--light.png 9311aabb05c22b4aed967319ebb20d1f6743f988
 linux/row-delete-confirmation--dark.png f62733eaba0b6dcb70147ed61cd18d59c0d0a4f8
