@@ -317,23 +317,50 @@ script, write a closing entry in its log, and stop the watchdog. Never edit `pla
 
 No release note needed.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-21 (claim acb5ce).
+### 2026-11-21: answer to a blocked question
 
-### Which screenshot comparison path should the review page use?
+The question, as the executor put it:
 
-Reviewers used to open changed screenshots one at a time, which made it easy to miss a change on an unrelated screen.
-The drafts put each changed screenshot beside its reference and highlight the differing pixels. A clean full Linux
-update captured 328 screenshots in 35 seconds and all 328 matched, so there was no page to generate. Replaying changes
-since an earlier reference set took another 28 seconds to make the page for 68 changed or new screenshots. An
-all-changed stress test took 112 seconds to produce 328 highlights. Both page timings used up to 16 processes.
+> Blocked on 2026-11-21 (claim acb5ce).
+>
+> ### Which screenshot comparison path should the review page use?
+>
+> Reviewers used to open changed screenshots one at a time, which made it easy to miss a change on an unrelated screen.
+> The drafts put each changed screenshot beside its reference and highlight the differing pixels. A clean full Linux
+> update captured 328 screenshots in 35 seconds and all 328 matched, so there was no page to generate. Replaying changes
+> since an earlier reference set took another 28 seconds to make the page for 68 changed or new screenshots. An
+> all-changed stress test took 112 seconds to produce 328 highlights. Both page timings used up to 16 processes.
+>
+> The plan specifies the existing Python PNG helpers and asks that a large page add little time to a full update. The
+> implementation reuses those helpers, and the measured cost is substantial when many screenshots change together.
+>
+> Should the executor try the PNG code already compiled into the golden test executable, or keep the Python
+> implementation and accept the measured wait on large reviews? I recommend trying the compiled code. It keeps the
+> portable HTML page and uses an existing dependency. It needs a new entry point in the golden test executable. Approval
+> would let the executor benchmark the compiled path on the same two sets. Use it if both results meet the plan’s speed
+> requirement. If the timings still show a substantial delay, bring them back before landing.
 
-The plan specifies the existing Python PNG helpers and asks that a large page add little time to a full update. The
-implementation reuses those helpers, and the measured cost is substantial when many screenshots change together.
+The maintainer's answer:
 
-Should the executor try the PNG code already compiled into the golden test executable, or keep the Python implementation
-and accept the measured wait on large reviews? I recommend trying the compiled code. It keeps the portable HTML page and
-uses an existing dependency. It needs a new entry point in the golden test executable. Approval would let the executor
-benchmark the compiled path on the same two sets. Use it if both results meet the plan’s speed requirement. If the
-timings still show a substantial delay, bring them back before landing.
+### Answered by the landing monitor on the maintainer's behalf (2026-11-21)
+
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks": it is a reversible choice inside development tooling, not a huge question. A later change of mind is a
+follow-up, not a reason to stop the plan.
+
+Decision: use the image code already compiled into the golden test program for the page's pixel work (decoding,
+comparing and drawing the highlight), as recommended. The plan's speed requirement, that making the page does not
+noticeably lengthen a run, is the maintainer's; reusing the Python PNG helpers was only the planner's means to it, so
+this decision overrides that planner decision. It adds no new dependency, since the test program already carries the
+image library, optimized in development builds since goldens-fast-and-targeted.
+
+- Keep the page itself plain static HTML written by the Python runner, as the plan says; only the pixel work moves.
+- Prefer the cheapest place for it: a comparison run already has both pictures decoded when it finds a difference, so
+  writing the highlight there costs almost nothing. Update mode needs its own entry point in the test program, in the
+  style of the existing scene listing.
+- Measure the compiled path on the same two sets as before (the 68 changed pictures and the all-changed 328), with the
+  default number of processes. Use whichever path is faster on both, and put the timings for both paths in the report.
+  Do not block again over the timings: if neither path meets the speed requirement, ship the faster one and say so in
+  the report's open questions.
