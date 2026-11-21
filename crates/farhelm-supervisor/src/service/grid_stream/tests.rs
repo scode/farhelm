@@ -1260,23 +1260,43 @@ async fn a_takeover_writes_nothing_of_a_half_collected_paste() {
 ///
 /// Why: the attachment holds a paste until its last part, so the backlog
 /// bounds how large a paste can be; past the bound it must give the paste
-/// up whole, never write the part it had. Spec: parts of 32 KiB are taken
-/// until the backlog refuses one, which happens within 300 parts; the
+/// up whole, never write the part it had. Spec: 32 KiB parts are taken
+/// until adding one would exceed the backlog, including the opening marker. The
 /// attachment ends, and `after` from another caller is all the program
-/// reads.
+/// reads after teardown. A marker through the pump before overflow proves
+/// the pump has run while the first paste part was still unfinished. A
+/// second marker checks the rest of the queue before cancelling it.
 #[farhelm_testtrace::test]
 async fn a_paste_past_the_backlog_writes_nothing() {
     let (host, test_host) = bracketed_host().await;
     let (mut input, _failure) = HostAttach::new(host.clone());
-    let part = "p".repeat(32 * 1024);
-    let mut taken = 0;
-    while input.send_input(&paste(&part, false)).is_ok() {
+    let part_bytes = 32 * 1024;
+    let part = paste(&"p".repeat(part_bytes), false);
+    let fitting_parts = (INPUT_BACKLOG - crate::grid_input::PASTE_START.len()) / part_bytes;
+    input.send_input(&part).expect("the first part fits");
+    // Send the fence behind anything the first part might have queued.
+    input.reserve(1).unwrap();
+    input
+        .queue_for_pump(QueuedInput::OneOff(vec![b'f']))
+        .unwrap();
+    received(&test_host, b"f").await;
+    let mut taken = 1;
+    while input.send_input(&part).is_ok() {
         taken += 1;
-        assert!(taken < 300, "the backlog never refused a part");
+        assert!(taken <= fitting_parts, "the backlog never refused a part");
     }
+    assert_eq!(
+        taken, fitting_parts,
+        "the paste was refused before the backlog filled"
+    );
+    input.reserve(1).unwrap();
+    input
+        .queue_for_pump(QueuedInput::OneOff(vec![b'g']))
+        .unwrap();
+    received(&test_host, b"fg").await;
     drop(input);
     host.send_input(b"after").await.expect("taken");
-    received(&test_host, b"after").await;
+    received(&test_host, b"fgafter").await;
 }
 
 /// A malformed message, and input inside an unfinished paste, are refused.
@@ -1322,7 +1342,9 @@ async fn input_does_not_wait_on_the_emulator() {
         tokio::task::spawn_blocking(move || {
             runtime.block_on(host.read(|_| {
                 holding_tx.send(()).expect("the test waits");
-                let _ = released.recv_timeout(WAIT);
+                released
+                    .recv_timeout(WAIT)
+                    .expect("the input must release a live holder");
             }))
         })
     };
@@ -1472,7 +1494,15 @@ impl Link {
             + Duration::from_secs_f64(size as f64 * 8.0 / Self::BITS_PER_SECOND);
         tokio::time::sleep_until(sent).await; // sleep-ok: the simulated link's serialization time, which is what backpressures the sender
         self.free = sent;
-        sent + Self::ONE_WAY - self.started
+        self.last_arrival()
+    }
+
+    /// Arrival of the last frame carried, even across separate drain calls.
+    fn last_arrival(&self) -> Duration {
+        if self.bytes == 0 {
+            return Duration::ZERO;
+        }
+        self.free + Self::ONE_WAY - self.started
     }
 }
 
@@ -1516,20 +1546,21 @@ async fn drain_until(
     mut link: Option<&mut Link>,
     done: impl Fn(&Viewer) -> bool,
 ) -> Duration {
-    let mut arrived = Duration::ZERO;
     loop {
         while let Ok(frame) = viewer.rx.try_recv() {
             if let Some(link) = link.as_deref_mut() {
-                arrived = link.carry(&frame).await;
+                link.carry(&frame).await;
             }
             viewer.take(frame);
         }
         if done(viewer) {
-            return arrived;
+            return link
+                .as_ref()
+                .map_or(Duration::ZERO, |link| link.last_arrival());
         }
         let frame = viewer.rx.recv().await.expect("the stream runs");
         if let Some(link) = link.as_deref_mut() {
-            arrived = link.carry(&frame).await;
+            link.carry(&frame).await;
         }
         viewer.take(frame);
     }

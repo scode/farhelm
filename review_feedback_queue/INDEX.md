@@ -163,16 +163,9 @@ consequences.
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.
 
-- [`refused-input-test-can-credit-earlier-bytes.md`](refused-input-test-can-credit-earlier-bytes.md) — The terminal
-  input-backpressure regression's claim that rejected input never reaches the host is stronger than what it observes.
-
 - [`desktop-smoke-misparses-space-bearing-run-path.md`](desktop-smoke-misparses-space-bearing-run-path.md) — Choosing a
   short fresh DESKTOP_SMOKE_DIR containing a space makes the gate report that a healthy created session has no live
   terminal.
-
-- [`paste-receipt-test-checks-before-ack-processing.md`](paste-receipt-test-checks-before-ack-processing.md) — The
-  regression does not prove that a long paste stays unconfirmed until all its pieces are acknowledged. It can miss a
-  receipt completing after the first piece. No current production receipt defect is established.
 
 - [`stop-wait-test-releases-exit-before-wait-witness.md`](stop-wait-test-releases-exit-before-wait-witness.md) — The
   regression can miss Stop ceasing to wait for final terminal output, leaving a lost opportunity to return the complete
@@ -199,17 +192,6 @@ consequences.
 - [`restart-screen-captured-before-prompt-settles.md`](restart-screen-captured-before-prompt-settles.md) — Correct
   terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
   writing the post-echo prompt.
-
-- [`resize-measurement-discards-arrival-timestamps.md`](resize-measurement-discards-arrival-timestamps.md) — The manual
-  resize benchmark can report zero last-frame delivery time after it has transmitted its resize output.
-
-- [`oversized-paste-test-cancels-before-pump-can-run.md`](oversized-paste-test-cancels-before-pump-can-run.md) — The
-  test meant to prove that an oversized paste writes nothing can pass without ever allowing its input pump to attempt
-  delivery of earlier paste parts.
-
-- [`emulator-lock-test-accepts-expired-holder.md`](emulator-lock-test-accepts-expired-holder.md) — The test for
-  nonblocking terminal input can pass after its emulator lock has already expired, so it can miss a regression that
-  would wait for that lock.
 
 - [`tab-retry-test-measures-observation-time.md`](tab-retry-test-measures-observation-time.md) — The retry regression
   can accept cleanup observed after 900 ms without proving that the retry itself waited for the required delay.

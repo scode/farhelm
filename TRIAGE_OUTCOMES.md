@@ -1703,20 +1703,6 @@
   reference: No. Discard; the scratch-space convention (`/tmp/farhelm-tmp/<uuid>`) never has spaces.
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
-## resize-measurement-discards-arrival-timestamps.md
-
-- Outcome: `other`.
-- Assessment: None in the product. A manual resize benchmark can print a last-frame delivery time of 0 ms. Verified:
-  Accepted from the file: `drain_until` starts its accumulator at zero, and an earlier drain discards the arrival times.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix code: keep the last arrival on `Link`. Or discard, since the benchmark is manual.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
 ## stable-recut-removes-retained-announcement-anchor.md
 
 - Outcome: `other`.
@@ -2390,38 +2376,6 @@
   reference: fix code (assert the seeded run is still counted)
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
-## refused-input-test-can-credit-earlier-bytes.md
-
-- Outcome: `other`.
-- Assessment: None in the product. The test that refused input never reaches the host could let a wrongly sent frame
-  stand in for the retry. Verified: Accepted from the file's line citations (reads exactly three frames, checks only the
-  lookahead buffer, retries identical bytes). Production admits before queueing.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix in a batch with a distinct sentinel frame.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
-## paste-receipt-test-checks-before-ack-processing.md
-
-- Outcome: `other`.
-- Assessment: None in the product. A test of "a long paste stays unconfirmed until every piece is acknowledged" checks
-  too early to catch a receipt that completes after the first piece. Verified: Accepted from the file. Production waits
-  for every piece. The neighboring test shows the needed fence shape.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix in a batch with an output-record fence before asserting pending.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
 ## stop-wait-test-releases-exit-before-wait-witness.md
 
 - Outcome: `other`.
@@ -2535,40 +2489,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix code: wait for the prompt after the echo before capturing.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## oversized-paste-test-cancels-before-pump-can-run.md
-
-- Outcome: `other`.
-- Assessment: None in the product. The test that an oversized paste writes nothing never lets the input pump run before
-  tearing down, so wrongly queued parts would go unnoticed. Verified: Accepted from the file: synchronous `send_input`
-  loop, then drop before any await on a current-thread runtime.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix in a batch with a witnessed pump opportunity before overflow.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
-## emulator-lock-test-accepts-expired-holder.md
-
-- Outcome: `other`.
-- Assessment: None directly. The supervisor test that proves typing is not held up while the terminal emulator is busy
-  could pass even if that property broke. Verified: Still present on main (`grid_stream/tests.rs`
-  `input_does_not_wait_on_the_emulator`): the holder ignores the result of `recv_timeout(WAIT)` (WAIT is 10 s), and the
-  stopwatch starts on a separately scheduled blocking task. A false pass needs that task to start more than 10 s late.
-  Never observed.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code, tiny (assert that the holder was released, not that it timed out). Discard is also reasonable.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
 
 ## tab-retry-test-measures-observation-time.md
 
