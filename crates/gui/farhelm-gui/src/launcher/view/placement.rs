@@ -43,7 +43,7 @@ use crate::hosts::identity::display_name;
 use crate::launcher::destination_rows::{
     PlacementControls, PlacementEdit, PlacementMode, build_placement_controls, environment_choices,
 };
-use crate::launcher::draft::{Field, RunsOn};
+use crate::launcher::draft::RunsOn;
 use crate::launcher::request::{Account, Recipes, container_reason, is_container_host};
 use crate::session;
 use crate::theme::{self, metrics};

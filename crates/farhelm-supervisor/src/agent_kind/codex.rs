@@ -9,7 +9,7 @@ use super::{
     MAX_LOCATOR_BYTES, MAX_SESSION_PATH_BYTES, RECORD_PREFIX_BYTES, is_plausible_conversation_id,
 };
 
-pub(crate) const PREFIX: &str = "codex:";
+use farhelm_proto::conversation::CODEX_LOCATOR_PREFIX as PREFIX;
 
 /// The vendor's own foreground-transition vocabulary: the hook `source`
 /// values a genuine foreground Codex lifecycle event carries.

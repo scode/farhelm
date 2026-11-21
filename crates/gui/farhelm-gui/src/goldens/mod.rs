@@ -961,6 +961,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_container_setup,
     },
     Scene {
+        name: "launcher-more-options",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_more_options_setup,
+    },
+    Scene {
         name: "template-launcher",
         // The card at its widest, near the window's top as the layer manager places it. Tall enough that the layer
         // manager's height cap (75% of the window) leaves all three rows in view, as the reference's taller window did.

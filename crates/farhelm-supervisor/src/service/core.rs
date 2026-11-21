@@ -1766,8 +1766,8 @@ pub(crate) fn named_create_fingerprint(
 /// Validate the transient selector at the supervisor's admission boundary.
 ///
 /// The helm composes commands, including generic harness selectors; this
-/// boundary checks executable shape and the raw value without duplicating that
-/// compiler. It must run before reservation or destructive restart work.
+/// boundary checks executable shape and applies the same literal selector rule
+/// as the helm. It must run before reservation or destructive restart work.
 pub(crate) fn validate_named_start(
     launch: &SessionLaunch,
     named: &farhelm_proto::NamedConversationStart,
@@ -1778,10 +1778,10 @@ pub(crate) fn validate_named_start(
     if !selection.harness.offers_named_conversation() {
         return Err("this agent does not offer named conversation starts".into());
     }
-    crate::agent_kind::validate_named_conversation(&named.conversation)?;
-    if selection.harness.named_conversation_is_file() && named.conversation.starts_with('~') {
-        return Err("session file paths do not expand ~; use an absolute or relative path".into());
-    }
+    farhelm_proto::conversation::validate_launch_conversation(
+        selection.harness,
+        &named.conversation,
+    )?;
     crate::agent_kind::ensure_executable_argv("named conversation start", &named.argv)?;
     crate::agent_kind::ensure_no_cwd_program("named conversation start", &named.argv)?;
     SessionLaunch::validate_start_argv("named conversation start", &named.argv)?;
