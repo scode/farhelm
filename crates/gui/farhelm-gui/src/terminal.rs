@@ -289,10 +289,10 @@ const SELECTION_ALPHA: f32 = 0.3;
 /// with the notice line on top when recovery lost some history, as in the old app (grid-terminal.js's "Scrollback"
 /// at the reference commit). Following the bottom, the rows are the screen; scrolled back, the window is anchored to
 /// the number of its top line ([`Viewport`]), so it stays on the same text while output continues and while the
-/// oldest history is dropped. A resize, a history reset or the alternate screen let go of the anchor. On the
-/// alternate screen there is no history to scroll. The owner moves the view ([`TerminalView::scroll_pixels`],
-/// [`TerminalView::scroll_lines`]) and brings it back to the bottom when the user sends the program input
-/// ([`TerminalView::follow`]).
+/// oldest history is dropped. A resize, a history reset or switching screens lets go of the anchor. A live alternate
+/// screen hides history. After exit, history is reachable above the final frame. The owner moves the view
+/// ([`TerminalView::scroll_pixels`], [`TerminalView::scroll_lines`]) and brings it back to the bottom when the user
+/// sends the program input ([`TerminalView::follow`]).
 pub struct TerminalView {
     model: GridModel,
     /// The screen's rows, cached with their shaped glyphs.
@@ -706,11 +706,9 @@ impl TerminalView {
         }
     }
 
-    /// Select everything the view can show: the history (none on the alternate screen) and the screen, the old app's
-    /// select all.
+    /// Select all the reachable history and screen text. A live alternate screen offers only its own rows.
     pub fn select_all(&mut self, cx: &mut Context<Self>) {
-        let alternate = self.state.is_some_and(|state| state.alt_screen);
-        let first = if alternate {
+        let first = if self.model.hides_primary_history() {
             self.model.screen_base()
         } else {
             self.oldest_line()

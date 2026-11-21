@@ -467,6 +467,26 @@ impl GridModel {
         self.state
     }
 
+    /// A live alternate screen owns the terminal view. After exit its final
+    /// frame stays below the primary history, which can be browsed and selected.
+    pub fn hides_primary_history(&self) -> bool {
+        self.state
+            .is_some_and(|state| state.alt_screen && state.exit.is_none())
+    }
+
+    /// The last primary history row and the first alternate screen row are
+    /// separate buffers. A wrap or a continued link can join rows within
+    /// either buffer, but cannot join across their display boundary.
+    fn has_screen_break_after(&self, line: u64) -> bool {
+        self.state.is_some_and(|state| state.alt_screen)
+            && line.checked_add(1) == Some(self.screen_base())
+    }
+
+    /// Whether this wire row's soft wrap joins the next row in the view.
+    fn wraps_after(&self, line: u64, row: &GridRow) -> bool {
+        row.wraps && !self.has_screen_break_after(line)
+    }
+
     /// Last committed revision; revisions may skip but cannot repeat.
     pub fn revision(&self) -> Option<u64> {
         self.revision

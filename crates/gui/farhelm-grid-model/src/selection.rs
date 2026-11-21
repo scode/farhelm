@@ -171,8 +171,8 @@ impl GridModel {
     }
 
     /// Triple-click selects the whole logical line, with the pinned client's
-    /// 1000-row search cap in each direction. Primary history is invisible while
-    /// the alternate screen is active, even if those rows remain retained.
+    /// 1000-row search cap in each direction. A live alternate screen hides
+    /// primary history. Its final frame and earlier history have separate lines.
     pub fn line_range(&self, position: Position) -> Option<Selection> {
         self.selection_line(position.line)?;
         let (first, last) = self.wrapped_span(position.line, 1000, usize::MAX);
@@ -190,10 +190,10 @@ impl GridModel {
         ))
     }
 
-    /// Selection and link lookup see only the currently displayed buffer. The
-    /// retained primary history must not offer copy/link targets on alt screen.
+    /// Resolve a row that navigation can reach. Word selection and link
+    /// lookup must follow the same history visibility rules as painting.
     pub(crate) fn selection_line(&self, line: u64) -> Option<(u16, &GridRow)> {
-        if line < self.screen_base() && self.state().is_some_and(|state| state.alt_screen) {
+        if line < self.screen_base() && self.hides_primary_history() {
             return None;
         }
         self.line(line)
@@ -211,7 +211,7 @@ impl GridModel {
             let Some((cols, row)) = self.selection_line(previous) else {
                 break;
             };
-            if !row.wraps || budget < usize::from(cols) {
+            if !self.wraps_after(previous, row) || budget < usize::from(cols) {
                 break;
             }
             budget -= usize::from(cols);
@@ -226,7 +226,10 @@ impl GridModel {
             let Some(next) = last.checked_add(1) else {
                 break;
             };
-            let Some((cols, _)) = self.selection_line(next).filter(|_| row.wraps) else {
+            let Some((cols, _)) = self
+                .selection_line(next)
+                .filter(|_| self.wraps_after(last, row))
+            else {
                 break;
             };
             if budget < usize::from(cols) {
@@ -338,7 +341,9 @@ impl GridModel {
                 SelectionMode::Column => (left.min(cols), right.min(cols)),
             };
             let mut text = row.text(from, to);
-            let continues = mode == SelectionMode::Linear && row.wraps && number != end.line;
+            let continues = mode == SelectionMode::Linear
+                && self.wraps_after(number, row)
+                && number != end.line;
             if !continues {
                 text.truncate(text.trim_end_matches(' ').len());
             } else if to == cols && self.pads_wide_wrap(number, cols, row) {
@@ -358,7 +363,7 @@ impl GridModel {
     /// program actually printed. A two-cell non-ASCII run on the next row
     /// cannot fit in that last cell, so only the uncovered padding is omitted.
     pub(crate) fn pads_wide_wrap(&self, number: u64, cols: u16, row: &GridRow) -> bool {
-        row.wraps
+        self.wraps_after(number, row)
             && row.end() < cols
             && number
                 .checked_add(1)

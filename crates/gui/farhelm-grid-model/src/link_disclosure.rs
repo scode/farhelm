@@ -221,8 +221,16 @@ impl GridModel {
             )
         };
         let line = range.start.line;
-        let above = line.checked_sub(1).map(&mut read).unwrap_or_default();
-        let below = line.checked_add(1).map(&mut read).unwrap_or_default();
+        let above = line
+            .checked_sub(1)
+            .filter(|&above| !self.has_screen_break_after(above))
+            .map(&mut read)
+            .unwrap_or_default();
+        let below = line
+            .checked_add(1)
+            .filter(|_| !self.has_screen_break_after(line))
+            .map(&mut read)
+            .unwrap_or_default();
         if above.0 == 0 && below.0 == 0 {
             return (Some(fragment), false);
         }
@@ -239,6 +247,9 @@ impl GridModel {
             } else {
                 at.checked_add(1)
             } {
+                if self.has_screen_break_after(at.min(next)) {
+                    break;
+                }
                 let (count, text) = read(next);
                 if count == 0 {
                     break;
