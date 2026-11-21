@@ -342,9 +342,6 @@ consequences.
   hook-preservation claim remains uncertain for an unrecognized override spelling and destructive vendor replacement
   behavior.
 
-- [`recent-setup-description-omits-wrapper-prefix.md`](recent-setup-description-omits-wrapper-prefix.md) — Different
-  saved setups can look identical even though Enter restores and launches different wrapper prefixes.
-
 - [`older-muse-restart-refusal-blames-command-mode.md`](older-muse-restart-refusal-blames-command-mode.md) — Plain
   Restart can describe an older Muse agent launch as a command launch with reporting disabled.
 
