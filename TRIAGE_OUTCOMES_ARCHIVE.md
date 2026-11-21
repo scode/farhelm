@@ -34655,6 +34655,72 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   `plan/triage-tooling/08-docs-media-deflake-and-smoke`,
   [draft PR #4506](https://github.com/scode/farhelm/pull/4506/changes).
 
+## trailing-new-container-proxy-snapshot-capability-cache.md
+
+- Outcome: `fix code`.
+- Assessment: environment/podman_probe.rs `fresh` accepts a probe up to FRESH_FOR=300s; `runtime` returns a same-route
+  cached result with no age check. Creation passes the cached `ready.proxy`. Basis: SPEC.md "Container sessions"
+  (~5241): "Containers inherit proxy variables from the container host's systemd user manager environment at creation
+  ... Later host changes affect newly created containers." Fix: read the manager's proxy variables at the creation step
+  (or force a probe refresh there).
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `wwqkznmqtvzvoyyrpwtpqyxnwumynnuo`, `plan/triage-podman/01-connections-and-probes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4482/changes). Fixed as decided.
+
+## trailing-podman-dial-kind-advances-before-process-marker.md
+
+- Outcome: `fix code`.
+- Assessment: manager.rs:4971-4972 advances to WaitingForHello when `row.kind.ssh_access().is_none()`, which is true for
+  Podman. Yet transport.rs:803 attaches process diagnostics to every process connection. `ssh_failure_detail`
+  (manager.rs:6211-6240) classifies LocalPodman and NestedSsh exits only at ConnectingToHost, so those arms are
+  unreachable for real container dials. Not run. Basis: SPEC_impl.md:6064-6065 "When the fallback login fails, launch
+  refusal or connection unavailability names the container host's SSH session limit."
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `wwqkznmqtvzvoyyrpwtpqyxnwumynnuo`, `plan/triage-podman/01-connections-and-probes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4482/changes). Fixed as decided.
+
+## trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md
+
+- Outcome: `fix code`.
+- Assessment: None in shipped use. A stopped container's connection actor holds a strong reference to the connection
+  manager while it idles. That delays, and with two such actors can prevent, cleanup when the manager is dropped without
+  an explicit shutdown. Production always shuts down explicitly. Verified: manager.rs:4397
+  `let manager = self.manager.upgrade();` lives across the idle select loop at :4425-4442 when the start branch is
+  skipped.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix the code: scope the upgrade to the gate check and upgrade again
+  only for the start task. Discarding is also reasonable. If the fix turns out not to be straightforward, or needs
+  significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
+  brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `wwqkznmqtvzvoyyrpwtpqyxnwumynnuo`, `plan/triage-podman/01-connections-and-probes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4482/changes). Fixed as decided.
+
+## trailing-dial-documentation-incorrectly-exempts-podman-from-the-provider-status-gate.md
+
+- Outcome: `fix code`.
+- Assessment: None. The dial docstring says only Tensorlake hosts wait on a provider status check before dialing.
+  Containers wait on it too. Verified: manager.rs:4948-4950 still has the old wording.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `wwqkznmqtvzvoyyrpwtpqyxnwumynnuo`, `plan/triage-podman/01-connections-and-probes`,
+  [draft PR](https://github.com/scode/farhelm/pull/4482/changes). Fixed as decided.
+
 ## valid-ssh-uri-short-label-parsing.md
 
 - Outcome: `fix code`.

@@ -6182,10 +6182,11 @@ and clears `/etc/machine-id`. Stop the preparer cleanly before `podman commit`. 
 identity and learns it through the ordinary hello. A custom image supplies its reference and login user and must meet
 the same readiness contract. The concrete managed Ubuntu digest and login user are implementation choices.
 
-Read proxy variables from `systemctl --user show-environment` on the place host during its probe. Use
-`--http-proxy=false` and write the selected variables into the container user's `environment.d` at creation. PID 1's
-container environment alone does not reliably reach its user manager. This makes each session's proxy inheritance
-deterministic and independent of the helm's or SSH command's incidental environment.
+Read proxy variables from the place host's systemd user manager. Build and preparation use the probe's observation. At
+creation, read the manager again before installing the initial proxy settings for the session container. Use
+`--http-proxy=false` and write the selected variables into the container user's `environment.d`. PID 1's container
+environment alone does not reliably reach its user manager. This makes each session's proxy inheritance deterministic
+and independent of the helm's or SSH command's incidental environment.
 
 After successful build/preparation replacement, remove a superseded owned image once no container uses it. Rebuild
 cleans the place's replaced images, and recipe deletion cleans owned images at every place before forgetting their

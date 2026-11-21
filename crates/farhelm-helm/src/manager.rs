@@ -4395,12 +4395,13 @@ impl HostActor {
                     if !matches!(self.status.borrow().state, HostState::Stopped { .. }) {
                         self.transport.release_shared_connections(&row).await;
                     }
-                    let manager = self.manager.upgrade();
+                    // Only the owned start may keep the manager alive across
+                    // an await. The idle actor must let its owner drop.
                     let gate = row
                         .environment_binding()
                         .and_then(|binding| binding.handle.place_host())
                         .is_none_or(|place| {
-                            manager.as_ref().is_some_and(|manager| {
+                            self.manager.upgrade().is_some_and(|manager| {
                                 manager
                                     .status(place)
                                     .is_some_and(|status| status.state.is_connected())
@@ -4414,7 +4415,7 @@ impl HostActor {
                     });
                     if !stopped.attempted
                         && gate
-                        && let Some(manager) = manager
+                        && let Some(manager) = self.manager.upgrade()
                     {
                         stopped.attempted = true;
                         let host = row.id;
@@ -4946,9 +4947,9 @@ impl HostActor {
         });
     }
 
-    /// The dial itself: open the transport, say hello, settle identity and
-    /// browser links. [`Self::attempt`] runs it after a Tensorlake host's
-    /// status check allows it, and at once for every other host.
+    /// Open the transport, say hello, and settle identity and browser links.
+    /// [`Self::attempt`] applies the provider status gate before dialing an
+    /// environment. Ordinary hosts go directly to the dial.
     async fn dial(&self, row: &HostRow, progress: &mut AttemptProgress) -> AttemptOutcome {
         let dialed = DialedAs::of(row);
         let TransportConnection {
@@ -4967,9 +4968,10 @@ impl HostActor {
             SshCapability::for_dial(&mut capability, &dialed).latest = Some(ssh.observation());
         }
         progress.ssh = ssh;
-        // Without ssh there is no connected marker to wait for: a socket
-        // that opened is already waiting for the hello.
-        if row.kind.ssh_access().is_none() {
+        // Every process connection can report a connected marker, including
+        // local container exec. Until then, its exit can explain an early
+        // failure. An opened socket is already waiting for the hello.
+        if progress.ssh.is_none() && row.kind.ssh_access().is_none() {
             self.advance_attempt(progress, ConnectionStage::WaitingForHello);
         }
         // `start_for_host`, not `start`: this connection is the ONE path an
@@ -14376,6 +14378,8 @@ mod tests {
     /// actually connected. Registry presence and repeated provider observations
     /// cannot stand in for that connection. Once the place connects, the same
     /// episode may make its first owned attempt and retain its failure.
+    /// The actor must release the manager once the start settles, so an idle
+    /// stopped actor cannot keep the manager and its other actors alive.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn stopped_container_waits_for_its_place_connection_before_starting() {
         let directory = tempfile::tempdir().unwrap();
@@ -14496,6 +14500,12 @@ mod tests {
             *source.starts.borrow(),
             1,
             "the previously gated episode makes exactly its first attempt"
+        );
+        let weak = Arc::downgrade(&manager);
+        drop(manager);
+        assert!(
+            weak.upgrade().is_none(),
+            "an idle stopped actor cannot keep its manager alive"
         );
     }
 

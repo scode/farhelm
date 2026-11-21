@@ -338,8 +338,8 @@ impl Commands {
     }
 }
 
-/// Only the prerequisite probe uses the text convenience call. Every engine
-/// command goes through bounded capture, retaining nonzero status separately.
+/// Prerequisite probes and manager reads use the text convenience call.
+/// Engine commands retain nonzero exit status separately from their output.
 #[async_trait::async_trait]
 impl PlaceCommands for Commands {
     async fn run(&self, _: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
@@ -617,7 +617,21 @@ impl Commands {
                     panic!("unrecognized provider script in {}: {script}", item.stage)
                 };
                 if self.hit(&phase) {
-                    return Ok(failure(&phase));
+                    let mut failed = failure(&phase);
+                    if phase == "session-proxy-write"
+                        && let Some(value) = self
+                            .state
+                            .lock()
+                            .unwrap()
+                            .proxy
+                            .as_ref()
+                            .and_then(|proxy| proxy.get("http_proxy"))
+                    {
+                        // A setup tool may echo the exact environment value
+                        // in the command diagnostic before returning failure.
+                        failed.stderr.push_str(&format!(": {value}"));
+                    }
+                    return Ok(failed);
                 }
                 Ok(output(
                     0,
@@ -1263,8 +1277,9 @@ async fn provider_with_proxy(f: &Fixture, proxy: BTreeMap<String, String>) -> Po
 
 /// Initial proxy setup belongs to admission, not to run's reply or canonical
 /// identity. Lost replies and known-ID unadmitted retries must refresh the
-/// supervisor before admission; admitted retries must retain their original
-/// snapshot even after a newer probe removes every proxy.
+/// supervisor before admission. The first setup reads current values even
+/// with a warm cache, and a failed import keeps those values private.
+/// An admitted retry keeps its original snapshot.
 #[farhelm_testtrace::test]
 async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_creates() {
     for lost_reply in [false, true] {
@@ -1278,7 +1293,13 @@ async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_cre
             ),
             ("HTTPS_PROXY".into(), String::new()),
         ]);
-        let provider = provider_with_proxy(&f, launch_proxy.clone()).await;
+        let provider = &f.provider;
+        assert_eq!(
+            provider.place(f.place).await.unwrap().2.proxy["https_proxy"],
+            PROXY_SECRET,
+            "preparation left an older proxy observation in the same provider"
+        );
+        f.commands.state.lock().unwrap().proxy = Some(launch_proxy);
         assert_eq!(
             f.recipe_state().await.prepared.unwrap().id,
             image,
@@ -1298,6 +1319,7 @@ async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_cre
             .find(|row| row.id == host)
             .unwrap();
         let events_before = f.backend_events().len();
+        let inputs_before = f.commands.state.lock().unwrap().inputs.len();
         if lost_reply {
             f.commands.lost_run(true);
         }
@@ -1316,6 +1338,16 @@ async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_cre
             &["write-proxy", "restart-supervisor"],
             "private file installation must precede the ordinary supervisor restart"
         );
+        {
+            let state = f.commands.state.lock().unwrap();
+            let import = state.inputs[inputs_before..]
+                .iter()
+                .map(|(_, bytes)| std::str::from_utf8(bytes).unwrap())
+                .find(|input| input.contains("systemctl --user import-environment"))
+                .expect("initial setup must import the place's proxy into the manager");
+            assert!(import.contains("launch-proxy-marker"));
+            assert!(!import.contains("private-proxy-marker"));
+        }
         let row = f
             .store
             .list_hosts()
@@ -1336,7 +1368,22 @@ async fn creation_proxy_restart_follows_admission_across_fresh_and_recovered_cre
             .unwrap()
             .unwrap();
         let runs = f.commands.run_count();
-        let events_before = events.len();
+        if !lost_reply {
+            f.commands.fail("session-proxy-write");
+            let error = provider
+                .create(
+                    &row.environment_binding().unwrap(),
+                    None,
+                    &Progress::default(),
+                )
+                .await
+                .err()
+                .expect("the simulated import failure must reach the caller")
+                .to_string();
+            assert!(error.contains("injected session-proxy-write: [proxy setting hidden]"));
+            assert!(!error.contains("launch-proxy-marker"));
+        }
+        let events_before = f.backend_events().len();
         let recovered = provider
             .create(
                 &row.environment_binding().unwrap(),
