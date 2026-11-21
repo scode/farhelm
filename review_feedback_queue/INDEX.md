@@ -926,10 +926,6 @@ consequences.
   implementation specification promises that orphan cleanup checks ownership under the host provisioning lock, but the
   endpoint does not hold that lock. No supported destructive adoption race was established.
 
-- [`sandbox-checkout-hides-required-folder-setting.md`](sandbox-checkout-hides-required-folder-setting.md) — A new
-  sandbox checkout can be offered without exposing its missing global checkout-folder setting, then fail before billing
-  with a Settings remedy.
-
 - [`sandbox-launch-skips-remembered-agent-choices.md`](sandbox-launch-skips-remembered-agent-choices.md) — A successful
   sandbox launch does not persist the user's permission or wrapper choice. The initiating page's local mirror hides the
   omission until a reload.
