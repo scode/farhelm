@@ -338,7 +338,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 93;
+pub(crate) const SCHEMA_VERSION: i64 = 94;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -1614,6 +1614,21 @@ pub struct PreferencePatch {
         skip_serializing_if = "Option::is_none"
     )]
     pub welcome_seen: Option<Option<bool>>,
+    /// Advance the recorded release without letting a late dismissal move it backwards.
+    /// Null clears a retired or incorrect record explicitly.
+    #[serde(
+        default,
+        deserialize_with = "double_option",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub last_whats_new_release: Option<Option<String>>,
+    /// Null restores the enabled default and omission preserves the shared choice.
+    #[serde(
+        default,
+        deserialize_with = "double_option_bool",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub show_whats_new: Option<Option<bool>>,
     #[serde(
         default,
         deserialize_with = "double_option",
@@ -2795,6 +2810,8 @@ pub struct HelmStore {
 /// - 90: the SSH sign-in sound preference, on when unset.
 /// - 91: enroll existing installations in automatic remote-host updates by clearing earlier opt-outs.
 /// - 92: permit the desktop login PATH notice while preserving notice IDs and history.
+/// - 93: the Antigravity workspace trust setting and hint dismissal.
+/// - 94: upgrade highlights follow one shared choice and release record. Upgraded databases start unset.
 fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<()> {
     let tx = conn
         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
@@ -3041,7 +3058,9 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
                  sound_turn_finished INTEGER CHECK (sound_turn_finished IN (0, 1)),
                  terminal_text_size INTEGER,
                  sound_ssh_sign_in INTEGER CHECK (sound_ssh_sign_in IN (0, 1)),
-                 antigravity_trust_hint_dismissed INTEGER CHECK (antigravity_trust_hint_dismissed IN (0, 1))
+                 antigravity_trust_hint_dismissed INTEGER CHECK (antigravity_trust_hint_dismissed IN (0, 1)),
+                 last_whats_new_release TEXT,
+                 show_whats_new INTEGER CHECK (show_whats_new IN (0, 1))
              ) STRICT;
              -- Successful structured creates are reusable only for the
              -- installation that actually accepted them. The stored
@@ -3140,7 +3159,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 93;",
+              PRAGMA user_version = 94;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
         ))
@@ -3154,6 +3173,16 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             [creation_build],
         )
         .context("recording the helm database's creation build")?;
+        // A fresh installation begins at this release. A development checkout has no release baseline.
+        if semver::Version::parse(creation_build).is_ok()
+            && !farhelm_proto::version::is_development_build(creation_build)
+        {
+            tx.execute(
+                "INSERT INTO preferences (singleton, last_whats_new_release) VALUES (1, ?1)",
+                [creation_build],
+            )
+            .context("seeding the upgrade highlights baseline")?;
+        }
         version = SCHEMA_VERSION;
     }
     if version == 1 {
@@ -5067,6 +5096,27 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 93")?;
         version = 93;
     }
+    if version == 93 {
+        // Earlier schemas have no dismissal record. An upgrade must let the running release show its notes once.
+        for (column, declaration) in [
+            ("last_whats_new_release", "TEXT"),
+            ("show_whats_new", "INTEGER CHECK (show_whats_new IN (0, 1))"),
+        ] {
+            let present: bool = tx.query_row(
+                "SELECT count(*) != 0 FROM pragma_table_info('preferences') WHERE name = ?1",
+                [column],
+                |row| row.get(0),
+            )?;
+            if !present {
+                tx.execute_batch(&format!(
+                    "ALTER TABLE preferences ADD COLUMN {column} {declaration};"
+                ))?;
+            }
+        }
+        tx.execute_batch("PRAGMA user_version = 94;")
+            .context("migrating helm.db to schema version 94")?;
+        version = 94;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5500,7 +5550,13 @@ impl HelmStore {
     /// This authority also attempts WAL conversion before schema work; all
     /// ordinary connections then select sync from the actual journal mode.
     pub async fn open(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, true).await
+        Self::open_inner(path, Some(env!("CARGO_PKG_VERSION"))).await
+    }
+
+    /// Keep fixture defaults independent of the version stamped on a release test build.
+    #[cfg(test)]
+    pub(crate) async fn open_fixture(path: &Path) -> anyhow::Result<HelmStore> {
+        Self::open_inner(path, Some("0.0.0-unreleased")).await
     }
 
     /// Crate-internal access to the shared connection for sibling modules
@@ -5518,7 +5574,7 @@ impl HelmStore {
     /// until an operation needs a schema feature they do not have; newer
     /// schemas are refused by the same version check as [`Self::open`].
     pub async fn open_without_migration(path: &Path) -> anyhow::Result<HelmStore> {
-        Self::open_inner(path, false).await
+        Self::open_inner(path, None).await
     }
 
     /// Open an EXISTING database at the CURRENT schema, creating and
@@ -5608,7 +5664,11 @@ impl HelmStore {
         })
     }
 
-    async fn open_inner(path: &Path, may_migrate: bool) -> anyhow::Result<HelmStore> {
+    /// The presence of a creation build grants permission to create or migrate the database.
+    async fn open_inner(
+        path: &Path,
+        creation_build: Option<&'static str>,
+    ) -> anyhow::Result<HelmStore> {
         let path = path.to_path_buf();
         let (conn, schema_version) = tokio::task::spawn_blocking(move || -> anyhow::Result<(Connection, i64)> {
             // Explicit flags rather than `Connection::open`'s defaults —
@@ -5619,7 +5679,7 @@ impl HelmStore {
             // `SQLITE_OPEN_NO_MUTEX` is correct (this module already
             // serializes every access through its own `Mutex`).
             let mut conn = farhelm_supervisor::db::open_private(&path, "helm database")?;
-            farhelm_supervisor::db::configure_durability(&conn, "helm database", may_migrate)?;
+            farhelm_supervisor::db::configure_durability(&conn, "helm database", creation_build.is_some())?;
             // Not durable in the database file — SQLite enforces foreign
             // keys only when a connection has asked for it, so every open
             // must set this pragma itself. See the module docs'
@@ -5628,8 +5688,8 @@ impl HelmStore {
             // `session_cache` DDL for the `ON DELETE CASCADE` it enables.
             conn.pragma_update(None, "foreign_keys", true)
                 .context("enabling sqlite foreign key enforcement")?;
-            let schema_version = if may_migrate {
-                apply_schema(&mut conn, env!("CARGO_PKG_VERSION"))?;
+            let schema_version = if let Some(build) = creation_build {
+                apply_schema(&mut conn, build)?;
                 ensure_local_row(&conn)?;
                 SCHEMA_VERSION
             } else {
@@ -5918,18 +5978,17 @@ impl HelmStore {
 
     // ---- The shared client preference ---------------------------------
 
-    /// The one preference row, or the all-unset default when no client has
-    /// written it yet.
+    /// The one preference row, or the all-unset default for a helm with no row.
     ///
     /// "Unset" and "absent row" deliberately read the same: a client seeds
-    /// its list order and auto-select from whatever comes back, and neither
-    /// answer should make it behave differently from a fresh install.
+    /// its list order and auto-select from whatever comes back. A new release
+    /// installation starts with an upgrade highlights baseline in the row.
     pub async fn preferences(&self) -> anyhow::Result<Preferences> {
         self.conn.call("preference read task panicked", move |conn: &mut Connection| -> anyhow::Result<Preferences> {
             conn
                 .query_row(
                     "SELECT list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, remembered_wrapper_prefixes, open_extensions, visit_history, auto_update_remote_hosts, last_container_host, \
-                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed \
+                            appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new \
                      FROM preferences WHERE singleton = 1",
                     [],
                     |row| {
@@ -5966,6 +6025,9 @@ impl HelmStore {
                             tunnel_consent: row.get(14)?,
                             claude_trust_hint_dismissed: row.get(13)?,
                             welcome_seen: row.get(12)?,
+                            last_whats_new_release: row.get::<_, Option<String>>(33)?
+                                .filter(|value| semver::Version::parse(value).is_ok()),
+                            show_whats_new: row.get(34)?,
                             list_sort: row.get(0)?,
                             last_selected: row.get(1)?,
                             visit_history: serde_json::from_str(&row.get::<_, String>(21)?)
@@ -6005,6 +6067,7 @@ impl HelmStore {
 
     /// Merge `patch` into the preference row: an absent field is left as it
     /// was, a `Some(None)` clears it, a `Some(Some(value))` replaces it.
+    /// The release baseline advances only when the proposed version is newer.
     ///
     /// A MERGE rather than a whole-row replace, and the reason is the
     /// preference being shared: two writes change different fields at
@@ -6021,7 +6084,8 @@ impl HelmStore {
     /// rather than making this preference write depend on current fleet
     /// availability. The retired `remembered_workspace_trust` field is the
     /// exception: older clients may still send it, but no patch changes its
-    /// historical column.
+    /// historical column. SemVer ordering keeps an older window's dismissal
+    /// from undoing a newer one.
     ///
     /// Validation (that `list_sort` is a word this helm serves) belongs to
     /// the handler, not here: the store records what it is told, exactly as
@@ -6074,6 +6138,22 @@ impl HelmStore {
             // The transaction covers both the history read and the sparse
             // upsert, so another connection cannot lose a visit between them.
             let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let mut release_patch = patch.last_whats_new_release;
+            if let Some(Some(ref proposed)) = release_patch {
+                let stored = tx.query_row(
+                    "SELECT last_whats_new_release FROM preferences WHERE singleton = 1",
+                    [],
+                    |row| row.get::<_, Option<String>>(0),
+                ).optional()?.flatten();
+                if let Some(Ok(stored)) = stored.as_deref().map(semver::Version::parse)
+                    && let Ok(proposed) = semver::Version::parse(proposed)
+                    && !proposed.cmp_precedence(&stored).is_gt()
+                {
+                    release_patch = None;
+                }
+            }
+            let release_present = release_patch.is_some();
+            let show_whats_new_present = patch.show_whats_new.is_some();
             let mut history = Vec::<String>::new();
             if let Some(id) = &selected {
                 let stored: Option<String> = tx.query_row(
@@ -6115,8 +6195,8 @@ impl HelmStore {
                 .execute(
                     "INSERT INTO preferences \
                          (singleton, list_sort, last_selected, compact, remembered_permissions, codex_trust_hint_dismissed, skip_host_remove_confirmation, skip_host_setup_confirmation, feedback_contact, terminal_link_click, skip_session_confirmations, quick_launch_template, template_shortcuts, welcome_seen, claude_trust_hint_dismissed, tunnel_consent, name_session_on_quick_launch, muse_trust_hint_dismissed, pi_trust_hint_dismissed, color_terminal_frames, open_extensions, visit_history, auto_update_remote_hosts, \
-                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed) \
-                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58, ?60) \
+                          appearance, sidebar_width, host_rail_open, sound_waiting, sound_approval, sound_turn_finished, terminal_text_size, sound_ssh_sign_in, antigravity_trust_hint_dismissed, last_whats_new_release, show_whats_new) \
+                     VALUES (1, ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?19, ?21, ?23, ?25, ?27, ?29, ?31, ?33, ?35, ?37, ?39, ?41, ?42, ?44, ?46, ?48, ?50, ?52, ?54, ?56, ?58, ?60, ?62, ?64) \
                      ON CONFLICT (singleton) DO UPDATE SET \
                          list_sort = CASE WHEN ?10 THEN excluded.list_sort ELSE list_sort END, \
                          last_selected = CASE WHEN ?11 THEN excluded.last_selected \
@@ -6153,7 +6233,9 @@ impl HelmStore {
                          sound_turn_finished = CASE WHEN ?55 THEN excluded.sound_turn_finished ELSE sound_turn_finished END, \
                          terminal_text_size = CASE WHEN ?57 THEN excluded.terminal_text_size ELSE terminal_text_size END, \
                          sound_ssh_sign_in = CASE WHEN ?59 THEN excluded.sound_ssh_sign_in ELSE sound_ssh_sign_in END, \
-                         antigravity_trust_hint_dismissed = CASE WHEN ?61 THEN excluded.antigravity_trust_hint_dismissed ELSE antigravity_trust_hint_dismissed END",
+                         antigravity_trust_hint_dismissed = CASE WHEN ?61 THEN excluded.antigravity_trust_hint_dismissed ELSE antigravity_trust_hint_dismissed END, \
+                         last_whats_new_release = CASE WHEN ?63 THEN excluded.last_whats_new_release ELSE last_whats_new_release END, \
+                         show_whats_new = CASE WHEN ?65 THEN excluded.show_whats_new ELSE show_whats_new END",
                     rusqlite::params![
                         sort,
                         selected,
@@ -6215,7 +6297,11 @@ impl HelmStore {
                         sound_ssh_sign_in,
                         sound_ssh_sign_in_present,
                         antigravity_trust_hint,
-                        antigravity_trust_hint_present
+                        antigravity_trust_hint_present,
+                        release_patch.flatten(),
+                        release_present,
+                        patch.show_whats_new.flatten(),
+                        show_whats_new_present
                     ],
                 )
                 .context("writing the client preference")?;
@@ -10093,7 +10179,7 @@ mod tests {
     async fn fresh_store() -> (tempfile::TempDir, HelmStore) {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("helm.db");
-        let store = HelmStore::open(&db_path).await.expect("open");
+        let store = HelmStore::open_fixture(&db_path).await.expect("open");
         (dir, store)
     }
 
@@ -10712,6 +10798,7 @@ mod tests {
         let path = dir.path().join("helm.db");
         {
             let conn = Connection::open(&path).unwrap();
+            rewind_whats_new_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
                  ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
@@ -10741,6 +10828,61 @@ mod tests {
             assert_eq!(preferences.sound_ssh_sign_in, choice);
             assert_eq!(preferences.sound_waiting, Some(false));
         }
+    }
+
+    /// Only creating a release database seeds the baseline. Migrating an
+    /// existing database leaves it unset so that upgrade can show the notes.
+    #[farhelm_testtrace::test]
+    async fn schema_94_seeds_upgrade_notes_on_creation_only() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("helm.db");
+        let fresh = HelmStore::open_inner(&path, Some("0.43.0")).await.unwrap();
+        let defaults = fresh.preferences().await.unwrap();
+        assert_eq!(defaults.last_whats_new_release.as_deref(), Some("0.43.0"));
+        assert_eq!(defaults.show_whats_new, None);
+        fresh
+            .update_preferences(PreferencePatch {
+                welcome_seen: Some(Some(true)),
+                ..PreferencePatch::default()
+            })
+            .await
+            .unwrap();
+        let schema = schema_objects(&fresh.conn.lock());
+        drop(fresh);
+
+        let reopened = HelmStore::open_inner(&path, Some("0.44.0")).await.unwrap();
+        assert_eq!(
+            reopened
+                .preferences()
+                .await
+                .unwrap()
+                .last_whats_new_release
+                .as_deref(),
+            Some("0.43.0"),
+            "opening a newer build preserves the original baseline",
+        );
+        {
+            let conn = reopened.conn.lock();
+            rewind_whats_new_columns(&conn);
+            conn.execute_batch("PRAGMA user_version = 93;").unwrap();
+            assert!(
+                conn.prepare("SELECT last_whats_new_release FROM preferences")
+                    .is_err()
+            );
+        }
+        drop(reopened);
+
+        let migrated = HelmStore::open_inner(&path, Some("0.44.0")).await.unwrap();
+        assert_eq!(migrated.schema_version, SCHEMA_VERSION);
+        assert_eq!(schema_objects(&migrated.conn.lock()), schema);
+        let saved = migrated.preferences().await.unwrap();
+        assert_eq!(saved.last_whats_new_release, None);
+        assert_eq!(saved.show_whats_new, None);
+        assert_eq!(saved.welcome_seen, Some(true));
+        assert_eq!(
+            migrated.creation_build().await.unwrap().as_deref(),
+            Some("0.43.0")
+        );
     }
 
     /// Schema 84 is what the stable release of the time (v0.39.0) created
@@ -10870,6 +11012,7 @@ mod tests {
         // Partial rewind: only the trailing three columns are missing.
         {
             let conn = Connection::open(&path).unwrap();
+            rewind_whats_new_columns(&conn);
             conn.execute_batch(
                 "ALTER TABLE preferences DROP COLUMN sound_approval;
                  ALTER TABLE preferences DROP COLUMN sound_turn_finished;
@@ -13991,6 +14134,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14037,6 +14182,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14082,6 +14229,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -14176,6 +14325,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -16833,6 +16984,7 @@ mod tests {
     /// front of the older columns the ladder appends again, and the migrated
     /// table would no longer match a fresh one.
     fn rewind_former_device_setting_columns(conn: &Connection) {
+        rewind_whats_new_columns(conn);
         conn.execute_batch(
             "ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
              ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;",
@@ -16852,6 +17004,15 @@ mod tests {
             0,
             "premise: this historical schema has no schema-85 preference columns",
         );
+    }
+
+    /// Older test databases need these columns removed before the migration ladder appends them in schema order.
+    fn rewind_whats_new_columns(conn: &Connection) {
+        conn.execute_batch(
+            "ALTER TABLE preferences DROP COLUMN last_whats_new_release;
+             ALTER TABLE preferences DROP COLUMN show_whats_new;",
+        )
+        .expect("a fresh schema declares the upgrade highlights preferences");
     }
 
     /// The migration's DATA half: a version-1 database may already hold two
@@ -18352,7 +18513,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
         {
-            let store = HelmStore::open(&path).await.expect("create current schema");
+            let store = HelmStore::open_fixture(&path)
+                .await
+                .expect("create current schema");
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
             // Schema 36 drops the profile tables, so a file claiming a
@@ -18411,6 +18574,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -18446,7 +18611,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
         {
-            let store = HelmStore::open(&path).await.expect("create current schema");
+            let store = HelmStore::open_fixture(&path)
+                .await
+                .expect("create current schema");
             drop(store);
             let conn = Connection::open(&path).expect("reopen raw");
             // Schema 36 drops the profile tables, so a file claiming a
@@ -18505,6 +18672,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -18894,7 +19063,9 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("helm.db");
         {
-            let store = HelmStore::open(&path).await.expect("create current schema");
+            let store = HelmStore::open_fixture(&path)
+                .await
+                .expect("create current schema");
             store
                 .update_preferences(PreferencePatch {
                     skip_host_remove_confirmation: Some(Some(true)),

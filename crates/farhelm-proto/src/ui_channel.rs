@@ -693,6 +693,13 @@ pub struct Preferences {
     /// including existing helms upgraded from before the welcome card.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub welcome_seen: Option<bool>,
+    /// The newest build whose upgrade highlights this helm has shown or skipped.
+    /// An existing helm without a record can show the running release on its first upgrade.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub last_whats_new_release: Option<String>,
+    /// Shared choice for the upgrade highlights dialog. Unset uses the enabled default.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub show_whats_new: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub list_sort: Option<String>,
     /// Full entry-bound reference. A deleted entry or session may leave this

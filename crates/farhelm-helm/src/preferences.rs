@@ -3,7 +3,7 @@
 //! last-selected session and bounded visit history, compact-row choice, and the remembered
 //! permissions choice of successful structured launches, per-agent trust-hint dismissals,
 //! host confirmation choices, terminal web-link ownership, quick-launch template,
-//! number-key bindings, welcome dismissal, tunnel consent, desktop download-opening
+//! number-key bindings, welcome dismissal, upgrade highlights, tunnel consent, desktop download-opening
 //! types, and contact reused after successful feedback. It also holds the
 //! settings the old app kept per device: appearance, sidebar width, host rail
 //! expansion, the three status-sound switches and terminal text size. The
@@ -80,9 +80,8 @@ use std::sync::Arc;
 
 /// `GET /api/preferences` — current preferences, with unset and retired fields omitted.
 ///
-/// A helm that has nothing remembered answers `{}` rather than an error:
-/// "nothing chosen yet" is the ordinary state of a fresh install, and the
-/// client's defaults are the right answer to it.
+/// Unset choices use the client defaults. An empty row is valid, while a new
+/// release installation already has its upgrade highlights baseline.
 pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl IntoResponse {
     match state.store.preferences().await {
         Ok(preferences) => axum::Json(preferences).into_response(),
@@ -96,14 +95,16 @@ pub(crate) async fn get_preferences(State(state): State<Arc<AppState>>) -> impl 
 /// never overwrites the other with its own possibly stale copy (see
 /// [`store::HelmStore::update_preferences`] for why that matters with the
 /// row shared). Three states per field, as [`PreferencePatch`] spells out:
-/// absent leaves it alone, an explicit `null` clears it, a value replaces
-/// it. An unknown field is refused through serde's `deny_unknown_fields`
+/// absent leaves it alone, an explicit `null` clears it, and a value replaces
+/// it. `last_whats_new_release` replaces a saved value only when it advances
+/// the version. An unknown field is refused through serde's `deny_unknown_fields`
 /// (axum's `Json` extractor answers a data error with 422, like every other
 /// JSON route here), which is what keeps a typo in a client from being an
 /// accepted no-op; a sort word this helm does not serve, or a
 /// `last_selected` that is not a full session reference, a feedback contact
 /// beyond its code-point cap, an unknown appearance word, a sidebar width or
-/// terminal text size outside its range, or an unmatchable download-opening list is a 400. The list is
+/// terminal text size outside its range, a malformed upgrade release version,
+/// or an unmatchable download-opening list is a 400. The list is
 /// normalized before the sparse write, so the next read names exactly the
 /// types the helm checks. 204 on success; the maintained visit history is
 /// available on the next GET rather than a second client write.
@@ -118,6 +119,14 @@ pub(crate) async fn put_preferences(
         || patch.antigravity_trust_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
     let auto_update_changed = patch.auto_update_remote_hosts.is_some();
+    if let Some(Some(version)) = &patch.last_whats_new_release
+        && semver::Version::parse(version).is_err()
+    {
+        return http_error(anyhow::Error::new(SupervisorError::helm(
+            ErrorKind::InvalidRequest,
+            "last_whats_new_release must be a semantic version".into(),
+        )));
+    }
     if let Some(Some(raw)) = &patch.open_extensions {
         let list = match farhelm_proto::open_extensions::OpenExtensions::parse(raw) {
             Ok(list) => list,
@@ -600,6 +609,46 @@ mod tests {
             .unwrap();
         assert_eq!(response.status(), StatusCode::NO_CONTENT);
         assert_eq!(read(&harness).await.welcome_seen, None);
+    }
+
+    /// A dismissal advances the shared baseline even across independent
+    /// preference writes. An older window cannot reopen already seen notes.
+    #[farhelm_testtrace::test]
+    async fn upgrade_notes_preferences_merge_without_rolling_back() {
+        let harness = rest_harness::idle_helm().await;
+        assert_eq!(read(&harness).await.last_whats_new_release, None);
+        for patch in [
+            serde_json::json!({"last_whats_new_release": "0.100.0", "show_whats_new": false}),
+            serde_json::json!({"last_whats_new_release": "0.99.0", "welcome_seen": true}),
+            serde_json::json!({"show_whats_new": null}),
+        ] {
+            let response = harness.router().oneshot(put(patch)).await.unwrap();
+            assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        }
+        let response = harness
+            .router()
+            .oneshot(put(
+                serde_json::json!({"last_whats_new_release": "latest", "welcome_seen": false}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+        let saved = read(&harness).await;
+        assert_eq!(saved.last_whats_new_release.as_deref(), Some("0.100.0"));
+        assert_eq!(saved.show_whats_new, None);
+        assert_eq!(saved.welcome_seen, Some(true));
+        let response = harness
+            .router()
+            .oneshot(put(
+                serde_json::json!({"last_whats_new_release": null, "show_whats_new": false}),
+            ))
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+        let saved = read(&harness).await;
+        assert_eq!(saved.last_whats_new_release, None);
+        assert_eq!(saved.show_whats_new, Some(false));
+        assert_eq!(saved.welcome_seen, Some(true));
     }
 
     /// Number bindings replace one shared map and never merge per key. Invalid
@@ -1320,6 +1369,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,
@@ -1448,6 +1499,8 @@ mod tests {
                 quick_launch_template: None,
                 template_shortcuts: Default::default(),
                 welcome_seen: None,
+                last_whats_new_release: None,
+                show_whats_new: None,
                 claude_trust_hint_dismissed: None,
                 codex_trust_hint_dismissed: None,
                 muse_trust_hint_dismissed: None,

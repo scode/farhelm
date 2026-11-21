@@ -779,7 +779,7 @@ mod claude_trust_tests {
         use farhelm_proto::LaunchHarness;
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join("helm.db");
-        let store = HelmStore::open(&path).await.unwrap();
+        let store = HelmStore::open_fixture(&path).await.unwrap();
         store.set_claude_trust(true).await.unwrap();
         store
             .update_preferences(crate::store::PreferencePatch {
@@ -3533,7 +3533,7 @@ mod tests {
     /// launch storage before stamping the old version. Tests then exercise the
     /// real migrations instead of a current schema carrying an old label.
     async fn rewind_to_v26(path: &Path) {
-        let store = HelmStore::open(path).await.expect("open to rewind");
+        let store = HelmStore::open_fixture(path).await.expect("open to rewind");
         let conn = store.conn();
         tokio::task::spawn_blocking(move || {
             let conn = conn.lock();
@@ -3580,6 +3580,8 @@ mod tests {
                  -- A missing value still requires dropping the later sign-in sound column.
                  ALTER TABLE preferences DROP COLUMN sound_ssh_sign_in;
                  ALTER TABLE preferences DROP COLUMN antigravity_trust_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN last_whats_new_release;
+                 ALTER TABLE preferences DROP COLUMN show_whats_new;
                  ALTER TABLE preferences DROP COLUMN terminal_text_size;
                  ALTER TABLE preferences DROP COLUMN last_container_host;
                  ALTER TABLE create_history_sessions DROP COLUMN github_repo;
