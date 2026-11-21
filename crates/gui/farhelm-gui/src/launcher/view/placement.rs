@@ -1,15 +1,14 @@
 //! The launcher's own side of a new environment: the checks it asks for as it opens, the Tensorlake account read, and
 //! the notes it draws under the destination controls it shares with the template editor
-//! (`crate::launcher::destination_rows`, which holds the Runs on switch's rules).
+//! (`crate::launcher::destination_rows`, which holds the rules for which environments to offer).
 //!
 //! SPEC.md, "Creation" (the Runs on bullet) and "Container sessions". Ported from the old app's
 //! `use_environment_places` (`environment_ui.rs`) and the launcher's use of `PlacementPicker` in
 //! `list/create_form.rs`, at reference commit `24bc0580`. Here's the TLDR:
 //!
-//! - **Edits are the draft's.** Each control's edit is one of the draft's
-//!   ([`crate::launcher::draft::LaunchDraft::choose_runs_on`] and its siblings), so their effects (Folder fixed to `~`)
-//!   are the draft's, and a press on the segment already chosen changes nothing, which keeps the user's explicit recipe
-//!   and place.
+//! - **Edits are the draft's.** The host menu takes a default through
+//!   [`crate::launcher::draft::LaunchDraft::choose_runs_on`]. Taking the same provider keeps the user's recipe and
+//!   place. The draft fixes Folder to `~` when entering a new environment.
 //! - **Nothing copied.** The recipes, the recipe places and each host's Podman check are pushed, so the rows read the
 //!   store while they draw. Besides the account read below, the one thing sent is a background Podman check of every
 //!   container host as the launcher opens, or as a quick launch prepares one out of sight ([`check_container_hosts`],
@@ -19,28 +18,31 @@
 //!   is listed, disabled with the helm's "needs a Podman check", until the check its opening asked for answers; one the
 //!   helm cannot route a check to carries none, and says it cannot run containers.
 //! - **New sandbox and the account.** The launcher reads the Tensorlake account once as it opens ([`read_account`]);
-//!   New sandbox's segment, recipe options and registration note take their rules from [`ProviderUi`]'s
+//!   New sandbox's menu row, recipe options and registration note take their rules from [`ProviderUi`]'s
 //!   `launch_place`, `recipe_pickable`, `recipe_listing`, `recipe_refusal` and `registration_note`.
 //! - **The question before a billed create**, "Create a sandbox for this session?", is the sibling `sandbox_question`
-//!   module's: a press on New sandbox asks it there, unless the account's "Create Tensorlake sandboxes without asking"
+//!   module's: attempting to launch into a new sandbox asks it there, unless "Create Tensorlake sandboxes without asking"
 //!   is on.
 
 use farhelm_helm_client::ApiPath;
+use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView, PREFERENCES_KEY, Preferences};
 use farhelm_proto::{LaunchTarget, RecipePlaceView};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _,
-    StatefulInteractiveElement as _, Styled as _, WeakEntity, div, px,
+    StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div, px,
 };
 use std::rc::Rc;
 
-use super::{Launcher, after_reads, row};
+use super::{Launcher, after_reads};
 use crate::components::{CommandWell, HoverHelp, Role};
 use crate::environment_ui::ProviderUi;
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::display_name;
-use crate::launcher::destination_rows::{PlacementEdit, PlacementMode, build_placement_rows};
+use crate::launcher::destination_rows::{
+    PlacementControls, PlacementEdit, PlacementMode, build_placement_controls, environment_choices,
+};
 use crate::launcher::draft::{Field, RunsOn};
 use crate::launcher::request::{Account, Recipes, container_reason, is_container_host};
 use crate::session;
@@ -122,50 +124,82 @@ fn container_host_ids(cx: &App) -> Vec<i64> {
 }
 
 impl Launcher {
-    /// Draw the shared placement controls above Host, followed by the launcher's build note. Restart with and
-    /// Replace with hold the destination, so these modes omit the controls entirely.
-    pub(super) fn placement_rows(
-        &self,
-        palette: &theme::Palette,
-        cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        if self.draft.holds(Field::Host) {
-            return Vec::new();
-        }
+    /// The offer and recipe controls read the same catalog and account state as the host menu. The recipes' order
+    /// also determines the first usable recipe a new environment defaults to.
+    fn placement_inputs<'a>(
+        &'a self,
+        cx: &App,
+    ) -> (PlacementMode<'a>, Vec<RecipeView>, Vec<HostView>) {
         let collections = self.store.read(cx).collections();
-        let catalog = Recipes::of(collections);
-        let recipes = match &catalog {
-            Recipes::Listed(recipes) => recipes.as_slice(),
-            Recipes::Loading | Recipes::Unreadable(_) => &[],
+        let recipes = match Recipes::of(collections) {
+            Recipes::Listed(recipes) => recipes,
+            Recipes::Loading | Recipes::Unreadable(_) => Vec::new(),
         };
-        let last_container_host = collections
-            .get::<Preferences>(PREFERENCES_KEY)
-            .and_then(|preferences| preferences.last_container_host);
+        let mode = PlacementMode::Launch {
+            last_container_host: collections
+                .get::<Preferences>(PREFERENCES_KEY)
+                .and_then(|preferences| preferences.last_container_host),
+            account: self.account.settings(),
+        };
+        (mode, recipes, self.hosts(cx))
+    }
+
+    /// The providers the host menu can enter now, with the target each would use on a first pick. Keep the selected
+    /// environment visible after its place goes away so the menu can still show the draft's choice.
+    pub(super) fn offered_environments(&self, cx: &App) -> Vec<LaunchTarget> {
+        let (mode, recipes, hosts) = self.placement_inputs(cx);
+        environment_choices(mode, &recipes, &hosts)
+            .into_iter()
+            .filter_map(|(provider, target)| {
+                target.or_else(|| {
+                    self.draft
+                        .target
+                        .as_ref()
+                        .filter(|target| target.provider() == provider.0)
+                        .cloned()
+                })
+            })
+            .collect()
+    }
+
+    /// A real menu pick changes the draft first and then brings the text inputs into step with the environment's home.
+    pub(super) fn pick_environment(
+        &mut self,
+        target: LaunchTarget,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let choice = RunsOn::New(target.provider());
+        if RunsOn::of(self.draft.target.as_ref()) == choice {
+            // The retained choice can carry a missing place or an explicit recipe. Taking it again keeps both
+            // the draft and any launch refusal explaining what is missing.
+            return;
+        }
+        self.draft.choose_runs_on(choice, Some(target));
+        self.sync_fields(window, cx);
+        self.changed(cx);
+    }
+
+    /// The shared recipe and container host controls for the selected environment. The address owns their layout.
+    pub(super) fn placement_controls(
+        &self,
+        target: &LaunchTarget,
+        cx: &mut Context<Self>,
+    ) -> PlacementControls {
+        let (mode, recipes, hosts) = self.placement_inputs(cx);
         let (on_edit, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let target = self.draft.target.as_ref();
-        let mut rows = build_placement_rows(
-            PlacementMode::Launch {
-                last_container_host,
-                account: self.account.settings(),
-                on_enter: Rc::new(move |window, cx| {
-                    let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
-                }),
-            },
-            target,
-            recipes,
-            &self.hosts(cx),
-            move |edit, window, cx| {
+        build_placement_controls(
+            mode,
+            Some(target),
+            &recipes,
+            &hosts,
+            Some(Rc::new(move |window, cx| {
+                let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
+            })),
+            move |edit, _, cx| {
                 let _ = on_edit.update(cx, |launcher, cx| {
                     match edit {
-                        PlacementEdit::RunsOn(target) => {
-                            launcher
-                                .draft
-                                .choose_runs_on(RunsOn::of(target.as_ref()), target);
-                            // The edit sets the folder to the environment's home, and leaving keeps it there, so the
-                            // folder field must follow the draft, or Existing host would show the folder typed
-                            // before while the footer and the launch use `~`.
-                            launcher.sync_fields(window, cx);
-                        }
+                        PlacementEdit::RunsOn(_) => unreachable!("only templates draw Runs on"),
                         PlacementEdit::Recipe(recipe) => launcher.draft.choose_recipe(recipe),
                         PlacementEdit::ContainerHost(host) => {
                             launcher.draft.choose_container_host(host)
@@ -174,15 +208,10 @@ impl Launcher {
                     launcher.changed(cx);
                 });
             },
-            |selector, label, control| row(selector, label, control, palette).into_any_element(),
-        );
-        if let Some(target) = target {
-            rows.extend(self.place_note(target, palette, cx));
-        }
-        rows
+        )
     }
 
-    /// The note under the selects, for a provider whose places build the recipe (SPEC.md: "the note says whether the
+    /// The quiet note under Container host, for a provider whose places build the recipe (SPEC.md: "the note says whether the
     /// recipe is ready there or builds on first launch"): the place's own reason first, then the recipe place's as the
     /// helm pushes it, building, ready on the host, or building on first launch, and "Checking build status…" before
     /// the place's state has arrived. Its words are the provider's ([`ProviderUi::launch_place_note`]).
@@ -190,7 +219,7 @@ impl Launcher {
     /// No note while the chosen container host is no longer listed, as the old `PlacementPicker` drew none without a
     /// listed place; otherwise it would say "Checking build status…" about a host that is gone. The Container host
     /// select keeps it as unavailable, and a press of Launch says why it cannot launch there.
-    fn place_note(
+    pub(super) fn place_note(
         &self,
         target: &LaunchTarget,
         palette: &theme::Palette,
@@ -233,7 +262,7 @@ impl Launcher {
                 .role(Role::Status)
                 .aria_label(sentence.accessible_name())
                 .text_size(metrics::TEXT_SM)
-                .text_color(theme::color(palette.fg_1))
+                .text_color(theme::color(palette.fg_2))
                 .child(sentence)
                 .into_any_element(),
         )

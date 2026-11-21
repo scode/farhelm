@@ -490,6 +490,8 @@ pub struct TextInput {
     line_prefix: Option<AnyElement>,
     /// A decoration outside the single-line input's text area, such as the key cap on Settings search.
     line_suffix: Option<AnyElement>,
+    /// Whether the surrounding address field owns the well and its border.
+    embedded: bool,
     /// Drawn with the warning outline ([`TextInput::invalid`]).
     invalid: bool,
     /// What the sequence prefix does in this field with nothing selected, and by which platform's rule, if anything
@@ -587,6 +589,7 @@ impl TextInput {
             height: None,
             line_prefix: None,
             line_suffix: None,
+            embedded: false,
             invalid: false,
             on_unselected_prefix: None,
         }
@@ -619,6 +622,12 @@ impl TextInput {
     /// with [`TextInput::monospace`].
     pub fn height(mut self, height: Pixels) -> Self {
         self.height = Some(height);
+        self
+    }
+
+    /// Put a single-line input inside a larger field, which supplies its border, focus and warning treatment.
+    pub(crate) fn embedded(mut self) -> Self {
+        self.embedded = true;
         self
     }
 
@@ -787,6 +796,7 @@ impl RenderOnce for TextInput {
                     .text_size(metrics::TEXT_MD)
                     .when_some(self.line_prefix, Input::prefix)
                     .when_some(self.line_suffix, Input::suffix)
+                    .when(self.embedded, |input| input.appearance(false))
                     .when(self.monospace, |input| {
                         input.font_family(crate::assets::TERMINAL_FONT)
                     })

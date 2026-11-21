@@ -152,7 +152,10 @@ fn a_taken_environment_setup_shows_and_sends_its_placement(cx: &mut TestAppConte
     assert!(value_of(cx, "launcher-recipe").is_some_and(|shown| shown.starts_with("web")));
     let footer = name_of(cx, "launcher-summary-target").unwrap_or_default();
     assert!(footer.contains("new web container on host1"), "{footer}");
-    assert_eq!(name_of(cx, "launcher-host"), None, "no Host row");
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: New container")
+    );
     test_support::click(cx, "launcher-launch");
     let sent = answer(&mut helm, cx, &[environment("web", None, 2)]);
     let [create] = &sent[..] else {

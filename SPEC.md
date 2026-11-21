@@ -1005,23 +1005,23 @@ shipping uninstall support.
 Session creation is one action, not a wizard. Choose an existing directory or explicitly request a managed checkout; the
 agent choice is independent of that destination:
 
-- **Runs on** offers a three-way switch above Host with **Existing host**, **New container** and **New sandbox**. A
-  segment with no usable place is hidden, and the switch is hidden when only Existing host remains. Existing host shows
-  the ordinary Host picker. New container shows Recipe and Container host, defaulting to the last container host used.
-  Hosts with unusable Podman are disabled with their reason, and the note says whether the recipe is ready there or
-  builds on first launch. New sandbox shows Recipe and retains its built-snapshot and account prerequisites below.
-  Recipes unsupported by the selected provider are disabled with a reason. Templates, Clone, quick launch and recent
-  setups carry the recipe and place together. Missing recipes or removed place hosts make that placement inapplicable.
-  The template editor offers the same three-way placement choice. Because a template only names a recipe and place for
-  later launches, which check readiness themselves, the editor does not check readiness: a host with unusable Podman
-  stays choosable with its reason, New sandbox always shows, a recipe without a built snapshot is offered, and only a
-  recipe whose base the provider cannot run is disabled. New container starts there on the first container host, not the
-  last one used.
-- Host: The session launcher's host picker shows each ordinary host's mark and name in the list's existing order,
-  including unavailable hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End
-  browse; Enter or Space chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the
-  closed field launches with the shown target. The picker is disabled for the whole launch round trip, and its value is
-  empty before hosts arrive. Session-owned environment hosts are omitted from ordinary destination choices.
+- **Host** lists ordinary hosts under **Existing host**. Its **New environment** group offers **New container**
+  (experimental) and **New sandbox** wherever they have a usable place. Choosing an environment puts its name in the
+  same picker. Choosing an existing host there leaves the new environment. New container shows Recipe and Container
+  host, defaulting to the last usable container host used, then the first usable one. Hosts with unusable Podman are
+  disabled with their reason, and the note says whether the recipe is ready there or builds on first launch. New sandbox
+  shows Recipe and retains its built-snapshot and account prerequisites below. Recipes unsupported by the selected
+  provider are disabled with a reason. Templates, Clone, quick launch and recent setups carry the recipe and place
+  together. Missing recipes or removed place hosts make that placement inapplicable. The template editor offers the
+  placement choices through **Runs on**. Because a template only names a recipe and place for later launches, which
+  check readiness themselves, the editor does not check readiness: a host with unusable Podman stays choosable with its
+  reason, New sandbox always shows, a recipe without a built snapshot is offered, and only a recipe whose base the
+  provider cannot run is disabled. New container starts there on the first container host, not the last one used.
+- Host picker: The launcher shows each ordinary host's mark and name in the list's existing order, including unavailable
+  hosts labelled with their phase. It is a single-choice keyboard list: arrows, Home and End browse; Enter or Space
+  chooses; typeahead finds a name; Escape closes without changing the destination. Enter on the closed field launches
+  with the shown target. The picker is disabled for the whole launch round trip, and its value is empty before hosts
+  arrive. Session-owned environment hosts are omitted from ordinary destination choices.
 
 - Working directory: an existing directory on the target host, named by an absolute path (a relative path would resolve
   against the supervisor process rather than the client, and would shift meaning across supervisor restarts). `~` and
@@ -1417,12 +1417,15 @@ of the stored launch, so relaunching or copying that launch never repeats it; te
 create. `farhelm agent prompt`, which would send a message into an already-running Claude or Codex session, is turned
 off in this version; Agent-spawned sessions has the refusal and the design kept for re-enabling it.
 
-A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The optional session
-name sits in the destination block under host and folder, visible without any disclosure. The launcher has a shared
-header with Close, a scrolling body and a pinned footer. Search and recent setups precede the Destination card, followed
-by the Agent and Command tabs and their fields. The selected tab is underlined. Labels sit above the fields with short
-notes where needed. The Agent tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh.
-Model, Effort and Permissions share a row when they fit. The footer shows the chosen agent type or command, host and
+A custom model id is typed into the model field and applied with Enter; it needs a chosen harness. The Destination
+card's compact Folder or Managed checkout switch sits next to its heading. An ordinary folder uses one address field
+with Host at its start, the path in the terminal font, and Browse at the right. Repository and checkout fields, or a new
+environment's recipe and place, occupy the space beside Host when chosen. The optional session name sits beside the
+address and drops below it when the form is narrow. Held values show as text. The launcher has a shared header with
+Close, a scrolling body and a pinned footer. Search and recent setups precede the Destination card, followed by the
+Agent and Command tabs and their fields. The selected tab is underlined. Labels sit above the fields with short notes
+where needed. The Agent tab shows the session list's harness marks on its chips, with a rule before Bash and Zsh. Model,
+Effort and Permissions share a row when they fit. The footer shows the chosen agent type or command, host and
 destination beside a compact Launch, Replace or Restart action; its accessible name retains that operation and target.
 Agent launches also retain the model, effort, permissions and nonempty prompt's line count in the footer summary. Long
 summaries may truncate visually; their full text remains accessible. Cancel comes first in the action row, then Reset
@@ -1540,18 +1543,18 @@ outside it. Its sessions appear under All. Opening Hosts lists the sandbox with 
 controls; updates, problems and progress also appear in the existing sidebar attention area. Update all and automatic
 updates include it under their ordinary rules. No separate session-only host-management surface is required.
 
-The launcher's **New sandbox** segment lists recipes with a cube mark and CPU and memory size. A recipe without a built
-snapshot is disabled with **No snapshot yet**. A missing API key or absent or unreadable local Farhelm SSH key also
-disables it. Once Farhelm's SSH key exists, New sandbox shows the existing copyable SSH-key registration command,
-whether or not a recipe is chosen, and explains that Farhelm cannot check account registration. If SSH later refuses the
-key, launch fails with that remedy and attempts to delete the new sandbox and snapshots. Brief billing and visible
-failed cleanup are accepted. Other failures retain their own reason. Launch never starts a missing software snapshot
-build; Add host keeps its existing build-if-missing behavior.
+After **New sandbox** is chosen in the host picker, Recipe lists its options with a cube mark and CPU and memory size. A
+recipe without a built snapshot is disabled with **No snapshot yet**. A missing API key or absent or unreadable local
+Farhelm SSH key also disables it. Once Farhelm's SSH key exists, New sandbox shows the existing copyable SSH-key
+registration command, whether or not a recipe is chosen, and explains that Farhelm cannot check account registration. If
+SSH later refuses the key, launch fails with that remedy and attempts to delete the new sandbox and snapshots. Brief
+billing and visible failed cleanup are accepted. Other failures retain their own reason. Launch never starts a missing
+software snapshot build; Add host keeps its existing build-if-missing behavior.
 
-The footer names **new &lt;recipe&gt; sandbox**. Its note explains that the sandbox is for this session, bills while
-running, Suspend stops CPU and memory billing, and deleting its last session removes the sandbox and its files. Managed
-checkout works normally, including the recipe's GitHub token for private clones. Folder is fixed to the new sandbox's
-home, without Browse or recent folders.
+The footer names **new &lt;recipe&gt; sandbox**. A note by the destination explains that the sandbox is for this
+session, bills while running, Suspend stops CPU and memory billing, and deleting its last session removes the sandbox
+and its files. Managed checkout works normally, including the recipe's GitHub token for private clones. Folder is fixed
+to the new sandbox's home, without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
 and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and

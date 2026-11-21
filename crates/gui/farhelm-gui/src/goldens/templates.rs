@@ -123,9 +123,32 @@ fn editor_scene_collections() -> Vec<CollectionState> {
 /// catalog read the editor sends, which is answered at once with the reference stack's four Codex models. The fake,
 /// the connection and the watch are kept for the scene's life, like Settings'.
 pub(super) fn template_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    open_template_editor(state, "codex-deep", None, window, cx);
+}
+
+/// Open the template that sets both Host and Destination so the shared switch and separate fields are visible.
+pub(super) fn template_destination_editor_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let mut hosts = super::hosts(&[super::remote(2, "build.example.invalid").alias("Build box")]);
+    hosts.entries[0].value["identity"] = serde_json::json!("install-build-box");
+    open_template_editor(state, "api-repo", Some(hosts), window, cx);
+}
+
+fn open_template_editor(
+    state: &SceneState,
+    template: &'static str,
+    hosts: Option<CollectionState>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    helm.connect(editor_scene_collections());
+    let mut snapshot = editor_scene_collections();
+    snapshot.extend(hosts);
+    helm.connect(snapshot);
     let handle = window.window_handle();
     let opener = state.ring.clone();
     let opened = std::cell::Cell::new(false);
@@ -142,7 +165,7 @@ pub(super) fn template_editor_setup(state: &SceneState, window: &mut Window, cx:
             if let Some(dialog) = layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx)
             {
                 dialog.update(cx, |dialog, cx| {
-                    dialog.open_template("codex-deep", window, cx)
+                    dialog.open_template(template, window, cx)
                 });
             }
         });
