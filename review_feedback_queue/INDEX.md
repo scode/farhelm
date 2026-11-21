@@ -778,10 +778,6 @@ consequences.
 - [`orphan-cleanup-start-does-not-invalidate-feed.md`](orphan-cleanup-start-does-not-invalidate-feed.md) — Starting
   orphan cleanup does not notify the live feed, so other views may miss its new in-progress state.
 
-- [`account-test-does-not-refresh-healthy-orphan-list.md`](account-test-does-not-refresh-healthy-orphan-list.md) — After
-  another window changes the account key, Test alone does not refresh a healthy orphan list. Whether the specification
-  requires that refresh remains unverified after investigation.
-
 - [`automatic-update-opt-out-can-roll-back.md`](automatic-update-opt-out-can-roll-back.md) — A power loss can roll back
   opting out of automatic updates and allow later unattended updates. Whether the general preference-loss acceptance
   covers this authorization remains unresolved.

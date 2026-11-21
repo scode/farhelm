@@ -1,25 +1,5 @@
 # Triage outcomes
 
-## account-test-does-not-refresh-healthy-orphan-list.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The old `OrphanList` went
-  with 1eb4e3751 (#3407), and the desktop list in `crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs` goes
-  further: by design (lines 41-42, coordinator decision 2026-11-15) a successful Test re-reads nothing, whether the list
-  was healthy or failed. The list re-reads only on opening, Refresh, a key Save or Clear in this opening, a Delete, or a
-  change in the fleet's Tensorlake hosts (lines 13-18, 152-191). `SPEC_impl.md:6878-6881` still says "A successful Test
-  resumes failed discovery with one reload" and that another window's key save needs "Refresh, Test or reopening
-  Settings", and the paragraph after it still describes the old `OrphanList`. The mismatch the finding raised is now
-  unconditional: Test never refreshes.
-- Decision: the maintainer picked "Make the spec match the app" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q3): where the desktop app deliberately does less than the spec promises, the spec is corrected
-  to describe the app.
-- Completion criteria: Correct SPEC.md and/or SPEC_impl.md so they describe the desktop app's current behavior for "Spec
-  says Test refreshes the Tensorlake sandbox list, but the app never does", without adding behavior. No code change.
-  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment). Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## attention-update-accessible-name-omits-target.md
 
 - Outcome: `fix code`.
