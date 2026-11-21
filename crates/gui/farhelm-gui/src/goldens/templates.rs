@@ -229,8 +229,7 @@ pub(super) fn template_launcher_setup(state: &SceneState, window: &mut Window, c
 }
 
 /// [`template_editor_setup`], then (reference `template-leave-question`) the name changed to `codex-deep-unsaved` and the
-/// header Close pressed: "Unsaved changes" in the heading, and the leave question at the editor's foot in place of its
-/// buttons, focus on its Save.
+/// header Close pressed: "Unsaved changes" in the heading behind the centered leave question, focus on its Save.
 pub(super) fn template_leave_question_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     template_editor_setup(state, window, cx);
     state

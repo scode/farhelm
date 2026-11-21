@@ -107,8 +107,8 @@
 //! Escape and Tab stay the answers'. Decided by the migration's orchestrator on 2026-11-16.
 //!
 //! [`ask_inline`] hands the question to its owner, which draws it inside its own surface, as the old app drew the
-//! launcher's YOLO question in the launcher's body and the template editor's leave question as a band at the editor's
-//! foot. It is not a layer: no veil, no header Close, no subject (it goes when its owner stops drawing it), and Tab
+//! launcher's YOLO question in the launcher's body. It is not a layer: no veil, no header Close, no subject (it goes
+//! when its owner stops drawing it), and Tab
 //! passes through it as through the rest of the owner's dialog. Where it is drawn is the owner's; how it looks and
 //! answers are the prompt's. Focus moves into it when it opens, onto its starting answer, unless the user has moved on
 //! since `mark` (then it shows and waits), and an answer pressed while focus is inside it, or clicked, returns focus to
@@ -120,7 +120,7 @@
 //! through [`focus::focus_control`]. Escape while focus is in it means Cancel and is taken there, so the owning dialog
 //! stays open; Escape anywhere else in the dialog is the dialog's. Enter presses the focused answer; the question holds
 //! no focus of its own, so a press on its empty space does what the owning dialog's empty-space rule says. It draws in
-//! one of two looks: plain, the old leave question's text and answers (`.templates-departure`), on whatever band its
+//! one of two looks: plain text and answers (`.templates-departure` in the old app), on whatever band its
 //! owner puts it in, or loud ([`Question::loud`]), the old YOLO confirmation's red-edged, red-washed block with its
 //! title as a red heading (`.yolo-confirmation`). Decided by the migration's orchestrator on 2026-11-14.
 //!
@@ -1562,7 +1562,7 @@ pub fn ask_anchored<T: Clone + 'static>(
 }
 
 /// Ask `question` inside its owner's surface: the owner draws what this returns where SPEC.md puts the question (the
-/// launcher's body for the YOLO question, the template editor's foot for its leave question), from the next frame on.
+/// launcher's body for the YOLO question), from the next frame on.
 /// Inside a dialog, focus moves to its starting answer once a frame has drawn it there, and the answer is scrolled into
 /// view; on the page it moves at once, so a question the owner does not draw in the next frame loses focus to home. It
 /// opens even when the user has moved on since `mark`, since it shows where it belongs; then it does not take focus,

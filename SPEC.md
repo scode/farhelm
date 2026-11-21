@@ -1243,18 +1243,20 @@ agent choice is independent of that destination:
   replaces it. Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; Save
   is greyed out and does nothing while there are no unsaved changes, and keeps keyboard focus after saving. A save the
   helm refuses is reported, and the editor keeps the draft for correction, never treating it as saved and never retrying
-  it. Leaving an unsaved draft asks Keep editing, Discard, or Save in that reading order, with initial focus still on
-  Save. Its shared header supplies Close; the complete editor keeps scrolling within the dialog, including its
-  editor-local action footer. Template names are unique. Creating a template or renaming one refuses any whitespace in
-  its name, including Unicode whitespace; existing names with whitespace remain usable, can keep their name when other
-  fields are saved, and retain delete undo. The agent's template create command follows the same new-name rule.
-  Duplicate opens an unsaved copy named `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace
-  in the source name with `-` in that suggestion. A workspace-trust field in an older template remains readable but is
-  ignored when applied and omitted on every save, including duplicate and delete undo. Delete takes effect immediately
-  and offers undo inside the dialog for about ten seconds; undo refuses if its old name has been taken. For a stored
-  template that fails current save rules, the control says "Delete permanently" before deletion and no undo is offered.
-  The label the user saw decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete"
-  always does, even if the template list changed in between. Closing the dialog ends its undo notice.
+  it. Leaving a draft with edits since opening or saving asks Keep editing, Discard, or Save in that reading order. The
+  question is centered over the dialog and starts with focus on Save. An inferred switch or removed legacy
+  workspace-trust field can enable Save without requiring a question when leaving. Its shared header supplies Close. The
+  complete editor keeps scrolling within the dialog, including its editor-local action footer. Template names are
+  unique. Creating a template or renaming one refuses any whitespace in its name, including Unicode whitespace; existing
+  names with whitespace remain usable, can keep their name when other fields are saved, and retain delete undo. The
+  agent's template create command follows the same new-name rule. Duplicate opens an unsaved copy named `<name>-copy`,
+  then `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-` in that suggestion. A
+  workspace-trust field in an older template remains readable but is ignored when applied and omitted on every save,
+  including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for about ten
+  seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules, the control
+  says "Delete permanently" before deletion and no undo is offered. The label the user saw decides: a click on "Delete
+  permanently" never offers undo, and a click on plain "Delete" always does, even if the template list changed in
+  between. Closing the dialog ends its undo notice.
 
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts

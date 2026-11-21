@@ -19,12 +19,12 @@
 //! - **The editor** ([`super::editor`]) beside the list: "Choose a template to edit, or make a new one." until a row or
 //!   "+ New template" opens one. Focus goes to its name field when it opens. What it refuses or the helm refuses of a
 //!   save is said in the status line under the panes.
-//! - **Leaving an unsaved draft** ([`Departure`]): another row, "+ New template", Duplicate, the header Close and
+//! - **Leaving an edited draft** ([`Departure`]): another row, "+ New template", Duplicate, the header Close and
 //!   Escape first ask "Save these changes before leaving?" with Keep editing, Discard and Save, in that reading order,
-//!   focus starting on Save (SPEC.md), as the plain inline question at the editor's foot. Keep editing stays, with focus
-//!   back in the name field, where it was put as the question opened. Discard goes where the user was heading. Save
+//!   focus starting on Save (SPEC.md), centered over the dialog. Keep editing or Escape returns focus to the name
+//!   field. Discard goes where the user was heading. Save
 //!   saves, and goes there only once the save has succeeded; a refused save stays with its reason in the status line.
-//!   A departure asked while the question is up replaces it.
+//!   The veil keeps the editor and the departure fixed while the question is open.
 //! - **Deleting.** Delete takes effect at once. Its editor goes, focus moves to "+ New template", and a notice under the
 //!   panes offers Undo for about ten seconds ([`UNDO_FOR`]): Undo saves the copy the dialog had loaded back under its old
 //!   name, unless another template has taken that name since. A later deletion replaces the notice, and closing the
@@ -117,7 +117,8 @@ const SUMMARY: &str = "Saved edits to combine in the session launcher";
 
 /// The header Close's name and hover help, the old dialog's words.
 const CLOSE_LABEL: &str = "Close templates";
-const CLOSE_HELP: &str = "Close templates; unsaved changes ask before leaving";
+const CLOSE_HELP: &str =
+    "Close Templates. If you edited the template, you can save or discard your changes.";
 
 /// How long a deletion's Undo is offered: SPEC.md's "about ten seconds", the old notice's 10,000 ms.
 pub(super) const UNDO_FOR: Duration = Duration::from_secs(10);
@@ -417,7 +418,11 @@ impl TemplatesDialog {
             cx.notify();
             return Dismissal::Stay;
         }
-        if self.editor.as_ref().is_some_and(Editor::dirty) {
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(Editor::needs_leave_confirmation)
+        {
             self.ask_leave(Departure::Close, window, cx);
             return Dismissal::Stay;
         }
@@ -516,7 +521,11 @@ impl TemplatesDialog {
         if self.writing(cx) {
             return;
         }
-        if self.editor.as_ref().is_some_and(Editor::dirty) {
+        if self
+            .editor
+            .as_ref()
+            .is_some_and(Editor::needs_leave_confirmation)
+        {
             self.ask_leave(departure, window, cx);
         } else {
             let mark = Mark::take(cx);
@@ -524,9 +533,8 @@ impl TemplatesDialog {
         }
     }
 
-    /// Ask "Save these changes before leaving?" for `departure` at the editor's foot, replacing a question already up.
-    /// Focus first goes to the name field, so the question's Keep editing (and Escape inside it) returns focus there,
-    /// where the old Keep editing put it: the prompt returns focus to what held it when the question opened.
+    /// Ask over the dialog so the question stays visible at any scroll position. Set the return target without
+    /// focusing the name field first, which would scroll the editor before the question appears.
     fn ask_leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
         let Some(name) = self
             .editor
@@ -536,7 +544,6 @@ impl TemplatesDialog {
             return;
         };
         let mark = Mark::take(cx);
-        focus::focus_in_layer(&name, &mark, window, cx);
         let answer = |label: &'static str, help: &'static str, tier| {
             Answer::new(label, HoverHelp::tooltip(help), tier)
         };
@@ -546,6 +553,7 @@ impl TemplatesDialog {
             answer("Save", "Save these changes, then continue", Tier::Primary),
             departure,
         )
+        .returns_to(name)
         .cancel_answer(answer(
             "Keep editing",
             "Stay here with the unsaved draft",
@@ -565,14 +573,15 @@ impl TemplatesDialog {
             },
         );
         let save = cx.weak_entity();
-        let inline = prompt::ask_inline(
+        prompt::ask(
             question,
+            None,
             &mark,
             move |departure, window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
                     let mark = Mark::take(cx);
-                    // The fields stay editable while the question is up, so the user may have undone their edits:
-                    // with nothing left to save they leave at once, as the old prompt's Save did.
+                    // A choice can undo the inferred switch and restore the raw stored template. In that case
+                    // the draft differs from what opened, but there is no write for Save to wait for.
                     if !dialog.editor.as_ref().is_some_and(Editor::dirty) {
                         dialog.depart(departure, &mark, window, cx);
                     } else if dialog.save_editor(window, cx) {
@@ -583,16 +592,11 @@ impl TemplatesDialog {
             window,
             cx,
         );
-        if let Some(editor) = self.editor.as_mut() {
-            editor.leave = Some(inline);
-        }
-        cx.notify();
     }
 
     /// Go where `departure` leads, whatever the editor holds, for the user's action at `mark`: a stored template (by
     /// its name, as the store holds it now; nothing if it has gone), a new or duplicated draft, or the dialog closed.
-    /// Nothing while a write is in flight, as for every other way to open a template, and since closing then would lose
-    /// the write's report: a Discard answered while a ⚡ or number-key write runs keeps the draft.
+    /// A write in flight keeps the draft, including any eventual refusal shown in its status line.
     fn depart(
         &mut self,
         departure: Departure,
@@ -754,9 +758,8 @@ impl TemplatesDialog {
     }
 
     /// Put `editor` in the pane, move focus to its name field for the action marked `mark` (the field is drawn in
-    /// the next frame, which the focus coordinator waits for), and read the catalog if no editor has yet. The editor it
-    /// replaces goes with its leave question, and the dialog's own status line (an Undo's refusal) is cleared, as the
-    /// old dialog cleared its one line whenever the editor moved on.
+    /// the next frame, which the focus coordinator waits for), and read the catalog if no editor has yet. An answered
+    /// leave question closes before this runs. The dialog's status line is cleared when the editor changes.
     fn show_editor(
         &mut self,
         editor: Editor,
@@ -1285,7 +1288,7 @@ impl Render for TemplatesDialog {
         let new_template = Button::new(
             "templates-new",
             "+ New template",
-            HoverHelp::tooltip("Start a new template; unsaved changes ask before leaving"),
+            HoverHelp::tooltip("Start a new template. If you edited this one, you can save or discard your changes."),
             Role::Button,
         )
         .tier(Tier::Neutral)

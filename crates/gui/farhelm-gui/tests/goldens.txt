@@ -250,8 +250,8 @@ linux/template-editor--dark.png 7b700977d51be6891ce04d1bc2accbe877080c1c
 linux/template-editor--light.png 68b2006e3cd71f50776f6e4fe32148f8cf293b8b
 linux/template-launcher--dark.png a3bf5786ea99bd8641940771b24f170406d49bed
 linux/template-launcher--light.png 2d8e66af0f0fbc99f9aa8b7e28227a2ef4eb01ae
-linux/template-leave-question--dark.png 7e6a4fb51175303506726045d8abecfc17847fe0
-linux/template-leave-question--light.png 21ebae8263797d3c9046a7b02b2466d3b94e5264
+linux/template-leave-question--dark.png 25efaa54ae5ae4702ff1c5fb82f4afe40f34e84d
+linux/template-leave-question--light.png 2dc572ee4aa4c4d1d279d738b47a8f79afe6d8b1
 linux/template-number-menu--dark.png 2bb48efece6b4ca07546b0f1caec60c7c7c31e9a
 linux/template-number-menu--light.png 424b02d8487890a468c9909d40e70fb786dd2898
 linux/templates-dialog--dark.png d2f393a7c0b9958e2033763d41195d2b4ad7ec6e

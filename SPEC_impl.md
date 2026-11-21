@@ -1014,14 +1014,13 @@ fail a debug build when set on a question asked a way that ignores them, so a qu
 fails a debug run, and so its tests, instead of losing one unseen.
 
 A question is centered over a veil, anchored beside the control it is about, or drawn inline inside the surface that
-owns it (the launcher's YOLO question in its body, the template editor's leave question at its foot), with the same
-rules in all three. An inline question is not a layer: its owner decides where it is drawn, and the prompt decides how
-it looks and answers. It takes focus on its starting answer when it opens, unless the user has moved on, and an answer
-returns focus to what held it before, inside the owner's dialog. Escape on it is Cancel and does not reach the owner's
-dialog. It draws plain, or loud as the YOLO confirmation is. An anchored question's text stops at about twelve lines so
-its answers stay in the window, its own words always whole while a line naming a host value (a quoted session title)
-gives up the height and scrolls, with the wheel and with Page Up, Page Down, Home and End from the answers, so the
-keyboard reaches it with no stop of its own.
+owns it (the launcher's YOLO question in its body), with the same rules in all three. An inline question is not a layer:
+its owner decides where it is drawn, and the prompt decides how it looks and answers. It takes focus on its starting
+answer when it opens, unless the user has moved on, and an answer returns focus to what held it before, inside the
+owner's dialog. Escape on it is Cancel and does not reach the owner's dialog. It draws plain, or loud as the YOLO
+confirmation is. An anchored question's text stops at about twelve lines so its answers stay in the window, its own
+words always whole while a line naming a host value (a quoted session title) gives up the height and scrolls, with the
+wheel and with Page Up, Page Down, Home and End from the answers, so the keyboard reaches it with no stop of its own.
 
 A centered question can be reworded in place while it is open, for SPEC.md's bulk Stop and Delete question, which
 rewords itself when an accepted target changes. Closing it and asking the replacement moved focus back to the starting

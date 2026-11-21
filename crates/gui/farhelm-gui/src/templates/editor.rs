@@ -13,7 +13,8 @@
 //! - **What it holds.** The stored template's name it opened (`previous`, none for a new template), the draft as it
 //!   was opened or last saved (`baseline`), and the draft being edited. "Unsaved changes" is the two differing. A
 //!   stored template opens as [`Draft::from_template`] against its raw stored fields, so a kindless template's inferred
-//!   switch and a dropped workspace-trust field show as unsaved, as the old editor showed them.
+//!   switch and a dropped workspace-trust field show as unsaved. The leave question compares against the displayed
+//!   starting draft, so those automatic changes alone never interrupt a departure.
 //! - **The draft is the template as loaded.** It does not follow a change pushed while it is open: the save writes the
 //!   whole template, last write wins (SPEC.md, "One GUI at a time", confirmed 2026-10-21), and the editor never takes
 //!   a pushed value into a field. The text fields are plain inputs over the draft, as the launcher's are; the drafts
@@ -51,9 +52,6 @@
 //!   that fails today's save rules says "Delete permanently", since Undo restores through the ordinary save, which the
 //!   helm would refuse. The press carries out the kind its label said ([`DeleteKind`]). Once the helm has deleted it,
 //!   the dialog drops the editor and offers Undo ([`Ended::Deleted`]); a refusal is said in the status line.
-//! - **The leave question.** While the dialog asks "Save these changes before leaving?" ([`Editor::leave`]), the
-//!   question takes the place of the footer's buttons, as the old band at the editor's foot did. The dialog asks it and
-//!   carries out the answer; the editor only draws it.
 
 use std::collections::HashMap;
 
@@ -70,7 +68,7 @@ use gpui::{
     Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
-use super::dialog::{Departure, TemplatesDialog};
+use super::dialog::TemplatesDialog;
 use super::fields::{Draft, Field, capitalized, duplicate_name, name_refusal};
 use super::shortcuts::{self, Bindings};
 use crate::components::{Button, HoverHelp, TextInputEvent, TextInputState, Tier};
@@ -79,7 +77,6 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::RunsOn;
 use crate::launcher::request::Recipes;
 use crate::operations::{Command, OpKey, Outcome, Work};
-use crate::prompt::Inline;
 use crate::session;
 use crate::theme::{self, Palette, metrics};
 
@@ -231,8 +228,11 @@ impl Step {
 pub(super) struct Editor {
     /// The stored template's name this editor opened or last saved, or `None` for a new template.
     previous: Option<String>,
-    /// The draft as opened or last saved; the draft differing from it is "Unsaved changes".
+    /// The raw stored template, or an empty template before the first save. Differences enable Save.
     baseline: Draft,
+    /// What the editor showed on opening or just after Save. This comparison gates leaving so an inferred
+    /// switch or removed legacy trust field never asks on its own.
+    leave_baseline: Draft,
     /// The template being edited.
     draft: Draft,
     /// The text inputs of the fields the draft sets, and of its name. The Custom permission words live only in theirs,
@@ -251,9 +251,6 @@ pub(super) struct Editor {
     /// The window the editor is drawn in: a write settles outside any window's update, and what follows it (the
     /// departure a save waited for, focus after a delete) needs the window.
     window: AnyWindowHandle,
-    /// The leave question the dialog asked last, drawn in place of the footer's buttons while it is open. A new
-    /// departure replaces it; a new editor drops it unanswered.
-    pub(super) leave: Option<Inline<Departure>>,
 }
 
 impl Editor {
@@ -294,6 +291,11 @@ impl Editor {
         cx: &mut Context<TemplatesDialog>,
     ) -> Editor {
         let mut editor = Editor {
+            leave_baseline: if previous.is_some() {
+                draft.clone()
+            } else {
+                baseline.clone()
+            },
             previous,
             baseline,
             draft,
@@ -304,7 +306,6 @@ impl Editor {
             status: None,
             writing: None,
             window: window.window_handle(),
-            leave: None,
         };
         editor.sync_inputs(window, cx);
         editor
@@ -397,9 +398,14 @@ impl Editor {
         self.edit(window, cx, |editor| editor.draft.name = name.to_owned());
     }
 
-    /// Whether the draft differs from what was opened or last saved: "Unsaved changes", and what leaving asks about.
+    /// Whether Save would change the stored template, including automatic upgrades to legacy fields.
     pub(super) fn dirty(&self) -> bool {
         self.draft != self.baseline
+    }
+
+    /// Whether leaving would lose edits since opening or saving. A duplicate also counts as an unsaved new draft.
+    pub(super) fn needs_leave_confirmation(&self) -> bool {
+        self.draft != self.leave_baseline
     }
 
     /// Which Delete the footer offers ([`DeleteKind`]), judged on the stored template, not the draft: Delete removes
@@ -890,6 +896,7 @@ impl Editor {
     /// template the editor holds.
     fn finish_save(&mut self, name: String) {
         self.baseline = self.draft.clone();
+        self.leave_baseline = self.draft.clone();
         self.previous = Some(name);
     }
 
@@ -1199,8 +1206,7 @@ impl Editor {
 
     /// The editor's own footer (`.templates-editor-footer`, the shared dialog footer's look inside the editor):
     /// Duplicate and Delete for a stored template, then Save, at its right. Save is busy, and so greyed and inert while
-    /// keeping focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`). While the
-    /// leave question is open it takes the buttons' place, in the same band.
+    /// keeping focus, when there is nothing unsaved and while any write of the dialog's is in flight (`busy`).
     fn footer(
         &self,
         busy: bool,
@@ -1220,9 +1226,6 @@ impl Editor {
             .bg(theme::color(palette.bg_1))
             .border_t_1()
             .border_color(theme::color(palette.border_dim));
-        if let Some(question) = self.leave.as_ref().filter(|question| question.is_open(cx)) {
-            return band.child(div().w_full().child(question.clone()));
-        }
         let save = Button::new(
             "templates-save",
             "Save",
