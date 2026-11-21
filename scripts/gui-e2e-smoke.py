@@ -163,9 +163,11 @@ TRASH_INTRO = "Folders of managed checkouts whose last session was deleted."
 # The YOLO question's one-off answer: drawn only while the question is up (step 54).
 YOLO_ONE_OFF = "Start YOLO session anyway"
 
-# The launcher's header summary in New: text only the open launcher draws (New's hover help says it with a lowercase
-# "start", which this does not match), so waiting for it (or for it to go) tells whether the launcher is open (step 51).
-LAUNCHER_SUMMARY = "Start an agent or a command on any host"
+# The launcher's empty command field in New and in Clone: placeholders only the open launcher draws, so waiting for one
+# (or for it to go) tells whether the launcher is open in that mode (steps 51 and 69). The redesigned launcher has no
+# header summary; its command field leads the dialog and names the mode.
+LAUNCHER_NEW = "New session: type an agent, host, folder, model or name…"
+LAUNCHER_CLONE = "Clone session: type an agent, host, folder, model or name…"
 
 # The rail notices panel's summary under its "Notifications" header, drawn only while the panel is open (step 66).
 NOTICES_SUMMARY = "About your hosts and Farhelm"
@@ -1346,7 +1348,7 @@ class Smoke(unittest.TestCase):
         live state: the heading's button, and the quick switcher's "New session named X" row, which needs the switcher's
         own read of the helm's listing first. Neither may start a session (SPEC.md: "Launch remains the user's action").
         Specified, with this step's own session open (titled with a per-run stamp): a click on the heading's New opens
-        the launcher (its "Start an agent or a command on any host" summary) and Escape closes it; the platform's chord
+        the launcher (its empty command field's "New session: …" placeholder) and Escape closes it; the platform's chord
         opens the switcher, a name filled into its search field offers `New session named "<name>"`, and a click on
         that row closes the switcher and opens the launcher with the name in its Name field; Escape closes it, and the
         helm lists the same sessions as before and still remembers this step's session as the last selected."""
@@ -1364,9 +1366,9 @@ class Smoke(unittest.TestCase):
         before = set(listed_titles())
 
         self.ok("click", "id:new-session-button")
-        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.ok("wait", "--text", LAUNCHER_NEW)
         self.ok("press", "escape")
-        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+        self.ok("wait", "--gone", LAUNCHER_NEW)
 
         name = f"named-{stamp}"
         self.ok("press", "cmd-k" if sys.platform == "darwin" else "ctrl-shift-k")
@@ -1376,10 +1378,10 @@ class Smoke(unittest.TestCase):
         self.assertIn(f'New session named \\"{name}\\"', self.ok("snapshot", "-i"), "the row names the typed name")
         self.ok("click", "id:quick-switcher-new")
         self.ok("wait", "--gone", SWITCHER_FOOTER)
-        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.ok("wait", "--text", LAUNCHER_NEW)
         self.ok("wait", "--text", name)
         self.ok("press", "escape")
-        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+        self.ok("wait", "--gone", LAUNCHER_NEW)
         self.assertEqual(set(listed_titles()), before, "neither New started a session")
         self.assertEqual(last_selected(), origin, "and the open session is unchanged")
 
@@ -2102,12 +2104,12 @@ class Smoke(unittest.TestCase):
         self.ok("wait", "--gone", REPLACE_WITH_SUMMARY)
 
         self.ok("click", "id:session-header-clone")
-        self.ok("wait", "--text", LAUNCHER_SUMMARY)
+        self.ok("wait", "--text", LAUNCHER_CLONE)
         self.assertEqual(
             self.ok("get", "text", "id:launcher-name").strip(), title, "the Name field holds the session's title"
         )
         self.ok("press", "escape")
-        self.ok("wait", "--gone", LAUNCHER_SUMMARY)
+        self.ok("wait", "--gone", LAUNCHER_CLONE)
         self.assertEqual(set(listed_titles()), before, "nothing was started or replaced")
 
     # ---- A row menu's arrow key (71), on a session of its own -------------------------------------------------------

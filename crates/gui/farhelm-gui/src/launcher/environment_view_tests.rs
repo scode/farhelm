@@ -80,7 +80,7 @@ fn the_environment_group_is_hidden_when_only_existing_hosts_remain(cx: &mut Test
 /// SPEC.md, "Creation": New container "shows Recipe and Container host, defaulting to the last container host used";
 /// "Hosts with unusable Podman are disabled with their reason, and the note says whether the recipe is ready there or
 /// builds on first launch"; "Container sessions": "Folder destinations use its home, without Browse or recent folders",
-/// and "The footer names the new container and its host". Specified: with host2 the last container host but unusable,
+/// and "The launch action's accessible name names the new container and its host". Specified: with host2 the last container host but unusable,
 /// New container chooses `web` on host1, the first usable host. The picker names the environment and Folder shows `~` as text, with no
 /// field; host2's option says why and cannot be chosen; the note says the build status is being checked while the
 /// helm has pushed nothing about `web` there; the footer names "new web container on host1". host3, an SSH host

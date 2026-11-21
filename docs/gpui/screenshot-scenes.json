@@ -1578,7 +1578,7 @@
         ],
         [
           "hover",
-          "text:Start an agent or a command on any host"
+          "id:launcher-destination-heading"
         ],
         [
           "wait",

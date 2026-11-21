@@ -70,7 +70,7 @@ rebuilt. Existing containers keep their software. Rebuild affects future launche
 ## Start a session
 
 Open **+** (New session). In [the session launcher](/docs/using/start-a-session/#choose-where-it-runs), when a container
-host is available, **Runs on** offers **New container** beside **Existing host**. (**New sandbox**, for
+host is available, the **Host** menu offers **New container** under **New environment**. (**New sandbox**, for
 [Tensorlake](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox), shows there once a Tensorlake API key
 is saved, whether or not you have a container host.) Choose **New container**, then **Recipe** and **Container host**.
 The host defaults to the one you used last. Recipes that cannot run there show why.

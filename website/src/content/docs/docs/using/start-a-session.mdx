@@ -52,8 +52,8 @@ you have a host that can run containers, and **New sandbox** once a Tensorlake A
 [sandbox sessions](/docs/using/tensorlake-sandboxes/#give-each-session-its-own-sandbox) use a recipe and your Tensorlake
 account, and Farhelm asks before creating the billed sandbox. Either can clone a [managed
 checkout](#start-from-a-managed-checkout) inside or start in the new environment's home. Opening **+** (New session) while a sandbox or container session is open preselects a new one from
-that session's recipe, on the same Tensorlake account or container host. The host and directory controls below apply to
-**Existing host**.
+that session's recipe, on the same Tensorlake account or container host. The host and directory controls below apply to an
+existing host.
 
 With no session open, the **Host** menu starts on the machine you are using, listed as **Local (this machine)**. A host
 that is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch
@@ -69,7 +69,7 @@ host. You can still launch; the host checks the directory again when you do.
 **Browse**, at the end of the address, lists the directories under the current path one level at a time. Choosing one of
 the directory list's entries fills the field without
 launching. **Local home** also switches the host to **Local (this machine)**. With the list open, Escape closes the list
-first. **Name (optional)** names the session in the session list; leave it empty and Farhelm picks a name.
+first. **Name** (optional) names the session in the session list; leave it empty and Farhelm picks a name.
 
 ## Choose the agent and how it runs
 
@@ -96,7 +96,7 @@ choosing an agent. If choosing an agent replaces a permission you chose with a r
 offers **Undo**, including on your first agent choice. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically, use the
 [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
-of these agents, start [Bash or Zsh under **Shells**](/docs/agents/shells/) or use the **Command**
+of these agents, start [Bash or Zsh, after the agent chips,](/docs/agents/shells/) or use the **Command**
 tab for a [custom command](/docs/agents/custom-commands/).
 
 To start a known agent through another command, open **More options** on the **Agent** tab and enter a **Wrapper prefix**. Farhelm places it
@@ -279,7 +279,7 @@ restores the source's directory and name; for a new sandbox or container it stay
 
 **Replace with** starts on **Folder** at the source session's directory. If the session uses a managed checkout, keeping
 that directory keeps your changes, and the launcher names the checkout. Choose **Managed checkout** to start from a fresh
-clone without those changes; the warning under **Where** then says what happens to the old checkout: when you replace
+clone without those changes; the warning in **Destination** then says what happens to the old checkout: when you replace
 the last session using it, it moves to the host's trash. In a sandbox or container, that trash stays inside and is
 deleted with the sandbox or container. **Replace** keeps the existing directory.
 
