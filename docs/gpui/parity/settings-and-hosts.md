@@ -417,7 +417,7 @@ in `crates/gui/farhelm-gui/src/settings/credential_tests.rs` unless named otherw
   `a_replacement_sends_only_the_secret_and_shows_the_hosts_it_did_not_reach`; one warning per view, naming the
   Tensorlake key only on the overview, `the_overview_and_the_editor_each_show_one_storage_warning`; the Codex caveat and
   a chosen file kept off screen and sent only on Save, `a_chosen_codex_login_is_hidden_and_saved_only_on_submit`; a
-  closed editor's draft gone and nothing created, `back_cancel_and_closing_discard_the_draft_without_asking`; Delete,
+  closed editor's draft gone and nothing created, `back_and_cancel_discard_the_draft_without_asking`; Delete,
   `delete_is_unavailable_while_a_recipe_uses_the_credential`; the catalog's read, its lists and their times,
   `credentials_reads_its_catalog_whenever_shown_and_lists_each_entry_in_its_kinds_list`; the editor's own checks and a
   refusal kept for correction, `the_editor_checks_the_name_and_the_secret_before_sending` and

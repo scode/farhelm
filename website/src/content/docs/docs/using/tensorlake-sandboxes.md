@@ -50,7 +50,7 @@ key**. Both places show whether a key is saved; neither shows its value again.
 
 Settings → **Credentials** has lists for GitHub tokens, agent subscription logins and API endpoint tokens. Each has a
 name you choose, fixed once saved. **Edit** replaces its value while keeping that name. A blank replacement keeps the
-saved value; closing Settings discards text you have not saved.
+saved value. If you close Settings with a value typed but not saved, Settings asks whether to save it first.
 
 **Not encrypted on disk:** Farhelm stores these values in plain text on the machine running the helm. Anyone who can
 read its state directory can read them. Farhelm never shows a saved value again.

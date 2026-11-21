@@ -585,13 +585,14 @@ fn delete_is_unavailable_while_a_recipe_uses_the_credential(cx: &mut TestAppCont
     );
 }
 
-/// SPEC.md: "Closing discards unsaved text without a recipe-style departure question", and Back returns to the
-/// overview the same way. A draft that survived would put a secret back in front of the next person to press Add.
-/// Specified: Back closes the editor with no question and nothing saved (only the catalog is read again, as the old
-/// editor's Back reloaded it), focus on its list's Add; Add again shows empty fields; Cancel does the same; closing
-/// Settings and opening it again shows the overview.
+/// Back and Cancel leave the credential editor without a recipe-style departure question, dropping its draft. A
+/// draft that survived would put a secret back in front of the next person to press Add. (Closing Settings with a
+/// typed secret is different: SPEC.md, "Closing Settings includes the credential draft in the unsaved-changes
+/// question".) Specified: Back closes the editor with no question and nothing saved (only the catalog is read again,
+/// as the old editor's Back reloaded it), focus on its list's Add; Add again shows empty fields; Cancel does the same;
+/// Escape with an empty editor closes Settings at once, and opening it again shows the overview.
 #[gpui::test]
-fn back_cancel_and_closing_discard_the_draft_without_asking(cx: &mut TestAppContext) {
+fn back_and_cancel_discard_the_draft_without_asking(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_credentials(&mut helm, cx, json!([]));
     press(cx, "credentials-add-endpoint");
