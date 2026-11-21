@@ -584,10 +584,14 @@ pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Wind
 
 /// Settings at App (reference `settings-app`), over a fake desktop updater kept as the app's
 /// (`desktop::updates::fake`), so the section is listed after Notifications and shows the running version, its check
-/// button, and automatic updates on. Focus starts on the switch, whose ring shows only under keyboard focus, so the
-/// picture shows none.
+/// button, and both automatic updates and upgrade highlights on. Focus starts on the automatic-updates switch,
+/// whose ring shows only under keyboard focus.
 pub(super) fn settings_app_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    keep_updater(cx);
+    let mut host = crate::whats_new::tests::test_host(Box::new(|_, _| {
+        Box::pin(async { Ok(crate::desktop::updates::notes::UpgradeNotes::Current) })
+    }));
+    host.automatic_updates = Box::new(|| true);
+    crate::desktop::updates::keep(Some(host), cx);
     settings_scene(state, crate::settings::Section::App, window, cx);
 }
 

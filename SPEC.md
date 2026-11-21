@@ -829,6 +829,23 @@ off, the user updates through an on-demand check or by running the installer, as
 from main, to the desktop app on Linux, or to remote hosts. Remote hosts have their own Update actions and the separate,
 **Update remote hosts automatically** setting described under Topology.
 
+After an upgrade to a stable release, the installed Mac app can show **What's new in Farhelm** when the window starts,
+after Welcome and any pending Announcements. It names the releases shown, newest first, with their dates and highlights
+in the release notes' categories. **See screenshot** opens the entry on the Release notes page in the browser when it
+has a screenshot. The footer counts the other changes across those releases. **All release notes** opens the full page,
+leaving the dialog open.
+
+The helm records the last release whose highlights were shown or skipped. A new helm starts at the release that created
+it. An older helm with no record starts with the running release's highlights. Otherwise the app asks for the finalized
+highlights when the running release is newer than the record, and shows the available releases between them, through the
+running release. If the website request fails or the feed omits the running release, the app logs the failure and keeps
+the record for a later launch. If the user starts working or another prompt takes focus before the release highlights
+arrive, the app leaves focus and the record alone.
+
+**Got it**, the ×, and Escape close the dialog and record the running release. **Don't show again** also turns off
+upgrade highlights. While off, newer releases are skipped and recorded. Turning highlights on in Settings resumes them
+from the next upgrade. The highlights check works with automatic updates turned off.
+
 The installer, run by hand, intentionally trusts get.farhelm.io over TLS: it learns the latest stable release from
 get.farhelm.io, downloads that release's `SHA256SUMS` from it and the release archives through it, over HTTPS only (no
 plain-HTTP redirects), and checks archives against those checksums, but it does not itself verify the release signature
@@ -2532,18 +2549,19 @@ default applies to hosts without their own folder, set in each host's settings. 
 in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
 and that command-line host overrides keep their command. When the updater is active, the desktop app's dialog also has
 an **App** section. It shows the running version and a **Check for updates** button above the switch for installing
-updates automatically (see [Installation and updates](#installation-and-updates)). The switch is a setting of that app
-installation, kept with the app rather than by the helm. The two host confirmation choices apply to every host and
-client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy: the
-helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
-change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
-persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
-shared preferences, including welcome-card and announcement dismissal and the host rail's expansion. The sound switches
-are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm preferences rather than
-per-device ones (see Status). A client that asks the helm for no particular order gets creation time. No mandatory
-hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not nest the list and
-implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can record it, while
-`farhelm agent create` and `clone` need not record the asking session.
+updates automatically (see [Installation and updates](#installation-and-updates)). Automatic updates are a setting of
+that app installation. On an installed stable Mac release, App also offers **Show what's new after updates**, on by
+default. The helm shares that choice and the last shown or skipped release with the window. The two host confirmation
+choices apply to every host and client of this helm; existing controls with a natural place in the main UI stay there.
+No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever they change,
+and the window writes one on change, so a window opens in the same order and on the same session after a reconnect as
+before it. Per-client persistence — a desktop state file, anything that lets two clients remember different answers — is
+not wanted for these shared preferences, including Welcome, Announcements and upgrade highlights dismissals and the host
+rail's expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they
+are helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
+creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
+does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
+`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -4721,6 +4739,8 @@ dialog described in [Desktop window chrome](#desktop-window-chrome). Release not
 an announcement, **Announcements** appears directly after **Release notes**, with the description **Shows previously
 shown announcements again**; it reopens the shown history described below. The installed desktop app's menu adds **Check
 for updates** last (see [Installation and updates](#installation-and-updates)). Welcome shows the welcome card again.
+The **What's new in Farhelm** startup dialog has its own release record. Opening **Release notes** from Help does not
+advance it.
 
 ### Welcome card
 
@@ -4759,7 +4779,8 @@ state.
 
 After at least one successful showing, **Announcements** stays in the **?** menu directly after **Release notes**. It
 opens the same dialog with all shown announcements, newest shown first, and reopening writes nothing. Closing this
-history view returns focus to Help; closing an automatic batch restores ordinary initial focus.
+history view returns focus to Help. Closing an automatic batch restores ordinary initial focus and lets the upgrade
+highlights check proceed on eligible apps (see [Installation and updates](#installation-and-updates)).
 
 The first and only producer is a compiled-in release table, initially empty. It contains only announcements explicitly
 chosen by the maintainer during the release procedure, never everything under Breaking in the changelog. Before the helm
@@ -4768,8 +4789,8 @@ running build, in full semver precedence including RC and dev versions. Thus ski
 announcements, including intermediate release candidates. A fresh installation receives nothing from its own version or
 earlier. An older helm without a recorded creation version, or one created by a build from main, counts as older than
 every entry. A running build from main (`0.0.0-unreleased`) enqueues none. Stable entries include their release's notes
-link; prereleases omit it because curated notes need not exist yet. Only this producer interprets release versions or
-builds release-notes links.
+link; prereleases omit it because curated notes need not exist yet. The desktop app selects upgrade highlights
+separately from this queue and uses screenshot links from the finalized release notes feed.
 
 ### Sending feedback
 
@@ -4821,8 +4842,8 @@ Steady-state operation between Farhelm's own components uses the desktop app's d
 its window and its embedded helm, and the helm to each supervisor (local IPC, SSH or Podman exec). User-opened localhost
 tunnels add a loopback listener on the Mac and a supervisor connection to a loopback service on the session host; the
 bytes between machines still ride the existing helm-to-supervisor connection. Besides provisioning's release downloads
-(see [Topology](#topology)), three more kinds of outbound connection exist. When the user sends feedback, the helm posts
-that submission, and nothing else, to the project's feedback endpoint (see [Feedback](#feedback)); that happens only on
+(see [Topology](#topology)), the outbound connections are as follows. When the user sends feedback, the helm posts that
+submission, and nothing else, to the project's feedback endpoint (see [Feedback](#feedback)); that happens only on
 explicit user action. And the installed desktop app's updater (see
 [Installation and updates](#installation-and-updates)) asks get.farhelm.io which stable release is the latest, reads
 `/advisories` and its signature for release withdrawals, and, when it is newer, verifies that release's signed checksums
@@ -4831,19 +4852,26 @@ archives from get.farhelm.io and checks them against those verified checksums. T
 startup and about daily, unless the user turned automatic updates off, and also whenever the user checks for updates. It
 sends nothing about the user or the machine beyond what any HTTPS request to get.farhelm.io carries. A release that
 fails that verification is not installed, and the app then says that it can no longer verify its updates and must be
-reinstalled with the installer, which, like any fresh install, trusts get.farhelm.io over TLS alone. When ntfy alerts
-are configured, the helm also posts waiting alerts and explicit test alerts to the saved server and topic, with the
-optional access token (see Status). This connection sends session titles and host display names; it follows no
-redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS protection. When
-a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://api.tensorlake.ai` with it as a bearer
-token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a snapshot build or
-preparation creates, snapshots and deletes sandboxes and snapshots; a sandbox-session launch creates its own sandbox,
-whose Delete terminates it and removes its snapshots). These requests follow no redirects and are not retried, and the
-key appears in no reply, error message or log. Snapshot builds, preparation and sandbox-host connections reach the
-sandbox with `ssh` through Tensorlake's gateway. Public-key authentication offers Farhelm's registered ed25519 key
-first, excluding configured certificates and hardware-token keys that could take priority. Other configured key files
-may follow it. The user's proxy and jump configuration still applies. The gateway's host key is recorded on first use in
-a known_hosts file in the helm's state directory, never in the user's own.
+reinstalled with the installer, which, like any fresh install, trusts get.farhelm.io over TLS alone.
+
+When an installed stable Mac app starts on a newer release and upgrade highlights are on, it reads
+`https://farhelm.io/whats-new.json` after the startup dialogs. This is a plain HTTPS GET with no redirects. It sends no
+credentials, cookies, release versions or helm state. Fresh installs, apps that have already shown or skipped this
+release, and apps with highlights turned off do not make this request. Automatic updates and their toggle do not control
+it. A screenshot link from the file can only open an entry on the HTTPS Release notes page on farhelm.io.
+
+When ntfy alerts are configured, the helm also posts waiting alerts and explicit test alerts to the saved server and
+topic, with the optional access token (see Status). This connection sends session titles and host display names; it
+follows no redirects. Settings allow HTTP for a private server, which sends those values and any token without TLS
+protection. When a Tensorlake API key is saved, the helm calls Tensorlake's REST API at `https://api.tensorlake.ai` with
+it as a bearer token, for the Tensorlake actions the user takes (Settings' **Test** lists the account's sandboxes; a
+snapshot build or preparation creates, snapshots and deletes sandboxes and snapshots; a sandbox-session launch creates
+its own sandbox, whose Delete terminates it and removes its snapshots). These requests follow no redirects and are not
+retried, and the key appears in no reply, error message or log. Snapshot builds, preparation and sandbox-host
+connections reach the sandbox with `ssh` through Tensorlake's gateway. Public-key authentication offers Farhelm's
+registered ed25519 key first, excluding configured certificates and hardware-token keys that could take priority. Other
+configured key files may follow it. The user's proxy and jump configuration still applies. The gateway's host key is
+recorded on first use in a known_hosts file in the helm's state directory, never in the user's own.
 
 - **Client to helm**: the desktop app's window reaches its embedded helm over loopback only. The helm chooses a fresh
   loopback port at each launch, binds only the IPv4 literal `127.0.0.1`, and accepts only the credentials minted in

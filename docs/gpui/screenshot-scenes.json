@@ -2716,6 +2716,10 @@
       "reference": "session-row-menu"
     },
     {
+      "golden": "open-session-row-menu",
+      "title": "The open session's row menu showing the Rename and Delete shortcuts"
+    },
+    {
       "golden": "notices-empty",
       "title": "The rail's notices panel with nothing in it, open beside the bell at the top of the rail's foot",
       "reference": "notices-empty"
@@ -2744,6 +2748,10 @@
       "golden": "welcome-dialog",
       "title": "The Welcome card: the introduction, Read Get started and Send feedback now in their bordered pointers, the footer's note and Got it with focus",
       "reference": "welcome-dialog"
+    },
+    {
+      "golden": "whats-new-dialog",
+      "title": "Upgrade highlights from two releases with a screenshot link, a count of other changes and the opt-out"
     },
     {
       "golden": "announcements-dialog",
@@ -2912,7 +2920,7 @@
     },
     {
       "golden": "settings-app",
-      "title": "Settings at App, in the installed desktop app: its note and Install updates automatically on",
+      "title": "Settings at App in the installed desktop app, with automatic updates and upgrade highlights on",
       "reference": "settings-app"
     },
     {

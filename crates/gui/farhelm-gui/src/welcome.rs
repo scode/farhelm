@@ -21,7 +21,8 @@
 //!   included, close first. When the card does not open, the batch of pending announcements opens at once
 //!   ([`crate::announcements::open_pending`]). When it does, the check waits until the card closes, or, after the
 //!   handoff, until the feedback dialog closes (its close continuation, [`crate::feedback::open_returning`]), and then
-//!   reads the pushed queue as it is. There is no queue of dialogs here: one flag per UI session says the check is due.
+//!   reads the pushed queue as it is. The installed app checks for upgrade highlights once the batch is dismissed, or
+//!   when the queue is empty. One flag per UI session says these checks are due after Welcome.
 //!
 //! An agent run (`scripts/gui-agent.py start`, whose helm is always fresh) turns this automatic decision off for the
 //! whole run unless it asks for `--start-dialogs` ([`crate::agent_startup::start_dialogs_off`]): then nothing opens at a
@@ -47,8 +48,8 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     App, AppContext as _, Context, FocusHandle, FontWeight, HighlightStyle, IntoElement,
-    ParentElement as _, Render, Styled as _, StyledText, Subscription, WeakEntity, Window, div, px,
-    relative,
+    ParentElement as _, Render, Styled as _, StyledText, Subscription, Task, WeakEntity, Window,
+    div, px, relative,
 };
 
 use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
@@ -406,9 +407,8 @@ impl Render for WelcomeDialog {
 
 // ---- The window-start dialogs ----------------------------------------------------------------------------------------
 
-/// The owner of SPEC.md's window-start dialogs: the first-open Welcome card and the automatic announcement check after
-/// it (the module docs). The main view keeps one for the window's life; it holds only per-UI-session state, so a reset
-/// starts it over.
+/// Own the window-start decisions for Welcome, Announcements and upgrade highlights. The main view keeps one
+/// for the window's life and starts the decisions over when the UI session resets.
 pub struct StartDialogs {
     start: PerSession<Start>,
     /// Follows the connection, whose change is how a new UI session arrives.
@@ -426,6 +426,9 @@ struct Start {
     card: Option<LayerId>,
     /// Whether the announcement check still waits for the card, or for the feedback dialog it handed off to.
     check_due: bool,
+    /// The current session owns the window side of the lookup. Resetting drops it before a later session can use
+    /// its answer.
+    _highlights: Option<Task<()>>,
 }
 
 impl StartDialogs {
@@ -460,8 +463,7 @@ impl StartDialogs {
         }
     }
 
-    /// Run the current UI session's decision, once: the card when the pushed preferences say it is unseen, and otherwise
-    /// the announcement check, both with the session's start mark.
+    /// Decide once for this UI session. An unseen Welcome card holds the other checks until it closes.
     ///
     /// Deferred from wherever the session was seen to the end of that update, after every other view has heard of the
     /// new session (the session pane has made its terminal home by then). The decision runs with the mark taken when
@@ -504,7 +506,7 @@ impl StartDialogs {
             _ => {}
         }
         // SPEC.md: "A failed preference read does not prevent this separate check."
-        crate::announcements::open_pending(&mark, window, cx);
+        self.remaining_dialogs(mark, window, cx);
     }
 
     /// The first-open card `layer` is gone. Unless Send feedback now handed off to the feedback dialog, which the check
@@ -534,13 +536,38 @@ impl StartDialogs {
         }
     }
 
-    /// The announcement check that waited for the card (and its handoff), at most once per UI session, with a mark
+    /// The startup checks that waited for the card (and its handoff), at most once per UI session, with a mark
     /// taken now: the close that got here was the user's press.
     fn run_due_check(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         if !std::mem::take(&mut self.start.current(cx).check_due) {
             return;
         }
         let mark = Mark::take(cx);
-        crate::announcements::open_pending(&mark, window, cx);
+        self.remaining_dialogs(mark, window, cx);
+    }
+
+    /// Upgrade highlights follow the automatic announcements. A queued dismissal continues only within
+    /// the connection session that supplied the batch.
+    fn remaining_dialogs(&mut self, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
+        let store = session::current_store(cx)
+            .as_ref()
+            .map(|store| store.entity_id());
+        let owner = cx.weak_entity();
+        let after: MainAction = Rc::new(move |window, cx| {
+            if session::current_store(cx)
+                .as_ref()
+                .map(|store| store.entity_id())
+                == store
+            {
+                let _ = owner.update(cx, |owner, cx| {
+                    let task = crate::whats_new::check(Mark::take(cx), window, cx);
+                    owner.start.current(cx)._highlights = task;
+                });
+            }
+        });
+        if crate::announcements::open_pending(&mark, after, window, cx).is_none() {
+            let task = crate::whats_new::check(mark, window, cx);
+            self.start.current(cx)._highlights = task;
+        }
     }
 }

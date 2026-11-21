@@ -335,6 +335,19 @@ pub(super) fn welcome_dialog_setup(state: &SceneState, window: &mut Window, cx: 
     crate::welcome::open(&state.ring, &mark, window, cx);
 }
 
+/// The upgrade dialog gets two finalized releases with different categories, styled runs and one screenshot link.
+/// Use the real dialog so the picture covers the scrollable body, pinned count and all three actions together.
+pub(super) fn whats_new_dialog_setup(_: &SceneState, window: &mut Window, cx: &mut App) {
+    let releases = crate::whats_new::tests::highlights();
+    crate::whats_new::open(
+        releases[0].version.clone(),
+        releases,
+        &Mark::take(cx),
+        window,
+        cx,
+    );
+}
+
 /// The Send feedback dialog as the Help menu opens it (reference `feedback-dialog`), over a preference row
 /// remembering `contact`: focus in the empty message, the contact field holding `contact`, and, when it is not empty,
 /// Re-use checked under it; then what is sent with it, the footer's note, Cancel and Send, unavailable while the

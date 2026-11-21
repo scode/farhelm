@@ -4946,11 +4946,13 @@ helms start unseen. The dismissal belongs to the helm so closing the welcome car
 client's next load. A failed or timed-out read is never evidence of unseen. This migration prevents older helms from
 opening the database.
 
-The upgrade highlights choice and the last build whose highlights were shown or skipped live beside `welcome_seen`.
-Only `show_whats_new: false` opts out. `last_whats_new_release` stores a SemVer string. A later dismissal advances it
-under the same write lock that merges the sparse preference patch. A delayed dismissal from an older build cannot
-roll it back. A new database seeds the record with its creation version for a release build. A database upgraded from
-before the record was introduced leaves it unset so the client can offer highlights for the running release once.
+The upgrade highlights choice and the last build whose highlights were shown or skipped live beside `welcome_seen`. Only
+`show_whats_new: false` opts out. `last_whats_new_release` stores a SemVer string. A later dismissal advances it under
+the same write lock that merges the sparse preference patch. A delayed dismissal from an older build cannot roll it
+back. A new database seeds the record with its creation version for a release build. A database upgraded from before the
+record was introduced leaves it unset so the client can offer highlights for the running release once. Closing What's
+new updates the record alone. **Don't show again** adds the opt-out to the same patch. Settings writes the running
+release alongside a toggle so an app can skip its current notes even before a lookup succeeds.
 
 Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
 false disables it, so upgraded helms have the same default as fresh ones. Null restores the enabled default and omission
@@ -7617,6 +7619,15 @@ canonicalized; `app_bundle::bundle_contents_of_main_program` recognizes the layo
 writes that one path, so an app running from anywhere else would install every day and never see its own Installed
 record change. The same gate keeps the desktop smoke test and Linux CI off the network. Outside it nothing is registered
 in the context, and every surface behaves as before.
+
+An installed Mac app running a stable build also provides the window with an upgrade highlights check. The window passes
+the helm's saved release and choice after its other startup dialogs. The desktop compares SemVer precedence before any
+request. If newer highlights are due, it uses the updater's worker-side streaming reader for
+`https://farhelm.io/whats-new.json` with a 2 MiB cap, a ten-second deadline and a client that follows no redirects. The
+website generates version 1 of this feed from finalized changelog sections. The reader requires the running release in
+the result, selects stable releases in range, and permits screenshot links to the official Release notes page. The
+window receives plain, bold and code text runs. A reset during the read or a change to either shared preference retires
+that answer. A failed check leaves the saved record available for a later launch.
 
 The latest stable version is found with a plain GET of `https://get.farhelm.io/latest` (https only, at most 256 bytes,
 the probe's 30-second timeout): exactly one line, `v` and a stable release version, a final newline allowed. A

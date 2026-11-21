@@ -325,11 +325,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Show release notes on upgrade.** on upgrades, show the release notes (only the highlighted ones) to the user. offer
-  a "do not show release notes again" option to suppresse (direct click button + separate toggle in settings). also link
-  in that dialog to full release notes. the release notes to contain everything since the last version the user ran, not
-  just the ones for the version they upgraded to. Plan: `plans/queue/whats-new-on-upgrade.md`.
-
 - **Antigravity session id reporting still broken.** in 0.43.0 session id reporting for antigravity still doesnt work.
   the point is "restart" button is grey because farhelm doesn't know the session id. (Screenshot: an Antigravity CLI
   1.5.13 session that has answered one prompt, with the Restart button in the session toolbar greyed out.)
