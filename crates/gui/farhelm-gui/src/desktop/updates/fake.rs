@@ -79,5 +79,6 @@ pub(crate) fn fake_host(feed: &Rc<Feed>, seen: &Rc<Seen>, restart_starts: bool) 
                 Err("not saved".to_string())
             }
         }),
+        upgrade_notes: None,
     }
 }
