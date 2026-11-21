@@ -110,17 +110,18 @@ const ATTACHMENT_TRACE: &str = "farhelm_helm::terminal_attachments";
 /// (an early return and a panic's unwinding included) reports the end
 /// exactly once.
 struct TracedAttachment {
+    /// Bounded, escaped copy of the session reference for diagnostics.
     session: String,
     /// `agent`, or `tab:` followed by a bounded, escaped peer identifier.
     terminal: String,
 }
 
 impl TracedAttachment {
-    /// Trace the admitted attachment without giving a host's tab ID control of
-    /// the operator's log terminal. Keep `agent` plain for the desktop smoke.
+    /// Escape identifiers once so both lifecycle events show the same
+    /// printable values even when a host supplied the session or tab ID.
     fn start(session: &str, tab: Option<&str>) -> Self {
         let traced = Self {
-            session: session.to_string(),
+            session: crate::manager::peer_text(session),
             terminal: match tab {
                 None => "agent".to_string(),
                 Some(tab) => format!("tab:{}", crate::manager::peer_text(tab)),
@@ -1039,24 +1040,29 @@ mod tests {
             .await
             .expect("terminal attach");
 
-        // Poll until the real bounded writer has accepted all available
-        // capacity and the remaining input is waiting for the stalled peer.
+        // The first frame is larger than the sealed duplex buffer. The
+        // writer is still sending it when every remaining slot is filled.
         let message = vec![b'x'; farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE];
-        let mut input = Box::pin(async {
-            while client
-                .send_grid_input(channel, message.clone())
-                .await
-                .is_ok()
-            {}
-        });
-        let parked = std::future::poll_fn(|cx| {
-            std::task::Poll::Ready(std::future::Future::poll(input.as_mut(), cx).is_pending())
+        tokio::time::timeout(Duration::from_secs(1), async {
+            for _ in 0..=crate::client::SUPERVISOR_WRITER_QUEUE {
+                client
+                    .send_grid_input(channel, message.clone())
+                    .await
+                    .expect("live attachment");
+            }
         })
-        .await;
-        assert!(parked, "the scripted peer must backpressure the writer");
+        .await
+        .expect("one in-flight frame and a full queue must fit");
 
-        super::detach_bounded(&client, channel).await;
-        drop(input);
+        let start = tokio::time::Instant::now();
+        let grace = super::WS_TEARDOWN_GRACE;
+        tokio::time::timeout(
+            grace + Duration::from_millis(10),
+            super::detach_bounded(&client, channel),
+        )
+        .await
+        .expect("teardown must return at the grace while the peer is still blocked");
+        assert!(start.elapsed() >= grace, "teardown must use its full grace");
         release_tx.send(()).expect("peer is waiting for release");
         let detached = tokio::time::timeout(Duration::from_secs(5), peer)
             .await
@@ -1141,11 +1147,8 @@ mod tests {
     /// session as the client named it and `terminal=agent`, and reports its
     /// end once when the client closes the socket.
     ///
-    /// Why: the desktop smoke test tells which session the relaunched window
-    /// has open only through these two events, since a terminal in a terminal host shows no
-    /// viewer anywhere outside the supervisor; a trace that missed the start,
-    /// or reported the end twice or never, would pass or fail those checks
-    /// for the wrong reason. Spec: after an attach of `<entry>:sess-1`'s
+    /// Why: these events let an operator see which terminal a window has
+    /// attached and how long it stayed attached. Spec: after an attach of `<entry>:sess-1`'s
     /// agent terminal, exactly one `terminal attached` event on the
     /// `farhelm_helm::terminal_attachments` target names that session and
     /// `agent` by the time the attachment's first data frame arrives, and
@@ -1164,6 +1167,7 @@ mod tests {
             .and_then(|rest| rest.strip_suffix("/term"))
             .expect("a session path")
             .to_string();
+        let session = format!("\"{session}\"");
         let traced = |message: &str| {
             crate::test_capture::matching(&events, message)
                 .into_iter()
@@ -1205,12 +1209,13 @@ mod tests {
         assert_eq!(traced("terminal attached"), 1);
     }
 
-    /// Successful attachments can carry host-supplied tab IDs, so both trace
-    /// events must escape controls even when no error or refusal occurred.
+    /// Both lifecycle events escape host-supplied identifiers, even on a
+    /// successful attachment. A nonprinting character stays legible in logs.
     #[farhelm_testtrace::test]
-    async fn the_attachment_trace_escapes_peer_tab_controls() {
+    async fn the_attachment_trace_escapes_peer_identifiers() {
         let events = crate::test_capture::current();
-        let traced = super::TracedAttachment::start("sess-1", Some("shell\n\u{1b}[2J\t\r\0"));
+        let traced =
+            super::TracedAttachment::start("sess\u{200b}-1", Some("shell\n\u{1b}[2J\t\r\0"));
         drop(traced);
         for message in ["terminal attached", "terminal ended"] {
             let matches: Vec<_> = crate::test_capture::matching(&events, message)
@@ -1218,6 +1223,7 @@ mod tests {
                 .filter(|event| event.target == super::ATTACHMENT_TRACE)
                 .collect();
             assert_eq!(matches.len(), 1, "{message}: {matches:?}");
+            assert_eq!(matches[0].field("session"), Some(r#""sess\u{200b}-1""#));
             assert_eq!(
                 matches[0].field("terminal"),
                 Some(r#"tab:"shell\n\u{1b}[2J\t\r\0""#),
@@ -1679,7 +1685,7 @@ mod tests {
     /// encode, which would end every attachment sharing the connection;
     /// dropping it and carrying on would deliver later input without what
     /// came before it. Spec: a binary message of 64 KiB + 1
-    /// and then a small one, in one write; the client gets a `detached`
+    /// and then a small one in the same send buffer. The client gets a `detached`
     /// notice with code `other` whose reason begins "terminal input failed",
     /// then the close; the supervisor receives a `Detach` for the channel and
     /// no data frame.
@@ -1695,9 +1701,8 @@ mod tests {
         );
         let (mut reader, _writer, channel) = peer.unwrap();
 
-        // One write, so the message after the oversized one is already
-        // there when the helm reads the first: what is not forwarded is
-        // decided by the helm, not by which of them arrived first.
+        // Queue the small frame immediately after the oversized one,
+        // without waiting for the helm to report the refusal.
         let oversized = vec![b'x'; farhelm_proto::grid::GRID_MAX_INPUT_MESSAGE + 1];
         ws.send_frames(&[(2, &oversized), (2, br#"{"t":"text","data":"after"}"#)])
             .await;

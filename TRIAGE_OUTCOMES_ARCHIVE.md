@@ -33587,3 +33587,54 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Stored terminal hyperlinks discard unused URI capacity after the budget admits the link, before
   retaining it. Change `wmlzlwnxuxop`, bookmark `plan/triage-terminal-host/02-hyperlink-memory-budget`,
   [PR #4474](https://github.com/scode/farhelm/pull/4474/changes).
+
+## terminal-attachment-trace-retains-raw-session-id.md
+
+- Outcome: `fix code`.
+- Assessment: Confirmed. `farhelm-helm/src/terminal.rs` `TracedAttachment` logs `session = %traced.session` raw. The tab
+  field next to it is already escaped via `peer_text`. `bare_session_id_problem` rejects only `char::is_control` (Cc),
+  so U+200B and U+202E are admitted. Basis: SPEC_impl.md, "Session IDs in logs": "Session IDs must not inject log lines
+  or use invisible or direction-changing characters to disguise the ID shown in logs." The fix is to escape the trace
+  copy with `peer_text`, exactly as the tab field is. The spec names this as the simple option.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Both lifecycle events log a bounded, escaped copy of the session reference. Change `uwpxtwxpvlum`,
+  bookmark `plan/triage-terminal-host/03-helm-terminal-relay`,
+  [PR #4478](https://github.com/scode/farhelm/pull/4478/changes).
+
+## input-test-comments-overstate-termination-coverage.md
+
+- Outcome: `fix code`.
+- Assessment: None. Test comments claim the WebSocket test proves the reader stops and that two frames arrive together.
+  The tests prove only the specified detach, close and no forwarding. Verified: Accepted from the file's source
+  citations (client.rs docstring around 6783, terminal.rs around 2191-2196, rest_harness `send_frames`). Not re-read
+  line by line; production behavior is not in dispute.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected. The comments describe detach, closure, forwarding, and the adjacent-frame send without promising
+  co-arrival or reader termination. Change `uwpxtwxpvlum`, bookmark `plan/triage-terminal-host/03-helm-terminal-relay`,
+  [PR #4478](https://github.com/scode/farhelm/pull/4478/changes).
+
+## trailing-detach-timeout-test-confuses-cooperative-yield-with-writer-capacity.md
+
+- Outcome: `other`.
+- Assessment: None. The terminal detach-timeout test treats any Pending as writer backpressure and never asserts the
+  grace elapsed, so removing the timeout could go undetected. Verified: still at `crates/farhelm-helm/src/terminal.rs`
+  around :1052-1056 (`poll_fn` "parked" assert), with no elapsed-grace assertion.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code if any test hardening is accepted (it guards a teardown timeout); otherwise discard
+- Execution: Fixed. The test fills the writer and verifies the teardown grace elapses before it releases the peer.
+  Change `uwpxtwxpvlum`, bookmark `plan/triage-terminal-host/03-helm-terminal-relay`,
+  [PR #4478](https://github.com/scode/farhelm/pull/4478/changes).
