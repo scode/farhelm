@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `triage-gui-sessions.md` — execute the 2026-11-21 triage outcomes for the desktop app's session list, sidebar, attention list and notices, in grouped PRs
 - [pending] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
 - [pending] `triage-supervisor.md` — execute the 2026-11-21 triage outcomes for the supervisor (session lifecycle, shell sessions, cleanup), in grouped PRs
-- [in-flight 7aa0d2] `triage-terminal-host.md` — execute the 2026-11-21 triage outcomes for the terminal host and terminal emulation, in grouped PRs
+- [complete] `triage-terminal-host.md` — execute the 2026-11-21 triage outcomes for the terminal host and terminal emulation, in grouped PRs
 - [pending] `triage-helm.md` — execute the 2026-11-21 triage outcomes for the helm (hosts, provisioning, automatic update, desktop startup), in grouped PRs
 - [in-flight 362cf1] `triage-podman.md` — execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [pending] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
