@@ -541,14 +541,23 @@ impl TensorlakeForm {
             HoverHelp::tooltip(MISSING_RECIPE),
         )
         .options(recipes.iter().map(|recipe| {
-            let option = SelectOption::new(
-                recipe.name.clone(),
-                recipe.name.clone(),
-                HoverHelp::tooltip(recipe.name.clone()),
-            );
+            // A recipe Tensorlake can run says what choosing it does; one it cannot names itself and shows the reason
+            // beside its label, since "create the sandbox from" would promise something Continue then refuses.
             match TENSORLAKE.base_refusal(recipe) {
-                Some(reason) => option.unavailable(reason),
-                None => option,
+                Some(reason) => SelectOption::new(
+                    recipe.name.clone(),
+                    recipe.name.clone(),
+                    HoverHelp::tooltip(recipe.name.clone()),
+                )
+                .unavailable(reason),
+                None => SelectOption::new(
+                    recipe.name.clone(),
+                    recipe.name.clone(),
+                    HoverHelp::tooltip(format!(
+                        "Create the sandbox from the recipe {}",
+                        recipe.name
+                    )),
+                ),
             }
         }))
         .options([SelectOption::new(

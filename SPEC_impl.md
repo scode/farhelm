@@ -278,29 +278,31 @@ decided" decided in time, chiefly the one for a host the helm is not connected t
 Past the bound, a late `Deleted` removes the session from the pushed list without its count, a late seal shows through
 the seal record (the host `Deleting`, then gone or failed with Retry), as does a late Retry, and a late "nothing
 decided" or refusal leaves the session listed, the next Delete taking the warned lane once the host shows as not
-connected. A late failure of the whole-environment Delete reaches only the helm's log, as host removal's does. A
-credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts; being already
-saved, it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named credential
-catalog"). The Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer within the same
-bound, counted from their handler's start: the API key's Test and the list of Sandboxes not on this helm stop listing
-and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover
-sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list then
-shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
-bound, counted from its handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run
-for up to its own 30 seconds, so a generation still running at the bound replies 504 that the creation carries on, and
-the settings read reports the key once it is written; a Create sent again meanwhile waits for that generation and
-answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from
-its handler's start: an unknown recipe, one a host uses and one already being deleted are refused at once from local
-state, before anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it
-carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the
-reason only in the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the
-recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An
-Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes
-the host's provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's
-Suspend, Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that
-finishes, as a sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so
-a failed earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The
-automatic update still waits for the lock.
+connected. A late failure of the whole-environment Delete reaches only the helm's log, as host removal's does, except on
+a host whose seal the helm already knew when that Delete began: the seal record then keeps the latest failure, shown
+with Retry, since the attempt records it before releasing the host's provisioning lock. A credential replacement waits
+the same bound, counted from its handler's start, for delivery to its hosts; being already saved, it is not refused, and
+the hosts still being delivered to are reported as not delivered (see "Named credential catalog"). The Tensorlake
+settings routes, which wait on Tensorlake's API rather than on a host, answer within the same bound, counted from their
+handler's start: the API key's Test and the list of Sandboxes not on this helm stop listing and answer the 502 of an
+unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover sandbox's Delete, once its
+cleanup is recorded as running, replies that the cleanup carries on, which that list then shows (see "Tensorlake
+account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same bound, counted from its
+handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run for up to its own 30
+seconds, so a generation still running at the bound replies 504 that the creation carries on, and the settings read
+reports the key once it is written; a Create sent again meanwhile waits for that generation and answers its key. A
+recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's
+start: an unknown recipe, one a host uses and one already being deleted are refused at once from local state, before
+anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it carries on,
+and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in
+the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save
+(`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An Update's
+confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes the host's
+provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's Suspend,
+Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that finishes, as a
+sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so a failed
+earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The automatic
+update still waits for the lock.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's

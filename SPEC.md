@@ -1622,9 +1622,10 @@ count of other sessions the sandbox holds, and a Delete that decided nothing lea
 Such a late "nothing decided" does not offer the whole-sandbox Delete at once: the next Delete offers it once the
 sandbox shows as not connected. While the sandbox stays connected but its Farhelm does not answer, **Delete sandbox** in
 Hosts is the way out, once the earlier Delete has ended. A whole-sandbox Delete still running then shows the sandbox as
-being deleted until it ends; if it then fails, the sandbox stays listed in its ordinary state, with the reason only in
-the helm's log, as for a host removal. A Retry still running shows its outcome on the sandbox in Hosts, a new failure
-with its reason and **Retry** again.
+being deleted until it ends; if it then fails, a sandbox already known to be sealed when that Delete began shows as
+being deleted with the reason and **Retry**, and any other sandbox stays listed in its ordinary state, with the reason
+only in the helm's log, as for a host removal. A Retry still running shows its outcome on the sandbox in Hosts, a new
+failure with its reason and **Retry** again.
 
 Bulk Delete sends one such request per marked session of a sandbox the helm is connected to; its Farhelm takes them one
 at a time, and the last one seals if nothing else remains. Marked sessions of a sandbox the helm could not ask when the
@@ -5161,8 +5162,9 @@ can be reached, without Resume. Confirmed container absence precedes forgetting 
 keeps the resource and reason visible for retry; a sealed container whose destruction failed shows as being deleted,
 with the reason and Retry. These Deletes and Retry answer within 20 seconds as Sandbox sessions' do, so a late answer
 loses the count of other sessions and the immediate offer of the whole-container Delete, and a late failure of the
-whole-container Delete reaches only the helm's log. Host-level **Delete container** always destroys the whole container
-after its confirmation. Whole-container deletion moves no checkout to the trash.
+whole-container Delete reaches only the helm's log, unless the container was already known to be sealed when that Delete
+began, which then shows as being deleted with the reason and Retry. Host-level **Delete container** always destroys the
+whole container after its confirmation. Whole-container deletion moves no checkout to the trash.
 
 Suspend uses Podman pause, preserving processes and memory. Resume unpauses them. The helm closes its exec connection
 before pausing, since a paused exec pipe can hang. Controls, the suspended card, rows and Stop and suspend follow the
