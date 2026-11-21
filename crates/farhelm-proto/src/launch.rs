@@ -214,21 +214,23 @@ impl LaunchHarness {
 
     /// Whether this harness has a per-run workspace-trust argv mapping
     /// ([`LaunchSelection::workspace_trust`]). Settings supplies this value
-    /// for new managed-checkout compositions. The mapping also remains
+    /// for new compositions within the harness's configured scope. The mapping remains
     /// available when reproducing an older stored launch exactly.
     ///
     /// Exhaustive, like every per-harness capability here, so a new harness
     /// is a compile error until it answers.
     pub const fn offers_workspace_trust(self) -> bool {
         match self {
-            LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => true,
+            LaunchHarness::Codex
+            | LaunchHarness::Muse
+            | LaunchHarness::Pi
+            | LaunchHarness::Antigravity => true,
             LaunchHarness::Cursor
             | LaunchHarness::Claude
             | LaunchHarness::Goose
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity
             | LaunchHarness::Bash
             | LaunchHarness::Zsh => false,
         }

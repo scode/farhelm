@@ -5121,6 +5121,12 @@ The cwd is quoted as a TOML key and resolved on the target host; omitted trust a
 stored launches, including plain Restart and Replace; new composition uses true or omission. Older selection JSON
 without the field continues to decode.
 
+Antigravity true adds `--settings` with the canonical-directory JSON slot. Its all-hosts switch applies to structured
+launches in plain folders as well as managed checkouts, so New and Restart with need no checkout ownership lookup for
+it. Claude's on-disk trust setup and the managed-only switches retain their own paths. Custom `--settings` and
+`--settings=...` options take precedence over Farhelm's opt-in. The resolved selection then omits trust, including on
+approval cards. A bare `--` ends the Custom options, so the compiled trust option goes before that token.
+
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order
 disagree. Schema 25 records both frontiers from the start; resetting bounded suggestion data is the only honest upgrade

@@ -2378,8 +2378,9 @@ fn is_codex_trust_slot(element: &str) -> bool {
 }
 
 /// Only a structured Antigravity launch with resolved trust owns a settings
-/// slot. This final settings pair follows Custom words and precedes any
-/// conversation selector. Earlier uses of the marker in saved launches stay literal.
+/// slot. It is the final settings pair among the agent's options, outside
+/// the wrapper and before any Custom positional tail. Saved literal uses
+/// outside that pair keep their original meaning.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn antigravity_trust_slot(
     argv: &[String],
@@ -2387,12 +2388,20 @@ fn antigravity_trust_slot(
 ) -> Option<usize> {
     let selection = selection.filter(|selection| selection.workspace_trust == Some(true))?;
     match selection.harness {
-        LaunchHarness::Antigravity => argv
-            .windows(2)
-            .rposition(|pair| {
-                pair[0] == "--settings" && pair[1] == ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER
-            })
-            .map(|index| index + 1),
+        LaunchHarness::Antigravity => {
+            let first_option = selection
+                .wrapper_prefix
+                .as_ref()
+                .map_or(1, |prefix| prefix.len() + 1);
+            let options = argv.get(first_option..)?;
+            let before_positional = options.split(|word| word == "--").next()?;
+            before_positional
+                .windows(2)
+                .rposition(|pair| {
+                    pair[0] == "--settings" && pair[1] == ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER
+                })
+                .map(|index| first_option + index + 1)
+        }
         LaunchHarness::Claude
         | LaunchHarness::Codex
         | LaunchHarness::Cursor
@@ -3110,8 +3119,9 @@ mod tests {
         }
     }
 
-    /// Antigravity trusts the canonical path, including any characters that
-    /// need JSON escaping. A symlink spelling would still show the prompt.
+    /// Antigravity trusts the canonical path, including characters that need
+    /// JSON escaping. Saved literal arguments before or after the settings
+    /// pair must keep their spelling through Restart or Replace.
     #[cfg(unix)]
     #[test]
     fn antigravity_trust_encodes_the_canonical_cwd_as_one_argument() {
@@ -3139,6 +3149,9 @@ mod tests {
             ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER.to_owned(),
             "--settings".to_owned(),
             ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER.to_owned(),
+            "--".to_owned(),
+            "--settings".to_owned(),
+            ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER.to_owned(),
         ];
         // Old custom arguments and authored Command text can carry this spelling.
         for source in [None, Some(&selection)] {
@@ -3151,6 +3164,7 @@ mod tests {
         assert!(!has_cwd_placeholder(&filled, Some(&selection)));
         assert_eq!(filled.len(), argv.len());
         assert_eq!(&filled[..4], &argv[..4]);
+        assert_eq!(&filled[5..], &argv[5..]);
         assert_eq!(
             serde_json::from_str::<serde_json::Value>(&filled[4]).unwrap(),
             serde_json::json!({ "trustedWorkspaces": [canonical.to_str().unwrap()] })

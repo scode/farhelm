@@ -12305,14 +12305,19 @@ mod tests {
         ));
     }
 
-    /// Inheritance must not carry a managed parent's trust to another folder.
+    /// Inheritance follows the destination's trust policy, not the parent's.
     /// Exercise the real approval and dispatch path for every trust-capable
-    /// harness, including gaining trust at a managed destination. Settings
-    /// changes during approval must leave the card's resolved choice intact.
+    /// harness, including an Antigravity plain folder that needs no ownership
+    /// lookup. Settings changes during approval leave the card's choice intact.
     #[farhelm_testtrace::test]
     async fn inherited_spawn_normalizes_trust_before_approval_and_dispatch() {
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
-        for harness in [LaunchHarness::Codex, LaunchHarness::Muse, LaunchHarness::Pi] {
+        for harness in [
+            LaunchHarness::Codex,
+            LaunchHarness::Muse,
+            LaunchHarness::Pi,
+            LaunchHarness::Antigravity,
+        ] {
             for (enabled, managed, source_trust) in [
                 (false, false, Some(true)),
                 (false, true, Some(true)),
@@ -12334,7 +12339,9 @@ mod tests {
                 let inherited = crate::launches::compile(selection.clone()).unwrap();
                 assert_eq!(inherited.yolo(), Some(harness.offers_only_yolo()));
                 let mut expected_selection = selection;
-                expected_selection.workspace_trust = (enabled && managed).then_some(true);
+                let managed_only = harness != LaunchHarness::Antigravity;
+                expected_selection.workspace_trust =
+                    (enabled && (managed || !managed_only)).then_some(true);
                 let expected = crate::launches::compile(expected_selection).unwrap();
                 let (client_side, peer) = tokio::io::duplex(64 * 1024);
                 let (seen, browsed) =
@@ -12429,7 +12436,7 @@ mod tests {
                 );
                 assert_eq!(
                     *browsed.lock().unwrap(),
-                    if enabled {
+                    if enabled && managed_only {
                         vec!["/target-directory".to_string()]
                     } else {
                         vec![]

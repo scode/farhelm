@@ -686,6 +686,9 @@ pub struct Preferences {
     pub muse_trust_hint_dismissed: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub pi_trust_hint_dismissed: Option<bool>,
+    /// Shared dismissal of the Antigravity trust hint, including for plain folders.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub antigravity_trust_hint_dismissed: Option<bool>,
     /// Dismissal shared by every client of this helm. Unset means unseen,
     /// including existing helms upgraded from before the welcome card.
     #[serde(skip_serializing_if = "Option::is_none")]
