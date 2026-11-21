@@ -1192,21 +1192,22 @@ systemd or SSH substrate ran.
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,
   fixed command operations, durable handoffs, compiled checkpoint contracts, fresh-versus-update installer entrypoints,
-  fixed command-only execution and provenance, bounded pre-action provider recovery with retained failures and no
-  uncertain-action replay, bounded read-only readiness deferrals and evidence-checked retries of legacy pre-action
-  sampling failures, retained unavailable-fixture retries excluding product failures and feedback, structured native
-  actions, native restart readiness after manual installation, durable completed-update evidence without transient
-  progress images, exact native update-channel readouts without mandatory tooltip images, normal Finder readiness with
-  verified menu dismissal, conditional product confirmations, terminal-host-only old-session survival and Restart,
-  automatic remote upgrade with continuity bound to the pre-relaunch receipt, remote menu Remove/re-add and Uninstall
-  sequencing, independent resource-preservation/removal receipts, restart process handoffs, calibrated window
-  measurements, gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional
-  fixtures, including continuation after an expected RC or dev discovery skip, stable discovery failure, explicit scope
-  restoration with feedback consent, and remote launcher visibility guidance. Use a substrate that permits process-group
-  inspection; Linux continuity cases skip on macOS. These tests prove harness contracts, not native GUI behavior or a
-  release pass. Actual native fixture probes and release checks retain their own private evidence. The guest-only Swift
-  geometry helper needs separate SDK type-check and read-only runtime validation in an owned disposable guest; the
-  portable suite does not exercise that OS API.
+  fixed command-only execution and provenance, bounded pre-action provider recovery within the effective checkpoint
+  budget with retained failures and no uncertain-action replay, bounded read-only readiness deferrals and
+  evidence-checked retries of legacy pre-action sampling failures, retained unavailable-fixture retries excluding
+  product failures and feedback, structured native actions, native restart readiness after manual installation, durable
+  completed-update evidence without transient progress images, exact native update-channel readouts without mandatory
+  tooltip images, normal Finder readiness with verified menu dismissal, conditional product confirmations,
+  terminal-host-only old-session survival and Restart, automatic remote upgrade with continuity bound to the
+  pre-relaunch receipt and attempt-local exports on deferral, remote menu Remove/re-add and Uninstall sequencing,
+  independent resource-preservation/removal receipts, restart process handoffs, calibrated window measurements,
+  gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional fixtures, including
+  continuation after an expected RC or dev discovery skip, stable discovery failure, explicit scope restoration with
+  feedback consent, and remote launcher visibility guidance. Use a substrate that permits process-group inspection;
+  Linux continuity cases skip on macOS. These tests prove harness contracts, not native GUI behavior or a release pass.
+  Actual native fixture probes and release checks retain their own private evidence. The guest-only Swift geometry
+  helper needs separate SDK type-check and read-only runtime validation in an owned disposable guest; the portable suite
+  does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
   one-time notes policy section and the folded full list's frame, synthetic git histories for the fragment sweep and for

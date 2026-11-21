@@ -190,17 +190,11 @@ consequences.
   tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
   lost terminal contents.
 
-- [`stable-recut-removes-retained-announcement-anchor.md`](stable-recut-removes-retained-announcement-anchor.md) — A
-  different-version stable re-cut can remove the website anchor still targeted by carried announcements.
-
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
 
 - [`upload-failure-test-lacks-pipe-holder-witness.md`](upload-failure-test-lacks-pipe-holder-witness.md) — The
   failed-upload regression can pass without starting the pipe-holding fixture needed to test the original hang.
-
-- [`brick-recovery-truncates-checkpoint-budget.md`](brick-recovery-truncates-checkpoint-budget.md) — A recoverable
-  provider refusal can cut release checks below their required time budget or wrongly prevent their retry.
 
 - [`sandbox-termination-poll-exceeds-phase-deadline.md`](sandbox-termination-poll-exceeds-phase-deadline.md) — Sandbox
   deletion can exceed its stated termination-polling allowance because each lookup receives a fresh timeout beyond the
@@ -425,10 +419,6 @@ consequences.
 - [`trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md`](trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md)
   — Real-container hosts-list test overstates its exact-membership oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md`](trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md)
-  — Older-target prerequisite omission has explicit competing installer policy. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md)
   — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
@@ -685,10 +675,6 @@ consequences.
 
 - [`docs-group-shot-wait-exceeds-budget.md`](docs-group-shot-wait-exceeds-budget.md) — If the staged helm stalls, the
   group screenshot’s ten-second membership wait can spend about a minute on one request.
-
-- [`brick-test-deferral-reuses-continuity-files.md`](brick-test-deferral-reuses-continuity-files.md) — The release test
-  can turn a failed or unavailable remote update into a harness failure when it carries forward receipt filenames from a
-  different checkpoint.
 
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.

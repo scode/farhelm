@@ -241,6 +241,8 @@ only receipt references and test observations, never authentication contents.
         self.completed = set()
         self.observations = {}
         self.latest_receipts = {}
+        # Receipt filenames belong to this attempt. Only the observations needed later go in pass state.
+        self.continuity_receipts = None
         self.latest_images = {}
         self.failure = None
         self.readiness_deferrals = []
@@ -296,8 +298,7 @@ Such output is held in memory only, so it gets a larger bound than receipts.
             'completed': sorted(self.completed), 'receipts': list(dict.fromkeys(selected)),
             'observations': self.observations,
             'readiness_deferrals': self.readiness_deferrals,
-            'continuity': self.state.get('continuity') if self.task['check_id'] in (
-                'continuity-before', 'remote-update', 'reopen') else None}, replace=True)
+            'continuity': self.continuity_receipts}, replace=True)
 
     def fail(self, message):
         """Latch one failure durably before replying to either tool client."""
@@ -855,7 +856,7 @@ baseline, even when that update completes before the next turn observes it.
         write_json(self.work / before_name, before)
         write_json(self.work / after_name, after)
         self.receipts.extend([before_name, after_name])
-        self.state['continuity'] = {'before': before_name, 'after': after_name}
+        self.continuity_receipts = {'before': before_name, 'after': after_name}
         return {'before': before, 'after': after}
 
 

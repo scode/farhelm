@@ -24,7 +24,7 @@ from unittest import mock
 
 from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
                               run_fixed, select_hosts, serve, write_json)
-from guest_tester import managed_result, native_args, prompt, TesterError
+from guest_tester import managed_result, native_args, prompt, TesterError, validate_observation
 from checkpoint_contract import (available_operations, require_old_session,
                                  required_operations, require_remote_host_effect, turn_timeout)
 from guest_workflow import managed_instructions
@@ -677,12 +677,18 @@ bonus upgrades still need original-process continuity from before the relaunch.
                          available_operations('remote-update', 'upgrade-v0.29.0', 'override'))
 
     def test_remote_update_continuity_uses_the_pre_relaunch_receipt(self):
-        """An already completed upgrade cannot pass by sampling both sides after it."""
+        """A deferral must preserve the verdict and keep the earlier sample available for the actual check."""
         identity = {'pid': 103, 'start_ticks': 200, 'boot_id': '8503c7ff-c9c5-4d1c-9d14-bc7abe52671e'}
         before = dict(identity, counter=5)
         after = dict(identity, counter=12)
         self.value.update(check_id='continuity-before', pass_id='upgrade-v0.29.0')
-        self.operations().receipt('continuity-before', {'before': dict(identity, counter=4), 'after': before})
+        replies = [subprocess.CompletedProcess([], 0, json.dumps(sample).encode(), b'')
+                   for sample in (dict(identity, counter=4), before)]
+        earlier = self.operations(runner=mock.Mock(side_effect=replies))
+        self.assertEqual(earlier.dispatch('continuity_before')['observation']['after'], before)
+        earlier_record = json.loads((self.output / 'managed-operations.json').read_text())
+        self.assertTrue(all((self.output / 'work' / name).is_file()
+                            for name in earlier_record['continuity'].values()))
 
         later = dict(self.value, check_id='remote-update')
         runner = mock.Mock(return_value=subprocess.CompletedProcess([], 0, json.dumps(after).encode(), b''))
@@ -693,10 +699,17 @@ bonus upgrades still need original-process continuity from before the relaunch.
         self.assertEqual(pending['status'], 'not-ready')
         self.assertNotIn('continuity_remote_after', operations.completed)
         runner.assert_not_called()
+        failure = {'status': 'could-not-run', 'detail': 'Candidate remote supervisor unavailable.'}
+        deferred = managed_result(later, output, failure)
+        self.assertEqual(validate_observation(later, deferred, output / 'work')['status'], 'could-not-run')
         operations.completed.add('remote_version')
         evidence = operations.dispatch('continuity_remote_after')['observation']
         self.assertEqual(evidence, {'before': before, 'after': after})
         runner.assert_called_once()
+        ready = managed_result(later, output, failure)
+        validate_observation(later, ready, output / 'work')
+        self.assertEqual({key: json.loads((output / 'work' / name).read_text())
+                          for key, name in ready['continuity'].items()}, evidence)
 
     def test_remote_update_continuity_requires_a_pre_relaunch_receipt(self):
         """Missing pre-relaunch evidence cannot fall back to the current live process."""
