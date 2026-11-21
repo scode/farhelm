@@ -10,9 +10,9 @@
 //! A marker compares the draft with the baseline Restart with opened on, the launch the request edits; outside Restart
 //! with there is nothing to compare with and no marker is drawn.
 
-use gpui::{AnyElement, IntoElement, ParentElement as _, Styled as _, div, px};
+use gpui::{AnyElement, IntoElement, ParentElement as _, Styled as _, div};
 
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher};
+use super::Launcher;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Mode, RestartBaseline};
 use crate::permission::words::{effort_label, permission_display};
@@ -92,7 +92,6 @@ impl Launcher {
         Some(
             // The sentence is the one labelled node, under the field's id; this box only places and colors it.
             div()
-                .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .text_size(metrics::TEXT_SM)
                 .text_color(theme::color(palette.info))
                 .child(words)

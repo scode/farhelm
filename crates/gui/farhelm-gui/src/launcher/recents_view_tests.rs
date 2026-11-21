@@ -11,7 +11,7 @@ use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::draft::{LaunchDraft, Tab};
-use super::view_tests::{codex, draft, fixture_hosts, launcher_with_hosts, name_of};
+use super::view_tests::{click_in_body, codex, draft, fixture_hosts, launcher_with_hosts, name_of};
 use crate::test_support::{self, keys, settle};
 
 /// `harness` launched with `model`, `effort` and `permissions`.
@@ -149,7 +149,7 @@ fn the_strip_shows_matching_setups_only(cx: &mut TestAppContext) {
         name_of(cx, "launcher-recent-1").is_none(),
         "and the only one"
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "backspace backspace backspace backspace");
     cx.simulate_input("/nowhere");
     settle(cx);

@@ -4,9 +4,8 @@
 //!
 //! Everything the GUI does differently per agent harness is answered per harness in a few named places (the map in
 //! `crates/farhelm-supervisor/src/agent_kind/mod.rs`, "How the GUI shows it"), never by comparing harnesses where
-//! something is drawn. Only the session row reads these answers today (`session_list/row_marks.rs`). The module sits at
-//! the app level rather than in the session list because the launcher, the quick switcher, templates and Settings are
-//! expected to read the same answers; the migration's orchestrator placed it here on 2026-11-14. Each is one
+//! something is drawn. The session row and launcher read the same mark and identity ink here. Keeping those answers
+//! at the app level lets other surfaces identify the same harness the same way. Each is one
 //! exhaustive match over one enum, under `#[warn(clippy::wildcard_enum_match_arm)]`, so a new harness is a compile
 //! error at every decision it needs here and a `_` arm fails the Clippy gate. The mark's geometry is `crate::marks`'s and the shared permission help is
 //! `permission/words.rs`'s; nothing here repeats them.

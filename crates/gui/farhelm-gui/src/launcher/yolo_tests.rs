@@ -14,7 +14,7 @@ use serde_json::json;
 
 use super::draft::{LaunchDraft, Tab};
 use super::launch_tests::{created, creates, launched_with, selected};
-use super::view_tests::{name_of, read};
+use super::view_tests::{click_in_body, name_of, read};
 use super::yolo::YoloReason;
 use crate::test_support::{self, any_open, focused_id, keys, settle};
 
@@ -218,7 +218,7 @@ fn a_failed_stop_asking_starts_nothing_and_keeps_the_question(cx: &mut gpui::Tes
         "the premise: it is the host write"
     );
     // Focus outside the question, whose own frozen answers take Escape themselves: this is the launcher's Escape.
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .name
@@ -330,7 +330,7 @@ fn the_launcher_holds_still_while_stop_asking_is_out(cx: &mut gpui::TestAppConte
     assert!(any_open(cx), "Close left the launcher open");
     test_support::click(cx, "launcher-cancel");
     assert!(any_open(cx), "Cancel left the launcher open");
-    test_support::click(cx, "launcher-name-row");
+    click_in_body(cx, "launcher-name");
     keys(cx, "n");
     assert_eq!(
         read(cx, |launcher, _, _| launcher.draft.name.value().clone()),
@@ -363,7 +363,7 @@ fn a_click_during_stop_asking_keeps_the_new_session_from_opening(cx: &mut gpui::
         write.path, "/api/hosts/1/yolo-without-asking",
         "the premise: it is the host write"
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     helm.reply(write.id, 200, Some(json!({})));
     settle(cx);
     let sent = creates(&mut helm, cx);

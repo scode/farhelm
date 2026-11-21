@@ -17,7 +17,7 @@ use super::draft::{LaunchDraft, Mode};
 use super::entry::{open_restart_with, restart_with_unavailable};
 use super::entry_tests::window_with;
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{draft, launch_help, name_of, shown_refusal};
+use super::view_tests::{click_in_body, draft, launch_help, name_of, shown_refusal};
 use super::yolo_tests::refuse_for_yolo;
 use crate::layers;
 use crate::local_state;
@@ -484,19 +484,19 @@ fn restart_with_shows_stored_command_values_escaped(cx: &mut TestAppContext) {
     assert!(restart_with(cx, "e"));
     super::view_tests::escaped_until_cleared(
         cx,
-        "launcher-command-row",
+        "launcher-command",
         "launcher-clear-command",
         "make<U+200B>  watch {farhelm_args}  ",
         |launcher| &launcher.command,
     );
     super::view_tests::escaped_until_cleared(
         cx,
-        "launcher-resume-command-row",
+        "launcher-resume-command",
         "launcher-clear-resume",
         "make<U+202E> watch --resume {conversation} {farhelm_args}  ",
         |launcher| &launcher.resume,
     );
-    test_support::click(cx, "launcher-command-row");
+    click_in_body(cx, "launcher-command");
     assert!(super::view_tests::read(cx, |launcher, window, cx| launcher
         .command
         .focus_handle(cx)
@@ -557,7 +557,7 @@ fn restart_with_sends_the_stored_resume_beside_an_edited_command(cx: &mut TestAp
     e_stores_invisible_characters(&mut helm, cx);
     assert!(restart_with(cx, "e"));
     test_support::click(cx, "launcher-clear-command");
-    test_support::click(cx, "launcher-command-row");
+    click_in_body(cx, "launcher-command");
     test_support::keys(cx, "r u n space { f a r h e l m _ a r g s }");
     let body = pressed(&mut helm, cx)
         .body
@@ -890,7 +890,7 @@ fn a_held_enter_in_the_model_field_does_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
     assert!(restart_with(cx, "a"));
     restarts(&mut helm, cx);
-    test_support::click(cx, "launcher-model-row");
+    click_in_body(cx, "launcher-model");
     cx.simulate_input("other");
     settle(cx);
     assert_eq!(

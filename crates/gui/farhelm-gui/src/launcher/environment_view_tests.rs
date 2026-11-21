@@ -19,7 +19,7 @@ use super::environment_launch_tests::{
 };
 use super::launch_tests::command_draft;
 use super::recents_view_tests::{answer_history, chosen, history, launched};
-use super::view_tests::{draft, fixture_hosts, name_of, read};
+use super::view_tests::{click_in_body, draft, fixture_hosts, name_of, read};
 use crate::test_support::{self, keys, meta, settle};
 
 /// [`window_with`] on [`command_draft`], host1 to host3 and [`plain_preferences`].
@@ -284,7 +284,7 @@ fn a_new_container_keeps_the_where_row(cx: &mut TestAppContext) {
 fn leaving_new_container_shows_the_drafts_folder_in_the_field(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx);
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "/ s r c");
     let typed = draft(cx).folder.value().clone();
     assert_ne!(

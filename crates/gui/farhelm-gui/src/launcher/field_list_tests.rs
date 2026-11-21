@@ -9,7 +9,7 @@ use gpui::TestAppContext;
 
 use super::draft::LaunchDraft;
 use super::view::{Launcher, step_for_tests as step};
-use super::view_tests::{fixture_hosts, launcher_with_hosts};
+use super::view_tests::{click_in_body, fixture_hosts, launcher_with_hosts};
 use crate::components::Vertical;
 use crate::layers;
 use crate::test_support::{self, keys, settle};
@@ -58,7 +58,7 @@ fn a_list_the_layer_manager_closed_is_forgotten_with_its_highlight(cx: &mut Test
         LaunchDraft::new(Some(1), "~".into(), None),
         fixture_hosts(&[0]),
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "down");
     test_support::frame(cx);
     assert!(
