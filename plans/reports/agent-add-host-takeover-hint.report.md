@@ -37,3 +37,56 @@ None.
 
 Independent source review found no issues. It verified which refusal each request reaches and traced the text to the
 desktop's existing error display. The commit wording passed a separate cold read.
+
+### Landing
+
+#### What landed with it
+
+Main gained nothing but plan bookkeeping since this plan's work started, and nothing else landed in this round, so there
+was nothing for it to interact with. An independent reviewer and I read the PR against the plan. Every add request ends
+the way it did before, and only the words changed: a host already in Hosts is still told to use Take over there, a new
+host that reports no install identity is refused whether you or an agent started the add, and only your own Add host on
+a host that reports one reaches the takeover question. The Add host dialog an agent's request opens shows the helm's
+refusal as its error line, so the new text is what you see. No test, screenshot or step of the app's end-to-end smoke
+test expected the old text.
+
+#### Fixes made while landing
+
+One went in as a second PR, [#4357](https://github.com/scode/farhelm/pull/4357/changes), which changes only SPEC.md. The
+plan's new sentence about a host that reports no install identity followed the one about an agent's request, so it read
+as covering only agent requests. The helm refuses your own Add host the same way, and the sentence now says so.
+
+#### Checks
+
+The plan changes only the helm's code (the refusal text when Add host finds that another Farhelm manages the host) and
+its tests, plus SPEC.md, TODO.md and a changelog fragment. So the landing ran the helm crate's whole test suite and the
+main lint (clippy) on a separate arm64 Linux test machine, and the small checks locally on x86_64.
+
+On the plan as delivered, stacked on main:
+
+- `cargo nextest run -p farhelm-helm`, on the test machine (`def287eb-4770-440e-ba64-c01469a3dc01`): all 1783 tests
+  passed. The two skipped tests need a real Mac host and are always skipped in this run.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed. The executor's
+  report does not mention running clippy.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+The landing fix (#4357) changes only SPEC.md: `dprint check` on it passed, and the runs above still apply, since no test
+reads SPEC.md. Skipped: the workspace suite, since nothing outside the helm crate changed; the desktop app's tests and
+the end-to-end smoke test, since no app code changed (the smoke's agent host-add step adds a host nobody else manages,
+so it never reaches the changed refusals); and Mac runs, since no macOS-specific code changed.
+
+#### Things you should know that the report does not say
+
+- The agent's refusal appears inside the Add host dialog the agent's request opened, and says "Add it yourself with Add
+  host to take it over." Pressing Add again in that dialog only repeats the refusal: you have to close it and open Add
+  host yourself from Hosts, which then asks about the takeover. The wording is the one you chose while planning, so the
+  landing left it alone. If it reads as confusing in that dialog, a follow-up could say "close this and add it from
+  Hosts".
+- The refusal for a host that reports no install identity explains why takeover is unavailable but suggests no next
+  step. That is what the plan asked for.
+
+#### What you should still do
+
+Nothing, unless you want the dialog follow-up above. No Mac check is needed: the change is in the helm, and its tests
+cover each refusal with a simulated host that reports which Farhelm owns it.
