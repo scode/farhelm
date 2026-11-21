@@ -4,3 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `launcher-command-field.md` — make the session launcher's search field its header and starting point, with hints, a left column of recent setups, templates and results, a calmer form, and no footer summary
 - [complete] `golden-changes-page.md` — write a page of only the changed and new golden pictures (reference, new, differing pixels) after every run that finds any, and describe one visual-review procedure built on it (after `goldens-fast-and-targeted.md`)
+- [pending] `agent-hook-setup.md` — give every agent type its own Settings section, and let Grok and Antigravity users opt in once to Farhelm installing its Restart hooks into those agents on every machine, asked in the launcher and explained on the greyed Restart (after `launcher-command-field.md`)
