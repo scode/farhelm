@@ -108,7 +108,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
 - `node --test website/scripts/release-notes.test.mjs` after installing website dependencies
-- `dist generate --check`
+- `python3 releasing/generate-workflow.py --check` with pinned cargo-dist 0.32.0,
+  `python3 releasing/generate-workflow.py --self-test` and `shellcheck releasing/check-artifact-handoff.sh`
 - `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
   (the dependency license and source policy in `deny.toml`)
 - `python3 -B scripts/dependency-notices.py --check` and `python3 -B scripts/test-dependency-notices.py` (the generated
