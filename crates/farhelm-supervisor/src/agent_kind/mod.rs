@@ -2562,7 +2562,7 @@ pub enum AgentHooks {
     All,
     /// No automatically installed reporter runs, so those integrations gain
     /// no new identity through automatic reporting.
-    /// Manually configured Grok and Antigravity callbacks are unaffected.
+    /// Grok and Antigravity callbacks already installed, by hand or by an earlier opted-in launch, are unaffected.
     None,
     /// Exactly these automatically configured kinds get their reporter. A
     /// disabled kind gains no new identity through automatic reporting. An [`AgentKind::Generic`] entry would be inert rather

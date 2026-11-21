@@ -3571,6 +3571,9 @@ mod tests {
                  DROP TABLE session_mutes;
                  DROP TABLE session_group_members;
                  DROP TABLE session_groups;
+                 -- Schema 95 added the remembered dismissals of the hook setup prompt and hint.
+                 ALTER TABLE preferences DROP COLUMN grok_hook_hint_dismissed;
+                 ALTER TABLE preferences DROP COLUMN antigravity_hook_hint_dismissed;
                  -- Schema 85 added the settings the old app kept per device.
                  ALTER TABLE preferences DROP COLUMN appearance;
                  ALTER TABLE preferences DROP COLUMN sidebar_width;

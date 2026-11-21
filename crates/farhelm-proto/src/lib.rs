@@ -2756,9 +2756,9 @@ pub enum ReportVendor {
     Pi,
     /// Oh-my-pi, via the shipped extension asset.
     Omp,
-    /// xAI's Grok Build CLI, via manually configured lifecycle hooks.
+    /// xAI's Grok Build CLI, via lifecycle hooks Farhelm installs on opt-in or the user installed by hand.
     Grok,
-    /// Antigravity CLI's manually configured SessionStart and Stop hooks.
+    /// Antigravity CLI's SessionStart and Stop hooks, installed by Farhelm on opt-in or by hand.
     Antigravity,
     /// Muse Code, via the per-launch JSON hooks override.
     Muse,

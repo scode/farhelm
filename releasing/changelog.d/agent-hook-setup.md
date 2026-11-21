@@ -9,3 +9,4 @@ answer the agent.
 
 Turning the switch off leaves installed hooks in place. Settings names the file or directory to delete. If you
 previously set up Antigravity by hand, you can delete the old `farhelm` entry from `~/.gemini/config/hooks.json`.
+Turning on Grok setup replaces a `~/.grok/hooks/farhelm.json` you made by hand from the old instructions.

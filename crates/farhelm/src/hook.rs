@@ -2,8 +2,8 @@
 //! conversation identity the agent is currently using.
 //!
 //! Claude, Codex, Muse and Antigravity report SessionStart and Stop. Antigravity
-//! uses callbacks the user installs. Grok uses three manually
-//! configured callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
+//! uses callbacks Farhelm installs on opt-in or the user installed by hand.
+//! Grok uses three callbacks (`SessionStart`, `UserPromptSubmit`, and `Stop`) so
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
 //! the agent process, inside the agent's terminal, with the session's
@@ -206,8 +206,8 @@ pub const HOOK_BUDGET: Duration = Duration::from_secs(30);
 ///
 /// That symmetry is why there is no Codex-specific fallback here — no file
 /// under farhelm's state directory, no `model_instructions_file` override.
-/// One mechanism serves all announcement-enabled vendors. Grok's manually
-/// configured callbacks stay silent and never request this line.
+/// One mechanism serves all announcement-enabled vendors. Grok's callbacks
+/// stay silent and never request this line.
 ///
 /// ## Why the wording is constrained
 ///
@@ -646,7 +646,7 @@ fn parse_antigravity_payload(value: &serde_json::Value) -> Result<HookReport, &'
     ))
 }
 
-/// Parse the three manually configured Grok callbacks into one bounded,
+/// Parse the three Grok callbacks into one bounded,
 /// vendor-specific locator report.
 ///
 /// Grok emits camelCase and snake_case copies of several fields. When both
