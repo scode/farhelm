@@ -743,8 +743,10 @@ systemd or SSH substrate ran.
   rendering. It also checks the CPU cap, disjoint work groups and a real killed worker that leaves other workers'
   captures available without certifying the update. The changes page checks exercise packaged pictures and highlights,
   native update requests, size changes, removal of stale pages, and an update without access to the store. Run it when
-  the runner or page generator changes. Seconds, no graphics renderer or network. The Rust unit tests filtered with
-  `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size changes without drawing.
+  the runner or the page generator (`scripts/golden_changes_page.py` and
+  `crates/gui/farhelm-gui/src/goldens/changes.rs`) changes. Seconds, no graphics renderer or network. The Rust unit
+  tests filtered with `cargo test --locked -p farhelm-gui --lib goldens::changes` check exact highlights and size
+  changes without drawing.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only

@@ -47,8 +47,8 @@ fn review(mut reference: RgbaImage, capture: &RgbaImage) -> (Review, Option<Rgba
     (info, Some(reference))
 }
 
-/// Write metadata last so it can only advertise a finished highlight. A null record means the reference failed to
-/// decode and cannot be displayed. With no record at all, the runner can still display a known reference by itself.
+/// Write metadata last so it can only advertise a finished highlight. A null record means the reference is missing or
+/// failed to decode, and cannot be displayed. With no record at all, the runner can still display a known reference by itself.
 pub(super) fn write(
     directory: &Path,
     picture: &Path,
