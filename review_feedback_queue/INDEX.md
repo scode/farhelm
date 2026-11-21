@@ -387,10 +387,6 @@ consequences.
   Supplying neither prerequisite cannot show that each prerequisite is independently required. The test can miss removal
   of either production guard; no shipped installer defect is established.
 
-- [`ensure-host-warning-names-unavailable-setup-action.md`](ensure-host-warning-names-unavailable-setup-action.md) — The
-  startup warning tells an ordinary remote host with an invalid install path to use a setup action its row does not
-  offer. Manual/API recovery remains possible; this is diagnostic correctness with ambiguous filter coverage.
-
 - [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
   regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
 

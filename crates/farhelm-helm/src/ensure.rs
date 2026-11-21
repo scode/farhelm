@@ -200,9 +200,10 @@ async fn warn_hosts_needing_correction(
             remote_farhelm = ?remote_farhelm,
             remote_state_dir = ?remote_state_dir,
             "a host guaranteed by the ensure-hosts file has a remote path that is not absolute (a leading \
-             ~ is not expanded); give absolute paths in the file, and repair the stored host with its \
-             set up action. Removing the host while the file still has such a path would stop the \
-             next start"
+             ~ is not expanded); give absolute paths in the file. If the stored host has such a path, \
+             remove it once the file is corrected and restart the helm, which registers it again from \
+             the file. Removing the host while the file still has such a path would stop the next \
+             start"
         );
     }
 }
