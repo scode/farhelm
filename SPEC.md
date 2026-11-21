@@ -648,9 +648,9 @@ Antigravity is an agent type for the `agy` CLI. Its launcher suggests `gemini-4-
 `gemini-4-hydrogen`, and `gemini-3.8-flash`, and accepts literal custom model IDs. `--model` and `--effort` carry the
 choices. All four suggestions offer low, medium and high effort. Neon, Hydrogen and custom IDs also offer xhigh. Guarded
 is the default and adds `--mode auto`. Antigravity falls back to its default mode when auto is unavailable. YOLO adds
-`--dangerously-skip-permissions`, and Custom passes the user's permission flags. Antigravity uses generic activity
-status and has no managed-checkout trust choice. Initial prompts work for both fresh and named starts. See
-[Antigravity](website/src/content/docs/docs/agents/antigravity.md).
+`--dangerously-skip-permissions`, and Custom passes the user's permission flags. Antigravity reports Waiting while its
+workspace trust question is visible and uses generic activity status otherwise. Initial prompts work for both fresh and
+named starts. See [Antigravity](website/src/content/docs/docs/agents/antigravity.md).
 
 Muse support uses `muse --permission-profile :auto-review` for guarded launches and `muse --yolo` for YOLO. Its screen
 reader recognizes Working and Thinking above the composer, the composer at rest, and the workspace-trust question. Other
@@ -2868,17 +2868,17 @@ the agent-spawn behavior below is one instance of this general rule, not a speci
 ### Status
 
 Farhelm can play distinct sounds when a session starts waiting, when a new agent approval request arrives, and when an
-agent goes from running to idle. Claude and Codex report Waiting; Muse reports it for workspace trust only, with
-in-conversation questions and approvals still unverified. Such sessions can show Idle while Muse waits for an answer.
-Settings has sounds controls under **Notifications**. SSH sign-in, waiting and approval default on. Turn finished
-defaults off. The switches are helm preferences, shared by every client of the helm (the maintainer decided on
-2026-11-13 that they are helm preferences rather than per-device ones). The open session stays quiet while its window is
-active. The initial session and approval state is silent. Status sounds follow the sidebar's current host selector and
-filters; changing that view silently records its existing statuses. New approval requests sound regardless of those
-filters, because their cards are always shown. An SSH question can chime as soon as the app sees it, including at
-startup or while the user is working in another app. It is independent of the selected session and its mute setting.
-Farhelm plays at most one cue for changes seen together, in this order among the sounds enabled and eligible to play:
-SSH sign-in, approval, waiting, then turn finished.
+agent goes from running to idle. Claude and Codex report Waiting. Muse and Antigravity report Waiting for workspace
+trust only. Either can show Idle while waiting for an answer to an in-conversation question. Settings has sounds
+controls under **Notifications**. SSH sign-in, waiting and approval default on. Turn finished defaults off. The switches
+are helm preferences, shared by every client of the helm (the maintainer decided on 2026-11-13 that they are helm
+preferences rather than per-device ones). The open session stays quiet while its window is active. The initial session
+and approval state is silent. Status sounds follow the sidebar's current host selector and filters; changing that view
+silently records its existing statuses. New approval requests sound regardless of those filters, because their cards are
+always shown. An SSH question can chime as soon as the app sees it, including at startup or while the user is working in
+another app. It is independent of the selected session and its mute setting. Farhelm plays at most one cue for changes
+seen together, in this order among the sounds enabled and eligible to play: SSH sign-in, approval, waiting, then turn
+finished.
 
 Each session shows one of: **Running** (agent actively working), **Waiting** (a detected pending question or approval
 directed at the user), **Idle** (agent alive and at rest, no pending ask), **Exited** (process ended), **Interrupted**
@@ -2986,18 +2986,18 @@ recognize what those agents draw — their busy indicators, their input prompt a
 (workspace trust only for Muse) — and answer from that, so an idle agent's own redraws read idle. A screen they
 recognize as carrying no state (a menu the user opened) leaves the previous status in place, and a screen they do not
 recognize at all falls back to the generic reader. Their rules are held to real screens captured from the vendors'
-current releases; see `docs/agent-screen-fixtures.md`. A reader never creates lifecycle state. Wrong status must be
-cosmetic only — status detection must never gate or delay the user's interaction with the terminal. Agent-requested
-prompt delivery is a narrow exception: the owning supervisor refuses a target reading waiting or unknown rather than
-risk answering a dialog (see Agent-spawned sessions). A mistaken reading may therefore refuse that request or let it
-reach an unrecognized dialog; it never gates the user's own typing. Status also decides whether Restart and Restart with
-ask before stopping a live agent (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra
-confirmation. A recognized dialog also defers the missing-conversation warning's clock until an Enter outside that
-dialog, as described below; this does not delay delivering input. Farhelm-supplied integration must not make vendor
-configuration a condition of launching an agent. Users install the documented Grok and Antigravity hooks themselves to
-enable conversation capture. Both can launch before those hooks are installed. OMP, Grok and Antigravity use generic
-activity only. Their approval prompts show the generic running/idle classification, never waiting — a settled scope
-decision, not a reader waiting to be written.
+current releases; see `docs/agent-screen-fixtures.md`. Antigravity recognizes the workspace trust question and uses
+generic activity for other screens. A reader never creates lifecycle state. Wrong status must be cosmetic only — status
+detection must never gate or delay the user's interaction with the terminal. Agent-requested prompt delivery is a narrow
+exception: the owning supervisor refuses a target reading waiting or unknown rather than risk answering a dialog (see
+Agent-spawned sessions). A mistaken reading may therefore refuse that request or let it reach an unrecognized dialog; it
+never gates the user's own typing. Status also decides whether Restart and Restart with ask before stopping a live agent
+(see Lifecycle operations), where a wrong reading costs at most a skipped or an extra confirmation. A recognized dialog
+also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
+not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
+agent. Users install the documented Grok and Antigravity hooks themselves to enable conversation capture. Both can
+launch before those hooks are installed. OMP and Grok use generic activity only. Their approval prompts show the generic
+running/idle classification, never waiting.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering

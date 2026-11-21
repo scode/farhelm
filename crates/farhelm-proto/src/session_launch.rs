@@ -45,6 +45,10 @@ pub const FARHELM_ARGS_PLACEHOLDER: &str = "{farhelm_args}";
 pub const CODEX_TRUSTED_CWD_PLACEHOLDER: &str = "{codex:trusted-cwd}";
 pub const CODEX_UNTRUSTED_CWD_PLACEHOLDER: &str = "{codex:untrusted-cwd}";
 
+/// The entire Antigravity `--settings` argument. The supervisor encodes
+/// the destination's canonical directory once it knows where the launch runs.
+pub const ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER: &str = "{antigravity:trusted-cwd}";
+
 /// Every whole-argument marker that a later launch pass may substitute.
 /// Keep validation and substitution tied to one list: a user-supplied word
 /// equal to a marker must never acquire Farhelm-owned meaning at spawn.
@@ -54,11 +58,22 @@ pub const RESERVED_PLACEHOLDERS: &[&str] = &[
     FARHELM_ARGS_PLACEHOLDER,
     CODEX_TRUSTED_CWD_PLACEHOLDER,
     CODEX_UNTRUSTED_CWD_PLACEHOLDER,
+    ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER,
 ];
 
 /// Match reserved markers as whole argv words; embedded text stays literal.
 pub fn is_reserved_placeholder(value: &str) -> bool {
     RESERVED_PLACEHOLDERS.contains(&value)
+}
+
+/// Only these markers are interpreted in user-written shell source. The
+/// Antigravity slot belongs to the structured compiler's trust argument;
+/// treating it as a shell marker would reinterpret commands saved before it existed.
+pub fn shell_placeholders() -> impl Iterator<Item = &'static str> {
+    RESERVED_PLACEHOLDERS
+        .iter()
+        .copied()
+        .filter(|&marker| marker != ANTIGRAVITY_TRUSTED_CWD_PLACEHOLDER)
 }
 
 /// One session's launch, resolved: what it runs and how it resumes.

@@ -7,7 +7,7 @@
 
 use std::ops::Range;
 
-use crate::session_launch::RESERVED_PLACEHOLDERS;
+use crate::session_launch::shell_placeholders;
 use crate::text::shell_quote;
 
 /// Refuse placeholders whose original spelling is not a whole, unquoted Bash argument.
@@ -173,7 +173,7 @@ fn marker_spans(field: &str, text: &str) -> Result<Vec<Marker>, String> {
         // that stage's literal words too: a glued escaped marker may only
         // become visible here, while only root slots authorize replacement.
         let stage_words = shell_words::split(&source.text).unwrap_or_default();
-        for &name in RESERVED_PLACEHOLDERS {
+        for name in shell_placeholders() {
             for word in &stage_words {
                 if word.contains(name) {
                     literal_marker = true;
@@ -222,7 +222,7 @@ fn marker_spans(field: &str, text: &str) -> Result<Vec<Marker>, String> {
                 comments.push(source.original_range(range));
                 descend = false;
             } else if is_argument(node, &cursor)
-                && let Some(&name) = RESERVED_PLACEHOLDERS.iter().find(|&&marker| raw == marker)
+                && let Some(name) = shell_placeholders().find(|&marker| raw == marker)
             {
                 let original = source.original_range(range);
                 if &text[original.clone()] != name {
@@ -255,7 +255,7 @@ fn marker_spans(field: &str, text: &str) -> Result<Vec<Marker>, String> {
     // Braces alone are not markers, and established comments remain inert.
     // Unknown grammar must not reject an otherwise untouched marker-free
     // program merely because discovery parsed it to inspect a backtick stage.
-    let raw_marker = RESERVED_PLACEHOLDERS.iter().any(|name| {
+    let raw_marker = shell_placeholders().any(|name| {
         text.match_indices(name).any(|(at, _)| {
             !comments
                 .iter()
@@ -267,7 +267,7 @@ fn marker_spans(field: &str, text: &str) -> Result<Vec<Marker>, String> {
             "{field}: cannot establish Bash placeholder placement; write each placeholder unquoted as its own word"
         ));
     }
-    for &name in RESERVED_PLACEHOLDERS {
+    for name in shell_placeholders() {
         let literal_count = literal.iter().filter(|word| word.as_str() == name).count();
         if markers.iter().filter(|marker| marker.name == name).count() != literal_count {
             return Err(placement_error(field, name));
@@ -318,6 +318,20 @@ fn placement_error(field: &str, marker: &str) -> String {
 mod tests {
     use super::{BacktickFrame, Source, render_command, validate_command_placeholders};
     use crate::text::shell_quote;
+
+    /// Command text saved before the Antigravity compiler marker existed
+    /// keeps the word byte for byte, including when the author quoted it.
+    #[test]
+    fn command_preserves_the_antigravity_trust_spelling_as_literal() {
+        let source = "printf '%s\\n' {antigravity:trusted-cwd} '{antigravity:trusted-cwd}'";
+        assert_eq!(
+            render_command("command", source, |word| panic!(
+                "unexpected marker: {word}"
+            ))
+            .unwrap(),
+            source
+        );
+    }
 
     /// Shell rendering must preserve all non-marker bytes, including multibyte offsets and
     /// comments; reconstructing source from argv would silently change these programs.

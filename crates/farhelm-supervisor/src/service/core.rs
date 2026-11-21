@@ -2835,13 +2835,13 @@ pub(crate) enum FarhelmArgsMode {
     Legacy,
 }
 
-/// User-owned source is interpreted only at the final execution boundary.
-/// Commands retain phase text; wrappers retain the raw prefix already present
-/// in the literal argv. Ordinary agents and legacy sessions never select Bash.
+/// The launch information needed to prepare the final argv. Commands retain
+/// phase text. Structured launches have compiler-owned slots and may carry a
+/// wrapper whose raw prefix already appears in argv.
 #[derive(Clone, Copy)]
 enum ShellSource<'a> {
     Command(&'a str),
-    Wrapper,
+    Agent(&'a farhelm_proto::LaunchSelection),
 }
 
 impl<'a> ShellSource<'a> {
@@ -2854,9 +2854,7 @@ impl<'a> ShellSource<'a> {
                     command.resume.as_deref().map(Self::Command)
                 }
             },
-            SessionLaunch::Agent { selection, .. } => {
-                selection.wrapper_prefix.as_ref().map(|_| Self::Wrapper)
-            }
+            SessionLaunch::Agent { selection, .. } => Some(Self::Agent(selection)),
             SessionLaunch::Legacy { .. } => None,
         }
     }
@@ -3025,7 +3023,9 @@ fn command_shell_values(
     Ok(original
         .into_iter()
         .zip(filled)
-        .filter(|(word, _)| farhelm_proto::session_launch::is_reserved_placeholder(word))
+        .filter(|(word, _)| {
+            farhelm_proto::session_launch::shell_placeholders().any(|slot| slot == word)
+        })
         .map(|(word, value)| (word, vec![value.clone()]))
         .collect())
 }
@@ -14420,7 +14420,12 @@ impl Supervisor {
             farhelm_proto::command_shell::validate_command_placeholders(command_field, source)
                 .map_err(|message| anyhow::anyhow!(message))?;
         }
-        if let Some(ShellSource::Wrapper) = shell_source {
+        let selection = match shell_source {
+            Some(ShellSource::Agent(selection)) => Some(selection),
+            Some(ShellSource::Command(_)) | None => None,
+        };
+        let wrapped_agent = selection.is_some_and(|selection| selection.wrapper_prefix.is_some());
+        if wrapped_agent {
             // A reserved raw prefix element must be refused before cwd/hooks
             // can replace it and hide the invalid prefix. Only the suffix may
             // change length, so this boundary survives both fills and prompts.
@@ -14439,15 +14444,15 @@ impl Supervisor {
         // wrapper's directory" and "the terminal's directory" the same string
         // on every path. The log names the cwd and never the argv, which
         // users do put credentials into (see `validate_create`).
-        let argv = if crate::agent_kind::has_cwd_placeholder(&argv) {
+        let argv = if crate::agent_kind::has_cwd_placeholder(&argv, selection) {
             info!(session = %id, cwd, "substituting the working directory into the agent command line");
-            crate::agent_kind::fill_cwd(argv, cwd)
+            crate::agent_kind::fill_cwd(argv, cwd, selection)
         } else {
             argv
         };
         let mut shell_values = match shell_source {
             Some(ShellSource::Command(source)) => Some(command_shell_values(source, &argv)),
-            Some(ShellSource::Wrapper) | None => None,
+            Some(ShellSource::Agent(_)) | None => None,
         }
         .transpose()?;
         // Hook arguments follow placeholder substitution; the one-time
@@ -14512,7 +14517,7 @@ impl Supervisor {
                     })
                     .map_err(|message| anyhow::anyhow!(message))?;
                 (vec!["bash".into(), "-c".into(), line], Some(argv))
-            } else if let Some(ShellSource::Wrapper) = shell_source {
+            } else if wrapped_agent {
                 let line = wrapped_agent_shell_line(&argv, snapshot.wrapper_prefix_words)?;
                 (vec!["bash".into(), "-c".into(), line], Some(argv))
             } else {

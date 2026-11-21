@@ -5191,16 +5191,19 @@ installation it is on, so it follows an open session the sidebar's filter hides
   `--dangerously-skip-permissions`, while Custom uses the submitted words. Both named starts and Restart use
   `--conversation {conversation}` with a literal ID. The supervisor appends one `--prompt-interactive=<prompt>` argument
   for a fresh or named start with an initial prompt. Attaching the value keeps leading dashes in the prompt from being
-  parsed as options. The generic activity classifier supplies its status. OMP is also a structured harness only at
-  launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags for the
-  harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent explicit;
-  a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise of literal
-  upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix` interpretations on the
-  id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`). `--thinking <effort>` carries the
-  seven-level list (`off` through `max`; OMP's `auto` is not offered), and `--approval-mode yolo|always-ask|write`
-  carries the YOLO/Approve/Guarded choices. An omitted permission selects Guarded for new launches. Older stored
-  launches with no permission keep their historical YOLO meaning. SmartApprove and Chat are refused for OMP; the row
-  glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at sidebar size.
+  parsed as options. Protocol 82 introduces the whole-argument Antigravity trust placeholder. The supervisor fills it
+  with a JSON settings object naming the canonical working directory. The screen reader recognizes Antigravity's
+  workspace trust menu as Waiting and uses the generic classifier on other screens. OMP is also a structured harness
+  only at launch time: its release catalog holds the same OpenRouter model IDs as Pi's, omits model and provider flags
+  for the harness default, and compiles an explicit model as `omp --provider openrouter --model <id>` (provider intent
+  explicit; a literal custom id stays one argv element and is stored verbatim — provider qualification is not a promise
+  of literal upstream routing for unknown ids; OMP's own resolution still runs alias, fuzzy, and `:suffix`
+  interpretations on the id it receives, as documented in `website/src/content/docs/docs/agents/omp.md`).
+  `--thinking <effort>` carries the seven-level list (`off` through `max`; OMP's `auto` is not offered), and
+  `--approval-mode yolo|always-ask|write` carries the YOLO/Approve/Guarded choices. An omitted permission selects
+  Guarded for new launches. Older stored launches with no permission keep their historical YOLO meaning. SmartApprove
+  and Chat are refused for OMP; the row glyph is the Greek capital omega, chosen so it cannot read as Pi's "P" at
+  sidebar size.
 - The launch composer's model field is a bounded combobox: it lists the selected harness's catalog filtered by the typed
   text, can reveal every harness's models with each foreign row suffixed by its harness, and accepts a custom id only
   after an explicit harness selection. Enter applies an arrow-navigated row over the typed text, so a half-typed filter

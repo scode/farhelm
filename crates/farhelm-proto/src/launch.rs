@@ -816,7 +816,7 @@ pub fn check_wrapper_prefix(words: Option<&[String]>) -> Result<(), String> {
     }
     if words
         .iter()
-        .any(|word| crate::session_launch::is_reserved_placeholder(word))
+        .any(|word| crate::session_launch::shell_placeholders().any(|marker| marker == word))
     {
         return Err("wrapper prefix cannot contain Farhelm placeholders".into());
     }
@@ -1423,7 +1423,7 @@ mod tests {
         ] {
             assert!(super::split_wrapper_prefix(text).is_err(), "{text:?}");
         }
-        for marker in crate::session_launch::RESERVED_PLACEHOLDERS {
+        for marker in crate::session_launch::shell_placeholders() {
             for spelling in [
                 marker.to_string(),
                 format!("'{marker}'"),
