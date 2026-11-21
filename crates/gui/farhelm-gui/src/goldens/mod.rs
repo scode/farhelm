@@ -100,9 +100,12 @@ use sign_in::*;
 use templates::*;
 use terminal::*;
 
-/// How many frames a scene may take to settle before the test gives up: icons decode on the background executor, so
-/// the first frame can lack them. Two consecutive identical captures is the readiness signal; a scene that never
-/// settles is a failure that says so, not a flaky pixel mismatch.
+/// A scenario can need several draws to open its dialog, complete fake helm reads and press an action on the drawn
+/// control. Bound that staging separately from the pixel comparison, which begins only on a ready frame.
+const MAX_STAGING_FRAMES: usize = 24;
+
+/// Once a scene is ready, its icons may still be decoding on the background executor. Allow several captures to
+/// get two consecutive identical ones. Unstable pixels fail here before any comparison with a reference.
 const MAX_SETTLE_FRAMES: usize = 6;
 
 /// One scene: a name, its size in logical pixels, what it draws, and what it sets up once its window exists.
@@ -967,6 +970,36 @@ static SCENES: &[Scene] = &[
         setup: launcher_more_options_setup,
     },
     Scene {
+        name: "launcher-command-results",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_results_setup,
+    },
+    Scene {
+        name: "launcher-restart-with",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_restart_setup,
+    },
+    Scene {
+        name: "launcher-replace-with",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_replace_setup,
+    },
+    Scene {
+        name: "launcher-narrow",
+        size: (720., 900.),
+        draw: session_lists_then,
+        setup: launcher_narrow_setup,
+    },
+    Scene {
+        name: "launcher-yolo-question",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_yolo_setup,
+    },
+    Scene {
         name: "template-launcher",
         // The card at its widest, near the window's top as the layer manager places it. Tall enough that the layer
         // manager's height cap (75% of the window) leaves all three rows in view, as the reference's taller window did.
@@ -1465,16 +1498,26 @@ fn settle(
     view: &Entity<SceneView>,
 ) -> anyhow::Result<image::RgbaImage> {
     let mut previous = None;
+    let mut remaining_staging = MAX_STAGING_FRAMES;
     for _ in 0..MAX_SETTLE_FRAMES {
-        cx.run_until_parked();
-        let ready = cx.update_window(window, |_, window, cx| {
-            window.draw(cx).clear(cx);
-            let state = &view.read(cx).state;
-            state.after.get().is_none() && !settings::settings_scene_pending(state)
-        })?;
-        if !ready {
+        loop {
+            cx.run_until_parked();
+            cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))?;
+            // The draw takes the after-draw callback out of the slot. Check after its deferred effect has had
+            // a chance to put the next step back, or a partly staged scene can appear ready.
+            let ready = cx.update(|cx| {
+                let state = &view.read(cx).state;
+                state.after.get().is_none() && !settings::settings_scene_pending(state)
+            });
+            if ready {
+                break;
+            }
+            anyhow::ensure!(
+                remaining_staging > 0,
+                "after-draw interaction still pending after {MAX_STAGING_FRAMES} frames"
+            );
+            remaining_staging -= 1;
             previous = None;
-            continue;
         }
         let capture = cx.capture_screenshot(window)?;
         if previous.as_ref() == Some(&capture) {
@@ -1482,13 +1525,7 @@ fn settle(
         }
         previous = Some(capture);
     }
-    let pending = cx.update(|cx| {
-        let state = &view.read(cx).state;
-        state.after.get().is_some() || settings::settings_scene_pending(state)
-    });
-    anyhow::bail!(
-        "never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"
-    )
+    anyhow::bail!("rendered pixels never settled after {MAX_SETTLE_FRAMES} captures")
 }
 
 /// Holds the per-run output path and, in compare mode, the immutable reference directory.

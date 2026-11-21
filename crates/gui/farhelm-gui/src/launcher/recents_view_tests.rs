@@ -1,4 +1,4 @@
-//! Tests of the recent setups strip in the real launcher over the helm client's fake: when it shows, what a row says,
+//! Tests of recent setups in the real launcher's command pane over the helm client's fake: when they show, what a row says,
 //! and what a click and Enter on a row do. The rules for which setups and in what order are `recents_tests`'.
 //!
 //! Ported from the composer cases of the old `e2e/tests/sidebar.spec.ts` at reference commit `24bc0580` ("composer
@@ -81,10 +81,9 @@ pub(super) fn creates(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<Fa
     creates
 }
 
-/// Whether the strip is drawn.
+/// Whether the pane has a Recent group. The template list remains available without it.
 fn strip_shown(cx: &mut VisualTestContext) -> bool {
-    test_support::frame(cx);
-    cx.debug_bounds("launcher-recents").is_some()
+    name_of(cx, "launcher-recent-heading").is_some()
 }
 
 /// The YOLO Codex setup and the default Claude one, both in `/tmp`.
@@ -170,7 +169,7 @@ fn an_empty_history_shows_no_strip(cx: &mut TestAppContext) {
 }
 
 /// A click fills the setup and returns focus to the command field. This lets the user keep refining the draft.
-/// Enter on a keyboard-focused row launches the filled setup once through the ordinary path; a held Enter does nothing.
+/// Down moves only the highlight, and Enter on that row launches through the ordinary path. A held Enter does nothing.
 #[gpui::test]
 fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_in_tmp(cx, &two_setups());
@@ -195,13 +194,9 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
 
     test_support::click(cx, "launcher-tabs-Command");
     test_support::click(cx, "launcher-search-row");
-    // The header's Close lies between the field and the first recent.
-    keys(cx, "tab tab");
-    assert_eq!(
-        test_support::focused_id(cx).as_deref(),
-        Some("launcher-recent-0"),
-        "the premise: keyboard focus reached the first row"
-    );
+    keys(cx, "down");
+    assert!(recent_highlighted(cx, "launcher-recent-0"));
+    assert!(super::view_tests::search_focused(cx));
     cx.simulate_event(gpui::KeyDownEvent {
         native_key: None,
         keystroke: gpui::Keystroke::parse("enter").unwrap(),
@@ -223,11 +218,29 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     assert_eq!(body["launch"]["permissions"], json!("yolo"));
 }
 
-/// Replace with names a row "Replace: …"; Restart with shows no strip. Why: in Replace with Enter on a row replaces the
-/// source, which its name must say, and Restart with keeps its setup (old `replace.spec.ts`'s recent row, and the old
-/// strip's `!restart_mode`).
+/// Up at the first recent gives Enter back to the draft, so browsing a saved setup cannot change the next launch.
 #[gpui::test]
-fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppContext) {
+fn up_from_the_first_recent_restores_the_forms_enter(cx: &mut TestAppContext) {
+    let mut draft = LaunchDraft::new(Some(1), "/tmp".into(), None);
+    draft.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, fixture_hosts(&[0]));
+    answer_history(&mut helm, cx, &two_setups());
+    keys(cx, "down");
+    assert!(recent_highlighted(cx, "launcher-recent-0"));
+    keys(cx, "up");
+    assert!(!recent_highlighted(cx, "launcher-recent-0"));
+    assert!(super::view_tests::search_focused(cx));
+    keys(cx, "enter");
+    let sent = creates(&mut helm, cx);
+    let [create] = sent.as_slice() else {
+        panic!("expected one create from the form: {sent:?}");
+    };
+    assert!(create.body.as_ref().unwrap()["launch"]["model"].is_null());
+}
+
+/// Replacement rows identify the action. Restart's rows explain the fixed destination and cannot apply a setup.
+#[gpui::test]
+fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(None, None, None));
     let (mut helm, cx) = launcher_with_hosts(
         cx,
@@ -241,22 +254,10 @@ fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppConte
     answer_history(&mut helm, cx, &answer);
     let name = name_of(cx, "launcher-recent-0").unwrap_or_default();
     assert!(name.starts_with("Replace: /src/project · "), "{name}");
-    assert_eq!(
-        name_of(cx, "launcher-recent-0-hint"),
-        None,
-        "no hint while the row lacks keyboard focus"
-    );
+    assert!(!recent_highlighted(cx, "launcher-recent-0"));
     test_support::click(cx, "launcher-search-row");
-    keys(cx, "tab tab");
-    assert_eq!(
-        test_support::focused_id(cx).as_deref(),
-        Some("launcher-recent-0"),
-        "the premise: Tab from search reached the row"
-    );
-    assert_eq!(
-        name_of(cx, "launcher-recent-0-hint").as_deref(),
-        Some("⏎ Replace")
-    );
+    keys(cx, "down");
+    assert!(recent_highlighted(cx, "launcher-recent-0"));
 
     let mut source = super::draft_tests::session(codex(None, None, None));
     source.restart_offer = RestartOffer::Resume;
@@ -266,7 +267,35 @@ fn replace_with_says_replace_and_restart_with_has_no_strip(cx: &mut TestAppConte
         fixture_hosts(&[0]),
     );
     answer_history(&mut helm, cx, &answer);
-    assert!(!strip_shown(cx), "Restart with has no strip");
+    let before = draft(cx);
+    let row = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"))
+        .expect("Restart with shows the recent row");
+    assert!(!row.flags.click, "held rows cannot be taken by clicking");
+    assert!(
+        recent_help(cx, "launcher-recent-0")
+            .is_some_and(|help| help.contains("keeps destination fixed"))
+    );
+    test_support::click(cx, "launcher-search-row");
+    keys(cx, "down enter");
+    assert_eq!(draft(cx), before);
+}
+
+/// Read the real hover help after the layer tracker's delay has elapsed.
+pub(super) fn recent_help(cx: &mut VisualTestContext, id: &'static str) -> Option<String> {
+    let at = test_support::center(cx, id);
+    cx.simulate_mouse_move(at, None, gpui::Modifiers::none());
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    cx.update(|window, cx| crate::layers::shown_tooltip(window, cx))
+        .map(|shown| shown.text.to_string())
+}
+
+/// A selected row is reported without moving focus out of the command field.
+fn recent_highlighted(cx: &mut VisualTestContext, id: &str) -> bool {
+    test_support::frame(cx)
+        .iter()
+        .any(|node| node.element_id.as_deref() == Some(id) && node.selected == Some(true))
 }
 
 /// Put the retired setup beside a usable one so a refusal can be tested both alone and before a second choice.
@@ -316,21 +345,27 @@ fn taking_a_usable_setup_clears_the_retired_container_refusal(cx: &mut TestAppCo
 #[gpui::test]
 fn a_row_names_its_agent_and_only_explicit_choices(cx: &mut TestAppContext) {
     let (_helm, cx) = new_in_tmp(cx, &two_setups());
-    assert_eq!(
-        name_of(cx, "launcher-recent-0-harness").as_deref(),
-        Some("Codex")
+    let nodes = test_support::frame(cx);
+    let words = |id| {
+        crate::session_list::host_rail::tests::within(&nodes, id)
+            .iter()
+            .flat_map(|node| node.texts.iter())
+            .map(|line| line.text.as_ref())
+            .collect::<Vec<_>>()
+            .join(" ")
+    };
+    let first = words("launcher-recent-0");
+    assert!(first.contains("Codex") && first.contains("YOLO"), "{first}");
+    assert!(first.contains("enter-model"), "{first}");
+    let full = name_of(cx, "launcher-recent-0").unwrap();
+    assert!(
+        full.contains("Effort: High"),
+        "the truncated choice remains accessible: {full}"
     );
-    assert_eq!(
-        name_of(cx, "launcher-recent-0-choices").as_deref(),
-        Some("Model: enter-model · Effort: High · Permissions: YOLO")
-    );
-    assert_eq!(
-        name_of(cx, "launcher-recent-1-harness").as_deref(),
-        Some("Claude")
-    );
-    assert_eq!(
-        name_of(cx, "launcher-recent-1-choices").as_deref(),
-        Some("Defaults")
+    let second = words("launcher-recent-1");
+    assert!(
+        second.contains("Claude") && second.contains("Defaults"),
+        "{second}"
     );
 }
 
@@ -374,9 +409,8 @@ fn a_checkout_setup_chooses_its_repository(cx: &mut TestAppContext) {
     );
 }
 
-/// Keyboard focus follows the setup, not the row's place: a fill re-filters the rows, and Enter then launches the
-/// setup the user moved to, though another setup now sits in its old place. Why: Enter on a row launches; launching a
-/// setup the user never moved to would start the wrong session (the old launcher guarded against the same).
+/// The highlight follows the setup when the draft narrows the list. Launching whatever moved into the old position
+/// could be a different host or directory.
 #[gpui::test]
 fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
     let codex = chosen(LaunchHarness::Codex, None, Some(LaunchEffort::High), None);
@@ -392,26 +426,25 @@ fn focus_follows_the_setup_when_the_rows_change(cx: &mut TestAppContext) {
         name_of(cx, "launcher-recent-1").is_some_and(|name| name.starts_with("/tmp · ")),
         "the premise: the Codex folder setup is the second row"
     );
-    keys(cx, "tab tab tab");
-    assert_eq!(
-        test_support::focused_id(cx).as_deref(),
-        Some("launcher-recent-1"),
-        "the premise: the second row has focus"
-    );
-    keys(cx, "space");
-    assert_eq!(
-        draft(cx).agent.harness,
-        Some(LaunchHarness::Codex),
-        "the premise: Space filled Codex"
-    );
+    keys(cx, "down down");
+    assert!(recent_highlighted(cx, "launcher-recent-1"));
+    cx.update(|_, cx| {
+        let launcher = crate::layers::last_opened::<super::view::Launcher>(cx).unwrap();
+        launcher.update(cx, |launcher, cx| {
+            launcher
+                .draft
+                .choose_harness(LaunchHarness::Codex, None, None);
+            cx.notify();
+        });
+    });
+    settle(cx);
     assert!(
         name_of(cx, "launcher-recent-1").is_some_and(|name| name.starts_with("gh:acme/bar")),
         "the premise: the checkout setup now sits in the second place"
     );
-    assert_eq!(
-        test_support::focused_id(cx).as_deref(),
-        Some("launcher-recent-0"),
-        "focus moved with the Codex folder setup to the first place"
+    assert!(
+        recent_highlighted(cx, "launcher-recent-0"),
+        "the highlight moved with the setup"
     );
     keys(cx, "enter");
     let sent = creates(&mut helm, cx);

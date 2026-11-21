@@ -204,18 +204,18 @@ SHOTS = [
         "search",
         search_claude,
         ["id:launcher-search", "id:launcher-search-results"],
-        # This query has enough results to cover the Destination label. The Harnesses heading is inside the list
-        # and can hold the pointer without highlighting an option.
-        park="id:launcher-search-group-Harnesses",
+        # In the staged wide viewport the results are beside the form, leaving its Destination label clear.
+        park=LAUNCHER_PARK,
         annotations=[
             Callout("id:launcher-search",
                     "Type to find anything the launcher can set: hosts, agents, models, directories, recent setups.",
                     side="left"),
-            Callout("id:launcher-search-results",
-                    "Choosing a result applies it and empties the box. Enter on the empty box launches.", side="left",
-                    dy=60),
+            Callout("id:launcher-search-option-0",
+                    "Enter takes the highlighted result. Once the field is empty, Enter launches your setup.",
+                    side="left", dy=75),
         ],
         max_width=900,
+        max_height=425,
     ),
     Shot(
         "search-name",
@@ -228,18 +228,19 @@ SHOTS = [
                     "agent.", side="left"),
         ],
         max_width=900,
+        max_height=280,
     ),
     Shot(
         "recent-setups",
         recent_setups,
-        ["id:launcher-recents"],
+        ["id:launcher-command-navigation", "id:launcher-recent-0", "id:launcher-recent-2"],
         park=LAUNCHER_PARK,
         annotations=[
-            Highlight("id:launcher-recents", pad=4),
-            # Below the list rather than beside it, which keeps the crop no wider than the list itself.
-            Callout("id:launcher-recents",
-                    "Setups you launched before that match the directory and choices so far, most used first. Click "
-                    "one to fill in the launcher; Enter on it launches straight away.", side="bottom", dx=200),
+            Highlight("id:launcher-recent-0", pad=3),
+            Callout("id:launcher-command-navigation",
+                    "With the field empty, press ↓ to move into Recent. Enter launches the highlighted setup.",
+                    side="left", dy=-22),
+            Callout("id:launcher-recent-0", "Click a setup to fill in the form.", side="left", dy=80),
         ],
         max_width=900,
     ),

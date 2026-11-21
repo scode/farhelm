@@ -57,8 +57,8 @@ use std::sync::Arc;
 
 use gpui::{
     App, Div, ElementId, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement,
-    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, StyledText, Window,
-    div,
+    RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, StyledText,
+    UnderlineStyle, Window, div, px,
 };
 
 use crate::assets;
@@ -334,6 +334,7 @@ enum Part {
 pub struct HostSentence {
     id: ElementId,
     parts: Vec<Part>,
+    underlined_query: Option<(String, bool)>,
 }
 
 impl HostSentence {
@@ -342,6 +343,7 @@ impl HostSentence {
         HostSentence {
             id: id.into(),
             parts: Vec::new(),
+            underlined_query: None,
         }
     }
 
@@ -366,6 +368,30 @@ impl HostSentence {
     /// since the sentences draw differently.
     pub fn mono(mut self, text: &HostText) -> Self {
         self.parts.push(Part::Mono(text.clone()));
+        self
+    }
+
+    /// Mark matches in drawn text. Launcher values use the search's ASCII fold by default, with Unicode
+    /// lowercase for template names. Escaping and accessible names stay with the sentence.
+    pub(crate) fn underline_matches(self, query: &str) -> Self {
+        self.underlined(query, false)
+    }
+
+    /// Template search lowercases whole names, including final sigma in Greek, before looking for a substring.
+    pub(crate) fn underline_template_matches(self, query: &str) -> Self {
+        self.underlined(query, true)
+    }
+
+    fn underlined(mut self, query: &str, unicode: bool) -> Self {
+        if !query.is_empty() {
+            let query = farhelm_proto::text::escaped(query);
+            let folded = if unicode {
+                query.to_lowercase()
+            } else {
+                query.to_ascii_lowercase()
+            };
+            self.underlined_query = Some((folded, unicode));
+        }
         self
     }
 
@@ -426,6 +452,105 @@ const LRI: char = '\u{2066}';
 /// the shared table escapes it.
 const PDI: char = '\u{2069}';
 
+/// Highlight ranges refer to the source's UTF-8 bytes. A lowercased character can occupy a different number of
+/// bytes or expand into two characters, so substring offsets in the folded text cannot be passed to StyledText.
+pub(crate) fn match_ranges(text: &str, words: &[String]) -> Vec<Range<usize>> {
+    ranges_in_lowercase(
+        text,
+        &text
+            .chars()
+            .flat_map(char::to_lowercase)
+            .collect::<String>(),
+        words,
+    )
+}
+
+/// The lowercase spelling can come from a whole name or individual characters. Context changes lowercase sigma's
+/// letter, but both spellings are two bytes, so each lowercase byte maps to the same source character either way.
+fn ranges_in_lowercase(text: &str, folded: &str, words: &[String]) -> Vec<Range<usize>> {
+    let mut original = Vec::new();
+    for (start, ch) in text.char_indices() {
+        for lower in ch.to_lowercase() {
+            original.extend(std::iter::repeat_n(
+                start..start + ch.len_utf8(),
+                lower.len_utf8(),
+            ));
+        }
+    }
+    let mut hits = Vec::new();
+    for word in words {
+        // Adjacent matches can share bytes, as two matches of "ana" do in "banana".
+        hits.extend(
+            folded
+                .char_indices()
+                .filter(|&(start, _)| folded[start..].starts_with(word))
+                .map(|(start, _)| original[start].start..original[start + word.len() - 1].end),
+        );
+    }
+    hits.sort_unstable_by_key(|range| range.start);
+    let mut merged: Vec<Range<usize>> = Vec::new();
+    for hit in hits {
+        if let Some(last) = merged.last_mut().filter(|last| hit.start <= last.end) {
+            last.end = last.end.max(hit.end);
+        } else {
+            merged.push(hit);
+        }
+    }
+    merged
+}
+
+/// Split runs at both the match and font boundaries so underlining part of a path keeps the entire path monospace.
+fn sentence_runs(
+    text: &str,
+    mono: &[Range<usize>],
+    query: Option<&(String, bool)>,
+) -> Vec<(Range<usize>, HighlightStyle)> {
+    let Some((query, unicode)) = query else {
+        return mono
+            .iter()
+            .cloned()
+            .map(|range| (range, HighlightStyle::default()))
+            .collect();
+    };
+    let hits = if *unicode {
+        ranges_in_lowercase(text, &text.to_lowercase(), std::slice::from_ref(query))
+    } else {
+        let folded = text.to_ascii_lowercase();
+        folded
+            .char_indices()
+            .filter(|(start, _)| folded[*start..].starts_with(query.as_str()))
+            .map(|(start, _)| start..start + query.len())
+            .collect()
+    };
+    let mut edges: Vec<_> = hits
+        .iter()
+        .chain(mono)
+        .flat_map(|range| [range.start, range.end])
+        .collect();
+    edges.sort_unstable();
+    edges.dedup();
+    edges
+        .windows(2)
+        .map(|edge| {
+            let start = edge[0];
+            let underline = hits
+                .iter()
+                .any(|hit| hit.contains(&start))
+                .then_some(UnderlineStyle {
+                    thickness: px(1.),
+                    ..Default::default()
+                });
+            (
+                start..edge[1],
+                HighlightStyle {
+                    underline,
+                    ..Default::default()
+                },
+            )
+        })
+        .collect()
+}
+
 impl RenderOnce for HostSentence {
     fn render(self, _: &mut Window, _: &mut App) -> impl IntoElement {
         let name = self.accessible_name();
@@ -434,11 +559,9 @@ impl RenderOnce for HostSentence {
         // highlights is one run, so every monospace range is also handed in as a highlight that changes nothing, which
         // splits the runs at its edges. Both resolve against the inherited style at layout, so size and color still
         // come from the surrounding text.
+        let runs = sentence_runs(&text, &mono, self.underlined_query.as_ref());
         let text = StyledText::new(text)
-            .with_highlights(
-                mono.iter()
-                    .map(|range| (range.clone(), HighlightStyle::default())),
-            )
+            .with_highlights(runs)
             .with_font_family_overrides(
                 mono.into_iter()
                     .map(|range| (range, SharedString::from(assets::TERMINAL_FONT))),
@@ -536,6 +659,23 @@ impl RenderOnce for Line {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    /// Path matching treats a capital sigma literally. Template matching accepts whole-name lowercase,
+    /// which folds that same sigma differently at the end of a word.
+    #[test]
+    fn underlining_follows_the_search_values_case_policy() {
+        let matches = |sentence: HostSentence| {
+            let (text, mono) = sentence.drawn();
+            sentence_runs(&text, &mono, sentence.underlined_query.as_ref())
+                .into_iter()
+                .filter(|(_, style)| style.underline.is_some())
+                .map(|(range, _)| text[range].to_owned())
+                .collect::<Vec<_>>()
+        };
+        let sentence = HostSentence::new("result").mono(&HostText::from_host("/ΟΣ"));
+        assert_eq!(matches(sentence.clone().underline_matches("Σ")), ["Σ"]);
+        assert_eq!(matches(sentence.underline_template_matches("ος")), ["ΟΣ"],);
+    }
 
     /// Spoofing strings a host could put in a session title or host name, each paired with what the GUI must show.
     /// Kept beside the type so every view that renders host text can push the same corpus through itself.
