@@ -5,5 +5,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `antigravity-workspace-trust.md` — add an off-by-default Antigravity workspace-trust switch (all launches, via per-launch `--settings`) and screen-reader trust detection for Waiting status and the discovery banner
 - [complete] `model-family-cleanup.md` — standardize catalog model family names to versionless shorthand words, drop `family_word` from the wire, and shorten wrong-agent model refusals
 - [complete] `template-placeholder-validation.md` — validate command placeholder quoting and joining when saving launch templates and close the matching review item
-- [in-flight 22f4c9] `auto-update-staged-payloads.md` — skip automatic remote-host updates when locally staged unsigned payloads (`FARHELM_HELM_PAYLOAD_DIR`) are active and close the matching review item
+- [complete] `auto-update-staged-payloads.md` — skip automatic remote-host updates when locally staged unsigned payloads (`FARHELM_HELM_PAYLOAD_DIR`) are active and close the matching review item
 - [in-flight 72121e] `harness-drift-tests.md` — add opt-in real-agent harness drift tests across all 10 supported harnesses (including live Antigravity conversation-report verification) with three-way verdicts and manual flow triggers
