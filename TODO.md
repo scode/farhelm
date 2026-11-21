@@ -345,6 +345,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Show key bindings in pop-up menus.** key bindings should be shown in pop-up menus for discoverability (so eg.
   "rename" shows cmd-l). Plan: `plans/queue/menu-shortcut-hints.md`.
 
+- **Antigravity session id reporting still broken.** in 0.43.0 session id reporting for antigravity still doesnt work.
+  (Screenshot: an Antigravity CLI 1.5.13 session that has answered one prompt, with no session id shown anywhere in the
+  session view.)
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
