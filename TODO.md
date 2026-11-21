@@ -286,7 +286,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   them, Restart and resume. The point is to notice when an upstream update breaks Farhelm, before a user does. Today
   nothing does this: the tests drive stand-in agents and recorded transcripts, `scripts/agent-tui.py` is a manual tool,
   and re-capturing agent screens (`docs/agent-screen-fixtures.md`) is a manual job that only covers status reading. It
-  spends real vendor turns, so it needs logins and a budget, and stays out of the default test run.
+  spends real vendor turns, so it needs logins and a budget, and stays out of the default test run. Plan:
+  `plans/queue/harness-drift-tests.md`.
 
 ### Trivial
 
@@ -302,7 +303,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   you can type in the launcher to get a family's newest model (`fable`, `spark`, `glm`, ...) need a separate lookup
   table to map onto these names (`FAMILY_WORDS` in `crates/farhelm-proto/src/launcher.rs`). Pick one style, most likely
   the typed word itself, rename the families, and drop the lookup table if it becomes redundant. Raised by the
-  model-families landing, 2026-11-19.
+  model-families landing, 2026-11-19. Plan: `plans/queue/model-family-cleanup.md`.
 
 - **Shorter refusal for a model family word typed with the wrong agent.** With Claude chosen in the launcher, typing
   `sol` in the model field and pressing Enter says "sol is offered by Codex or Goose or Pi or OMP or OpenCode; choose
@@ -310,7 +311,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   does not describe it. Something like "Claude has no sol model; choose an agent that offers it." would do; add a test
   and a SPEC.md line. In the same change, drop the family word that the helm sends to the app with every model: both are
   the same build and already have the word table, so that protocol field and its roughly 35 test lines add nothing; let
-  the app work out the word itself. Raised by the model-family-shorthand landing, 2026-11-19.
+  the app work out the word itself. Raised by the model-family-shorthand landing, 2026-11-19. Plan:
+  `plans/queue/model-family-cleanup.md`.
 
 - **An agent asking to add a host another Farhelm owns is told to do something impossible.** An agent running in a
   session can ask Farhelm to add a remote host (you approve it). Since a host now belongs to exactly one Farhelm
@@ -318,7 +320,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   request goes to a devbuild) is refused with "Another Farhelm (...) manages this host. Use Take over in Hosts first."
   But Take over is an action on the host's row in Hosts, and this host has no row there, because adding it is exactly
   what was refused. The message should say what works instead: add the host yourself with Add host, which asks whether
-  to take it over from the other Farhelm. Raised by the one-helm-per-supervisor landing, 2026-11-19.
+  to take it over from the other Farhelm. Raised by the one-helm-per-supervisor landing, 2026-11-19. Plan:
+  `plans/queue/agent-add-host-takeover-hint.md`.
 
 - **Decide whether saving a launch template checks where its command's placeholders stand.** A custom command launch can
   use placeholders such as `{cwd}`, which Farhelm fills in. Each must stand alone as an unquoted word: `"{cwd}"` or
@@ -328,7 +331,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   refuses it. A complication: a template can hold just part of a launch setup (a command without its agent type, say),
   so some checks cannot run on a template alone, but the quoting and joining check can. The review item
   `review_feedback_queue/template-save-placeholder-validation-contract-conflict.md` is the same question; settle both
-  together. Raised by the gui-ux-wording plan, 2026-11-19.
+  together. Raised by the gui-ux-wording plan, 2026-11-19. Plan: `plans/queue/template-placeholder-validation.md`.
 
 - **Decide whether automatic host updates may install a devbuild's unsigned host builds.** A desktop app built from a
   working copy (a devbuild) has no signed release to download host builds from, so `scripts/devbuild-mac.sh` stages
@@ -337,7 +340,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   turning it on in one, and then Farhelm would install those unsigned local builds on every remote host with no click at
   all. Decide whether automatic updates should skip a staged folder and leave it to Update clicks. The review item
   `review_feedback_queue/staged-payloads-and-automatic-host-updates.md` is the same question. Raised by the
-  auto-update-hosts-default plan, 2026-11-20.
+  auto-update-hosts-default plan, 2026-11-20. Plan: `plans/queue/auto-update-staged-payloads.md`.
 
 - **Test that a real Antigravity still gets its conversation reports accepted.** To keep Restart on the main
   conversation rather than a subagent's, Farhelm now accepts a conversation report from Antigravity only when the
@@ -346,7 +349,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   report and Restart keeps opening an old conversation, and no test notices. Add a test that runs the installed
   Antigravity CLI, sends a short prompt, and checks that Farhelm accepts the report; it spends a real turn, so it
   belongs with the harness drift tests (Near term) rather than in the default run. Raised by the
-  antigravity-subagent-check plan, 2026-11-20.
+  antigravity-subagent-check plan, 2026-11-20. Plan: `plans/queue/harness-drift-tests.md`.
 
 ## Mid term
 
