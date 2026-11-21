@@ -3782,7 +3782,10 @@ Protocol 44 adds `ListCheckoutTrash`/`CheckoutTrashListed` and `DeleteCheckoutTr
 routes each HTTP request to one connected supervisor and checks the observed host incarnation before dispatch; it keeps
 no archive listing cache. IDs select records, never paths supplied by the client. The session Delete reply includes
 `archived: true` only when its completed last-reference teardown moved a checkout; bare successes and notice-only
-replies retain their existing JSON shapes.
+replies retain their existing JSON shapes. If the helm's reply deadline expires, it saves any late cleanup notice under
+the host and removed session's ID and wakes the notices feed after committing it. A timely reply carries its own notice
+and adds nothing to this history. A read mark also resolves a late Delete's notice because the Delete has already
+finished.
 
 `checkout_trash` operates only on retired working-copy rows with a recorded archive destination. It derives that path
 under the recorded root, opens the root and archive without following their final symlinks, and applies the
@@ -3863,19 +3866,20 @@ last successful listing says `removing` is read again every three seconds until 
 only that host is rechecked, and not while a read of it is out. A failed read keeps the last removal report and ends the
 rechecks until the host's trash epoch moves, it reconnects or the dialog opens. A settled delete reads its host again
 (the exceptions are below). A per-host in-memory Trash epoch advances on accepted nonempty Delete or Retry, on a session
-Delete or Replace that archived a checkout, and on a recorded notice change, before the existing fleet wake. Hosts
-listings carry it; only its change makes the window read an idle host again, so a cleanup the window did not start, such
-as a session Delete from the command line or an agent that archived a checkout, is still read and its removal rechecked.
-Ordinary pushes do not themselves read Trash. Changes through another helm are noticed when the window first sees a
-host's connection, on reconnect, or when the dialog opens and measures every connected host (`sync` and `open` in
-`crates/gui/farhelm-gui/src/trash.rs`). Trash notices arrive in the helm's pushed `Notices` collection like every other
-notice, so no timer or channel of the trash's own is mounted. The window keeps each connected host's newest read, keyed
-by host and connection incarnation, and drops an answer to any older read, so a reply from a host's earlier connection,
-from before a delete or from an older recheck never replaces a newer one, and unrelated hosts' reads are unaffected
-(`crates/gui/farhelm-gui/src/trash/listing.rs` records the decision); while the registry cannot be read, nothing is read
-or dropped. Host-list refresh failures are disclosed rather than treated as proof of current reachability. Unknown host
-counts stay unknown; the global cleanup requires successful, settled listings from every reachable host, and refuses a
-host above the protocol's 10,000-ID batch limit rather than silently omitting it.
+Delete or Replace that archived a checkout, and on a recorded notice change, before the fleet wake. An archive wakes the
+fleet even if a previous refresh has already removed the session row. Hosts listings carry it; only its change makes the
+window read an idle host again, so a cleanup the window did not start, such as a session Delete from the command line or
+an agent that archived a checkout, is still read and its removal rechecked. Ordinary pushes do not themselves read
+Trash. Changes through another helm are noticed when the window first sees a host's connection, on reconnect, or when
+the dialog opens and measures every connected host (`sync` and `open` in `crates/gui/farhelm-gui/src/trash.rs`). Trash
+notices arrive in the helm's pushed `Notices` collection like every other notice, so no timer or channel of the trash's
+own is mounted. The window keeps each connected host's newest read, keyed by host and connection incarnation, and drops
+an answer to any older read, so a reply from a host's earlier connection, from before a delete or from an older recheck
+never replaces a newer one, and unrelated hosts' reads are unaffected (`crates/gui/farhelm-gui/src/trash/listing.rs`
+records the decision); while the registry cannot be read, nothing is read or dropped. Host-list refresh failures are
+disclosed rather than treated as proof of current reachability. Unknown host counts stay unknown; the global cleanup
+requires successful, settled listings from every reachable host, and refuses a host above the protocol's 10,000-ID batch
+limit rather than silently omitting it.
 
 Confirmations freeze deduplicated IDs and observed host incarnations. Diagnostic IDs are selectable for explicit
 forgetting, while every diagnostic remains visible, including several for one ID. Before dispatch the window checks that

@@ -22,6 +22,11 @@ pub enum NoticeContent {
     FleetSessionLimit,
     /// The desktop kept its inherited PATH after its interactive login shell lookup failed.
     DesktopLoginPathUnavailable,
+    /// A Delete finished after the reply deadline and reported cleanup details.
+    LateDelete {
+        /// The supervisor names any checkout left behind and explains other cleanup outcomes.
+        detail: String,
+    },
 }
 
 /// Stable identity and first observation belong to the notice, not to each removal attempt. Resolved notices are

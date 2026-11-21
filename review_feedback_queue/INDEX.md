@@ -55,10 +55,6 @@ consequences.
   — New containers can permanently inherit a cached host proxy environment. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md`](trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md)
-  — Archive epoch can change without waking other clients. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-rebuild-retires-fallback-before-success.md`](trailing-podman-rebuild-retires-fallback-before-success.md)
   — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -605,10 +601,6 @@ consequences.
 
 - [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
   without typing can undo a host rename that just happened through an approved agent request.
-
-- [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
-  enough to time out while the host is still working, Farhelm can remove the session without telling you where its
-  unarchived checkout was left.
 
 - [`stop-and-suspend-hides-timeout-reason.md`](stop-and-suspend-hides-timeout-reason.md) — When Stop and suspend exceeds
   its reply deadline, Farhelm can leave you without the explanation that it is still working or that Stop already

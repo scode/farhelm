@@ -34832,3 +34832,45 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: Fixed. Change `ovkvssmpqxkzpsolwxswnzpvmuqzwvpl`, bookmark `plan/triage-helm/04-tunnels-and-credentials`,
   [PR #4505](https://github.com/scode/farhelm/pull/4505/changes).
+
+## trailing-archive-trash-epoch-lacks-unconditional-fleet-wake.md
+
+- Outcome: `fix code`.
+- Assessment: When a Delete archives a checkout (for example one run from the command line or by an agent while the GUI
+  is open), the GUI's Trash count can stay stale until some unrelated fleet change or until Trash is opened. Verified:
+  sessions.rs ~4107 bumps the Trash epoch and relies on `forget_session` to wake the fleet. manager.rs ~2711 wakes only
+  if a cached row was actually removed, which an earlier listing may already have done. "One GUI at a time" removes the
+  other-window framing, but CLI and agent deletes still reach this.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code: always wake the fleet when `archived` is true (tiny). If the
+  fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
+  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Fixed. Delete and Replace wake the fleet when they archive a checkout, even if the session row is already
+  gone. Change `ntzzpprwktnsvwrxqzulrtznmymklrmn`, bookmark `plan/triage-helm/05-delete-and-trash`,
+  [PR #4507](https://github.com/scode/farhelm/pull/4507/changes).
+
+## late-delete-loses-checkout-archive-notice.md
+
+- Outcome: `fix code`.
+- Assessment: If a session Delete takes longer than 20 s, Farhelm later removes the session but never says that its
+  checkout was left unarchived, or where. Verified: the helm bounds the Delete route at `HOST_REPLY_BOUND` = 20 s
+  (`farhelm-helm/src/sessions.rs:3767, 4029-4038`), while Delete's own budgets run to 60+60+15 s, so a slow Delete is
+  ordinary rather than rare. The GUI publishes the notice only from a `Done` reply (`session_list/delete.rs:378-386`).
+  No late delivery exists. SPEC.md ~1986-1988: "That outcome must never be silent: Delete completes with a visible
+  notice ... Wherever Delete's result is shown, the notice is shown with it."
+- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Deliver the late
+  notice" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we definitely need
+  to batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance
+  of them running concurrently."
+- Completion criteria: When a session Delete finishes after its helm reply timed out, publish its checkout-archive
+  notice (unarchived, and where) through the notifications feed, so SPEC's "must never be silent" holds. Medium;
+  accepted. Remove the feedback file and its index entry.
+- Execution: Fixed. A checkout left behind after Delete's reply deadline reaches the host notices bell. Change
+  `ntzzpprwktnsvwrxqzulrtznmymklrmn`, bookmark `plan/triage-helm/05-delete-and-trash`,
+  [PR #4507](https://github.com/scode/farhelm/pull/4507/changes).

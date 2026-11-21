@@ -2009,7 +2009,8 @@ safely, for any reason (its folder or root no longer matching what was recorded,
 earlier move attempt being impossible to establish), Delete still removes the session, releases the checkout from
 Farhelm's management, and leaves the folder where it is. That outcome must never be silent: Delete completes with a
 visible notice that the checkout was not archived, naming the path left behind and, where known, why. Wherever Delete's
-result is shown, the notice is shown with it.
+result is shown, the notice is shown with it. If the reply timed out before Delete finished, its checkout notice appears
+in the navigation rail's notices bell once the host reports the outcome.
 
 Repository suggestions combine successful repository launches for the same host installation with immediate Git clones
 under the configured root. Discovery does not confer ownership, contact GitHub, fetch, recurse, run repository code, or
@@ -3198,6 +3199,9 @@ mark may leave it loud until another close. Resolved items are quiet even if nev
 **Clear resolved** removes the resolved items in the last displayed list, including items outside the viewport. Read and
 cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable host
 keeps its last known notices.
+
+A late Delete notice names the host and shows its cleanup details, including the path and reason for any checkout left
+behind. Reading this notice marks it resolved so it can be cleared from the history.
 
 Trash cleanup notices report trashed checkouts whose background cleanup failed. A notice names the host and checkout,
 shows how much space was last measured when known and a short reason, and explains that Farhelm tries again when that

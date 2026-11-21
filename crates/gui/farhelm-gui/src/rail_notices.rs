@@ -579,7 +579,8 @@ impl Actions {
 /// and what happened, the checkout's repository and last measured size, the reason in red (greyed with the rest once
 /// resolved), when it last failed (to the minute, in the viewer's local time), and for an unresolved notice the promise
 /// of a retry at the host's supervisor restart with Retry now beside Open Trash. A session-limit or desktop startup
-/// notice offers Send feedback. A host the registry does not list is named "Unknown host", as the old panel said;
+/// notice offers Send feedback. A late Delete carries the host’s cleanup details.
+/// A host the registry does not list is named "Unknown host", as the old panel said;
 /// trash reports keep their original host name while the registry load is pending.
 #[allow(
     clippy::too_many_arguments,
@@ -618,6 +619,29 @@ fn entry(
                 button,
                 bell,
                 palette,
+            );
+        }
+        NoticeContent::LateDelete { detail } => {
+            let id = notice.id;
+            let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-title"))
+                .text("Session deleted on ");
+            let title = match &host {
+                Some(host) => title.host(host),
+                None => title.text("Unknown host"),
+            };
+            return entry_frame(
+                SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
+                is_unread(notice),
+                palette,
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(6.))
+                    .when(notice.resolved, |content| {
+                        content.text_color(theme::color(palette.fg_1))
+                    })
+                    .child(div().font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(host_text::element(&HostText::from_host(detail.as_str()))),
             );
         }
     };
