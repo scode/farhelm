@@ -43,13 +43,13 @@ use gpui::{
 };
 
 use crate::actions::{ChordModifiers, THIS_PLATFORM};
-use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier};
+use crate::components::{Button, DialogFrame, HoverHelp, Role, Tier, key_chip};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Dialog, DialogPlacement, LayerId, MainAction};
 use crate::session;
 use crate::templates::shortcuts::{Bindings, KEYS};
-use crate::theme::{self, Palette, Token, metrics};
+use crate::theme::{self, Palette, metrics};
 
 // ---- Layout: the old `.keyboard-shortcuts-*` rules ------------------------------------------------------------------
 
@@ -66,9 +66,6 @@ const HEADING_GAP: f32 = 10.;
 /// `.keyboard-shortcuts-row`: the gap between the action and its chip, and the row's vertical padding.
 const ROW_GAP: f32 = 16.;
 const ROW_PAD: f32 = 5.;
-/// `.quick-switcher-template-keys kbd`: the chip's padding (vertical, horizontal) and text size.
-const CHIP_PAD: (f32, f32) = (2., 5.);
-const CHIP_TEXT: f32 = 11.;
 /// `.host-settings-header`'s gap, kept between the title and the header's Close (see [`KeyboardShortcuts`]'s render).
 const HEADER_GAP: f32 = 14.;
 
@@ -288,9 +285,9 @@ pub(crate) fn open_from_menu(
     open(ReturnTo::Control(opener.clone()), mark, window, cx)
 }
 
-/// Whether the current UI session's store holds the helm's preferences: false while the window is inert and before
-/// the snapshot has brought them.
-fn preferences_arrived(cx: &App) -> bool {
+/// Whether the chord has the helm preferences it needs. The Help menu uses this same condition to advertise the
+/// shortcut. The menu item itself can open the overview while preferences are unavailable.
+pub(crate) fn preferences_arrived(cx: &App) -> bool {
     session::current_store(cx).is_some_and(|store| {
         store
             .read(cx)
@@ -398,24 +395,7 @@ fn row(entry: Row, palette: &Palette) -> Div {
         .gap(px(ROW_GAP))
         .py(px(ROW_PAD))
         .child(div().flex_1().min_w_0().child(name))
-        .child(chip(keys, palette.fg_1, palette))
-}
-
-/// A key chip (`.quick-switcher-template-keys kbd`, the rule the old overview's rows shared): `keys` in 11-pixel `ink`
-/// inside a small rounded box with the dialog's border ink. The overview draws every chord in one, and the template list
-/// draws a template's ⚡ and number-key chords in them, so both lists show a chord the same way. `ink` is the caller's
-/// because a chip on a selected row takes the dimmer inverse ink, as the old sheet's selected rule had it.
-pub(crate) fn chip(keys: impl Into<SharedString>, ink: Token, palette: &Palette) -> Div {
-    div()
-        .flex_none()
-        .py(px(CHIP_PAD.0))
-        .px(px(CHIP_PAD.1))
-        .border_1()
-        .border_color(theme::color(palette.border_dialog))
-        .rounded(metrics::RADIUS_SM)
-        .text_size(px(CHIP_TEXT))
-        .text_color(theme::color(ink))
-        .child(keys.into())
+        .child(key_chip(keys, palette.fg_1, palette))
 }
 
 impl Render for KeyboardShortcuts {

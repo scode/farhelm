@@ -397,6 +397,19 @@ pub(super) fn session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mu
     );
 }
 
+/// The open running session's menu fits both hints at the standard panel width, with Rename highlighted and Delete
+/// in danger ink. On Linux this pictures the full Ctrl+Shift+Backspace label.
+pub(super) fn open_session_row_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    session_list_then(
+        state,
+        |list, _, window, cx| {
+            assert_eq!(local_state::selected(cx).as_deref(), Some("a"));
+            list.update(cx, |list, cx| list.toggle_menu("a", window, cx));
+        },
+        cx,
+    );
+}
+
 /// The list's order menu, open below its title as a click opens it (reference `sort-menu`): the title in its open look,
 /// the shared header ("Session list"), the three orders with Recently active, the stored default, checked and
 /// highlighted, and Compact, unchecked, after a separator.

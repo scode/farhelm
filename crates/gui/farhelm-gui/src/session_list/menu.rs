@@ -136,7 +136,7 @@ use gpui::{
 use super::environment::{self, Environment};
 use super::row_marks::HelpPlace;
 use super::{SessionList, delete, outcome, replace, seen, selection, status, stop};
-use crate::actions::RENAME_SESSION_SHORTCUT_NAME;
+use crate::actions::{DELETE_SESSION_SHORTCUT_NAME, RENAME_SESSION_SHORTCUT_NAME};
 use crate::assets::Icon;
 use crate::components::{
     HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Role, Tier, home_end_keys,
@@ -902,11 +902,6 @@ impl RowMenu {
         };
         let panel = panel.on_key_down(home_end_keys(first.clone(), self.delete_focus.clone()));
         let open = local_state::selected(cx).as_deref() == Some(self.key.as_str());
-        let rename_help = if open {
-            format!("Rename: give this session a new title ({RENAME_SESSION_SHORTCUT_NAME})")
-        } else {
-            "Rename: give this session a new title".to_owned()
-        };
         // An environment session's own commands and freeze (the module docs), read from the registry now.
         let environment = Environment::of(row, store.read(cx).collections());
         let frozen = environment.is_some_and(|environment| environment.frozen());
@@ -914,6 +909,10 @@ impl RowMenu {
         let Some(target) = Actionable::drawn(&self.key, row.clone(), cx) else {
             return panel;
         };
+        // The shortcut routes through the header. Both entry points use the same guard and environment lane, but
+        // the header can ask for confirmation when the menu would delete at once.
+        let delete_shortcut =
+            open && !busy && delete::asks(&target, false) == delete::asks(&target, true);
         let captured =
             self.action_frame
                 .capture(target, [busy, frozen, launch_wait.is_some()], window);
@@ -943,10 +942,13 @@ impl RowMenu {
             "session-menu-rename",
             Icon::Edit,
             "Rename",
-            HoverHelp::tooltip(rename_help),
+            HoverHelp::tooltip("Rename: give this session a new title"),
             Role::MenuItem,
         )
         .description("Give this session a new title")
+        .when(open && !busy, |item| {
+            item.shortcut(RENAME_SESSION_SHORTCUT_NAME)
+        })
         .disabled(busy)
         .focus(&self.rename_focus)
         .on_click(move |_, window, cx| {
@@ -1089,6 +1091,9 @@ impl RowMenu {
             delete_help.unwrap_or("Removes the session and its state"),
             LifecycleCommand::Delete,
         )
+        .when(delete_shortcut, |item| {
+            item.shortcut(DELETE_SESSION_SHORTCUT_NAME)
+        })
         .focus(&self.delete_focus);
         // A retired session's menu holds Delete alone (the module docs), the same item every row's menu ends with.
         let pinned = super::pins::menu_items(&self.list, &self.key, row, busy, cx);

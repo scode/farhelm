@@ -3702,8 +3702,9 @@ leaves the app running. The maintainer decided on 2026-11-13 that the notices li
 
 Cmd+L in the Mac desktop app, or Ctrl+Shift+L on Linux, opens Rename for the open session, including when its row is
 filtered out of the sidebar. Closing that shortcut-opened dialog returns focus to the terminal. Both session shortcuts
-work from terminal focus without sending their chord to the program, ignore repeat and composition, and appear in the
-relevant tooltips: Delete on the header button, Rename only on the open session's row-menu item.
+work from terminal focus without sending their chord to the program and ignore repeat and composition. The open
+session's row menu shows a key chip on Rename and on Delete when the menu and header actions have the same confirmation
+behavior. The header Delete button names its shortcut in its tooltip.
 
 Cmd+0–9 in the Mac desktop app, or Ctrl+Shift+0–9 on Linux, directly launches templates with number keys (see Creation).
 
@@ -3755,15 +3756,15 @@ preparation, or before preferences finish loading.
 Cmd+/ on macOS, Ctrl+Shift+/ on Linux, opens **Keyboard shortcuts**, including from a focused terminal. Matching uses
 the physical Slash key, with no extra modifiers; repeat and composition do not open it. The chord never reaches the
 terminal's program, and does nothing while another modal is open or before preferences finish loading. The same dialog
-is also available from the **?** menu. Its Sessions, Launching and Terminal groups show every app-wide shortcut and the
-keys inside a quick-launch sequence, with action names beside key chips. New appears only in the Mac desktop app. Each
-shortcut shows only the form this client handles: quick switcher, template list, ⚡, terminal text size and this dialog
-follow the operating system, while New, Delete, Rename, number keys and the sequence prefix use Command only in the Mac
-desktop app. The dialog names the current ⚡ template, or says none is marked, and lists assigned number keys with their
-template names. It refreshes those shared bindings once each time it opens; a failed read keeps cached names. Keys used
-only inside other dialogs are omitted. Escape, Close or a click outside closes the ordinary modal and restores the
-opener's focus, including the terminal or the **?** button. The documentation's Keyboard shortcuts page lists both
-platform forms.
+is also available from the **?** menu, where the item shows its shortcut. Its Sessions, Launching and Terminal groups
+show every app-wide shortcut and the keys inside a quick-launch sequence, with action names beside key chips. New
+appears only in the Mac desktop app. Each shortcut shows only the form this client handles: quick switcher, template
+list, ⚡, terminal text size and this dialog follow the operating system, while New, Delete, Rename, number keys and the
+sequence prefix use Command only in the Mac desktop app. The dialog names the current ⚡ template, or says none is
+marked, and lists assigned number keys with their template names. It refreshes those shared bindings once each time it
+opens; a failed read keeps cached names. Keys used only inside other dialogs are omitted. Escape, Close or a click
+outside closes the ordinary modal and restores the opener's focus, including the terminal or the **?** button. The
+documentation's Keyboard shortcuts page lists both platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size

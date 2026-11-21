@@ -44,10 +44,10 @@ linux/filter-empty-both-links--dark.png d423cda2aa8331116574e6e3c3f47a750dcce928
 linux/filter-empty-both-links--light.png 92265c2d7487766dc3f1fb779e3c4a7d29a6bfb3
 linux/focus-ring--dark.png 6b7b43d368f719b9d73f4c93732399604dc5aba1
 linux/focus-ring--light.png 5cfb9bdb574c9451c8ddfcfbcf879933fccc6d20
-linux/help-menu--dark.png d83704595c29470ac30d43e9735b9232629f8b00
-linux/help-menu--light.png dab610a061b4eee14d5cdc03b1351c32fda5ff9c
-linux/help-menu-announcements-hover--dark.png 9803d0ffbfb2ef0b52932a2ba2012713fc04eeaf
-linux/help-menu-announcements-hover--light.png 3b76965694de752522c3189db887c6377acd0dd1
+linux/help-menu--dark.png 6b360290b62eff87861d43d5071313039bf87bc1
+linux/help-menu--light.png 6798947a98cf8b84ca167c62e3f2167993a136e4
+linux/help-menu-announcements-hover--dark.png ba221b4f42e99927d43852bb7c0c4af622bc0bef
+linux/help-menu-announcements-hover--light.png f697f1cda1c8148eb74747df28aefeb354800cbb
 linux/host-add-dialog--dark.png dd79b2d78534c41709803c07df40faa2a908200e
 linux/host-add-dialog--light.png f2549c0d759995f6697306ccaf080aca62e4c864
 linux/host-add-dialog-agent--dark.png aa9d93a42f7f3cd4040a1548c60fa3dbf37c51a7
@@ -128,6 +128,8 @@ linux/notices-bell-loud--dark.png dfa980eb51152ea15566052a16b7d4d1ca1491a4
 linux/notices-bell-loud--light.png 748986108ee5cc236a83d6a18c122c27ea388fb9
 linux/notices-empty--dark.png 4043c5734698a78e7edc8c6d024be9b8bd884f03
 linux/notices-empty--light.png 0258259296017999c40197e6da4b7e2995060071
+linux/open-session-row-menu--dark.png e1463d5a9c88e04a9e8dfb76a437a98ca0ce55a0
+linux/open-session-row-menu--light.png 8c2e72fb09f142b8b67764000103936f3e67da49
 linux/open-source-notices--dark.png fd1d6cfe323e289524c7bbe526cd2aeb81c0a0dd
 linux/open-source-notices--light.png a0e4ea27130025bf7057a9ad6d826260dfc1cd09
 linux/popover--dark.png 2b966dc1d7adf10360384161d8d4c83ab0561bd3

@@ -410,6 +410,7 @@ fn check_chord(platform: Platform, chord: Chord, runs: Runs, what: &str, cx: &gp
 /// modifiers). Any other shortcut is bound to its action by this platform's installed keymap in Farhelm's context, and,
 /// for the other platform, its chord is that action's app-shortcut row in the terminal key table (New, the Mac's alone,
 /// through its binding function). Quick launch is checked as bound to its action alone and inside a sequence.
+/// The menu hints on this platform must spell the same chords as the dialog rows.
 #[gpui::test]
 fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppContext) {
     test_support::install(cx);
@@ -429,6 +430,23 @@ fn every_chord_the_table_shows_runs_the_action_its_row_names(cx: &mut TestAppCon
                         chords += 1;
                         let what = format!("{:?}", row.name);
                         check_chord(platform, chord, runs(&row.name), &what, cx);
+                        if platform == THIS_PLATFORM {
+                            let hint = match row.name {
+                                Name::Words("Delete session") => {
+                                    Some(actions::DELETE_SESSION_SHORTCUT_NAME)
+                                }
+                                Name::Words("Rename session") => {
+                                    Some(actions::RENAME_SESSION_SHORTCUT_NAME)
+                                }
+                                Name::Words("Keyboard shortcuts") => {
+                                    Some(actions::KEYBOARD_SHORTCUTS_SHORTCUT_NAME)
+                                }
+                                _ => None,
+                            };
+                            if let Some(hint) = hint {
+                                assert_eq!(hint, chord.label(), "{what}'s menu hint");
+                            }
+                        }
                     }
                 }
             }
@@ -496,7 +514,8 @@ fn the_chord_does_nothing_over_a_menu_or_over_the_overview_itself(cx: &mut TestA
 
 /// SPEC.md: the chord does nothing "before preferences finish loading"; here that is a snapshot without the preferences
 /// entry, the same stand-in the quick switcher's chord uses. The overview names bindings it would not have yet.
-/// Specified: with the session list arrived but no preferences entry in the store, the chord opens nothing.
+/// Specified: with the session list arrived but no preferences entry in the store, the chord opens nothing. Help
+/// still offers the dialog, and omits the chip until the chord can open it too.
 #[gpui::test]
 fn the_chord_does_nothing_before_the_preferences_arrive(cx: &mut TestAppContext) {
     let main = open_main(cx, vec![listing(&["a"], &[session("a")])]);
@@ -515,6 +534,20 @@ fn the_chord_does_nothing_before_the_preferences_arrive(cx: &mut TestAppContext)
     );
     keys(main.cx, CHORD);
     assert!(!any_open(main.cx), "nothing opens before the preferences");
+
+    click(main.cx, HELP_BUTTON);
+    let texts = crate::session_list::host_rail::tests::texts_within(
+        &frame(main.cx),
+        "help-menu-keyboard-shortcuts",
+    );
+    assert!(texts.iter().any(|text| text.text == "Keyboard shortcuts"));
+    assert!(
+        !texts
+            .iter()
+            .any(|text| text.text == actions::KEYBOARD_SHORTCUTS_SHORTCUT_NAME)
+    );
+    click(main.cx, "help-menu-keyboard-shortcuts");
+    assert!(open(main.cx), "the menu item can open the dialog");
 }
 
 // ---- The rows from pushed preferences -------------------------------------------------------------------------------
@@ -612,10 +645,19 @@ fn the_template_rows_follow_the_pushed_preferences_while_open_and_at_each_openin
 
 // ---- Opening from the `?` menu ---------------------------------------------------------------------------------------
 
-/// Open the overview from the `?` menu's item, checking that the menu closed and the overview opened with focus on
-/// Close.
+/// The Help menu advertises the chord that opens the same dialog. Check the chip before choosing the item and
+/// check that focus starts on Close in the overview.
 fn open_from_menu(cx: &mut VisualTestContext) {
     click(cx, HELP_BUTTON);
+    let texts = crate::session_list::host_rail::tests::texts_within(
+        &frame(cx),
+        "help-menu-keyboard-shortcuts",
+    );
+    assert!(
+        texts
+            .iter()
+            .any(|text| text.text == actions::KEYBOARD_SHORTCUTS_SHORTCUT_NAME)
+    );
     click(cx, "help-menu-keyboard-shortcuts");
     assert!(open(cx), "the item opened the overview");
     assert!(

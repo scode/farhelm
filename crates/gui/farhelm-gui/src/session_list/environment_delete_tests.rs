@@ -198,16 +198,22 @@ fn each_lane_sends_its_own_flag_as_environment_delete_work() {
 /// sandbox's name, the quoted title, no managed-checkout line, and "Delete session" helped by the lane's help; nothing
 /// is sent before the answer; the answer sends exactly `?delete_environment_session=true`, held on a's key as
 /// environment Delete work; its success with a count of 2 shows "The sandbox stays: 2 other sessions are in it" in the
-/// band and counts as this window's Delete; once the hosts read no longer lists the sandbox, the band is gone.
+/// band and counts as this window's Delete; once the hosts read no longer lists the sandbox, the band is gone. The
+/// open row advertises the shortcut because both commands need the same consent even with Skip confirmations on.
 #[gpui::test]
 fn a_connected_sandboxs_delete_asks_its_farhelm_and_says_what_stays(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
     let (mut fake, cx) = open(cx, &[(ended("a"), 0), (session("b"), 0)], true, &host);
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
+    let menu = texts(cx);
     assert!(
-        texts(cx).iter().any(|text| text == SANDBOX_SESSION_HELP),
+        menu.iter().any(|text| text == SANDBOX_SESSION_HELP),
         "the menu's Delete names the session lane"
+    );
+    assert!(
+        menu.iter().any(|text| text == DELETE_SESSION_SHORTCUT_NAME),
+        "both Deletes ask for the session lane"
     );
     test_support::click(cx, "session-menu-delete");
     test_support::settle(cx);
@@ -343,7 +349,8 @@ fn a_suspended_sandboxs_delete_is_the_warned_whole_sandbox_delete(cx: &mut TestA
 /// Specified, on a paused container: a's menu describes Delete as "Delete this session together with its whole
 /// container and everything in it"; Delete asks with the container's warning and its name, answered "Delete session
 /// and container" helped by that same description. Focus starts on Cancel because everything in the container would
-/// be lost. Confirming sends exactly `?delete_sandbox=true`.
+/// be lost. Confirming sends exactly `?delete_sandbox=true`. The open row still advertises the shortcut because
+/// both commands ask for the whole container.
 #[gpui::test]
 fn a_paused_containers_row_asks_the_whole_container_delete(cx: &mut TestAppContext) {
     const CONTAINER_WHOLE_HELP: &str =
@@ -352,9 +359,14 @@ fn a_paused_containers_row_asks_the_whole_container_delete(cx: &mut TestAppConte
     let (mut fake, cx) = open(cx, &[(session("a"), 0)], false, &host);
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
+    let menu = texts(cx);
     assert!(
-        texts(cx).iter().any(|text| text == CONTAINER_WHOLE_HELP),
+        menu.iter().any(|text| text == CONTAINER_WHOLE_HELP),
         "the menu's Delete names the whole lane"
+    );
+    assert!(
+        menu.iter().any(|text| text == DELETE_SESSION_SHORTCUT_NAME),
+        "both Deletes ask for the whole lane"
     );
     test_support::click(cx, "session-menu-delete");
     test_support::settle(cx);

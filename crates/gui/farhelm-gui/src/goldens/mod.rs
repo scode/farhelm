@@ -781,6 +781,13 @@ static SCENES: &[Scene] = &[
         setup: session_row_menu_setup,
     },
     Scene {
+        name: "open-session-row-menu",
+        // Keep the last command visible so the capture shows Delete's full Linux shortcut.
+        size: (920., 680.),
+        draw: session_lists_then,
+        setup: open_session_row_menu_setup,
+    },
+    Scene {
         name: "notices-empty",
         size: (820., 560.),
         draw: session_lists_then,

@@ -157,8 +157,7 @@ pub(crate) const DELETE_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
     "ctrl-shift-backspace"
 };
 
-/// The Delete shortcut as hover help names it on this platform, in the old app's spelling (`SESSION_DELETE_SHORTCUT` at
-/// reference commit `24bc0580`): the session header's Delete names it.
+/// The Delete shortcut's display name for the header tooltip and the open session's menu.
 pub(crate) const DELETE_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
     "⌘W"
 } else {
@@ -177,12 +176,19 @@ pub(crate) const RENAME_SESSION_CHORD: &str = if cfg!(target_os = "macos") {
     RENAME_SESSION_LINUX
 };
 
-/// The Rename shortcut as hover help names it on this platform, in the old app's spelling (`SESSION_RENAME_SHORTCUT`
-/// at reference commit `24bc0580`).
+/// The Rename shortcut's display name for the open session's menu.
 pub(crate) const RENAME_SESSION_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
     "⌘L"
 } else {
     "Ctrl+Shift+L"
+};
+
+/// The Help menu's display name for the physical Slash shortcut. The shortcut table tests check it against the
+/// dialog's label and the physical key's binding.
+pub(crate) const KEYBOARD_SHORTCUTS_SHORTCUT_NAME: &str = if cfg!(target_os = "macos") {
+    "⌘/"
+} else {
+    "Ctrl+Shift+/"
 };
 
 /// The quick switcher's chords (SPEC.md, "Desktop window chrome"): Cmd+K on a Mac, Ctrl+Shift+K on Linux. Spelled once

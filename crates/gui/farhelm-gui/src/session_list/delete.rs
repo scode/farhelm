@@ -258,16 +258,17 @@ impl SessionList {
     }
 }
 
-/// Start a Delete from the activated control's snapshot. This is the one statement of
-/// Delete's ask-or-send rule, for the row's menu and the open session's header alike. The row's Delete goes ahead
-/// unasked on a session that shows nothing alive; the header's asks even then (SPEC.md: it "asks first in the same
-/// anchored way, even for a session that has ended"), which `ask_when_nothing_alive` says. Skipped questions go ahead
-/// either way. When nothing needs asking, the Delete is sent at once with the guard of `row` as drawn, and there is
-/// nothing to ask. Otherwise nothing is sent, and what comes back builds the question to ask, whose answer goes to
-/// [`confirm`] or [`confirming`].
-///
-/// A session in a disposable environment is always asked, skipped or not and alive or not, in the lane the hosts read
-/// picks now (`environment_delete`'s "Always asked").
+/// Whether the drawn Delete requires confirmation, before anything is sent. The header and its shortcut ask even
+/// when the row shows nothing alive, unless the preference skips questions. The row menu can also skip on that
+/// premise. Both always ask for an environment Delete, in either lane.
+pub(super) fn asks(target: &menu::Actionable, ask_when_nothing_alive: bool) -> bool {
+    target.environment_delete.is_some()
+        || (!target.skips_questions
+            && (ask_when_nothing_alive || !shows_nothing_alive(&target.row)))
+}
+
+/// Start a Delete from the activated control's snapshot. If it [`asks`], defer the request and return the question
+/// builder for [`confirm`] or [`confirming`]. Otherwise send at once with the guard of the row as drawn.
 pub(crate) fn begin<'a>(
     target: &'a menu::Actionable,
     ask_when_nothing_alive: bool,
@@ -276,8 +277,7 @@ pub(crate) fn begin<'a>(
     let (key, row) = (&target.key, &target.row);
     let guard = guard(row);
     let environment = &target.environment_delete;
-    let unasked = target.skips_questions || (shows_nothing_alive(row) && !ask_when_nothing_alive);
-    if environment.is_none() && unasked {
+    if !asks(target, ask_when_nothing_alive) {
         send_delete(key, guard, cx);
         return None;
     }

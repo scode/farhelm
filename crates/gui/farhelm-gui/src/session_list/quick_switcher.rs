@@ -128,7 +128,7 @@ use super::selection;
 use super::status::{self, Badge};
 use crate::components::{
     Button, HoverHelp, OptionRow, Role, TextInput, TextInputEvent, TextInputState, Vertical,
-    dialog_shadow,
+    dialog_shadow, key_chip,
 };
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
@@ -139,7 +139,7 @@ use crate::templates::rows::{self as template_rows, Row as TemplateRow};
 use crate::templates::summary;
 use crate::templates::{self, QUICK_LAUNCH_SHORTCUT_NAME};
 use crate::theme::{self, Palette, metrics};
-use crate::{assets, operations, shortcuts, ticker};
+use crate::{assets, operations, ticker};
 
 // ---- Layout: the old `.quick-switcher-*` rules ------------------------------------------------------------------------
 
@@ -1319,7 +1319,7 @@ fn template_row(row: &TemplateRow, selected: bool, mode: Mode, palette: &Palette
         div().flex().flex_wrap().gap(KEY_CHIP_GAP).children(
             chords
                 .into_iter()
-                .map(|chord| shortcuts::chip(chord, quiet, palette)),
+                .map(|chord| key_chip(chord, quiet, palette)),
         ),
     )
 }

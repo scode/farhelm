@@ -30,7 +30,10 @@ use super::tests::{
     Fixture, change, launcher_drawn, listing_meta, open_main, painted, row_order, selected, sent,
     session,
 };
-use crate::actions::{DELETE_SESSION_CHORD as DELETE_CHORD, RENAME_SESSION_SHORTCUT_NAME};
+use crate::actions::{
+    DELETE_SESSION_CHORD as DELETE_CHORD, DELETE_SESSION_SHORTCUT_NAME,
+    RENAME_SESSION_SHORTCUT_NAME,
+};
 use crate::hosts::tests::{connected, host, hosts};
 use crate::launcher::view_tests::{search_focused, search_text};
 use crate::operations::OpKey;
@@ -1063,29 +1066,82 @@ fn the_menus_rename_is_refused_while_a_delete_of_its_row_is_in_flight(cx: &mut T
     assert_eq!(sent(&mut fake), []);
 }
 
-/// SPEC.md, "Desktop window chrome": the Rename shortcut appears "only on the open session's row-menu item", the one
-/// row the shortcut acts on; naming it on another row would suggest it renames that one. Specified: with a open, the
-/// help of Rename in a's menu, shown after the hover delay, holds the shortcut's name, and in b's menu it does not.
+/// Both shortcuts act on the open session. Its Rename needs only a chip, and its Delete can show one when the
+/// menu and the shortcut both ask. An ended session with nothing alive has no Delete chip unless the preference
+/// makes both commands proceed without asking.
 #[gpui::test]
-fn only_the_open_rows_rename_names_the_shortcut(cx: &mut TestAppContext) {
-    let (mut fake, cx) = open_main(cx, snapshot(&[(session("a"), 0), (session("b"), 0)], false));
+fn the_open_rows_menu_names_only_shortcuts_that_do_the_same_thing(cx: &mut TestAppContext) {
+    let (mut fake, cx) = open_main(
+        cx,
+        snapshot(
+            &[(session("a"), 0), (ended("b"), 0), (ended("c"), 2)],
+            false,
+        ),
+    );
     assert_eq!(selected(cx).as_deref(), Some("a"), "the premise: a is open");
     deletes(&mut fake);
-    let mut help_in_menu_of = |button: &'static str| {
-        test_support::click(cx, button);
-        let rename = test_support::center(cx, "session-menu-rename");
-        cx.simulate_mouse_move(rename, None, Modifiers::none());
-        test_support::advance(cx, layers::HOVER_DELAY);
-        let help = cx
-            .update(|window, cx| layers::shown_tooltip(window, cx))
-            .map(|shown| shown.text.to_string());
-        test_support::keys(cx, "escape escape");
-        help.expect("the premise: Rename's help is showing")
-    };
-    let open = help_in_menu_of("session-menu-a");
-    let other = help_in_menu_of("session-menu-b");
-    assert!(open.contains(RENAME_SESSION_SHORTCUT_NAME), "{open}");
-    assert!(!other.contains(RENAME_SESSION_SHORTCUT_NAME), "{other}");
+
+    test_support::click(cx, "session-menu-a");
+    assert_menu_shortcuts(cx, true, true);
+    let rename = test_support::center(cx, "session-menu-rename");
+    cx.simulate_mouse_move(rename, None, Modifiers::none());
+    test_support::advance(cx, layers::HOVER_DELAY);
+    let help = cx.update(|window, cx| layers::shown_tooltip(window, cx).unwrap().text.to_string());
+    assert_eq!(help, "Rename: give this session a new title");
+    test_support::keys(cx, "escape escape");
+
+    test_support::click(cx, "session-menu-c");
+    assert_menu_shortcuts(cx, false, false);
+    test_support::keys(cx, "escape");
+
+    test_support::click(cx, "session-row-b");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("b"),
+        "the ended session without tabs opened"
+    );
+    test_support::click(cx, "session-menu-b");
+    assert_menu_shortcuts(cx, true, false);
+    test_support::keys(cx, "escape");
+
+    test_support::click(cx, "session-row-c");
+    assert_eq!(
+        selected(cx).as_deref(),
+        Some("c"),
+        "the ended session with tabs opened"
+    );
+    test_support::click(cx, "session-menu-c");
+    assert_menu_shortcuts(cx, true, true);
+}
+
+/// Check each command's own paint record so a missing chip cannot pass because the command was absent.
+fn assert_menu_shortcuts(cx: &mut VisualTestContext, rename: bool, delete: bool) {
+    let nodes = frame(cx);
+    for (id, label, shortcut, expected) in [
+        (
+            "session-menu-rename",
+            "Rename",
+            RENAME_SESSION_SHORTCUT_NAME,
+            rename,
+        ),
+        (
+            "session-menu-delete",
+            "Delete",
+            DELETE_SESSION_SHORTCUT_NAME,
+            delete,
+        ),
+    ] {
+        let texts = texts_within(&nodes, id);
+        assert!(
+            texts.iter().any(|text| text.text == label),
+            "the premise: {label} was drawn"
+        );
+        assert_eq!(
+            texts.iter().any(|text| text.text == shortcut),
+            expected,
+            "{label}'s shortcut"
+        );
+    }
 }
 
 // ---- The question and the request ----------------------------------------------------------------------------------
@@ -1378,6 +1434,7 @@ fn skipped_delete_keeps_the_shown_guard_after_an_agent_restarts(cx: &mut TestApp
     let (mut fake, cx) = open_main(cx, snapshot(&[(ended("a"), 0)], true));
     deletes(&mut fake);
     test_support::click(cx, "session-menu-a");
+    assert_menu_shortcuts(cx, true, true);
     test_support::show_next_frame(cx);
     let at = test_support::center(cx, "session-menu-delete");
     let live = change(listing_meta(&["a"], 1, false), &[session("a")], &[]);

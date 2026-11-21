@@ -21,6 +21,8 @@
 //!   line is its accessible description, as the old item's `aria-describedby` made it. SPEC.md lets an item that shows
 //!   a description go without hover text; the component layer has no form of [`HoverHelp`] that stands for a visible
 //!   description yet, so every item carries a tooltip too.
+//! - **Shortcut hints.** A shortcut for the same command appears beside the label, at the far edge where a submenu
+//!   trigger would put its arrow. The item also exposes the chord to assistive technology.
 //!
 //! Activation follows [`super::Button`]: a click, or Enter or Space while the item has focus (never a held key), and
 //! the focus coordinator's click rule for whether a press moves focus.
@@ -47,7 +49,7 @@ use gpui::{
     Window, div, prelude::FluentBuilder as _, px, radians, svg,
 };
 
-use super::{Handler, HoverHelp};
+use super::{Handler, HoverHelp, key_chip};
 use crate::assets::Icon;
 use crate::focus;
 use crate::host_text::{HostSentence, Line};
@@ -75,6 +77,7 @@ pub struct MenuItem {
     description: Option<Line>,
     /// Words drawn after the label on its line ([`MenuItem::suffix`]).
     suffix: Option<SharedString>,
+    shortcut: Option<&'static str>,
     /// Whether this is a choice ([`MenuItem::choice`]), and then whether it is the chosen one.
     chosen: Option<bool>,
     /// Whether this command is one of a set of choices in force ([`MenuItem::checked`]), and then whether it is the
@@ -115,6 +118,7 @@ impl MenuItem {
             label: label.into(),
             description: None,
             suffix: None,
+            shortcut: None,
             chosen: None,
             checked: None,
             submenu: None,
@@ -171,6 +175,13 @@ impl MenuItem {
     /// The line under the label that says what the command does ("Removes the session and its state").
     pub fn description(mut self, description: impl Into<SharedString>) -> Self {
         self.description = Some(Line::App(description.into()));
+        self
+    }
+
+    /// Advertise the app shortcut for this direct command. The caller supplies the platform label and checks that
+    /// the shortcut operates on the same target with the same effect. Submenu triggers reserve this space for an arrow.
+    pub(crate) fn shortcut(mut self, shortcut: &'static str) -> Self {
+        self.shortcut = Some(shortcut);
         self
     }
 
@@ -280,14 +291,24 @@ impl RenderOnce for MenuItem {
         };
         let line = div()
             .min_w_0()
-            .when(self.chosen.is_some(), |line| line.truncate())
-            .child(words);
+            .when(self.chosen.is_some(), |line| line.truncate());
+        let line = if let Some(keys) = self.shortcut {
+            line.flex()
+                .items_center()
+                .gap(px(6.))
+                .child(div().flex_1().min_w_0().child(words))
+                .child(key_chip(keys, description_ink, palette))
+        } else {
+            line.child(words)
+        };
         let copy = div()
             .flex()
             .flex_col()
             .gap(px(1.))
             .min_w_0()
-            .when(self.chosen.is_some(), |copy| copy.flex_1())
+            .when(self.chosen.is_some() || self.shortcut.is_some(), |copy| {
+                copy.flex_1()
+            })
             .child(line)
             .children(self.description.clone().map(|description| {
                 div()
@@ -302,6 +323,7 @@ impl RenderOnce for MenuItem {
             .debug_selector(|| self.id.to_string())
             .role(self.role)
             .aria_label(self.label.clone())
+            .when_some(self.shortcut, |item, keys| item.aria_keyshortcuts(keys))
             .flex()
             .flex_row()
             .items_start()

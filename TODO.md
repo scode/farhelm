@@ -330,9 +330,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in that dialog to full release notes. the release notes to contain everything since the last version the user ran, not
   just the ones for the version they upgraded to. Plan: `plans/queue/whats-new-on-upgrade.md`.
 
-- **Show key bindings in pop-up menus.** key bindings should be shown in pop-up menus for discoverability (so eg.
-  "rename" shows cmd-l). Plan: `plans/queue/menu-shortcut-hints.md`.
-
 - **Antigravity session id reporting still broken.** in 0.43.0 session id reporting for antigravity still doesnt work.
   the point is "restart" button is grey because farhelm doesn't know the session id. (Screenshot: an Antigravity CLI
   1.5.13 session that has answered one prompt, with the Restart button in the session toolbar greyed out.)
