@@ -1,6 +1,6 @@
 # Trailing code review checkpoint
 
-Last reviewed commit: `b6e33332cd8beab675da31b04509fbbee70be8bb`
+Last reviewed commit: `8bcca67df1afe6eb0f184ef73b9952ed7ebb329f`
 
 This is the exclusive starting point for the next trailing code review of `main`. Advance it only after completing the
 procedure in `review_feedback_queue/.agents/trailing-review.md`, together with any resulting queue updates. A proposed
@@ -9,22 +9,22 @@ checkpoint reaches `main` only when its review-result PR is merged.
 This file holds only the checkpoint and the latest run's completion record. Earlier runs' records are in
 `review_feedback_queue/TRAILING_REVIEW_HISTORY.md`.
 
-## Incomplete review through b6e33332
+## Review through 8bcca67d
 
-**The maintainer explicitly authorized advancing the checkpoint to the pinned tip with the review incomplete.**
+The range starts after `b6e33332cd8beab675da31b04509fbbee70be8bb` and includes
+`8bcca67df1afe6eb0f184ef73b9952ed7ebb329f`. The inventory covers 89 commits. Eleven have in-scope patches with 3,192
+added and 827 removed lines across the individual commits. The scope includes remembered terminal tabs, Antigravity
+Restart capture, Tensorlake suspend attribution, desktop login PATH and relaunch, and Bash and Zsh sessions.
+Seventy-eight commits contain only excluded material, including plans, review bookkeeping, ordinary docs and release
+prose.
 
-The range starts after `c3569dc51cdab52fd8cd9e7887dcf1e9b67e8718` and includes
-`b6e33332cd8beab675da31b04509fbbee70be8bb`. The inventory covers 29 commits. Sixteen contain in-scope changes, with
-7,816 added lines and 2,943 removed lines across individual patches. The scope includes SSH sign-in and host
-maintenance, automatic host updates, desktop attention cues, product specs, tests, and maintainer tooling. The other 13
-commits contain only excluded material, such as plans, review bookkeeping, ordinary documentation, and release prose.
+Ten reviewers used Codex `gpt-6.2-sol` at high reasoning effort over 42 turns. The delivery audits matched all 7,807
+assigned patch lines. Every group finished synthesis and a final discovery pass with no new findings or open leads. One
+discovery turn stopped at a cybersecurity safeguard. The same reviewer completed a source-only continuation, with no
+assigned scope left unread. The review used source and contract inspection.
 
-Twenty Codex `gpt-6.2-sol` high-effort reviewer groups ran 56 turns. All initial patch delivery audits passed. Eight
-groups completed synthesis and discovery. Twelve remained incomplete after cybersecurity safeguards stopped some turns
-and the maintainer directed the review away from work likely to trigger them. Remaining gaps cover SSH transport and
-sign-in, host maintenance, attention integration, retirement of manual sign-in help, and identity checks in automatic
-updates. Findings reconciliation and independent checks on proposed drops remain incomplete.
-
-The result records 40 new findings (0 highest, 4 high, 36 other) and extends one existing finding. Of these 41 entries,
-37 are supported by source and contract inspection and four retain uncertainty after investigation. Evidence is retained
-under run `116de16d-0880-420e-9e7e-87f8b9869bf3`.
+The reviewers logged 77 active findings before deduplication and independent checks. The result adds 58 findings (8
+highest, 9 high, 41 other) and extends one existing item. The consolidated dispositions include 54 source-supported
+entries and five unverified after investigation. Independent checks covered 124 proposed dispositions. Two disputed
+exclusions and one ambiguous exclusion resulted in retained entries. The commit inventory, manifests, discovery and
+delivery records, and independent verdicts are retained under run `328737fe-cec4-4461-9ba9-d042969d54c1`.

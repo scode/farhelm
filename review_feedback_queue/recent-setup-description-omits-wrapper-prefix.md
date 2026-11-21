@@ -8,6 +8,20 @@ Different saved setups can look identical even though Enter restores and launche
 
 ## Details
 
+### Bash and Zsh sessions
+
+Reviewed commit: 22054a595bc3d502b64af6040ec4b7355b3893da
+
+The same omission reaches Bash and Zsh recents in the current desktop app. The visible row, tooltip and accessible label
+can omit the saved wrapper, while recent equality and the launch action retain it. This lets a wrapped setup look like
+the bare shell or share its description with another wrapper. The source path is
+`crates/gui/farhelm-gui/src/launcher/recents.rs:96–123, 294–308, 325–328` through
+`crates/gui/farhelm-gui/src/launcher/view/recents.rs:255–314, 359–370`. The independent check confirmed the shared
+description defect. The review evidence is recorded under run `328737fe-cec4-4461-9ba9-d042969d54c1` as
+`shell-launcher/f1`.
+
+### Original finding
+
 Suggested bucket: **other**. Confidence: **verified**. Source-confirmed assessment; conditional routes retain their
 prerequisites and no runtime observation is claimed.
 
