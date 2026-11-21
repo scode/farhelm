@@ -673,7 +673,7 @@ fn editing_the_checkout_name_reads_no_repository_suggestions(cx: &mut TestAppCon
 
 /// Focusing Repository closes the composer's search, so only the repository field offers choices for Enter. After
 /// discovery answers with a failed scan and no matches, Enter leaves the draft unselected and sends neither a
-/// preview nor a create.
+/// preview nor a create. The loading hint lasts until the failed scan arrives.
 #[gpui::test]
 fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
@@ -692,6 +692,9 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
     assert!(read(cx, |launcher, window, cx| launcher
         .repository_focused(window, cx)));
     test_support::keys(cx, "i n v a l i d");
+    let loading = Some("Loading repositories…");
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), loading);
+    assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
     test_support::advance(cx, Duration::from_millis(160));
     let reads = to(&sent(&mut helm, cx), REPOSITORIES);
     let [discovery] = &reads[..] else {
@@ -701,6 +704,7 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
         discovery.body,
         Some(json!({"host": 1, "expected_incarnation": 4, "query": "invalid"}))
     );
+    assert_eq!(name_of(cx, "launcher-repository-empty").as_deref(), loading);
     let scan_error = "fixture scan unavailable";
     helm.reply(
         discovery.id,
@@ -739,7 +743,7 @@ fn repository_focus_closes_search_and_enter_on_no_match_chooses_nothing(cx: &mut
 /// repository matches" with no row, since the search had no repository rows at all. Specified: on a Folder draft,
 /// `gh:widg` reads the host's repositories for "widg" after 150 ms and lists the one that matches
 /// ("Managed checkout: acme/widgets"); `gh:widg/new`, a valid pair discovery did not list, is offered at once and
-/// first; Enter takes it: a managed checkout of widg/new, the search box emptied.
+/// first; Enter takes it: a managed checkout of widg/new, the search box emptied. Loading covers both waits.
 #[gpui::test]
 fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut TestAppContext) {
     let (mut helm, cx) = launcher_on(cx, command_draft(1));
@@ -755,6 +759,9 @@ fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut Test
         "the premise: the search box has focus"
     );
     test_support::keys(cx, "g h : w i d g");
+    let loading = Some("Loading repositories…");
+    assert_eq!(name_of(cx, "launcher-search-message").as_deref(), loading);
+    assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
     test_support::advance(cx, Duration::from_millis(160));
     // The fake helm answers strictly in order, so every command taken is answered, in order: the repositories read with
     // its reply, the rest (the launcher's other reads) as failed reads, which leave the search alone.
@@ -767,6 +774,7 @@ fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut Test
         read_.body,
         Some(json!({"host": 1, "expected_incarnation": 4, "query": "widg"}))
     );
+    assert_eq!(name_of(cx, "launcher-search-message").as_deref(), loading);
     for command in &taken {
         if command.path == REPOSITORIES {
             helm.reply(

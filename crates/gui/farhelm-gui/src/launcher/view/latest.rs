@@ -26,6 +26,8 @@ pub(super) struct Latest<K, A> {
     /// Whether a read is out, which holds the next one until it answers. A reset drops the answer's wait, leaving this
     /// set, but a reset drops the launcher too (drafts do not survive it), so nothing is left waiting on it.
     out: bool,
+    /// Whether the read out still belongs to this generation. Returning to the same key starts a new generation.
+    out_current: bool,
     /// Whether a read for the current key came due while one was out: its answer then sends the read for the current
     /// key. A key change clears it, since the change's own deadline or send will ask, so one change never sends two.
     due: bool,
@@ -49,6 +51,7 @@ impl<K, A> Default for Latest<K, A> {
             asked: None,
             answered: None,
             out: false,
+            out_current: false,
             due: false,
             waiting: None,
         }
@@ -64,6 +67,7 @@ impl<K: Clone + PartialEq, A> Latest<K, A> {
             return None;
         }
         self.asked = key.clone();
+        self.out_current = false;
         self.answered = None;
         self.waiting = None;
         self.due = false;
@@ -83,6 +87,12 @@ impl<K: Clone + PartialEq, A> Latest<K, A> {
             .flatten()
     }
 
+    /// Whether the current key is awaiting an answer, including the debounce and the time before a slot opens.
+    /// Returns `None` for an unrelated key. A read the caller could not send stays pending until the key changes.
+    pub(super) fn pending_for(&self, key: &K) -> Option<bool> {
+        (self.asked.as_ref() == Some(key)).then_some(self.answered.is_none())
+    }
+
     /// Take the slot for a read about `key`: `true` when the caller sends it now, which marks a read out. A key that is
     /// no longer current is not sent; while a read is out, another is marked due instead, which that read's answer
     /// sends ([`Latest::finish`]).
@@ -95,12 +105,14 @@ impl<K: Clone + PartialEq, A> Latest<K, A> {
             return false;
         }
         self.out = true;
+        self.out_current = true;
         true
     }
 
     /// The read [`Latest::begin`] allowed could not be sent after all (no UI session): free the slot it took.
     pub(super) fn unsent(&mut self) {
         self.out = false;
+        self.out_current = false;
     }
 
     /// The read about `key` answered with `answer`, `None` when it brought nothing to keep (an inconclusive answer):
@@ -108,7 +120,9 @@ impl<K: Clone + PartialEq, A> Latest<K, A> {
     /// which key to send now if a read came due meanwhile.
     pub(super) fn finish(&mut self, key: &K, answer: Option<A>) -> Finished<K> {
         self.out = false;
-        let kept = self.asked.as_ref() == Some(key) && answer.is_some();
+        let kept = std::mem::take(&mut self.out_current)
+            && self.asked.as_ref() == Some(key)
+            && answer.is_some();
         if kept {
             self.answered = answer;
         }
@@ -226,14 +240,15 @@ mod tests {
         );
         assert!(latest.begin(&"b".to_owned()));
         latest.follow(Some("c".to_owned()));
+        // Returning to b owes a fresh read. The first b's answer cannot settle the new generation.
+        latest.follow(Some("b".to_owned()));
+        assert!(!latest.begin(&"b".to_owned()), "the new read is due");
         let finished = latest.finish(&"b".to_owned(), Some("for b"));
         assert!(!finished.kept);
-        assert_eq!(
-            finished.next, None,
-            "nothing came due for c while b was out"
-        );
+        assert_eq!(finished.next.as_deref(), Some("b"));
         assert_eq!(latest.answer_for(&"b".to_owned()), None);
-        assert_eq!(latest.answer_for(&"c".to_owned()), None);
+        assert_eq!(latest.pending_for(&"b".to_owned()), Some(true));
+        assert_eq!(latest.pending_for(&"c".to_owned()), None);
     }
 
     /// A read that could not be sent frees its slot, so the next one is not held behind an answer that will never come.

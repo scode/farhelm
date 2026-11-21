@@ -1,37 +1,5 @@
 # Triage outcomes
 
-## repository-search-reports-empty-before-reply.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
-  reviewed. Claim: a partial repository query says "no repository matches" before the host has answered. Current main
-  confirms it. `crates/farhelm-ui/src/list/create_form.rs:4129-4144` debounces 150 ms and then awaits
-  `fetch_github_repositories`. While that is pending, `repository_result` is `None` and the suggestions are empty.
-  `create_form.rs:4254-4259` builds the field's message by calling
-  `empty_search_message(&format!("gh:{repository_text}"), false, false, false)`.
-  `crates/farhelm-ui/src/launch_composer.rs:948` returns "no repository matches; enter owner/repo" unconditionally for a
-  nonempty `gh:` value, and `create_form.rs:7001` shows that message whenever the list is empty. The `gh:` search scope
-  (`create_form.rs:4266-4276`) also gets no repository-loading flag. The helper's own contract
-  (`launch_composer.rs:917-922`, "Loading flags mean a read is still pending, not that a completed read failed") already
-  handles pending reads this way for models ("loading models…") and templates ("loading templates…"). Repository
-  discovery is the one pending source with no flag. SPEC.md:3228-3233 accepts that a repository search can be slow, but
-  it does not accept a negative answer shown before the search finishes.
-- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
-  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
-  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
-  revise it.
-- Completion criteria: give `empty_search_message` a repository-loading input. Make its `SearchScope::Github` branch,
-  for a nonempty value, return a loading message (wording parallel to "loading models…") while discovery for that entry
-  point's current query is pending, which covers both the debounce and the wait for the host. Keep "no repository
-  matches; enter owner/repo" for a completed reply for that query with no rows. Pass the flag from both callers in
-  `create_form.rs`: the dedicated repository field, and the `gh:` search scope's `search_message`. In each, compute it
-  as: a live repository authority whose query is this entry point's query, with no accepted result yet. Errors keep
-  their existing note. Extend `empty_search_messages_cover_labels_and_loading` in `launch_composer.rs` with the
-  repository-loading case, and with a case showing that the negative message still appears when not loading. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/launcher-repository-search-loading.md`.
-
 ## shutdown-wait-test-does-not-witness-waiting.md
 
 - Outcome: `fix code`.
