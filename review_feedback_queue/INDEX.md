@@ -334,9 +334,6 @@ consequences.
 - [`download-interruption-promise-omits-crash-exception.md`](download-interruption-promise-omits-crash-exception.md) —
   The product's partial-download cleanup promise omits the newly accepted crash and force-quit exception.
 
-- [`add-host-refusal-bypasses-dialog-admission.md`](add-host-refusal-bypasses-dialog-admission.md) — A delayed Add-host
-  refusal may reopen a mutually inert dialog beside Settings; Escape remains available.
-
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
