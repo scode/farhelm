@@ -106,7 +106,7 @@ use std::rc::Rc;
 
 use farhelm_input_mapping::Platform;
 use gpui::{
-    App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
+    AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
     InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
     Subscription, Window, div, prelude::FluentBuilder as _,
 };
@@ -474,6 +474,10 @@ pub struct TextInput {
     monospace: bool,
     /// The field's height in place of Kit's ([`TextInput::height`]).
     height: Option<Pixels>,
+    /// A decorative icon before a single-line field's text, such as the Settings search magnifier.
+    line_prefix: Option<AnyElement>,
+    /// A decoration outside the single-line input's text area, such as the key cap on Settings search.
+    line_suffix: Option<AnyElement>,
     /// Drawn with the warning outline ([`TextInput::invalid`]).
     invalid: bool,
     /// What the sequence prefix does in this field with nothing selected, and by which platform's rule, if anything
@@ -569,9 +573,23 @@ impl TextInput {
             on_vertical: None,
             monospace: false,
             height: None,
+            line_prefix: None,
+            line_suffix: None,
             invalid: false,
             on_unselected_prefix: None,
         }
+    }
+
+    /// Place a decoration before a single-line field's text. Kit reserves space for it outside the caret area.
+    pub(crate) fn line_prefix(mut self, prefix: impl IntoElement) -> Self {
+        self.line_prefix = Some(prefix.into_any_element());
+        self
+    }
+
+    /// Place a decoration after a single-line field's text. Kit reserves its width even when the text scrolls.
+    pub(crate) fn line_suffix(mut self, suffix: impl IntoElement) -> Self {
+        self.line_suffix = Some(suffix.into_any_element());
+        self
     }
 
     /// Draw the text in the monospace face, as the old launcher drew its paths, model ids, wrapper prefix and command
@@ -755,6 +773,8 @@ impl RenderOnce for TextInput {
                     .bg(theme::color(palette.well))
                     .rounded(metrics::RADIUS_SM)
                     .text_size(metrics::TEXT_MD)
+                    .when_some(self.line_prefix, Input::prefix)
+                    .when_some(self.line_suffix, Input::suffix)
                     .when(self.monospace, |input| {
                         input.font_family(crate::assets::TERMINAL_FONT)
                     })

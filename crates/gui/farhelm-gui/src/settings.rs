@@ -7,7 +7,8 @@
 //! reference commit `24bc0580`. Here's the TLDR of its rules:
 //!
 //! - **The frame.** The host dialogs' framed header (a gear tile, the title "Settings", the summary, and its own header
-//!   close control, "Close settings") over a body that scrolls, and a pinned footer with its note and Close. It is
+//!   close control, "Close settings") over independently scrolling navigation and page panes, with a pinned page
+//!   heading and a pinned footer with its note and Close. It is
 //!   760 pixels wide and 780 tall, capped by the window, whatever section is shown, so switching sections never moves
 //!   the frame or its close controls (`.app-settings-dialog[aria-label="Settings"]`).
 //! - **The sections.** A list of section buttons on the left, each with its icon and full label and the solid selection
@@ -63,11 +64,7 @@
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
 //! section switch does not move focus to the shown section's heading, as the old app did so a keyboard user went on
 //! from there: the focus coordinator moves focus to a control only while no layer is open, and the heading is not a
-//! control. The section list is not pinned while a long section scrolls (the old `position: sticky`). Checkouts is
-//! taller than the dialog's body even at the dialog's full height, by about 30 pixels, so its body scrolls: unscrolled,
-//! its last control, the docs link, sits at the body's visible edge with its descenders and underline below it, and
-//! scrolled to the end it lies wholly above the footer. The header is taller than the old one, and the docs link has a
-//! line of its own.
+//! control. Checkouts' docs link has its own line and can require scrolling even at full dialog height.
 
 mod agent_trust;
 mod app;
@@ -85,6 +82,7 @@ mod credentials;
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
+mod frame;
 mod ntfy;
 #[cfg(test)]
 mod recipe_credential_tests;
@@ -125,9 +123,8 @@ use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
-    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role,
-    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div,
-    prelude::FluentBuilder as _, px, svg,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role, ScrollHandle,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px, svg,
 };
 
 use crate::assets::Icon;
@@ -165,14 +162,10 @@ pub(crate) use appearance::follow_stored as follow_stored_appearance;
 const WIDTH: f32 = 760.;
 /// Its height, capped by the window: what the old Checkouts section needed, kept for every section.
 const HEIGHT: f32 = 780.;
-/// `.app-settings-navigation`'s column: 168 pixels, its 12-pixel right padding and its edge included.
-const NAV_WIDTH: f32 = 168.;
 /// The search shortcut is scoped to the Settings frame, including its header and footer.
 pub(crate) const SEARCH_CONTEXT: &str = "Settings";
-/// `.app-settings-panel > h3`: the shown section's heading size.
+/// Search keeps its own heading until its results adopt the page layout.
 const HEADING_TEXT: f32 = 18.;
-/// The heading's line: `line-height: normal` at 18 pixels; GPUI's default line is taller.
-const HEADING_LINE_HEIGHT: f32 = 22.;
 /// `.host-settings-section`'s gap between a section's heading and its groups.
 const SECTION_GAP: f32 = 14.;
 
@@ -462,21 +455,20 @@ pub(crate) enum Section {
 }
 
 impl Section {
-    /// The sections, in SPEC.md's order ("Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials,
-    /// Terminal, Checkouts, Agent trust and Notifications, followed by App").
+    /// Settings navigation and search share this order so results follow the same sequence as the section list.
     const ALL: &[Section] = &[
         Section::Sessions,
         Section::Appearance,
-        Section::Hosts,
-        Section::Recipes,
-        Section::Tensorlake,
-        Section::Containers,
-        Section::Credentials,
         Section::Terminal,
-        Section::Checkouts,
-        Section::AgentTrust,
         Section::Notifications,
         Section::App,
+        Section::Hosts,
+        Section::Checkouts,
+        Section::Containers,
+        Section::Recipes,
+        Section::Tensorlake,
+        Section::AgentTrust,
+        Section::Credentials,
     ];
 
     /// Whether the dialog lists this section in this app: every section in [`Section::ALL`], except App, which only a
@@ -543,11 +535,10 @@ impl Section {
             Section::Hosts => Icon::Hosts,
             Section::Recipes => Icon::Folder,
             Section::Tensorlake => Icon::Key,
-            // The old app drew Containers with the Hosts glyph too (`settings_section_icon`).
-            Section::Containers => Icon::Hosts,
+            Section::Containers => Icon::EnvironmentContainer,
             Section::Credentials => Icon::Lock,
             Section::Terminal => Icon::Terminal,
-            Section::Checkouts => Icon::Folder,
+            Section::Checkouts => Icon::Branch,
             Section::AgentTrust => Icon::AgentTrust,
             Section::Notifications => Icon::Bell,
             Section::App => Icon::App,
@@ -588,6 +579,8 @@ impl Section {
 pub(crate) struct SettingsDialog {
     /// The section drawn beside the list; the others keep their state undrawn.
     shown: Section,
+    /// Search temporarily replaces the page. Keep its scroll offset in the dialog so clearing the query restores it.
+    page_scroll: ScrollHandle,
     /// The field lives with the dialog. Searching temporarily replaces the right pane and keeps its section state.
     search: Search,
     /// One per [`Choice`], in [`Choice::ALL`]'s order, whichever section draws it.
@@ -693,6 +686,7 @@ impl SettingsDialog {
             .collect();
         SettingsDialog {
             shown,
+            page_scroll: ScrollHandle::new(),
             search: Search::new(crate::actions::THIS_PLATFORM, window, cx),
             switches,
             appearance: Draft::load(Preference::System),
@@ -761,6 +755,9 @@ impl SettingsDialog {
     /// section has yet.
     fn show(&mut self, section: Section, window: &mut Window, cx: &mut Context<Self>) {
         self.focus_on = None;
+        if self.shown != section {
+            self.page_scroll.set_offset(gpui::Point::default());
+        }
         self.shown = section;
         if section == Section::Containers && self.containers.is_none() {
             self.containers = Some(cx.new(containers::Containers::new));
@@ -989,6 +986,7 @@ impl SettingsDialog {
         if let Some(handle) = self.search_target(target, cx) {
             focus::focus_in_layer(&handle, &mark, window, cx);
         } else {
+            self.page_scroll.set_offset(gpui::Point::default());
             self.search.focus(window, cx);
             if matches!(
                 target,
@@ -1470,108 +1468,26 @@ impl Render for SettingsDialog {
             .cloned();
         let weak = cx.weak_entity();
 
-        let help_edge =
-            layers::beside_edge("settings-navigation-help-edge", window, cx).into_any_element();
         let searching = self.search.active();
-        let listed = Section::ALL.iter().copied().filter_map(|section| {
-            if searching {
-                let count = self.search.section_count(section);
-                (count > 0).then_some((section, Some(count)))
-            } else {
-                section.listed(cx).then_some((section, None))
-            }
-        });
-        // `.app-settings-navigation`: the section buttons, 6 pixels apart, with a rule between them and the section.
-        let navigation = div()
-            .id("settings-sections")
-            .relative()
-            .role(Role::Navigation)
-            .aria_label("Settings sections")
-            .flex_none()
-            .w(px(NAV_WIDTH))
-            .flex()
-            .flex_col()
-            .gap(px(6.))
-            .pr(px(12.))
-            .border_r_1()
-            .border_color(theme::color(palette.border_dialog))
-            .child(help_edge)
-            .child(self.search.field(cx))
-            .children(listed.map(|(section, count)| {
-                let weak = weak.clone();
-                Button::new(
-                    format!("settings-section-{}", section.key()),
-                    section.label(),
-                    HoverHelp::tooltip(format!("Show {} settings", section.label()))
-                        .beside_list(false),
-                    Role::Button,
-                )
-                .tier(Tier::Nav)
-                .icon(section.icon())
-                .pressed(!searching && section == self.shown)
-                .when_some(count, |button, count| {
-                    let name = if count == 1 {
-                        format!("{} (1 match)", section.label())
-                    } else {
-                        format!("{} ({count} matches)", section.label())
-                    };
-                    button.accessible_name(name).content(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .justify_between()
-                            .gap(px(4.))
-                            .child(div().min_w_0().truncate().child(section.label()))
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .text_size(theme::metrics::TEXT_SM)
-                                    .child(count.to_string()),
-                            ),
-                    )
-                })
-                .on_click(move |_, window, cx| {
-                    let _ = weak.update(cx, |dialog, cx| {
-                        dialog.search.clear(window, cx);
-                        dialog.show(section, window, cx);
-                    });
-                })
-            }));
-        // `.app-settings-panel`: the shown section under its heading.
-        let shown = if searching {
-            self.search.pane(window, cx)
-        } else {
+        let page = if searching {
             div()
                 .flex_1()
                 .min_w_0()
-                .flex()
-                .flex_col()
-                .gap(px(SECTION_GAP))
-                .child(
-                    div()
-                        .id("settings-heading")
-                        .debug_selector(|| "settings-heading".into())
-                        .role(Role::Heading)
-                        .aria_label(self.shown.label())
-                        .text_size(px(HEADING_TEXT))
-                        .line_height(px(HEADING_LINE_HEIGHT))
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(theme::color(palette.fg_0))
-                        .child(self.shown.label()),
-                )
-                .children(self.body(self.shown, preferences.as_ref(), cx))
+                .min_h_0()
+                .p(px(14.))
+                .bg(theme::color(palette.settings_page))
+                .child(self.search.pane(window, cx))
                 .into_any_element()
+        } else {
+            self.page(preferences.as_ref(), window, cx)
         };
         let body = div()
             .flex()
-            .items_start()
-            .gap(px(20.))
+            .flex_1()
+            .min_h_0()
             .text_color(theme::color(palette.fg_0))
-            .when(searching, |body| body.h_full())
-            .child(navigation)
-            .child(shown);
+            .child(self.navigation(window, cx))
+            .child(page);
 
         let close = Button::new(
             "settings-footer-close",
@@ -1609,6 +1525,7 @@ impl Render for SettingsDialog {
             .note(FOOTER_NOTE)
             .width(px(WIDTH))
             .fixed_height(px(HEIGHT))
+            .split_body()
             .close(
                 "Close settings",
                 HoverHelp::tooltip(CLOSE_HELP),

@@ -10,7 +10,7 @@ use farhelm_input_mapping::Platform;
 use gpui::{
     AnyElement, App, Context, FontWeight, HighlightStyle, InteractiveElement as _, IntoElement,
     ParentElement as _, Role, ScrollHandle, StatefulInteractiveElement as _, Styled as _,
-    StyledText, Subscription, Window, div, prelude::FluentBuilder as _, px,
+    StyledText, Subscription, Window, div, prelude::FluentBuilder as _, px, svg,
 };
 
 use super::{
@@ -20,6 +20,7 @@ use super::{
     tensorlake_ssh_key, terminal,
 };
 use crate::actions::Dismiss;
+use crate::assets::Icon;
 use crate::components::{
     HoverHelp, OptionRow, TextInput, TextInputEvent, TextInputState, Vertical, option_heading,
 };
@@ -594,9 +595,29 @@ impl Search {
     }
 
     /// The field handles Escape only while it owns focus and has text. Header and footer dismissal never pass here.
-    pub(super) fn field(&self, cx: &Context<SettingsDialog>) -> impl IntoElement {
+    pub(super) fn field(
+        &self,
+        platform: Platform,
+        cx: &Context<SettingsDialog>,
+    ) -> impl IntoElement {
         let weak = cx.weak_entity();
         let step = weak.clone();
+        let palette = theme::palette(cx);
+        let shortcut = match platform {
+            Platform::Mac => "⌘F",
+            Platform::Linux => "Ctrl F",
+        };
+        let key_cap = div()
+            .flex_none()
+            .rounded(px(3.))
+            .px(px(4.))
+            .border_1()
+            .border_color(theme::color(palette.border_dim))
+            .bg(theme::color(palette.bg_1))
+            .text_size(px(10.))
+            .line_height(px(14.))
+            .text_color(theme::color(palette.fg_1))
+            .child(shortcut);
         div()
             .id("settings-search-field")
             .debug_selector(|| "settings-search-field".into())
@@ -626,6 +647,14 @@ impl Search {
                     "Search Settings",
                     HoverHelp::tooltip("Find settings by name or description"),
                 )
+                .height(px(28.))
+                .line_prefix(
+                    svg()
+                        .size(px(14.))
+                        .path(Icon::Search.path())
+                        .text_color(theme::color(palette.fg_2)),
+                )
+                .when(!self.active(), |input| input.line_suffix(key_cap))
                 .when(self.active(), |input| {
                     input.on_vertical(move |direction, _, cx| {
                         let _ = step.update(cx, |dialog, cx| dialog.search.step(direction, cx));
