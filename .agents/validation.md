@@ -695,7 +695,7 @@ systemd or SSH substrate ran.
   Kit, or when the manifest of a GUI crate, `farhelm-desktop` or `farhelm-helm-client` does not deny clippy's
   `unwrap_used` and `expect_used`. Seconds, nothing compiled. Run it when a manifest under `crates/gui/`, either of
   those two crates' manifests, or `Cargo.lock` changes. CI's `deny` job runs both.
-- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'libtest default threads' -- python3 scripts/check-gui-goldens.py`
+- `python3 scripts/record-test-run.py --kind development --selection 'GPUI app goldens' --concurrency 'up to four renderer processes' -- python3 scripts/check-gui-goldens.py`
   — the GPUI app's screenshot goldens (`crates/gui/farhelm-gui/src/goldens/`): every component, the dialog frame and the
   layer manager's overlays (a tooltip, a popover, the prompt over its veil), the keyboard focus ring, host-supplied text
   over its spoofing corpus, the terminal's styles and cursor shapes, and an attached terminal's status line and exit
@@ -729,12 +729,17 @@ systemd or SSH substrate ran.
   with `--scene 'settings-*'` (repeatable). This works in compare and update mode. Run a full `--update` before
   publishing so changes to a shared component show up in every scene it reaches. Only a full successful update can
   produce a completion marker. Additional Cargo build options go before a bare `--`. Only libtest output options are
-  supported after it, and `--scene` is the selector.
+  supported after it, and `--scene` is the selector. The runner builds the test binary once and splits the scenes among
+  four processes by default, capped at available CPUs and selected scenes. Use `--jobs N` to change render parallelism,
+  including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit build jobs. Parallel renderer output is
+  grouped by process.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
   update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.
   The tests also cover Cargo's executable discovery, ordered pattern matching and an unmatched pattern refused before
-  rendering. Run it when the runner changes. Seconds, no renderer or network.
+  rendering. It also checks the CPU cap, disjoint work groups and a real killed worker that leaves other workers'
+  captures available without certifying the update. Run it when the runner changes. Seconds, no graphics renderer or
+  network.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only

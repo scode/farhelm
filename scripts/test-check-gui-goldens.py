@@ -5,9 +5,11 @@ import contextlib
 import importlib.util
 import io
 import json
+import signal
 import subprocess
 import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -53,10 +55,18 @@ class GoldenRunnerTests(unittest.TestCase):
                 "FARHELM_GOLDENS_DIR": str(self.references),
                 "FARHELM_UPDATE_GOLDENS": str(self.tool.CAPTURES),
             }
+
+        def spawn(command, *, cwd, env, pass_fds, **_):
+            result = render(command, cwd=cwd, env=env, pass_fds=pass_fds)
+            child = mock.Mock()
+            child.wait.return_value = result.returncode
+            child.poll.return_value = result.returncode
+            return child
+
         with mock.patch.object(runner, "build_binary", return_value=self.binary), \
                 mock.patch.object(runner, "list_scenes", return_value=self.names), \
-                mock.patch.object(runner.subprocess, "run", side_effect=render):
-            return runner.run_suite(self.tool, base, update, list(patterns), [], [])
+                mock.patch.object(runner.subprocess, "Popen", side_effect=spawn):
+            return runner.run_suite(self.tool, base, update, list(patterns), [], [], 1)
 
     @staticmethod
     def write_selected(env):
@@ -205,6 +215,97 @@ class GoldenRunnerTests(unittest.TestCase):
             self.run_suite(render, patterns=["*", "missing-page"])
         render.assert_not_called()
         self.assertFalse(self.marker.exists())
+
+    def test_scene_groups_are_stable_disjoint_and_capped(self):
+        """A CPU cap changes the number of processes without dropping any catalog entries."""
+        with mock.patch.object(runner.os, "sched_getaffinity", return_value={0, 1}, create=True):
+            self.assertEqual(runner.scene_groups(self.names, 4), [["first", "launcher-search"], ["launcher-new", "last"]])
+            self.assertEqual(runner.scene_groups(self.names, 1), [self.names])
+            self.assertEqual(runner.scene_groups(["first"], 4), [["first"]])
+
+    def test_a_killed_worker_leaves_other_outputs_unpublishable(self):
+        """Actual concurrent children reach a shared readiness boundary before one is killed.
+
+        All expected PNG names exist. Even that set cannot certify a full update if one of its renderers was killed.
+        Each job's captured output is still readable and carries the killed child's signal.
+        """
+        binary = self.tool.WORK / "fake-renderer"
+        binary.write_text(textwrap.dedent("""\
+            #!/usr/bin/env python3
+            import json
+            import os
+            import signal
+            import sys
+            import time
+            from pathlib import Path
+
+            captures = Path(os.environ["FARHELM_UPDATE_GOLDENS"])
+            names = json.loads(os.environ["FARHELM_GOLDEN_SCENES"])
+            print(f"ready {names[0]}", flush=True)
+            (captures.parent / (names[0] + ".ready")).touch()
+            deadline = time.monotonic() + 10
+            while not all((captures.parent / (name + ".ready")).is_file()
+                          for name in ("first", "launcher-new")):
+                if time.monotonic() > deadline:
+                    sys.exit(98)
+                time.sleep(0.01)
+            platform = "macos" if sys.platform == "darwin" else sys.platform
+            dest = captures / platform
+            dest.mkdir(exist_ok=True)
+            for name in names:
+                for appearance in ("light", "dark"):
+                    (dest / f"{name}--{appearance}.png").touch()
+            if names[0] == "first":
+                os.kill(os.getpid(), signal.SIGKILL)
+            """), encoding="utf-8")
+        binary.chmod(0o700)
+        output = io.StringIO()
+        with contextlib.redirect_stdout(output), \
+                mock.patch.object(runner, "build_binary", return_value=binary), \
+                mock.patch.object(runner, "list_scenes", return_value=self.names), \
+                mock.patch.object(runner.os, "sched_getaffinity", return_value={0, 1}, create=True):
+            status = runner.run_suite(self.tool, {}, True, [], [], [], 2)
+        self.assertEqual(status, 137, output.getvalue())
+        self.assertIn("ready first", output.getvalue())
+        self.assertIn("ready launcher-new", output.getvalue())
+        self.assertIn("renderer terminated by signal 9", output.getvalue())
+        self.assertIn("[goldens job 2/2]", output.getvalue())
+        self.assertEqual(
+            {file.name for file in (self.tool.CAPTURES / PLATFORM).iterdir()},
+            {f"{name}--{appearance}.png" for name in self.names for appearance in ("light", "dark")},
+        )
+        self.assertFalse(self.marker.exists())
+
+    def test_term_during_spawn_keeps_the_returned_worker_owned(self):
+        """TERM during spawn must leave the returned child tracked and reaped, with no later spawns."""
+        child = mock.Mock()
+        child.poll.return_value = None
+
+        def spawn(*args, **kwargs):
+            signal.raise_signal(signal.SIGTERM)
+            return child
+
+        with mock.patch.object(runner.subprocess, "Popen", side_effect=spawn) as popen:
+            status = runner.render_scenes(["stand-in"], [["first"], ["second"]], {}, None)
+        self.assertEqual(status, 128 + signal.SIGTERM)
+        popen.assert_called_once()
+        child.kill.assert_called_once_with()
+        child.wait.assert_called_once_with()
+
+    def test_term_during_cleanup_overrides_an_already_successful_worker(self):
+        """The runner can only certify a completed update after its last cancellation boundary."""
+        child = mock.Mock()
+        child.poll.return_value = 0
+
+        def wait(*, timeout=None):
+            if timeout is None:
+                signal.raise_signal(signal.SIGTERM)
+            return 0
+
+        child.wait.side_effect = wait
+        with mock.patch.object(runner.subprocess, "Popen", return_value=child):
+            status = runner.render_scenes(["stand-in"], [["first"]], {}, None)
+        self.assertEqual(status, 128 + signal.SIGTERM)
 
 
 if __name__ == "__main__":

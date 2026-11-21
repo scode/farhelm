@@ -267,14 +267,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   one host-and-folder field and a More options fold, and the footer loses its summary line. Plan:
   `plans/queue/launcher-command-field.md`.
 
-- **Make the golden screenshot runs fast and targeted.** "We need visual inspection to be cheap and targeted as much as
-  possible." A full run of the GUI's screenshot goldens takes 8 to 20 minutes on the shared development host and about
-  11 on a quiet 8-core VM, and an executor re-renders all 328 pictures to look at ten. Measured on 2026-11-21, most of
-  the time goes to writing PNGs with unoptimized code. Compile the image, renderer and UI libraries optimized in
-  development builds (668 s to 89 s, every picture byte-identical), write each picture once, keep going when a scene
-  fails to settle, let a run render only named scenes without a partial run ever being publishable, and render four
-  scenes at once by default (27 s). Plan: `plans/queue/goldens-fast-and-targeted.md`.
-
 - **Show the changed golden pictures on one page.** Visual reviews are handed paths to changed pictures and judge them
   file by file, with nothing showing what changed or flagging a scene nobody meant to touch. Make a page of only the
   changed and new pictures (reference, new picture and the differing pixels, light and dark) whenever a run finds any,
