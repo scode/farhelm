@@ -133,29 +133,6 @@
   feedback file and its index entry.
 - Execution: planned in `plans/queue/brick-test-guard-oracles.md`.
 
-## host-edit-doc-overstates-preapproval-refusal.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
-  reviewed. The docstring of `edit_host_for_agent` (`crates/farhelm-helm/src/agent_requests.rs:3034-3036`) says the
-  alias is canonicalized before the card "so ... an alias that route would refuse is refused without a card". Before the
-  card, the code calls only `crate::store::validate_alias` (:3060), and that function checks only trimming, control
-  characters and length (`store.rs:1586-1600`). A collision with another host's display name is refused only after the
-  Allow, when the write goes through `write_alias_locked` (`hosts.rs:1073-1078` notes that write's "refusals of its own
-  (another host's name)"). SPEC.md:2857-2858 accepts this: "On Allow, an edit writes through the same routes as the host
-  settings dialog ... with their refusals."
-- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
-  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
-  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
-  revise it.
-- Completion criteria: narrow the docstring so that only an alias failing the shape rules (control characters, length;
-  whitespace-only means none) is refused without a card. It must also say that a collision with another host's name is
-  checked by the alias write after the Allow and is refused there with nothing changed. No code change. A test is
-  optional; if added, it shows that a colliding alias gets a card and is refused after Allow with nothing written. Size
-  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
-  fragment); over it, block and bring it back. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## shutdown-wait-test-does-not-witness-waiting.md
 
 - Outcome: `fix code`.

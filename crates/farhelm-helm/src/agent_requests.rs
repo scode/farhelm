@@ -3424,8 +3424,12 @@ struct HostEditRequest {
 /// through the settings dialog's own writes and nothing else.
 ///
 /// The alias is canonicalized before the card by the rule its route stores
-/// it with, so the card shows the value that will be stored and an alias
-/// that route would refuse is refused without a card. A request whose
+/// it with, so the card shows the value that will be stored. Only an alias
+/// that fails that rule's shape checks (control characters, length; a
+/// whitespace-only alias means none) is refused without a card. A collision
+/// with another host's name is not checked here: the card is shown, and the
+/// alias write after the Allow refuses it with nothing changed, since the
+/// alias is written before the appearance. A request whose
 /// fields all already have the asked values is refused as having nothing
 /// to change, without a card: no edit ever succeeds without an explicit
 /// Allow, so an agent cannot take a success for an approval.

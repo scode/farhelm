@@ -391,10 +391,6 @@ consequences.
   startup warning tells an ordinary remote host with an invalid install path to use a setup action its row does not
   offer. Manual/API recovery remains possible; this is diagnostic correctness with ambiguous filter coverage.
 
-- [`host-edit-doc-overstates-preapproval-refusal.md`](host-edit-doc-overstates-preapproval-refusal.md) — A rename
-  colliding with another host's name can ask for approval and then fail, although its docstring says refused aliases get
-  no card. The source check is syntax-only before approval; no authorization defect is claimed.
-
 - [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
   regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
 
