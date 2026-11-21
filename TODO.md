@@ -29,13 +29,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit the golden changes page doing its pixel work in the compiled test program.** On 2026-11-21 the landing
-  monitor answered golden-changes-page's block on your behalf: the page's decoding, comparison and highlight use the
-  image code already in the golden test program instead of the Python PNG helpers the plan named, because the Python
-  path took 28 seconds for 68 changed pictures and 112 seconds for 328, against the plan's rule that the page must not
-  noticeably lengthen a run. The executor uses whichever path measures faster and reports both timings. The alternative
-  was to keep the Python helpers and accept the wait on large reviews.
-
 ## Near term
 
 - **Set up the default checkout folder from a new environment launch.** The session launcher offers a managed checkout
@@ -45,12 +38,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   this requirement. The recipe exception applies to previewing the checkout path, so correct the comment at the
   installed-host preview check. Keep quick launch waiting for the global read. Cover an unset default with a host
   override, a configured default, and a shortcut that reveals the setup field when the default is missing or the read
-  error when the setting could not be loaded.
+  error when the setting could not be loaded. Plan: `plans/queue/environment-checkout-without-setup.md`.
 
 - **Expose the oldest terminal output after an agent exits.** The exit notice can lift the oldest retained line or the
   missing-output notice out of the pane even at the top of scrollback. Keep the exit notice below the text and make
   every retained row reachable, including when the agent exits on the alternate screen. Cover drag selection and Select
-  All against the same visible history.
+  All against the same visible history. Plan: `plans/queue/exited-terminal-scrollback.md`.
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
   resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
@@ -60,7 +53,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   while another operation holds the host, fail on a new suspension), the preparation pill, the fresh-checkout folder
   allocation once the host is ready, quick launch, and "this launch is waking that host" refusing Hosts' Suspend, Resume
   and Settings and a session's own Suspend and Resume. The old app's 13 launch-after-wake cases (tensorlake-lifecycle)
-  are the spec. Design the wake with an opus consult.
+  are the spec. Design the wake with an opus consult. Plan: `plans/queue/launch-wakes-suspended-host.md`.
 
 - **A maximized Mac window grows into place on launch.** When the desktop app was maximized (zoomed) at quit, the next
   launch restores that, but the window first appears at its ordinary size and then visibly animates to full size for
@@ -172,7 +165,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Fix "answer trust dialog" for Claude Code.** fix "answer trust dialog" feature for claude code. confirmed to not
   work in 0.39.0 for a plain folder. might just be that we only enabled the behavior for managed checkouts. either way
-  it's infuriatingly annoying. let's also test out codex while we're at it.
+  it's infuriatingly annoying. let's also test out codex while we're at it. Plan:
+  `plans/queue/agent-trust-every-folder.md`.
 
 - **Linux installation and updates for the desktop app.** The GPUI desktop app runs on Linux but has no install story:
   no package (tarball, .deb, AppImage or Flatpak not chosen), no desktop entry or icon install beyond what a build
@@ -223,6 +217,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   follow a symlinked `refs/`, and the repair on the background cleanup path are untested and worth covering with
   whichever fix lands. Recorded by the maintainer on 2026-11-18 from the plan's review.
 
+  Sent back unplanned on 2026-11-21: the maintainer does not want these gaps patched one by one. Their words: "We need
+  to fundamentally rethink this. This cannot be this complicated. We cannot rely on these implementation details and
+  whatever in Git; we need to fundamentally redesign this." Planning research that day also found that the parent-death
+  signal recommended above would not cover background cleanup, where `git gc` hands the branch-list rewrite to a child
+  process the signal does not reach, and that it is Linux-only while the cache runs on Macs too.
+
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
   installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0
@@ -267,7 +267,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Consider consistent workspace-trust scope across agents.** Antigravity's workspace-trust switch applies to all
   launches (including plain folders), whereas Claude, Codex, Muse and Pi under Settings → Agent trust currently apply
   only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
-  also "Fix 'answer trust dialog' for Claude Code").
+  also "Fix 'answer trust dialog' for Claude Code"). Plan: `plans/queue/agent-trust-every-folder.md`.
 
 - **One Settings section per agent.** Settings gets a dedicated Agents group with one section per agent type, every
   agent type included, holding that agent's settings. An agent with nothing to configure gets a section that says so
@@ -416,7 +416,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   credentials; a token rotation reaches agents only when they next launch; keys earlier releases wrote into the settings
   files need a one-time cleanup; and the recipe, delivery and Settings help text in the specs is rewritten. Container
   hosts share recipes once `plans/queue/podman-environments.md` lands, so the same design should cover them. From the
-  2026-11-10 triage of `settings-save-races-final-replacement.md`.
+  2026-11-10 triage of `settings-save-races-final-replacement.md`. Plan:
+  `plans/queue/recipe-credentials-in-launch-env.md`.
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
   approval.
@@ -452,7 +453,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **No box around a session row's status icons on hover.** the "box" that appears around the idle time and the agent
   type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
-  button/something selectable, which is basically what that appearance of the rectangle on hover is showing
+  button/something selectable, which is basically what that appearance of the rectangle on hover is showing Plan:
+  `plans/queue/status-mark-hover-ring.md`.
 
 ## Mid term
 
