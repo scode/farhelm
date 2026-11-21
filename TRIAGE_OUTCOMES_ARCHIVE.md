@@ -32227,3 +32227,290 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Completion criteria: Remove the feedback file and its index entry.
 - Execution: Discarded as decided. Change `mwnyupmuwnrp`, bookmark `plan/triage-bookkeeping/01-discards`,
   [PR #4465](https://github.com/scode/farhelm/pull/4465/changes).
+
+## desktop-startup-update-duplicates.md
+
+- Outcome: `other`.
+- Assessment: None. Startup and updater code repeat small helpers (bundle reopen, hello probe, window size check,
+  stable-version check, state-file wiring, peer-text formatting). Verified: spot-checked that the duplication remains
+  (`window_state.rs:145` and `:178`).
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## terminal-grid-row-traversal-duplicated.md
+
+- Outcome: `other`.
+- Assessment: None today. Word selection and file-path recognition each walk a terminal row their own way and could
+  drift apart. Verified: not re-traced. The reviewer reports it as source-confirmed.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## gui-controls-repeat-shared-rendering.md
+
+- Outcome: `other`.
+- Assessment: None. Controls draw their own focus rings, and three forms capitalize validation errors separately.
+  Verified: not re-traced. The reviewer reports it as source-confirmed.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## gui-focus-checks-repeat-drawn-predicate.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: confirmed that `focus.rs:730` has `is_drawn`, while `:1224` and others repeat
+  `root.contains`.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## approval-views-repeat-status-lookups.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## gui-command-paths-repeat-reply-classification.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## hosts-menu-and-settings-repeat-operation-logic.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## launcher-repeats-choices-and-summary-formatting.md
+
+- Outcome: `other`.
+- Assessment: None today. Launcher labels and help strings are spelled separately in several places and could drift.
+  Verified: not re-traced. Note that the in-flight plan `launcher-command-field.md` reworks these launcher surfaces, so
+  this code will churn.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## gui-screenshot-scenes-repeat-fixture-wiring.md
+
+- Outcome: `other`.
+- Assessment: None. Golden screenshot scenes repeat fixture setup. One scene hand-copies the update reinstall advice, so
+  its picture would not change if the shipped wording did. Verified: not re-traced. The in-flight
+  `goldens-fast-and-targeted.md` plan touches the golden runner, not these scenes.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## session-list-actions-repeat-admission-and-progress.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## session-pane-repeats-last-known-status.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## settings-repeat-preference-and-focus-wiring.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## templates-repeat-lookup-and-control-wiring.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## terminal-repeats-modifier-mapping.md
+
+- Outcome: `other`.
+- Assessment: None today. The drag notice's help names the forcing modifier separately from the code that checks it, so
+  the two could drift. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## trash-repeats-animation-and-focus-wiring.md
+
+- Outcome: `other`.
+- Assessment: None. Verified: not re-traced.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## control-tests-repeat-simulated-key-events.md
+
+- Outcome: `other`.
+- Assessment: None. Test helpers for key press/release are copied across component and approval tests. Verified:
+  `components/tests/mod.rs` `press`/`release`, `components/tests/radio_group.rs` `key_up`,
+  `approvals/region_tests.rs:1449-1463` still each build the same `KeyDownEvent`/`KeyUpEvent`.
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## session-list-tests-repeat-frame-and-request-helpers.md
+
+- Outcome: `other`.
+- Assessment: None. Session-list test suites keep their own copies of scroll, drawn-check, text-collection, row-menu and
+  fake-helm drain helpers. Verified: copies still present (`texts` in `environment_delete_tests.rs:95`,
+  `environment_tests.rs:233`, `lifecycle_tests.rs:177`; `drawn` in `menu_tests.rs:133` and `host_rail/tests.rs:1632`;
+  `answered` drains in `seen_tests.rs:40`, `retired_tests.rs:121`, etc.).
+- Decision: Q13, the maintainer wrote: "add a near term todo item for this instead. the findings go out of the queue,
+  but the detail must be retaine din a way that the agent looking at the todo item later knows what the findings were".
+  (2026-11-21 fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: Add one Near term TODO.md entry covering all 17 duplicated-code findings from this question,
+  retaining each finding's detail (what is duplicated, where, and the suggested consolidation) so a later agent can act
+  without the queue files. Then remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
+  Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
+  [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).

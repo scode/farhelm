@@ -280,6 +280,123 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   agent's own configuration, which affects the agent outside Farhelm too. Drop the manual setup instructions. Plan:
   `plans/queue/agent-hook-setup.md`.
 
+- **Consolidate the helpers duplicated across Farhelm.** Work through the repeated helpers from the 2026-11-21 review.
+  Reuse the existing shared module where one fits and keep each helper scoped to its actual callers. Locations below are
+  from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
+  `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
+
+  - `desktop-startup-update-duplicates.md`. In desktop `bundle.rs:214–241` and `updater.rs:339–346,367–397`, share the
+    detached bundle wait-and-open helper with explicit wait limits and opener arguments. Keep the reopen marker and
+    update environment with their callers. In desktop `lib.rs:574–585,600–609`, share the hello discovery predicate
+    while the two startup waits keep their own child checks, deadlines and errors. In desktop
+    `window_state.rs:144–151,175–183`, share the 320×240 minimum and fits-one-monitor checks. Leave position and
+    centering to each platform. In desktop `updater.rs:1394–1405` and `updater/advisories.rs:84–99`, share the stable
+    SemVer predicate that excludes prerelease and build metadata, with each parser keeping its diagnostics. In desktop
+    `updater.rs:432–445,2558–2575`, have production and the file-backed test rig use one constructor for the three
+    state-file closures. Move the peer text escaping and empty/whitespace wording from desktop `local_host.rs:38–51` and
+    GUI `update_readout.rs:301–317` next to the shared escaping routines.
+  - `terminal-grid-row-traversal-duplicated.md`. In
+    `crates/gui/farhelm-grid-model/src/{paths.rs:335–383,selection.rs:241–281}`, both row walks fill gaps, split plain
+    runs, keep other runs' widths and drop wide-wrap padding. Share a walker yielding column, width and text. Keep byte
+    offsets for paths and UTF-16 offsets for selection with the callers.
+  - `gui-controls-repeat-shared-rendering.md`. Share the absolute two-pixel focus-ring element across
+    `components/button.rs:1163–1200`, `select.rs:414–427`, `radio_group.rs:775–787,840–852,900–912,953–965`,
+    `menu_item.rs:312–326`, `list_row.rs:125–136`, `tab_strip.rs:240–256`, `copy_field.rs:288–299`,
+    `checkbox.rs:240–251` and `mod.rs:545–558` (all under `components/`). Pass insets and color, and keep corner styling
+    and ring visibility with each control. Share initial ASCII-letter capitalization for validation messages in
+    `components/custom_flags.rs:156–162`, `settings/recipes/editor.rs:125–131` and `templates/fields.rs:540–546`. Keep
+    punctuation and non-ASCII input intact.
+  - `gui-focus-checks-repeat-drawn-predicate.md`. In `focus.rs:761–765,1228–1234,1427–1431,1684–1688`, route repeated
+    current-frame root and focus-handle checks through `is_drawn`, keeping layer-specific conditions at each caller.
+  - `approval-views-repeat-status-lookups.md`. In `approvals/host_add.rs:95–110` and
+    `approvals/tunnel.rs:173–182,194–202`, share one approval-row lookup and one in-progress operation lookup by request
+    ID in the approvals module.
+  - `gui-command-paths-repeat-reply-classification.md`. In `operations.rs:546–556,633–643`, let the keyless command path
+    project `Outcome::from_reply` into body or refusal words. Keep its command-error handling separate.
+  - `hosts-menu-and-settings-repeat-operation-logic.md`. In `hosts/menu.rs:485–494,513–518,568–574`, have Remove use
+    Delete's existing `close` helper after taking the focus mark. In `hosts/identity/phase.rs:409–417,575–586`, share
+    the suspend/resume infinitive while keeping provider-specific subjects in their lines. In
+    `hosts/progress.rs:151–180`, `hosts/status.rs:425–448` and `hosts/uninstall.rs:427–449`, share the operations-store
+    ID check and conditional update that discards old-session state and notifies only on change. Keep separate globals
+    for the observers. In `hosts/setup.rs:888–922` and `hosts/remove.rs:429–465`, share permanent-answer save admission,
+    clearing on admission and handling a busy preferences key or refused reply. Pass each panel's wording.
+  - `launcher-repeats-choices-and-summary-formatting.md`. Recheck these call sites after the launcher redesign
+    (`plans/queue/launcher-command-field.md`). Share the lowercase effort spelling and `default` fallback for search and
+    the change notice beside the labels in `permission/words.rs:16–27`, used from `launcher/search.rs:413–419` and
+    `launcher/view/changed.rs:104–110`. Share default-effort help across the select, radio group and search at
+    `launcher/view/choices.rs:231–235,260–265` and `launcher/search.rs:361–362`. Share `gh:owner/name` on top of
+    `repo_identifier` for `launcher/recents.rs:244–250`, `launcher/view/checkout.rs:1184–1191` and
+    `launcher/draft.rs:194–197`, adding preview status where applicable. In `launcher/entry.rs:348–361,371–379`, share
+    the harness-specific unsupported-resume formatter and uncaptured-conversation text, keeping the Agent and Command
+    conditions. In `launcher/view/folder_list.rs:89–106` and `crates/farhelm-proto/src/text.rs:113–132`, use one
+    iterator over whole escaped display units so truncation splits only between units. In
+    `launcher/view/recents.rs:354–383` and `launcher/view/search.rs:654–655,683–694`, the two recent-setup surfaces
+    repeated resolved permission rendering, including danger ink for YOLO. The old strip omitted the default. In the
+    redesigned launcher, look at `recent_choice` in `launcher/view/search/start.rs` and `recent_lines` in
+    `launcher/view/search.rs`. Share the permission projection and keep the Start column's chip and default omission,
+    search's inline text, and each surface's summary local.
+  - `gui-screenshot-scenes-repeat-fixture-wiring.md`. The landed `goldens-fast-and-targeted` plan changed the runner.
+    The scene fixtures still need consolidation. Share one-shot dialog setup when a fake connection first has a UI
+    session. Give the helper each scene's setup callback and retain the connection, fake helm and subscription. See
+    `goldens/hosts.rs:55–85,125–146,154–176,188–209,795–817,960–988`,
+    `goldens/other_dialogs.rs:235–253,282–299,332–350`, `goldens/templates.rs:52–69,129–167,208–228` and
+    `goldens/settings.rs:122–183`. Share the session fixture's title and `TEST_NOW` activity/seen timestamps while
+    scenes supply their status (`goldens/session_list.rs:42–47,114–119,154–160`, `goldens/other_dialogs.rs:112–117`,
+    `goldens/mod.rs:301–307`). Move the upgrade-floor reinstall hover formatter into GUI `update_readout` so
+    `goldens/desktop.rs:371–384` and desktop `updater.rs:588–609` use the same words.
+  - `session-list-actions-repeat-admission-and-progress.md`. In `session_list/`, share operation admission across
+    `menu.rs:601–615`, `environment.rs:625–642`, `restart.rs:278–306`, `stop.rs:226–247`, `delete.rs:366–392`,
+    `environment_delete.rs:242–267` and `replace.rs:319–346`. The helper takes the command result and completion, finds
+    the store, starts work under the session key and returns `NotStarted` on refusal. Keep guards, logging and progress
+    clocks local. Share `outcome.rs:432–437`'s in-flight lookup with `stop.rs:285–290`, `restart.rs:314–319`,
+    `replace.rs:414–419`, `delete.rs:435–442` and `environment.rs:323–344`, letting callers filter kinds. Share the
+    status label, colors and spinner for the progress title in `delete.rs:484–516` and `stop.rs:296–327` with
+    caller-supplied selector, label and flex sizing. Share the stale-cause mark's ID, name, role and tooltip in
+    `row.rs:639–660,758–769`, with the clock or text styling supplied by compact and full rows.
+  - `session-pane-repeats-last-known-status.md`. Share the last-known status and activity-age projections between the
+    Details bar and unavailable-session view, keeping their visibility rules local. See
+    `session_pane/details.rs:239–245,260–264` and `session_pane/unavailable.rs:561–569`.
+  - `settings-repeat-preference-and-focus-wiring.md`. Share the sparse `PUT /api/preferences` constructor and diagnostic
+    label in `settings/choices.rs:377–387`, `session_list/order.rs:212–220`, `session_list/host_rail/expansion.rs:71–79`
+    and `terminal/tunnels.rs:605–617`. Let Order pass its object and the callers keep their write and completion
+    policies. Share focus-mark restoration to the editor opener using the stored window when the callback has none in
+    `settings/credentials.rs:362–371` and `settings/recipes.rs:717–727`, keeping editor and refresh bookkeeping local.
+  - `templates-repeat-lookup-and-control-wiring.md`. In `templates/dispatch.rs:221–243,295–313`, share launcher and
+    switcher template lookup and unavailable/missing-name wording, with each surface supplying its sentence ID. Share
+    the available-name read in helm order in `templates/armed.rs:475–499` and `templates/editor.rs:1494–1507`. The
+    sequence's Enter lookup still uses retained names. Share the Base name/Fixed name radio and help in
+    `templates/editor/rows.rs:652–678` and `templates/save_panel.rs:308–340`, passing each control's ID, selection and
+    handler. Share the typed `GET /api/launch-catalog` request and decode in `templates/dialog.rs:766–789` and
+    `launcher/view.rs:477–500`, keeping retries, failure display and quick-launch continuation local. Share physical
+    keypad digit lookup for macOS keycodes and XKB names in the input mapping crate (`templates/armed.rs:84,186–194`,
+    `crates/gui/farhelm-input-mapping/src/keys.rs:218–244`). Keep the terminal's logical-character check and operator
+    mapping.
+  - `terminal-repeats-modifier-mapping.md`. Share the drag-selection modifier test and display name (Option on macOS,
+    Shift on Linux) between `terminal/drag_notice.rs:108–113` and `terminal/attached.rs:3717–3722`. In
+    `terminal/attached.rs:1942–1948,3522–3531`, share the five-field GPUI-to-terminal modifier conversion, with mouse
+    input calling `.bits()` on the result.
+  - `trash-repeats-animation-and-focus-wiring.md`. Share the ticker handle and redraw counter in `trash.rs:777–810` and
+    `components/spinner.rs:42–74`, deriving spinner steps modulo eight. In `trash/dialog.rs:185–191,239–245`, share
+    confirm/cancel focus restoration to the host Delete control or Delete all footer, taking the caller's mark.
+  - `control-tests-repeat-simulated-key-events.md`. Share simulated press/release helpers that construct the same
+    events, park the executor and check invariants. Move the component helpers to test support for the radio and
+    approval tests. See `components/tests/radio_group.rs:265–274`, `components/tests/mod.rs:76–97`,
+    `approvals/region_tests.rs:1447–1463` and `test_support.rs:221–227`.
+  - `session-list-tests-repeat-frame-and-request-helpers.md`. Paths in this item are under `session_list/`. Share the
+    mouse move, vertical pixel scroll and settle in `list_tests.rs:57–67` and `lifecycle_tests.rs:1707–1717`. Put the
+    debug-bounds drawn predicate from `host_rail/tests.rs:1543–1546` and `menu_tests.rs:128–131` beside the existing
+    test bounds helper. Share frame parent traversal across `host_rail/tests.rs:234–264,1759–1774`,
+    `lifecycle_tests.rs:142–158,1142–1162` and `row_tests.rs:53–75`, keeping frame order, including the collection root
+    and checking every match for reused IDs. Share fresh-frame painted-text collection in
+    `environment_delete_tests.rs:94–97`, `environment_tests.rs:231–234` and `lifecycle_tests.rs:176–179`. Share the
+    row-menu toggle, item click and settle in `environment_tests.rs:224–229`, `lifecycle_tests.rs:160–165` and
+    `menu_tests.rs:146–151`, with the Delete wrapper supplying its item ID. Share a fake-helm drain returning commands
+    acknowledged with empty 200 responses in order. Keep path filters and result shape at the callers in
+    `seen_tests.rs:37–52`, `pin_drag_tests.rs:34–48`, `marking_tests.rs:396–409`, `pins_tests.rs:33–49`,
+    `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
+
+  Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
