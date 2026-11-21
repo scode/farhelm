@@ -67,3 +67,86 @@ miss the selected conversation or interpret the initial message differently from
 All three PRs passed their source and wording review gates. The reviews tightened trust-menu recognition and kept older
 command arguments literal, added coverage for competing Custom settings, and corrected the docs and screenshot framing.
 The existing Custom separator limitation above was left for a separate change.
+
+### Landing
+
+#### What landed with it
+
+Two other plans landed right after this one in the same round: model-family-cleanup (launcher model family shortcuts and
+a shorter wrong-agent refusal) and template-placeholder-validation (launch templates refuse misplaced command
+placeholders when saved). Since this plan's work started, main had gained only the Add host takeover wording fix and two
+TODO entries. An independent reviewer and I read the three plans' changes against each other, and none of it interacts
+with this plan:
+
+- The other two change different parts of the same launch code.
+- Model-family-cleanup stopped sending a separate shortcut word with each model in the launcher's list. That list goes
+  only from the helm to the app built with it, so it needs no protocol change; this plan's move to protocol 82 is the
+  round's only one.
+- To trust a directory, this plan has the supervisor fill the session's working directory into Antigravity's trust
+  option, through a placeholder only an Antigravity launch fills. A saved template carries no trust setting, and the new
+  template save check treats that placeholder as ordinary text, as Command launches do.
+
+#### Fixes made while landing
+
+One went in as a fourth PR, [#4362](https://github.com/scode/farhelm/pull/4362/changes). None of it changes what you see
+or what a launch does:
+
+- In SPEC.md's Status section, this plan had dropped the words recording that OMP's and Grok's approval prompts showing
+  only running or idle is a settled decision, not a missing feature. They are back, now naming Antigravity's approval
+  prompts too, which this plan did not change.
+- SPEC_impl.md now says that the working-directory placeholder above stays literal in a Command launch. A session's
+  displayed command shows it as it is, so pasting that command into a Command launch does not carry the trust.
+- The Settings help for Antigravity's switch now follows the settings code's rule of deciding each such text for every
+  agent; the text is unchanged.
+- The changelog fragment names the section "Agent trust", as Settings spells it.
+
+#### Checks
+
+This round landed three plans together: antigravity-workspace-trust, model-family-cleanup and
+template-placeholder-validation. Between them they change the protocol (to 82), the helm's database (to version 93), how
+the supervisor reads Antigravity's screen, the helm's launches, templates and preferences, the desktop app (Settings,
+the note above the terminal, the launcher's model field and search, the template editor), screenshots, the docs website,
+SPEC.md and SPEC_impl.md. So the landing ran the whole workspace suite, the desktop app's tests, the app's end-to-end
+smoke test and the main lint (clippy) on a separate arm64 Linux test machine, and the screenshot comparisons, the
+website build and the small checks locally on x86_64. All of these ran on the three plans stacked together on main.
+
+On the plans as delivered:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine
+  (`8bcf674c-ac40-4153-932e-8c1088275db5`): all 8182 tests passed, and no test reported skipping itself because the
+  machine lacked something it needs (a systemd user session, ssh to itself, Podman).
+- `cargo nextest run -p farhelm-desktop`, on the test machine (`6780e911-a7be-4097-ba35-431188b6f40b`): all 180 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (`084e7104-a303-472d-8b1b-04d8906d56b6`): every step passed
+  but paste, which skips on Linux as it always does.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (`2980a7fb-c943-402e-99cf-5ac085118d90`):
+  passed, with Antigravity's two new Settings pictures.
+- `python3 -B scripts/test-gui-screenshot-batch.py` (which validates the screenshot list), the website build
+  (`bun run build`), `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+After the landing fixes, #4362 for Antigravity (one function in the app's Settings code, which still shows the same help
+text, plus SPEC.md, SPEC_impl.md and a changelog fragment) and #4363 for model-family-cleanup (a docs page):
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (`c609aff2-d2f1-4346-9cb8-16f37e4a1266`): all 3226 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine: passed.
+- The website build, `cargo fmt --all -- --check`, `dprint check` and `python3 releasing/check-changelog.py format`,
+  locally: passed.
+
+Reused for the fixes: the workspace suite, the desktop tests, the smoke test and the screenshot comparisons, since the
+Settings help shows the same text and nothing else that runs changed. Skipped: Mac runs, since no macOS-specific code
+changed; the Antigravity note's devbuild check covers the Mac by hand.
+
+#### Things you should know that the report does not say
+
+The report's open question still stands, and it is wider than the report puts it. Antigravity Custom permission flags
+that end with a bare `--` put all of the launch's later options after that separator: a conversation to resume,
+Farhelm's own options and an initial prompt. Antigravity reads each of them as plain text. That was true before this
+plan; the plan only makes sure its own trust option goes before the separator.
+
+#### What you should still do
+
+Try it on a devbuild with Antigravity installed: start an Antigravity session in a directory it has not trusted, check
+that the session shows Waiting while the trust question is up and that the note above the terminal links to the switch.
+Then turn the switch on in **Settings → Agent trust**, start another session there, and check that the question does not
+appear. The protocol moved to 82, so update remote hosts when you test across machines.

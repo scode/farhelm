@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing 410d43] `antigravity-workspace-trust.md` — add an off-by-default Antigravity workspace-trust switch (all launches, via per-launch `--settings`) and screen-reader trust detection for Waiting status and the discovery banner
 - [landing 44c0a5] `model-family-cleanup.md` — standardize catalog model family names to versionless shorthand words, drop `family_word` from the wire, and shorten wrong-agent model refusals
 - [landing 74e405] `template-placeholder-validation.md` — validate command placeholder quoting and joining when saving launch templates and close the matching review item
 - [complete] `auto-update-staged-payloads.md` — skip automatic remote-host updates when locally staged unsigned payloads (`FARHELM_HELM_PAYLOAD_DIR`) are active and close the matching review item

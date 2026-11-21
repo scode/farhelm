@@ -4,3 +4,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 
 - [`templates-dialog-close`](reports/templates-dialog-close.report.md) landed 2026-11-21 in #4345, #4346, #4347: let the Templates dialog close: no save question for an untouched template, and a leave question shown over the dialog (templates and the Settings recipe editor)
 - [`agent-add-host-takeover-hint`](reports/agent-add-host-takeover-hint.report.md) landed 2026-11-21 in #4354, #4357: point users to Add host (instead of a non-existent Take over row in Hosts) when an agent asks to add a host managed by another Farhelm
+- [`antigravity-workspace-trust`](reports/antigravity-workspace-trust.report.md) landed 2026-11-21 in #4349, #4350, #4356, #4362: add an off-by-default Antigravity workspace-trust switch (all launches, via per-launch `--settings`) and screen-reader trust detection for Waiting status and the discovery banner
