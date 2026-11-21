@@ -15443,6 +15443,10 @@ mod tests {
                 .await
                 .expect("handshake");
             while let Ok(Some(frame)) = reader.read_frame().await {
+                // Heartbeats use data frames. Only control frames carry a launch.
+                if frame.kind != farhelm_proto::FrameKind::Control {
+                    continue;
+                }
                 let ControlMsg::CreateSession {
                     req_id,
                     cwd,
@@ -18025,9 +18029,10 @@ mod tests {
                     .into_iter()
                     .map(|row| row.id)
                     .collect();
-                assert!(
-                    !cached.contains(&"helper".to_string()),
-                    "{provider:?}: {cached:?}"
+                assert_eq!(
+                    cached,
+                    ["starter"],
+                    "{provider:?}: preserve the other session"
                 );
             }
         }

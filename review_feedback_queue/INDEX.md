@@ -214,9 +214,6 @@ consequences.
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
 
-- [`upload-failure-test-lacks-pipe-holder-witness.md`](upload-failure-test-lacks-pipe-holder-witness.md) — The
-  failed-upload regression can pass without starting the pipe-holding fixture needed to test the original hang.
-
 - [`sandbox-termination-poll-exceeds-phase-deadline.md`](sandbox-termination-poll-exceeds-phase-deadline.md) — Sandbox
   deletion can exceed its stated termination-polling allowance because each lookup receives a fresh timeout beyond the
   phase's remaining time.
@@ -281,12 +278,6 @@ consequences.
   sandbox runner cannot stage an ordinary checkout whose absolute path contains spaces, because nested remote shell
   commands interpolate that path without quoting it.
 
-- [`mac-uninstall-test-lacks-live-host-premise.md`](mac-uninstall-test-lacks-live-host-premise.md) — The native Mac
-  uninstall test can pass without establishing that a retained agent terminal host was still alive before uninstall.
-
-- [`mac-fixture-cleanup-stop-budget.md`](mac-fixture-cleanup-stop-budget.md) — Mac test cleanup uses a shorter deadline
-  than production permits for the same stop script; no actual timeout was observed.
-
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -295,10 +286,6 @@ consequences.
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-test-responders-heartbeat-control-decode.md`](trailing-environment-test-responders-heartbeat-control-decode.md)
-  — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-agent-environment-missing-local-ssh-key-preflight.md`](trailing-agent-environment-missing-local-ssh-key-preflight.md)
   — Sandbox agent launches ask for approval before checking the local SSH key. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
@@ -306,10 +293,6 @@ consequences.
 - [`trailing-environment-history-admits-agent-origin.md`](trailing-environment-history-admits-agent-origin.md) — Agent
   environment launches enter GUI place-default and recent-history bookkeeping. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-nonfinal-environment-delete-cache-survivor-oracle.md`](trailing-nonfinal-environment-delete-cache-survivor-oracle.md)
-  — Non-final Delete test accepts clearing every cached session. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
 
 - [`trailing-sealed-delete-comment-hold-versus-seal-record.md`](trailing-sealed-delete-comment-hold-versus-seal-record.md)
   — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection;
@@ -323,10 +306,6 @@ consequences.
   — Unanswered-status regression test can skip the settled failure boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-host-phase-vocabulary-test-omits-stopped.md`](trailing-host-phase-vocabulary-test-omits-stopped.md) —
-  Phase-consistency test omits new Stopped and Deleting states despite its every-variant promise. Abbreviated
-  collection; confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md`](trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md)
   — Suspended view documentation retains the known Tensorlake-only vocabulary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
@@ -338,10 +317,6 @@ consequences.
 - [`trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md`](trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md)
   — Ordinary Add retains source exclusion during post-Running SSH readiness. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-cancelled-trash-observation-test-misses-fleet-publication.md`](trailing-cancelled-trash-observation-test-misses-fleet-publication.md)
-  — The cancellation test does not assert its committed fleet wake. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-ui-stopped-container-waiting-place-offers-suspend.md`](trailing-ui-stopped-container-waiting-place-offers-suspend.md)
   — Stopped container offers Suspend when its container host is unavailable. Abbreviated collection; confidence,
@@ -397,10 +372,6 @@ consequences.
 
 - [`trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md`](trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md)
   — Real-container hosts-list test overstates its exact-membership oracle. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md)
-  — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
@@ -586,20 +557,9 @@ consequences.
 - [`wrapped-link-test-misses-second-open.md`](wrapped-link-test-misses-second-open.md) — The test checks that the second
   click gives no refusal but never verifies that it opens the link.
 
-- [`connection-refusal-tests-release-port-too-early.md`](connection-refusal-tests-release-port-too-early.md) — Two tests
-  can reach a different process if it starts listening after the test gives up the port it reserved.
-
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
   flash.
-
-- [`devbuild-startup-test-misses-first-scan.md`](devbuild-startup-test-misses-first-scan.md) — The startup test can pass
-  if a devbuild starts its first automatic update scan before saving the opt-out. It also starts from a database that
-  has already migrated.
-
-- [`automatic-update-wake-test-accepts-host-refresh.md`](automatic-update-wake-test-accepts-host-refresh.md) — The test
-  can miss that turning on automatic updates failed to wake the helm, because a delayed first host refresh can wake it
-  instead.
 
 - [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
   can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
@@ -612,9 +572,6 @@ consequences.
 
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
-
-- [`desktop-path-notice-first-read-untested.md`](desktop-path-notice-first-read-untested.md) — The startup tests can
-  pass if the first client misses the login PATH warning.
 
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.

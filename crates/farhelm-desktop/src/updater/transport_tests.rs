@@ -164,13 +164,13 @@ async fn a_nonresponding_peer_hits_the_client_deadline() {
     );
 }
 
-/// A reserved then closed loopback port gives a real connection refusal with
+/// A bound loopback port kept without a listener gives a connection refusal with
 /// no external service or fixed-port premise. The error must remain an error.
 #[farhelm_testtrace::test]
 async fn a_refused_connection_is_not_missing_metadata() {
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    let address = listener.local_addr().unwrap();
-    drop(listener);
+    let reserved = tokio::net::TcpSocket::new_v4().unwrap();
+    reserved.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+    let address = reserved.local_addr().unwrap();
     let error = fetch_with_client(&client(), &format!("http://{address}/"), 8)
         .await
         .unwrap_err();

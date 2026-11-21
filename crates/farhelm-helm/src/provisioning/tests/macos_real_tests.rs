@@ -326,7 +326,12 @@ impl OwnedMac {
             plist = shell_path(&self.plist).unwrap(),
         ));
         self.backend
-            .require_shell(&self.target, &script, "clean the owned Mac fixture")
+            .require_shell_within(
+                &self.target,
+                &script,
+                "clean the owned Mac fixture",
+                super::super::backend::STOP_SUPERVISOR_TIMEOUT,
+            )
             .await
             .is_ok()
     }
@@ -738,6 +743,12 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         client.stop_session(&session.id).await.expect("end the owned agent");
         let listing = client.list_sessions().await.expect("list the ended Mac agent");
         assert!(listing.sessions.iter().any(|row| row.id == session.id && row.status.has_ended()));
+        // The agent's pair is first. Its host must still be alive after Stop
+        // so uninstall actually has a retained terminal to end.
+        let (pid, identity) = &processes[1];
+        let retained_host = fixture.shell(&format!("ps -p {pid} -o pid=,lstart=,command="),
+            "confirm the retained agent terminal host before uninstall").await;
+        assert_eq!(&retained_host, identity, "Stop must preserve the agent terminal host");
         let planned = service.plan_uninstall(host).await.unwrap_or_else(|_| panic!("Mac uninstall planning failed"));
         fixture.assert_plan(&planned.plan);
         assert!(planned.plan.actions.iter().any(|action| matches!(action, ProvisioningAction::StopLaunchAgent { .. })));
