@@ -2,6 +2,7 @@
 //! for the local machine or through a remote machine's execution route.
 
 use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
+use crate::access::RemoteRoute;
 use crate::manager::peer_text;
 use async_trait::async_trait;
 use farhelm_proto::io::{
@@ -1589,9 +1590,17 @@ impl SystemBackend {
     /// `~/.local/bin`. Missing the latter reported a host that runs Farhelm
     /// from the standard installer as empty, and offered to install a second
     /// copy over it.
-    pub(super) fn probe_script(farhelm: &str, state: Option<&str>) -> String {
+    ///
+    /// The route's stdin deadline applies even to a short probe. If the helm
+    /// stops executing while the transport still holds stdin, only the remote
+    /// helper can enforce that deadline.
+    pub(super) fn probe_script(farhelm: &str, state: Option<&str>, route: &RemoteRoute) -> String {
         let state_arg = state
             .map(|path| format!(" --state-dir {path}"))
+            .unwrap_or_default();
+        let idle_arg = route
+            .stdin_idle_limit_secs()
+            .map(|seconds| format!(" --stdin-idle-limit-secs {seconds}"))
             .unwrap_or_default();
         format!(
             "printf '%s\\n' {marker} >&2; resolved=''; \
@@ -1601,7 +1610,7 @@ impl SystemBackend {
              elif [ {farhelm} = farhelm ] && [ -x \"$HOME/.local/bin/farhelm\" ]; \
              then resolved=\"$HOME/.local/bin/farhelm\"; fi; \
              if [ -n \"$resolved\" ]; then printf '%s%s\\n' {resolved_prefix} \"$resolved\" >&2; \
-             exec \"$resolved\" internal stdio{state_arg}; fi; exit {POSITIVE_ABSENCE_EXIT}",
+             exec \"$resolved\" internal stdio{state_arg}{idle_arg}; fi; exit {POSITIVE_ABSENCE_EXIT}",
             marker = crate::ssh::shell_quote(REMOTE_PROBE_MARKER),
             resolved_prefix = crate::ssh::shell_quote(REMOTE_RESOLVED_PREFIX),
         )
@@ -1629,7 +1638,7 @@ impl SystemBackend {
                     .as_ref()
                     .map(|path| shell_path(path))
                     .transpose()?;
-                let script = Self::probe_script(&farhelm, state.as_deref());
+                let script = Self::probe_script(&farhelm, state.as_deref(), route);
                 self.remote_command(route, script).map_err(|error| {
                     BackendFailure::new("building the remote probe", error.to_string())
                 })?

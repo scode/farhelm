@@ -2486,6 +2486,9 @@ impl ProvisioningService {
         }
         self.manager.events().bump();
         let service = Arc::clone(self);
+        // Register the handle before the child can purge its own host during
+        // uninstall. Purge takes the same memory lock.
+        let mut memory = self.memory.lock().await;
         let task = tokio::spawn(async move {
             let _slot = Arc::clone(&service.run_slots)
                 .acquire_owned()
@@ -2497,7 +2500,7 @@ impl ProvisioningService {
                 .revalidate_and_execute(host, pending, host_write)
                 .await;
         });
-        self.memory.lock().await.tasks.insert(host, task);
+        memory.tasks.insert(host, task);
         Ok(RunAccepted {
             host_id: host,
             run_id,
@@ -2779,7 +2782,39 @@ impl ProvisioningService {
                     ProbeObservation::OwnedSupervisor { owner, .. } => {
                         Err(BackendFailure::new(owner_refusal(&owner), ""))
                     }
-                    ProbeObservation::Absent => Ok(Revalidation::Execute),
+                    ProbeObservation::Absent => {
+                        // The desktop app can be installed while the setup
+                        // question is open without any supervisor answering.
+                        if pending.plan.host_arch.is_macos() {
+                            let reach = match self.backend.inspect(original_target).await? {
+                                ReachOutcome::Supported(reach) => reach,
+                                ReachOutcome::Manual(reason) => {
+                                    return Err(BackendFailure::new(reason, ""));
+                                }
+                            };
+                            // A supported reply can describe a different login.
+                            // The setup plan freezes the inspected login's
+                            // paths and launchd domain.
+                            let domain = pending.plan.actions.iter().find_map(|action| {
+                                if let ProvisioningAction::StartLaunchAgent { domain, .. } = action
+                                {
+                                    Some(domain)
+                                } else {
+                                    None
+                                }
+                            });
+                            if reach.arch != pending.plan.host_arch
+                                || reach.home != pending.plan.host_home
+                                || reach.launchd_domain.as_ref() != domain
+                            {
+                                return Err(BackendFailure::new(
+                                    "the Mac setup target changed while awaiting confirmation. Start setup again.",
+                                    "",
+                                ));
+                            }
+                        }
+                        Ok(Revalidation::Execute)
+                    }
                 }
             }
             PendingConfirmation::Update {

@@ -485,13 +485,11 @@ pub(crate) struct ProvisioningPlan {
     /// The inspected host's home directory, frozen with the actions so their
     /// path chips cannot be shortened against this client's own home.
     pub(super) host_home: PathBuf,
-    /// The reach probe's validated Linux distribution ID (empty when absent)
-    /// or `macOS`, and the native payload target it matched — carried
-    /// through purely for `confirmation()`'s host line. Validation happens
-    /// at the reach-record boundary because this value becomes plan text;
-    /// provisioning still gates on capabilities, not on this ID (see
-    /// `Reach::distro_id`), so nothing here or in execution branches on it.
+    /// Distribution spelling for the confirmation. Reach validates it before
+    /// using it as plan text, and provisioning gates on capabilities.
     pub(super) host_distro_id: String,
+    /// The approved native target. A confirmed Mac setup with no answering
+    /// supervisor revalidates that it would still install on this target.
     pub(super) host_arch: PayloadTarget,
 }
 

@@ -173,9 +173,6 @@ consequences.
 - [`anonymous-container-volumes-survive-removal.md`](anonymous-container-volumes-survive-removal.md) — Removing a
   container can leave its anonymous image volumes behind; whether Farhelm promises to remove them is unresolved.
 
-- [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
-  completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
-
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
@@ -301,10 +298,6 @@ consequences.
 - [`mac-fixture-cleanup-stop-budget.md`](mac-fixture-cleanup-stop-budget.md) — Mac test cleanup uses a shorter deadline
   than production permits for the same stop script; no actual timeout was observed.
 
-- [`mac-setup-confirmation-misses-installed-app.md`](mac-setup-confirmation-misses-installed-app.md) — An old Mac setup
-  confirmation can install the remote supervisor after Farhelm.app is installed; the pre-confirmation exception's scope
-  remains uncertain.
-
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -408,10 +401,6 @@ consequences.
 - [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
   — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-provisioning-probe-omits-stdin-watchdog.md`](trailing-environment-provisioning-probe-omits-stdin-watchdog.md)
-  — Environment provisioning probes omit the required stdin deadline. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-podman-dial-kind-advances-before-process-marker.md`](trailing-podman-dial-kind-advances-before-process-marker.md)
   — Container dial staging disables its process-exit diagnosis. Abbreviated collection; confidence, proposed dismissals

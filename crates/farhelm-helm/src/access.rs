@@ -235,7 +235,7 @@ impl RemoteRoute {
 
     /// Environments establish a writer-heartbeat contract with the helper.
     /// Ordinary user SSH access keeps its existing unbounded stdin lifetime.
-    fn stdin_idle_limit_secs(&self) -> Option<u64> {
+    pub(crate) fn stdin_idle_limit_secs(&self) -> Option<u64> {
         match self {
             Self::Ssh {
                 access: SshAccessKind::UserConfig,

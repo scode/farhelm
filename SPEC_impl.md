@@ -7901,7 +7901,10 @@ undetected. Linux retains its `/proc/self/mountinfo` check and read-failure refu
 shared-directory permission rules below still apply.
 
 ADD and UPDATE both retain that concrete plan behind an opaque, one-use confirmation id. Planning is inspection-only;
-consuming the id revalidates the host and registry facts the plan relied on, and only then admits the host-scoped run.
+consuming the id revalidates the host and registry facts the plan relied on before the run executes its planned actions.
+If ADD's confirmation finds no answering supervisor on a Mac, it repeats the desktop-app and reach checks. A changed
+native target, home or launchd user needs a new plan with those facts.
+
 Setup shows the helm's ordered action descriptions in a numbered dialog and consumes the id on explicit confirmation.
 Each path chip uses the helm's home-relative spelling where available, with the full host path on hover; Copy plan
 copies the helm's exact plain-text confirmation, since selecting separate names and chips cannot produce that text. The

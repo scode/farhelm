@@ -1268,7 +1268,8 @@ mod tests {
     /// Farhelm from the standard installer probed as having no supervisor,
     /// and the helm offered to install a second copy over it. The script is
     /// run under a local `sh` with a controlled HOME and PATH, the same shape
-    /// the remote side sees.
+    /// the remote side sees. The environment invocation also keeps its
+    /// stdin deadline when the script resolves a binary off PATH.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
     fn the_probe_script_finds_an_install_script_binary_off_path() {
@@ -1289,24 +1290,35 @@ mod tests {
         // and everything it runs is a builtin.
         let empty_path = home.path().join("empty-path");
         std::fs::create_dir(&empty_path).unwrap();
-        let output = std::process::Command::new("/bin/sh")
-            .arg("-c")
-            .arg(SystemBackend::probe_script("farhelm", None))
-            .env_clear()
-            .env("HOME", home.path())
-            .env("PATH", &empty_path)
-            .output()
-            .expect("run the probe script under sh");
-        let stderr = String::from_utf8_lossy(&output.stderr);
-        assert!(
-            stderr.contains(&format!("{REMOTE_RESOLVED_PREFIX}{}", farhelm.display())),
-            "the probe must resolve the install-script binary: {stderr}"
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout).trim(),
-            "ARGS:internal stdio",
-            "the probe must exec that binary's stdio proxy"
-        );
+        for (route, expected) in [
+            (
+                crate::access::RemoteRoute::Ssh {
+                    destination: "ordinary.example".into(),
+                    access: crate::ssh::SshAccessKind::UserConfig,
+                },
+                "ARGS:internal stdio",
+            ),
+            (
+                crate::tensorlake::ssh::route("sandbox"),
+                "ARGS:internal stdio --stdin-idle-limit-secs 120",
+            ),
+        ] {
+            let output = std::process::Command::new("/bin/sh")
+                .arg("-c")
+                .arg(SystemBackend::probe_script("farhelm", None, &route))
+                .env_clear()
+                .env("HOME", home.path())
+                .env("PATH", &empty_path)
+                .output()
+                .expect("run the probe script under sh");
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            assert!(output.status.success(), "{stderr}");
+            assert!(
+                stderr.contains(&format!("{REMOTE_RESOLVED_PREFIX}{}", farhelm.display())),
+                "the probe must resolve the install-script binary: {stderr}"
+            );
+            assert_eq!(String::from_utf8_lossy(&output.stdout).trim(), expected);
+        }
     }
 
     /// A bare executable name is valid for SSH steady state, but an update
@@ -5158,6 +5170,58 @@ mod tests {
             row.remote_farhelm.as_deref(),
             Some(root.path().join("late/farhelm").to_str().unwrap())
         );
+    }
+
+    /// A setup confirmation authorizes the Mac login that planning inspected.
+    /// Refuse if the app now owns the next launch or the same SSH name reaches
+    /// a different launchd user.
+    #[farhelm_testtrace::test]
+    async fn confirmed_mac_setup_refuses_a_new_app_or_changed_target() {
+        for app_installed in [true, false] {
+            let harness = harness().await;
+            let root = tempfile::tempdir().unwrap();
+            let backend = FakeBackend::absent(root.path().to_path_buf());
+            let mut reach = Reach {
+                user_unit_dir: root.path().join("Library/LaunchAgents"),
+                home: root.path().into(),
+                arch: PayloadTarget::MacosAarch64,
+                distro_id: "macOS".into(),
+                launchd_domain: Some("user/501".into()),
+            };
+            *backend.reach.lock().unwrap() = ReachOutcome::Supported(reach.clone());
+            let service = service(&harness, backend.clone(), root.path());
+            let ProbeResponse::Provisionable { probe_id, plan, .. } = service
+                .probe(ProbeRequest {
+                    target: ProbeDestination::Ssh {
+                        destination: "mac.example".into(),
+                    },
+                    remote_farhelm: None,
+                    remote_state_dir: None,
+                    new_entry: None,
+                })
+                .await
+                .unwrap()
+            else {
+                panic!("setup without an app must return a plan");
+            };
+            assert_eq!(plan.host_arch, PayloadTarget::MacosAarch64);
+            let (current, expected) = if app_installed {
+                let reason = "Farhelm desktop app is installed";
+                (ReachOutcome::Manual(reason.into()), reason)
+            } else {
+                reach.launchd_domain = Some("user/502".into());
+                (ReachOutcome::Supported(reach), "Mac setup target changed")
+            };
+            *backend.reach.lock().unwrap() = current;
+            let accepted = service
+                .start_add(ProvisionRequest { probe_id })
+                .await
+                .unwrap();
+            let view = wait_finished(&service, accepted.host_id).await;
+            assert_eq!(view.status, RunStatus::Failed);
+            assert!(view.message.unwrap().contains(expected));
+            assert!(backend.operations.lock().unwrap().is_empty());
+        }
     }
 
     /// An SSH/auth failure is an error with the host's diagnostic, never the

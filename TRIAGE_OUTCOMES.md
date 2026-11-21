@@ -240,21 +240,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-environment-provisioning-probe-omits-stdin-watchdog.md
-
-- Outcome: `fix code`.
-- Assessment: `provisioning/backend.rs:1592-1607` (`probe_script`) and :1612-1650 (`spawn_probe`) build `internal stdio`
-  without `--stdin-idle-limit-secs`. `RemoteRoute::stdin_idle_limit_secs()` (access.rs:238) already gives the per-route
-  answer, and `HostAccess::stdio_argv` (access.rs:32-48) applies it elsewhere. Actual orphaning was not observed. Basis:
-  SPEC_impl.md:6056-6058 "All environment stdio routes pass `--stdin-idle-limit-secs 120` unconditionally ... the
-  helper's own stdin watchdog supplies the bound". Also SPEC_impl.md:6826-6828.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-podman-dial-kind-advances-before-process-marker.md
 
 - Outcome: `fix code`.
@@ -575,26 +560,6 @@
   feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-podman.md`.
 
-## finished-task-handle-published-after-host-purge.md
-
-- Outcome: `fix code`.
-- Assessment: None visible. When an uninstall or a failed first sandbox launch removes a host very quickly, the helm can
-  keep a finished background-task handle for the removed host in memory until it restarts. Verified: Confirmed at
-  service.rs:2485-2496 and tensorlake_add.rs:481-526 and 1000-1007: the task is spawned before its handle is inserted.
-  `forget_host_memory` removes `tasks[host]`, so a child that finishes first leaves the parent to insert a stale handle
-  afterwards. Host IDs are not reused. The cost is one small entry per occurrence.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code if bundled with similar items. Hold the memory lock across
-  spawn+insert at the three sites. Otherwise discard. If the fix turns out not to be straightforward, or needs
-  significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## successful-suspend-flashes-connecting.md
 
 - Outcome: `fix code`.
@@ -635,28 +600,6 @@
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## mac-setup-confirmation-misses-installed-app.md
-
-- Outcome: `fix code`.
-- Assessment: Adding a remote Mac. Prepare setup, leave the confirmation dialog open, install Farhelm.app on the Mac,
-  then confirm. Setup goes ahead and installs the panel's supervisor, although SPEC refuses setup on a Mac with the
-  desktop app. Verified: Confirmed. `provisioning/service.rs` `revalidate` (~L2674+) re-probes for a supervisor, and
-  `ProbeObservation::Absent` leads to `Execute` without repeating the app check in `backend.rs` (~L3870). SPEC.md ~L213
-  refuses setup with the app installed, and SPEC_impl.md ~L7868 says consuming the id "revalidates the host and registry
-  facts the plan relied on". Whether app absence counts as such a fact is a reading of the text. The 2026-10-11
-  best-effort exception (SPEC.md ~L5775) covers queued or running runs, not an unconfirmed plan.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Yes for supported refusals. Fix the code: repeat the Mac app check at
-  confirmation. If the fix turns out not to be straightforward, or needs significant additional complexity, stop and
-  bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger,
-  the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer.
-  Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md
 
