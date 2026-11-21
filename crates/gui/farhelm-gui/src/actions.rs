@@ -66,10 +66,8 @@
 //! NOTE: The slot sees key-downs only, and some text reaches the focused element's input handler without one: on macOS,
 //! a key the input method takes while it composes (marked text, a CJK input source, a dead key's accent) arrives as
 //! committed text, never as a key-down, and on Wayland a text-input commit of several characters and a dead key
-//! followed by a key it does not compose with are inserted directly. So with the slot armed, a Japanese input source or
-//! a French `^` still puts text into a focused terminal's program or a text field. The slot cannot stop it; the text
-//! receiver is the place to refuse it, by dropping committed and marked text while [`key_capture_armed`] says so. For
-//! a terminal that is its input handler, and for a text field its own input handling. Neither does that yet.
+//! followed by a key it does not compose with are inserted directly. The terminal drops those commits in its input
+//! handler while [`key_capture_armed`] says so, since they never reach the capture slot.
 //!
 //! ## Shortcuts that act once per press
 //!
@@ -90,15 +88,11 @@
 //! The guard relies on the platform marking repeats, which macOS and Wayland both do. (GPUI's X11 backend does not, but
 //! Farhelm builds GPUI without X11.)
 //!
-//! NOTE: The guard does not cover SPEC.md's "ignore composition". IME composition is invisible here: GPUI's key-down
-//! event has no composing flag and an interceptor cannot reach the focused input handler. On macOS GPUI offers a key to
-//! the input method first while it composes, and a key the input method hands back is dispatched like any other, so a
-//! listed shortcut typed mid-composition still runs. The element that owns the input handler knows it is composing and
-//! is the place to refuse it; for a terminal, that comes with the terminal's input method work. For the
-//! [`PHYSICAL_KEYS`] rows that place is the action's handler instead: the interceptor stops their keys before the
-//! focused element sees them, so it cannot refuse one itself, and SPEC.md's "composition do not open it" for Keyboard
-//! shortcuts (the old app checked `isComposing`) is the handler's to keep, by asking the focused input whether it is
-//! composing (marked text) before it opens anything. That handler is not built here.
+//! GPUI's key-down event has no composing flag. An input method can hand a shortcut back to GPUI during composition,
+//! and the key can reach the app's action before it reaches the focused terminal. The session Delete and Rename
+//! handlers ask the shown terminal directly whether its input has marked text. The physical-key interceptor also
+//! stops its keys before the focused element sees them, so composition checks for those actions belong to their
+//! handlers.
 //!
 //! ## Shortcuts matched by the physical key
 //!

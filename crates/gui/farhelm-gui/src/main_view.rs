@@ -240,7 +240,9 @@ impl Render for MainView {
             // destination display, does not). Taken whatever the header does with it, as a once-per-press
             // shortcut's handler must be (`actions.rs`).
             .on_action(cx.listener(|main, _: &DeleteSession, window, cx| {
-                if layers::focus_layer_open(window, cx) {
+                if layers::focus_layer_open(window, cx)
+                    || main.session_pane.read(cx).terminal_is_composing(window, cx)
+                {
                     return;
                 }
                 let mark = Mark::take(cx);
@@ -249,9 +251,11 @@ impl Render for MainView {
                 });
             }))
             // Taken whatever the editor does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
-            .on_action(|_: &RenameSession, window, cx| {
-                session_list::rename::open_for_selected(window, cx)
-            })
+            .on_action(cx.listener(|main, _: &RenameSession, window, cx| {
+                if !main.session_pane.read(cx).terminal_is_composing(window, cx) {
+                    session_list::rename::open_for_selected(window, cx);
+                }
+            }))
             // Taken whatever the switcher does with it, as a once-per-press shortcut's handler must be (`actions.rs`).
             // The switcher holds the list weakly, so that a pick can show the session it opened.
             .on_action({

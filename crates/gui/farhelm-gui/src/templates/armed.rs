@@ -34,11 +34,8 @@
 //!   arms the launcher's form of the sequence: the pill says "apply" and sits at the bottom of the main area, and Enter
 //!   applies the queue to the launcher's draft or shows the refusal there, opening nothing.
 //!
-//! NOTE: Input-method text is not refused while armed. A composition's committed text (a CJK input source, a dead key's
-//! accent, a Wayland commit of several characters) reaches the focused element's input handler without a key-down, so
-//! the capture never sees it, and a focused terminal still sends it to its program. The actions module's NOTE on the
-//! slot names the fix, the terminal's input handler dropping text while `actions::key_capture_armed` says so, which is
-//! the terminal's code.
+//! A composition can send committed text without a key-down, so it bypasses the capture slot. The terminal's input
+//! handler drops these commits while the sequence is armed.
 //!
 //! NOTE: A keypad digit cancels the sequence and goes on to its target, as in the old app ("Numpad digits retain
 //! cancellation and pass-through"), so a word never starts with a keypad digit by accident. Only a key that carries its

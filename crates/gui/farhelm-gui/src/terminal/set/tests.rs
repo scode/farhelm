@@ -451,6 +451,53 @@ fn tabs_opened_and_closed_elsewhere_come_and_go(cx: &mut TestAppContext) {
     assert_eq!(window.strip_labels(), ["Agent", "Terminal 1", "Terminal 2"]);
 }
 
+/// The app's session shortcuts can see a terminal key before its input handler does. They must leave a composition
+/// alone, including when Delete would otherwise send immediately, and honor the next shortcut once it has ended.
+#[gpui::test]
+fn session_shortcuts_ignore_a_focused_terminal_composition(cx: &mut TestAppContext) {
+    for skip in [false, true] {
+        let mut app = cx.new_app();
+        let mut window = open(&mut app, if skip { skipping(&[]) } else { snapshot(&[]) });
+        let agent = window.stream_of(None);
+        window.go_live(agent, "agent");
+        let set = window.set();
+        let composition = |window: &mut Window<'_>, marked: &str| {
+            window.cx.update(|window, cx| {
+                let agent = set.read(cx).agent().clone();
+                agent.update(cx, |agent, _| {
+                    agent.mark_text(marked);
+                    assert_eq!(agent.is_composing(window), !marked.is_empty());
+                });
+            });
+        };
+        composition(&mut window, "日本");
+        window.helm.commands();
+        keys(window.cx, crate::actions::RENAME_SESSION_CHORD);
+        keys(window.cx, crate::actions::DELETE_SESSION_CHORD);
+        assert!(!test_support::any_open(window.cx));
+        assert!(
+            window
+                .helm
+                .commands()
+                .iter()
+                .all(|cmd| cmd.method != farhelm_helm_client::Method::Delete)
+        );
+        assert!(!window.typed_into(agent));
+        composition(&mut window, "");
+        keys(window.cx, crate::actions::DELETE_SESSION_CHORD);
+        assert_eq!(test_support::any_open(window.cx), !skip);
+        assert_eq!(
+            window
+                .helm
+                .commands()
+                .iter()
+                .any(|cmd| cmd.method == farhelm_helm_client::Method::Delete),
+            skip
+        );
+        app.quit();
+    }
+}
+
 /// SPEC.md, "Session view": "A tab whose process exits on its own is reaped automatically and silently", and the
 /// settled focus case: "A shell tab exits on its own while the user types in it. The session's agent tab takes focus."
 /// The helm detaches a reaped tab's viewer before its row stops listing the tab, so the terminal must not flash a

@@ -816,6 +816,11 @@ impl AttachedTerminal {
         &self.focus
     }
 
+    /// The focused terminal still has a platform composition in progress.
+    pub(crate) fn is_composing(&self, window: &Window) -> bool {
+        self.marked.is_some() && self.focus.is_focused(window)
+    }
+
     /// The shown screen's text, as the renderer reads it from its paint cache; `None` before any screen is shown.
     pub fn terminal_text(&self, cx: &App) -> Option<String> {
         self.committed
@@ -4287,18 +4292,20 @@ impl AttachedTerminal {
 impl AttachedTerminal {
     /// Text the platform committed: the character a key typed, a finished dead-key sequence, an input method's string.
     /// It ends any composition and dead-key sequence (left pending, the input mapping would hold back the next key
-    /// that sends a sequence, so Enter after a composed `é` would send nothing), and goes to the program as typed text
-    /// while the terminal is live.
+    /// that sends a sequence, so Enter after a composed `é` would send nothing). A quick-launch sequence takes keys
+    /// before they reach the terminal, so commits that bypass key-down are dropped here.
     fn commit_text(&mut self, text: &str, cx: &mut Context<Self>) {
         self.set_marked(None);
         self.composition.dead_pending = false;
-        if let Some(attachment) = self.attachment {
+        if !actions::key_capture_armed(cx)
+            && let Some(attachment) = self.attachment
+        {
             self.send_user(attachment, committed_text(text), cx);
         }
     }
 
     /// An input method is composing `text` (empty when it gave up): recorded, neither drawn nor sent.
-    fn mark_text(&mut self, text: &str) {
+    pub(super) fn mark_text(&mut self, text: &str) {
         self.set_marked((!text.is_empty()).then(|| text.encode_utf16().count()));
     }
 
