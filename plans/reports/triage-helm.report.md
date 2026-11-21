@@ -100,3 +100,96 @@ links and the rebase. The recorder preserves those changes, their parent revisio
 All eight drafts passed the required independent source review and cold wording read. The retained-environment Delete
 coverage, setup target recheck, tunnel recovery fixture and test readiness checks incorporate review findings. The
 reviews left no unresolved issue in the changes.
+
+### Landing
+
+#### What landed with it
+
+The plan's eight PRs merged with a landing fix, #4521, as the first of four plans landed together in this round; the
+Podman triage, the exited-terminal scrollback fix and the status-mark hover change landed right after it. Since the
+executor based the plan, main had gained the per-agent Settings and hook setup plan, which also added a step to the
+helm's database. While rebasing, the landing gave this plan's step for late Delete notices the next number after that
+one, so existing databases run both upgrades in order and new databases get both changes. Nothing else that landed
+touches the plan's code: the other three plans in the round share no source files with it.
+
+The 33 triage outcomes were graduated by the plan's own commits. The review queue, its index and the outcome ledger
+conflicted with the other triage plan's edits to the same files; the landing kept both sides by replaying each commit's
+own change onto the combined files, and a script then confirmed that every queue file has its index line, every open
+ledger entry has its queue file, and nothing this round archived is still in the queue or the open ledger.
+
+An independent reviewer read the eight PRs against the plan, the triage outcomes and the specs. It found no blocker:
+
+- **Outcomes.** All 33 were carried out as decided, with nothing beyond them except the small extras the report names.
+- **Correctness.** It found no bug in the late Delete notice, the credential delivery cancellation, the automatic update
+  retry or the tunnel's accept loop, and checked the new lock orders for deadlocks.
+- **Specs and docs.** SPEC.md, SPEC_impl.md, the CLI help and the protocol docs match the code.
+
+#### Fixes made while landing
+
+In [#4521](https://github.com/scode/farhelm/pull/4521/changes): the code comment that explains the notices table (how
+notices go away with their host, the uniqueness rule, why notice ids are never reused) had ended up on a frozen copy of
+the table that an older upgrade step needs. It is back on the current table, and the frozen copy says what it is for. No
+behavior changed.
+
+#### Checks
+
+The round landed four plans together: the helm triage, the Podman triage, the exited-terminal scrollback fix and the
+status-mark hover change. The landing ran their checks once, on all four stacked on main. The Rust workspace suite, the
+desktop app's tests, the lint runs and the end-to-end smoke test ran on a separate arm64 Linux test worker. The goldens,
+the website build and the small checks ran locally on x86_64. The workspace run used four build jobs, as in the last
+round, since runs with more had run out of memory on the worker; this round it had no memory or disk trouble.
+
+On the four plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four build jobs, on the test worker (recorder run
+  `8ba93f1d-d933-483b-a90a-eeac88311d3a`): all 8252 passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `890a2d33-0c71-410b-9498-3a792708a974`): all
+  184 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker, not through the recorder: failed on one lint in a new
+  Podman test, fixed in #4522.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `c732c6cc-ba70-4b34-853a-fe7961b6d297`): every
+  step passed but paste, which skips on Linux as it always does.
+- `python3 scripts/check-gui-goldens.py`, the full comparison, locally (recorder run
+  `2372fd39-11ef-4468-84d3-f1c70cdf9f7e`): failed only on the two pictures of the recipe Delete anyway question, which
+  the Podman plan had captured before main's Settings sidebar changed. Fixed in #4522.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed because that new scene was missing from the
+  screenshot scene list. Fixed in #4522.
+- `python3 -B scripts/test-check-gui-goldens.py` (recorder run `952eb6e8-4c50-4a08-bc89-870dd1358b6d`),
+  `python3 -B scripts/gui-goldens.py --self-test`, `python3 -B scripts/test-docs-shots.py` (recorder run
+  `6c988518-9a04-4428-b87d-f5a1d49ede50`), `python3 -B scripts/test-gui-agent.py` (recorder run
+  `430497e6-e6fd-4d35-8648-4082a3b33d33`), the website build (`bun install --frozen-lockfile && bun run build`) with its
+  link check, `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment),
+  `dprint check`, `python3 scripts/check-agents-md.py` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After the landing fixes (#4521 to #4524):
+
+- `python3 scripts/check-gui-goldens.py --update`, locally (recorder run `6d8fe2d8-8886-45e5-a8f7-c1902f41d10c`):
+  re-rendered every picture and changed only the two Delete anyway pictures, which were then published.
+- `python3 scripts/check-gui-goldens.py --scene 'settings-recipe-*' --scene 'session-row-*'`, locally (recorder run
+  `9282ca4e-8230-435c-8d5d-20380af3477c`): passed.
+- `cargo nextest run -p farhelm-helm --lib`, on the test worker (recorder run `2b0cfd85-3205-4a06-97c1-d028a7ae46db`):
+  all 1801 passed.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and the same with `--features agent`, on the test
+  worker: passed. They had not run on the first pass, which stopped at the failing lint run.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+The rest of the first runs still applies after the fixes, which change only a Podman test's lint, a test comment, two
+pictures and the scene list, a code comment on the helm's notices table, SPEC.md wording, the desktop parity notes and a
+changelog note. Skipped: the Podman suite's opt-in real-engine and real-SSH variants, which neither triage plan needed
+beyond the real Podman environment test, which ran in the workspace run on the worker (about two minutes, not skipped);
+macOS, since no Mac was part of this landing and the pictures used the Linux renderer only; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+- The new "Session deleted on <host>" entry in the notices panel has no golden picture, and once read it only greys its
+  text, while the other notice kinds show a bold "Resolved" line. SPEC.md's "stay greyed" is met. A picture and the
+  matching "Resolved" line would be a small follow-up if you want that entry to look like the others.
+- One test helper's comment in the helm's agent request code still quotes the retired YOLO label, "start YOLO sessions
+  here without asking". It was outside the decided scope and changes nothing for users.
+- One graduated entry in the outcome archive has an Execution field with a sentence starting in lowercase ("Corrected.
+  the helm and CLI refusals ..."). I left it, since the archive is history.
