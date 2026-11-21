@@ -342,6 +342,10 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   belongs with the harness drift tests (Near term) rather than in the default run. Raised by the
   antigravity-subagent-check plan, 2026-11-20. Plan: `plans/queue/harness-drift-tests.md`.
 
+- **Vertically center the lightning bolt in the template list.** the layout of the lightning bolt in the template menu
+  is off. it needs to be properly vertically centered. (Screenshot: on the Templates page, the ⚡ quick-launch marker to
+  the left of each template row sits up near the top of the row, above the ⌘ shortcut, rather than centered on the row.)
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
