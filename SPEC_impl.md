@@ -4832,14 +4832,15 @@ no path values are stored in the notice.
   LAUNCH, named `<session>.<generation>.json`, plus a `.status` failure sentinel and an empty `.waypoint` proving a
   scoped command reached its wrapper step. The waypoint follows the same generation cleanup and superseded-launch sweep
   as the spec; orphan waypoints are removed too. A launch spec carries the agent's command line and the session
-  credential, but nothing the session's own database row does not already hold, in the same private state directory, for
-  the session's whole lifetime (the plaintext invocation, and the credential kept so a restart can inject the same one).
-  Removing specs is therefore tidiness, not a credential boundary: the shim unlinks its spec as soon as it has read it,
-  creation removes it if the session never starts, and the supervisor's startup sweep removes specs of sessions that no
-  longer exist and of launches a later generation superseded. A current-generation spec whose launch never reached the
-  shim (a login shell that exited in its rc files, a reboot, or a stop before launch) may stay until the session is
-  deleted, whichever path observed the outcome (startup reconciliation, the runtime observers, or Stop); Delete removes
-  it.
+  credential, and apart from one thing nothing the session's own database row does not already hold, in the same private
+  state directory, for the session's whole lifetime (the plaintext invocation, and the credential kept so a restart can
+  inject the same one). The exception is an agent-requested create's initial prompt: the create appends it to the
+  command line, while the row keeps only its digest. Removing specs is therefore tidiness, not a credential boundary:
+  the shim unlinks its spec as soon as it has read it, creation removes it if the session never starts, and the
+  supervisor's startup sweep removes specs of sessions that no longer exist and of launches a later generation
+  superseded. A current-generation spec whose launch never reached the shim (a login shell that exited in its rc files,
+  a reboot, or a stop before launch) may stay until the session is deleted, whichever path observed the outcome (startup
+  reconciliation, the runtime observers, or Stop); Delete removes it.
 - Symlink TOCTOU hardening of the state directory is intentionally absent. The directory create, chmod, lock, socket,
   and sweep operations are plain path-based calls that follow symlinks; making them airtight means `O_NOFOLLOW` opens,
   dir-fd-relative operations, and ownership verification throughout. Exploiting the gap requires write access to a

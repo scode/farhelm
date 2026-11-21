@@ -376,11 +376,6 @@ consequences.
   rejects its documented ID-less expectation when the shell supplies it as a separate argument. An ordinary published
   updater history reaching that boundary remains unestablished.
 
-- [`launch-input-database-duplication-rationale-overstated.md`](launch-input-database-duplication-rationale-overstated.md)
-  — The implementation specification says launch input contains nothing absent from the session database, but
-  create-time agent-request prompts are an exception. Retaining the private current-generation file is explicitly
-  allowed.
-
 - [`matching-restart-template-model-normalizes-historical-permissions.md`](matching-restart-template-model-normalizes-historical-permissions.md)
   — A template repeating the current agent and model can change a session's historical agent-owned permission setting to
   Guarded without containing a permission edit, making an otherwise unchanged Restart draft count as edited.

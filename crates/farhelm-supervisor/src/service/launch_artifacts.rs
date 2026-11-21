@@ -688,10 +688,11 @@ impl LaunchArtifacts {
 /// still be waiting for "launched".
 ///
 /// Best-effort and log-only: this sweep is tidiness rather than a
-/// credential boundary (a spec holds nothing the session's own database row
-/// does not already hold for the session's lifetime; see SPEC_impl.md's
-/// runtime-state notes), so a failure that leaves debris behind is logged
-/// and never fails startup.
+/// credential boundary (apart from an agent-requested create's initial
+/// prompt, of which the row keeps only a digest, a spec holds nothing the
+/// session's own database row does not already hold for the session's
+/// lifetime; see SPEC_impl.md's runtime-state notes), so a failure that
+/// leaves debris behind is logged and never fails startup.
 pub(crate) async fn sweep_launch_dir(
     launch_dir: &Path,
     sessions: &std::collections::HashMap<String, i64>,
