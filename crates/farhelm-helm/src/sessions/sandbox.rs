@@ -307,7 +307,7 @@ async fn finish_pending_seal(state: &AppState, host: store::HostId) -> anyhow::R
 
 /// Share the seal attempt across the user's Delete, Retry and the finisher. Keeping the lock through recording
 /// the outcome prevents the finisher from taking over the seal between a failed provider call and its Retry state.
-async fn finish_seal_locked(
+pub(crate) async fn finish_seal_locked(
     state: &AppState,
     host: store::HostId,
     provisioning: crate::manager::ProvisionLockGuard,
@@ -342,10 +342,9 @@ async fn finish_seal_locked(
 /// attempt still running at the host reply bound answers
 /// [`retry_delete_carries_on`]'s 504 and carries on, on a task of its own,
 /// which also keeps a dropped caller from cancelling it partway (the route
-/// sits in the router's cancellable group). Unlike host removal's, its late
-/// outcome is fully pushed: the seal record shows the host as being deleted
-/// during the attempt, then either takes it out of the lists or shows the new
-/// failure with Retry (see `HOST_REPLY_BOUND` for the decision).
+/// sits in the router's cancellable group). The seal record shows the host
+/// as being deleted during the attempt. On completion, the host leaves the
+/// lists or shows the new failure with Retry.
 pub(crate) async fn retry_environment_delete(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<store::HostId>,
@@ -453,9 +452,9 @@ pub(super) fn environment_session_delete_carries_on() -> String {
 ///
 /// The destruction carries on under the host's provisioning lock, with the
 /// host shown as being deleted meanwhile. A late success takes the host and its
-/// sessions out of the lists; a late failure leaves the host listed in its
-/// ordinary state with the reason only in the helm's log, as host removal's
-/// does (`crate::hosts::remove_host`).
+/// sessions out of the lists. A sealed host keeps the latest failure visible
+/// with Retry. An unsealed host returns to its ordinary state and the reason
+/// goes to the helm's log.
 pub(super) fn whole_environment_delete_carries_on() -> String {
     format!(
         "deleting the environment did not finish within {} seconds; the deletion carries on, and \

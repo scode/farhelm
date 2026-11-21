@@ -1069,10 +1069,6 @@ consequences.
   — Ordinary Add retains source exclusion during post-Running SSH readiness. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md`](trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md)
-  — Whole-host Delete does not record sealed deletion failures. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md`](trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md)
   — Normal removal parks or cancels the listing before clearing its seal. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

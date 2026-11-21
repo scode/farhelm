@@ -1145,11 +1145,9 @@ pub(crate) async fn registry_row(state: &AppState, host: HostId) -> anyhow::Resu
 /// a task of its own, so it finishes whether or not anyone still waits, which
 /// also gives this handler the ownership through actor teardown that
 /// [`remove_host_for`] asks of its caller. A late success shows in the pushed
-/// hosts list, which no longer names the host. A late failure does not show
-/// anywhere but the helm's log: the host stays listed in its ordinary state,
-/// with no record of why, and the user learns of it only by seeing the host
-/// still there (keeping the reason would need a failure record such as the
-/// seal's, which nothing here writes). Until the removal ends it holds the
+/// hosts list, which no longer names the host. A sealed host keeps the latest
+/// failure in its seal record. An unsealed host returns to its ordinary state,
+/// with the failure in the helm's log. Until the removal ends it holds the
 /// host's provisioning lock, so removing the same host again meanwhile meets
 /// the "busy" refusal ([`provision_lock_or_busy`]).
 ///
@@ -1210,13 +1208,7 @@ pub(crate) async fn remove_host(
 /// The HTTP handler runs it on a task of its own ([`remove_host`]).
 async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
     let provisioning = provision_lock_or_busy(state, host)?;
-    forget_host_locked(
-        state,
-        host,
-        &provisioning,
-        crate::provisioning::RunTask::Abort,
-    )
-    .await
+    remove_registered_host_locked(state, host, provisioning).await
 }
 
 /// Remove only a host whose current resource still matches the caller's consent.
@@ -1231,7 +1223,7 @@ async fn remove_host_for(state: &AppState, host: HostId) -> anyhow::Result<()> {
 /// have the agent forget the new destination on an approval of the old one.
 /// It is taken without waiting, exactly as the GUI's remove takes it, so a
 /// host busy with a setup, update or uninstall gets the same prompt refusal.
-/// Past the check, the removal is the GUI's own ([`forget_host_locked`]),
+/// Past the check, the removal is the GUI's own ([`remove_registered_host_locked`]),
 /// so an approved remove does exactly what the GUI's remove does.
 ///
 /// The caller must own the operation through actor teardown, as for
@@ -1246,6 +1238,19 @@ pub(crate) async fn remove_host_checked(
     state.approvals.hold_at_host_write_gate(host).await;
     let provisioning = provision_lock_or_busy(state, host)?;
     expected(&registry_row(state, host).await?)?;
+    remove_registered_host_locked(state, host, provisioning).await
+}
+
+/// Both host Delete entry points honor a seal already known when the attempt starts.
+/// The seal path records the result while the lock still excludes the finisher.
+async fn remove_registered_host_locked(
+    state: &AppState,
+    host: HostId,
+    provisioning: crate::manager::ProvisionLockGuard,
+) -> anyhow::Result<()> {
+    if state.manager.is_sealed(host) {
+        return crate::sessions::finish_seal_locked(state, host, provisioning).await;
+    }
     forget_host_locked(
         state,
         host,
@@ -1370,9 +1375,8 @@ pub(crate) async fn forget_host_locked(
         match result {
             Ok(deleted) => Some(deleted),
             Err(error) => {
-                // A sealed host keeps showing its deletion and this failure
-                // through the manager's seal record (`sealed_outcome`, which
-                // its caller writes), however the connection goes on.
+                // The caller records a sealed attempt's failure before releasing the
+                // provisioning lock. Releasing the connection hold lets its actor retry.
                 state.manager.release_hold(host, true);
                 return Err(error);
             }

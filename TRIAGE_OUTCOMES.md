@@ -22,28 +22,6 @@
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
-## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): `forget_host_locked`
-  (`crates/farhelm-helm/src/hosts.rs:1339-1408`) returns provider and local-cleanup errors without writing the seal
-  record. Its comment at :1372-1375 says the caller writes `sealed_outcome`. But `remove_host_for` (:1211-1219, used by
-  `DELETE /api/hosts/{id}`) and `remove_host_checked` (:1240-1256, used by agent removal and whole-environment session
-  Delete) never do; only `finish_seal_locked` (`sessions/sandbox.rs:309-322`) records outcomes. The desktop app offers
-  Delete sandbox / Delete container again on a host whose deletion failed
-  (`crates/gui/farhelm-gui/src/hosts/offers.rs:297-300`), and that route takes the unrecorded path.
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes ("Deleting a host whose earlier
-  deletion failed keeps showing the old failure"), with a test where practical. Size gate: about 100 lines of diff
-  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a
-  complexity gate: "if any of these spiral into something very complicated, the executor should make a near term todo
-  item to follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket),
-  remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/hosts-small-fixes.md`.
-
 ## trailing-ui-host-lifecycle-provider-and-start-wording.md
 
 - Outcome: `fix code`.

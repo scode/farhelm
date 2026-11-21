@@ -1670,6 +1670,49 @@ async fn a_remembered_seal_that_fails_at_startup_keeps_retry_available() {
     finisher.abort();
 }
 
+/// Delete from Hosts on an already failed seal must update the reason shown with Retry.
+/// Script two distinct failures so the old reason cannot satisfy the second assertion.
+#[farhelm_testtrace::test]
+async fn deleting_an_already_failed_sealed_host_shows_the_new_reason() {
+    let api = FakeApi::default()
+        .with_sandbox(
+            "sbx-1",
+            "farhelm-sess-k7q2-owned-abcd",
+            SandboxStatus::Suspended,
+        )
+        .failing(
+            "terminate",
+            TensorlakeError::Transport("first refusal".into()),
+        )
+        .failing(
+            "terminate",
+            TensorlakeError::Transport("second refusal".into()),
+        );
+    let (harness, host) = start_with_remembered_sandbox_seal(&api).await;
+    let finisher = crate::sessions::spawn_seal_finisher(Arc::clone(&harness.state));
+    wait_for_sealed_sandbox(&harness, host, |state| {
+        matches!(state, Some(HostState::Deleting { failure: Some(reason) }) if reason.contains("first refusal"))
+    }).await;
+    // The failure is published before the finisher releases the provisioning lock. Join it before Delete.
+    finisher.abort();
+    let _ = finisher.await;
+
+    let (status, body) = delete_host(&harness, host).await;
+    assert!(
+        !status.is_success() && body.contains("second refusal"),
+        "{status}: {body}"
+    );
+    let shown = harness.manager.state(host);
+    assert!(
+        matches!(&shown, Some(HostState::Deleting { failure: Some(reason) }) if reason.contains("second refusal")),
+        "{shown:?}"
+    );
+    assert!(
+        harness.manager.sealed_pending().is_empty(),
+        "the new failure waits for Retry"
+    );
+}
+
 /// A helm over `api` with the key saved and one planted Tensorlake host,
 /// reconciled so it has an actor like any listed host.
 async fn helm_with_sandbox_host(
