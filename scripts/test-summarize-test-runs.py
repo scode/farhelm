@@ -104,8 +104,10 @@ class SummaryCommandTest(unittest.TestCase):
         Each file opens with a preamble that quotes the field names. If the
         files were simply joined, one file's last entry would run on into the
         next file's preamble, so its `Cause:` line would no longer be the
-        body's last and would count as invalid. Every entry here must keep its
-        own tags.
+        body's last and would count as invalid. An empty heading ahead of
+        the archive entry is malformed but still ends the preceding body.
+        A bare heading also ends the final entry in a CRLF archive.
+        Both default discovery and repeated --flakes must keep the tags.
         """
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
@@ -114,26 +116,48 @@ class SummaryCommandTest(unittest.TestCase):
             (root / "FLAKES.md").write_text(
                 preamble + entry.format(date="2026-11-09", title="active", cls="substrate", cause="hypothesis"))
             (root / "FLAKES_ARCHIVE.md").write_text(
-                preamble + entry.format(date="2026-09-07", title="closed", cls="readiness", cause="established"))
-            report = cli.report(
-                self.arguments(root, flakes=[root / "FLAKES.md", root / "FLAKES_ARCHIVE.md"]), Inventory())
-            ledger = report["flake_ledger"]
-            self.assertEqual(ledger["state"], "read")
-            self.assertEqual(ledger["dated_entries"], 2)
-            self.assertEqual((ledger["first_date"], ledger["last_date"]), ("2026-09-07", "2026-11-09"))
-            self.assertEqual(ledger["cause"]["hypothesis"], 1)
-            self.assertEqual(ledger["cause"]["established"], 1)
-            self.assertEqual(ledger["cause"]["invalid"] + ledger["cause"]["missing"], 0)
-            self.assertEqual(ledger["class"]["substrate"] + ledger["class"]["readiness"], 2)
+                preamble + "## \n\nA heading with a space.\n\n"
+                + entry.format(date="2026-09-07", title="closed", cls="readiness", cause="established")
+                + "\n##\n\nA bare heading.\n",
+                newline="\r\n",
+            )
+            other = root / "other-checkout"
+            other.mkdir()
+            explicit = []
+            # No canonical sibling can stand in for either explicit path.
+            for name in ("FLAKES.md", "FLAKES_ARCHIVE.md"):
+                copied = other / f"selected-{name}"
+                copied.write_text((root / name).read_text(), newline="\n")
+                explicit.extend(["--flakes", str(copied)])
+            for checkout, arguments in ((root, []), (other, explicit)):
+                output = io.StringIO()
+                with self.subTest(arguments=arguments), mock.patch.object(
+                    cli, "__file__", str(checkout / "scripts/summarize-test-runs.py")
+                ), mock.patch.object(sys, "stdout", output):
+                    self.assertEqual(cli.main(arguments), 0)
+                    ledger = json.loads(output.getvalue())["flake_ledger"]
+                    self.assertEqual(ledger["state"], "read")
+                    self.assertEqual(ledger["dated_entries"], 2)
+                    self.assertEqual(ledger["invalid_date_headings"], 2)
+                    self.assertEqual((ledger["first_date"], ledger["last_date"]), ("2026-09-07", "2026-11-09"))
+                    self.assertEqual(ledger["cause"]["hypothesis"], 1)
+                    self.assertEqual(ledger["cause"]["established"], 1)
+                    self.assertEqual(ledger["cause"]["invalid"] + ledger["cause"]["missing"], 0)
+                    self.assertEqual(ledger["class"]["substrate"], 1)
+                    self.assertEqual(ledger["class"]["readiness"], 1)
 
     def test_missing_ledger_and_exhausted_discovery_are_explicit(self):
         """A partial inventory remains usable but cannot present its denominator as complete."""
         with tempfile.TemporaryDirectory() as temporary:
             root = pathlib.Path(temporary)
             fixtures.write_run(root)
-            missing = cli.report(self.arguments(root), Inventory())
+            ledger = root / "FLAKES.md"
+            ledger.write_text("")
+            missing = cli.report(self.arguments(root, flakes=[ledger, root / "unavailable.md"]), Inventory())
             self.assertFalse(missing["discovery"]["complete"])
             self.assertEqual(missing["flake_ledger"]["state"], "missing_or_invalid")
+            self.assertEqual(missing["discovery"]["unique_valid_run_records"], 1)
+            self.assertEqual(missing["runs"]["selected_records"], 1)
             bounded = cli.report(self.arguments(root), Inventory(budget=Budget(entries=0)))
             self.assertFalse(bounded["discovery"]["complete"])
             self.assertEqual(bounded["discovery"]["limit_reached"], "entries")

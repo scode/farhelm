@@ -716,27 +716,15 @@ consequences.
 - [`docs-group-shot-wait-exceeds-budget.md`](docs-group-shot-wait-exceeds-budget.md) — If the staged helm stalls, the
   group screenshot’s ten-second membership wait can spend about a minute on one request.
 
-- [`test-summary-ledger-boundary-crosses-files.md`](test-summary-ledger-boundary-crosses-files.md) — A malformed heading
-  in one selected flake ledger can invalidate the final cause tag in a different ledger.
-
-- [`test-summary-archive-test-bypasses-cli.md`](test-summary-archive-test-bypasses-cli.md) — The reporting test can pass
-  if the command stops loading the closed-flake archive by default or ignores a repeated `--flakes` option.
-
 - [`brick-test-deferral-reuses-continuity-files.md`](brick-test-deferral-reuses-continuity-files.md) — The release test
   can turn a failed or unavailable remote update into a harness failure when it carries forward receipt filenames from a
   different checkpoint.
-
-- [`test-summary-asserts-total-instead-of-flake-classes.md`](test-summary-asserts-total-instead-of-flake-classes.md) —
-  The test can pass if the summary counts both fixture flakes in the same class.
 
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
 
 - [`systemd-isolation-comments-point-to-active-ledger.md`](systemd-isolation-comments-point-to-active-ledger.md) — The
   new test comments send maintainers to the active flake ledger for evidence that has moved to the archive.
-
-- [`test-summary-partial-test-ignores-usable-run-count.md`](test-summary-partial-test-ignores-usable-run-count.md) — The
-  partial-report test can pass if an unavailable flake ledger causes the summary to lose valid test-run counts.
 
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
