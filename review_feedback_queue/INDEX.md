@@ -313,9 +313,6 @@ consequences.
   may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
   replacement-folder grant.
 
-- [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
-  regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
-
 - [`light-appearance-darkens-terminal-catchup.md`](light-appearance-darkens-terminal-catchup.md) — Light appearance
   darkens catch-up prose while its terminal background stays dark; display duration is unmeasured.
 
