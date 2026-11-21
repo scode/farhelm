@@ -29082,3 +29082,2476 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: change `pqpxlnwmsnvrkrsknlpzoqvtxsowommn`, bookmark `plan/hosts-small-fixes/04-attention-update-name`,
   [PR #4422](https://github.com/scode/farhelm/pull/4422/changes).
+
+## desktop-path-probe-needs-private-result-boundary.md
+
+- Outcome: `other`.
+- Assessment: login_path.rs `NamedTempFile::new()` (TMPDIR), and the shell appends by path
+  (`>> "$FARHELM_LOGIN_PATH_FILE"`). The default /tmp is sticky. Basis: SPEC.md "Local authority and trust between
+  hosts": "Conditions the user, or whoever administers their machine, deliberately set up outside Farhelm count as the
+  user's intent: their shell environment ... If the trigger takes a deliberate setup and the consequence follows from
+  what that setup means, guarding against it is not Farhelm's job." Because the item is highest, the coordinator may
+  want an independent check before removing it.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: narrowly: needs TMPDIR
+  deliberately pointed at a non-sticky directory other accounts can write (SPEC.md deliberate setup); the app reads back
+  through its own handle, so no PATH injection.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## container-token-read-blocks-host-admission.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The legacy supervisor-outside container launch was removed.
+  crates/farhelm-supervisor/src/container.rs now only recognizes and deletes retired sessions and reads no token file.
+  The remaining github_token.rs reads a Farhelm-owned file in the state directory. Basis: 04d85f0c9 "feat!: retire
+  legacy containerized sessions (#3330)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## podman-storage-selection-escapes-lifecycle-lookup.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Reviewed at d6645f771 (legacy container.rs). Legacy sessions are now
+  Delete-only and nothing creates them. Current Podman environments run lifecycle commands on the place host through one
+  route (SPEC_impl ~6131). A possible leftover is a pre-upgrade legacy container whose Delete looks in the wrong store.
+  That needs upgrade-carried state plus an unusual login-only storage config, which the "Upgrades from older releases
+  combined with another rare condition" filter covers. Basis: 04d85f0c9 (#3330); SPEC.md "Retired containerized
+  sessions".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-agent-host-add-explicit-queued-opening-ignores-moved-on.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The old webview app was removed. GPUI `hosts::add::open_for_agent`
+  (crates/gui/farhelm-gui/src/hosts/add.rs ~252) refuses with a reason while another dialog or host change is open and
+  does not queue. SPEC_impl (~9165) records "that action is refused with a reason on the card". Basis: 1eb4e3751 (#3407,
+  old app removed); 14e7e4d3c (#3536, GPUI Add host).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-experimental-supervisor-outside-container-sessions-retired-delete-only.md
+
+- Outcome: `other`.
+- Assessment: covered. Spec text matches; the guard exists (launch.rs ~1168 RETIRED_MESSAGE). Basis: SPEC.md "Retired
+  containerized sessions": "Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart,
+  Clone, Replace and Replace with are refused."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-offline-uninstall-old-private-tmux-survivor.md
+
+- Outcome: `other`.
+- Assessment: covered. Spec text found. Basis: SPEC.md (~233): "... but one that outlived a supervisor stopped before
+  uninstall ... keeps running, which the maintainer accepted on 2026-11-11."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-seal-listing-consumption-phase-integration.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The gap existed only at an intermediate commit. On main the helm sends the
+  seal (sessions/sandbox.rs), finishes sealed replies, and consumes `listing.sealed` in recovery (the record cites
+  manager.rs and finish_seal at 00de0b6c). Basis: 222bf6253 "feat: let the helm delete one session of a sandbox or
+  container (#3361)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-container-leftover-delete-registers-global-configuration-save.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The cited code (dioxus `containers_settings.rs`, `api.rs`
+  CONFIGURATION_SAVES, `send_save`) no longer exists. The GPUI settings/containers.rs sends plain commands that bypass
+  the operation store ("Plain commands" in its module docs). Basis: 1eb4e3751 "feat!: remove the old webview desktop app
+  (#3407)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-restart-success-retired-by-precompletion-stale-listing.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Every cited file (session_ops.rs, list/view.rs, aggregate.rs, dioxus
+  use_effect) belongs to the removed old app. Both reviewers had also proposed the rare self-correcting display filter.
+  Basis: 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-custom-farhelm-binary-at-private-tmux-path-removed-by-update.md
+
+- Outcome: `other`.
+- Assessment: covered. The reviewer confirmed that supported setup always installs `lib/farhelm/farhelm`. Basis: SPEC.md
+  "Supported host setup" (~5759): "... one at paths other than the layout setup installs ... Do not spend significant
+  complexity making setup or Update detect, adapt to, coexist with, or preserve such setups."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-unconditional-stdin-option-compatibility.md
+
+- Outcome: `other`.
+- Assessment: covered. Spec text found. Basis: SPEC_impl.md (~6056): "All environment stdio routes pass
+  `--stdin-idle-limit-secs 120` unconditionally ... The supported environment helper has that option." Also ~6827: "The
+  option shipped in the same release as Tensorlake host support."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-ownership-wal-normal-tail-loss.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC_impl text found. Leftover discovery covers unrecorded owned containers. Basis: SPEC_impl.md
+  (~5179): "This accepts losing the last commits on an OS crash or power loss without weakening database consistency".
+  SPEC.md (~622): "Missing records after an older installation or power loss require the same explicit cleanup."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-ordinary-wal-tail-loss-of-create-ownership.md
+
+- Outcome: `other`.
+- Assessment: covered. Same as the previous item. Basis: SPEC_impl.md (~5179), as in the previous item.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-replace-with-accepts-incompatible-environment-recent.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The old create_form.rs is gone. The GPUI launcher/view/recents.rs
+  `recent_refusal` returns `KeepsEnvironment` when the entry has a target and Host is held, and `take_strip_recent`
+  shows the reason without changing the draft. Basis: 1eb4e3751 (#3407) plus the GPUI launcher port.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-restart-retirement-two-filtered-trigger-subsets.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The cited session_view.rs, list/view.rs and session_ops.rs belong to the
+  removed old app. The reviewer also proposed the rare self-correcting display filter. Basis: 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-container-cli-helper-removal.md
+
+- Outcome: `other`.
+- Assessment: covered. launch.rs ~1168 still records RETIRED_MESSAGE before exec. Basis: SPEC.md "Retired containerized
+  sessions" (quoted above).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-startup-treats-old-terminals-as-ended-even-if-ending-the-server-fails.md
+
+- Outcome: `other`.
+- Assessment: covered. Spec text found. Basis: SPEC.md "Old terminals" (~3336): "A failure to end the server or to stop
+  what ran there is logged and never stops the supervisor from starting; those sessions are treated as ended all the
+  same, accepting that a Restart could then start a second agent beside one still running." Also SPEC_impl.md ~2595.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-already-polled-displaced-input-handover.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file is the already-polled race only; it says the natural-detach regression
+  is separate. That regression is fixed: connection.rs ~1519–1521 drops `old.input` before releasing the attachment lock
+  (9fb5f80d1, #4156). Basis: FILTER.md "A displaced input task resumes inside an in-progress handoff". Takeover,
+  replacement or detach cancels without joining (yes); a worker was already polling the old send (yes, the premise);
+  replacement input arrives first and the old send resumes (yes). No exclusion applies: it is not newly received input,
+  another terminal, or paste interleaving.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-retirement-startup-continues-after-failed-kill.md
+
+- Outcome: `other`.
+- Assessment: covered. Same spec text. Basis: SPEC.md "Old terminals" (~3336), quoted in the earlier item.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-startup-cannot-discover-all-legacy-tab-identities.md
+
+- Outcome: `other`.
+- Assessment: covered. Spec text found. A related Delete-consent concern is the survivors principle in
+  guarded-delete-replace-omits-surviving-shell-work.md. Basis: SPEC.md "Old terminals" (~3334): "for a tab wherever its
+  id can be found; what cannot be attributed to an old tab is left for the session's Delete". Also SPEC_impl.md ~2586.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-delete-gone-adopted-tab-host-without-process-confirmation.md
+
+- Outcome: `other`.
+- Assessment: The reviewer's own record says the needed event (a live adopted host becoming Gone despite the process
+  guard) has no shipped producer. The earlier blanket confirmation was withdrawn. Basis: FILTER.md "Harm whose route is
+  not established in shipped code". Every consequence worth triage depends on an unshown step. The filter requires the
+  independent drop check because the unestablished consequence could be highest, so this is not a plain FILTERED.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: orphan route only: no shipped
+  path marks a still-live host Gone (client.rs confirm_with_process turns Gone into Unavailable when a process serves
+  the socket).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-grid-only-old-page-display-and-malformed-input-detachment.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The old webview and xterm page are gone; the desktop app is the only UI.
+  The SPEC_impl acceptance sentence the reviewer quoted was removed with it. The sibling g196/l1 JSON-paste item is
+  separate and not in this chunk. Basis: 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## late-composition-commit-reaches-previous-terminal.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file says "The platform delivery window across an actual tab switch remains
+  unverified." The only established fact is a missing focus check in commit_text. Basis: FILTER.md "Harm whose route is
+  not established in shipped code". The consequence depends on platform behavior nobody verified. Bucket is high, not
+  highest, so no drop check is needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## terminal-file-requests-can-wait-indefinitely.md
+
+- Outcome: `other`.
+- Assessment: covered. No admission deadline exists, which SPEC_impl states explicitly ("There is no upload staging,
+  publication phase, admission cap or progress timer"). A healthy supervisor answers; a stall needs a hung filesystem, a
+  slow host, or a broken host. The rest of Farhelm keeps working, and leaving the view ends the wait. Basis: SPEC.md
+  "Healthy local filesystems" ("Requests involving the affected host may fail or remain pending, but the helm must
+  otherwise continue to function"), "Slow hosts", and the 2026-10-11 denial-of-service acceptance for arbitrarily broken
+  hosts. Caveat: SPEC_impl's "every host-waiting route the GUI sends is bounded" phrase could be read against this. If
+  the coordinator reads it that way, it becomes DECIDE (worth-fixing).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## managed-ubuntu-bootstrap-pid1-stop-can-time-out.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The code matches the description: `--systemd=always`, entrypoint
+  `/bin/sh -c "exec sleep infinity"`, `podman stop --time -1` under a 60 s bound (podman.rs ~464-525). The claimed
+  failure is contradicted by evidence. The real-Podman e2e
+  `podman_environments::real_local_environment_lifecycle_and_owned_image_cleanup` does a full managed-base recipe build
+  (bootstrap, stop, commit) and runs in the x86_64 Linux release gate (.agents/validation.md ~85-101). Per
+  FLAKES_ARCHIVE 2026-11-13, that gate's only failure was earlier, in the setup script, fixed by #3388, and releases
+  through v0.44 have shipped since. Not verified: other Podman versions. Basis: FILTER.md "Harm whose route is not
+  established in shipped code". The platform signal behavior is unverified, and the shipped gate on Ubuntu 24.04 /
+  Podman builds the image successfully.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## podman-recipe-cleanup-tries-parent-before-child.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The code is as described: `retire_images_unlocked` stops at the first `image rm`
+  error, and the order follows `retired_images`. The real-Podman e2e in the release gate deletes a recipe with base,
+  software and prepared images and asserts that the delete succeeds and no owned image remains (podman_environments.rs
+  ~1351-1405). The claimed repeatable refusal therefore does not happen on the gate platform. Not verified: why the
+  order works (the test's own cleanup comment says Podman can refuse a parent), and other Podman versions. Basis:
+  FILTER.md "Harm whose route is not established". The runtime premise is unverified and contradicted by the shipped
+  real-Podman test.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-updater-waits-indefinitely-for-installer.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The wait is confirmed unbounded (`spawn_installer` `.wait()`, updater.rs ~1590).
+  No cause of a hang in shipped code is shown. The installer's network fetches are bounded
+  (`curl --connect-timeout 15 --max-time 600`, scripts/install.sh ~269-275). Anything left would be a local hang, which
+  SPEC.md "Healthy local filesystems" accepts. Basis: FILTER.md "Harm whose route is not established" (no producer of
+  the hang); SPEC.md "Healthy local filesystems" for local hangs.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## antigravity-restart-may-stop-without-relaunching.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Confirmed. The snapshot is read at core.rs ~12314, the agent is stopped at
+  ~12487, and `begin_relaunch_named` returns `OfferChanged`, refused at ~12697. The conversation record is preserved.
+  Antigravity is not a first-class harness, and the trigger needs a capture change (such as late verification) inside
+  that short window. Basis: FILTER.md "Rare, self-correcting glitches": a narrow timing window, and the operation fails
+  safely (the agent the user asked to restart is stopped, no work is lost) and succeeds when retried. None of the
+  exclusions apply.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## automatic-update-charges-obsolete-plan-failure.md
+
+- Outcome: `other`.
+- Assessment: covered. Confirmed. The error path records the current incarnation, with the code comment "The no-retry
+  boundary starts when refusal is known, not before SSH". Basis: SPEC.md ~185-186: "A failed automatic attempt is not
+  retried until that host's connection incarnation changes after failure or the helm restarts". SPEC.md ~429-434 treats
+  a host entry as one logical host across destination changes. The code applies the boundary at the moment the failure
+  is known, which is what the spec says.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-login-shell-spawn-outside-timeout.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Confirmed that the synchronous spawn (fork, exec, CLOEXEC wait) happens before
+  the deadline check. Only a stall in exec itself escapes the timer; the shell's own rc loading is timed. No OS stall
+  was observed or shown. Accepting a success that arrives after the deadline is harmless. Basis: FILTER.md "Harm whose
+  route is not established" (OS behavior nobody verified). A stall from a hung filesystem falls under SPEC.md "Healthy
+  local filesystems".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## launcher-enter-uses-unshown-recent.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Confirmed. `history.rs` resets the search highlight when a reply arrives, and
+  `search_enter` re-queries the live rows. After the redraw the user sees the reset highlight, so only the time before
+  the next frame is drawn matters. Basis: FILTER.md "Races a person would have to win inside a sub-second window". The
+  consequence is a form fill the user sees and can change before Launch; nothing acts on a machine or session.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## shell-switch-can-send-hidden-initial-prompt.md
+
+- Outcome: `other`.
+- Assessment: covered. Confirmed from source. The behavior is exactly what the spec describes. Basis: SPEC.md
+  ~1172-1173: "The draft survives recent-setup selection and switching tabs; unsupported selections omit it from the
+  request." SPEC.md ~1147-1148: "Enter on a choice button ... applies that choice and then launches through the ordinary
+  Launch path."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## open-url-card-without-host-shows-no-site.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. No such request can reach a card. browser.rs `permission_for_url` (run in
+  `open_url` before `ask_with_answer`) rejects a URL that fails `url::Url::parse` or has `host().is_none()` ("only
+  absolute http or https URLs with a host can be opened"). The GUI parses with the same crate. Basis: FILTER.md "Harm
+  whose route is not established". The premise is refuted by the helm's validation before the card is made; the item
+  itself says it can be dropped with this citation.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## removed-host-strands-tunnel-listeners.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. hosts.rs ~1403-1410 now calls `state.tunnels.close_host_locked(host)`
+  during removal, under the tunnel mutation lock, and that closes every listener for that host's sessions (tunnels.rs
+  ~186-202). Basis: Fixed in #3264 (0ff236126, "run sessions in disposable sandboxes"), which landed after the reviewed
+  commit.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## restart-trust-discards-observed-canonical-folder.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Mechanism confirmed per reviewer (sessions.rs keeps only the membership boolean).
+  The trigger needs someone to flip a symlink twice; the record itself says no ordinary producer was established. Basis:
+  FILTER.md "Harm whose route is not established" (no shipped or accidental producer of the two-flip sequence). SPEC.md
+  ~5285-5291 also counts hand-reshaped symlinks as the user's intent.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## late-reporter-preparation-capture-conflict.md
+
+- Outcome: `other`.
+- Assessment: covered. Mechanism confirmed per reviewer. The only producer of a late-only failure is a host-local I/O
+  error (healthy concurrent publication was refuted in the record). Basis: SPEC.md "Healthy local filesystems"
+  (~5019-5025): local I/O errors "may cause failures"; "Accepted outcomes include losing durable state". The clearing
+  rule in SPEC.md ~3904-3905 is not violated by a healthy producer.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## landing-baseline-delays-new-block.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. landing.md ~95-109 now runs a blocks-only watcher during every round with
+  plans (`idle-watch.ts --blocks-only`), and plans-queue.py's `lander-blocks` role wakes for blocks raised mid-round.
+  Basis: Fixed by #3238 (6635456cc, "wake the landing monitor for blocks during a round"), which landed after the
+  reviewed commit.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## legacy-muse-hook-preservation-source-gap.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Per the record's own investigation, no supported path creates a current Legacy
+  Muse launch (migration converts or keeps the old kind, new creates reject Legacy), and Muse's parser behavior is
+  unverified. Basis: FILTER.md "Harm whose route is not established" (missing producer, plus unverified vendor
+  behavior).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## terminal-size-readout-points-css-pixels-conflict.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The xterm.js terminal and terminal.js were removed. The native terminal
+  (`terminal/text_size.rs`, `TextSize` "in points") draws in GPUI logical pixels, which are points on macOS, so "points"
+  is now accurate. Basis: Removed in #3407 (1eb4e3751, "remove the old webview desktop app").
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## worker-archive-omits-playwright-artifact-directory.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. scripts/tensorlake/run-shard.sh and the Playwright Tensorlake harness no
+  longer exist. Basis: Removed in #3401 (6ef88c9a4, "remove the browser interface and browser sign-in").
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## worker-template-acceptance-ignores-prerequisite-failures.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The acceptance step (welcome tests in sandbox-tests.ts, run-shard.sh) is
+  gone. `makeTemplate` now says outright "Nothing here proves the template beyond bootstrap.sh finishing". The Rust
+  shard records "self-ssh: FAILED" in summary.txt, and the e2e SSH tests assert that self-SSH is available. Basis:
+  Removed in #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## worker-checkpoint-polling-has-no-failure-exit.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The loops have no deadline (sandbox-tests.ts `makeTemplate`, rust-tests.ts
+  `stage`). The record's own investigation found no service behavior that leaves a snapshot permanently incomplete.
+  Basis: FILTER.md "Harm whose route is not established" (unverified vendor behavior).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## confirmation-rollback-omits-container-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Old-style containerized sessions (supervisor outside the container) can no
+  longer be created. crates/farhelm-supervisor/src/container.rs is now removal-only ("Current binaries have no creation
+  or exec implementation"), and SPEC.md ~5262-5269 "Retired containerized sessions" allows Delete only. Basis: Retired
+  in #3330 (04d85f0c9), after the reviewed commit.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## replace-container-ready-wording-exceeds-create-boundary.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Replace and Replace with are refused for retired container sessions
+  (SPEC.md ~5265-5266), and the "replacement container" wording is gone from SPEC.md, sessions.rs and the GUI. Basis:
+  Retired in #3330 (04d85f0c9).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## rootless-pause-inherits-session-marker.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The supervisor no longer starts containers, and its remaining Podman
+  control commands strip every `FARHELM_*` variable (container.rs `control_command`). The new helm-side provider strips
+  `FARHELM_*` too, per SPEC_impl.md "Podman places, creation and images". Basis: Retired in #3330 (04d85f0c9).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## podman-remote-routing-host-contract-ambiguity.md
+
+- Outcome: `other`.
+- Assessment: covered. The cited supervisor path was retired by #3330. The helm-side provider strips only `FARHELM_*`
+  and tmux variables, so ambient CONTAINER_HOST still applies, as Podman intends. Basis: SPEC.md ~5285-5287: "Conditions
+  the user, or whoever administers their machine, deliberately set up outside Farhelm count as the user's intent: their
+  shell environment ... guarding against it is not Farhelm's job." SPEC.md ~5245: "The container host's Podman
+  configuration still applies."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## discovery-registration-bypasses-host-row-lock.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file says "Confidence: unverified after investigation". The established part
+  is only the lock-boundary difference. Ordinary Update uses the registered paths in place, so overlap alone changes
+  nothing. Basis: FILTER "Harm whose route is not established in shipped code". Every consequence worth triage (wrong
+  saved path, later wrong attachment) depends on "a supported shipped ordinary sequence producing a differing reply",
+  which nobody has shown. No established lesser consequence sits beside it. The suspected consequence (wrong path,
+  refused attachment) is not a highest-bucket loss, so no independent drop check is needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## automatic-update-mutates-unadopted-skewed-installation.md
+
+- Outcome: `other`.
+- Assessment: covered. The SPEC_impl text matches the mechanism exactly: Update against a version-skewed peer carries
+  the recorded identity forward unverified, and a wrong identity is detected at post-update attach. Basis:
+  SPEC_impl.md:8028-8044: "UPDATE proceeds against it with the recorded identity carried forward unverified ... Be
+  honest about what the relaxation costs ... the update pushes payloads TO it ... at paths it named ... adoption after
+  the update still runs the full hello — a wrong identity freezes the host as identity-mismatch and fails the run at
+  attach rather than being taken over." SPEC.md:180-181 says automatic updates start "that same authorized Update".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## container-template-replacement-test-reuses-old-config.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The positive replacement path no longer exists. On current main,
+  launcher.rs:1605-1645 (`container_template_preserves_clears_and_refuses_retired_edits`) asserts that an object edit is
+  refused ("Delete only"), so the oracle gap is moot. Basis: 04d85f0c9 "feat!: retire legacy containerized sessions
+  (#3330)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## mac-process-lookup-transforms-socket-path.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The split/join collapsing of spaces is real (hosts.rs ~299-309). Its docstring
+  states the assumption that "test socket paths contain no spaces". Every in-repo `tempdir`/`tempdir_in` root is `/tmp`,
+  a tempfile directory or a `/tmp/fh-it.*` child, none with spaces. Basis: FILTER "Harm whose route is not established
+  in shipped code": the consequence needs "an input sequence no shipped control produces" (a spaced root that no caller
+  supplies). It is maintainer tooling, not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## unavailable-host-recipe-misses-fourth-disconnect.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. TODO.md no longer contains the recipe.
+  `git log -S drop_connection -- TODO.md` shows it was removed when the work landed. Basis: 82fe09bf2 "fix: recover
+  temporarily unavailable terminal tabs (#2956)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## width-table-change-removes-restored-history.md
+
+- Outcome: `other`.
+- Assessment: The file says "unverified after investigation" and that no supported writing/reading build pair with a
+  width change exists (the same unicode-width 0.2.3 throughout). SPEC_impl.md:2519-2522 accepts restoring with another
+  table: "A reader with another table restores it anyway and asks the program to redraw, since refusing would make every
+  running terminal unavailable after a dependency upgrade". The snapshot module docs list the history consequences.
+  Basis: FILTER "Harm whose route is not established in shipped code" ("speculation about work that is not implemented
+  yet", a future dependency change). SPEC_impl's acceptance is partial coverage. The item self-flags a
+  potentially-highest consequence, so it needs the independent drop check before removal.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: no writer/reader build pair
+  with different unicode-width tables exists (single unicode-width 0.2.3 since the snapshot format arrived); harm needs
+  a future dependency upgrade.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## snapshot-measurement-buffers-past-claimed-bound.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The file itself records the repair. paint.rs:793-806 now shares a bounded
+  logical allowance and releases the buffers once it is crossed. 25fc266ad is an ancestor of main. Basis: 25fc266ad
+  "perf: speed up terminal checkpoints (#2960)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## replay-work-model-omits-history-rotations.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file states: "No excessive latency at shipped settings or shipped producer
+  for the extreme history count is established". The scrollback limit comes from the caller (the supervisor uses 12,000
+  lines), not from the blob. Basis: FILTER "Harm whose route is not established in shipped code": the consequence needs
+  a library caller requesting huge scrollback, which no shipped caller does. Not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## lossy-storage-precedes-cursor-template-validation.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Accepted from the file. The file claims "malformed-input acceptance only, not a
+  dangerous returned cursor". Farhelm's own encoder never writes combining marks into a cursor template. Basis: FILTER
+  "Harm whose route is not established in shipped code": no shipped producer writes such a blob ("an input sequence no
+  shipped control produces"), and the only consequence is accepting it harmlessly. Not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## hosts-directory-replacement-stop-uncertainty.md
+
+- Outcome: `other`.
+- Assessment: The file says "unverified after investigation". Path-based reconnect is confirmed, but no producer of the
+  directory replacement exists (only a test removes a hosts directory). Note: the file records that an earlier
+  independent reviewer declined the drop. That predates the 2026-11-21 filter. Basis: FILTER "Harm whose route is not
+  established in shipped code" (a missing source premise). The potentially-highest consequence requires the independent
+  drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: incidental replacement only:
+  nothing in Farhelm replaces the hosts directory, and a matching random socket name would also be needed. Deliberate
+  substitution is outside the agreement.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## placeholder-grid-fixture-readoption-uncertainty.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file says "unverified after investigation". The complete execution causing a
+  false failure was not established. No flake is recorded in FLAKES.md. Basis: FILTER "Harm whose route is not
+  established in shipped code": the only consequence (a false test failure) depends on a schedule nobody showed. Not
+  highest. Whoever observes the flake records it then.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## idle-readoption-task-outlives-supervisor-drop.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Every `Supervisor::new`/`new_with_exe` caller outside the production run path is
+  a test, each with its own runtime. Production does an orderly stop and drops its runtime. Basis: FILTER "Harm whose
+  route is not established in shipped code": the retention matters only for a long-lived embedding runtime, which no
+  shipped code has. Not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## clipboard-notice-drain-lacks-per-turn-work-bound.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The drain loop has no bound (grid_stream.rs `drain_notices`, confirmed). The file
+  says "material starvation or wider supervisor disruption remains unverified after investigation". Each iteration is
+  trivial next to the publisher's OSC 52 parse. Basis: FILTER "Harm whose route is not established in shipped code": the
+  only consequence worth triage (starvation) depends on scheduling nobody showed. Not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## emoji-report-names-wrong-vendored-patch.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `plans/reports/vs16-emoji-width.report.md` no longer exists. It was removed
+  when the plan was approved. In any case, plans/AGENTS.md forbids hand-editing reports. Basis: Removed in 45459ad31
+  "chore(plans): approve vs16-emoji-width". Moot.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## announcement-report-overstates-startup-validation.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `plans/reports/in-app-announcements.report.md` was removed on approval.
+  Reports are not hand-editable (plans/AGENTS.md, "Editing rules"). Basis: Removed in fb07709aa "chore(plans): approve
+  in-app-announcements". Moot.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## checkpoint-image-triage-rootless-path-unresolved.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The code it concerns, `crates/farhelm-supervisor/src/container/account.rs`,
+  was deleted in 04d85f0c9 (#3330, legacy containerized sessions retired). The ledger entry has graduated to the
+  archive, and the Podman-rigor TODO line was dropped in that same PR. New Podman environments do `podman run` recipe
+  images (`environment/podman.rs`). Whether a checkpoint image could be restored there is a separate, unestablished
+  route and is not this finding. Basis: 04d85f0c9 "feat!: retire legacy containerized sessions (#3330)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## ambiguous-resume-retains-old-connection-token.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Source confirmed. `environment/lifecycle.rs` withdraws the connection only when
+  the transition reports a change. A retry that finds the sandbox already Running returns "unchanged" and withdraws
+  nothing. Every user-facing consequence depends on unverified gateway behavior for the stale channel. Basis: FILTER.md,
+  "Harm whose route is not established in shipped code". The only established effect is internal token retention. The
+  worth-triage consequence (gateway/operation failures) rests on vendor behavior nobody verified. Not highest-capable,
+  so no drop check is needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## snapshot-cleanup-spec-omits-unrecorded-builder-exception.md
+
+- Outcome: `other`.
+- Assessment: covered. The behavior is explicitly accepted. SPEC.md's shorter sentence ("cannot select a snapshot
+  Farhelm built for a recipe as its base") is arguably still true, because no recipe owns an unrecorded snapshot yet.
+  Basis: SPEC_impl.md, Tensorlake recipes/builds: "Not covered: a snapshot a builder took that no recipe records yet
+  (the helm stopped between taking it and recording it) can be named as a snapshot base, and the next sweep of that
+  builder then deletes it; finding its ID takes listing the account's snapshots by hand."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## tunnel-helper-exit-may-block-flushing-stdout.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. `farhelm internal stdio` exits via `std::process::exit`, whose cleanup can flush
+  a buffered partial line. That needs a specific interleaving: a buffered tail, the lock free, and a pipe that is full
+  but still read. Tokio's copy flushes on a pending read, which likely closes the window. The finding itself leaves the
+  ordering and the shipped-stdlib premise unverified. Basis: FILTER.md, "Harm whose route is not established in shipped
+  code". Every consequence depends on an interleaving and pipe state nobody has shown to occur. Not highest-capable (the
+  worst case is billing).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## identity-adoption-overwrites-held-lifecycle-display.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The source route is plausible. The window is the gap between adoption's store
+  transaction and its publication, which is milliseconds. Competing lifecycle actions are still refused server-side, and
+  the confirmed state is published when the hold ends. Basis: FILTER.md, "Races a person would have to win inside a
+  sub-second window". It needs a second person's click inside a millisecond window, and the consequence (a wrong label,
+  extra controls that the server refuses) clears when the operation completes. No wrong-target action.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## sandbox-diagnostic-json-shape-compatibility-unresolved.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The local strictness is confirmed (`error_details: Option<String>`). The finding
+  itself establishes that Farhelm's pinned origin (api.tensorlake.ai) is not shown to send that shape. Only the SDK for
+  a different origin accepts it. Basis: FILTER.md, "Harm whose route is not established in shipped code" (vendor
+  behavior nobody verified). Not highest-capable.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## mixed-setup-plans-escape-cache-bound.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `provisioning/service.rs` now centralizes eviction in
+  `ProvisioningMemory::remember_approval`, which removes the expired id from `plans`, `tensorlake_plans` and
+  `takeovers`. Every approval kind (service.rs 1051/1126/2398, tensorlake_add.rs 868) uses it. Basis: def36b68c "feat:
+  add helm routes for host takeover (#4195)" introduced `remember_approval`.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## provider-error-cleaning-can-miss-transformed-secret.md
+
+- Outcome: `other`.
+- Assessment: Ordering confirmed in `tensorlake/http.rs` (truncate, replace the key, then strip). No producer that
+  echoes a key, split or padded, is known. Basis: FILTER.md, "Harm whose route is not established in shipped code" (no
+  shown provider echo). The filter requires the independent drop check because the unestablished harm could be highest.
+  The bucket on file is other, so this label is applied by analogy.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: every harm depends on
+  Tensorlake echoing the key with inserted characters, which nobody has shown.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## sandbox-timestamp-wire-contract-unresolved.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Farhelm assumes integer milliseconds. The finding establishes alternative forms
+  only in the SDK for another origin. Basis: FILTER.md, "Harm whose route is not established in shipped code" (vendor
+  behavior nobody verified).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## sandbox-list-pagination-contract-unresolved.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The consumer ignores `cursor` and lists snapshots in a single GET. The finding
+  cannot show that api.tensorlake.ai paginates. The cursor schema comes from the Sandbox Engine SDK for another origin.
+  Basis: FILTER.md, "Harm whose route is not established in shipped code" (vendor behavior nobody verified). Not highest
+  (worst case is high: incomplete billing cleanup).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## privileged-sandbox-tunnel-port-compatibility-unresolved.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The validator accepts any port except 22. The gateway's actual policy is unknown.
+  Basis: FILTER.md, "Harm whose route is not established in shipped code" (vendor behavior nobody verified).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## old-recipe-admission-builds-same-name-replacement.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. `tensorlake/build.rs` `start_definition` awaits only local store reads (recipe
+  row, API key, SSH key, namespace) before checking `deleting`/`active`. The window is therefore milliseconds, and in it
+  the delete's whole cleanup must finish and the user must recreate the recipe. Basis: FILTER.md, "Races a person would
+  have to win inside a sub-second window". Recreating a recipe inside a millisecond window that opens on its own. The
+  consequence (a mismatched snapshot, flagged by the stale-definition warning, fixed by Rebuild) is recoverable through
+  ordinary use, with no wrong machine or session and no user work lost.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## late-snapshot-visibility-escapes-builder-cleanup.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The builder sweep lists once after DELETE and does not wait for termination
+  (unlike host removal). The finding is explicit that no provider ordering lets a snapshot appear after a successful
+  DELETE plus a list. Tensorlake's delete docs say 200 means terminated. Basis: FILTER.md, "Harm whose route is not
+  established in shipped code" (vendor behavior nobody verified). Not highest.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## detached-recipe-write-crosses-recreated-generation.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The source route is plausible: a dispatched blocking write is detached on
+  cancellation and keyed by name. It needs a blocking worker to stall between dequeue and the DB mutex for as long as a
+  full delete plus a manual recreate takes. Basis: FILTER.md, "Races a person would have to win inside a sub-second
+  window". The person must recreate inside a thread-scheduling gap. The consequence is wrong cleanup bookkeeping on the
+  recreated recipe, which ordinary cleanup or orphan listing reconciles. No wrong machine or session, and no user work
+  lost.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## packages-build-result-retired-under-changed-image-source.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Build completion (`tensorlake/build.rs` ~1280-1294) now always records the
+  new snapshot as current, whatever the recipe's base is now ("edits require another explicit rebuild"). Builds run on
+  every base, so the result is no longer retired because the live source changed. Basis: 04336cfa7 "feat: build on every
+  tensorlake recipe base (#3178)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## orphan-cleanup-start-does-not-invalidate-feed.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The finding assumed the Settings sandbox list re-reads on feed changes. The
+  GPUI port (`gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) never re-reads on fleet notices, by a coordinator
+  decision of 2026-11-15. It re-reads after every Delete answer, keeps Delete busy while one is out, and the helm
+  answers at its reply bound, after which the re-read shows "Cleaning up…". Another already-open Settings view stays
+  stale until Refresh, which is that design decision, not this bug. Basis: Moot after the GPUI migration (module docs,
+  "Read when it can change, never on a timer").
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## bulk-screenshot-test-expects-wrong-local-alias.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `e2e/docs-shots/visual-review.spec.ts` (the whole `e2e/` tree) is gone.
+  Basis: Deleted in 6ef88c9a4 "feat!: remove the browser interface and browser sign-in (#3401)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## delete-reader-notice-bypass.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Still present. The input path in `service/connection.rs` (~L543-565) removes the
+  attachment and sends "terminal input failed" without waiting for the Delete. Only the output-side verdicts go through
+  `detach_naturally`, which waits on `delete_over`. SPEC_impl.md ~L2160-2164 promises that a failed input waits for the
+  Delete too, so this breaks a written guarantee. The Delete itself still runs and is reported to whoever started it.
+  Basis: "Rare, self-correcting glitches and imprecise diagnostics". The trigger is a narrow window: input frames arrive
+  after the Delete ends the host and before it detaches viewers. The whole consequence is the wording of the detach
+  notice. Nothing is lost, the wrong target is never acted on, nothing persists wrongly, no failure is reported as
+  success, and there is no trust-boundary issue.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## grid-row-is-not-program-line.md
+
+- Outcome: `other`.
+- Assessment: The code is unchanged. `harness.rs` `grid_text` adds a newline after every row. `codex_identity.rs`
+  `complete_marker` and `harness.rs` `extract_pid` trust that newline, and `session_lifecycle.rs` ~L4002 kills the
+  parsed `self_pid`. The route needs one short `writeln!`/`println!` to be split mid-line on the pty, and that is not
+  established. Std's LineWriter flushes the buffered "SELF-PID:<digits>" in a single write before the newline, so a
+  split inside the digits is very unlikely. Basis: "Harm whose route is not established in shipped code". Every
+  consequence depends on an unshown mid-write split. The killing of an unrelated process is a highest-class consequence,
+  so FILTER.md requires the independent drop check before dropping, even though the bucket is other.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: both the false test failure
+  and the kill need the SELF-PID line split inside its digits, which the single buffered writeln does not produce;
+  maintainer tests only.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## argv-grid-wrap-witness.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The code is unchanged (`structured_launches.rs` `decode_generation_argv`
+  ~L509-560). The bad shape needs the second hex row to be caught partly drawn while the first row stays unchanged.
+  Whether the wrapper's od/tr output ever reaches the pty in pieces that way is unverified. Basis: "Harm whose route is
+  not established in shipped code". The only consequence, a false test failure, depends on an unverified write pattern.
+  The repair would come with the grid-text-omits-blank-columns helper fix if that is accepted.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## tunnel-dns-outlives-dial-admission.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Still present (`tensorlake/tunnels.rs` ~L307-310 wraps `TcpStream::connect(host)`
+  in a timeout, and Tokio's resolver runs on a blocking thread that cannot be cancelled). Whether a supported host's
+  resolver blocks long enough to matter, or for how long, is unverified. Basis: "Harm whose route is not established in
+  shipped code". Every material consequence (accumulation, shutdown delay) depends on resolver behaviour nobody has
+  verified. The consequence is not highest-class.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## container-path-publication-keeps-stale-cut.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `terminal.js`, `terminal-files.js` and `grid-terminal.js` no longer exist.
+  SPEC_impl.md ~L3417-3419 says container environments use the ordinary file rules and that the checkout-confinement
+  browser adapter is removed. Basis: Code deleted by 1eb4e3751 "remove the old webview desktop app" (#3407). The browser
+  UI was removed in #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## mac-rosetta-ssh-classification.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The code still uses `uname -m` (`backend.rs` ~L3872, 3898). No supported shell
+  setup that makes a plain SSH command run translated has been established. Basis: "Harm whose route is not established
+  in shipped code". The platform behaviour is unverified, and the worst outcome is a refusal, not a highest-class harm.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## devbuild-rust-llvm-layout-unverified.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The Dioxus web build no longer exists. Neither `scripts/devbuild-mac.sh`,
+  `Cargo.toml` nor `.github/dist-build-setup.yml` mentions dioxus, wasm or objcopy. Basis: 1eb4e3751 (#3407) removed the
+  webview app, and ddabac368 (#3441) "fix the Mac devbuild after the Dioxus app's removal".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## sandbox-launch-skips-remembered-agent-choices.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. Sandbox launches now carry an environment target (`tensorlake_add.rs`
+  `start_session_environment` ~L346). `record_created_history` allows session-owned hosts when `environment` is set
+  (`sessions.rs` ~L2338). In `store.rs` ~L9388-9389, `record_launch_history` runs for environment launches. SPEC.md
+  ~L1583 now says sandbox recent setups are restored. Basis: 52cc5d725 "store reusable environment launch choices"
+  (#3325) and 566598397 (#3328).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## cache-lock-repair-child-lifetime.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. Not re-traced. The finding states that no production route that kills only the
+  shim was found and that no real Git collision was established. Basis: "Harm whose route is not established in shipped
+  code". Every consequence depends on an unshown production overlap, and the possible harm (a cache or checkout failure)
+  is not highest-class.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-container-delete-treats-podman-lookup-none-as-absence.md
+
+- Outcome: `other`.
+- Assessment: covered. `container.rs` `remove_with_podman(None)` skips removal. `scope::resolve_program` returns None
+  only when no usable executable is on the supervisor's PATH, which is what "missing" means to the supervisor. Basis:
+  SPEC.md ~L5266-5267 (retired container model): "Delete retains the legacy container-removal path and confirms absence.
+  Missing Podman counts as nothing left to remove."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-wake-budget-inflight-busy-resume.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `WakeBudget` and the launch-wakes-host code are gone. SPEC.md ~L357-362 now
+  says the desktop app refuses a launch on a suspended host, and launch-time resume is "Once implemented". Basis:
+  1eb4e3751 (#3407) removed the code along with the webview app.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-suspended-source-clone-rules-distinguish-agent-authority-from-gui-prefill.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC_impl.md ~L6269-6272 limits the refusal to an agent's environment Clone, which reads the
+  source live. SPEC.md ~L1660-1661 describes the GUI row's Clone as creating a new sandbox. The reviewer's own record
+  says "no actionable contradiction established". This is a non-finding. Basis: SPEC.md ~L1660-1661 and SPEC_impl.md
+  ~L6269-6272 state the two behaviours separately and consistently.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-removed-terminal-selector-stale-migration-spec-condition.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. SPEC_impl.md no longer contains "internal switch". Basis: 1ed482dde "remove
+  the supervisor's tmux driver" (#3368) removed the text.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-startup-best-effort-duplicate-agent-residual.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. SPEC_impl.md ~L2594-2596 accepts that "a Restart could then start a second agent
+  beside one still running". The old "nothing left to stop" consent wording is gone from the code. The new GUI's
+  interrupted card restarts on one click (`session_pane/card.rs`), and the supervisor refuses a working agent without
+  consent. Basis: "Upgrades from older releases combined with another rare condition". The trigger needs a session that
+  survived the upgrade from a tmux-era release, plus a failed startup cleanup. The filter covers lost work within the
+  affected session. No broken install, corrupted database or security consequence.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-launch-excerpt-inherited-history-provenance.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC_impl.md ~L2436-2437 now accepts exactly this, and the earlier blank-screen claim has been
+  corrected. Basis: SPEC_impl.md ~L2436-2437: "If the terminal grows before the failure, it can bring lines from earlier
+  runs into view, where they can appear in the quote." Added by a981db219 (#4170).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-uninstall-accepted-outlived-private-tmux-residual.md
+
+- Outcome: `other`.
+- Assessment: covered. Both spec passages are present on main. Terminal-host cleanup is still mandatory (not re-traced).
+  Basis: SPEC.md:233-236: "one that outlived a supervisor stopped before uninstall ... keeps running, which the
+  maintainer accepted on 2026-11-11". SPEC_impl.md:7906-7909 says the same.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-agent-environment-guide-key-and-wait-exceptions.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. agent_instructions.rs:271-273 still tells environment launches to take no
+  `--idempotency-key` and to use a timeout of at least 40 minutes or run in the background. Basis: Not a defect. The
+  reviewer's own refutation still holds on main.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-intermediate-agent-delete-calls-podman-container-sandbox.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. agent_requests.rs:1736 now says "Only the user can delete a sandbox or
+  container session in Farhelm", and the test at :14931 matches. Basis: Fixed by 190d844e, inside the review range, as
+  the reviewer noted.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-generic-lost-reply-remedy-does-not-prescribe-an-unsupported-environment-retry-key.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. AGENT_MUTATION_UNKNOWN_REMEDY (proto lib.rs:2513) says only "check the
+  session's current state before retrying ..." and does not mention a key. Basis: Not a defect. The refutation holds on
+  main.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-create-result-drops-operation-claim-remints-current.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. agent_requests.rs:4580-4592 still takes a new `host_client` claim after the
+  launch result arrives. The environment entry, the session reference and the successful create are all correct. Basis:
+  FILTER.md "Rare, self-correcting glitches and imprecise diagnostics". The trigger is a narrow timing window (a
+  disconnect and reconnect between create completion and reply projection). The whole consequence is one reply's
+  freshness flag being imprecise, and the next `farhelm agent sessions` corrects it. No exclusion applies: the operation
+  succeeded, nothing durable is wrong, there is no wrong target and no trust impact. The reviewers called the filter fit
+  "unclear", so the coordinator may want to confirm.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-module-overview-does-not-independently-require-every-clone-to-name-a-host.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The reviewer's own "no separate finding" conclusion. Not re-traced beyond
+  that. Basis: Not a defect. It was recorded only as a closed candidate.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-shared-suspended-refusal-retains-tensorlake-noun.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. environment/mod.rs:245-269 `suspended_refusal` words it per provider ("the
+  host's container is paused"). Basis: Fixed by 93406de4b (#3946).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-normal-removal-parks-or-cancels-the-listing-before-clearing-its-seal.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. forget_host_locked still takes the hold first (hosts.rs:1354) and clears
+  the seal last, after the actor stops (`sealed_outcome(host, None)` at :1412). Basis: Not a defect. The refutation
+  holds on main.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-seal-finisher-stale-pending-snapshot-admission.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. sessions/sandbox.rs:296-305 `finish_pending_seal` rechecks
+  `seal_is_pending` after taking the provisioning lock. `finish_seal_locked` (:310-322) records the outcome while it
+  still holds the lock. Basis: Fixed by 790e982ba (#4282).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-ui-host-phase-fixture-omits-stopped-deleting.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The old UI tests (`every_phase`, `every_phase_keeps_the_helms_wire_token`)
+  no longer exist. The GPUI phase tests (hosts/identity/phase/tests.rs) construct Stopped and Deleting. Basis: Moot. The
+  old UI was removed by 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-ui-host-flow-omits-shared-environment-details.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `HostRowLines`, `host_flow_rows` and list/view.rs no longer exist. The GPUI
+  menus are a different implementation, not re-reviewed here. Basis: Moot. The old UI was removed by 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-ui-remove-label-docstring-still-sandbox-only.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The GPUI hosts/remove.rs:55-58 and :132 name both "Delete sandbox" and
+  "Delete container". Basis: Moot. The old UI was removed by 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-bulk-cleanup-captures-targets-after-deleting-exclusion.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. In GPUI session_list/bulk.rs, rows refused after confirmation are refused
+  in `run_batch` (:624-628, `menu::refused` covers Deleting via `environment::held`) but remain in the batch's `keys`,
+  so their marks clear with the batch. Rows already deleting when the button is pressed keep their mark, which the code
+  documents as intended (:514-517). Basis: Superseded by the GPUI rewrite. The old UI was removed by 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-deleting-environment-row-rename-omits-phase-guard.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. GPUI session_list/menu.rs:699-704 `refused` includes `environment::held`,
+  which matches Deleting (session_list/environment.rs:352-361) and covers Rename. Basis: Superseded by the GPUI rewrite
+  (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-late-environment-delete-count-republished-after-host-absence.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. GPUI delete_notice.rs:186-200 `follow_hosts` retires a "stays" count whose
+  host is absent or Deleting. session_list.rs:557 runs `settle` (and with it `follow_hosts`) on every change in the
+  operation store, so a late reply's settlement re-checks host absence straight away. Not runtime-verified; this rests
+  on the operation store notifying after the settle callback runs. Basis: Superseded by the GPUI rewrite (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-delete-expanded-error-false-no-change-comment.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The comment ("A refusal changed nothing on the host") no longer exists
+  anywhere in crates. Basis: Moot. The old UI was removed by 1eb4e3751 (#3407).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-container-positive-ui-test-removal.md
+
+- Outcome: `other`.
+- Assessment: covered. The browser test files are gone (the browser interface was removed). The spec retirement text is
+  present. Basis: SPEC.md:5265-5270: "The earlier experimental model ... is retired ... Templates, recent setups and
+  history with that choice still load. Using them drops or refuses the retired choice with an explanation and cannot
+  create another old-style session."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-live-recipe-settings-need-an-independent-contract-based-drop-check.md
+
+- Outcome: `other`.
+- Assessment: Only the user can edit recipes; agents cannot list, read or write them (SPEC.md:1673). So the edit is the
+  user's own choice, and no route exists for an agent to change credentials. The card names the recipe (SPEC.md:4680).
+  Basis: SPEC.md:485-487: "Edits to size, base and packages affect only hosts created afterwards ...; tunnels and
+  credential selections are read when a host connects or is set up." Because the original record raised a possible
+  credential-exposure route, this needs the independent drop check before removal.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: narrowly: a same-named recipe
+  edited while its card waits is the user's own act, and its settings are read at setup as SPEC.md specifies. The
+  container-host retarget concern is excluded.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-wrapper-direct-allow-without-separate-prefix-gate.md
+
+- Outcome: `other`.
+- Assessment: Both quotes are present on main. Basis: SPEC_impl.md:6279: "the direct-Allow card already covers an
+  agent-supplied wrapper." SPEC.md:4474: "A host allowed to start YOLO sessions without asking has no prefix approval
+  gate." This touches wrapper authorization, so it needs the independent drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: the environment card always
+  needs a direct Allow and shows the full command including wrapper words (SPEC_impl.md: the direct-Allow card covers an
+  agent-supplied wrapper).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-supervisor-tmux-pin.md
+
+- Outcome: `other`.
+- Assessment: covered. The spec text is present. Basis: SPEC_impl.md:8069: "The supervisor runs no tmux. The supervisor
+  unit provisioning renders names no tmux and puts no tmux directory on PATH". Users' and agents' own tmux commands are
+  out of scope here (see trailing-prepared-image-inherits-private-tmux-cleanup-exception.md).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-stopped-provider-state-zero-refusal-ticket.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. provisioning/service.rs:3443 still requires `refusal_attempt > ticket`. Actor
+  `set_state` publishes go through `publish` (manager.rs:5894-5909), which the reviewer traced to refusal_attempt 0.
+  Basis: FILTER.md "Rare, self-correcting glitches and imprecise diagnostics". The trigger is a narrow window (an
+  external stop between restart and attach). The whole consequence is a lost or imprecise diagnostic plus a bounded
+  wait, and the host's own Stopped state and Resume stay correct. No exclusion applies. The parent reviewer proposed the
+  same filter.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-prepared-image-inherits-private-tmux-cleanup-exception.md
+
+- Outcome: `other`.
+- Assessment: covered. The spec text is present on main. Basis: SPEC_impl.md:8091-8093: "Snapshot preparation skips the
+  step, as it skips attachment and lingering: the sandbox image it installs into has no Farhelm installation ..., so it
+  is not expected to carry an earlier tmux." The original record asked for an independent drop check on the
+  inherited-binary concern.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-intermediate-reach-test-comment-accurately-names-the-remaining-uninstall-consumer.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. The text "uninstall runs it to end" no longer appears anywhere in the helm
+  crate. Basis: Not a defect (the reviewer's refutation). The text no longer exists.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-uninstall-previously-orphaned-legacy-private-tmux-survives.md
+
+- Outcome: `other`.
+- Assessment: covered. The same spec text as trailing-uninstall-accepted-outlived-private-tmux-residual.md is present.
+  Basis: SPEC.md:233-236 and SPEC_impl.md:7906-7909 (the accepted residual, 2026-11-11). Terminal-host stop stays
+  mandatory and is not waived.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-history-obsolete-claim-after-adoption.md
+
+- Outcome: `other`.
+- Assessment: covered. the record has two parts. (a) Its original "obsolete completion restores old defaults" claim: the
+  record's own claims-031 refutes it from source (identity-checked claim under SQLite, no token reuse). I did not
+  re-trace that. (b) Its later agent-origin part is the same root as the queued
+  `trailing-environment-history-admits-agent-origin.md`, which already carries g050/l1 and g020/l5. Basis: duplicate of
+  queue item `trailing-environment-history-admits-agent-origin.md` (a coverage source per
+  `review_feedback_queue/AGENTS.md`), plus the source refutation of (a) in the record's claims-031
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-history-deleted-place-id-reuse.md
+
+- Outcome: `other`.
+- Assessment: covered. host ids are `AUTOINCREMENT` (store.rs:2862, :20169), so a deleted id cannot alias a new row.
+  Missing-place retention is specified. The separate pending-card retarget route was already triaged and archived as
+  `other` (`TRIAGE_OUTCOMES_ARCHIVE.md:21313`,
+  `trailing-container-place-retarget-authority-is-unverified-after-investigation.md`). Basis: SPEC.md:5237 "Recent
+  setups retain the recipe, container host when applicable, ... A missing recipe or container host stays unavailable
+  until the user changes that choice." SPEC.md "Topology": "One still in flight when the destination changes ... may be
+  carried out against the entry's new machine, and Farhelm adds no check of the installation identity to prevent that."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-uninstall-retains-already-orphaned-legacy-private-tmux-server.md
+
+- Outcome: `other`.
+- Assessment: covered. matches the spec text exactly. Basis: SPEC.md:233-236 "Uninstall has no tmux step of its own: ...
+  one that outlived a supervisor stopped before uninstall ... keeps running, which the maintainer accepted on
+  2026-11-11."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-literal-image-user-argument-injection.md
+
+- Outcome: `discard`.
+- Assessment: refuted on main. Podman calls put `--` before ids and images (environment/podman.rs:244, 267, 344, 439...;
+  podman/build.rs:699, 750, 827, 840), and the account lookup shell-quotes (`getent passwd -- {quoted}`, build.rs:70).
+  The entry itself proposes a drop ("duplicate of g058/l1, source-refuted").
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: refuted on main: an
+  end-of-options -- precedes every image or id in run/exists/inspect/pull/rm, the account is quoted after getent passwd
+  --, and arguments stay separate through the remote shell.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-job-removal-after-last-fleet-invalidation.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `tensorlake/build.rs:462-466` `PodmanJobAdmission::drop` now removes the
+  job and then bumps the fleet event, which is the order the finding asked for. Basis: afebbc69d (#3721)
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-ordinary-wal-tail-loss-after-external-create.md
+
+- Outcome: `other`.
+- Assessment: covered. ordinary NORMAL-sync writes, as described. No security or work-loss route. Basis:
+  SPEC_impl.md:5179-5181 "every ordinary read-write connection selects `synchronous=NORMAL` only after reading an actual
+  WAL mode ... This accepts losing the last commits on an OS crash or power loss"
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-podman-test-payload-producer-consumer-tmux-mismatch.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. repaired inside the review range. Main has no tmux in
+  `crates/farhelm/tests/e2e/podman_environments.rs` or `scripts/build-podman-test-payloads.sh`. Basis: d751ff1633
+  (consumer now checks only the farhelm archive)
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-snapshot-preparation-skips-inherited-private-tmux-removal.md
+
+- Outcome: `other`.
+- Assessment: covered. the spec carves this out explicitly. Basis: SPEC_impl.md:8091-8093 "Snapshot preparation skips
+  the step, as it skips attachment and lingering: the sandbox image it installs into has no Farhelm installation ..., so
+  it is not expected to carry an earlier tmux."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-ui-agent-environment-launch-last-session-consequence.md
+
+- Outcome: `other`.
+- Assessment: covered. the wording matches the spec, and it appears in a creation card, not in a Delete consent. GPUI
+  wording is at `approvals/model_tests.rs:1760, 1795`. The real Delete confirmations state both outcomes. Basis:
+  SPEC.md:1597 "**Delete removes the sandbox together with its last session.**" The container rule at SPEC.md "Container
+  sessions" is parallel.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-ui-legacy-container-editor-specified-retirement.md
+
+- Outcome: `other`.
+- Assessment: covered. this is a retirement record, not a defect. The webview code is gone. Basis: SPEC.md:5269
+  "Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with
+  an explanation and cannot create another old-style session."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-grid-only-removal-leaves-hidden-pane-fitaddon-rationale-stale.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. corrected within the range, and `app.css` no longer exists. Basis:
+  61e632323d (rationale corrected); 1eb4e3751 (#3407, file removed)
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-environment-pending-launch-label-resolves-with-empty-places.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the old code is gone. The GPUI launcher captures the pill label with the
+  host list (`launcher/view.rs:1361-1368`, `launch_target_label(environment, &hosts)`). Basis: 1eb4e3751 (#3407) removed
+  the old pill; the GPUI port captures the label with the host list
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-mac-devbuild-header-retains-removed-local-tmux-requirement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. repaired in range. `scripts/devbuild-mac.sh` has no tmux mention. Basis:
+  cb762a313a
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-desktop-smoke-direct-websocket-comment-overclaims-page-delivery.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `scripts/desktop-smoke.sh` no longer exists. Basis: 1eb4e3751 (#3407)
+  deleted the script
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-legacy-container-delete-conflates-podman-resolution-failure-with-absence.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. `farhelm-supervisor/src/container.rs:185-188` treats
+  `resolve_program("podman") == None` as nothing to remove. The creation-time path came from the same supervisor PATH
+  (units.rs composes it), so the trigger needs a later PATH or metadata change. Basis: filter "Upgrades from older
+  releases combined with another rare condition". (1) A retired containerized session is state an older release wrote.
+  (2) It also needs a rare change that makes Podman unresolvable on the supervisor's PATH. The consequence is a leftover
+  container or storage and a forgotten row: no update breakage, no DB corruption, no security effect. Also partly
+  covered by SPEC.md:5267 "Missing Podman counts as nothing left to remove."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-legacy-tmux-retry-refusal-private-launch-artifact-retention.md
+
+- Outcome: `other`.
+- Assessment: covered. the record's own lifetime correction shows reload cleanup removes it. The helper is still at
+  `service/core.rs:14760`. Basis: SPEC_impl.md:93-97 "files left behind are not a leak ... when they ... are removed ...
+  by the next start of the process that owns them." SPEC_impl.md:4840 "Removing specs is therefore tidiness, not a
+  credential boundary." The upgrade-plus-rare filter would also match.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-legacy-retry-refusal-skips-launch-artifact-cleanup.md
+
+- Outcome: `other`.
+- Assessment: covered. same helper (`core.rs:14760`). The startup sweep removes unknown-session specs. Basis:
+  SPEC_impl.md:93-97 (next-start removal is not a leak) and SPEC_impl.md:4840 ("tidiness, not a credential boundary").
+  The record notes the same paragraph's "creation removes it if the session never starts" could be read as stricter. I
+  read the paragraph as a whole as declaring this tidiness only.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-tab-scope-prefix-stale-two-terminal-kinds-docstring.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `rg 'both kinds of tab'` over crates/ on main finds nothing. Basis:
+  corrected in-range by 08399d092 (#3384), as the record itself says.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-prompt-recorder-default-off-without-catchup-witness.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. the fixture (core.rs:19883-) is unchanged:
+  `stty raw -echo; printf '\033[?2004l'`, no newline. The reviewer's own source check of dash/Linux showed one event for
+  this raw, newline-free write, and the parent rejected the claim. Basis: FILTER.md "Harm whose route is not established
+  in shipped code". The only consequence depends on platform behavior nobody showed (a split first write under raw
+  mode). Bucket is not `highest`.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-hold-mark-negative-oracle-retained-in-host-terminal-tests.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the reviewer withdrew it. `the_hold_wait_waits_for_a_host_agents_child`
+  exists at core/tests/host_terminals.rs:488 with the missing/stale/correct mark assertions. The claim was never true at
+  the tip. Basis: oracle present on main (refuted, not fixed by a later commit).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-migration-missing-terminal-lifecycle-docs.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. terminals.rs:165-175 on main gives the corrected Interrupted causes ("a
+  host reboot, or an update that ended an old terminal"). Basis: corrected in-range by 1ed482dde.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-pre-range-grid-first-input-queue-acceptance-wording.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. connection.rs:515-518 on main keeps the channel plus same-connection owner check,
+  and :534-537 keeps Agent + Ok(true) gating. The reviewer refuted the behavior change. The leftover "must have been
+  confirmed" wording (:527) predates the range and is not claimed as a defect. Basis: FILTER.md "Harm whose route is not
+  established in shipped code". The claimed consequences are refuted, and only a pre-range wording nit remains.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-deleted-replay-chunk-leaves-connection-doc-reference.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `rg REPLAY_CHUNK` finds nothing in the supervisor source on main. Basis:
+  repaired in-range by f560058d.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-tmux-periodic-warning-contract.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC.md:3103-3106 on main. Basis: SPEC.md, Status: "That has happened (see Terminal experience),
+  so no warning is recorded any more, and every supervisor start marks any unresolved one resolved." Both contributing
+  records already proposed "covered".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-container-positive-path-test-removal.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC.md:5263-5270 on main. The separate lost-Delete oracle (g137/f1) is not part of this file.
+  Later 391007ca9 (#4412) also adds retired-container removal tests. Basis: SPEC.md "Retired containerized sessions":
+  "is retired. Existing sessions support Delete only. Opening terminals or tabs, exec, Stop, Restart, Clone, Replace and
+  Replace with are refused." SPEC_impl.md:8395-8396: "Remove creation helpers, ... special tab/attach and
+  file-confinement paths once nothing can create or open these sessions." The record notes a conditional
+  could-be-highest concern (only if retired execution were still reachable). No route is established, and the refusals
+  are specified.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-upload-ack-priority-regression-oracle-removed.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. attachment_uploads.rs:951
+  `an_ack_arrives_ahead_of_a_backlog_of_terminal_output` on main, host-backed. Basis: 892972dbe "test: restore terminal
+  backpressure and upload coverage (#4194)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-refused-delete-live-upload-continuation-oracle-removed.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. attachment_uploads.rs:893 `a_refused_delete_preserves_an_in_flight_upload`
+  on main: partial upload, guarded Delete refused, then the same transfer commits and publishes. Caveat: the refusal is
+  the live-agent guard rather than a preflight refusal, which is close enough for the stated contract. Basis: 892972dbe
+  (#4194).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-deleted-legacy-deep-replay-tail-oracle.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the tmux driver is gone from crates/farhelm-supervisor/src on main. The
+  parent disposition already said "no current legacy fixture repair". Basis: subject retired by dbfc6975 (old terminals
+  ended at startup) and 1ed482dd (driver removed).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-deleted-signal-legacy-two-client-shutdown-oracle.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. as item 26. The parent disposition rejected a current fix. Basis: subject
+  retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-removed-serving-legacy-binary-final-output-oracle.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. as item 26. Host final-output tests are separate and valid. Basis: subject
+  retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-docs-stop-callout-overpromises-descendant-cleanup.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. e2e/docs-shots/stop-restart-resume.spec.ts was deleted (#3401). Its port
+  scripts/docs-shots/stop-restart-resume.py:36,52-53 says "ends the agent and closes its shell tabs" and notes "Jobs you
+  run under your own tmux can keep ...". Basis: 53d618e4 (in-range correction) plus the docs-shots port.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-startup-filesystem-cleanup-outside-deadline.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. old_terminals.rs:183, :245, :251 on main call `remove_server_files` outside
+  `timeout_at`, and SPEC_impl.md:2596-2597 states the budget. So the contract mismatch is real, but exceeding the budget
+  needs a hung filesystem or a huge root-directory debris count. Basis: FILTER.md "Harm whose route is not established
+  in shipped code" (no healthy workload shown to exceed the budget). The hung-filesystem part is accepted by SPEC.md
+  "Healthy local filesystems": "Do not add complexity to recover from or bound those problems solely to keep the
+  affected host making progress".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-647f022-old-terminal-process-compatibility-oracle-deletion.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the record itself says the subject was retired before the tip. The tmux
+  driver is gone on main. Basis: subject retired (dbfc6975, 1ed482dd). SPEC.md, Terminal experience now has startup
+  ending the old server.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-647f022-old-to-host-migration-integration-oracle-deletion.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. per the record, `tmux_restart_seed` was removed in 1ed482dd, and no tmux
+  driver is on main. Basis: subject retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-647f022-stale-connection-pause-oracle-restored-f560058.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. core/tests/host_terminals.rs:3693
+  `a_pause_from_a_client_that_lost_a_takeover_cannot_silence_the_winner` on main. Basis: restored in f560058d.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-mixed-session-regression-coverage-disappears-before-legacy-serving-retires.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. mixed sessions no longer exist (old terminals end at startup; SPEC_impl
+  "every terminal runs in a terminal host"). Basis: subject retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-legacy-forced-pause-mode-restoration-oracles-disappear-before-legacy-serving-retires.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the tmux forwarder recovery is gone on main. The parent disposition
+  rejected a current fix. Basis: subject retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-legacy-stalled-viewer-rss-regression-check-is-removed-before-legacy-serving-retires.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the tmux subject is gone. A host-terminal RSS test was added in 892972dbe
+  (#4194, crates/farhelm/tests/e2e/terminal_backpressure/rss.rs). Basis: subject retired, plus host analogue restored in
+  #4194.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-647f0227-removes-supported-tmux-pending-cleanup-request-oracles.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the parent disposition says the tip has none of the gate/sink/reap
+  machinery. Basis: subject retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-647f0227-removes-supported-tmux-transport-sink-crash-recovery-oracles.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the parent disposition says retirement and removal ended the exact legacy
+  subject. Basis: subject retired (dbfc6975, 1ed482dd).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-pre-range-tmux-probe-fixture-process-oracles.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. `fn probe_fixture` and `fn pidfile_arg` exist nowhere in crates/ on main.
+  The supervisor's tmux.rs is gone (removed by 17a3fe858/500548b92, #3371/#3373). The could-be-highest stale-pid concern
+  was never established, and the code no longer exists. Basis: code removed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-historical-desktop-tmux-abovepin-warning-after-retirement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. no `AbovePin`/"unaudited" emitter or spec promise remains; SPEC.md now says
+  hosts neither need nor install tmux (SPEC.md ~201, 233). The reviewer itself notes the mismatch was intermediate.
+  Basis: #3371 `17a3fe858` "stop requiring tmux on the Mac and in helm setup" removed the Mac preflight and the policy
+  text.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-restart-seeded-history-promoted-into-launch-error-screen.md
+
+- Outcome: `other`.
+- Assessment: covered. SPEC_impl.md now accepts exactly this route. The prompt-mode hypothesis is source-refuted by the
+  reviewer. Basis: SPEC_impl.md ~2435-2437 (added by #4170 `a981db219`): "Restart seeds the new host with the terminal
+  history it recovered from the same session, above a blank screen. If the terminal grows before the failure, it can
+  bring lines from earlier runs into view, where they can appear in the quote."
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-osc52-browser-refusal-test-removed-before-retirement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the gap was intermediate only. Old terminals, xterm's clipboard provider
+  and the browser page are all gone, so nothing is left to test. The finding itself says "not a request to resurrect".
+  Basis: moot. Code removed by #3368, #3369 and #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-settings-to-mounted-agent-shell-link-ownership-integration-test-removed.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the target page and suite are gone: #3401 removed the browser interface and
+  every `.spec.ts`. The link-click choice now lives in the desktop GUI
+  (`crates/gui/farhelm-gui/src/settings/terminal.rs`). Whether the GUI has an equivalent end-to-end check was not
+  assessed; that would be a new finding. Basis: moot. Browser page removed by #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-terminal-whole-stream-flow-stall-paused-remount-oracles-removed-before-retirement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. intermediate only. The record says "At tip these old-specific mechanisms
+  are gone; do not restore them." Basis: moot. Code removed by #3368, #3369 and #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-xterm-deferred-replay-flush-test-gap.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. no deferred xterm flush exists on main. The record says "Do not restore an
+  obsolete callback test." Basis: moot. Code removed by #3369 and #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-xterm-per-tab-write-flow-isolation-test-gap.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the xterm write-flow mechanism and the browser page are gone. The record
+  says the old test should not be restored. Basis: moot. Code removed by #3369 and #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-grid-catchup-progress-and-empty-frame-idle-tests-removed.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the browser timer (`terminal.js`) and its tests are gone (#3401). The idle
+  bound now lives in the helm client (`crates/farhelm-helm-client/src/terminal.rs`, "The catch-up's idle bound"). It
+  measures silence, and an empty binary message ends the socket, so the empty-frame case no longer exists.
+  `crates/farhelm-helm-client/src/terminal/tests/catch_up.rs:111` covers "grid messages spaced under the bound, for
+  longer than the bound in all ... no end of replay among them; once they stop ... ReplayIdle". Lines 180 and 63 cover a
+  slow caller and the nothing-sent case. Basis: the browser code was removed by #3401, and the replacement is covered by
+  the helm-client catch_up tests.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-old-xterm-sustained-viewport-tests-removed-before-retirement.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. intermediate only. The tested renderer and its workaround were removed.
+  Basis: moot. Code removed by #3368 and #3369 (and the browser by #3401).
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-renderer-swap-kind-notice-test-deletion.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the reviewer proposed "covered". The caveat about old-page commands being
+  reinterpreted is also moot, because the browser page is gone. Basis: moot. Code removed by #3369 and #3401.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-retired-old-terminal-migration-ui-test-deletion.md
+
+- Outcome: `other`.
+- Assessment: covered. the spec now ends old terminals at supervisor start, so no migration UI exists to test. Basis:
+  SPEC.md "Old terminals" (~3326-3332): "A supervisor that finds that tmux server when it starts ends it, and with it
+  everything that still ran in an old terminal".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## trailing-tmux-only-sgr-adapter-deletion-frozen-snapshot-compatibility-concern.md
+
+- Outcome: `discard`.
+- Assessment: `sgr_setting` is gone and nothing on main references it. The reviewer's source check shows the v1 encoder,
+  decoder and host seed chain never called it. `crates/farhelm-terminal-emulator/tests/snapshot_golden.rs` still pins
+  the v1 bytes and restore behavior. The reviewer marked it "refuted". Basis: FILTER.md "Harm whose route is not
+  established in shipped code". The only consequence (lost retained history) depends on a route that source reading
+  refutes. The bucket is other, but that hypothetical consequence could be highest, so the filter's own text requires
+  the independent drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: refuted: the deleted adapter's
+  only caller was the removed tmux path; the v1 snapshot encoder, decoder and goldens are unchanged.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## partial-host-edit-reports-whole-failure.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. `edit_identity_checked` (`farhelm-helm/src/hosts.rs:1087-1102`) writes the alias
+  first by design (its comment: "An appearance write failing after it leaves the alias changed, and the error says the
+  edit failed"). If the registry sync fails, the error already says "alias was changed but could not be synchronized"
+  (:1026-1028). What remains is an appearance database write failing after the alias write. Basis: FILTER.md "Rare,
+  self-correcting glitches and imprecise diagnostics". The trigger is a local database write fault at one specific
+  point, and the whole consequence is an imprecise error message. The alias change was authorized, so no wrong target,
+  false success or security consequence applies. SPEC.md "Healthy local filesystems" also accepts local storage
+  failures.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## linux-helm-allows-mac-only-tunnel-open.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. tunnel admission checks only that a native link opener exists
+  (`tunnels.rs:349-356, 474, 533, 553`) and requires `tunnel_consent == true`. SPEC.md ~2541-2543 says the Mac app opens
+  tunnels and "other desktop apps, which open no tunnels" leave the consent control out, so Linux UI can never set
+  consent or send the open request. Basis: FILTER.md "Harm whose route is not established in shipped code". Reaching it
+  needs an input no shipped control produces: a raw API call with the device credential that both sets consent and opens
+  a tunnel.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## credential-editor-retains-obsolete-secret-copies.md
+
+- Outcome: `other`.
+- Assessment: not re-traced. The reviewer reports no reader outside the already trusted app process. SPEC.md's
+  write-only field rule allows holding the current draft and is silent on obsolete copies. Basis: FILTER.md "Harm whose
+  route is not established in shipped code". Disclosure needs a reader nobody has shown. The bucket is other, but the
+  hypothetical credential exposure could be highest, so it needs the independent drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: the chooser half is already
+  fixed (edit-counter check); the remaining error record stays in the trusted app process with no reader.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## attachment-paste-keeps-directory-control-bytes.md
+
+- Outcome: `other`.
+- Assessment: the supervisor sanitizes only the basename (`farhelm-supervisor/src/attachments.rs` `sanitize`) and puts
+  the published file under the state directory (`attachments_root`/`session_dir`). No shipped way to get control bytes
+  into that path is shown. Basis: FILTER.md "Harm whose route is not established in shipped code". Both the garbled
+  paste and the posited command submission need a state-directory path with control bytes, which nothing shipped
+  creates. The reviewer's could-be-highest route (submitting a command) means it needs the independent drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: state-directory route only:
+  control bytes would have to come from the user's or admin's own XDG_STATE_HOME/HOME/--state-dir.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-supervisor-ownership-save-is-silent.md
+
+- Outcome: `other`.
+- Assessment: covered. the trigger is a failed local state-file write (`crates/farhelm-desktop/src/lib.rs` ~1308).
+  Basis: SPEC.md "Healthy local filesystems" (~5019-5025): "Local filesystem I/O errors or hangs may cause failures ...
+  those outcomes are accepted, not defects ... Accepted outcomes include losing durable state".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## credential-chooser-test-assumes-missing-global-path.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. the test now picks `PathBuf::from(FILE).join("unreadable-child")`, a child
+  of a regular fixture file, which cannot exist. Basis: `6f65c70a2` "fix: hide selected Codex login file contents
+  (#4153)" replaced `/nonexistent/auth.json`.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## group-toggle-inverts-drawn-action.md
+
+- Outcome: `other`.
+- Assessment: covered. `session_list/groups.rs:162-185` toggles from the live queued state; the label comes from the
+  frame (223-227). Still present. Basis: SPEC.md, "Decided 2026-11-21: a control the screen still shows after its target
+  changed may be used, as long as the helm refuses what is no longer valid or the result is trivially undone." A second
+  click undoes it.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## manual-update-check-can-join-already-settled-auto-hold.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. the hold decision reads `user_waiting` under the lock
+  (`farhelm-desktop/src/updater.rs` ~1195-1206); `check_now` (806-818) joins while `current` is not Idle; completion in
+  `run_check` (~996-1030) clears `user_waiting`. The gap spans one `read_installed` call. Basis: FILTER.md "Races a
+  person would have to win inside a sub-second window": the click must land in the window between the decision and
+  completion (milliseconds); the result is replaced on the next check (the user can check again or restart into the
+  pending update and be offered the newer one). No loss, wrong target, unrecoverable state or security consequence.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## tunnel-pill-can-show-previous-session-mapping.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. the pill uses one fixed element ID across sessions (`terminal/tunnels.rs:81`), so
+  a tooltip keyed by it can outlive the switch. The tooltip's exact retention was not re-traced. Basis: FILTER.md "Rare,
+  self-correcting glitches and imprecise diagnostics": rare trigger (an automatic session change during a hover); the
+  whole consequence is hover text that is briefly wrong and corrects when the pointer moves. No action or durable state
+  is involved.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## rendered-sign-in-action-reads-live-state.md
+
+- Outcome: `other`.
+- Assessment: covered. `sign_in.rs:532-559` resolves the question or SignInNeeded state at click, not from the frame.
+  Still present. Basis: SPEC.md 2026-11-21 stale-control acceptance: opening another question popover is dismissed in
+  one step, and starting a sign-in retry is the action the button offers anyway.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## sign-in-visibility-label-inverts.md
+
+- Outcome: `other`.
+- Assessment: covered. `sign_in_form.rs:74-80` toggles live `show`; the only other writer is Send (145), which also
+  clears and locks the field, so a stale Hide reveals an empty read-only field. Basis: SPEC.md 2026-11-21 stale-control
+  acceptance: the result is undone by pressing again.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## ssh-chime-first-preference-read-failure.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. `sounds/rules.rs:100-111` maps a missing preferences row to defaults (on), and
+  `sounds/owner.rs:148` passes whatever the store holds. Nothing shows the helm's local preferences read failing on
+  first snapshot in shipped use. Basis: FILTER.md "Harm whose route is not established in shipped code": the trigger
+  (the helm failing to read its own database's preferences row) is a missing source premise; a local I/O failure there
+  falls under SPEC.md "Healthy local filesystems". Bucket other, so no drop check needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## settings-spec-sound-switch-count.md
+
+- Outcome: `discard`.
+- Assessment: already fixed or moot on main. SPEC.md now reads "Under **Notifications**, **Sounds** has four switches"
+  (line ~2550). Basis: `7271212a1` "feat: add settings cards and previews (#4437)".
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (already
+  fixed) (fewest-questions triage, 2026-11-21, against main ca62397de).
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## failed-create-test-accepts-other-io-error.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The test is now
+  `a_failed_create_replays_its_error_and_a_changed_override_conflicts` (core.rs ~27758). It asserts only
+  `ErrorKind::Internal` and the text being the same across replays, never which stage failed. The create uses cwd `/`.
+  The alternative failure would need `check_cwd_access("/")` (core.rs ~3897) to hit an unclassified I/O error on `/`,
+  which nobody has shown happens. Basis: FILTER.md "Harm whose route is not established in shipped code". The only
+  consequence, the test passing vacuously, needs an unverified platform failure (stat of `/` failing). No highest
+  consequence, so no drop check is needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## attention-cue-expiry-can-precede-landing-flash.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The independent clocks still exist (layers/cue.rs `retire`, `LANDING = 0.68`).
+  The file itself says the route is unverified, because no platform scheduling has been shown to delay the first layout
+  that long. Basis: FILTER.md "Harm whose route is not established in shipped code" (unverified platform behavior). The
+  consequence is cosmetic.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## attention-cue-accepts-empty-visible-clip.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. layers.rs ~657 returns `intersects(...).then(intersect)`, which can be zero-area.
+  The file says no ordinary layout producing that collapse was established. Basis: FILTER.md "Harm whose route is not
+  established in shipped code" (missing source premise). The consequence is cosmetic.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## antigravity-transcript-id-pairing.md
+
+- Outcome: `other`.
+- Assessment: SPEC_impl.md ~4504-4512 specifies marker-only verification of the first record, with no binding between ID
+  and path. The file says the vendor pairing is unverified. Basis: FILTER.md "Harm whose route is not established in
+  shipped code" (unverified vendor behavior). The non-first-class harness filter does not apply because resuming the
+  wrong conversation is excluded there. The bucket is other, but the unestablished consequence (resuming the wrong
+  conversation, which counts as lost user work) could be highest, so the filter text requires the independent drop check
+  before dropping.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: route depends on unverified
+  vendor behavior pairing one conversation's ID with another's transcript.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## antigravity-full-first-record-needs-delimiter.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. SPEC.md ~4040 accepts that a first record over the 64 KiB read limit "leaves
+  capture as it was", and SPEC_impl.md ~4509 says the same. The exact-boundary case without a newline is not "over" the
+  limit, and no Antigravity version has been shown to write one. Basis: FILTER.md "Rare edge cases in harnesses without
+  first-class support". Antigravity only, the trigger is unconfirmed vendor behavior, and the consequence is a delayed
+  or missing Resume offer, with no wrong conversation. "Harm whose route is not established" also applies.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-and-session-login-shell-disagree.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file reports a lookup-order difference (desktop: native passwd first;
+  supervisor: getent first, then native). The file states that no stock backend disagreement is established. Basis:
+  FILTER.md "Harm whose route is not established in shipped code". No supported configuration where the two lookups
+  disagree has been shown.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-account-lookup-environment-race.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file says no supported passwd backend that does this is known. Basis:
+  FILTER.md "Harm whose route is not established in shipped code" (unverified platform behavior). The file names high,
+  not highest, as the ceiling, so no drop check is needed.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## desktop-login-notice-write-failure.md
+
+- Outcome: `other`.
+- Assessment: covered. The file conditions the whole route on a failed notice-database write ("a write-specific storage
+  failure"). The PATH used for tool lookup is unaffected. Basis: SPEC.md "Healthy local filesystems": "assume each
+  host's local filesystem is healthy. Local filesystem I/O errors or hangs may cause failures… those outcomes are
+  accepted… This applies to each supervisor host as well as the machine running the helm." A failed write to the helm's
+  own SQLite store is that case.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (covered by
+  the specification, a queued plan or BUGS.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This
+  removes the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## notice-clear-can-use-unpresented-state.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The feedback file is truncated (its Details have only a fragment).
+  `resolved_shown` is recomputed on each render (rail_notices.rs ~461), so the window is between a store update
+  rendering and that frame being presented. Basis: FILTER.md "Rare, self-correcting glitches and imprecise diagnostics".
+  The trigger is a narrow timing window. The whole consequence is a lost resolved notice, which is diagnostic history.
+  The user did press Clear resolved, so this is not a wrong target, and nothing user-owned is lost.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## shell-can-show-contradictory-claude-hint.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file states the shipped supervisor never produces this combination (the
+  generic and Bash/Zsh readers return false). The consequence is a misleading band whose Settings shortcut turns nothing
+  on. Basis: FILTER.md "Harm whose route is not established in shipped code" (an input no shipped supervisor sends).
+  There is no trust-boundary consequence, because enabling trust still needs a separate explicit action.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## shell-can-show-conflicting-restart-offer.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file states the shipped supervisor reports NoConversationReporting for
+  shells, and that the supervisor revalidates before acting. Basis: FILTER.md "Harm whose route is not established in
+  shipped code" (an input no shipped supervisor sends). There is no cross-host or destructive route.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## remembered-tab-input-before-visible.md
+
+- Outcome: `other`.
+- Assessment: The file says the required ordering (first replay plus later input before presentation) is unverified, and
+  that the first key cannot reach the new shell. Basis: FILTER.md "Harm whose route is not established in shipped code".
+  The bucket is other, but the file says it "Could be highest if wrong-program input is established" (keys typed into a
+  different terminal), so the filter text requires the independent drop check.
+- Decision: recorded without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The finding's
+  possible harm could be in the `highest` bucket, so the drop went through the independent drop check
+  (`review_feedback_queue/.agents/recording.md`, "Independent drop check"), which agreed: wrong-program input needs the
+  replay round trip to finish before the next frame is presented, which nothing shows; a dropped key is accepted by
+  SPEC.md's input-before-shown rule.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## filtered-reply-resets-restored-terminal.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. filters.rs `serves_named` NOTE (~278-294) describes the trigger: a quick return
+  before the helm answers the earlier query, while the session stops matching filters. The tab views are rebuilt and the
+  remembered choice is lost. Nothing is killed, and the shell tab is still there to click. Basis: FILTER.md "Races a
+  person would have to win inside a sub-second window". The user must return before the helm's reply. The whole
+  consequence is a dropped remembered-tab choice (in-memory UI convenience state), recovered by clicking the tab. No
+  wrong session or machine, and no data loss.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
+
+## carried-upload-notice-clears-before-display.md
+
+- Outcome: `other`.
+- Assessment: matches a review filter. The file says the event ordering is unverified. The consequence is a lost
+  diagnostic only. Basis: FILTER.md "Harm whose route is not established in shipped code" (unverified platform event
+  ordering). The consequence is a lost diagnostic, which "Rare, self-correcting glitches" also covers.
+- Decision: recorded without asking under `review_feedback_queue/.agents/triage.md`, "Preparing each item" (review-only
+  filter in review_feedback_queue/FILTER.md) (fewest-questions triage, 2026-11-21, against main ca62397de). This removes
+  the item from the queue; it does not mean any planned work is done.
+- Completion criteria: remove the feedback file and its index entry.
+- Execution: complete (removed during triage).
