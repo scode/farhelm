@@ -7613,9 +7613,9 @@ fn the_notice_goes_after_thirty_seconds(cx: &mut TestAppContext) {
 #[gpui::test]
 fn a_program_clipboard_write_in_the_grace_window_suppresses_the_notice(cx: &mut TestAppContext) {
     let grace = super::super::drag_notice::GRACE;
-    let write = |target: &str| -> GridOutput {
+    let write = |target: &str, text: &str| -> GridOutput {
         serde_json::from_value(
-            serde_json::json!({"t":"clipboard","target":target,"text":"copied","last":true}),
+            serde_json::json!({"t":"clipboard","target":target,"text":text,"last":true}),
         )
         .unwrap()
     };
@@ -7624,7 +7624,7 @@ fn a_program_clipboard_write_in_the_grace_window_suppresses_the_notice(cx: &mut 
     h.set_clipboard("someone else's");
     h.plain_drag();
     h.wait(grace / 2);
-    h.fake().output(write("primary"));
+    h.fake().output(write("primary", ""));
     settle(h.cx);
     assert_eq!(
         h.clipboard().as_deref(),
@@ -7642,7 +7642,7 @@ fn a_program_clipboard_write_in_the_grace_window_suppresses_the_notice(cx: &mut 
     h.cx.simulate_mouse_down(from, MouseButton::Left, Modifiers::none());
     h.cx.simulate_mouse_move(to, MouseButton::Left, Modifiers::none());
     settle(h.cx);
-    h.fake().output(write("clipboard"));
+    h.fake().output(write("clipboard", "copied"));
     settle(h.cx);
     h.cx.simulate_mouse_up(to, MouseButton::Left, Modifiers::none());
     settle(h.cx);

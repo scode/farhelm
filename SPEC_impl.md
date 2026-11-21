@@ -1835,9 +1835,8 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   out its own timeout; and an answer a supervisor had worked out but not written is lost the same way. That holds for a
   crash, and for an orderly stop too, for the output in flight between the host and the stopping supervisor when it lets
   the connection go. Writes to the clipboard reach notice subscribers only from live output, so the user never sees one
-  twice (bells, title changes and writes to the primary selection are not sent: a viewer does nothing with any of them,
-  and a burst of them would push clipboard writes out of a subscriber's backlog); each viewer attachment subscribes on
-  its own, every subscription gets every notice, and one that falls behind by more than a short backlog loses the oldest
+  twice. Bells, title changes and primary-selection writes stay out of its backlog so they cannot push a copy out. Each
+  viewer attachment subscribes on its own, gets each clipboard write, and if its short backlog fills, loses the oldest
   (logged) rather than holding the terminal up. Every replacement of the emulator (a restored snapshot) goes through one
   place and is counted under the emulator's lock, beside the gap's history-trimmed mark, and so is every resize that
   changes the size (a resize reflows history without replacing the emulator), so that a viewer's grid stream reading the
@@ -1901,6 +1900,9 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   set, scroll region, cursor style) the lost output set until the program sets it again; nothing makes a program do that
   on `SIGWINCH`, and many set their modes only at startup, so the setting can stay wrong until the program restarts.
   Unverified either way: no test covers what real programs resend on a resize.
+- **Primary-selection notices.** A write to the primary selection advances the live terminal's status. The grid stream
+  coalesces these writes into a single completion with no text. The viewer counts it for drag guidance and leaves the
+  system clipboard alone.
 - **The terminal switch points** answer from each session's `HostTerminal` runtime (`hosts/terminal.rs`). The module
   `service/terminals.rs` resolves current terminal IDs and tracks attachments. Status reads three classes of evidence: a
   running child is live, a processed exit record is an exit with its code, a host that has ended is gone, and a host

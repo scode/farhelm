@@ -662,6 +662,9 @@ pub struct HostStatus {
     /// flushes, restores), so that a reader can wait for the screen to
     /// change.
     pub revision: u64,
+    /// Live primary-selection writes advance this generation. A viewer can
+    /// coalesce them without retaining selection text or evicting clipboard writes.
+    pub primary_write_generation: u64,
     /// Whether the emulator has processed everything the host had journaled
     /// when the runtime adopted it, its stored snapshot included: the host
     /// is asked for `Info` right after `Read`, and every record it sent
@@ -1857,6 +1860,7 @@ impl HostTerminal {
             child_start,
             position: Position::default(),
             revision: 0,
+            primary_write_generation: 0,
             caught_up: fence == 0 && adopted_end == Position::default(),
             checkpoint: checkpoints.accepted(),
             history_trimmed: false,
@@ -2042,6 +2046,7 @@ impl HostTerminal {
             child_start: previous.and_then(|status| status.child_start),
             position: Position::default(),
             revision: 0,
+            primary_write_generation: 0,
             caught_up: false,
             checkpoint: None,
             history_trimmed: false,
@@ -3313,23 +3318,30 @@ impl Runtime {
     /// notices only for live output, so these are all live. With nobody
     /// subscribed they go nowhere: nobody is watching.
     ///
-    /// Only writes to the clipboard are sent: a viewer's grid stream, the
-    /// one subscriber, has no message for a bell or a title (a title reaches
-    /// a viewer with the session's details), and its client honors only
-    /// clipboard writes, not the primary selection's
-    /// (`farhelm_proto::grid`). A burst of anything else would push a
-    /// clipboard write out of a subscription's short backlog for nothing.
+    /// Only writes to the clipboard use the subscriber backlog. A primary
+    /// selection just advances the status generation so the viewer can
+    /// suppress its drag guidance. A burst of them cannot evict a clipboard write.
     fn deliver_notices(&self, notices: Vec<Notice>) {
+        let mut primary_written = false;
         for notice in notices {
-            if matches!(
-                notice,
+            match notice {
                 Notice::Clipboard {
                     target: ClipboardTarget::Clipboard,
                     ..
+                } => {
+                    let _ = self.notices.send(notice);
                 }
-            ) {
-                let _ = self.notices.send(notice);
+                Notice::Clipboard {
+                    target: ClipboardTarget::Selection,
+                    ..
+                } => primary_written = true,
+                Notice::Bell | Notice::Title => {}
             }
+        }
+        if primary_written {
+            self.status.send_modify(|status| {
+                status.primary_write_generation = status.primary_write_generation.wrapping_add(1);
+            });
         }
     }
 

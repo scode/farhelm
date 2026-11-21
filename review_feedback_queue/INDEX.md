@@ -712,10 +712,6 @@ consequences.
   — Connection writer diagnostics still point to the deleted stream checkpoint. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-primary-write-notice-filter-drag-guidance.md`](trailing-primary-write-notice-filter-drag-guidance.md) —
-  Primary-selection writes cannot suppress drag-copy guidance (predates range). Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
   typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
 
