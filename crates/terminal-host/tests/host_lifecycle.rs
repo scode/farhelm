@@ -14,24 +14,31 @@ use terminal_host::protocol::{
     encode_spawn,
 };
 
-/// Output written before any client connects is kept and read from the
+/// Output written before the first Hello is kept and read from the
 /// start; the child's exit arrives after its output, with its status.
 ///
 /// Why: a client may connect long after the child started, or after it
-/// exited; neither may lose output or the exit. Spec: a child that prints
-/// and exits 3 before anyone connects is read back in full from (0, 0),
-/// followed by an exit record with code 3; Info reports it exited.
+/// exited. A child prints and exits 3 before the first Hello. A read from
+/// (0, 0) yields all its output and then an exit record with code 3. Info
+/// reports the same exit.
 #[test]
 fn output_before_a_client_connects_is_kept_and_the_exit_follows_it() {
+    let fixture = tempfile::tempdir().expect("fixture directory");
+    let child_pid = fixture.path().join("child.pid");
     let host = start(&spec(&[
         "/bin/sh",
         "-c",
-        "printf 'early output\\n'; exit 3",
+        "printf 'early output\\n'; printf '%s\\n' \"$$\" > \"$1\"; exit 3",
+        "sh",
+        child_pid.to_str().expect("fixture path is UTF-8"),
     ]));
-    // Let the child run and exit with nobody connected.
+    // The marker follows the pty write. The startup helper connects only
+    // to learn the host's pid for cleanup. The first Hello must come later.
     eventually("the child exits", || {
-        let mut client = host.connect(true);
-        client.info().child_exit.is_some()
+        std::fs::read_to_string(&child_pid)
+            .ok()
+            .and_then(|pid| pid.trim().parse::<u32>().ok())
+            .is_some_and(|pid| !running(pid))
     });
     let mut client = host.connect(true);
     client.read_all();
@@ -272,16 +279,18 @@ fn the_exit_is_reported_while_a_descendant_holds_the_pty() {
 }
 
 /// Collect messages until `predicate` matches one, failing if an
-/// acknowledgement of `total` input bytes comes first (bounded as
-/// [`Client::until`] is).
+/// acknowledgement of `total` input bytes comes first or the host discards
+/// input. A full acknowledgement or discarded input could make a drained
+/// queue look stalled.
 fn until_before_ack(
     client: &mut Client,
     total: u64,
     mut predicate: impl FnMut(&HostMessage) -> bool,
 ) -> HostMessage {
     client.until(|message| {
-        if let HostMessage::InputAck { written, .. } = message {
+        if let HostMessage::InputAck { written, discarded } = message {
             assert!(*written < total, "all the input was written after all");
+            assert_eq!(*discarded, 0, "the stalled input was discarded");
         }
         predicate(message)
     })
@@ -321,6 +330,10 @@ fn stuck_input_does_not_block_control_messages() {
     }) else {
         unreachable!()
     };
+    assert!(
+        info.child_exit.is_none() && running(info.child_pid),
+        "the program must stay alive while input is pending"
+    );
     let position = Position {
         offset: info.end,
         resizes: info.resizes,
@@ -352,6 +365,10 @@ fn stuck_input_does_not_block_control_messages() {
     }) else {
         unreachable!()
     };
+    assert!(
+        info.child_exit.is_none() && running(info.child_pid),
+        "the program must still be alive before shutdown"
+    );
     assert_eq!(info.size, size);
     client.send(&ClientMessage::Shutdown);
     until_before_ack(&mut client, total, |m| matches!(m, HostMessage::Goodbye));

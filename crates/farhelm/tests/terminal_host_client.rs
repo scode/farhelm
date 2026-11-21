@@ -680,13 +680,13 @@ async fn inputs_are_acknowledged_in_order() {
     assert!(positions.is_sorted(), "{text:?}");
 }
 
-/// Shift+Enter's two bytes reach a waiting program in one read.
+/// Shift+Enter's two bytes reach a raw-mode program in one block.
 ///
 /// Why: programs tell Shift+Enter from Escape-then-Enter by whether the two
 /// bytes arrive together; the client sends them as one `Input` so that the
-/// host writes them in one call. Spec: a raw-mode `dd` already waiting to
-/// read one block receives both bytes (ESC and CR, as `od -c` prints them)
-/// in that block.
+/// host can write them together. This checks what reaches the program's
+/// first block (ESC and CR, as `od -c` prints them). The host's atomic-input
+/// test checks the write boundary itself.
 #[farhelm_testtrace::test]
 async fn shift_enter_reaches_the_program_in_one_read() {
     let host = Host::start(shell(
@@ -696,7 +696,7 @@ async fn shift_enter_reaches_the_program_in_one_read() {
     let mut connection = host.connect().await;
     connection.start_read(Position::default()).await.unwrap();
     output_until(&mut connection, "ready").await;
-    // sleep-ok: let dd reach its read before the input; the property needs it already waiting.
+    // sleep-ok: give the pipeline time to enter its read before sending input.
     tokio::time::sleep(Duration::from_millis(200)).await;
     connection.send_input(b"\x1b\r").await.unwrap();
     let text = output_until(&mut connection, "\\r").await;
