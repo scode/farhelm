@@ -5346,6 +5346,8 @@ as nothing left to remove. Stored sessions still decode their old container conf
 Templates, recent setups and history with that choice still load. Using them drops or refuses the retired choice with an
 explanation and cannot create another old-style session. The old launcher switch and account-selection flow are gone.
 
+Removal of a container, whether recipe-based or retired, asks Podman to clean up its unused anonymous volumes.
+
 ### Local authority and trust between hosts
 
 The local security boundary is the Unix account on a particular host. Processes the user runs on the target host,

@@ -51,10 +51,6 @@ consequences.
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`trailing-podman-rebuild-retires-fallback-before-success.md`](trailing-podman-rebuild-retires-fallback-before-success.md)
-  — Failed container Rebuild discards the previous usable images. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md`](trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md)
   — Interrupted image capture can permanently block recipe cleanup. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -154,9 +150,6 @@ consequences.
 
 - [`worker-allocation-precedes-ownership-ledger.md`](worker-allocation-precedes-ownership-ledger.md) — A created worker
   can fall outside cleanup when ledger writing fails or remote creation succeeds before the local request times out.
-
-- [`anonymous-container-volumes-survive-removal.md`](anonymous-container-volumes-survive-removal.md) — Removing a
-  container can leave its anonymous image volumes behind; whether Farhelm promises to remove them is unresolved.
 
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
@@ -325,10 +318,6 @@ consequences.
 - [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
   — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-podman-account-observation-exec-guesses-root-home.md`](trailing-podman-account-observation-exec-guesses-root-home.md)
-  — Custom-image login lookup unnecessarily requires /root. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
 
 - [`trailing-podman-probe-dedup-test-asserts-before-spawned-task.md`](trailing-podman-probe-dedup-test-asserts-before-spawned-task.md)
   — Probe deduplication test checks its counter before a duplicate task can run. Abbreviated collection; confidence,

@@ -187,11 +187,12 @@ impl ContainerGuard<'_> {
         self.remove_with_podman(podman.as_deref()).await
     }
 
-    /// Inject resolution for focused tests without modifying process environment.
+    /// Collect unused anonymous volumes with the retired container. A separate
+    /// observation must confirm container absence before ownership can settle.
     async fn remove_with_podman(&self, podman: Option<&Path>) -> anyhow::Result<()> {
         if let Some(podman) = podman {
             let name = self.runtime.name();
-            let _ = run_control(podman, &["rm", "-f", "--ignore", &name]).await;
+            let _ = run_control(podman, &["rm", "-f", "--ignore", "--volumes", &name]).await;
             let absent = run_control(podman, &["container", "exists", &name]).await?;
             anyhow::ensure!(
                 absent.status.code() == Some(1),
@@ -325,9 +326,9 @@ mod tests {
             format!(
                 r#"#!/bin/sh
 root="${{0%/*}}"
-case "$#:$1:$2:$3:$4" in
-    "4:rm:-f:--ignore:{name}"|"3:rm:-f:{name}:") mv "$root/present" "$root/removed" ;;
-    "3:container:exists:{name}:") test -f "$root/present" ;;
+case "$#:$1:$2:$3:$4:$5" in
+    "5:rm:-f:--ignore:--volumes:{name}") mv "$root/present" "$root/removed" ;;
+    "3:container:exists:{name}::") test -f "$root/present" ;;
     *) exit 125 ;;
 esac
 "#

@@ -55,7 +55,8 @@ impl Podman {
     }
 
     /// Resolve the literal recipe account through the image's passwd data.
-    /// Exec needs its actual name, home and UID rather than a guessed default.
+    /// Exec needs its actual name, home and UID. The lookup runs from `/`
+    /// because even the root account's home may be absent from a custom image.
     async fn login(
         &self,
         place: HostId,
@@ -66,7 +67,10 @@ impl Podman {
             .script(
                 place,
                 id,
-                root_user(),
+                ContainerUser {
+                    home: "/".into(),
+                    ..root_user()
+                },
                 &format!("getent passwd -- {}", crate::ssh::shell_quote(requested)),
                 COMMAND,
             )
