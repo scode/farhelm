@@ -33638,3 +33638,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The test fills the writer and verifies the teardown grace elapses before it releases the peer.
   Change `uwpxtwxpvlum`, bookmark `plan/triage-terminal-host/03-helm-terminal-relay`,
   [PR #4478](https://github.com/scode/farhelm/pull/4478/changes).
+
+## retired-runtime-retains-restart-seed-reply.md
+
+- Outcome: `fix code`.
+- Assessment: In a rare scheduling window as a terminal ends, a Restart can wait forever for the terminal's history,
+  holding the session busy until the supervisor restarts. A late paste can also wait with no receipt. Verified: Still
+  present: terminal.rs `finish` (~4350) closes and drains with `try_recv` until the first error; `history_seed` (~2445)
+  awaits its reply with no timeout. The Tokio reserve-then-push behavior is as the reviewer describes (not re-read).
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code: drain until None, or put a timeout around the seed wait
+  (tiny). If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it
+  back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed. A runtime drains input and control requests admitted before closure. Restart also stops waiting for
+  a reply if the runtime is aborted. Change `mmmlwyyrzmvs`, bookmark `plan/triage-terminal-host/04-restart-seed-drain`,
+  [PR #4480](https://github.com/scode/farhelm/pull/4480/changes).

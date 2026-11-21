@@ -1910,6 +1910,63 @@ fn the_adapters_map_each_liveness_like_a_pane() {
 
 // ---- Input -----------------------------------------------------------------------
 
+/// A caller that already has capacity when the runtime ends still gets
+/// its result. Unsent input is refused and a seed request gives no history.
+#[farhelm_testtrace::test]
+async fn retiring_a_runtime_settles_requests_with_outstanding_permits() {
+    let stand_in = StandIn::new();
+    let (terminal, server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options()).await;
+    let input = terminal
+        .inner
+        .input
+        .reserve()
+        .await
+        .expect("live input queue");
+    let seed = terminal
+        .inner
+        .control
+        .reserve()
+        .await
+        .expect("live control queue");
+
+    std::fs::remove_file(stand_in.socket()).unwrap();
+    drop(server);
+    within("the runtime closes both request queues", async {
+        tokio::join!(
+            terminal.inner.input.closed(),
+            terminal.inner.control.closed()
+        );
+    })
+    .await;
+    assert_eq!(terminal.liveness(), Liveness::Gone);
+    assert!(
+        !terminal.inner.task.is_finished(),
+        "permits hold the drain open"
+    );
+
+    let (fate, received) = oneshot::channel();
+    input.send(InputRequest {
+        data: b"x".to_vec(),
+        fates: vec![fate],
+        epoch: 0,
+        paste: None,
+    });
+    assert_eq!(
+        within("the late input receipt", received).await.unwrap(),
+        InputFate::NotSent,
+    );
+    assert!(
+        !terminal.inner.task.is_finished(),
+        "the control permit alone still holds the drain open",
+    );
+    let (reply, answer) = oneshot::channel();
+    seed.send(Control::Seed {
+        max_bytes: 1024,
+        reply,
+    });
+    assert!(within("the late seed reply", answer).await.is_err());
+}
+
 /// Each input's fate follows the host's acknowledgements, and input whose
 /// connection ended unacknowledged is unknown and never sent again.
 ///
