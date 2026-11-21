@@ -280,6 +280,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and describe one visual-review procedure in `.agents/validation.md` that GUI plans can point to. Plan:
   `plans/queue/golden-changes-page.md`.
 
+- **One Settings section per agent.** Settings gets a dedicated Agents group with one section per agent type, every
+  agent type included, holding that agent's settings. An agent with nothing to configure gets a section that says so
+  plainly: not finding your agent in Settings is what confuses people. The current agent-specific settings (the trust
+  switches, their hint switches and Claude's caution box) move into their agents' sections, and the Agent trust page
+  goes away. Credentials moves to the General group. Plan: `plans/queue/agent-hook-setup.md`.
+
+- **Install Grok and Antigravity conversation hooks automatically, opt-in.** Restart needs Farhelm's hooks in Grok and
+  Antigravity, which users install by hand today and forget (the maintainer did, and took a greyed-out Restart for a
+  bug). Add an all-hosts opt-in per agent. While it is on, every start of that agent installs or updates Farhelm's own
+  hook file on the machine it runs on. Ask in the launcher the first time, show a band in sessions launched without it,
+  and make the greyed Restart tooltip say to turn the setting on. The opt-in wording must say that Farhelm changes the
+  agent's own configuration, which affects the agent outside Farhelm too. Drop the manual setup instructions. Plan:
+  `plans/queue/agent-hook-setup.md`.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
@@ -331,10 +345,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
-
-- **Antigravity session id reporting still broken.** in 0.43.0 session id reporting for antigravity still doesnt work.
-  the point is "restart" button is grey because farhelm doesn't know the session id. (Screenshot: an Antigravity CLI
-  1.5.13 session that has answered one prompt, with the Restart button in the session toolbar greyed out.)
 
 ## Mid term
 
