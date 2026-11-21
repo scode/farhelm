@@ -208,24 +208,31 @@ impl TrustAgent {
             TrustAgent::Claude => vec![self.mechanism().to_owned()],
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
                 let mut paragraphs = vec![
-                format!(
-                    "{} New, Clone, Restart with and Replace with use this setting. Restart and Replace keep the \
-                     session's saved launch.",
-                    self.mechanism()
-                ),
-                "As when you approve it yourself, repository hooks, settings and commands are then trusted. This is \
-                 why the switch is off by default."
-                    .to_owned(),
+                    format!(
+                        "{} New, Clone, Restart with and Replace with use this setting. Restart and Replace keep the \
+                         session's saved launch.",
+                        self.mechanism()
+                    ),
+                    "As when you approve it yourself, repository hooks, settings and commands are then trusted. This \
+                     is why the switch is off by default."
+                        .to_owned(),
                 ];
-                if let TrustAgent::Antigravity = self {
-                    paragraphs.push(
-                        "For this launch, the option replaces Antigravity's saved list of trusted folders. Custom \
-                         permission flags that include --settings or --settings=… take precedence."
-                            .to_owned(),
-                    );
-                }
+                paragraphs.extend(self.caveat().map(str::to_owned));
                 paragraphs
             }
+        }
+    }
+
+    /// A last help paragraph for an agent whose option has a consequence the mechanism sentence does not cover:
+    /// Antigravity's option replaces its saved trust list for the launch, and the user's own Custom `--settings`
+    /// wins over it (SPEC.md: "Custom permission options supplying `--settings` or `--settings=...` take precedence").
+    fn caveat(self) -> Option<&'static str> {
+        match self {
+            TrustAgent::Antigravity => Some(
+                "For this launch, the option replaces Antigravity's saved list of trusted folders. Custom permission \
+                 flags that include --settings or --settings=… take precedence.",
+            ),
+            TrustAgent::Claude | TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => None,
         }
     }
 
