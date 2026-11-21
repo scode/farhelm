@@ -428,9 +428,6 @@ consequences.
   — The template regression cannot detect keeping the old container settings because its replacement uses identical
   values.
 
-- [`legacy-quickstart-stops-surviving-supervisor.md`](legacy-quickstart-stops-surviving-supervisor.md) — The parked
-  quickstart contradicts itself about whether the supervisor survives quitting the Mac app.
-
 - [`stalled-input-test-accepts-discarded-bytes.md`](stalled-input-test-accepts-discarded-bytes.md) — The stalled-input
   regression accepts discarded typing rather than proving that controls remain responsive beside pending input.
 

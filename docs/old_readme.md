@@ -32,9 +32,9 @@ Linux" below).
 
 - Install with the curl command above; on macOS it puts both `farhelm` and `farhelm-desktop` into `~/.local/bin`.
 - Start `farhelm-desktop` (double-click it in Finder, or run `~/.local/bin/farhelm-desktop` from a terminal). It starts
-  its embedded helm and a managed local supervisor, so the Mac itself is already a host; both stop when the app exits.
-  The window is the app's only interface: its helm picks a fresh loopback port at each launch and serves no browser
-  page.
+  its embedded helm and a managed local supervisor, so the Mac itself is already a host. The helm stops when the app
+  exits; the supervisor keeps running, so its sessions survive until the app starts again. The window is the app's only
+  interface: its helm picks a fresh loopback port at each launch and serves no browser page.
 - Add the remote host from the permanent host list: choose "add" in the host-count heading and enter the host's SSH
   destination. Use the row's "⋯" menu for host actions, and open "details" when you need evidence or provisioning
   progress. Farhelm connects with your existing passwordless SSH configuration and inspects the host. A supervisor

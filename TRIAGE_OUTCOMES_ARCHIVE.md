@@ -28764,3 +28764,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: change `nwusxmrxtsoqtwzsuouqwqmrnrpoxqtq`, bookmark `pr/muse-capability-docstring`,
   [PR #4401](https://github.com/scode/farhelm/pull/4401/changes).
+
+## legacy-quickstart-stops-surviving-supervisor.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): `docs/old_readme.md:35`
+  still says the app's embedded helm and managed local supervisor "both stop when the app exits", while lines 60-61 of
+  the same file say the supervisor keeps running. The current desktop app detaches the supervisor and leaves it running
+  (`crates/farhelm-desktop/src/lib.rs:571,1379-1386`), as SPEC.md:39 and 113 state. The same parked file also still
+  describes the removed browser route (59-62).
+- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
+  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
+  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
+  of complexity."
+- Completion criteria: Fix within the current spec what the Assessment describes ("Parked quickstart contradicts itself
+  on whether the supervisor survives quitting"), with a test where practical. Size gate: about 100 lines of diff (code,
+  tests and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a
+  complexity gate: "if any of these spiral into something very complicated, the executor should make a near term todo
+  item to follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket),
+  remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
+- Execution: change `srymukzqnwsoqmpwypslsusxxxvwyolq`, bookmark `pr/parked-quickstart-supervisor-survives`,
+  [PR #4402](https://github.com/scode/farhelm/pull/4402/changes).
