@@ -296,9 +296,9 @@ mod tests {
         .expect("open a fixture folder")
     }
 
-    /// A replaced file is either the old one or the complete new one, has
-    /// the requested mode, and leaves no temporary behind; a folder or link
-    /// is never followed when classifying or opening.
+    /// Replacing a file leaves the complete new contents, the requested mode,
+    /// and no temporary entry. Classifying a directory link reports the link,
+    /// and each open must refuse a link to a target it could open directly.
     #[farhelm_testtrace::test]
     fn files_are_replaced_whole_and_links_are_never_followed() {
         let root = tempfile::tempdir().expect("temp dir");
@@ -326,9 +326,14 @@ mod tests {
             open_folder(dir.as_fd(), "link").is_err(),
             "a link to a folder is refused"
         );
+        // The regular target passes the file type check, so only refusing the
+        // link prevents opening the file through this name.
+        let file_link = root.path().join("file-link");
+        std::os::unix::fs::symlink("target", &file_link).unwrap();
+        assert!(std::fs::metadata(file_link).unwrap().is_file());
         assert!(
-            open_file(dir.as_fd(), "link").is_err(),
-            "a link is never read through"
+            open_file(dir.as_fd(), "file-link").is_err(),
+            "a link to a regular file is refused"
         );
         assert_eq!(
             entry_kind(dir.as_fd(), "missing").unwrap(),

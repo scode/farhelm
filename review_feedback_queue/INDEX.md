@@ -356,10 +356,6 @@ consequences.
 - [`shutdown-wait-test-does-not-witness-waiting.md`](shutdown-wait-test-does-not-witness-waiting.md) — The shutdown
   regression can pass even if shutdown stops waiting for a launch whose registration is still in flight.
 
-- [`installer-file-symlink-test-masks-nofollow-removal.md`](installer-file-symlink-test-masks-nofollow-removal.md) — The
-  installer's symlink test would still pass if its no-follow protection disappeared, because the fixture points to a
-  directory that another check rejects.
-
 - [`legacy-expectation-is-parsed-as-cli-option.md`](legacy-expectation-is-parsed-as-cli-option.md) — The installer CLI
   rejects its documented ID-less expectation when the shell supplies it as a separate argument. An ordinary published
   updater history reaching that boundary remains unestablished.
