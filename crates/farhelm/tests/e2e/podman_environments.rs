@@ -756,7 +756,7 @@ impl Fixture {
         // sleep may end or be killed by the later container stop, which
         // leaves it an ended session that still counts as one.
         let line = format!(
-            "P={program}; \"$P\" agent hosts > ~/.e2e-hosts 2>&1; \
+            "P={program}; \"$P\" agent hosts --json > ~/.e2e-hosts 2>&1; \
              \"$P\" agent create --cwd /home/ubuntu \
              --command 'touch ~/.e2e-sibling-alive; exec sleep 600' --no-yolo --title spawned \
              > ~/.e2e-created 2> ~/.e2e-created.err; \
@@ -813,15 +813,17 @@ impl Fixture {
         .await;
         let text = |bytes: Vec<u8>| String::from_utf8(bytes).unwrap();
         let hosts = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-hosts").await);
-        let own_name = host["name"].as_str().unwrap();
-        assert!(
-            hosts.contains(own_name),
-            "the container lists itself: {hosts}"
-        );
-        assert!(
-            !hosts.contains("this machine"),
-            "the container lists no other host: {hosts}"
-        );
+        let listing: Value = serde_json::from_str(&hosts)
+            .unwrap_or_else(|error| panic!("agent hosts: {error}: {hosts}"));
+        let rows = listing["reply"]["hosts"]
+            .as_array()
+            .expect("a host listing");
+        // The caller's entry UUID survives display-name collisions. Exact
+        // membership rules out both the local host and any other SSH entry.
+        assert_eq!(rows.len(), 1, "the container lists only itself: {listing}");
+        assert_eq!(rows[0]["id"], asking.entry_uuid());
+        assert_eq!(rows[0]["name"], host["name"]);
+        assert_eq!(rows[0]["current"], true);
         let created = text(read_inside_file(client, bare, "/home/ubuntu/.e2e-created").await);
         let created_err =
             text(read_inside_file(client, bare, "/home/ubuntu/.e2e-created.err").await);

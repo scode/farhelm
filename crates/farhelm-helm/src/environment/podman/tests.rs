@@ -21,6 +21,8 @@ struct Model {
     image_exists: bool,
     lost_run: bool,
     helper_oracle: bool,
+    /// The session's selected image facts must already be durable at run.
+    pending_session: Option<(HostId, PreparedImage)>,
     /// The Podman subcommand (`ps`, `rm`) whose reply waits for
     /// [`Commands::release`], standing in for a container host that has
     /// stopped answering. It is recorded before the wait, so a test can tell
@@ -41,6 +43,17 @@ struct Commands {
     /// Lets the held command (`Model::hold`) answer. A `Notify` keeps the
     /// permit if the release comes before the command reaches its wait.
     release: tokio::sync::Notify,
+}
+
+impl Commands {
+    /// Read the registry at the requested boundary, including the pending
+    /// binding before Podman has supplied a canonical container ID.
+    async fn session_row(&self, host: HostId) -> crate::store::HostRow {
+        let rows = self.store.list_hosts().await.unwrap();
+        rows.into_iter()
+            .find(|row| row.id == host)
+            .expect("the session must still have its durable host row")
+    }
 }
 
 #[async_trait::async_trait]
@@ -65,10 +78,14 @@ impl PlaceCommands for Commands {
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
         assert!(!bound.is_zero(), "every real provider command is bounded");
-        let (helper_oracle, lost_run) = {
+        let (helper_oracle, lost_run, pending_session) = {
             let mut model = self.model.lock().unwrap();
             model.commands.push(argv.to_vec());
-            (model.helper_oracle, model.lost_run)
+            (
+                model.helper_oracle,
+                model.lost_run,
+                model.pending_session.clone(),
+            )
         };
         if argv[0] == "systemd-run" {
             assert!(argv.iter().any(|arg| arg == "/usr/bin/podman"));
@@ -92,6 +109,19 @@ impl PlaceCommands for Commands {
                 );
             }
             if lost_run {
+                // A lost reply can require recovery after a crash. Read the
+                // session's facts from the store at send, before any reply.
+                if let Some((host, image)) = pending_session {
+                    let offset = argv.iter().position(|arg| arg == "--name").unwrap();
+                    let binding = self.session_row(host).await.podman.unwrap();
+                    assert_eq!(binding.name, argv[offset + 1]);
+                    assert_eq!(binding.login_user().unwrap(), image.login);
+                    assert!(binding.pending_create_at.is_some());
+                    assert_eq!(
+                        self.store.podman_prepared_install(host).await.unwrap(),
+                        Some(image.facts)
+                    );
+                }
                 anyhow::bail!("scripted lost run reply");
             }
             return Ok(output(0, ID));
@@ -283,15 +313,7 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
         .register_pending_session_container("farhelm-sess-pending".into(), "dev".into(), place)
         .await
         .unwrap();
-    let row = provider
-        .0
-        .store
-        .list_hosts()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.id == host)
-        .unwrap();
+    let row = commands.session_row(host).await;
     assert!(
         row.podman.as_ref().unwrap().login.is_none(),
         "pending registration invents no account"
@@ -315,6 +337,7 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
             uid: 1000,
         },
     };
+    commands.model.lock().unwrap().pending_session = Some((host, image.clone()));
     let guard = provider
         .0
         .builds
@@ -331,15 +354,7 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
             .await
             .is_err()
     );
-    let row = provider
-        .0
-        .store
-        .list_hosts()
-        .await
-        .unwrap()
-        .into_iter()
-        .find(|row| row.id == host)
-        .unwrap();
+    let row = commands.session_row(host).await;
     assert_eq!(row.podman.as_ref().unwrap().login_user().unwrap().uid, 1000);
     assert!(row.podman.as_ref().unwrap().pending_create_at.is_some());
     assert_eq!(

@@ -1010,8 +1010,13 @@ mod tests {
         tokio::time::timeout(Duration::from_secs(2), commands.entered.notified())
             .await
             .unwrap();
-        service.refresh(store.clone(), host).await.unwrap();
         assert_eq!(commands.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
+        // The first probe is held inside its command. A second task would
+        // own a service reference as soon as it was queued, before it ran
+        // any commands, so the command count alone cannot witness a join.
+        let references = Arc::strong_count(&service);
+        service.refresh(store.clone(), host).await.unwrap();
+        assert_eq!(Arc::strong_count(&service), references);
         assert!(service.view(&row).unwrap().refreshing);
         assert!(!service.view(&row).unwrap().usable);
         commands.release.notify_one();

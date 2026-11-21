@@ -1061,11 +1061,13 @@ async fn cold_build_sends_exact_proxy_values_only_as_private_input() {
         !state.inputs.is_empty(),
         "the real provider must use the input seam"
     );
-    let values = BTreeMap::from([
-        ("HTTP_PROXY".into(), String::new()),
-        ("https_proxy".into(), PROXY_SECRET.into()),
-    ]);
-    let exports = build::proxy_exports(&values);
+    // The expected script is independent of the code that serializes it.
+    // It preserves the empty value, embedded quote, backslash and newline.
+    let exports = r#"unset http_proxy https_proxy ftp_proxy all_proxy no_proxy HTTP_PROXY HTTPS_PROXY FTP_PROXY ALL_PROXY NO_PROXY
+export 'HTTP_PROXY='
+export 'https_proxy=https://u:private-proxy-marker a'\''$x\"@proxy.example/
+line'
+"#;
     let routes = [
         BaseRoute::Local,
         BaseRoute::Ssh {
@@ -1102,7 +1104,7 @@ async fn cold_build_sends_exact_proxy_values_only_as_private_input() {
         assert_eq!(argv.last().map(String::as_str), Some(PRIVATE_SCRIPT));
         let input = std::str::from_utf8(input).unwrap();
         assert!(
-            input.starts_with(&exports),
+            input.starts_with(exports),
             "exports must preserve the exact observed values"
         );
         assert!(!input.contains("systemctl --user set-environment "));
