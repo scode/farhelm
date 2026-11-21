@@ -6874,20 +6874,18 @@ closing/reopening Settings or losing the vendor's terminated sandbox record. A r
 Only a successful snapshot sweep removes the operation; nothing retries automatically. A helm restart loses this
 in-memory operation state; a session-owned leftover still has its durable host resource record and remains visible in
 Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither path adds automatic startup
-reconciliation. Settings re-reads on invalidations and offers Refresh for changes outside this helm. A failed discovery
-pauses automatic reads until Refresh, a key save/clear in this dialog, a successful Test of the saved key, or remounting
-Settings; unrelated fleet changes must not keep resending a rejected key. Key replacement in this dialog triggers
-discovery even when a key was already saved. A successful Test resumes failed discovery with one reload. Another tab's
-key save is not observed automatically: this tab needs Refresh, Test or reopening Settings.
+reconciliation. The desktop list (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) is read only when its
+answer can have changed, never on a timer: when the opening's account first says a key is saved, on Refresh, after a key
+Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list gains or loses a
+Tensorlake host. No other fleet change reads it, so a rejected key is never resent on unrelated notices. A successful
+Test reads nothing, whether the list was healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure
+fixed elsewhere, shows after Refresh or reopening Settings.
 
-`OrphanList` keeps local checking and last-successful-check feedback beside its existing rows, discovery error and
-generation. A saved key keeps its section mounted when discovery is empty; Refresh sits beside the heading and is
-disabled during discovery or a deletion request. Only the current successful read updates rows and the viewer-local
-HH:MM label, obtained from the renderer's Date; the generation is checked again after that bridge await. A bridge
-failure labels the time unavailable without changing a successful discovery into an API failure. Failed reads keep
-earlier rows and hide the empty-success message. An earlier discovery error remains while explicit recovery runs so
-unrelated feed notices remain paused. Clearing the key invalidates pending reads and clears checking/time feedback.
-These are presentation facts, not new backend operation state or a timer.
+The list keeps its rows, its last failure and a "checked HH:MM" time in the viewer's local time beside each other. A
+saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out. Each read is a
+round and only the newest round's answer is shown; a Clear ends the round. A failed read shows the helm's reason and
+keeps earlier rows rather than claiming the account has none. These are presentation facts, not new backend operation
+state or a timer.
 
 ## Feedback forwarding
 
