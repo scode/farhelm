@@ -314,15 +314,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the app work out the word itself. Raised by the model-family-shorthand landing, 2026-11-19. Plan:
   `plans/queue/model-family-cleanup.md`.
 
-- **An agent asking to add a host another Farhelm owns is told to do something impossible.** An agent running in a
-  session can ask Farhelm to add a remote host (you approve it). Since a host now belongs to exactly one Farhelm
-  installation, adding a host that another one already manages (another machine's Farhelm, or the installed app when the
-  request goes to a devbuild) is refused with "Another Farhelm (...) manages this host. Use Take over in Hosts first."
-  But Take over is an action on the host's row in Hosts, and this host has no row there, because adding it is exactly
-  what was refused. The message should say what works instead: add the host yourself with Add host, which asks whether
-  to take it over from the other Farhelm. Raised by the one-helm-per-supervisor landing, 2026-11-19. Plan:
-  `plans/queue/agent-add-host-takeover-hint.md`.
-
 - **Decide whether saving a launch template checks where its command's placeholders stand.** A custom command launch can
   use placeholders such as `{cwd}`, which Farhelm fills in. Each must stand alone as an unquoted word: `"{cwd}"` or
   `--dir={cwd}` is refused, and SPEC.md says it is refused "on save". But saving a launch template only checks the

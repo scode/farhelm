@@ -4590,43 +4590,58 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 
-    /// Add host can register a refused supervisor only after an explicit
-    /// takeover. An agent Add never receives that confirmation.
-    #[farhelm_testtrace::test]
-    async fn takeover_discovery_waits_for_one_user_confirmation() {
-        let harness = harness().await;
-        let root = tempfile::tempdir().unwrap();
-        let backend = FakeBackend::absent(root.path().to_path_buf());
-        let service = service(&harness, backend.clone(), root.path());
+    /// Script the next probe's ownership refusal and return the same owner
+    /// the confirmation would display. An identityless supervisor can
+    /// report its owner without providing the identity needed for takeover.
+    fn report_supervisor_owner(
+        backend: &FakeBackend,
+        root: &Path,
+        host_identity: Option<&str>,
+    ) -> farhelm_proto::HelmOwnerRefusal {
         let owner = farhelm_proto::HelmOwnerRefusal {
             tag: "ab12".into(),
             owner_revision: "owner-1".into(),
             connected: false,
             last_connected_at: 42,
         };
-        let report_owner = || {
-            *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::OwnedSupervisor {
-                owner: owner.clone(),
-                build_version: "test-build".into(),
-                host_identity: Some("owned-installation".into()),
-                dial_farhelm: root.path().join("lib/farhelm"),
-                dial_state_dir: Some(root.path().join("state")),
-            }));
-        };
+        *backend.probe.lock().unwrap() = Some(Ok(ProbeObservation::OwnedSupervisor {
+            owner: owner.clone(),
+            build_version: "test-build".into(),
+            host_identity: host_identity.map(str::to_string),
+            dial_farhelm: root.join("lib/farhelm"),
+            dial_state_dir: Some(root.join("state")),
+        }));
+        owner
+    }
+
+    /// Add host can register an owned supervisor only after a person
+    /// confirms takeover. The agent gets a remedy that works before the
+    /// host has a row in Hosts.
+    #[farhelm_testtrace::test]
+    async fn takeover_discovery_waits_for_one_user_confirmation() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
         let mut agent = new_entry_probe("builder.example", Some("builder"));
         agent.new_entry.as_mut().unwrap().from_agent = true;
-        report_owner();
+        report_supervisor_owner(&backend, root.path(), Some("owned-installation"));
         let refused = service
             .probe(agent)
             .await
             .expect_err("an agent cannot offer takeover");
-        assert!(matches!(
-            refused.downcast_ref::<ProvisioningRequestError>(),
-            Some(ProvisioningRequestError::Refused(message)) if message.contains("ab12")
-        ));
+        assert!(
+            matches!(
+                refused.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::Refused(message))
+                    if message == "Another Farhelm (ab12) manages this host. Add it yourself with Add host to take it over."
+            ),
+            "{refused:#}"
+        );
+        assert!(!probe_unused(&backend), "the owned supervisor answered");
         assert_eq!(harness.store.list_hosts().await.unwrap().len(), 1);
 
-        report_owner();
+        let owner = report_supervisor_owner(&backend, root.path(), Some("owned-installation"));
         let offered = service
             .probe(new_entry_probe("builder.example", Some("builder")))
             .await
@@ -4669,6 +4684,84 @@ mod tests {
                 .downcast_ref::<ProvisioningRequestError>(),
             Some(ProvisioningRequestError::UnknownPlan)
         ));
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Take over needs the host's install identity. Both entrances must
+    /// explain why it is unavailable when the supervisor gives only its owner.
+    #[farhelm_testtrace::test]
+    async fn a_new_owned_host_without_install_identity_explains_the_refusal() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let before = harness.store.list_hosts().await.unwrap().len();
+        for from_agent in [false, true] {
+            let mut request = new_entry_probe("identityless.example", None);
+            request.new_entry.as_mut().unwrap().from_agent = from_agent;
+            report_supervisor_owner(&backend, root.path(), None);
+            let refused = service
+                .probe(request)
+                .await
+                .expect_err("takeover needs an identity");
+            assert!(
+                matches!(
+                    refused.downcast_ref::<ProvisioningRequestError>(),
+                    Some(ProvisioningRequestError::Refused(message))
+                        if message == "Another Farhelm (ab12) manages this host. Farhelm cannot take it over because the host reported no install identity."
+                ),
+                "from_agent={from_agent}: {refused:#}"
+            );
+            assert!(!probe_unused(&backend), "the owned supervisor answered");
+            assert_eq!(harness.store.list_hosts().await.unwrap().len(), before);
+        }
+        assert!(backend.operations.lock().unwrap().is_empty());
+    }
+
+    /// Setup can discover different ownership before the connection actor
+    /// does. A row already exists, so the remedy still points to Hosts.
+    #[farhelm_testtrace::test]
+    async fn an_owned_host_found_during_setup_points_to_take_over_in_hosts() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let destination = "owner.example";
+        let host = harness
+            .store
+            .add_ssh_host(destination, None, None)
+            .await
+            .unwrap();
+        assert_eq!(
+            stored_row(&harness.store, host)
+                .await
+                .destination
+                .as_deref(),
+            Some(destination)
+        );
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let request = ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: destination.into(),
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+            new_entry: None,
+        };
+        // Even an identityless observation keeps the remedy for a listed host.
+        report_supervisor_owner(&backend, root.path(), None);
+        let refused = service
+            .probe(request)
+            .await
+            .expect_err("the host has another owner");
+        assert!(
+            matches!(
+                refused.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::Refused(message))
+                    if message == "Another Farhelm (ab12) manages this host. Use Take over in Hosts first."
+            ),
+            "{refused:#}"
+        );
+        assert!(!probe_unused(&backend), "the owned supervisor answered");
         assert!(backend.operations.lock().unwrap().is_empty());
     }
 

@@ -445,9 +445,10 @@ last connected. Policy lives in the owning helm. Its approvals, host settings an
 Take over is an explicit user action. It changes which Farhelm manages the host and its existing sessions, and ends the
 previous helm's connection. A new Farhelm can recover a host after the old registry is lost by adding the host again and
 confirming Take over. A host already listed in Farhelm shows Take over in Hosts and refuses Setup, Update and uninstall
-until it is taken over. An agent's request to add a host cannot take it over. Ownership guards against accidentally
-connecting two helms to the same host. Local tools running as the same user retain access to the supervisor socket under
-the existing threat model.
+until it is taken over. An agent's request to add a host cannot take it over. The refusal directs the user to Add host
+when the supervisor reports an install identity. For a new host that reports no install identity, the refusal explains
+why takeover is unavailable. Ownership guards against accidentally connecting two helms to the same host. Local tools
+running as the same user retain access to the supervisor socket under the existing threat model.
 
 The helm is not a process of its own: it lives and dies with the desktop app, on the Mac and on Linux.
 
