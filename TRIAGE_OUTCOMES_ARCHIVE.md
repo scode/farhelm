@@ -32914,3 +32914,191 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   no-stall rule. No code change. Remove the feedback file and its index entry.
 - Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
   [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## codex-wrapper-guides-omit-isolation-purpose.md
+
+- Outcome: `fix code`.
+- Assessment: The docs pages on custom commands and agent wrappers say a wrapper that drops Farhelm's arguments loses
+  conversation tracking. They do not say that for Codex those arguments also carry `--no-daemon`, which stops sessions
+  from sharing one Codex daemon. Verified: custom-commands.md:50-53 and agent-wrappers.md:90-96 mention only reporting
+  and tracking. `--no-daemon` is always injected for Codex (supervisor core.rs:30918) and is documented in
+  SPEC.md:1193-1202 and on the docs pages codex.md and agent-hook-injection.md.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## restart-unwind-omits-tree-sweep-failure.md
+
+- Outcome: `fix code`.
+- Assessment: When a Restart's new terminal fails to start and Farhelm cannot confirm that processes the failed start
+  left behind were cleaned up, the session is left with no terminal. SPEC_impl says that happens only when the new
+  terminal host itself cannot be confirmed ended. Verified: host_restart.rs `unwind_failed_host_relaunch` (lines
+  ~733-783) returns ambiguous on a failed `reap_process_tree`, after the host record was already removed.
+  SPEC_impl.md:2087: "Only a replacement host that cannot be confirmed ended keeps the launching record" (confirmed).
+  The code's conservative behavior is deliberate (its docstring explains it), so fixing the code would overturn a
+  choice. Not SETTLED.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## joined-link-spec-omits-cursor-tail-exception.md
+
+- Outcome: `fix spec`.
+- Assessment: When an agent continues a hyperlink on the next row using cursor movement, the hover's lookalike warning
+  can judge the second row's text on its own and warn when it should not. SPEC.md promises such rows are compared
+  together. Verified: SPEC.md (terminal links bullet) still says "Consecutive rows of the same hyperlink are compared
+  together, including links an agent continues after indentation with cursor movement". The original JS exception
+  (grid-buffer.js) has been ported to Rust (`farhelm-grid-model/src/links.rs` `Identities::joins`,
+  `link_disclosure.rs`). I did not confirm that the exact cursor-tail case still behaves the same in the port, and no
+  test for it exists there. The consequence runs in the safe direction (an extra warning).
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## version-agreement-lifetime-doc.md
+
+- Outcome: `fix code`.
+- Assessment: None. SPEC.md says `TERM_PROGRAM_VERSION` is "the version the terminal also reports when a program asks
+  it", but after a Farhelm update a surviving program keeps the old value while new queries report the new version.
+  Verified: Still unqualified at SPEC.md (terminal host bullet) and SPEC_impl.md (child environment: "the one the
+  emulator's XTVERSION answer names"). The behavior is correct and expected.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## orphan-cleanup-promises-unheld-provisioning-lock.md
+
+- Outcome: `fix code`.
+- Assessment: Settings, Tensorlake orphan cleanup. The implementation spec says the ownership recheck runs under the
+  host provisioning lock. The code takes no lock, and an orphan has no host whose lock it could take. Verified:
+  Confirmed. `tensorlake/orphans.rs` `delete_orphan` (~L186-245) rechecks prefix and ownership without any provisioning
+  lock. SPEC_impl.md ~L6877-6878 promises the lock. The review found no destructive race.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md
+
+- Outcome: `fix code`.
+- Assessment: None (internal docs). The testing overview says supervisor tests start hosts from the built `farhelm`, but
+  the supervisor crate's unit tests use their own test binary. Verified: Confirmed. SPEC_impl.md ~L8267 makes the
+  unqualified claim, and ~L1936 gives the unit-test exception.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md
+
+- Outcome: `fix spec`.
+- Assessment: An agent asks to launch a sandbox (approval card). SPEC.md says the wait is 9 min of approval plus 30 min,
+  counted from when the request arrives, "so a slow answer leaves less time for the launch". The helm actually gives the
+  launch 30 minutes after Allow. Verified: Confirmed. `agent_requests.rs` ~L4561 times the task to
+  `ENVIRONMENT_LAUNCH_WAIT` (30 min) after approval, which matches SPEC_impl.md ~L6282-6286. The SPEC.md ~L4685-4687
+  sentence is the one that disagrees.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-spec-terminal-switch-point-names-deleted-terminal-type.md
+
+- Outcome: `fix spec`.
+- Assessment: None (internal docs). SPEC_impl names `service/terminals.rs`'s `Terminal` type, which no longer exists.
+  The runtime is the host terminal in `hosts/terminal.rs`. Verified: Confirmed. SPEC_impl.md L1904, and no `Terminal`
+  type exists in either file.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-old-terminal-create-refusal-qualified-rollback-wording.md
+
+- Outcome: `fix code`.
+- Assessment: None (internal docs). SPEC_impl says a refused retry of an old tmux-era create is always "rolled back".
+  Code keeps an error session and the checkout when the checkout was already allocated, which is correct behaviour.
+  Verified: Confirmed. SPEC_impl.md L1954-1955 describes the rollback without that distinction. The code in `core.rs`
+  ~L14745-14800 rolls back only a missing or Planned checkout.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-spec-shim-container-execution-branch-retired.md
+
+- Outcome: `fix spec`.
+- Assessment: None (internal docs). The launch contract still mentions the retired container branch of the launch shim.
+  Verified: Confirmed (SPEC_impl.md L2427 says "The shim and its container branch receive the same Bash vector"). The
+  retired model is documented as gone at SPEC.md ~L5264.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-shift-enter-unconditional-pty-write-guarantee.md
+
+- Outcome: `fix code`.
+- Assessment: None. Shift+Enter works; the question is whether the spec's wording about how it is delivered matches the
+  terminal host's documented behavior. Verified: The SPEC_impl.md sentence the finding targeted ("The single write is
+  the promise") was removed by 1eb4e3751 (#3407), so most of the finding is fixed. What remains is older:
+  SPEC.md:3189-3191 still says Shift+Enter is sent "in a SINGLE write", while crates/terminal-host/SPEC.md:397-400 says
+  it is offered whole in one `write` call but a short write may follow. Behavior was not checked at runtime.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## trailing-spec-report-discard-on-terminal-disappearance.md
+
+- Outcome: `fix spec`.
+- Assessment: None today. The internal docs say a conversation report whose terminal is gone gets discarded. The code
+  instead retries it, or still accepts a valid final report using the anchor it kept from the terminal's last process.
+  Verified: SPEC_impl.md:4467 ("whose terminal no longer exists, fails the anchor and is discarded") and
+  report_files.rs:43-56 ("A terminal host that is gone altogether ... is definitive ... is discarded") are both still
+  present. core.rs:15893-15911 (host_agent_anchor) returns Internal, which means retry, when there is no entry or no
+  anchor, and a Gone host keeps its anchor.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
+  [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.

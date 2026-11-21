@@ -49,8 +49,9 @@ directory-trust question), and conversation tracking for Claude, Codex, Muse, Go
 hooks you install. Declaring Cursor or OpenCode gives no tracking, since Farhelm has none for them.
 
 A declared agent needs `{farhelm_args}` in the command, once, as a whole argument, where that agent's own arguments go.
-Farhelm puts there whatever it needs to follow the conversation; for an agent that takes nothing, it becomes nothing.
-Your command has to pass those arguments on to the agent: a wrapper that drops them loses tracking.
+Farhelm fills it in with the arguments that agent needs, including any arguments for conversation tracking. Your command
+has to pass them on. For [Codex](/docs/agents/codex/#gotchas-and-quirks), they include `--no-daemon` even with
+conversation reporting off. That flag keeps Codex's commands in the session's own environment.
 [Agent wrappers](/docs/agents/agent-wrappers/) shows how to write one that keeps them.
 
 Leave the placeholders unquoted and separate from other text: `{cwd}`, rather than `"{cwd}"` or `--dir={cwd}`. Farhelm

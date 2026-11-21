@@ -3218,11 +3218,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   background, text palette and size do not change.
 - The quick-switcher's Cmd+K and template list's Cmd+J on macOS, or Ctrl+Shift+K and Ctrl+Shift+J elsewhere, never reach
   the terminal's program when Farhelm accepts them; plain Ctrl+K off macOS keeps the terminal program's own behavior.
-- Shift+Enter (the exact chord — no other modifier held, not mid-IME-composition) is sent as ESC CR in a SINGLE write,
-  in every terminal tab alike, agent and shell. Single-write delivery is part of the promise, not an implementation
-  detail: a lone ESC arriving in its own read is indistinguishable from the Escape key to line editors that disambiguate
-  by read boundary or a short timeout (Codex's input stack; zsh with a small KEYTIMEOUT), which turns the chord into
-  Escape-plus-submit. Delivered whole, the sequence is the newline binding Claude Code and Codex honor in place of
+- Shift+Enter (the exact chord, with no other modifier held and outside IME composition) is sent as one ESC CR input in
+  every terminal tab. The terminal host offers the two bytes to the pty together in its first write. A short write can
+  leave bytes for a later write. The program and its terminal settings determine how its reads divide the bytes. Keeping
+  the bytes together matters to line editors that use a read boundary or a short timeout to tell Escape from the start
+  of a longer sequence. Delivered whole, the sequence is the newline binding Claude Code and Codex honor in place of
   submit (verified against both, 2026-08-19). Other programs receive the same bytes and interpret them per their own
   line editing — stock emacs-mode zsh inserts a newline, bash's default quietly ignores the pair — the same outcomes
   those shells give under a reference terminal that encodes the chord identically (Ghostty).
@@ -3252,19 +3252,22 @@ whatever the agent renders is what you see. There is no composer, no message abs
   terminal (see Restart under [Lifecycle operations](#lifecycle-operations)).
 - Every terminal runs in a **terminal host**: a small process of its own on the host that keeps the terminal and its
   program running across supervisor restarts and updates. Programs in a terminal are told it is Farhelm's own:
-  `TERM_PROGRAM=farhelm` with Farhelm's version as `TERM_PROGRAM_VERSION` (the version the terminal also reports when a
-  program asks it), with `TERM=xterm-256color` and `COLORTERM=truecolor`, all four set whatever the supervisor's own
-  environment holds, and nothing that names tmux: no `TMUX` or `TMUX_PANE`. Container sessions use this same terminal
-  environment inside their container. A terminal keeps its scrollback to the floor below, and keeps it across supervisor
-  restarts and updates as well as client disconnects: its terminal host holds the program's output while no supervisor
-  reads it (up to a bound, next), and the next supervisor rebuilds the terminal from it. That output is held in memory
-  only, never on disk. A viewer that attaches or reconnects is sent the current screen and then the whole scrollback
-  once, oldest first; from then on it is sent only what changes: the screen as it is now, and the lines that entered the
-  scrollback, appended. The scrollback stays while a full-screen program shows and is there when the program exits. When
-  the scrollback changes in a way an append cannot show (a resize rewraps it, the program erases it or redefines one of
-  the terminal's palette colors, or lines the viewer was still owed fell off the scrollback's far end), the viewer is
-  sent the whole scrollback again once the change has settled, so a window dragged to a new size sends it once, or for a
-  long drag once during it and once when it stops, not at every step.
+  `TERM_PROGRAM=farhelm` with the launch build's version as `TERM_PROGRAM_VERSION`, with `TERM=xterm-256color` and
+  `COLORTERM=truecolor`, all four set whatever the supervisor's own environment holds, and nothing that names tmux: no
+  `TMUX` or `TMUX_PANE`. Container sessions use this same terminal environment inside their container. A terminal keeps
+  its scrollback to the floor below, and keeps it across supervisor restarts and updates as well as client disconnects:
+  its terminal host holds the program's output while no supervisor reads it (up to a bound, next), and the next
+  supervisor rebuilds the terminal from it. That output is held in memory only, never on disk. A viewer that attaches or
+  reconnects is sent the current screen and then the whole scrollback once, oldest first; from then on it is sent only
+  what changes: the screen as it is now, and the lines that entered the scrollback, appended. The scrollback stays while
+  a full-screen program shows and is there when the program exits. When the scrollback changes in a way an append cannot
+  show (a resize rewraps it, the program erases it or redefines one of the terminal's palette colors, or lines the
+  viewer was still owed fell off the scrollback's far end), the viewer is sent the whole scrollback again once the
+  change has settled, so a window dragged to a new size sends it once, or for a long drag once during it and once when
+  it stops, not at every step.
+
+  At launch, `TERM_PROGRAM_VERSION` agrees with the terminal's version reply. After a supervisor update, a surviving
+  program keeps its original environment and new version queries are answered by the current supervisor's emulator.
 - A terminal host keeps a bounded amount of the program's output beyond the supervisor's latest checkpoint of the
   terminal: 32 MiB by default, a few minutes of an agent redrawing as fast as it can, hours of a shell. When more than
   that arrives while no supervisor reads it (a supervisor that crashed and is not started again soon; the desktop app's
@@ -3458,8 +3461,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   that shows the text beside the real target. Link text that is not a web address, such as a file name or "click here",
   keeps the ordinary display. Consecutive rows of the same hyperlink are compared together, including links an agent
   continues after indentation with cursor movement. Restarting a hyperlink without an explicit id right where its
-  previous piece ended, with the same target, continues that hyperlink, across soft wraps too. An honest wrapped web
-  address keeps the ordinary display, and a lookalike split across rows of one hyperlink is judged on its whole text.
+  previous piece ended, with the same target, continues that hyperlink, across soft wraps too. A cursor-positioned
+  continuation can keep its own link identity when the preceding piece was already joined to an earlier anonymous piece
+  on the previous row. The hover comparison stops at the boundary between different link identities. An honest wrapped
+  web address keeps the ordinary display when the pieces join, and a lookalike is judged on the whole joined text.
   Repeated complete addresses that each independently match the target keep the ordinary display. If an adjacent
   continuation cannot be joined unambiguously within the bounds, a piece that looks like a web address warns rather than
   counting as a match. The warning is judged when the hover starts and need not follow later redraws of other rows while
@@ -4716,12 +4721,14 @@ Tensorlake sandbox bills while it runs, and otherwise shows what any launch card
 confirmation, so a Tensorlake launch shows no separate billing question even when **Create Tensorlake sandboxes without
 asking** is off; Deny creates nothing. It is a card kind an older UI cannot decode. After Allow the helm runs the same
 launch task as the launcher, whose named progress appears in the host's attention area like any other environment
-launch. The command waits for that task and prints the new session's ID. Its wait covers the nine-minute approval wait
-and thirty minutes more, counted together from when the request reaches the helm, so a slow answer leaves less time for
-the launch; a launch still unfinished then is reported as an unknown outcome while the task carries on, and the session
-appears in listings once it exists. The YOLO rule judges these launches by the defaults the new environment host will
-start with, which allow YOLO launches, so it refuses none of them. An idempotency key is refused: its record would live
-inside the environment the first attempt created, where a retry could not find it before creating a second environment.
+launch. The command waits for that task and prints the new session's ID. After Allow, the helm gives the registered
+launch task up to thirty minutes to return a result. The command's separate relay budget starts when the request is
+queued for the helm. It includes the ordinary reply allowance, nine minutes for approval and thirty minutes for launch.
+If either wait ends while the launch is still running, the command reports an unknown outcome. The task carries on and
+the session appears in listings once it exists. The YOLO rule judges these launches by the defaults the new environment
+host will start with, which allow YOLO launches, so it refuses none of them. An idempotency key is refused: its record
+would live inside the environment the first attempt created, where a retry could not find it before creating a second
+environment.
 
 ## Errors and diagnostics
 
