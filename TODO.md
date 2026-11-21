@@ -26,6 +26,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit the golden changes page doing its pixel work in the compiled test program.** On 2026-11-21 the landing
+  monitor answered golden-changes-page's block on your behalf: the page's decoding, comparison and highlight use the
+  image code already in the golden test program instead of the Python PNG helpers the plan named, because the Python
+  path took 28 seconds for 68 changed pictures and 112 seconds for 328, against the plan's rule that the page must not
+  noticeably lengthen a run. The executor uses whichever path measures faster and reports both timings. The alternative
+  was to keep the Python helpers and accept the wait on large reviews.
+
 ## Near term
 
 - **Set up the default checkout folder from a new environment launch.** The session launcher offers a managed checkout
