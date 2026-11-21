@@ -154,9 +154,9 @@ impl Hold {
         self.held.is_some() && !self.pointer_over
     }
 
-    /// The pointer left the rows (or the rows went away under it).
-    pub(super) fn left(&mut self) {
-        self.pointer_over = false;
+    /// The pointer left the rows (or the rows went away under it). Repeated outside events need no new frame.
+    pub(super) fn left(&mut self) -> bool {
+        std::mem::take(&mut self.pointer_over)
     }
 
     /// The stillness deadline fired: the pointer has not moved over the rows for [`STILLNESS`].
@@ -318,8 +318,8 @@ impl SessionList {
 
     /// The pointer was active over the rows: note it, restart the 5 seconds of stillness, and take the hold with the
     /// rows on screen when none is on and the listing is available (a failed or missing read is nothing to hold).
-    /// Taking the hold changes nothing on screen, so nothing is redrawn. A pin drag calls it for every move it captures
-    /// ([`super::pin_drag`]), since it stops those moves before the rows' own listeners see them.
+    /// Taking the hold changes nothing on screen, so nothing is redrawn. A pin drag calls it for captured moves over
+    /// the rows ([`super::pin_drag`]), since it stops those moves before the rows' listeners see them.
     pub(super) fn pointer_activity(&mut self, cx: &mut Context<Self>) {
         let list = cx.weak_entity();
         let deadline = ticker::after(STILLNESS, cx, move |cx| {
@@ -336,9 +336,10 @@ impl SessionList {
 
     /// The pointer left the rows: redraw, so the frame's release check ([`Hold::release_if_due`]) ends the hold unless
     /// a row's menu keeps it.
-    fn pointer_left(&mut self, cx: &mut Context<Self>) {
-        self.current.current(cx).hold.left();
-        cx.notify();
+    pub(super) fn pointer_left(&mut self, cx: &mut Context<Self>) {
+        if self.current.current(cx).hold.left() {
+            cx.notify();
+        }
     }
 
     /// Read whether the pointer is inside the window with `read` from now on, for a test: GPUI's test window never says it

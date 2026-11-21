@@ -402,6 +402,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Keep bulk Stop and Delete bound to what the user saw.** In the desktop session list's marked bar, the click reads
+  fresh confirmation preferences and shell guards. Capture the drawn targets, guards, confirmation preference, and the
+  environment scope in the control as the single-row `Actionable` path does. Check that the connection, host identity
+  and environment Delete scope still match at acceptance and at queued dispatch. Reword or remove targets when facts
+  change without widening consent. This is the rule in SPEC_impl.md's “Questions: the prompt” and SPEC.md's bulk
+  actions. Cover changed confirmation preferences, a retargeted host and an unreachable environment that reconnects
+  while Delete is pending.
+
+- **Pace metadata changes to marked sessions.** Pin, Unpin, Mute, Unmute, Mark read and Mark unread can issue a burst
+  from the desktop's marked menu. The helm closes its UI channel when more than 64 commands are pending, leaving the
+  window reconnecting with a partly applied batch. Use the existing reply-paced Stop/Delete and group-move mechanisms as
+  guides. Keep each eligible row's drawn write, acceptance-time refusal if busy, row-local failures, and cancellation on
+  reconnect. Cover a batch larger than the channel limit and show that rows keep making progress after a refusal.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm

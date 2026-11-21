@@ -45,9 +45,8 @@
 //! - **Capture.** From the press to the release the drag follows the pointer across the whole window ([`watch`]), in the
 //!   capture phase, stopping its moves and the grip's release. A sweep lets mouse-up reach GPUI so a row's native
 //!   pending press gets cleared. Only a Shift press that ended before sweeping another row may activate the row.
-//!   Each captured move counts
-//!   as activity over the rows for the hold, as the old list kept hearing the moves its grip captured. A move with the
-//!   primary button no longer held is a release the window never saw (outside it, or lost to another app): the old
+//!   Captured moves inside the rows count as activity for the hold. A move with the primary button no longer held
+//!   is a release the window never saw (outside it, or lost to another app): the old
 //!   `lostpointercapture`, which cancels. The window learns of such a release only at its next move inside it, so a
 //!   drag started in a window with keyboard activation also ends when the window loses it (another app came to the
 //!   front), where the old capture's loss arrived at once; a drag begun by the press that activated the window (macOS's
@@ -1166,10 +1165,14 @@ impl SessionList {
         }
     }
 
-    /// The pointer moved to `at` with the primary button held during a drag: it is activity over the rows for the order
-    /// hold, and the lift and the drop line are worked out again; a change redraws.
+    /// Captured motion bypasses row hover events. Keep the pointer's relation to the rows so an outside release can
+    /// end the hold as soon as the sweep finishes.
     pub(super) fn pin_drag_moved(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
-        self.pointer_activity(cx);
+        if self.rows.viewport_bounds().contains(&at) {
+            self.pointer_activity(cx);
+        } else {
+            self.pointer_left(cx);
+        }
         if self.resample_pin_drag(at, cx) {
             cx.notify();
         }
@@ -1228,8 +1231,8 @@ impl SessionList {
         }
     }
 
-    /// Resample the previous step's frame, then move the list and request new measured bounds. A tick counts as
-    /// pointer activity for the order hold, just as a wheel event does.
+    /// Resample the previous step's frame, then move the list and request new measured bounds. A sweep can
+    /// autoscroll with the pointer outside the rows. The sweep itself keeps the hold in that case.
     fn edge_scroll_tick(&mut self, cx: &mut Context<Self>) {
         let shared = self.pin_drag(cx);
         let (at, sweep) = {
@@ -1248,7 +1251,9 @@ impl SessionList {
         }
         let step = self.edge_scroll_step(at, sweep);
         if step != px(0.) {
-            self.pointer_activity(cx);
+            if self.rows.viewport_bounds().contains(&at) {
+                self.pointer_activity(cx);
+            }
             // Arm before the scroll so its final step still gets a fresh target sample at the limit.
             self.arm_edge_scroll(cx);
             self.rows.scroll_by(step);
@@ -1259,6 +1264,10 @@ impl SessionList {
     /// Finish the captured primary release. A grip sends its admitted move. A sweep keeps its marks and may admit
     /// just the original row click if it never left its start.
     pub(super) fn pin_drag_released(&mut self, at: Point<Pixels>, cx: &mut Context<Self>) {
+        // An outside release may arrive without a final captured move.
+        if !self.rows.viewport_bounds().contains(&at) {
+            self.pointer_left(cx);
+        }
         let shared = self.pin_drag(cx);
         let sweep_missing = shared.borrow().drag.as_ref().is_some_and(|drag| {
             matches!(drag.kind, Kind::Sweep(_))

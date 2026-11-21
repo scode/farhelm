@@ -24,9 +24,6 @@ consequences.
   a shared environment can stop its live processes even though the confirmation only mentions stopping processes if the
   whole environment is deleted.
 
-- [`bulk-action-uses-live-shell-guard.md`](bulk-action-uses-live-shell-guard.md) — Marked Stop or Delete can act
-  immediately using newer confirmation settings or liveness than the user saw.
-
 - [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
   down before it saves command history configured to write on exit.
 
@@ -94,9 +91,6 @@ consequences.
 - [`podman-place-probe-bypasses-host-identity-refusal.md`](podman-place-probe-bypasses-host-identity-refusal.md) —
   Farhelm can treat two SSH entries for the same machine and account as usable container places even while its ordinary
   host connection refuses the duplicate.
-
-- [`bulk-mute-can-reset-window.md`](bulk-mute-can-reset-window.md) — Muting or unmuting a large marked set can reset the
-  desktop connection after applying only part of the batch.
 
 - [`gone-terminal-retained-handle-hides-recovery.md`](gone-terminal-retained-handle-hides-recovery.md) — A terminal the
   supervisor knows is gone can stay in reconnecting state and hide the recovery card.
@@ -819,12 +813,6 @@ consequences.
 
 - [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
   preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
-
-- [`session-groups-lose-membership-in-accessibility-tree.md`](session-groups-lose-membership-in-accessibility-tree.md) —
-  The sidebar can omit a session's group membership from screen-reader information.
-
-- [`sidebar-order-stays-held-after-shift-sweep.md`](sidebar-order-stays-held-after-shift-sweep.md) — Releasing a Shift
-  sweep outside the sidebar can leave the previous list order visible for up to five seconds.
 
 - [`test-worker-success-loses-evidence.md`](test-worker-success-loses-evidence.md) — An SSH test worker can report
   success when the results could not be copied back.

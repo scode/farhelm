@@ -419,3 +419,26 @@ fn a_sweep_keeps_the_order_held_after_pointer_stillness(cx: &mut TestAppContext)
     assert_eq!(row_order(&frame(cx)), ["a", "b", "d", "c"]);
     assert_eq!(markers(cx), ["b", "c"]);
 }
+
+/// Captured moves over the neighbouring pane never renew the order hold. The outside release can apply the
+/// waiting order immediately while keeping the same marked keys.
+#[gpui::test]
+fn a_sweep_released_outside_the_rows_releases_the_order(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, fleet(&["a", "b", "c", "d"]));
+    press(cx, "session-row-b", shift());
+    let at = drag_to(cx, "session-row-c", shift());
+    let rows = test_support::bounds(cx, "session-rows");
+    let outside = point(rows.right() + px(4.), at.y);
+    cx.simulate_mouse_move(outside, Some(MouseButton::Left), shift());
+    fake.push(change(
+        listing_meta(&["a", "b", "d", "c"], 4, false),
+        &[],
+        &[],
+    ));
+    test_support::settle(cx);
+    assert_eq!(markers(cx), ["b", "c"]);
+    assert_eq!(row_order(&frame(cx)), ["a", "b", "c", "d"]);
+    release(cx, outside, shift());
+    assert_eq!(row_order(&frame(cx)), ["a", "b", "d", "c"]);
+    assert_eq!(markers(cx), ["b", "c"]);
+}
