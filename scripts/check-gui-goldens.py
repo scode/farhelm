@@ -22,6 +22,8 @@ only grows, so a wrong picture that was pushed costs nothing, but a manifest lin
 Pass `--scene 'settings-*'` to compare or update only matching scenes. Repeat it to select the union of several
 patterns. Any explicit selection is for inspection. Publishing requires a full `--update` run.
 
+Rendering uses up to four worker processes. Pass `--jobs 1` to run in one process.
+
 Extra Cargo build options go before `--`. Only libtest output options (`--nocapture`, `--show-output`, `--quiet`)
 go after it so a second test filter cannot quietly skip the render.
 
@@ -39,10 +41,11 @@ import json
 import os
 import re
 import shutil
+import signal
 import subprocess
 import sys
 import tempfile
-from contextlib import nullcontext
+from contextlib import ExitStack, nullcontext
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parent.parent
@@ -150,16 +153,81 @@ def complete_update(captures: Path, platform: str, names: list[str]) -> bool:
     return True
 
 
+def scene_groups(names: list[str], jobs: int) -> list[list[str]]:
+    """Split in catalog order. CPU affinity can be narrower than the host's CPU count."""
+    cpus = len(os.sched_getaffinity(0)) if hasattr(os, "sched_getaffinity") else (os.cpu_count() or 1)
+    count = min(jobs, cpus, len(names))
+    return [names[index::count] for index in range(count)]
+
+
+def render_scenes(command: list[str], groups: list[list[str]], env: dict[str, str], lock: int | None) -> int:
+    """Give each worker its own output log so failure details remain readable when renders overlap."""
+    pass_fds = () if lock is None else (lock,)
+    with ExitStack() as logs:
+        workers = []
+        stopping = None
+
+        def stop(signum, _frame):
+            # A handler can interrupt spawn before registration or wait before returncode is saved. Let the main
+            # flow finish those operations before it signals or reaps any child.
+            nonlocal stopping
+            stopping = signum
+
+        for signum in (signal.SIGINT, signal.SIGTERM):
+            logs.callback(signal.signal, signum, signal.signal(signum, stop))
+        try:
+            for group in groups:
+                if stopping is not None:
+                    break
+                child_env = {**env, "FARHELM_GOLDEN_SCENES": json.dumps(group)}
+                log = None
+                if len(groups) > 1:
+                    log = logs.enter_context(tempfile.TemporaryFile(mode="w+t", encoding="utf-8", errors="replace"))
+                child = subprocess.Popen(
+                    command, cwd=GUI_CRATE, env=child_env, stdout=log,
+                    stderr=subprocess.STDOUT if log is not None else None, pass_fds=pass_fds,
+                )
+                workers.append((child, log))
+            if stopping is not None:
+                return 128 + stopping
+            status = 0
+            for index, (child, log) in enumerate(workers, 1):
+                # A renderer can take minutes. A timed wait lets a cancellation reach the single cleanup path.
+                while stopping is None:
+                    try:
+                        result = child.wait(timeout=0.1)
+                    except subprocess.TimeoutExpired:
+                        continue
+                    break
+                if stopping is not None:
+                    break
+                if log is not None:
+                    print(f"\n[goldens job {index}/{len(workers)}]", flush=True)
+                    log.seek(0)
+                    shutil.copyfileobj(log, sys.stdout)
+                if result < 0:
+                    print(f"renderer terminated by signal {-result}")
+                status = status or result
+        finally:
+            # On a spawn failure or stop, no worker should keep writing partial captures or holding the lease.
+            for child, _ in workers:
+                if child.poll() is None:
+                    child.kill()
+            for child, _ in workers:
+                child.wait()
+    return status if stopping is None else 128 + stopping
+
+
 def run_suite(tool, base_env: dict[str, str], update: bool, patterns: list[str],
-              cargo_args: list[str], test_args: list[str]) -> int:
+              cargo_args: list[str], test_args: list[str], jobs: int) -> int:
     """Run with fresh captures, keeping an incomplete update unpublishable and any comparison failures inspectable."""
     lease = tool.capture_lock(tool.CAPTURES) if update else nullcontext()
     with lease as lock:
-        return run_locked(tool, base_env, update, patterns, cargo_args, test_args, lock)
+        return run_locked(tool, base_env, update, patterns, cargo_args, test_args, jobs, lock)
 
 
 def run_locked(tool, base_env: dict[str, str], update: bool, patterns: list[str],
-               cargo_args: list[str], test_args: list[str], lock: int | None) -> int:
+               cargo_args: list[str], test_args: list[str], jobs: int, lock: int | None) -> int:
     """An update owns the default capture directory until every writer has exited and the marker is decided."""
     references = None
     if update:
@@ -187,10 +255,9 @@ def run_locked(tool, base_env: dict[str, str], update: bool, patterns: list[str]
         os.chmod(runtime_dir, 0o700)
         command = [str(binary), "--ignored", "--exact", "goldens::component_goldens", *test_args]
         env = golden_env(base_env, runtime_dir, references, captures)
-        env["FARHELM_GOLDEN_SCENES"] = json.dumps(names)
-        status = subprocess.run(
-            command, cwd=GUI_CRATE, env=env, pass_fds=() if lock is None else (lock,),
-        ).returncode
+        status = render_scenes(command, scene_groups(names, jobs), env, lock)
+    if status < 0:
+        status = 128 - status
     if not update:
         if status == 0:
             shutil.rmtree(run_dir)
@@ -213,7 +280,11 @@ def main() -> int:
     parser.add_argument("--update", action="store_true", help="write this run's captures for gui-goldens.py publish")
     parser.add_argument("--scene", action="append", default=[], metavar="PATTERN",
                         help="match a scene name (repeatable, quote wildcards, selected updates cannot publish)")
+    parser.add_argument("--jobs", type=int, default=4, metavar="N",
+                        help="parallel render processes (default: 4, capped at available CPUs)")
     args, extras = parser.parse_known_args()
+    if args.jobs < 1:
+        parser.error("--jobs must be a positive integer")
     separator = extras.index("--") if "--" in extras else len(extras)
     cargo_args, test_args = extras[:separator], extras[separator + 1:]
     for arg in test_args:
@@ -226,7 +297,7 @@ def main() -> int:
             return 1
     tool = load_goldens_tool()
     try:
-        return run_suite(tool, dict(os.environ), args.update, args.scene, cargo_args, test_args)
+        return run_suite(tool, dict(os.environ), args.update, args.scene, cargo_args, test_args, args.jobs)
     except tool.Refused as refusal:
         print(f"gui-goldens: {refusal}", file=sys.stderr)
         return 1
