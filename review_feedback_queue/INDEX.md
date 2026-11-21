@@ -23,6 +23,28 @@ consequences.
 - [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
   down before it saves command history configured to write on exit.
 
+- [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
+  different template from the one shown. The old button can also suppress Undo.
+
+- [`stale-permanent-delete-can-remove-repaired-template.md`](stale-permanent-delete-can-remove-repaired-template.md) — A
+  stale Delete permanently button can remove a repaired revision of the same template without offering Undo. The
+  specification’s acceptance of that exact case is disputed.
+
+- [`test-state-guards-accept-replaceable-parent.md`](test-state-guards-accept-replaceable-parent.md) — With some shared
+  temporary directories, the ownership check can accept a test-state path another account can replace.
+
+- [`deflake-run-consumers-skip-state-ownership-check.md`](deflake-run-consumers-skip-state-ownership-check.md) — Deflake
+  Stop can trust run state from a location Start would refuse and affect a process outside that sweep.
+
+- [`settings-close-can-save-unlisted-drafts.md`](settings-close-can-save-unlisted-drafts.md) — Save and Close can write
+  an unlisted form and clear the saved alert token outside the user’s confirmation.
+
+- [`settings-queued-save-can-commit-later-draft.md`](settings-queued-save-can-commit-later-draft.md) — A queued Settings
+  save can commit later edits to an approved form, including changes that clear a saved alert token.
+
+- [`settings-footer-can-save-the-wrong-page.md`](settings-footer-can-save-the-wrong-page.md) — A stale Settings footer
+  can save the wrong page’s draft and overwrite the stored Tensorlake key.
+
 ## High priority: material UX degradation
 
 - [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
@@ -100,6 +122,38 @@ consequences.
 - [`remembered-terminal-restore-keeps-unavailable-tab.md`](remembered-terminal-restore-keeps-unavailable-tab.md) —
   Reopening a session can leave it on a remembered shell tab that cannot attach, even while the main terminal is
   available.
+
+- [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
+  cause the remaining answer to save or discard a different template draft.
+
+- [`antigravity-trust-warning-omitted-from-accessibility.md`](antigravity-trust-warning-omitted-from-accessibility.md) —
+  Screen-reader users can enable automatic trust without access to the visible permission and trust-list warnings.
+
+- [`approval-omits-automatic-trust-warning-from-accessibility.md`](approval-omits-automatic-trust-warning-from-accessibility.md)
+  — Screen-reader users can miss the trusted-workspace status and warning on a launch or Restart approval.
+
+- [`stale-host-retry-can-continue-sandbox-delete.md`](stale-host-retry-can-continue-sandbox-delete.md) — A Retry still
+  shown as reconnecting can continue a sealed sandbox deletion if the failed deletion state arrives before the menu
+  updates.
+
+- [`settings-footer-can-discard-the-wrong-page.md`](settings-footer-can-discard-the-wrong-page.md) — A save refusal can
+  switch pages before a stale Discard press runs, making it discard a different draft.
+
+- [`settings-close-can-miss-detached-credential-save.md`](settings-close-can-miss-detached-credential-save.md) —
+  Settings can close without waiting for a credential save whose editor is already closed.
+
+- [`settings-close-can-miss-conflicting-tensorlake-keys.md`](settings-close-can-miss-conflicting-tensorlake-keys.md) —
+  Save and Close can skip the conflicting-key check and write a second Tensorlake key after the first save completes.
+
+- [`settings-close-can-retry-refused-save.md`](settings-close-can-retry-refused-save.md) — Save and Close can miss one
+  pending refusal and retry the rejected draft without a new decision.
+
+- [`settings-close-can-save-newly-staged-codex-login.md`](settings-close-can-save-newly-staged-codex-login.md) — A file
+  read can change the Codex login draft while the Save and Close question is open, leaving the chosen file unreviewed
+  before it is saved.
+
+- [`settings-close-can-hide-credential-delivery-warnings.md`](settings-close-can-hide-credential-delivery-warnings.md) —
+  Save and Close can hide which hosts failed to receive a saved credential replacement.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -669,3 +723,179 @@ consequences.
 
 - [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
   its normal launch path.
+
+- [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
+  the Templates leave question as inline, although the app centers it.
+
+- [`launcher-model-field-can-reinterpret-show-all.md`](launcher-model-field-can-reinterpret-show-all.md) — An arriving
+  model catalog can turn Enter on the highlighted Show all option into a model selection.
+
+- [`legacy-template-can-ask-to-save-automatic-cleanup.md`](legacy-template-can-ask-to-save-automatic-cleanup.md) — A
+  legacy template can ask to save when the only remaining change is automatic cleanup of a retired trust field.
+
+- [`ensure-hosts-repair-omits-settings-loss.md`](ensure-hosts-repair-omits-settings-loss.md) — The repair message omits
+  that removing and re-adding a staged host forgets its saved organization and settings.
+
+- [`sealed-container-delete-spec-conflicts.md`](sealed-container-delete-spec-conflicts.md) — The product and
+  implementation specs disagree about where a late sealed container deletion failure is reported.
+
+- [`tensorlake-key-clear-spec-misstates-leftover-refresh.md`](tensorlake-key-clear-spec-misstates-leftover-refresh.md) —
+  The implementation spec says clearing the Tensorlake API key refreshes the leftovers list. The app clears and
+  invalidates that list instead.
+
+- [`antigravity-recovery-republishes-old-trust-status.md`](antigravity-recovery-republishes-old-trust-status.md) — A
+  recovered terminal can initially show Antigravity’s old trust status and date the first fresh screen as new activity.
+
+- [`antigravity-restart-can-send-stale-trust-alert.md`](antigravity-restart-can-send-stale-trust-alert.md) — A refresh
+  during Restart can send a pending trust alert after the Antigravity process that asked has stopped.
+
+- [`antigravity-trust-falls-back-to-uncanonical-folder.md`](antigravity-trust-falls-back-to-uncanonical-folder.md) — If
+  the folder can no longer be resolved or encoded during launch preparation, the Antigravity trust setting can use the
+  submitted spelling.
+
+- [`antigravity-dismissal-can-hide-next-trust-hint.md`](antigravity-dismissal-can-hide-next-trust-hint.md) — A delayed
+  close from an earlier Antigravity trust hint can hide a later hint in the same session.
+
+- [`antigravity-trust-hint-omits-live-announcement.md`](antigravity-trust-hint-omits-live-announcement.md) — The new
+  Antigravity trust hint emits no live announcement request for screen readers.
+
+- [`unavailable-antigravity-trust-switch-announced-as-off.md`](unavailable-antigravity-trust-switch-announced-as-off.md)
+  — Accessibility metadata reports an unread trust setting as off without marking its switch unavailable.
+
+- [`antigravity-trust-link-can-hide-read-failure.md`](antigravity-trust-link-can-hide-read-failure.md) — When the trust
+  setting cannot be read, the hint’s Settings link can leave the unavailable switch and its error below the fold.
+
+- [`antigravity-trust-dismissal-lost-during-recovery.md`](antigravity-trust-dismissal-lost-during-recovery.md) — A
+  terminal recovery can bring back an Antigravity trust hint the user already dismissed for the same question.
+
+- [`launcher-alias-enter-can-apply-an-undrawn-model.md`](launcher-alias-enter-can-apply-an-undrawn-model.md) — Enter can
+  fill in an agent and model from a new family alias while the launcher still says models are loading.
+
+- [`installed-agent-hook-preflight-accepts-incomplete-setup.md`](installed-agent-hook-preflight-accepts-incomplete-setup.md)
+  — The installed-agent check can report agent drift when its manual conversation hook is configured for the wrong
+  event.
+
+- [`installed-agent-teardown-hides-test-failure.md`](installed-agent-teardown-hides-test-failure.md) — A teardown
+  failure can hide the original launch or Restart failure in the installed-agent check.
+
+- [`drift-suite-lacks-blocking-update-classification.md`](drift-suite-lacks-blocking-update-classification.md) — The
+  drift guide calls for an unavailable verdict on a blocking CLI update, but the suite has no update-specific
+  classification. The exact verdict for the documented Codex screen has not been established.
+
+- [`installed-agent-readiness-oracle-is-too-weak.md`](installed-agent-readiness-oracle-is-too-weak.md) — Launch-only
+  checks can pass on identifying text without establishing that the agent is interactive.
+
+- [`installed-agent-turn-oracle-accepts-old-output.md`](installed-agent-turn-oracle-accepts-old-output.md) — The
+  first-turn check can credit text that was already visible before its prompt was submitted.
+
+- [`installed-agent-runner-can-leave-interrupted-build-running.md`](installed-agent-runner-can-leave-interrupted-build-running.md)
+  — Stopping only the installed-agent runner during the preliminary build can leave Cargo running.
+
+- [`installed-agent-preflight-can-misclassify-executable-access.md`](installed-agent-preflight-can-misclassify-executable-access.md)
+  — Binary preflight can mark an inaccessible executable as available and misreport the resulting launch failure as
+  drift.
+
+- [`interrupted-drift-case-retains-failed-verdict.md`](interrupted-drift-case-retains-failed-verdict.md) — A cancelled
+  case can leave a failed drift verdict in its retained evidence before the test binary starts.
+
+- [`docs-shot-partial-failure-hides-success-paths.md`](docs-shot-partial-failure-hides-success-paths.md) — One failed
+  page can hide the paths of sibling screenshots that were captured successfully and kept in the archive.
+
+- [`invalid-boat-member-limit-clears-previews.md`](invalid-boat-member-limit-clears-previews.md) — An invalid Boat
+  worker limit can erase selected previews and the publish record before any capture starts.
+
+- [`docs-shots-share-host-details-state.md`](docs-shots-share-host-details-state.md) — A docs screenshot can show
+  different host row details depending on which other shots run on the same worker.
+
+- [`docs-shot-run-can-overwrite-earlier-failure-frame.md`](docs-shot-run-can-overwrite-earlier-failure-frame.md) — A
+  later shot can overwrite the raw image retained for a failed capture, leaving its error linked to the wrong frame.
+
+- [`manual-update-check-can-be-consumed-by-automatic-skip.md`](manual-update-check-can-be-consumed-by-automatic-skip.md)
+  — A manual update request can disappear when it joins a background check whose policy decision already skipped
+  installation.
+
+- [`settings-shows-unreadable-updater-as-on.md`](settings-shows-unreadable-updater-as-on.md) — Settings can still show
+  automatic app updates as on when the updater has paused them because preferences are unreadable.
+
+- [`menu-shortcuts-omitted-from-native-accessibility.md`](menu-shortcuts-omitted-from-native-accessibility.md) — The new
+  menu shortcut labels do not reach the native accessibility shortcut fields.
+
+- [`feedback-external-link-cue-is-visual-only.md`](feedback-external-link-cue-is-visual-only.md) — The feedback dialog’s
+  Discord link omits the browser-opening cue from its accessible description.
+
+- [`upgrade-highlights-feed-can-outgrow-desktop-reader.md`](upgrade-highlights-feed-can-outgrow-desktop-reader.md) — The
+  cumulative highlights feed can exceed the desktop reader’s limit while still passing the release promotion check.
+
+- [`upgrade-highlights-can-open-after-sign-in.md`](upgrade-highlights-can-open-after-sign-in.md) — Upgrade highlights
+  can take focus after a startup SSH question has already opened and closed.
+
+- [`unshown-upgrade-highlights-can-be-recorded-seen.md`](unshown-upgrade-highlights-can-be-recorded-seen.md) — Escape or
+  Enter can mark upgrade highlights seen before they appear on screen.
+
+- [`upgrade-highlights-opt-out-refusal-is-hidden.md`](upgrade-highlights-opt-out-refusal-is-hidden.md) — A refused Don’t
+  show again save can close the highlights dialog without telling the user.
+
+- [`release-gate-regeneration-guidance-stale.md`](release-gate-regeneration-guidance-stale.md) — The release workflow’s
+  maintainer instructions can leave the generated workflow stale for the next tag.
+
+- [`settings-close-save-can-hide-notification-refusal.md`](settings-close-save-can-hide-notification-refusal.md) — Save
+  and Close can take the user to Notifications while leaving the relevant error below the viewport.
+
+- [`settings-close-save-can-hide-credential-error.md`](settings-close-save-can-hide-credential-error.md) — Settings can
+  keep a failed credential save’s explanation behind the Credentials overview.
+
+- [`settings-close-save-stalls-silently-during-tests.md`](settings-close-save-stalls-silently-during-tests.md) — Save
+  and Close can give up without explanation while a Notifications or Tensorlake test is running.
+
+- [`settings-close-can-dismiss-a-newer-question.md`](settings-close-can-dismiss-a-newer-question.md) — A successful Save
+  and Close can dismiss a newer unanswered tunnel-permission question.
+
+- [`tensorlake-key-discard-lacks-preservation-test.md`](tensorlake-key-discard-lacks-preservation-test.md) — The new
+  Tensorlake Discard coverage does not prove that abandoning a replacement keeps the saved key.
+
+- [`ntfy-test-no-longer-witnesses-pending-save-lock.md`](ntfy-test-no-longer-witnesses-pending-save-lock.md) — The
+  changed Notifications test can pass if Save wrongly becomes available on an edited form while Send test is pending.
+
+- [`sound-preview-overlay-blocks-settings-switch.md`](sound-preview-overlay-blocks-settings-switch.md) — The Play
+  overlay leaves parts of its sound switch row unclickable.
+
+- [`golden-runner-bypasses-cargo-runtime-setup.md`](golden-runner-bypasses-cargo-runtime-setup.md) — Custom screenshot
+  builds can succeed but fail to run when they depend on Cargo’s runner or shared-library setup.
+
+- [`focused-golden-update-replaces-unpublished-full-captures.md`](focused-golden-update-replaces-unpublished-full-captures.md)
+  — A valid focused golden update can overwrite a complete set of unpublished captures.
+
+- [`golden-runner-misdecodes-cargo-json-paths.md`](golden-runner-misdecodes-cargo-json-paths.md) — A successful golden
+  build can fail before rendering when Cargo reports a path the runner decodes or splits incorrectly.
+
+- [`golden-output-backpressure-can-block-cancellation-cleanup.md`](golden-output-backpressure-can-block-cancellation-cleanup.md)
+  — Blocked parallel render output can delay cancellation cleanup and retain the update lock.
+
+- [`failed-golden-reference-setup-can-leave-partial-files.md`](failed-golden-reference-setup-can-leave-partial-files.md)
+  — A failed reference fetch can strand partial files from a golden comparison that never started rendering.
+
+- [`staged-host-update-controls-promise-unattended-installs.md`](staged-host-update-controls-promise-unattended-installs.md)
+  — Host update controls can still promise automatic installation while a staged build requires a manual update.
+
+- [`update-accessible-names-can-collide-across-host-kinds.md`](update-accessible-names-can-collide-across-host-kinds.md)
+  — An SSH host and a container with the same display name can still have identical accessible Update labels.
+
+- [`sound-preview-regression-misses-separate-mappings.md`](sound-preview-regression-misses-separate-mappings.md) — The
+  preview test exercises one sound and can miss a wrong mapping on the three other Play controls.
+
+- [`recipe-tunnel-edit-marks-only-card.md`](recipe-tunnel-edit-marks-only-card.md) — A recipe with multiple tunnels
+  marks only the card as edited, leaving the changed row and field unidentified.
+
+- [`recipe-delete-test-misses-warning-clipping.md`](recipe-delete-test-misses-warning-clipping.md) — The recipe Delete
+  regression checks that the prompt box fits without verifying that its warning text remains visible.
+
+- [`app-settings-shared-upgrade-option-has-local-heading.md`](app-settings-shared-upgrade-option-has-local-heading.md) —
+  The App heading says This Mac even though it contains a helm-shared highlights setting.
+
+- [`settings-radio-click-can-use-clipped-bounds.md`](settings-radio-click-can-use-clipped-bounds.md) — The new Settings
+  card geometry changes where an accessibility activation is aimed when a radio row is partly offscreen. A failure on a
+  supported native adapter remains unverified.
+
+- [`container-leftover-confirmation-host-identity-uncertain.md`](container-leftover-confirmation-host-identity-uncertain.md)
+  — A registered-container cleanup confirmation passes the displayed host number. Whether it can reach a different
+  installation after that number’s identity changes remains unverified.
