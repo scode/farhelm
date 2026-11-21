@@ -23,6 +23,35 @@ consequences.
 - [`quick-switcher-enter-can-run-a-different-template.md`](quick-switcher-enter-can-run-a-different-template.md) — If
   the template list changes, Enter can start a different saved setup from the one still shown as selected.
 
+- [`antigravity-historical-restart-can-target-child.md`](antigravity-historical-restart-can-target-child.md) — After an
+  update, Restart can stop Antigravity’s main session and try to resume a child conversation recorded by the previous
+  version.
+
+- [`desktop-path-probe-needs-private-result-boundary.md`](desktop-path-probe-needs-private-result-boundary.md) — The
+  desktop’s login PATH check can write to the wrong file when its configured temporary directory lacks a private
+  boundary.
+
+- [`guarded-delete-replace-omits-surviving-shell-work.md`](guarded-delete-replace-omits-surviving-shell-work.md) —
+  Delete or Replace can end surviving main-shell work after a confirmation that mentions only extra tabs or says nothing
+  is running.
+
+- [`shell-lifecycle-approval-names-wrong-program.md`](shell-lifecycle-approval-names-wrong-program.md) — Agent-requested
+  Stop or Delete can ask approval to terminate an agent even though accepting the card terminates the shell and its
+  work.
+
+- [`shared-environment-delete-omits-live-shell.md`](shared-environment-delete-omits-live-shell.md) — Deleting a shell in
+  a shared environment can stop its live processes even though the confirmation only mentions stopping processes if the
+  whole environment is deleted.
+
+- [`bulk-action-uses-live-shell-guard.md`](bulk-action-uses-live-shell-guard.md) — Marked Stop or Delete can act
+  immediately using newer confirmation settings or liveness than the user saw.
+
+- [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
+  down before it saves command history configured to write on exit.
+
+- [`tabs-only-stop-ends-surviving-shell-jobs.md`](tabs-only-stop-ends-surviving-shell-jobs.md) — A Stop confirmation
+  that only names extra tabs can also end background work left by the main shell.
+
 ## High priority: material UX degradation
 
 - [`older-development-archive-moves-replacement-folder.md`](older-development-archive-moves-replacement-folder.md) — An
@@ -285,6 +314,36 @@ consequences.
 
 - [`provisioning-waits-use-fleet-slots.md`](provisioning-waits-use-fleet-slots.md) — If four host operations are waiting
   for user input, another accepted operation can sit idle until one of those prompts is answered or cancelled.
+
+- [`desktop-login-shell-spawn-outside-timeout.md`](desktop-login-shell-spawn-outside-timeout.md) — If the system stalls
+  while starting the login shell, the desktop can miss its five-second fallback and stay closed.
+
+- [`desktop-relaunch-sleep-depends-on-path.md`](desktop-relaunch-sleep-depends-on-path.md) — Restart to update can close
+  the app without reopening it if the original PATH cannot find `sleep`.
+
+- [`desktop-path-handoff-exceeds-linux-entry-limit.md`](desktop-path-handoff-exceeds-linux-entry-limit.md) — On Linux,
+  an inherited PATH the app can start with can still prevent its supervisor from starting, including after the previous
+  supervisor stops.
+
+- [`launcher-enter-uses-unshown-recent.md`](launcher-enter-uses-unshown-recent.md) — While recents load, Enter can fill
+  a shell setup that differs from the highlighted one.
+
+- [`deferred-template-changes-unpresented-launch.md`](deferred-template-changes-unpresented-launch.md) — A delayed
+  template can change the program or wrapper before the launcher shows the change, and Launch can submit it in that
+  interval.
+
+- [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
+  agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
+
+- [`shell-switch-can-send-hidden-initial-prompt.md`](shell-switch-can-send-hidden-initial-prompt.md) — Entering an agent
+  choice from a shell draft can send an initial prompt that was hidden on the shell draft.
+
+- [`filtered-tab-reset-can-route-input-before-display.md`](filtered-tab-reset-can-route-input-before-display.md) — A
+  session-list update can send a key to the main shell while the extra tab is still on screen.
+
+- [`remembered-terminal-restore-keeps-unavailable-tab.md`](remembered-terminal-restore-keeps-unavailable-tab.md) —
+  Reopening a session can leave it on a remembered shell tab that cannot attach, even while the main terminal is
+  available.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -3000,3 +3059,133 @@ consequences.
 
 - [`working-attention-row-hides-warning-edge.md`](working-attention-row-hides-warning-edge.md) — Starting work on a host
   can remove its attention row’s amber warning edge before an earlier setup or update warning is acknowledged.
+
+- [`antigravity-transcript-id-pairing.md`](antigravity-transcript-id-pairing.md) — An Antigravity callback could save
+  the wrong Restart target if it names a different conversation from the verified transcript. That vendor behavior
+  remains unverified.
+
+- [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
+  despite recording a process identity from a rejected first callback.
+
+- [`antigravity-full-first-record-needs-delimiter.md`](antigravity-full-first-record-needs-delimiter.md) — A supported
+  first transcript record at the read limit could be refused if it has no newline. Whether Antigravity writes such a
+  record remains unverified.
+
+- [`desktop-and-session-login-shell-disagree.md`](desktop-and-session-login-shell-disagree.md) — When `SHELL` is absent,
+  the app and a new session can use different tool paths if their account lookups disagree.
+
+- [`desktop-ignores-empty-login-path.md`](desktop-ignores-empty-login-path.md) — An explicitly empty login PATH triggers
+  fallback and makes tools available that the shell excluded.
+
+- [`desktop-account-lookup-environment-race.md`](desktop-account-lookup-environment-race.md) — A supported account
+  backend could leave an environment-reading thread active during the desktop PATH write. That backend behavior remains
+  unverified.
+
+- [`desktop-login-notice-write-failure.md`](desktop-login-notice-write-failure.md) — A failed notice save can suppress
+  the login PATH warning or leave an obsolete warning visible until a later startup.
+
+- [`notice-panel-marks-offscreen-rows.md`](notice-panel-marks-offscreen-rows.md) — Opening and closing Notifications can
+  mark an off-screen PATH warning as read. Clear resolved can also remove unseen history.
+
+- [`desktop-path-notice-first-read-untested.md`](desktop-path-notice-first-read-untested.md) — The startup tests can
+  pass if the first client misses the login PATH warning.
+
+- [`notice-clear-can-use-unpresented-state.md`](notice-clear-can-use-unpresented-state.md) — Clear resolved can remove a
+  notice whose new state has yet to appear in the panel.
+
+- [`shell-status-samples-visible-tail.md`](shell-status-samples-visible-tail.md) — A visibly active shell can show Idle
+  when its output changes above the sampled area. This can also suppress the extra Suspend warning.
+
+- [`shell-main-tab-spec-still-says-agent.md`](shell-main-tab-spec-still-says-agent.md) — The session-view spec still
+  tells Bash and Zsh users to look for an Agent tab instead of Shell.
+
+- [`shell-idle-spec-omits-sampling-cadence.md`](shell-idle-spec-omits-sampling-cadence.md) — The shell description can
+  understate how long a quiet shell takes to show Idle on a host with many sessions.
+
+- [`shell-recovery-spec-omits-replace.md`](shell-recovery-spec-omits-replace.md) — The Status spec omits Replace as a
+  way to recover an interrupted Bash or Zsh session.
+
+- [`shell-idle-plays-agent-turn-finished.md`](shell-idle-plays-agent-turn-finished.md) — The optional Turn finished
+  sound can play when a Bash or Zsh screen goes quiet, even while its command is still running.
+
+- [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
+  can clear a draft prompt that selecting the same shell by hand would keep.
+
+- [`shell-wrapper-help-names-agent.md`](shell-wrapper-help-names-agent.md) — A shell’s wrapper field says it runs before
+  an agent command.
+
+- [`shell-picker-split-by-model.md`](shell-picker-split-by-model.md) — The model field can split the agent and shell
+  choices, moving the Shells group as the selection changes.
+
+- [`shell-template-hides-incompatible-permissions.md`](shell-template-hides-incompatible-permissions.md) — The template
+  editor says a shell has no approvals while retaining incompatible approvals that block saving.
+
+- [`host-suspend-warning-calls-shell-agent.md`](host-suspend-warning-calls-shell-agent.md) — Hosts calls an active Bash
+  or Zsh session an agent when asking to suspend.
+
+- [`shell-can-show-contradictory-claude-hint.md`](shell-can-show-contradictory-claude-hint.md) — Conflicting status from
+  a remote host can show a Claude trust hint on a shell session.
+
+- [`shell-approval-command-facts-untested.md`](shell-approval-command-facts-untested.md) — Approval tests check that the
+  shell lacks a Permissions row but could miss a missing shell name or command.
+
+- [`shell-template-approval-misstates-permission.md`](shell-template-approval-misstates-permission.md) — Approval cards
+  can say a shell template has no permissions while saving a concrete incompatible setting.
+
+- [`suspended-shell-card-names-agent.md`](suspended-shell-card-names-agent.md) — A suspended shell’s card says an agent
+  command is preserved.
+
+- [`suspend-treats-failed-session-refresh-as-complete.md`](suspend-treats-failed-session-refresh-as-complete.md) —
+  Suspend can skip its activity question when the host stays connected but Farhelm could only read an older idle or
+  empty session list.
+
+- [`shell-stop-and-suspend-wording-untested.md`](shell-stop-and-suspend-wording-untested.md) — Stop and suspend tests
+  can pass if its confirmation goes back to calling Bash or Zsh an agent.
+
+- [`shell-tab-label-omitted-row.md`](shell-tab-label-omitted-row.md) — An open shell can show an Agent tab when the
+  session list omits its row.
+
+- [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
+  failure can say an agent stopped after stopping Bash or Zsh.
+
+- [`shell-stop-tab-only-help.md`](shell-stop-tab-only-help.md) — When only extra tabs remain, the Stop dialog’s help
+  still says it will stop the shell.
+
+- [`shell-can-show-conflicting-restart-offer.md`](shell-can-show-conflicting-restart-offer.md) — Conflicting host
+  metadata can make the app offer conversation Restart on a Bash or Zsh session.
+
+- [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
+  its normal launch path.
+
+- [`late-tab-restore-hides-upload-notice.md`](late-tab-restore-hides-upload-notice.md) — An interrupted upload can go
+  unreported while the reopened session is usable but still missing from the list.
+
+- [`remembered-tab-input-before-visible.md`](remembered-tab-input-before-visible.md) — Input might reach the restored
+  shell while the old terminal is still on screen. The required timing remains unverified.
+
+- [`filtered-reply-resets-restored-terminal.md`](filtered-reply-resets-restored-terminal.md) — An older filtered
+  session-list reply can switch a reopened session away from its remembered shell even though the shell is still
+  available.
+
+- [`carried-upload-notice-clears-before-display.md`](carried-upload-notice-clears-before-display.md) — Another file
+  offer might clear an interrupted-upload notice before it first appears. The platform event ordering remains
+  unverified.
+
+- [`retired-terminal-comment-names-agent-recipient.md`](retired-terminal-comment-names-agent-recipient.md) — The
+  terminal retirement comment still sends maintainers looking for notices on Agent even when they follow the selected
+  shell.
+
+- [`tensorlake-lifecycle-loses-running-evidence.md`](tensorlake-lifecycle-loses-running-evidence.md) — A later outside
+  pause can be credited to an old Suspend after an explicit host operation already saw the sandbox running.
+
+- [`tensorlake-timestamp-clear-delayed-by-dial.md`](tensorlake-timestamp-clear-delayed-by-dial.md) — Quitting during
+  supervisor connection retries can preserve an old Suspend time that Farhelm already knows is obsolete.
+
+- [`tensorlake-reprobe-moves-observed-time.md`](tensorlake-reprobe-moves-observed-time.md) — An interruption in
+  Tensorlake status checks can make the same suspension appear to have started later.
+
+- [`tensorlake-stale-registry-skips-timestamp-clear.md`](tensorlake-stale-registry-skips-timestamp-clear.md) — A failed
+  registry refresh can prevent a successful reconnect from clearing an old Suspend timestamp.
+
+- [`tensorlake-quit-rewrites-cleared-suspend-time.md`](tensorlake-quit-rewrites-cleared-suspend-time.md) — Quitting
+  while Suspend finishes can put back an old timestamp that Farhelm had already cleared.
