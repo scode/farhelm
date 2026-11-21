@@ -120,6 +120,11 @@ use gpui_component::input::{
 use super::HoverHelp;
 use crate::theme::{self, metrics};
 
+/// The field owns Ctrl+F even at the end of its text, where Kit's ordinary MoveRight can propagate.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, gpui::Action)]
+#[action(namespace = farhelm, no_json)]
+struct MoveTextCaretRight;
+
 /// What happened in a text input, for the view that owns its state.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum TextInputEvent {
@@ -580,7 +585,7 @@ impl TextInput {
     pub(crate) fn control_key_bindings() -> [KeyBinding; 9] {
         let field = Some(actions::TEXT_INPUT_CONTEXT);
         [
-            KeyBinding::new("ctrl-f", input::MoveRight, field),
+            KeyBinding::new("ctrl-f", MoveTextCaretRight, field),
             KeyBinding::new("ctrl-b", input::MoveLeft, field),
             KeyBinding::new("ctrl-n", input::MoveDown, field),
             KeyBinding::new("ctrl-p", input::MoveUp, field),
@@ -746,7 +751,12 @@ impl RenderOnce for TextInput {
         // does in a field what Cmd+C, Cmd+V and Cmd+A do. Paste is handed on only while the field is editable, because
         // Kit handles its Paste only then, and a handler here would enable the menu item over a read-only field.
         let (copy, paste, select_all) = (handle.clone(), handle.clone(), handle.clone());
+        let caret = handle.clone();
         let wrapper = wrapper
+            // Kit lets MoveRight bubble at the end. Ctrl+F there would fall through to Settings search on Linux.
+            .on_action(move |_: &MoveTextCaretRight, window, cx| {
+                hand_to_field(&caret, &input::MoveRight, window, cx)
+            })
             .on_action(move |_: &actions::CopyTerminalSelection, window, cx| {
                 hand_to_field(&copy, &input::Copy, window, cx)
             })

@@ -15,36 +15,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## wayland-terminal-paste-ignores-file-list.md
-
-- Outcome: `fix code`.
-- Assessment: vendor/gpui-pre-linux wayland/clipboard.rs `payload_mime_type` picks only image or text types.
-  `text/uri-list` is defined (FILE_LIST_MIME_TYPE) but only used for drag-and-drop and offering. Basis: SPEC.md
-  "Attachments" (~3512): pasted content "is classified by flavor ... file references first ... A file reference means an
-  actual file object on the clipboard". Fix: read text/uri-list in the vendored Wayland clipboard as a file item. This
-  is a vendor patch; gpui-pre-linux is not on the frozen-vendor list.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## linux-ctrl-f-leaves-settings-field-at-end.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed. gpui-base 0.9.1 `movement.rs` `right()` propagates when a single caret sits at the end of the
-  text. `vendor/gpui-pre/src/window.rs` ~6649 then tries the next matching binding, which is Settings' `SearchSettings`
-  (settings.rs ~265). Basis: SPEC.md ~2467-2468: "Ctrl+F on Linux moves focus there from Settings, except where a Linux
-  text field uses Ctrl+F to move its caret." The fix follows directly: a Linux field must consume Ctrl+F even when the
-  caret cannot move.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
 ## untagged-sandbox-leftover-labelled-another-helm.md
 
 - Outcome: `fix code`.
@@ -938,24 +908,3 @@
   removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
   feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## attention-cue-loses-reduced-motion-flash.md
-
-- Outcome: `fix code`.
-- Assessment: On Linux, a user with reduced motion turned on can see no attention cue at all: neither the flight nor the
-  stationary flash. Verified: Farhelm reads reduced motion once via `gsettings ... enable-animations`
-  (`farhelm-desktop/src/reduced_motion.rs`). GPUI Kit (`gpui_component::init`, `bootstrap.rs:84`) separately writes
-  GPUI's `reduce_motion` from the XDG portal and follows it live (`gpui-base-0.9.1/src/reduce_motion.rs`). The cue
-  chooses flight from Farhelm's flag (`layers/cue.rs` `activate`/`insert`), but its `cue_progress` animation jumps to
-  the zero-opacity end when GPUI's flag is set. The two readings diverge on desktops where portal and GNOME settings
-  differ (KDE backs the portal itself), or after a mid-run toggle. Not run on a desktop.
-- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "One reduced-motion
-  reading everywhere" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we
-  definitely need to batch these in a much smaller set of plans. please try to separate them by area of code so there is
-  a good chance of them running concurrently."
-- Completion criteria: Farhelm follows the GUI toolkit's live, portal-backed reduced-motion setting everywhere and drops
-  its own separate gsettings read, so the attention cue and all other motion agree (the cue shows its stationary flash
-  under reduced motion). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.

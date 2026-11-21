@@ -84,16 +84,9 @@ consequences.
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`wayland-terminal-paste-ignores-file-list.md`](wayland-terminal-paste-ignores-file-list.md) — Copying a file in a
-  Wayland file manager and pasting into Farhelm can paste its text representation or do nothing instead of attaching the
-  file.
-
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
-
-- [`linux-ctrl-f-leaves-settings-field-at-end.md`](linux-ctrl-f-leaves-settings-field-at-end.md) — Ctrl+F at the end of
-  a Linux Settings field can focus Search and send the next keystroke there.
 
 - [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
   agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
@@ -290,10 +283,6 @@ consequences.
 
 - [`wrapped-link-test-misses-second-open.md`](wrapped-link-test-misses-second-open.md) — The test checks that the second
   click gives no refusal but never verifies that it opens the link.
-
-- [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
-  desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a
-  flash.
 
 - [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
   can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
