@@ -324,6 +324,17 @@ fn every_header_action_is_refused_while_the_environment_is_being_deleted(cx: &mu
 
 // ---- The suspended card --------------------------------------------------------------------------------------------
 
+/// A stale session can remain visible while its environment is being deleted. Its card must say why it is unavailable.
+#[gpui::test]
+fn a_cached_session_card_explains_deletion_in_progress(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Container, deleting(None));
+    let (_fake, cx) = open(cx, &[(session("a").stale(), 0)], false, &host);
+    assert_eq!(
+        label_of(cx, EXPLANATION_ID).as_deref(),
+        Some("This session's container is being deleted, so its actions are unavailable.")
+    );
+}
+
 /// SPEC.md: "The unavailable card says **Session suspended**, explains preserved processes and snapshot-storage
 /// billing, and offers Resume", and a failed resume shows on the card. Specified: with stale a open on a suspended
 /// sandbox, the card's heading reads "Session suspended", its explanation the provider's, its diagnostics start
@@ -332,7 +343,8 @@ fn every_header_action_is_refused_while_the_environment_is_being_deleted(cx: &mu
 #[gpui::test]
 fn the_suspended_card_says_so_and_resumes(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, suspended_at(0));
-    let (mut fake, cx) = open(cx, &[(session("a").stale(), 0)], false, &host);
+    let shell = crate::session_list::environment_tests::bash_session("a").stale();
+    let (mut fake, cx) = open(cx, &[(shell, 0)], false, &host);
     pending(&mut fake);
     assert_eq!(
         label_of(cx, HEADING_ID).as_deref(),
@@ -341,8 +353,8 @@ fn the_suspended_card_says_so_and_resumes(cx: &mut TestAppContext) {
     assert_eq!(
         label_of(cx, EXPLANATION_ID).as_deref(),
         Some(
-            "This session's sandbox is suspended. Its processes are preserved, including the agent's running \
-             command, and continue when you resume it. Only snapshot storage bills while suspended."
+            "This session's sandbox is suspended. Its processes are preserved and continue when you resume it. \
+             Only snapshot storage bills while suspended."
         )
     );
     assert!(

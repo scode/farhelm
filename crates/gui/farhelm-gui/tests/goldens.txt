@@ -36,6 +36,8 @@ linux/dialog-list-tooltip--dark.png b1ad44993aebc6a579323d122578af994d1a216b
 linux/dialog-list-tooltip--light.png fe0e46bb42b19cfae4ad09b9321cdc05d91101bb
 linux/dialog-notices-stop--dark.png 3d96a1a657383461d64a04e7026ecf218b2bc920
 linux/dialog-notices-stop--light.png af3822d922d34fcd23893903bdf5c7483b71ffa8
+linux/environment-delete-confirmation--dark.png 2c3133a7eca7faa36bc1172a896c0a5fe95911ab
+linux/environment-delete-confirmation--light.png 4d0b45a961d6e819bd67d4f4cc3c107283072f94
 linux/feedback-dialog--dark.png c7aec33e547125337bf1120c38a5b7d4e02b155f
 linux/feedback-dialog--light.png 63efd080d2ba1f2314404016025384e5a8472308
 linux/feedback-dialog-reuse--dark.png 787264c4d19065d0d498403b57fa14379218539d
@@ -184,6 +186,8 @@ linux/session-details-bar--dark.png f73a0b88d418c34b286cbf5a854ac9488228bec0
 linux/session-details-bar--light.png a85863c16fcaefd15746f425f7abdaa91189db79
 linux/session-details-copy-warning--dark.png 747274a067fb5632032cc0aa4b719c740298fbea
 linux/session-details-copy-warning--light.png e3b6157e59bc6799ee2a0af27602023f73b38461
+linux/session-environment-unavailable--dark.png 3b051db88432699700c0f52df5a243d058414fd0
+linux/session-environment-unavailable--light.png d87b73c986ea82145d6b41620af3d54bce9e8004
 linux/session-interrupted-card--dark.png 9af1847a8512cd90eb3a58b97f15ff9d12c3af60
 linux/session-interrupted-card--light.png 675c23f99f1de214dcf1424344674fe158c02348
 linux/session-list--dark.png 08453a46a91d691811d6a3ecfa00083092adc242
@@ -290,6 +294,8 @@ linux/ssh-sign-in-notice--dark.png bf16a53434dec14c6188af819637f49dc762a393
 linux/ssh-sign-in-notice--light.png 62e63c98c55f04fe2d89e83a4453ce9f697e19aa
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
+linux/tab-only-stop-confirmation--dark.png cd852d4eb4d22ec450bae85325c5281553550786
+linux/tab-only-stop-confirmation--light.png e6880a2d278f242edce85925895c01378c2e7398
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e
 linux/tab-strip--light.png 3646e8f9c7dff120d426435c698ff01563d55764
 linux/template-destination-editor--dark.png 387bedac880d8fbb765c3ad504ef685530b427ea

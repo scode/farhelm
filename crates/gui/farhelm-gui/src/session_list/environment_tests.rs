@@ -56,6 +56,16 @@ pub(crate) fn connected() -> HostStateView {
     }
 }
 
+/// A structured Bash launch, so the session's actions name its shell even if its main process has ended.
+pub(crate) fn bash_session(key: &'static str) -> Fixture {
+    session(key).launch(json!({
+        "kind": "agent",
+        "selection": {"harness": "bash", "permissions": null},
+        "start": ["bash", "{farhelm_args}"],
+        "resume": null,
+    }))
+}
+
 /// A host suspended outside Farhelm, noticed at `observed` (unix ms).
 pub(crate) fn suspended_at(observed: i64) -> HostStateView {
     HostStateView::Suspended {
@@ -538,6 +548,46 @@ fn suspend_reads_its_hosts_own_listing_before_going_ahead(cx: &mut TestAppContex
             "Cancel sends nothing ({why})"
         );
     }
+
+    // A connected host can still be serving its previous list after a failed refresh.
+    choose(cx, "session-menu-a", "session-menu-suspend");
+    let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
+    let mut phase = connected();
+    if let HostStateView::Connected { refresh, .. } = &mut phase {
+        *refresh = RefreshView::Failed {
+            error: "reading activity failed".into(),
+        };
+    }
+    push_host(&mut fake, &environment_host(Provider::Sandbox, phase), cx);
+    fake.reply(read, 200, Some(listing(&[idle("a")], false)));
+    test_support::settle(cx);
+    assert_eq!(label_of(cx, "prompt").as_deref(), Some("Suspend sandbox?"));
+    assert!(
+        pending(&mut fake).is_empty(),
+        "a cached idle listing needs consent"
+    );
+}
+
+/// Once the main shell exits, the two answers describe only what they do to its open terminal tabs.
+#[gpui::test]
+fn a_tab_only_stop_question_helps_with_the_remaining_tabs(cx: &mut TestAppContext) {
+    let ended = bash_session("a").status(json!({"state": "exited", "exit_code": 0}));
+    let host = environment_host(Provider::Container, connected());
+    let (_fake, cx) = open(cx, &[(ended, 1)], false, &host);
+    choose(cx, "session-menu-a", "session-menu-stop");
+    assert!(
+        texts(cx)
+            .iter()
+            .any(|text| text.starts_with("Close 1 terminal tab?"))
+    );
+    assert_eq!(
+        hover_help(cx, "prompt-confirm").as_deref(),
+        Some("Close this session's terminal tabs")
+    );
+    assert_eq!(
+        hover_help(cx, "prompt-cancel").as_deref(),
+        Some("Cancel: leave the terminal tabs open")
+    );
 }
 
 /// Consent names an operation, not a toggle against the latest phase: another viewer may suspend the environment while

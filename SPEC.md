@@ -358,6 +358,8 @@ sessions. A session on a suspended host says **&lt;host&gt; is suspended; this s
 offers **Resume host**. Farhelm does not suspend automatically. For now the desktop app refuses a launch on a suspended
 host and asks you to resume it in Hosts first. Resuming before the create is planned.
 
+A connected host with a pending or failed session refresh still asks before suspending.
+
 Once implemented, a launch on a suspended host resumes it first and waits for a fresh connection. While another
 operation on that host (a Suspend or Resume from elsewhere, setup, an update) holds it, the launch keeps asking within
 the same minute it allows for the connection, and a Resume that finishes elsewhere meanwhile is enough. If the host is
@@ -1636,6 +1638,9 @@ longer reach. While deletion runs, Hosts and the sidebar attention area show the
 sessions show as being deleted with their actions unavailable. If deletion fails, Hosts and the sidebar show the reason
 and wait for **Retry**. Deleting a sandbox's last two sessions at once (from the window and an agent, say) can briefly
 show "the sandbox stays" for one Delete just before the other seals it; the list then shows the truth.
+
+The confirmation also says that Delete stops any processes still running in the selected session and closes its terminal
+tabs, including in a sandbox or container that stays for other sessions.
 
 When the helm cannot ask the sandbox's Farhelm (the sandbox is suspended or unreachable, or its Farhelm is a version
 this helm cannot talk to until it is updated), or the request gets no answer within 20 seconds (below), nothing is

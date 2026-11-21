@@ -277,10 +277,7 @@ pub(super) fn session_unavailable_cards(
     window: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    use crate::session_list::status::HostLookup;
-    use crate::session_pane::unavailable::{Band, Drawn, draw, notice};
-    use farhelm_proto::ui_channel::{HostStateView, SessionRow};
-    let now = crate::session_list::age::seconds(ticker::wall_now(cx));
+    use farhelm_proto::ui_channel::HostStateView;
     let cases = [
         (
             session("a")
@@ -308,11 +305,60 @@ pub(super) fn session_unavailable_cards(
             },
         ),
     ];
+    draw_unavailable_cards(
+        cases.map(|(fixture, phase)| (fixture, crate::hosts::tests::host(2, "ssh", phase))),
+        window,
+        cx,
+    )
+}
+
+/// Two retained sessions show what actually happened to their environment. A deleting container has no reconnect
+/// promise. A suspended Bash session preserves its processes and offers Resume.
+pub(super) fn environment_unavailable_cards(
+    _: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    use crate::session_list::environment_tests::{
+        Provider, bash_session, deleting, environment_host, suspended_at,
+    };
+    let cases = [
+        (
+            session("a")
+                .title("Generate the release artifacts")
+                .activity(TEST_NOW - 300),
+            environment_host(Provider::Container, deleting(None)),
+        ),
+        (
+            bash_session("b")
+                .title("Inspect the benchmark logs")
+                .activity(TEST_NOW - 120),
+            environment_host(Provider::Sandbox, suspended_at((TEST_NOW - 60) * 1000)),
+        ),
+    ];
+    draw_unavailable_cards(cases, window, cx)
+}
+
+/// Draws each stale-session band and card at the width of a narrow terminal pane.
+fn draw_unavailable_cards(
+    cases: impl IntoIterator<
+        Item = (
+            crate::session_list::tests::Fixture,
+            farhelm_proto::ui_channel::HostView,
+        ),
+    >,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    use crate::session_list::status::HostLookup;
+    use crate::session_pane::unavailable::{Band, Drawn, draw, notice};
+    use farhelm_proto::ui_channel::SessionRow;
+    let now = crate::session_list::age::seconds(ticker::wall_now(cx));
     let mut columns = Vec::new();
-    for (fixture, host_state) in cases {
+    for (fixture, host) in cases {
+        let key = fixture.key;
         let row: SessionRow = serde_json::from_value(fixture.stale().entry().value)
             .unwrap_or_else(|error| panic!("a session row: {error}"));
-        let host = crate::hosts::tests::host(2, "ssh", host_state);
         let zone = local_time::zone(cx);
         let notice = notice(
             &row.host_name,
@@ -324,7 +370,7 @@ pub(super) fn session_unavailable_cards(
         let band = Band::of(&row, now, zone).map(|band| band.draw(theme::palette(cx)));
         let card = draw(
             Drawn {
-                key: "a",
+                key,
                 notice,
                 focus: &cx.focus_handle().tab_stop(true),
                 scroll: &gpui::ScrollHandle::new(),

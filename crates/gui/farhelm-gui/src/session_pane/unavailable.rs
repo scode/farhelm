@@ -293,9 +293,9 @@ pub(crate) fn notice(
     }
 }
 
-/// `notice` with what a suspended, stopped or starting `host` changes in it: the Resume it offers, and, for a session's
-/// own environment, the provider's words for being suspended or starting again (the old `sandbox_sessions::
-/// unavailable_notice` and `stale_session_notice`'s `resume_host`).
+/// The changes to an unavailable notice for a session's own environment, including which offers Resume and what
+/// the card says while the environment is suspended, starting or being deleted. A stale cached row can still be
+/// visible during deletion, so its card must describe that phase.
 fn environment_notice(mut notice: Notice, host: &HostView, zone: Zone) -> Notice {
     let environment = Environment::of_host(host).map(|environment| environment.ui);
     notice.resume = match host.state {
@@ -338,6 +338,12 @@ fn environment_notice(mut notice: Notice, host: &HostView, zone: Zone) -> Notice
         HostStateView::TensorlakeChanging { starting: true, .. } => Notice {
             cause: "Starting environment",
             explanation: HostSentence::new(EXPLANATION_ID).text(ui.starting_help()),
+            ..notice
+        },
+        HostStateView::Deleting { failure: None } => Notice {
+            explanation: HostSentence::new(EXPLANATION_ID)
+                .text(ui.session_deleting_help(false))
+                .text("."),
             ..notice
         },
         _ => notice,

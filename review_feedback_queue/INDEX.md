@@ -20,10 +20,6 @@ consequences.
   Stop or Delete can ask approval to terminate an agent even though accepting the card terminates the shell and its
   work.
 
-- [`shared-environment-delete-omits-live-shell.md`](shared-environment-delete-omits-live-shell.md) — Deleting a shell in
-  a shared environment can stop its live processes even though the confirmation only mentions stopping processes if the
-  whole environment is deleted.
-
 - [`bash-stop-loses-unsaved-history.md`](bash-stop-loses-unsaved-history.md) — Stop and Stop and suspend can force Bash
   down before it saves command history configured to write on exit.
 
@@ -491,10 +487,6 @@ consequences.
   — The cancellation test does not assert its committed fleet wake. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-ui-deleting-environment-retains-running-reconnect-promise.md`](trailing-ui-deleting-environment-retains-running-reconnect-promise.md)
-  — Deleting environment can promise its cached session is still running. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-ui-stopped-container-waiting-place-offers-suspend.md`](trailing-ui-stopped-container-waiting-place-offers-suspend.md)
   — Stopped container offers Suspend when its container host is unavailable. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
@@ -919,21 +911,11 @@ consequences.
 - [`shell-template-approval-misstates-permission.md`](shell-template-approval-misstates-permission.md) — Approval cards
   can say a shell template has no permissions while saving a concrete incompatible setting.
 
-- [`suspended-shell-card-names-agent.md`](suspended-shell-card-names-agent.md) — A suspended shell’s card says an agent
-  command is preserved.
-
-- [`suspend-treats-failed-session-refresh-as-complete.md`](suspend-treats-failed-session-refresh-as-complete.md) —
-  Suspend can skip its activity question when the host stays connected but Farhelm could only read an older idle or
-  empty session list.
-
 - [`shell-stop-and-suspend-wording-untested.md`](shell-stop-and-suspend-wording-untested.md) — Stop and suspend tests
   can pass if its confirmation goes back to calling Bash or Zsh an agent.
 
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.
-
-- [`shell-stop-tab-only-help.md`](shell-stop-tab-only-help.md) — When only extra tabs remain, the Stop dialog’s help
-  still says it will stop the shell.
 
 - [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
   its normal launch path.
