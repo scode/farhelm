@@ -151,10 +151,6 @@ consequences.
 - [`valid-ssh-uri-short-label-parsing.md`](valid-ssh-uri-short-label-parsing.md) — Valid SSH URIs with a trailing slash,
   service-name port or empty port can show an incorrectly shortened host label.
 
-- [`runtime-recorder-guidance-conflict.md`](runtime-recorder-guidance-conflict.md) — Run-all-tests gives conflicting
-  directions about whether emulator stress and memory tests require the runtime-test recorder; taking the optional
-  direction can leave future failures without the normally required retained run record.
-
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
@@ -275,10 +271,6 @@ consequences.
 - [`landing-tests-import-unregistered-module.md`](landing-tests-import-unregistered-module.md) — The documented
   landing-tool validation command can crash during import before testing any safeguards, because its dynamically loaded
   module is absent from Python's module registry.
-
-- [`outer-recorder-deletes-nested-failure-evidence.md`](outer-recorder-deletes-nested-failure-evidence.md) — Recording a
-  script that starts another recorder can delete the inner failed run's evidence during outer temporary-directory
-  cleanup. The release invocation that explicitly forwards both output roots is outside this route.
 
 - [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
   runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
@@ -692,12 +684,6 @@ consequences.
 
 - [`failed-demo-rollback-can-remove-previous-preview.md`](failed-demo-rollback-can-remove-previous-preview.md) — A
   preview rollback that fails can leave the previous generated demo output in temporary files that are then deleted.
-
-- [`test-worker-success-loses-evidence.md`](test-worker-success-loses-evidence.md) — An SSH test worker can report
-  success when the results could not be copied back.
-
-- [`test-worker-sync-precedes-lock.md`](test-worker-sync-precedes-lock.md) — A second SSH test request can change the
-  checkout used by the run already in progress.
 
 - [`attention-cue-loses-reduced-motion-flash.md`](attention-cue-loses-reduced-motion-flash.md) — On Linux, if the
   desktop reports reduced motion after Farhelm has enabled animation, an attention cue can show neither a flight nor a

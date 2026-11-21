@@ -77,9 +77,10 @@ duplicate PRs.
 
 Run these before the sweep: several of them compile, and the sweep's timing-sensitive tests assume a quiet machine. This
 is the inventory in `.agents/validation.md` minus every battery the sweep runs, plus two checks the inventory does not
-name (the CI job's Alpine/BusyBox installer run and the rehearsal generator's self-test). Generic recorder wrapping is
-fine but not required for these; record each result in the log either way. Rust commands use `rust-toolchain.toml`, the
-same pin CI and release builds use; no second clippy run on floating stable is needed.
+name (the CI job's Alpine/BusyBox installer run and the rehearsal generator's self-test). Recorder wrapping is optional
+for static and tooling checks. Use the recorder for runtime test entries, including the ignored terminal emulator tests,
+and record each result in the log. Rust commands use `rust-toolchain.toml`, the same pin CI and release builds use; no
+second clippy run on floating stable is needed.
 
 - `cargo fmt --all -- --check`
 - `python -B scripts/check-test-sleeps.py`, with the isolated interpreter from `docs/test-sleep-check.md` (create its
@@ -145,9 +146,10 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page, and
   clearing only the selected docs outputs). Run the harness only on the maintainer's request, per `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
-  `python3 -m py_compile scripts/test-worker/remote/prune.py` (the SSH test worker harness's own checks). Run the
-  harness only on the maintainer's request, per `.agents/test-worker.md`.
-- `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py`
+  `python3 -m py_compile scripts/test-worker/remote/prune.py` (the SSH test worker harness's checks, including the
+  evidence-copy driver). Run the harness only on the maintainer's request, per `.agents/test-worker.md`.
+- `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py` (the runtime recorder,
+  including nested failure evidence, and trace tooling)
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
   `python3 -B scripts/test-install-pinned-cargo-about.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,

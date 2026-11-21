@@ -105,6 +105,9 @@ it to about ten gigabytes in a month. In a temporary directory it goes away with
 PR or FLAKES.md entry) while the run is still present, or pass `--output-root` for evidence that must outlive the
 machine's temporary files.
 
+A nested recorder inherits the outer recorder's default evidence root, even though its TMPDIR is the outer command's
+disposable directory. An explicit `--output-root` still selects storage for the invocation that supplies it.
+
 That cleanup alone did not keep up: on the shared Linux host it runs only at boot or after 30 days, and about 250
 recorded runs a day had grown the default root to 18 GB within three weeks, two fifths of it from runs that passed. So
 in the default root a run that passed (outcome `completed`, recorder exit 0) drops `traces.tar` and `test-traces/` as
@@ -307,7 +310,8 @@ The child environment is copied from the recorder, then every `FARHELM_*` variab
 `--keep-farhelm-env`. An absent requested name remains absent. The same controlled environment is used for the Git
 metadata probes. Before the command starts, the recorder sets `FARHELM_TEST_TRACE_DIR` to its new private `test-traces`
 directory. This name is reserved: even an explicit `--keep-farhelm-env FARHELM_TEST_TRACE_DIR` cannot redirect capture
-to an ambient location. Metadata probes run before this override.
+to an ambient location. The recorder also supplies `FARHELM_TEST_RUN_DEFAULT_ROOT` for nested invocations. Metadata
+probes run before these overrides.
 
 The command also gets its own `TMPDIR`, overriding any ambient value: a fresh mode-0700 directory `/tmp/fh-tmp.XXXXXX`,
 in farhelm-teststate's sweep family. The recorder holds the family's liveness lock (`fh-run.lock` inside it) while the

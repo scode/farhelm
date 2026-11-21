@@ -28,8 +28,9 @@ ordinary `known_hosts` check). A missing file means there is no worker; say so r
 The worker follows the `scode-ssh-delegate` skill's trust rules: source is pushed from the local checkout (the working
 copy's tracked files only), nothing on the worker gets GitHub, cloud or registry credentials or contacts a private
 remote, and only summaries, console logs and a failed run's retained recorder directories come back. It keeps one tree
-per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental, and a
-lock so two runs never share a tree; a second run fails at once and names the holder.
+per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental. Its lock
+covers execution after the driver stages the tools and source. A run that reaches a held lock fails and names the
+holder.
 
 Assume the worker can be reset to a fresh image at any time. Nothing on it is precious: every run syncs the working copy
 again, and a lost `target/` only makes the next build cold. Before each run the driver checks a marker the bootstrap
@@ -58,6 +59,10 @@ Read each `summary.txt` like a recorded run: the substrate lines (architecture, 
 self-ssh), the summary and failures, and the runtime `SKIPPED` count from the retained output. A failed run's recorder
 directories come back as `runs.tar.gz`; keep them as evidence. Report the worker's runs by their recorder run ids and
 say they ran on the test worker, with its architecture.
+
+The command prints the summary from its worker. If the evidence copy fails, the driver prints the copy error and the
+status returned by the SSH command. A reused output directory can contain earlier artifacts, such as an old failure
+archive.
 
 ## When the worker cannot be used
 

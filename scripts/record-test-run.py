@@ -272,6 +272,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return parsed
 
 
+DEFAULT_EVIDENCE_ROOT_ENV = "FARHELM_TEST_RUN_DEFAULT_ROOT"
+
+
 def default_output_root(environment: dict[str, str]) -> pathlib.Path:
     """Place evidence in the shared agent scratch tree, `<tmp>/farhelm-tmp/test-runs`.
 
@@ -286,10 +289,17 @@ def default_output_root(environment: dict[str, str]) -> pathlib.Path:
     survive that cleanup. A failure worth keeping longer is recorded (FLAKES.md
     or a fix PR) or copied out, or the run passes `--output-root`.
 
+    A nested recorder gets the outer recorder's default root before the
+    outer recorder replaces TMPDIR with the directory it will clean up.
+    Each invocation can still choose its own explicit output root.
+
     The environment is the recorder's ambient one, passed in so tests can
     choose the location without touching their own process environment.
     """
 
+    inherited = environment.get(DEFAULT_EVIDENCE_ROOT_ENV)
+    if inherited and os.path.isabs(inherited):
+        return pathlib.Path(inherited)
     temporary = environment.get("TMPDIR")
     base = pathlib.Path(temporary) if temporary and os.path.isabs(temporary) else pathlib.Path("/tmp")
     return base / "farhelm-tmp" / "test-runs"
@@ -1796,7 +1806,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
         cwd = pathlib.Path.cwd().resolve()
         child_env = controlled_environment(ambient, args.keep_farhelm_env)
         checkout, top_level_probe = discover_checkout(cwd, child_env, intent)
-        requested_root = args.output_root or default_output_root(ambient)
+        default_root = default_output_root(ambient)
+        requested_root = args.output_root or default_root
         root = prepare_root(requested_root, checkout or checkout_marker_ancestor(cwd), ambient)
         run_id = str(uuid.uuid4())
         run_dir = root / run_id
@@ -1878,7 +1889,8 @@ def run(argv: list[str], *, signal_intent: SignalIntent | None = None) -> int:
 
         trace_root, trace_fd = test_run_traces.create_run_root(run_dir)
         child_env[test_run_traces.TRACE_ENV] = os.fspath(trace_root)
-        owned_environment = (test_run_traces.TRACE_ENV,)
+        child_env[DEFAULT_EVIDENCE_ROOT_ENV] = os.fspath(default_root)
+        owned_environment = (test_run_traces.TRACE_ENV, DEFAULT_EVIDENCE_ROOT_ENV)
         manifest.data["environment"] = environment_evidence(
             ambient, child_env, args.keep_farhelm_env, recorder_owned=owned_environment,
         )
