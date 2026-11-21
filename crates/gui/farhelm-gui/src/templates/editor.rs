@@ -13,8 +13,8 @@
 //! - **What it holds.** The stored template's name it opened (`previous`, none for a new template), the draft as it
 //!   was opened or last saved (`baseline`), and the draft being edited. "Unsaved changes" is the two differing. A
 //!   stored template opens as [`Draft::from_template`] against its raw stored fields, so a kindless template's inferred
-//!   switch and a dropped workspace-trust field show as unsaved. The leave question compares against the displayed
-//!   starting draft, so those automatic changes alone never interrupt a departure.
+//!   switch and a dropped workspace-trust field show as unsaved. The leave question asks only about edits the user made
+//!   since opening or saving that Save would store, so those automatic changes alone never interrupt a departure.
 //! - **The draft is the template as loaded.** It does not follow a change pushed while it is open: the save writes the
 //!   whole template, last write wins (SPEC.md, "One GUI at a time", confirmed 2026-10-21), and the editor never takes
 //!   a pushed value into a field. The text fields are plain inputs over the draft, as the launcher's are; the drafts
@@ -230,8 +230,9 @@ pub(super) struct Editor {
     previous: Option<String>,
     /// The raw stored template, or an empty template before the first save. Differences enable Save.
     baseline: Draft,
-    /// What the editor showed on opening or just after Save. This comparison gates leaving so an inferred
-    /// switch or removed legacy trust field never asks on its own.
+    /// What the editor showed on opening or just after Save. Leaving asks only when the draft differs from this and
+    /// from `baseline` ([`Editor::needs_leave_confirmation`]), so an inferred switch or removed legacy trust field never
+    /// asks on its own.
     leave_baseline: Draft,
     /// The template being edited.
     draft: Draft,
@@ -403,9 +404,13 @@ impl Editor {
         self.draft != self.baseline
     }
 
-    /// Whether leaving would lose edits since opening or saving. A duplicate also counts as an unsaved new draft.
+    /// Whether leaving would lose something the user did: the draft differs from what the editor showed on opening or
+    /// after the last save, and Save would store it. Farhelm's own fill-ins on opening (the inferred switch, the dropped
+    /// workspace-trust field) differ only from the stored template, and an edit back to the stored template differs only
+    /// from what opened; neither asks, since leaving keeps the stored template as it is. A new or duplicated draft's
+    /// `leave_baseline` is its empty baseline, so for those this is [`Editor::dirty`].
     pub(super) fn needs_leave_confirmation(&self) -> bool {
-        self.draft != self.leave_baseline
+        self.dirty() && self.draft != self.leave_baseline
     }
 
     /// Which Delete the footer offers ([`DeleteKind`]), judged on the stored template, not the draft: Delete removes

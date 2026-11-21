@@ -1743,9 +1743,10 @@ Where the port does not match the old app, and why. Each stays until the work na
   Save that names it is refused by the helm with its own words.
 - **The credential pickers show names in the interface font.** The old pickers were monospace (`font-mono`); the shared
   select has no monospace look, so the names read as the rest of the form's choices do.
-- **The leave question opens over the hosting dialog.** It sits above the Settings or Add host editor and its pinned
-  footer. Save closes the question and waits for the write. A refusal leaves the draft and shows the helm's words above
-  the editor's ordinary answers. The delete question still replaces those answers inline.
+- **The leave question opens over the hosting dialog.** The old question replaced the editor's answers inline and stayed
+  up while its Save ran and after a refusal, with the reason above it. Here it sits above the Settings or Add host
+  editor and its pinned footer. Save closes the question and waits for the write. A refusal leaves the draft and shows
+  the helm's words above the editor's ordinary answers. The delete question still replaces those answers inline.
 - **A delete whose cleanup outlasts the helm's bound closes the editor and leaves the helm's words on the row.** The old
   editor waited for the delete however long its cleanup took. The helm now answers within 20 seconds, with a 504 saying
   the deletion carries on, the recipe leaving the list once it is gone, and, if it is still listed later, to delete it

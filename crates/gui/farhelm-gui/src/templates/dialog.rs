@@ -21,10 +21,10 @@
 //!   save is said in the status line under the panes.
 //! - **Leaving an edited draft** ([`Departure`]): another row, "+ New template", Duplicate, the header Close and
 //!   Escape first ask "Save these changes before leaving?" with Keep editing, Discard and Save, in that reading order,
-//!   focus starting on Save (SPEC.md), centered over the dialog. Keep editing or Escape returns focus to the name
-//!   field. Discard goes where the user was heading. Save
-//!   saves, and goes there only once the save has succeeded; a refused save stays with its reason in the status line.
-//!   The veil keeps the editor and the departure fixed while the question is open.
+//!   focus starting on Save (SPEC.md), centered over the dialog, when the draft holds edits Save would store
+//!   ([`Editor::needs_leave_confirmation`]). Keep editing or Escape returns focus to the name field. Discard goes where
+//!   the user was heading. Save saves, and goes there only once the save has succeeded; a refused save stays with its
+//!   reason in the status line. The veil keeps the editor and the departure fixed while the question is open.
 //! - **Deleting.** Delete takes effect at once. Its editor goes, focus moves to "+ New template", and a notice under the
 //!   panes offers Undo for about ten seconds ([`UNDO_FOR`]): Undo saves the copy the dialog had loaded back under its old
 //!   name, unless another template has taken that name since. A later deletion replaces the notice, and closing the
@@ -115,7 +115,7 @@ const TILE_GLYPH: f32 = 14.;
 /// The header's summary, the old dialog's words.
 const SUMMARY: &str = "Saved edits to combine in the session launcher";
 
-/// The header Close's name and hover help, the old dialog's words.
+/// The header Close's name (the old dialog's words) and its hover help (this app's, saying what a close asks).
 const CLOSE_LABEL: &str = "Close templates";
 const CLOSE_HELP: &str =
     "Close Templates. If you edited the template, you can save or discard your changes.";
@@ -208,7 +208,7 @@ pub struct TemplatesDialog {
     status: Option<HostSentence>,
 }
 
-/// Where leaving the editor goes ([`TemplatesDialog::leave`]): every way out that asks about an unsaved draft first,
+/// Where leaving the editor goes ([`TemplatesDialog::leave`]): every way out that asks about an edited draft first,
 /// the old dialog's `Departure`.
 #[derive(Clone, Debug)]
 pub(super) enum Departure {
@@ -352,7 +352,7 @@ fn open_dialog(
 
 /// What the header's Close does: dismiss the dialog through the layer manager, so its dismissal hook decides, as for
 /// Escape. An open "+ Add field" menu is forgotten first, so the hook closes the dialog (or asks the leave question about
-/// an unsaved draft): only Escape closes that menu on its own, as in the old dialog, whose Close left the editor
+/// an edited draft): only Escape closes that menu on its own, as in the old dialog, whose Close left the editor
 /// whatever was open in it. While a write is in flight the hook keeps the dialog open, so the menu is left alone too:
 /// forgetting it then, with no redraw, would make it vanish later from under the user.
 fn dismiss(
@@ -406,7 +406,7 @@ impl TemplatesDialog {
     /// What Escape and the header Close do. The dialog stays while one of its writes is in flight, as the old dialog
     /// held its Close while busy: closing then would lose the line that reports the write if it is refused (SPEC.md,
     /// "One GUI at a time": a failed save is reported). An open "+ Add field" menu closes first, focus going back to
-    /// "+ Add field", as the old dialog's Escape closed it before the dialog. An unsaved draft stays and asks the leave
+    /// "+ Add field", as the old dialog's Escape closed it before the dialog. An edited draft stays and asks the leave
     /// question, whose answer closes the dialog or not.
     fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
         if self.writing(cx) {
@@ -514,9 +514,9 @@ impl TemplatesDialog {
 
     // ---- Leaving the editor -----------------------------------------------------------------------------------------
 
-    /// Leave the editor for `departure`: at once when it holds nothing unsaved, or else after the leave question
-    /// ([`TemplatesDialog::ask_leave`]). Nothing while a write is in flight. The header Close and Escape come through
-    /// the dismissal hook instead, which must answer the layer manager itself.
+    /// Leave the editor for `departure`: at once when it holds no edits Save would store, or else after the leave
+    /// question ([`TemplatesDialog::ask_leave`]). Nothing while a write is in flight. The header Close and Escape come
+    /// through the dismissal hook instead, which must answer the layer manager itself.
     fn leave(&mut self, departure: Departure, window: &mut Window, cx: &mut Context<Self>) {
         if self.writing(cx) {
             return;
@@ -580,11 +580,9 @@ impl TemplatesDialog {
             move |departure, window, cx| {
                 let _ = save.update(cx, |dialog, cx| {
                     let mark = Mark::take(cx);
-                    // A choice can undo the inferred switch and restore the raw stored template. In that case
-                    // the draft differs from what opened, but there is no write for Save to wait for.
-                    if !dialog.editor.as_ref().is_some_and(Editor::dirty) {
-                        dialog.depart(departure, &mark, window, cx);
-                    } else if dialog.save_editor(window, cx) {
+                    // The question opens only over a draft Save would store, and the veil keeps the draft as it was,
+                    // so there is no "nothing to save" case here; a save refused before any write keeps the draft.
+                    if dialog.save_editor(window, cx) {
                         dialog.leaving = Some((departure, mark));
                     }
                 });
@@ -1288,7 +1286,7 @@ impl Render for TemplatesDialog {
         let new_template = Button::new(
             "templates-new",
             "+ New template",
-            HoverHelp::tooltip("Start a new template. If you edited this one, you can save or discard your changes."),
+            HoverHelp::tooltip("Start a new template. If you edited the open one, you can save or discard your changes."),
             Role::Button,
         )
         .tier(Tier::Neutral)

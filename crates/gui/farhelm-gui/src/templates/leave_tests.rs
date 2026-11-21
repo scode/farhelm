@@ -77,10 +77,11 @@ fn without(name: &str) -> Vec<LaunchTemplate> {
 
 // ---- The leave question --------------------------------------------------------------------------------------------
 
-/// The question must stand in every way out the old dialog guarded, or an unsaved draft is lost by
-/// the one that forgot it. Specified: a clean editor opens another row without asking; with an unsaved draft, another
-/// row, "+ New template", Duplicate, the header Close and Escape each ask instead, with Keep editing, Discard and Save in order and
-/// focus on Save, and the editor and dialog stay; Keep editing then puts focus back in the name field, sending nothing.
+/// The question must stand in every way out the old dialog guarded, or an unsaved draft is lost by the one that forgot
+/// it. Specified: a clean editor opens another row without asking; with an unsaved draft, another row, "+ New
+/// template", Duplicate, the header Close and Escape each ask instead, with Keep editing, Discard and Save in that order
+/// and focus on Save, and the editor and dialog stay; Keep editing (or Escape) then puts focus back in the name field,
+/// sending nothing. Escape asks again after that, and Discard then closes the dialog: the reported loop ends.
 #[gpui::test]
 fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
@@ -119,12 +120,12 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
             Some("prompt-confirm")
         );
         assert!(any_open(cx) && draft(cx).name == "codex-deep");
-        // The template footer stays behind the veil. The prior inline question replaced it.
-        assert!(frame(cx).iter().any(|node| {
-            node.element_id
-                .as_ref()
-                .is_some_and(|id| id.to_string() == "templates-save")
-        }));
+        // The question is a layer over the dialog, so the editor's own footer stays drawn behind the veil; the old
+        // inline question took the footer's place.
+        assert!(
+            drawn(cx, "templates-save"),
+            "the footer stays behind the question"
+        );
         if index == 4 {
             keys(cx, "escape");
         } else {
@@ -146,12 +147,18 @@ fn every_departure_from_an_unsaved_draft_asks_first(cx: &mut TestAppContext) {
     assert!(helm.commands().is_empty(), "nothing was sent");
 }
 
-/// The legacy switch and trust cleanup leave Save available, but neither may trap the user in the editor.
-/// Check both close controls against the same stored template, with no helm write on either departure.
+/// The reported trap: a template saved before launcher switches existed, carrying the old workspace-trust field, opens
+/// with Farhelm's own fill-ins (the inferred switch, the dropped field) showing as unsaved, and that alone made every
+/// close ask. Those fill-ins keep Save available, but leaving must not ask about them. Specified: such a template,
+/// untouched, closes on the first Escape and on the first header Close; and toggled away from the inferred switch and
+/// back, the header Close still leaves at once; none of them sends anything to the helm.
 #[gpui::test]
 fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
-    let close_controls: [fn(&mut VisualTestContext); 2] =
-        [|cx| keys(cx, "escape"), |cx| click(cx, "templates-close")];
+    let close_controls: [fn(&mut VisualTestContext); 3] = [
+        |cx| keys(cx, "escape"),
+        |cx| click(cx, "templates-close"),
+        |cx| click(cx, "templates-close"),
+    ];
     let mut stored = templates();
     let legacy = stored
         .iter_mut()
@@ -164,7 +171,7 @@ fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
         assert!(painted(cx).contains("Unsaved changes"));
         assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
         assert!(draft(cx).fields.workspace_trust.is_none());
-        if index == 1 {
+        if index == 2 {
             click(cx, "templates-switch-Don't switch");
             assert_eq!(draft(cx).fields.kind, None);
             click(cx, "templates-switch-Agent");
@@ -181,22 +188,24 @@ fn untouched_legacy_template_closes_without_asking(cx: &mut TestAppContext) {
     }
 }
 
-/// Picking Don't switch can reproduce the stored legacy fields while changing the displayed draft.
-/// Save in the leave question still finishes the departure when it has no write to send.
+/// Picking Don't switch on a template saved without a switch changes the draft from what opened but makes it match the
+/// stored template again: "Unsaved changes" goes and Save greys out. Leaving then loses nothing, so a question whose
+/// Save and Discard did the same thing must not appear. Specified: after Don't switch, Escape closes the dialog without
+/// asking and sends nothing.
 #[gpui::test]
-fn save_leaves_when_an_edit_restores_the_stored_template(cx: &mut TestAppContext) {
+fn an_edit_back_to_the_stored_template_leaves_without_asking(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
     open_editor(&mut helm, "template-open-kindless", cx);
     assert_eq!(draft(cx).fields.kind, Some(LauncherKind::Agent));
     click(cx, "templates-switch-Don't switch");
     assert_eq!(draft(cx).fields.kind, None);
-    assert!(!painted(cx).contains("Unsaved changes"));
+    assert!(
+        !painted(cx).contains("Unsaved changes"),
+        "the premise: the draft matches the stored template"
+    );
     keys(cx, "escape");
     settle(cx);
-    assert!(painted(cx).contains(QUESTION));
-    click(cx, "prompt-confirm");
-    settle(cx);
-    assert!(!any_open(cx));
+    assert!(!any_open(cx), "Escape closes without asking");
     assert!(helm.commands().is_empty());
 }
 

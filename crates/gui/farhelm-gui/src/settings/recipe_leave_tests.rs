@@ -230,8 +230,8 @@ fn the_questions_save_finishes_the_leave_once_the_save_is_done(cx: &mut TestAppC
     assert!(drawn(cx, "recipe-save"));
 }
 
-/// Closing Settings from another section reveals the recipe behind its question so Keep editing has somewhere to return.
-/// Specified: with a change typed and Hosts shown,
+/// Closing Settings from another section must not ask about a draft the user cannot see: Settings shows Recipes again
+/// behind the question, so the user knows which draft it is about. Specified: with a change typed and Hosts shown,
 /// Escape shows Recipes again with the question up and focus on Save, and Settings stays open.
 #[gpui::test]
 fn a_close_from_another_section_shows_recipes_first(cx: &mut TestAppContext) {

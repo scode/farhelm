@@ -130,8 +130,13 @@ save with focus kept on it (`templates::save_tests::launch_sends_nothing_while_t
 - `templates::leave_tests::undo_refuses_a_taken_name_and_keeps_a_spaced_one` ("taken names refuse save and undo")
 - `templates::leave_tests::undo_lasts_ten_seconds_a_later_delete_replaces_it_and_closing_ends_it` ("undo expires
   independently of earlier deletions and ends on close")
-- `templates::leave_tests::untouched_legacy_template_closes_without_asking` (both close controls leave a legacy template
-  without a prompt or a write)
+- "model suggestions and phone departure controls remain reachable", the departure question's half: no longer applies,
+  since the question is centered over the dialog rather than drawn at the editor's foot, where a short window could
+  leave it below the fold (Deviations, "The leave question").
+- `templates::leave_tests::untouched_legacy_template_closes_without_asking` and
+  `templates::leave_tests::an_edit_back_to_the_stored_template_leaves_without_asking` (new: Escape and the header Close
+  leave an untouched legacy template, and a close leaves one edited back to what opened or to what is stored, without a
+  question or a write)
 - `templates::save_tests::a_spaced_or_taken_name_is_refused_without_a_write` ("save as template requires a name without
   whitespace" and "launcher template save refuses a taken name")
 - `templates::save_tests::new_checks_its_choices_and_offers_passive_values_unchecked` ("save as template captures the
@@ -759,12 +764,15 @@ orchestrator.
   words, not which step of the rename failed; by then the template is saved under the new name with the mark and key
   moved, and the old one is still there. Tested by
   `templates::editor_tests::a_refused_delete_of_the_old_name_shows_the_helms_words`.
-- **The leave question.** The older inline question could scroll the editor when it took focus. It now opens over the
-  dialog with a veil, so the question and its answers stay visible. Only changes since opening or saving the draft
-  require an answer. Saving from the question closes it and waits for the save to settle before departing. A refusal
-  keeps the draft and puts the helm's words in the editor's status line. Covered by
+- **The leave question.** The old question was a band at the editor's foot, in place of its buttons, with the fields
+  still editable under it; it stayed up through its Save and after a refusal, and it asked whenever the draft differed
+  from the stored template, so an older template's inferred switch alone made every close ask. Here it opens over the
+  dialog with a veil, so the question and its answers stay visible at any scroll position, and it asks only about edits
+  since opening or saving that Save would store. Saving from the question closes it and waits for the save to settle
+  before departing. A refusal keeps the draft and puts the helm's words in the editor's status line. Covered by
   `templates::leave_tests::every_departure_from_an_unsaved_draft_asks_first`,
-  `templates::leave_tests::untouched_legacy_template_closes_without_asking` and
+  `templates::leave_tests::untouched_legacy_template_closes_without_asking`,
+  `templates::leave_tests::an_edit_back_to_the_stored_template_leaves_without_asking` and
   `templates::leave_tests::save_leaves_only_once_the_save_succeeds`.
 - **One Delete button.** The old footer kept a Delete and a "Delete permanently" button mounted and hid one, because its
   web view could swap a click listener before painting the new label. A GPUI click handler belongs to the frame that

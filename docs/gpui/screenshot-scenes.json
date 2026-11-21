@@ -2822,7 +2822,7 @@
     },
     {
       "golden": "template-leave-question",
-      "title": "The editor's leave question at its foot after an unsaved rename: Keep editing, Discard, and Save focused",
+      "title": "The leave question centered over the Templates dialog after an unsaved rename: Keep editing, Discard, and Save focused",
       "reference": "template-leave-question"
     },
     {
