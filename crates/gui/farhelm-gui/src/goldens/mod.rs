@@ -44,6 +44,7 @@
 //! pictures it names and publishes new ones. The test itself knows nothing of that: it reads the references from the
 //! directory `FARHELM_GOLDENS_DIR` names, and fails rather than skips when the variable is unset or a picture is
 //! missing. Only failures write a capture under `FARHELM_GOLDEN_CAPTURE_DIR`, a directory of the comparison run's own.
+//! A different reference also leaves pixel evidence there for the runner's review page.
 //! After an intended visual change, `scripts/check-gui-goldens.py --update` runs it with `FARHELM_UPDATE_GOLDENS`
 //! naming a directory for all the captures. The script marks the full successful run complete so
 //! `scripts/gui-goldens.py publish` can push its pictures and rewrite the manifest ([`GoldenRun`]).
@@ -54,6 +55,7 @@
 //! says why). A new scene adds its functions to its area's file and its entry to `SCENES`.
 
 mod approvals;
+mod changes;
 mod desktop;
 mod foundations;
 mod hosts;
@@ -1585,12 +1587,24 @@ impl GoldenRun {
             return save();
         };
         let reference = references.join(os).join(name);
-        let problem = match image::open(&reference).map(|expected| expected.into_rgba8()) {
-            Ok(expected) if &expected == screenshot => return Ok(()),
-            Ok(_) => format!("differs from {}", reference.display()),
-            Err(error) => format!("could not read {}: {error}", reference.display()),
-        };
+        let (problem, expected) =
+            match image::open(&reference).map(|expected| expected.into_rgba8()) {
+                Ok(expected) if &expected == screenshot => return Ok(()),
+                Ok(expected) => (
+                    format!("differs from {}", reference.display()),
+                    Some(expected),
+                ),
+                Err(error) => (
+                    format!("could not read {}: {error}", reference.display()),
+                    None,
+                ),
+            };
         save().with_context(|| problem.clone())?;
+        if let Err(error) =
+            changes::write(&directory.join("review"), &capture, expected, screenshot)
+        {
+            eprintln!("could not make a pixel review for {name}: {error:#}");
+        }
         anyhow::bail!("{problem} (capture in {})", capture.display());
     }
 }
