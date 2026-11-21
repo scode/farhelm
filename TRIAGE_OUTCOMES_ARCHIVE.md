@@ -26069,3 +26069,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   its index entry, and move this entry to `TRIAGE_OUTCOMES_ARCHIVE.md` in the same change.
 - Execution: change `kssuvkxopmmyqspynukkvvrznvlkmvrr`, bookmark `docs/spec-settings-save-gap`,
   [PR #3293](https://github.com/scode/farhelm/pull/3293/changes).
+
+## old-process-regression-misses-cli-premise.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
+  reviewed. `test_old_running_process_cannot_pass_candidate_relaunch`
+  (releasing/mac-vm-test/test_guest_operations.py:195-204) has the docstring "Installed bytes alone do not prove that
+  Restart actually returned the candidate process", so it means to isolate the running-version predicate. Its fixture
+  omits `cli`, and `managed_result` (guest_tester.py:291-294) raises the same "managed running-version premise was not
+  established" error when the CLI stdout is missing. The test therefore stays green even if the
+  `version not in versions['running_versions']` clause were removed. The sibling test at :220-229 shows the intended
+  isolation style, with the other fields correct and only one wrong.
+- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
+  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
+  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
+  revise it.
+- Completion criteria: Add `'cli': {'stdout': 'farhelm 0.30.0\n'}` to the fixture's versions observation, so the old
+  running version (`['0.29.0']`) is the only premise that fails. The test still expects the running-version error, and
+  removing the running-versions clause from `managed_result` would now make it fail. Run the mac-vm-test Python unit
+  tests through the repository's recorded test-run path. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: change `lovtmpvywvzpttwnqlmtlwmvrvqmnppt`, bookmark
+  `plan/brick-test-guard-oracles/01-old-process-cli-premise`,
+  [PR #4382](https://github.com/scode/farhelm/pull/4382/changes).
