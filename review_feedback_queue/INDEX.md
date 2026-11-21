@@ -1081,10 +1081,6 @@ consequences.
   — The cancellation test does not assert its committed fleet wake. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-ui-host-lifecycle-provider-and-start-wording.md`](trailing-ui-host-lifecycle-provider-and-start-wording.md)
-  — Container lifecycle wording bypasses provider-aware UI text. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-ui-deleting-environment-retains-running-reconnect-promise.md`](trailing-ui-deleting-environment-retains-running-reconnect-promise.md)
   — Deleting environment can promise its cached session is still running. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

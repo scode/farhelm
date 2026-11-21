@@ -401,8 +401,9 @@ fn tunnel_lines<'a>(
 
 /// [`evidence`] for `host`: a machine's change ("Asked Tensorlake to resume at …") and its deletion ("Farhelm is
 /// deleting this sandbox, its files and its snapshots", or the failure and Retry, then the helm's reason) are worded
-/// for the host's provider. The unavailable session card uses this line for a change so it names the same party as
-/// Hosts. Every other phase, and a host with no provider, reads as [`evidence`] says.
+/// for the host's provider. A stopped container's start has its own verb even though the lifecycle direction is
+/// Resuming. The unavailable session card uses the same line as Hosts. Every other phase, and a host with no
+/// provider, reads as [`evidence`] says.
 pub(crate) fn host_evidence(
     line: HostSentence,
     host: &HostView,
@@ -413,17 +414,18 @@ pub(crate) fn host_evidence(
         // The old `lifecycle_request_detail`: whom Farhelm asked, in the provider's words.
         (
             HostStateView::TensorlakeChanging {
+                starting,
                 direction,
                 requested_at,
-                ..
             },
             Some(provider),
         ) => line.text(format!(
             "Asked {} to {} at {}; waiting for confirmation",
             ProviderUi(provider).lifecycle_asked(),
-            match direction {
-                LifecycleDirection::Suspending => "suspend",
-                LifecycleDirection::Resuming => "resume",
+            match (direction, starting) {
+                (LifecycleDirection::Suspending, _) => "suspend",
+                (LifecycleDirection::Resuming, true) => "start",
+                (LifecycleDirection::Resuming, false) => "resume",
             },
             local_time::stamp(requested_at / 1000, zone)
         )),
