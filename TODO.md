@@ -456,6 +456,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   awaiting the rebuild's publication. Test both a failure with a usable fallback and a launch concurrent with Rebuild.
   Deferred from the Podman triage plan because preserving active-job joining exceeds the original size gate.
 
+- **Apply host identity rules to Podman places.** If an SSH alias starts reaching another machine or account, a Delete
+  can see no container there and forget a live one on the original host. Two aliases for the same machine and account
+  can also both appear usable for new containers. Use one stable machine/account identity for both outcomes. Record it
+  for the execution endpoint before sending a new container create, and dispatch only to that verified endpoint. Verify
+  the identity on the connection that reports absence before accepting that as proof of deletion. Refuse new containers
+  on a second place for the same machine and account while preserving safe cleanup for existing bindings. Honor the
+  ordinary supervisor's identity refusal when it is available and keep support for places without a supervisor. The
+  relevant code is in `environment/podman.rs`, `environment/podman_probe.rs` and `store/podman.rs` in the helm. For an
+  older binding whose create may have been sent, finding the owned container can establish its identity. If the
+  container is absent, the helm cannot distinguish a removed container from a changed route. Decide how users can clear
+  those rows without assuming the current endpoint is the original one. Cover both the retargeted alias and the
+  duplicate place in tests and update SPEC. The Podman triage plan deferred the pair together because the older-row
+  behavior is unsettled.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm

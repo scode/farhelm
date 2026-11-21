@@ -74,14 +74,6 @@ consequences.
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
 
-- [`retargeted-ssh-alias-can-forget-live-container.md`](retargeted-ssh-alias-can-forget-live-container.md) — If an SSH
-  alias starts reaching a different machine or login account, Farhelm can report the old container deleted and remove it
-  from Hosts even though it is still on the original machine.
-
-- [`podman-place-probe-bypasses-host-identity-refusal.md`](podman-place-probe-bypasses-host-identity-refusal.md) —
-  Farhelm can treat two SSH entries for the same machine and account as usable container places even while its ordinary
-  host connection refuses the duplicate.
-
 - [`gone-terminal-retained-handle-hides-recovery.md`](gone-terminal-retained-handle-hides-recovery.md) — A terminal the
   supervisor knows is gone can stay in reconnecting state and hide the recovery card.
 
