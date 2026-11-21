@@ -223,8 +223,8 @@ const ROW_MENU_PAD_X: f32 = 5.;
 const RAIL_SIZE: f32 = 40.;
 /// The [`Tier::Chip`] box's padding, vertical then horizontal.
 const CHIP_PAD: (f32, f32) = (4., 6.);
-/// The [`Tier::Nav`] box's padding, vertical then horizontal.
-const NAV_PAD: (f32, f32) = (8., 10.);
+/// A 20-pixel Settings tile and four pixels of vertical padding make a 28-pixel navigation row.
+const NAV_PAD: (f32, f32) = (4., 8.);
 /// The [`Tier::Nav`] label's line height.
 const NAV_LINE_HEIGHT: f32 = 16.;
 /// The [`Tier::IconChoice`] square's side (`.host-icon-choice`'s `max-width: 36px` with `aspect-ratio: 1`).

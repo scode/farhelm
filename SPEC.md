@@ -2438,24 +2438,25 @@ and whether host setup or host removal confirmation should be skipped after an e
 these preferences, by an agent or the command line included, reaches the open window as it happens; automatic session
 selection chooses from the visits as the helm last pushed them, template shortcuts read their bindings on each
 invocation and the desktop helm reads the current file-opening list for each hover and open request. The gear at the
-foot of the host rail opens a settings dialog. Its left sidebar lists **Sessions**, **Appearance**, **Hosts**,
-**Recipes**, **Tensorlake**, **Containers**, **Credentials**, **Terminal**, **Checkouts**, **Agent trust** and
-**Notifications**, followed by **App** only in a desktop app whose updater is active. Each section has an icon; the
-selected one uses the solid selection fill. One selected section appears beside the list, with a matching heading;
-notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog keeps one height across sections, capped by
-the window; short sections leave space below their content, and longer sections scroll inside the pinned header and
-footer. At 620px wide and below, the dialog shows either the selected section or the list; **‹ Settings** returns to the
-list. The gear always opens sessions and focuses its first switch, including at phone width. Trust hints instead open
-agent trust at the relevant switch and scroll its block into view. Section buttons follow the platform's normal Tab
-rules. Switching sections preserves unsaved fields, outcome lines and pending saves. A recipe draft can hold Settings
-open for the editor's leave question. Closing discards other unsaved fields. Escape and either close control return
-focus to the gear when Settings closes.
+foot of the host rail opens a settings dialog. Its left sidebar groups **Sessions**, **Appearance**, **Terminal**,
+**Notifications** and **App** under **General**. App appears only in a desktop app whose updater is active. **Where
+sessions run** holds **Hosts**, **Checkouts**, **Containers**, **Recipes** and **Tensorlake**. **Agents** holds **Agent
+trust** and **Credentials**. Section icons sit on tiles that are blue, teal or orchid by group. The selected row uses
+the solid selection fill with a white-tinted tile. The selected page's heading stays above its scrollable content and
+shows its icon, name, description and scope. Notifications keeps **Sounds** and **ntfy alerts** sub-headings. The dialog
+keeps one height across sections, capped by the window. The header, footer and search field stay in place while the page
+and section list scroll independently. At 620px wide and below, the dialog shows either the selected section or the
+list. **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch, including at
+phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view. Section buttons
+follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and pending saves. A
+recipe draft can hold Settings open for the editor's leave question. Closing discards other unsaved fields. Escape and
+either close control return focus to the gear when Settings closes.
 
-The **Search** field above the section list finds settings by section, label or help text. The list shows only sections
-with matches and gives each section's count while a query is active. Cmd+F on a Mac or Ctrl+F on Linux moves focus there
-from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or Enter opens a result and
-reveals its control, or the top of its section for a choice group or help entry. Escape in the search field clears the
-query before it closes the dialog.
+The **Search** field above the section list finds settings by section, label or help text. While a query is active, the
+list shows the sections with matches under their group headings and gives each section's count. Cmd+F on a Mac or Ctrl+F
+on Linux moves focus there from Settings, except where a Linux text field uses Ctrl+F to move its caret. A click or
+Enter opens a result and reveals its control, or the top of its section for a choice group or help entry. Escape in the
+search field clears the query before it closes the dialog.
 
 **Credentials**, with a lock icon, holds named GitHub tokens, agent subscription logins and API endpoint tokens in three
 lists. Names use the recipe-name grammar, are unique across all kinds, and cannot be changed after creation; neither can

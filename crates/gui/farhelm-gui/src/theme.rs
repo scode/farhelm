@@ -83,6 +83,10 @@ pub struct Palette {
     pub bg_1: Token,
     /// `--bg-2`: floating surfaces: menus, dialogs, tooltips.
     pub bg_2: Token,
+    /// Settings content sits on a separate ground from the navigation and its cards.
+    pub settings_page: Token,
+    /// Individually grouped content in Settings and the session launcher.
+    pub card: Token,
     /// `--control-hover-bg`: the hover fill of a control; also a dialog header's band.
     pub control_hover: Token,
     /// `--fg-0`: primary text.
@@ -197,6 +201,23 @@ pub struct Palette {
     pub harness: [Token; 8],
 }
 
+impl Palette {
+    /// Blue marks the general Settings sections. Controls keep their usual accent in all groups.
+    pub fn settings_general(&self) -> Token {
+        self.accent
+    }
+
+    /// The Settings group for places sessions run shares teal with the host palette.
+    pub fn settings_placement(&self) -> Token {
+        self.host[2]
+    }
+
+    /// The Settings group for agent configuration shares orchid with the host palette.
+    pub fn settings_agents(&self) -> Token {
+        self.host[1]
+    }
+}
+
 /// The old app's "Steel" dark appearance.
 pub const DARK: Palette = Palette {
     dark: true,
@@ -204,6 +225,8 @@ pub const DARK: Palette = Palette {
     well: rgb_token(0x1a2029),
     bg_1: rgb_token(0x1d222c),
     bg_2: rgb_token(0x282e3a),
+    settings_page: rgb_token(0x282e3a),
+    card: rgb_token(0x20252f),
     control_hover: rgb_token(0x333b49),
     fg_0: rgb_token(0xe2e6f0),
     fg_bright: rgb_token(0xf2f5ff),
@@ -283,6 +306,8 @@ pub const LIGHT: Palette = Palette {
     well: rgb_token(0xf1f3f8),
     bg_1: rgb_token(0xe9edf4),
     bg_2: rgb_token(0xffffff),
+    settings_page: rgb_token(0xf4f6fa),
+    card: rgb_token(0xffffff),
     control_hover: rgb_token(0xdde3ee),
     fg_0: rgb_token(0x1b2130),
     fg_bright: rgb_token(0x111827),

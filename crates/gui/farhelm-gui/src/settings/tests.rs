@@ -186,8 +186,7 @@ pub(super) fn open_settings(cx: &mut VisualTestContext) {
     assert!(any_open(cx), "the premise: the gear opened Settings");
 }
 
-/// The dialog frame's scrolling body, by the selector the frame gives it (`<frame id>-body`). Its drawn bounds are the
-/// part of the section the user can see: everything else in the body is scrolled out of them.
+/// The visible part of the Settings page, between its pinned heading and footer.
 const DIALOG_BODY: &str = "settings-body";
 
 /// Whether the element drawn under `selector` lies wholly inside, top to bottom, the element drawn under `region`: a
@@ -275,12 +274,8 @@ fn the_gear_opens_settings_at_sessions_with_focus_on_its_first_switch(cx: &mut T
     );
 }
 
-/// SPEC.md lists every section, and App only where the desktop app's updater runs, which it does not here; listing App
-/// with nothing behind it would offer a button that shows an empty pane. The list follows SPEC.md's order ("Sessions,
-/// Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications,
-/// followed by App"), and the button of the shown section is the pressed one. Specified: the section list holds exactly
-/// the Sessions, Appearance, Hosts, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and
-/// Notifications buttons, in that order, Sessions pressed and the others not.
+/// Settings groups the sections in SPEC.md's order and omits App when the updater is unavailable. The driver should
+/// find the group labels and every section button in that order, with Sessions the only pressed button.
 #[gpui::test]
 fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -288,9 +283,9 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     let listed: Vec<(String, Option<Toggled>)> = frame(cx)
         .into_iter()
         .filter(|node| {
-            node.element_id
-                .as_deref()
-                .is_some_and(|id| id.starts_with("settings-section-"))
+            node.element_id.as_deref().is_some_and(|id| {
+                id.starts_with("settings-section-") || id.starts_with("settings-group")
+            })
         })
         .map(|node| {
             (
@@ -304,28 +299,29 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
     assert_eq!(
         listed,
         [
+            ("General".to_string(), None),
             ("Sessions".to_string(), Some(Toggled::True)),
             ("Appearance".to_string(), Some(Toggled::False)),
+            ("Terminal".to_string(), Some(Toggled::False)),
+            ("Notifications".to_string(), Some(Toggled::False)),
+            ("Where sessions run".to_string(), None),
             ("Hosts".to_string(), Some(Toggled::False)),
+            ("Checkouts".to_string(), Some(Toggled::False)),
+            ("Containers".to_string(), Some(Toggled::False)),
             ("Recipes".to_string(), Some(Toggled::False)),
             ("Tensorlake".to_string(), Some(Toggled::False)),
-            ("Containers".to_string(), Some(Toggled::False)),
-            ("Credentials".to_string(), Some(Toggled::False)),
-            ("Terminal".to_string(), Some(Toggled::False)),
-            ("Checkouts".to_string(), Some(Toggled::False)),
+            ("Agents".to_string(), None),
             ("Agent trust".to_string(), Some(Toggled::False)),
-            ("Notifications".to_string(), Some(Toggled::False)),
+            ("Credentials".to_string(), Some(Toggled::False)),
         ]
     );
 }
 
-/// SPEC.md, "Session list": the sections are "followed by **App** only in a desktop app whose updater is active". App's
-/// one switch writes through the updater, so listing it where none runs would offer a switch that saves nothing; the
-/// test above pins that it is absent then. Specified: with a desktop updater kept as the app's, App is listed last,
-/// after Notifications, unpressed, and its button shows the App section under the App heading with focus left on the
-/// button.
+/// App belongs at the end of General when the updater is available. Without it the updater's controls have no
+/// target, so the preceding test checks that App is absent. With the updater, its button opens the App section and
+/// keeps focus on the button.
 #[gpui::test]
-fn app_is_listed_last_while_the_desktop_updater_runs(cx: &mut TestAppContext) {
+fn app_is_listed_under_general_while_the_desktop_updater_runs(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
     keep_updater(cx, true, &Rc::default(), &Rc::default());
     open_settings(cx);
@@ -339,13 +335,21 @@ fn app_is_listed_last_while_the_desktop_updater_runs(cx: &mut TestAppContext) {
         .filter_map(|node| node.label.map(|label| label.to_string()))
         .collect();
     assert_eq!(
-        listed
-            .iter()
-            .rev()
-            .take(2)
-            .map(String::as_str)
-            .collect::<Vec<_>>(),
-        ["App", "Notifications"]
+        listed.iter().map(String::as_str).collect::<Vec<_>>(),
+        [
+            "Sessions",
+            "Appearance",
+            "Terminal",
+            "Notifications",
+            "App",
+            "Hosts",
+            "Checkouts",
+            "Containers",
+            "Recipes",
+            "Tensorlake",
+            "Agent trust",
+            "Credentials",
+        ]
     );
     click(cx, section_button(Section::App));
     assert_eq!(heading(cx).as_deref(), Some("App"));
@@ -813,10 +817,9 @@ fn the_frame_keeps_one_size_across_sections_capped_by_the_window(cx: &mut TestAp
 }
 
 /// SPEC.md, "Reaching everything by keyboard": a control Tab reaches must come into view, and in a short window the
-/// Sessions section is taller than the body that holds it. Settings relies on the dialog frame's body being one of the
-/// focus coordinator's scroll regions rather than scrolling anything itself, so this pins that its switches sit inside
-/// that region. Specified: in a window 400 pixels tall, the last Sessions switch starts below the body's visible part;
-/// after two Tabs from the first switch it holds focus and lies wholly inside the body's visible part.
+/// Sessions section is taller than the page viewport. The page itself must reveal the switch without moving the
+/// heading or the section list. Specified: in a window 400 pixels tall, the last Sessions switch starts below the
+/// fold. After two Tabs it has focus and lies wholly inside the viewport, with the heading and navigation unmoved.
 #[gpui::test]
 fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext) {
     let frames = Choice::ColorTerminalFrames.id();
@@ -825,6 +828,8 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
     settle(cx);
     open_settings(cx);
     let body = bounds(cx, DIALOG_BODY);
+    let heading = bounds(cx, "settings-heading");
+    let sessions = bounds(cx, "settings-section-sessions");
     assert!(
         bounds(cx, frames).bottom() > body.bottom(),
         "the premise: the last switch is below the fold"
@@ -841,6 +846,35 @@ fn a_switch_tab_reaches_below_the_fold_scrolls_into_view(cx: &mut TestAppContext
         bounds(cx, frames),
         bounds(cx, DIALOG_BODY)
     );
+    assert_eq!(bounds(cx, "settings-heading"), heading);
+    assert_eq!(bounds(cx, "settings-section-sessions"), sessions);
+}
+
+/// At the minimum window height, the sidebar needs to scroll to reveal Credentials.
+/// Wheel the section list and verify it exposes that row while the search field and page stay put.
+#[gpui::test]
+fn long_settings_navigation_scrolls_without_moving_search_or_page(cx: &mut TestAppContext) {
+    let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.simulate_resize(size(px(720.), px(560.)));
+    settle(cx);
+    open_settings(cx);
+    let list = bounds(cx, "settings-navigation-region");
+    let bottom = section_button(Section::Credentials);
+    let search = bounds(cx, "settings-search-field");
+    let heading = bounds(cx, "settings-heading");
+    assert!(
+        bounds(cx, bottom).bottom() > list.bottom(),
+        "the last row starts below the fold"
+    );
+    cx.simulate_event(gpui::ScrollEvent {
+        position: list.center(),
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(-5000.))),
+        ..Default::default()
+    });
+    settle(cx);
+    assert!(shows_whole(cx, bottom, "settings-navigation-region"));
+    assert_eq!(bounds(cx, "settings-search-field"), search);
+    assert_eq!(bounds(cx, "settings-heading"), heading);
 }
 
 // ---- Saving the switches -------------------------------------------------------------------------------------------
@@ -3162,10 +3196,9 @@ fn show_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext, stored: Value) {
     settle(cx);
 }
 
-/// Turn the wheel by `delta` pixels over the dialog's body (negative scrolls toward the end, as a wheel turned down
-/// does). It turns inside the body's left edge, over the section list, which does not scroll itself, so the body takes
-/// the wheel rather than a field under the pointer (Checkouts' multi-line command would).
-fn wheel(cx: &mut VisualTestContext, delta: f32) {
+/// Turn the wheel by `delta` pixels over the page (negative scrolls toward the end). It turns over the page's
+/// padding so the page takes the event even if a field such as Checkouts' multiline command also scrolls.
+pub(super) fn wheel(cx: &mut VisualTestContext, delta: f32) {
     let body = bounds(cx, DIALOG_BODY);
     cx.simulate_event(gpui::ScrollEvent {
         position: gpui::point(body.left() + px(10.), body.center().y),
@@ -3662,9 +3695,6 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     assert_eq!(busy_line(cx, "ntfy"), None, "its save started");
     helm.reply(id, 200, Some(ntfy("https://ntfy.sh", "", "default", false)));
     settle(cx);
-    // Reaching ntfy's Save scrolled the body down, section list and all, and the body keeps its offset: scroll back up,
-    // as the user would, to reach the Checkouts button.
-    wheel(cx, 4000.);
     click(cx, section_button(Section::Checkouts));
     assert_eq!(
         busy_line(cx, "checkout-post-clone"),

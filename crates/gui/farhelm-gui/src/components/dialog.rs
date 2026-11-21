@@ -107,6 +107,7 @@ pub struct DialogFrame {
     note: Option<SharedString>,
     width: Option<Pixels>,
     fixed_height: Option<Pixels>,
+    split_body: bool,
     footer_lead: Option<AnyElement>,
     notices: Option<AnyElement>,
     top_band: Option<AnyElement>,
@@ -143,6 +144,7 @@ impl DialogFrame {
             note: None,
             width: None,
             fixed_height: None,
+            split_body: false,
             footer_lead: None,
             notices: None,
             top_band: None,
@@ -224,6 +226,13 @@ impl DialogFrame {
     /// dialog whose body changes under the user, as Settings' sections do, so the frame and its controls stay put.
     pub fn fixed_height(mut self, height: Pixels) -> Self {
         self.fixed_height = Some(height);
+        self
+    }
+
+    /// Let a fixed-height two-pane dialog fill the space between the header and footer.
+    /// Each pane supplies its own padding and registers its own focus scroll region.
+    pub(crate) fn split_body(mut self) -> Self {
+        self.split_body = true;
         self
     }
 
@@ -402,20 +411,26 @@ impl RenderOnce for DialogFrame {
         // they do not fit. Their scroll handles live in keyed element state, since a frame is rebuilt on every draw.
         let body_scroll = scroll_handle(format!("{}-body-scroll", self.id), window, cx);
         let card_scroll = scroll_handle(format!("{}-card-scroll", self.id), window, cx);
+        let body_slot = if self.split_body { "panes" } else { "body" };
         let body = div()
-            .id(ElementId::Name(format!("{}-body", self.id).into()))
-            .debug_selector(|| format!("{}-body", self.id))
+            .id(ElementId::Name(format!("{}-{body_slot}", self.id).into()))
+            .debug_selector(|| format!("{}-{body_slot}", self.id))
             .flex_shrink_1()
-            .overflow_y_scroll()
-            .py(pad_y)
-            .px(pad_x)
+            .when(self.split_body, |body| body.flex().flex_col())
+            .when(!self.split_body, |body| {
+                body.overflow_y_scroll().py(pad_y).px(pad_x)
+            })
             .text_size(metrics::TEXT_SM)
             .text_color(theme::color(palette.fg_0))
             .child(self.body);
         // Page Up, Page Down, Home and End from a control in the body scroll it, as WebKit scrolled the container
         // around a focused control (SPEC_impl.md, "The component layer and theme"). With a scroll stop drawn, the stop
         // holds focus around the body rather than in it, so this never sees the stop's keys.
-        let body = scroll_from_controls(body, &body_scroll);
+        let body = if self.split_body {
+            body
+        } else {
+            scroll_from_controls(body, &body_scroll)
+        };
         // How the body sits in the card: it gives up height down to its floor, and a fixed-height frame's body takes
         // whatever the header and footer leave. With a scroll stop, that is the stop's place, and the body fills it.
         let fixed = self.fixed_height.is_some();
@@ -426,6 +441,7 @@ impl RenderOnce for DialogFrame {
                 .min_h(px(BODY_MIN_HEIGHT))
         };
         let body = match self.scroll_stop {
+            None if self.split_body => place(body).into_any_element(),
             None => focus::scroll_region(place(body), &body_scroll).into_any_element(),
             // The body has no border: the ring lies along the stop's edge, inside the card, which would clip anything
             // outside.

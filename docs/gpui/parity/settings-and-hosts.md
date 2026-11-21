@@ -1635,9 +1635,6 @@ Where the port does not match the old app, and why. Each stays until the work na
   confirmations reports save failure and recovers"). Here every session confirmation reads the helm's stored choice, so
   a refused save leaves them skipped, the switch back on and its failure line shown. The maintainer chose this on
   2026-11-14 (follow the helm), and SPEC.md's "Errors and diagnostics" says so.
-- **The section list does not stay put while a long section scrolls** (the old `position: sticky`). Of the sections
-  built so far, Checkouts (next item) and Notifications (Sounds above the ntfy form, as in the old app) scroll even at
-  the dialog's full height, and the list then scrolls with it.
 - **Checkouts does not fit the full-size dialog.** The old section fit the 780-pixel dialog with about 25 pixels to
   spare; here it is about 30 pixels taller than the dialog's body, so the body scrolls. Unscrolled, its last control,
   the spare switch's documentation link, sits at the body's visible edge with its descenders and underline below it

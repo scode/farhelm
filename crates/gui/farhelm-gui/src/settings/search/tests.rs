@@ -4,14 +4,14 @@
 use farhelm_helm_client::Method;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::ui_channel::Preferences;
-use gpui::{KeyDownEvent, Keystroke, TestAppContext, VisualTestContext};
+use gpui::{KeyDownEvent, Keystroke, TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
 
 use super::{Entry, Target, catalog, fold, highlights};
 use crate::actions::THIS_PLATFORM;
 use crate::layers;
 use crate::settings::tests::{
-    drawn, open_rail, open_settings, section_button, sent, show_checkouts,
+    drawn, open_rail, open_settings, section_button, sent, show_checkouts, wheel,
 };
 use crate::settings::{Choice, Section, SettingsDialog, decide_tunnels_for_opened};
 use crate::test_support::{
@@ -269,6 +269,43 @@ fn escape_restores_the_prior_section_and_close_controls_close(cx: &mut TestAppCo
     }
 }
 
+/// Clearing a query returns to the same place in the page. Opening a top-of-page result for that same section
+/// instead reveals the section content from the top, even though the search field is outside its scroll area.
+#[gpui::test]
+fn a_top_result_reveals_the_start_of_the_current_scrolled_page(cx: &mut TestAppContext) {
+    let (_, cx, _) = open_rail(cx, &Preferences::default());
+    cx.simulate_resize(size(px(1000.), px(560.)));
+    settle(cx);
+    open_settings(cx);
+    click(cx, section_button(Section::Notifications));
+    let top = |cx: &mut VisualTestContext| {
+        frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(super::SOUNDS_ID))
+            .expect("the Sounds group is laid out")
+            .bounds
+            .top()
+    };
+    let start = top(cx);
+    wheel(cx, -5000.);
+    let scrolled = top(cx);
+    assert!(
+        scrolled < start,
+        "the Sounds group scrolled off its starting position"
+    );
+
+    focus_search(cx);
+    type_query(cx, "sounds");
+    keys(cx, "escape");
+    assert_eq!(top(cx), scrolled);
+
+    type_query(cx, "sounds");
+    let sounds = "settings-result-notifications-settings-sounds";
+    assert!(result_ids(cx).iter().any(|id| id == sounds));
+    click(cx, sounds);
+    assert_eq!(top(cx), start);
+}
+
 /// Filtering the navigation changes only which section buttons are listed, and a section this build hides is never
 /// one of them. Clearing the query restores the old list.
 #[gpui::test]
@@ -444,6 +481,14 @@ fn every_catalog_entry_corresponds_to_something_drawn(cx: &mut TestAppContext) {
                         "api_key_set": true, "create_without_asking": false,
                         "helm_tag": "fixture", "ssh_key": { "state": "not_created" },
                     })),
+                );
+            } else {
+                // Static catalog targets are present through a refusal. Answer in wire order so a section visited
+                // before Tensorlake cannot leave an earlier read ahead of the account fixture.
+                helm.reply(
+                    read.id,
+                    503,
+                    Some(json!("not available in the catalog fixture")),
                 );
             }
         }

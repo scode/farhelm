@@ -21,7 +21,7 @@ use super::recipes::Editor;
 use super::recipes::draft::Draft;
 use super::tests::{
     available, drawn, fill, label_of, open_rail_with, open_settings, painted, reach,
-    section_button, sent, switch_on,
+    section_button, sent, switch_on, wheel,
 };
 use crate::layers;
 use crate::operations::{OpKey, Work};
@@ -327,9 +327,8 @@ fn while_a_save_is_out_the_form_takes_no_edit(cx: &mut TestAppContext) {
 /// SPEC.md: "In Settings the editor opens at its top, including Back". The editor replaces a list the user may have
 /// scrolled, and the dialog's body keeps its scroll offset across that swap, so only the editor's own opening can bring
 /// its top back into view; with a short list the rule holds trivially, which is why the old spec seeded enough recipes
-/// to scroll first. Specified: with six recipes, the body scrolled until New recipe shows (the section's heading then
-/// lies above the body's top), New recipe opens the editor with Back wholly inside the body; Back again, the body
-/// scrolled to the last row's Edit, and Edit opens that recipe's editor with Back wholly inside the body too.
+/// to scroll first. Scroll the list with New recipe still visible, then open the editor from the New recipe button.
+/// Return to the list, scroll to the last row's Edit, and open that editor too. Back must show whole in both editors.
 #[gpui::test]
 fn the_editor_opens_at_its_top_from_a_scrolled_list(cx: &mut TestAppContext) {
     let names = ["dev-1", "dev-2", "dev-3", "dev-4", "dev-5", "dev-6"];
@@ -345,9 +344,11 @@ fn the_editor_opens_at_its_top_from_a_scrolled_list(cx: &mut TestAppContext) {
         body.top() <= back.top() && back.bottom() <= body.bottom()
     };
 
+    let list_top = bounds(cx, "recipe-new").top();
     reach(cx, "recipe-new");
+    wheel(cx, -5.);
     assert!(
-        bounds(cx, "settings-heading").top() < bounds(cx, "settings-body").top(),
+        bounds(cx, "recipe-new").top() < list_top,
         "the premise: the list is scrolled"
     );
     keys(cx, "space");
@@ -357,7 +358,7 @@ fn the_editor_opens_at_its_top_from_a_scrolled_list(cx: &mut TestAppContext) {
     click(cx, "recipe-back");
     reach(cx, "recipe-edit-dev-6");
     assert!(
-        bounds(cx, "settings-heading").top() < bounds(cx, "settings-body").top(),
+        bounds(cx, "recipe-new").top() < list_top,
         "the premise: the list is scrolled"
     );
     keys(cx, "space");
