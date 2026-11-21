@@ -22,29 +22,6 @@
   file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/hosts-small-fixes.md`.
 
-## exit-notice-hides-oldest-scrollback-row.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop app ported the
-  same layout. `crates/gui/farhelm-gui/src/terminal/attached.rs:1814-1827` (`placement`) and `lift` at 1988-2003 lift
-  the shown rows by a whole row whenever the program has exited and the fitted pane has less than one spare row.
-  `screen` at 2114-2149 draws them at `mt(-lift)` inside the `overflow_hidden` grid area at 2392-2398. None of this
-  looks at the scroll position, and the viewport's top is clamped to the oldest retained line
-  (`crates/gui/farhelm-grid-model/src/viewport.rs:60-74,103-107,115-121`). Scrolled all the way back after an exit, the
-  oldest line (or the "Some earlier output could not be recovered" notice line) is clipped and no earlier scroll
-  position can bring it into view.
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes ("After an agent exits, its oldest
-  output line can't be scrolled into view"), with a test where practical. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a
-  complexity gate: "if any of these spiral into something very complicated, the executor should make a near term todo
-  item to follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket),
-  remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/terminal-exit-and-placeholder-fixes.md`.
-
 ## light-appearance-darkens-terminal-catchup.md
 
 - Outcome: `fix code`.

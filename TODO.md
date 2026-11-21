@@ -37,6 +37,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   override, a configured default, and a shortcut that reveals the setup field when the default is missing or the read
   error when the setting could not be loaded.
 
+- **Expose the oldest terminal output after an agent exits.** The exit notice can lift the oldest retained line or the
+  missing-output notice out of the pane even at the top of scrollback. Keep the exit notice below the text and make
+  every retained row reachable, including when the agent exits on the alternate screen. Cover drag selection and Select
+  All against the same visible history.
+
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
   resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
   (interim, decided 2026-11-17). Tensorlake suspends an idle sandbox after 30 minutes, including once the app quits, so
