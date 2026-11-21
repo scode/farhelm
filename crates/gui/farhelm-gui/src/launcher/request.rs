@@ -37,6 +37,7 @@
 //! ambiguous fresh-checkout create ("Retry reconciles the original request at this path") have no counterpart here.
 
 use farhelm_helm_client::Collections;
+use farhelm_proto::conversation::validate_launch_conversation;
 use farhelm_proto::launcher::{LaunchCatalogModel, TemplateNameKind, compatible_efforts};
 use farhelm_proto::recipes::RecipeView;
 use farhelm_proto::session_requests::{
@@ -204,6 +205,8 @@ pub const SELECT_REPOSITORY: &str = "Select a GitHub repository before launching
 /// launcher's words, which it said at the press.
 pub const CONVERSATION_IN_CHECKOUT: &str =
     "Named conversations cannot start in a new managed checkout; choose an existing folder";
+const CONVERSATION_WITH_PROMPT: &str =
+    "This agent cannot combine an initial prompt with a named conversation";
 /// Why a managed checkout waits for its preview, the old launcher's words; a failed preview says this too, while its
 /// own words show beside the preview.
 pub const WAIT_FOR_PREVIEW: &str = "Wait for a current checkout preview before launching";
@@ -342,7 +345,7 @@ impl LaunchDraft {
                     .to_owned(),
             );
         }
-        if !self.agent.wrapper.is_empty() && split_wrapper_prefix(&self.agent.wrapper).is_err() {
+        if self.wrapper_error().is_some() {
             return Some("Correct the wrapper prefix before launching".to_owned());
         }
         if self.agent.container.is_some() {
@@ -353,22 +356,14 @@ impl LaunchDraft {
         {
             return Some(capitalized(&error));
         }
-        if self.active_prompt().is_some()
-            && self.active_conversation().is_some()
-            && !selection.harness.supports_initial_prompt(true)
-        {
-            return Some(
-                "This agent cannot combine an initial prompt with a named conversation".to_owned(),
-            );
-        }
-        None
+        self.named_start_error()
     }
 
     /// Restart with's own reasons, after the ordinary ones (SPEC.md, "Restart with": the main action is "inactive
     /// until a setting changes or a conversation selector is entered").
     fn restart_refusal(&self, restart: &Restart, live: Option<&SessionLaunch>) -> Option<String> {
         let baseline = &restart.baseline;
-        if restart.conversation_required && self.conversation.is_empty() {
+        if self.requires_conversation() && self.conversation.is_empty() {
             return Some("Enter a conversation to restart".to_owned());
         }
         if self.restart_edit().as_ref() == Some(baseline) && self.active_conversation().is_none() {
@@ -396,7 +391,7 @@ impl LaunchDraft {
         if checkout.repo.is_none() {
             return Some(SELECT_REPOSITORY);
         }
-        if self.active_conversation().is_some() {
+        if self.conversation_in_checkout() {
             return Some(CONVERSATION_IN_CHECKOUT);
         }
         // A new environment has no installation to verify and no folder to preview yet (the module docs).
@@ -517,13 +512,52 @@ impl LaunchDraft {
 
     /// The conversation selector this launch sends: only on the Agent tab, for an agent that offers one, when filled
     /// in.
-    fn active_conversation(&self) -> Option<&str> {
+    pub(super) fn active_conversation(&self) -> Option<&str> {
         let offered = self
             .agent
             .harness
             .is_some_and(|harness| harness.offers_named_conversation());
         (self.tab == Tab::Agent && offered && !self.conversation.is_empty())
             .then_some(self.conversation.as_str())
+    }
+
+    /// The restart could not acquire a captured conversation. Supplying a valid selector makes it actionable,
+    /// but the setting remains required for this restart and must stay visible.
+    pub(super) fn requires_conversation(&self) -> bool {
+        matches!(&self.mode, Mode::RestartWith(restart) if restart.conversation_required)
+    }
+
+    /// A saved or typed wrapper uses the same parser for the field warning and the launch prerequisite.
+    pub(super) fn wrapper_error(&self) -> Option<String> {
+        if self.agent.wrapper.is_empty() {
+            return None;
+        }
+        split_wrapper_prefix(&self.agent.wrapper).err()
+    }
+
+    /// The field warning uses the checkout prerequisite even while an earlier refusal takes precedence.
+    pub(super) fn conversation_error(&self) -> Option<String> {
+        if self.conversation_in_checkout() {
+            return Some(CONVERSATION_IN_CHECKOUT.to_owned());
+        }
+        self.named_start_error()
+    }
+
+    /// A selected checkout destination conflicts with a named start even before a repository has been picked.
+    fn conversation_in_checkout(&self) -> bool {
+        self.checkout.is_some() && self.active_conversation().is_some()
+    }
+
+    /// Apply the helm's literal selector boundary before submission. A valid selector can still conflict with a
+    /// prompt on an agent that only accepts prompts for fresh starts.
+    fn named_start_error(&self) -> Option<String> {
+        let conversation = self.active_conversation()?;
+        let harness = self.agent.harness?;
+        if let Err(error) = validate_launch_conversation(harness, conversation) {
+            return Some(capitalized(&error));
+        }
+        (self.active_prompt().is_some() && !harness.supports_initial_prompt(true))
+            .then(|| CONVERSATION_WITH_PROMPT.to_owned())
     }
 
     /// Whether the YOLO question's "Start guarded session instead" would still change anything: in Restart with, a

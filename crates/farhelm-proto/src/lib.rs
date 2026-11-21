@@ -113,6 +113,7 @@ pub mod announcements;
 /// Acting `farhelm` commands waiting for the user's approval, as the helm
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
+pub mod conversation;
 // The grid stream a terminal's attachment carries, and the input its viewer
 // sends back. Its docs are all its own: an outer doc comment here would make
 // rustdoc resolve the module's links from this file, where its items are not
