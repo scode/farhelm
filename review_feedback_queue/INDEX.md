@@ -348,10 +348,6 @@ consequences.
   defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are
   established, arbitrary path substitution is not.
 
-- [`implementation-version-doc-omits-schema-update-guard.md`](implementation-version-doc-omits-schema-update-guard.md) —
-  The implementation specification's version/skew description omits the schema-based guard that can forbid Update. The
-  product specification and actual guard remain intact.
-
 - [`folder-refusal-classifier-matches-path-text.md`](folder-refusal-classifier-matches-path-text.md) — A path containing
   familiar error phrases can be misclassified as missing rather than refused or non-directory. This changes an advisory
   annotation, not launch authority; the rare-diagnostic filter's scope is ambiguous.

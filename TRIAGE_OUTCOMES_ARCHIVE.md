@@ -26003,3 +26003,18 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and its index entry.
 - Execution: change `vtsmqnyqlvslxykovovsltptysvpszww`, bookmark `pr/spec-download-crash-exception`,
   [PR #4377](https://github.com/scode/farhelm/pull/4377/changes).
+
+## implementation-version-doc-omits-schema-update-guard.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  SPEC_impl.md "Version and skew" (around 5310-5325) covers hello versions and the dev-helm ordering, but not the
+  separate refusal of Update when a host reports a newer database schema (SPEC.md:119-125). The finding itself says the
+  existing sentence ("never refuses Update as a downgrade") "is not literally refuted".
+- Decision: the user picked "Fix each with the smallest truthful correction" (2026-10-26 ten-question triage page, Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: change `lxznlrmmvsllnxxmokxuzzkwqprrwyrw`, bookmark `pr/spec-impl-schema-update-guard`,
+  [PR #4378](https://github.com/scode/farhelm/pull/4378/changes).
