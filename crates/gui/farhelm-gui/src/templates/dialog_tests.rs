@@ -559,11 +559,25 @@ fn bolt_lit(cx: &mut VisualTestContext, name: &str) -> Option<bool> {
 /// clears it." (That a click means what the drawn bolt showed, even when the store changed before the redraw, is pinned
 /// by `shortcuts_tests::a_bolt_click_writes_what_the_drawn_bolt_meant`: here it would depend on whether a push lands
 /// before the click is dispatched.) A click writes only the mark's field, the template's name to mark it and `null` to clear it, and the
-/// list shows the mark once the helm has stored it, never before.
+/// list shows the mark once the helm has stored it. A long list sets the centered dialog's height, so
+/// reserve the chord line's space before the first mark to keep both controls under the pointer.
 #[gpui::test]
 fn the_bolt_marks_and_clears_through_the_preferences(cx: &mut TestAppContext) {
-    let (mut helm, cx) = open_header(cx, &templates(), None);
+    let mut list = templates();
+    list.extend(["z-a", "z-b", "z-c", "z-d"].map(|name| template(name, TemplateFields::default())));
+    let (mut helm, cx) = open_header(cx, &list, None);
     click(cx, "templates-button");
+    assert_eq!(bolt_lit(cx, "my-codex"), Some(false));
+    let bolt = test_support::bounds(cx, "template-bolt-my-codex");
+    let cap = test_support::bounds(cx, "template-key-my-codex");
+    let opener = test_support::bounds(cx, "template-open-my-codex");
+    let last = test_support::bounds(cx, "template-open-z-d");
+    assert!(
+        last.bottom() - opener.top() > px(340.),
+        "the list sets the dialog height"
+    );
+    assert!((bolt.center().y - opener.center().y).abs() < px(1.));
+    assert!((cap.center().y - opener.center().y).abs() < px(1.));
     click(cx, "template-bolt-my-codex");
     let (id, body) = one_write(&mut helm);
     assert_eq!(
@@ -581,6 +595,9 @@ fn the_bolt_marks_and_clears_through_the_preferences(cx: &mut TestAppContext) {
     );
     store_and_reply(&mut helm, id, &marked, cx);
     assert_eq!(bolt_lit(cx, "my-codex"), Some(true));
+    // The new chord line grows the row below its controls, leaving the button under the pointer.
+    assert_eq!(test_support::bounds(cx, "template-bolt-my-codex"), bolt);
+    assert_eq!(test_support::bounds(cx, "template-key-my-codex"), cap);
 
     click(cx, "template-bolt-my-codex");
     let (_, body) = one_write(&mut helm);
@@ -829,7 +846,7 @@ fn push_keys(helm: &mut FakeHelm, keys: &[(&str, &str)], cx: &mut VisualTestCont
 /// showed the keys as the dialog's own reads and writes had left them, so another writer's change stayed undrawn until
 /// the dialog was reopened, where these draw what the store holds (the parity file's deviation "The key buttons follow
 /// pushed bindings"). Specified: with Templates open and no key bound, a push binding key 1 to `my-codex` redraws that
-/// template's key button with key 1's chord; choosing key 2 for `webbuilder` then writes both keys.
+/// template's cap with key 1 without shifting the text; choosing key 2 for `webbuilder` then writes both keys.
 #[gpui::test]
 fn a_key_pushed_while_open_is_drawn_and_kept_by_the_next_key_write(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_header(cx, &templates(), None);
@@ -840,14 +857,18 @@ fn a_key_pushed_while_open_is_drawn_and_kept_by_the_next_key_write(cx: &mut Test
             .any(|line| line.text.as_ref() == chord.as_str())
     };
     assert!(
-        draws(cx, super::shortcuts::key_button_text(None)),
+        draws(cx, "+".to_owned()),
         "the premise: my-codex's key button shows no key"
     );
+    let cap = test_support::bounds(cx, "template-key-my-codex");
+    let opener = test_support::bounds(cx, "template-open-my-codex");
     push_keys(&mut helm, &[("1", "my-codex")], cx);
     assert!(
-        draws(cx, super::number_key_name("1")),
+        draws(cx, super::shortcuts::key_button_text(Some("1"))),
         "the pushed key is drawn"
     );
+    assert_eq!(test_support::bounds(cx, "template-key-my-codex"), cap);
+    assert_eq!(test_support::bounds(cx, "template-open-my-codex"), opener);
     click(cx, "template-key-webbuilder");
     click(cx, "templates-key-2-item");
     let (_, body) = one_write(&mut helm);
@@ -1218,11 +1239,10 @@ fn push_names(helm: &mut FakeHelm, names: &[&str], removed: &[&str], cx: &mut Vi
 /// SPEC.md, "Things changing underneath": "Focus follows the thing, not the position", and "Opening and closing":
 /// "Nothing closes a dialog, menu, popup list or confirmation that it did not open". The old app closed a template's
 /// open number-key menu whenever another change moved its button (`popover-template-movement.spec.ts` at reference
-/// commit `24bc0580`, whose six cases this inverts). Pushes move the button in two ways: the ⚡ mark adds a chord line
-/// to the marked row, growing it (a button is centered in its row, so its own row growing moves it too), and a rename
-/// re-sorts the list by name. Specified: over templates `a` to `d`, in a window tall enough that every key menu opens
-/// below its button, with a key menu opened by a click, each row's push leaves the menu open and moves it by as much
-/// as its button, which moves the way the row's last column says. The window's height is part of the premise: a menu
+/// commit `24bc0580`, whose six cases this inverts). The ⚡ mark adds a chord line below that row's controls, moving
+/// later rows. A rename re-sorts the list by name. In a window tall enough for the menu to open below its button,
+/// each push leaves the menu open and moves it by as much as its button. The expected direction is given in the
+/// last column. The window's height is part of the premise: a menu
 /// that fits on neither side of its button is pinned to the window's bottom, and one with no room below opens above
 /// it (`layers::popover_origin`), so in a shorter window a menu can change sides or stay pinned while its button moves,
 /// which is the layer manager's placement rule, not a menu failing to follow.
@@ -1244,7 +1264,7 @@ fn the_key_menu_follows_its_button_through_what_the_helm_pushes(cx: &mut TestApp
     click(cx, "templates-button");
     for (marked, key, change, way) in [
         (Some("c"), "template-key-b", MarkTo("a"), Greater),
-        (Some("c"), "template-key-a", MarkTo("a"), Greater),
+        (Some("c"), "template-key-a", MarkTo("a"), Equal),
         (Some("c"), "template-key-a", MarkTo("b"), Equal),
         (Some("c"), "template-key-d", MarkTo("a"), Equal),
         (None, "template-key-b", Rename("a", "z"), Less),
@@ -1381,9 +1401,8 @@ fn laid_out_dialog(
 /// proportional. The test context's text system gives every character the same width, so only the real one can tell.
 /// Specified, with the real text system: two templates holding the keys 1 and 8, the old case's pair, paint their key
 /// buttons' chords each as many advances of the monospace face, at the button's 10 pixels, as the chord has
-/// characters; and the interface face's 1 and 8 differ in advance at that size by more than a pixel (the premise: in
-/// that face the two chords would differ in width). The old case also compared the key buttons themselves, which take
-/// their width from their chord, so the two buttons are equally wide too.
+/// characters. The interface face's 1 and 8 differ by more than a pixel, so using that face would change the label
+/// width. Both buttons reserve the same space for the label.
 #[test]
 fn the_number_keys_digits_are_drawn_at_equal_widths() {
     let digits = ["1", "8"];
@@ -1424,7 +1443,7 @@ fn the_number_keys_digits_are_drawn_at_equal_widths() {
     );
     let mut buttons = Vec::new();
     for digit in digits {
-        let chord = super::number_key_name(digit);
+        let chord = super::shortcuts::key_button_text(Some(digit));
         let id = format!("template-key-key-{digit}");
         let button = nodes
             .iter()

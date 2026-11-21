@@ -162,8 +162,15 @@ fn hover_help_names_the_behavior_and_the_choice() {
         super::SEQUENCE_PREFIX_NAME
     )));
     assert!(key_help(false, None).ends_with("Click to give this template a number key."));
-    assert_eq!(key_button_text(None), super::number_key_name(" –"));
-    assert_eq!(key_button_text(Some("7")), super::number_key_name("7"));
+    assert_eq!(key_button_text(None), "+");
+    assert_eq!(
+        key_button_text(Some("7")),
+        if cfg!(target_os = "macos") {
+            "⌘7"
+        } else {
+            "7"
+        }
+    );
 }
 
 /// A bolt click means what the bolt showed when it was clicked: an unlit bolt marks, a lit one clears. When the store

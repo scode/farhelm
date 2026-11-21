@@ -256,7 +256,12 @@ pub fn key_help(launchable: bool, bound: Option<&str>) -> String {
     format!("{behavior} Only one template can hold each key. {state}")
 }
 
-/// The number-key button's text: the bound chord, or the old placeholder with no key ("Ctrl+Shift+ –", "⌘ –").
+/// The fixed-width cap shows a digit on Linux and Cmd plus the digit on macOS. The plus opens the same menu
+/// when no key is assigned. See [`key_help`] for the full binding.
 pub fn key_button_text(bound: Option<&str>) -> String {
-    super::number_key_name(bound.unwrap_or(" –"))
+    match bound {
+        None => "+".to_owned(),
+        Some(key) if cfg!(target_os = "macos") => super::number_key_name(key),
+        Some(key) => key.to_owned(),
+    }
 }

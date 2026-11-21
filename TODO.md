@@ -325,18 +325,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Vertically center the lightning bolt in the template list.** the layout of the lightning bolt in the template menu
-  is off. it needs to be properly vertically centered. (Screenshot: on the Templates page, the ⚡ quick-launch marker to
-  the left of each template row sits up near the top of the row, above the ⌘ shortcut, rather than centered on the row.)
-  Plan: `plans/queue/templates-list-bolt-and-key.md`.
-
-- **Something is cut off in the template list's left-hand bar.** wtf is getting cut off in the left hand bar. need to
-  understand what it is and whether to keep showing it and if so how, in a way that it's actually visible. (Screenshot:
-  on the Templates page, the narrow column left of each template's name holds the ⚡ and a ⌘ shortcut label, which reads
-  "⌘ –" on rows without a number key and "⌘1" or "⌘0" on rows with one; whatever follows the ⌘ looks clipped, and rows
-  showing "⌘ –" indent the template name further right than rows with a number.) Plan:
-  `plans/queue/templates-list-bolt-and-key.md`.
-
 - **Show release notes on upgrade.** on upgrades, show the release notes (only the highlighted ones) to the user. offer
   a "do not show release notes again" option to suppresse (direct click button + separate toggle in settings). also link
   in that dialog to full release notes. the release notes to contain everything since the last version the user ran, not
