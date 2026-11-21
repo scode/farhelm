@@ -105,29 +105,6 @@
   the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## sandbox-checkout-hides-required-folder-setting.md
-
-- Outcome: `fix code`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The helm refuses a
-  new-environment managed checkout when no global default checkout folder is set ("set a default checkout folder in
-  Settings → Checkouts before launching a repository in a new sandbox",
-  `crates/farhelm-helm/src/sessions.rs:1389-1398`). The desktop launcher deliberately skips the checkout-folder check
-  for a new environment (`launcher/view/checkout.rs:337-341`), and `environment_refusal` has no such check
-  (`launcher/request.rs:732-762`). So the inline setup field never shows, and Launch stays available until the helm
-  refuses. The comment at checkout.rs:337-341 cites SPEC's recipe-target "exception", which concerns the preview, not
-  the folder setting.
-- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
-  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
-  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
-  of complexity."
-- Completion criteria: Fix within the current spec what the Assessment describes ("New sandbox checkout doesn't show the
-  missing default checkout folder"), with a test where practical. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity gate:
-  "if any of these spiral into something very complicated, the executor should make a near term todo item to follow up
-  on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the
-  feedback file, and say so in the execution record. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
-
 ## trailing-ordinary-host-remove-bypasses-sealed-attempt-outcome.md
 
 - Outcome: `fix code`.
