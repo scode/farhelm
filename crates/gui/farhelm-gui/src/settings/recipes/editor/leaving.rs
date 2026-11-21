@@ -1,16 +1,18 @@
-//! Leaving the recipe editor, and deleting its recipe: the question "Save these changes before leaving?" that Back,
-//! Cancel and closing the hosting dialog ask while the draft has unsaved changes, and Delete with its confirmation.
+//! Leaving the recipe editor, and deleting its recipe: the question "Save these changes before leaving?" that Back and
+//! Cancel ask while the draft has unsaved changes (and that closing Add host asks for its embedded editor), and Delete
+//! with its confirmation.
 //!
-//! SPEC.md, "Topology" (the Recipes paragraphs: "Leaving it with unsaved changes, whether by its own Back or Cancel or
-//! by closing Settings with Escape or a close control, asks whether to save, discard or keep editing, and saving or
-//! discarding then completes the close. Delete asks for confirmation"). Ported from the old editor's leave and delete
-//! questions and its `DialogCloseGuard` (`tensorlake/recipe_editor.rs` at reference commit `24bc0580`), with their
-//! words. Here's the TLDR of its rules:
+//! SPEC.md, "Topology" (the Recipes paragraphs: "Leaving it with unsaved changes by its own Back or Cancel asks whether
+//! to save, discard or keep editing. Closing Settings includes the recipe draft in the dialog's unsaved-changes
+//! question. Delete asks for confirmation in the pinned footer"). Closing Settings is therefore not this module's
+//! question: the Settings dialog asks one question about every unsaved draft and saves the recipe through the editor's
+//! ordinary Save (`settings/editing.rs`). Ported from the old editor's leave and delete questions and its
+//! `DialogCloseGuard` (`tensorlake/recipe_editor.rs` at reference commit `24bc0580`), with their words. Here's the TLDR
+//! of its rules:
 //!
-//! - **The editor owns its leaving.** Back and Cancel call [`Editor::leave`] for a return to the list, and the hosting
-//!   dialog's dismissal hook calls [`Editor::dismissal`] for a close, so a dialog other than Settings can host the
-//!   editor with the same rules. Where a departure goes is the host's ([`super::Host`]): the section's
-//!   ([`super::super::Recipes::depart`]), or Add host's.
+//! - **The editor owns its leaving.** Back and Cancel call [`Editor::leave`] for a return to the list. Add host's
+//!   dismissal hook calls [`Editor::dismissal`] for a close; Settings no longer does. Where a departure goes is the
+//!   host's ([`super::Host`]): the section's ([`super::super::Recipes::depart`]), or Add host's.
 //! - **Leaving opens over the host dialog.** Keep editing, Discard and Save stay visible even during a long edit.
 //!   The delete confirmation stays in the footer. Asking about leaving dismisses any inline delete confirmation.
 //! - **Save finishes the leave.** Save in the question saves as Save does, and the done answer completes the departure

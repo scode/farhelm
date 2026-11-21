@@ -116,8 +116,9 @@ pub enum Tier {
     /// pointer).
     Readout { focus_fill: bool },
     /// `.app-settings-navigation button`: an entry of a navigation list (Settings' sections), as wide as its list, its
-    /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line (the old `line-height: normal`, which
-    /// made it 34 pixels high), the primary ink at rest, and the label cut short with an ellipsis rather than wrapped.
+    /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line, a 28-pixel row around Settings'
+    /// 20-pixel section tiles (`NAV_PAD`; the old sheet's row was 34 pixels high), the primary ink at rest, and the label
+    /// cut short with an ellipsis rather than wrapped.
     /// The entry whose pane is shown is drawn through [`Button::pressed`], in this tier as the old sheet drew it: the
     /// accent fill with the accent edge, which the pointer does not change, and the inverse ring one pixel inside the
     /// edge (`outline-offset: -3px`).

@@ -3161,10 +3161,11 @@ fn a_failed_folder_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppC
     assert!(drawn(cx, FOOTER_SAVE));
 }
 
-/// SPEC.md: "Switching sections preserves unsaved fields", and closing discards them (the dialog's module docs). A
-/// draft that a section switch dropped would lose what the user typed; one that outlived the dialog would show text the
-/// helm does not hold. Specified: a command typed but neither saved nor refused is still there after showing Sessions
-/// and Checkouts again, with nothing sent; after Escape and a new opening, the field shows the stored command.
+/// SPEC.md: "Switching sections preserves unsaved fields", and Discard in the close question drops them. A draft
+/// that a section switch dropped would lose what the user typed; one that outlived a discarded close would show text
+/// the helm does not hold. Specified: a command typed but neither saved nor refused is still there after showing
+/// Sessions and Checkouts again, with nothing sent; after Escape, Discard and a new opening, the field shows the stored
+/// command.
 #[gpui::test]
 fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -3472,10 +3473,10 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
 }
 
 /// SPEC.md: "Save refusals appear inline", and SPEC.md's "Switching sections preserves unsaved fields, outcome lines
-/// and pending saves; closing discards unsaved fields". The helm refuses a bad topic with its own fixed words, and the
-/// user must be able to correct the form rather than retype it. Specified: a topic with a slash, saved and refused,
-/// shows the helm's words as an alert; after showing Sessions and Notifications again the words are still there and
-/// Save sends the same topic; once Settings is closed and opened again the form reads the settings again and Save
+/// and pending saves". The helm refuses a bad topic with its own fixed words, and the user must be able to correct the
+/// form rather than retype it. Specified: a topic with a slash, saved and refused, shows the helm's words as an alert;
+/// after showing Sessions and Notifications again the words are still there and Save sends the same topic; once
+/// Settings is closed with Discard in the close question and opened again, the form reads the settings again and Save
 /// sends the stored topic.
 #[gpui::test]
 fn a_refused_save_keeps_the_form_with_the_helms_words_until_closed(cx: &mut TestAppContext) {
@@ -3867,8 +3868,8 @@ fn the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end(cx: &mut
 /// send and change nothing; the helm's refusal shows in its own words with the alert role; an edit takes that line
 /// away; with an unsaved topic typed, a refusal stays after showing Sessions and Notifications again, beside the
 /// unsaved topic; a test answered with no body shows "Test alert sent" with the status role, which also stays across
-/// that switch; closing Settings with it showing and opening it again shows no line, and Save sends the stored topic,
-/// not the unsaved one.
+/// that switch; closing Settings with it showing (Discard in the close question) and opening it again shows no line,
+/// and Save sends the stored topic, not the unsaved one.
 #[gpui::test]
 fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppContext) {
     let refusal = "the ntfy server could not be reached";
