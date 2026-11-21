@@ -667,7 +667,8 @@ mod tests {
     /// The card's words are the only place an interrupted session says why it has no terminal and what each choice
     /// does, so they are the old card's, pinned per offer. Specified: a resumable session names Restart or Replace and
     /// the resume; an uncaptured Claude session names only Replace, never-captured, and the feedback invitation; an
-    /// agent without conversation reporting and a command launch without Resume name only Replace and why; a legacy
+    /// agent without conversation reporting and an older Muse launch without a stored resume command name only Replace
+    /// and why; a legacy
     /// launch names Replace with instead in each of its three forms and never promises that Replace starts it over.
     #[test]
     fn the_cards_words_say_what_ended_and_what_each_choice_does() {
@@ -694,11 +695,13 @@ mod tests {
                  session's agent, so Replace starts it over."
             )
         );
+        let older_muse = json!({"kind": "agent", "selection": {"harness": "muse"},
+            "start": ["muse", "{farhelm_args}"], "resume": null});
         assert_eq!(
-            text(&row("no_resume_command", "claude", None)),
+            text(&row("no_resume_command", "muse", Some(older_muse))),
             format!(
-                "{ended}. Farhelm will wait for you to choose Replace — this command launch did not opt into Resume, so \
-                 it has no resume command and Replace starts it over."
+                "{ended}. Farhelm will wait for you to choose Replace — this agent launch has no stored resume \
+                 command, so Replace starts it over."
             )
         );
         assert_eq!(

@@ -370,10 +370,12 @@ fn each_actions_hover_help_is_the_old_headers_tooltip(cx: &mut TestAppContext) {
 /// as the old tooltip, and a click opens nothing and sends nothing.
 #[gpui::test]
 fn restart_says_why_it_is_unavailable_and_sends_nothing(cx: &mut TestAppContext) {
+    let mut command = offering(&session("c"), 0, "no_resume_command", "muse");
+    command.value["launch"] = json!({"kind": "command", "command": "muse {farhelm_args}", "yolo": false, "agent": "muse", "resume": null});
     let rows = vec![
         offering(&session("a"), 0, "not_captured", "codex"),
         offering(&session("b"), 0, "no_conversation_reporting", "generic"),
-        offering(&session("c"), 0, "no_resume_command", "claude"),
+        command,
         offering(&ended("d"), 0, "not_captured", "claude"),
     ];
     let (mut fake, cx) = open_main(cx, snapshot_of(rows, false));

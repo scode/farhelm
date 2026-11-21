@@ -33,7 +33,7 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::RestartSessionBody;
 use farhelm_proto::ui_channel::SessionRow;
-use farhelm_proto::{AgentKind, ReadinessWording, RestartOffer, SessionStatus};
+use farhelm_proto::{AgentKind, LaunchKind, ReadinessWording, RestartOffer, SessionStatus};
 use gpui::{App, Window};
 use serde_json::json;
 
@@ -111,6 +111,9 @@ pub(crate) fn offer_clause(row: &SessionRow, ended: bool) -> String {
         RestartOffer::NoConversationReporting => {
             "Farhelm has no conversation reporting for this session's agent, so Replace starts it over"
                 .to_owned()
+        }
+        RestartOffer::NoResumeCommand if row.info.launch.launch_kind() == LaunchKind::Agent => {
+            "this agent launch has no stored resume command, so Replace starts it over".to_owned()
         }
         RestartOffer::NoResumeCommand => {
             "this command launch did not opt into Resume, so it has no resume command and Replace starts it over"
@@ -337,7 +340,8 @@ mod tests {
     /// its wording per offer is pinned. Specified: a resumable session; an uncaptured running Codex session (the
     /// timing, and the feedback invitation for a report still to come); an uncaptured exited Claude session (never
     /// captured, and the other invitation); an uncaptured running session of no known agent; an agent without
-    /// conversation reporting; a command launch without Resume; and an interrupted session's lead.
+    /// conversation reporting; and an interrupted session's lead. The header and interrupted-card tests exercise
+    /// missing resume commands with fixtures for both launch kinds.
     #[test]
     fn the_hover_help_names_the_offer_then_says_why() {
         let running = json!({"state": "running"});
@@ -368,18 +372,9 @@ mod tests {
              the Help (?) menu.)"
         );
         assert_eq!(
-            hover_help(&row(
-                running.clone(),
-                "no_conversation_reporting",
-                "generic"
-            )),
+            hover_help(&row(running, "no_conversation_reporting", "generic")),
             "Restart unavailable — Farhelm has no conversation reporting for this session's agent, so Replace starts \
              it over."
-        );
-        assert_eq!(
-            hover_help(&row(running, "no_resume_command", "claude")),
-            "Restart unavailable — this command launch did not opt into Resume, so it has no resume command and \
-             Replace starts it over."
         );
         assert_eq!(
             hover_help(&row(json!({"state": "interrupted"}), "resume", "claude")),

@@ -342,9 +342,6 @@ consequences.
   hook-preservation claim remains uncertain for an unrecognized override spelling and destructive vendor replacement
   behavior.
 
-- [`older-muse-restart-refusal-blames-command-mode.md`](older-muse-restart-refusal-blames-command-mode.md) — Plain
-  Restart can describe an older Muse agent launch as a command launch with reporting disabled.
-
 - [`host-permission-copy-quotes-retired-labels.md`](host-permission-copy-quotes-retired-labels.md) — Specifications and
   helm refusal text quote old host-permission labels rather than the controls users now see.
 
