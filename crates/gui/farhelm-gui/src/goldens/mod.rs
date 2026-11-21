@@ -1586,13 +1586,43 @@ fn catch_render_panic<T>(render: impl FnOnce() -> anyhow::Result<T>) -> anyhow::
     })
 }
 
+/// Give the runner the test binary's actual catalog. The same build supplies both the names and their pixels.
+#[test]
+#[ignore = "queried by scripts/check-gui-goldens.py"]
+fn list_scenes() -> anyhow::Result<()> {
+    let names = SCENES.iter().map(|scene| scene.name).collect::<Vec<_>>();
+    // Serial libtest can print the test name on the same line before running the body.
+    println!("\nFARHELM_GOLDEN_SCENES={}", serde_json::to_string(&names)?);
+    Ok(())
+}
+
+/// Resolve the runner's exact scene names before drawing. The Python wrapper owns wildcard matching and sharding.
+fn selected_scenes() -> anyhow::Result<Vec<&'static Scene>> {
+    let names = match std::env::var("FARHELM_GOLDEN_SCENES") {
+        Ok(names) => names,
+        Err(std::env::VarError::NotPresent) => return Ok(SCENES.iter().collect()),
+        Err(error) => return Err(error.into()),
+    };
+    let names: Vec<String> = serde_json::from_str(&names)?;
+    anyhow::ensure!(!names.is_empty(), "the golden runner selected no scenes");
+    names
+        .iter()
+        .map(|name| {
+            SCENES
+                .iter()
+                .find(|scene| scene.name == name.as_str())
+                .ok_or_else(|| anyhow::anyhow!("unknown golden scene {name:?}"))
+        })
+        .collect()
+}
+
 /// Reports scene failures together so a broken fixture cannot hide failures or changes further down the catalog.
 #[test]
 #[ignore = "needs the headless renderer selected; run scripts/check-gui-goldens.py"]
 fn component_goldens() -> anyhow::Result<()> {
     let run = GoldenRun::from_env()?;
     let mut failures = Vec::new();
-    for scene in SCENES {
+    for scene in selected_scenes()? {
         for (appearance, preference) in [("light", Preference::Light), ("dark", Preference::Dark)] {
             let name = format!("{}--{appearance}.png", scene.name);
             let result = catch_render_panic(|| {
