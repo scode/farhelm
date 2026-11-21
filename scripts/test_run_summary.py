@@ -17,6 +17,8 @@ CLASSES = {
 }
 CAUSES = {"established", "hypothesis", "unknown"}
 RUST_COUNTS = ("tests", "passed", "skipped", "failures", "errors", "flaky")
+# Preamble trimming and entry parsing share a boundary for both LF and CRLF ledgers.
+FLAKE_HEADING = re.compile(r"^##(?:[ \t]([^\r\n]*))?\r?$", re.MULTILINE)
 
 
 def iso_date(value):
@@ -44,6 +46,8 @@ def flake_summary(text, since=None):
     A dated entry is the denominator, not an inferred number of distinct tests
     or failures. An optional lower date bound defines 'new'; invalid dates stay
     visible outside that selection because their age cannot be established.
+    An empty heading still ends the preceding entry. The next ledger can start
+    with one, and its prose must not change the preceding entry's final tag.
     No heading, test name, hostname, command or raw observation is exported.
     """
     lower = iso_date(since) if since is not None else None
@@ -54,9 +58,9 @@ def flake_summary(text, since=None):
         "class": dict.fromkeys(sorted(CLASSES | {"missing", "invalid"}), 0),
         "mentions_on_recurrence": 0, "mentions_not_kept": 0,
     }
-    headings = list(re.finditer(r"^## (.+)$", text, re.MULTILINE))
+    headings = list(FLAKE_HEADING.finditer(text))
     for index, match in enumerate(headings):
-        heading = match[1]
+        heading = (match[1] or "").lstrip(" \t")
         candidate = heading.split(" ", 1)[0]
         try:
             date = iso_date(candidate)

@@ -2145,22 +2145,6 @@
   reference: discard
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
-## test-summary-ledger-boundary-crosses-files.md
-
-- Outcome: `other`.
-- Assessment: None for users. A malformed empty `## ` heading in one flake ledger can make the test-run summary count
-  the previous file's last entry's Cause tag as invalid. Verified: `scripts/summarize-test-runs.py:34-62` joins ledgers
-  after `^## ` trimming; `test_run_summary.py:57-75` splits on `^## (.+)$`, so an empty heading is absorbed. Needs a
-  malformed ledger; the default ledgers are well-formed.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: discard
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
 ## brick-test-deferral-reuses-continuity-files.md
 
 - Outcome: `other`.
@@ -2180,36 +2164,6 @@
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: fix code (keep the exported continuity names attempt-local and add a test that defers after a real earlier
   pair)
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## test-summary-asserts-total-instead-of-flake-classes.md
-
-- Outcome: `other`.
-- Assessment: None. A test of the test-run summary script would pass if both flake-ledger entries were counted in the
-  same class. Verified: scripts/test-summarize-test-runs.py ~127 still asserts
-  `class["substrate"] + class["readiness"] == 2`.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: fix code (assert each class is 1)
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## test-summary-partial-test-ignores-usable-run-count.md
-
-- Outcome: `other`.
-- Assessment: None. A summary-script test would pass if an unreadable flake ledger caused valid run counts to be
-  dropped. Verified: `test_missing_ledger_and_exhausted_discovery_are_explicit` (~129-139) seeds a run and never asserts
-  it is counted.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: fix code (assert the seeded run is still counted)
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## stop-wait-test-releases-exit-before-wait-witness.md
@@ -3151,22 +3105,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## test-summary-archive-test-bypasses-cli.md
-
-- Outcome: `other`.
-- Assessment: None for users. The summary script's tests do not cover its default ledger selection (FLAKES.md plus the
-  archive) or a repeated `--flakes`. Verified: defaults at `summarize-test-runs.py:101-107`; tests call `report`
-  directly with both paths.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard
-- Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## ssh-chime-test-accepts-pending-draft.md
 

@@ -10,7 +10,6 @@ import argparse
 import json
 import os
 import pathlib
-import re
 import signal
 import sys
 
@@ -18,7 +17,7 @@ _previous_bytecode_setting = sys.dont_write_bytecode
 try:
     sys.dont_write_bytecode = True
     from test_run_inventory import Budget, DIRECTORY_FLAGS, Inventory, InventoryLimit
-    from test_run_summary import aggregate_runs, flake_summary, iso_date
+    from test_run_summary import FLAKE_HEADING, aggregate_runs, flake_summary, iso_date
 finally:
     sys.dont_write_bytecode = _previous_bytecode_setting
     del _previous_bytecode_setting
@@ -43,7 +42,7 @@ def ledger_entries(text):
     `Class:` and `Cause:` field names, and a `Cause:` line that is no longer
     the body's last would count as invalid.
     """
-    match = re.search(r"^## ", text, re.MULTILINE)
+    match = FLAKE_HEADING.search(text)
     if match is None:
         return ""
     entries = text[match.start():]

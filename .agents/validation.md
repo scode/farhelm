@@ -1047,6 +1047,9 @@ systemd or SSH substrate ran.
 - `python3 -B scripts/test-record-test-run.py` and `python3 -B deflake/test-deflake.py` cover the recorder and deflake
   tooling, including state-root ownership checks and retention of a nested run after outer temporary directory cleanup.
   Changes to the deflake driver also run `deflake/EVAL.md`.
+- `python3 -B scripts/test-summarize-test-runs.py` and `python3 -B scripts/test-test-run-summary.py` cover evidence
+  accounting, including CLI ledger selection, separate class and cause counts and retaining valid runs when a ledger is
+  unavailable. Run them when the summary command or its classifiers change.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops
   the rest silently) and ending with its truncation sentinel, every path an instruction file names and every

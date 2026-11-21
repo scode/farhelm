@@ -150,6 +150,8 @@ second clippy run on floating stable is needed.
   evidence-copy driver). Run the harness only on the maintainer's request, per `.agents/test-worker.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py` (the runtime recorder,
   including nested failure evidence, and trace tooling)
+- `python3 -B scripts/test-summarize-test-runs.py` and `python3 -B scripts/test-test-run-summary.py` (ledger selection,
+  flake counts and partial run discovery)
 - `python3 -B scripts/test-install-pinned-nextest.py`, `python3 -B scripts/test-install-pinned-cargo-deny.py` and
   `python3 -B scripts/test-install-pinned-cargo-about.py`
 - The vendored terminal crates' three recorded test commands from `.agents/validation.md` (`vendor/vte`,
