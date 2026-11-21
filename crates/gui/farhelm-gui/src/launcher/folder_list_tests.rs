@@ -14,7 +14,9 @@ use serde_json::json;
 
 use super::draft::LaunchDraft;
 use super::view::{recent_folders_for_tests as recent_folders, tail_label_for_tests as tail_label};
-use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of, read, shown_refusal};
+use super::view_tests::{
+    click_in_body, draft, fixture_hosts, launcher_with_hosts, name_of, read, shown_refusal,
+};
 use crate::layers;
 use crate::test_support::{self, keys, settle};
 
@@ -120,7 +122,7 @@ fn list_shown(cx: &mut VisualTestContext) -> bool {
 
 /// Focus the folder field, which opens its list.
 fn focus_folder(cx: &mut VisualTestContext) {
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     assert!(
         read(cx, |launcher, window, cx| launcher
             .folder

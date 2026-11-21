@@ -2814,6 +2814,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-new",
+      "title": "New session with the launcher form visible and a harness selected",
+      "reference": "launcher-agent"
+    },
+    {
       "golden": "templates-dialog",
       "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key, the editor not opened yet",
       "reference": "templates-dialog"

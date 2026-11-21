@@ -70,10 +70,7 @@ use gpui::{
 
 use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
-use super::{
-    LABEL_COLUMN, LABEL_GAP, Launcher, SourceConsent, choices::status_line, help_line,
-    help_line_container, row,
-};
+use super::{Launcher, SourceConsent, choices::status_line, help_line, help_line_container, row};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
 use crate::focus::Mark;
@@ -1121,7 +1118,7 @@ impl Launcher {
 
     /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
     /// field over the default folder (SPEC.md: "When the selected host has no checkout folder in effect, the launcher's
-    /// managed-checkout destination offers the same explicit-save field"), in the control column. Made the first time it
+    /// managed-checkout destination offers the same explicit-save field"). Made the first time it
     /// shows. A successful save or a value found changed after refusal refreshes the suggestions and preview.
     fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.needs_root(cx) != Some(true) {
@@ -1156,7 +1153,6 @@ impl Launcher {
             div()
                 .id("launcher-checkout-setup")
                 .debug_selector(|| "launcher-checkout-setup".into())
-                .pl(px(LABEL_COLUMN + LABEL_GAP))
                 .child(field.clone())
                 .into_any_element(),
         )
@@ -1249,7 +1245,6 @@ impl Launcher {
             .debug_selector(move || format!("launcher-preview-{state}"))
             .role(Role::Status)
             .aria_label(heading.accessible_name())
-            .pl(px(LABEL_COLUMN + LABEL_GAP))
             .flex()
             .flex_col()
             .gap(px(2.))
@@ -1447,7 +1442,6 @@ fn environment_checkout(repo: &GithubRepo, palette: &theme::Palette) -> AnyEleme
         .debug_selector(|| "launcher-preview-environment".to_owned())
         .role(Role::Status)
         .aria_label(heading.accessible_name())
-        .pl(px(LABEL_COLUMN + LABEL_GAP))
         .flex()
         .flex_col()
         .gap(px(2.))

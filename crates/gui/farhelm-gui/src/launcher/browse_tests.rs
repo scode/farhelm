@@ -12,7 +12,7 @@ use gpui::{Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContex
 use serde_json::{Value, json};
 
 use super::draft::{DestinationKind, LaunchDraft};
-use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of};
+use super::view_tests::{click_in_body, draft, fixture_hosts, launcher_with_hosts, name_of};
 use crate::test_support::{self, keys, settle};
 
 /// Wheel inside the launcher body so tests can reach clipped rows or change the scroll position without changing focus.
@@ -71,7 +71,7 @@ fn tmp_listing() -> Value {
 
 /// Browse asks the chosen host, on its connection, for the folder as typed, and lists what it answers: the folder
 /// itself, its parent, that there are more, then each folder (a host value drawn escaped); taking one makes it the
-/// folder as the user's own choice and closes the listing. Browse sits right under the Host row. Why: SPEC.md,
+/// folder as the user's own choice and closes the listing. Browse sits under the Host row. Why: SPEC.md,
 /// "explicit browsing asks the selected supervisor for one bounded directory level" (old "composer path actions …
 /// browse the selected remote host" and "launcher action-button Enter keeps reset browse and cancel").
 #[gpui::test]
@@ -85,11 +85,7 @@ fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext
         test_support::bounds(cx, "launcher-browse"),
         test_support::bounds(cx, "launcher-host-row"),
     );
-    assert_eq!(
-        button.top(),
-        host_row.bottom(),
-        "Browse sits right under the Host row"
-    );
+    assert!(button.top() > host_row.bottom(), "Browse follows Host");
     test_support::click(cx, "launcher-browse");
     let request = browse_request(&mut helm, cx).expect("Browse asked the host");
     assert_eq!(
@@ -167,8 +163,13 @@ fn an_edit_of_the_folder_forgets_the_listing(cx: &mut TestAppContext) {
     let (mut helm, cx) = new_in_tmp(cx);
     test_support::click(cx, "launcher-browse");
     let request = browse_request(&mut helm, cx).expect("Browse asked the host");
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "x");
+    assert_ne!(
+        draft(cx).folder.value(),
+        "/tmp",
+        "the edit invalidated the outstanding listing"
+    );
     keys(cx, "backspace");
     assert_eq!(
         draft(cx).folder.value(),
@@ -191,7 +192,7 @@ fn an_edit_of_the_folder_forgets_the_listing(cx: &mut TestAppContext) {
         name_of(cx, "launcher-browse-use").is_some(),
         "the premise: listed"
     );
-    test_support::click(cx, "launcher-folder-row");
+    click_in_body(cx, "launcher-folder");
     keys(cx, "x");
     assert_eq!(name_of(cx, "launcher-browse-use"), None, "an edit hides it");
     keys(cx, "backspace");
@@ -315,10 +316,9 @@ fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
         test_support::bounds(cx, "launcher-browse"),
         test_support::bounds(cx, "launcher-host-row"),
     );
-    assert_eq!(
-        button.top(),
-        host_row.bottom(),
-        "Browse sits right under the held host"
+    assert!(
+        button.top() > host_row.bottom(),
+        "Browse follows the held host"
     );
 }
 

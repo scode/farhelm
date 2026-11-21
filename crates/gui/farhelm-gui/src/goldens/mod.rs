@@ -57,6 +57,7 @@ mod approvals;
 mod desktop;
 mod foundations;
 mod hosts;
+mod launcher;
 mod other_dialogs;
 mod session_list;
 mod session_pane;
@@ -90,6 +91,7 @@ use approvals::*;
 use desktop::*;
 use foundations::*;
 use hosts::*;
+use launcher::*;
 use other_dialogs::*;
 use session_list::*;
 use session_pane::*;
@@ -930,6 +932,14 @@ static SCENES: &[Scene] = &[
         size: (1010., 940.),
         draw: template_number_menu_scene,
         setup: template_number_menu_setup,
+    },
+    Scene {
+        name: "launcher-new",
+        // The dialog caps its height relative to the window. Leave enough room to see the prompt guidance alongside
+        // the destination and agent controls in one capture.
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_new_setup,
     },
     Scene {
         name: "template-launcher",

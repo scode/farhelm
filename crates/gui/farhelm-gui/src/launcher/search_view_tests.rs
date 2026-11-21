@@ -14,8 +14,8 @@ use super::recents_view_tests::{
     answer_history, chosen, creates, history, launched, new_in_tmp, two_setups,
 };
 use super::view_tests::{
-    answer_catalog, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts, name_of, read,
-    search_focused, search_text, selected_state, shown_refusal,
+    answer_catalog, click_in_body, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts,
+    name_of, read, search_focused, search_text, selected_state, shown_refusal,
 };
 use crate::layers;
 use crate::test_support::{self, keys, settle};
@@ -477,7 +477,7 @@ fn a_name_row_on_the_command_tab_keeps_the_tab_and_its_command(cx: &mut TestAppC
         Tab::Command,
         "the premise: Command is chosen"
     );
-    test_support::click(cx, "launcher-command-row");
+    click_in_body(cx, "launcher-command");
     type_in(cx, "make watch");
     test_support::click(cx, "launcher-search-row");
     assert!(search_focused(cx), "the premise: the search box has focus");

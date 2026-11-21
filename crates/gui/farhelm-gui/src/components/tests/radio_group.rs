@@ -661,7 +661,7 @@ fn a_described_option_draws_its_line_under_the_label_and_the_group_stacks(cx: &m
 /// announced a group would add an announced, named group the old row never had. Specified, with B chosen among A, B
 /// and C drawn as chips in a generic container, with the owner's action: the container reports no role and no name
 /// (the name half holds by construction: the driver record reads a name only from an element with a role); each chip
-/// reports the button role, its label and B alone pressed, is 36 pixels high and sits 8 pixels after the chip before
+/// reports the button role, its label and B alone pressed, is 26 pixels high and sits 6 pixels after the chip before
 /// it; Tab reaches A, B and C in turn; Down neither chooses nor moves; Enter on C chooses it and then runs the action.
 #[gpui::test]
 fn chips_in_a_generic_container_are_pressed_buttons_in_no_group(cx: &mut TestAppContext) {
@@ -696,14 +696,14 @@ fn chips_in_a_generic_container_are_pressed_buttons_in_no_group(cx: &mut TestApp
     ];
     for chip in &chips {
         assert!(
-            (chip.size.height.as_f32() - 36.).abs() < 0.5,
-            "a chip is 36 pixels high: {chip:?}"
+            (chip.size.height.as_f32() - 26.).abs() < 0.5,
+            "a chip is 26 pixels high: {chip:?}"
         );
     }
     for pair in chips.windows(2) {
         assert!(
-            ((pair[1].left() - pair[0].right()).as_f32() - 8.).abs() < 0.5,
-            "chips are 8 pixels apart: {pair:?}"
+            ((pair[1].left() - pair[0].right()).as_f32() - 6.).abs() < 0.5,
+            "chips are 6 pixels apart: {pair:?}"
         );
     }
     for id in ["before", "choice-A", "choice-B", "choice-C"] {

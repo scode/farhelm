@@ -7,7 +7,7 @@
 //! offer, dropping Custom flags on leaving Custom); this module only draws the choices the draft and `farhelm_proto`
 //! allow, in the old controls' shapes:
 //!
-//! - **Harness**: chips in the old picker order, a pressed-button row with no group around it, as the old `div` was.
+//! - **Harness**: compact chips in picker order, using the session list's colored marks. Bash and Zsh follow a rule.
 //! - **Effort**: a segmented button group of Default and the offered efforts, or a select once that is more than five
 //!   (the old switch to a native `<select>`).
 //! - **Permissions**: a segmented button group of what the agent type offers, YOLO in danger ink, then a "?" whose
@@ -25,16 +25,17 @@ use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
-    SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    Pixels, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use super::changed::Changed;
-use super::{LABEL_COLUMN, LABEL_GAP, Launcher, row};
+use super::{Launcher, row};
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Role, Select, SelectOption, Tier,
 };
 use crate::focus::{self, Mark};
-use crate::launcher::draft::{Edit, Field, Mode, RestartBaseline, harness_label};
+use crate::harness;
+use crate::launcher::draft::{Edit, Mode, RestartBaseline, harness_label};
 use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
 use crate::permission::words::{
     effort_label, permission_display, permission_help, permission_tooltip,
@@ -44,6 +45,10 @@ use crate::theme::{self, metrics};
 /// Above this many options (Default included) effort is a select rather than segments, as the old launcher switched
 /// to a native `<select>` past five.
 const MAX_EFFORT_SEGMENTS: usize = 5;
+
+/// Align the free-text model input and the help button with the small segments' 28px control and its well's edge
+/// and padding. The effort select keeps its usual size when there are too many choices for segments.
+pub(super) const MODEL_ROW_CONTROL_HEIGHT: Pixels = px(34.);
 
 /// The approval modes, after Guarded and YOLO and Custom, in the old fixed order; each shows for whichever agent type
 /// offers it (Goose all three, OMP Approve alone).
@@ -159,83 +164,86 @@ impl Launcher {
         efforts
     }
 
-    /// The Agent tab puts the shell types immediately after the agent chips.
-    /// The active launch type decides which subsequent choice rows it needs.
-    /// The Custom flags and the last choice's notice sit further down the tab
-    /// ([`Self::flags_editor`], [`status_line`]).
-    pub(super) fn choice_rows(
+    /// Model, Effort and Permissions travel together when they fit. Wrap a whole field when an agent's controls
+    /// need more room, with any Restart-with change marker directly below its own field.
+    pub(super) fn model_choices(
         &self,
+        model: Option<Vec<AnyElement>>,
         palette: &theme::Palette,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
-        let mut rows = Vec::new();
-        if !self.draft.holds(Field::AgentType) {
-            rows.push(self.harness_row(false, palette, cx));
-            rows.push(self.harness_row(true, palette, cx));
-        }
+    ) -> Div {
         let harness = self.draft.agent.harness;
-        if harness.is_none_or(LaunchHarness::offers_effort) {
-            rows.push(self.effort_row(harness, palette, cx));
-            rows.extend(self.changed_marker(Changed::Effort, palette));
-        }
-        if !harness.is_some_and(LaunchHarness::is_shell) {
-            rows.push(self.permission_row(harness, palette, cx));
-            rows.extend(self.changed_marker(Changed::Permissions, palette));
-        }
-        rows
+        let field = || div().flex().flex_col().gap(px(4.)).max_w_full();
+        let effort = harness.is_none_or(LaunchHarness::offers_effort).then(|| {
+            field()
+                .child(self.effort_row(harness, palette, cx))
+                .children(self.changed_marker(Changed::Effort, palette))
+        });
+        let permissions = (!harness.is_some_and(LaunchHarness::is_shell)).then(|| {
+            field()
+                .child(self.permission_row(harness, palette, cx))
+                .children(self.changed_marker(Changed::Permissions, palette))
+        });
+        div()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap(px(12.))
+            .children(model.map(|rows| {
+                field()
+                    .flex_grow_1()
+                    .flex_basis(px(144.))
+                    .min_w(px(144.))
+                    .children(rows)
+            }))
+            .children(effort)
+            .children(permissions)
     }
 
-    /// Both chip groups update the same draft choice. Only the group containing
-    /// that choice shows a pressed chip.
-    fn harness_row(
+    /// The shell chips and rule can wrap as a unit onto the same line as the last agent chips.
+    /// Keep the separate shell IDs used to capture the shell choices in the docs.
+    pub(super) fn harness_choices(
         &self,
-        shells: bool,
         palette: &theme::Palette,
         cx: &mut Context<Self>,
-    ) -> AnyElement {
+    ) -> Stateful<Div> {
         let (on_change, on_enter) = (cx.weak_entity(), cx.weak_entity());
-        let (row_id, id, heading, help) = if shells {
-            (
-                "launcher-shells-row",
-                "launcher-shells",
-                "Shells",
-                "Start a plain shell session",
+        let option = |harness| {
+            let label = harness_label(harness);
+            let glyph = harness::glyph(harness);
+            RadioOption::new(
+                label,
+                HoverHelp::tooltip(format!("Use {label} for the session")),
+                harness,
             )
-        } else {
-            (
-                "launcher-harness-row",
-                "launcher-harness",
-                "Harness",
-                "Harness: the agent this session starts",
+            .mark(
+                harness::icon(glyph),
+                harness::ink(glyph, palette).unwrap_or(palette.fg_1),
             )
         };
-        let chips = HARNESS_PICKER_ORDER
+        let chips = RadioGroup::new(
+            "launcher-harness",
+            "Harness",
+            HoverHelp::tooltip("Harness: the agent or shell this session starts"),
+            Role::GenericContainer,
+        )
+        .chips();
+        let (shells, agents): (Vec<_>, Vec<_>) = HARNESS_PICKER_ORDER
             .iter()
-            .filter(|harness| harness.is_shell() == shells)
+            .copied()
+            .partition(|harness| harness.is_shell());
+        let chips = agents
+            .into_iter()
+            .map(option)
+            .fold(chips, RadioGroup::option);
+        let chips = shells
+            .into_iter()
+            .map(option)
             .fold(
-                RadioGroup::new(
-                    id,
-                    heading,
-                    HoverHelp::tooltip(help),
-                    Role::GenericContainer,
-                )
-                .chips(),
-                |chips, &harness| {
-                    let label = harness_label(harness);
-                    chips.option(RadioOption::new(
-                        label,
-                        HoverHelp::tooltip(format!("Use {label} for the session")),
-                        harness,
-                    ))
-                },
-            );
-        let chips = chips
-            .chosen(
-                self.draft
-                    .agent
-                    .harness
-                    .filter(|harness| harness.is_shell() == shells),
+                chips.separated_chips("launcher-shells-row", "launcher-shells"),
+                RadioGroup::option,
             )
+            .chosen(self.draft.agent.harness)
             .on_change(move |harness, window, cx| {
                 let _ = on_change.update(cx, |launcher, cx| {
                     launcher.choose_harness(*harness, window, cx)
@@ -244,7 +252,11 @@ impl Launcher {
             .on_enter(move |window, cx| {
                 let _ = on_enter.update(cx, |launcher, cx| launcher.press(window, cx));
             });
-        row(row_id, heading, chips, palette).into_any_element()
+        div()
+            .id("launcher-harness-row")
+            .debug_selector(|| "launcher-harness-row".into())
+            .min_w_0()
+            .child(chips)
     }
 
     /// Effort (`.launch-composer-effort-choice`): Default and the displayed efforts as segments, or as a select past
@@ -306,6 +318,7 @@ impl Launcher {
                         Some(*effort),
                     ))
                 })
+                .compact_segments()
                 .chosen(Some(chosen))
                 .on_change(move |effort, _, cx| {
                     let _ =
@@ -391,6 +404,7 @@ impl Launcher {
         };
         let (on_change, on_enter) = (cx.weak_entity(), cx.weak_entity());
         let group = group
+            .compact_segments()
             .chosen(Some(shown))
             .on_change(move |permission, window, cx| {
                 let _ = on_change.update(cx, |launcher, cx| {
@@ -419,12 +433,13 @@ impl Launcher {
                 )
                 .content("?")
                 .tier(Tier::Neutral)
+                .square(MODEL_ROW_CONTROL_HEIGHT)
                 .on_click(|_, _, cx| cx.open_url(PERMISSION_DOCS))
             }));
         row("launcher-permissions-row", "Permissions", controls, palette).into_any_element()
     }
 
-    /// The Custom flags editor (old `CustomPermissionFlags`): the flags as typed, beside their label, in the shared
+    /// The Custom flags editor (old `CustomPermissionFlags`): the flags as typed, under their label, in the shared
     /// Custom flags block ([`CustomFlags`]), which says what they mean and draws the words they parse to (each its own
     /// escaped box, so a hidden character shows), or why they do not parse, lined up under the field.
     pub(super) fn flags_editor(
@@ -451,12 +466,11 @@ impl Launcher {
             self.draft.agent.permission_flags.clone(),
             agent,
         )
-        .indent(px(LABEL_COLUMN + LABEL_GAP))
         .into_any_element()
     }
 }
 
-/// A line of warning-colored words in the control column (`.launch-composer-choice-error`), announced politely as a
+/// A line of warning-colored words below the affected control, announced politely as a
 /// status (the old line was no live region, so a choice's side effect went unannounced), and named by its words since
 /// plain text is not in the accessibility tree.
 pub(super) fn status_line(
@@ -468,7 +482,6 @@ pub(super) fn status_line(
         .id(id)
         .role(Role::Status)
         .aria_label(SharedString::from(words.clone()))
-        .pl(px(LABEL_COLUMN + LABEL_GAP))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.warn))
         .child(words)

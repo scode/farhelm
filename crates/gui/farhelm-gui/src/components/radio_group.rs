@@ -47,7 +47,7 @@
 //! drawing the stored value again. A radio group reports a choice only when the option was not already chosen, as a
 //! native radio's change event did; a button group reports every press, as the old buttons' click handlers did.
 //!
-//! Five looks, one per old stylesheet rule, picked by the owner and independent of the role's keyboard (except that
+//! The owner picks the look independently of the role's keyboard (except that
 //! plain radio circles promise the radio keyboard, so [`RadioGroup::radios`] demands it):
 //!
 //! - **Segments** (the default): `.segmented-control`, the options side by side in one rounded well, the chosen one in
@@ -56,9 +56,11 @@
 //!   (`.session-status-filter .segmented-control`), the same well with shorter, narrower segments of 12-pixel words,
 //!   all of one width, and the well growing to fill its row; or, where the row is narrow
 //!   ([`RadioGroup::fit_words`]), each segment as wide as its words with tighter sides.
+//! - **Compact segments** ([`RadioGroup::compact_segments`]): the launcher's Effort and Permissions controls, with
+//!   the same height as small segments and room beside the words when the group sits alongside other fields.
 //! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
 //! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
-//!   buttons on the well color, wrapping with an 8-pixel gap, and no well around them.
+//!   buttons on the well color, wrapping with a 6-pixel gap. Related chips can follow a divider in the same flow.
 //! - **Cards** ([`RadioGroup::cards`]): the recipe editor's Software choice (`.recipe-source-cards`), bordered cards
 //!   on the well color in a three-column grid, each with its title over its description, the chosen one edged in the
 //!   accent.
@@ -113,16 +115,15 @@ const SMALL_SEGMENT_LINE_HEIGHT: f32 = 16.8;
 /// while they fit their words ([`RadioGroup::fit_words`]).
 const FITTED_SEGMENT_PAD_X: f32 = 3.;
 const SMALL_SEGMENTS_BASIS: f32 = 220.;
+const COMPACT_SEGMENT_PAD_X: f32 = 8.;
 
-/// The harness row's chip as the launcher drew it. The base `.launch-composer-options > button` rule says 38 pixels
-/// high, 14-pixel side padding and 14-pixel semibold words, but the launcher form's own override
-/// (`.create-session-form .launch-composer-harness-choice .launch-composer-options > button`) made every chip anyone
-/// saw 36 pixels high with 12-pixel side padding and 13-pixel regular words; the override is what is ported. The
-/// 1.5-pixel edge and the 8-pixel gap between chips are the base rule's.
-const CHIP_MIN_HEIGHT: f32 = 36.;
-const CHIP_PAD_X: f32 = 12.;
-const CHIP_EDGE: f32 = 1.5;
-const CHIP_GAP: f32 = 8.;
+/// Compact enough for the harness picker to wrap with the form's width.
+const CHIP_MIN_HEIGHT: f32 = 26.;
+const CHIP_PAD_X: f32 = 8.;
+const CHIP_EDGE: f32 = 1.;
+const CHIP_GAP: f32 = 6.;
+/// A form's harness chip uses the sidebar mark's drawing size.
+const CHIP_MARK: f32 = 10.;
 
 /// The destination type's glyphs (`.destination-folder-glyph`, `.managed-checkout-glyph`) and their gap to the words
 /// (`.segmented-control > button`'s `gap: 6px`).
@@ -134,9 +135,11 @@ const GLYPH_GAP: f32 = 6.;
 const RADIO_GAP: f32 = 6.;
 
 /// `.recipe-source-cards`: three equal columns 8 pixels apart; `.recipe-source-card`: 10 pixels of padding and 4 between
-/// its title and its description, inside the chip's 1.5-pixel edge.
+/// its title and its description, inside a 1.5-pixel edge.
 const CARD_COLUMNS: u16 = 3;
 const CARD_GAP: f32 = 8.;
+/// The recipe cards retain their original edge when the launcher's chips change size.
+const CARD_EDGE: f32 = 1.5;
 const CARD_PAD: f32 = 10.;
 const CARD_INNER_GAP: f32 = 4.;
 
@@ -165,6 +168,7 @@ pub struct RadioOption<V> {
 struct Glyph {
     icon: Icon,
     words: bool,
+    mark_ink: Option<Token>,
 }
 
 impl<V> RadioOption<V> {
@@ -193,7 +197,21 @@ impl<V> RadioOption<V> {
     /// Draw `icon` before the option's words, in the words' ink (the destination type's folder and branch). The label
     /// stays the accessible name.
     pub fn icon(mut self, icon: Icon) -> Self {
-        self.glyph = Some(Glyph { icon, words: true });
+        self.glyph = Some(Glyph {
+            icon,
+            words: true,
+            mark_ink: None,
+        });
+        self
+    }
+
+    /// Draw a harness chip's small mark in its own ink at rest. The selected chip inverts the mark with its text.
+    pub(crate) fn mark(mut self, icon: Icon, ink: Token) -> Self {
+        self.glyph = Some(Glyph {
+            icon,
+            words: true,
+            mark_ink: Some(ink),
+        });
         self
     }
 
@@ -201,7 +219,11 @@ impl<V> RadioOption<V> {
     /// screen reader, and the hover help is what a sighted user has to tell such options apart, so it should name the
     /// choice.
     pub fn icon_only(mut self, icon: Icon) -> Self {
-        self.glyph = Some(Glyph { icon, words: false });
+        self.glyph = Some(Glyph {
+            icon,
+            words: false,
+            mark_ink: None,
+        });
         self
     }
 
@@ -236,6 +258,7 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     role: Role,
     chosen: Option<V>,
     options: Vec<RadioOption<V>>,
+    chip_tail: Option<ChipTail>,
     disabled: bool,
     look: Look,
     card_columns: u16,
@@ -245,11 +268,19 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     on_enter: Option<MainAction>,
 }
 
+/// The final chips can share a separator and wrap as a unit alongside the preceding individual chips.
+struct ChipTail {
+    start: usize,
+    id: &'static str,
+    prefix: &'static str,
+}
+
 /// How a group draws its options; one at a time, so a single field rather than a flag per look. See the module docs.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Look {
     Segments,
     SmallSegments,
+    CompactSegments,
     Radios,
     RadioRows,
     Chips,
@@ -290,6 +321,7 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             role,
             chosen: None,
             options: Vec::new(),
+            chip_tail: None,
             disabled: false,
             look: Look::Segments,
             card_columns: CARD_COLUMNS,
@@ -347,6 +379,18 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
         self
     }
 
+    /// Group chips added after this call behind a vertical rule. They still share selection and keyboard order
+    /// with the whole chooser. Their own prefix preserves stable control ids when two groups share a row.
+    pub(crate) fn separated_chips(mut self, id: &'static str, prefix: &'static str) -> Self {
+        debug_assert!(self.look == Look::Chips);
+        self.chip_tail = Some(ChipTail {
+            start: self.options.len(),
+            id,
+            prefix,
+        });
+        self
+    }
+
     /// Draw the options as the session list's status filter drew its segments: the segmented well, with each segment
     /// 28 pixels high, 5 pixels in from its sides and in 12-pixel words, every segment the same width however long its
     /// words (`flex: 1 1 0`), and the well itself growing from 220 pixels to fill the row it sits in, or shrinking
@@ -355,6 +399,13 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// with [`Role::RadioGroup`], as its old inputs were native radios.
     pub fn small_segments(mut self) -> Self {
         self.look = Look::SmallSegments;
+        self
+    }
+
+    /// Use the small segment height and type in a form row. Each segment sizes from its words with ordinary room
+    /// around them, and the well takes the group's content width so its neighbors can fit beside it.
+    pub(crate) fn compact_segments(mut self) -> Self {
+        self.look = Look::CompactSegments;
         self
     }
 
@@ -516,7 +567,15 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         let ids: Vec<SharedString> = self
             .options
             .iter()
-            .map(|option| format!("{}-{}", self.id, option.label).into())
+            .enumerate()
+            .map(|(index, option)| {
+                let prefix = self
+                    .chip_tail
+                    .as_ref()
+                    .filter(|tail| index >= tail.start)
+                    .map_or(self.id.as_ref(), |tail| tail.prefix);
+                format!("{prefix}-{}", option.label).into()
+            })
             .collect();
         let handles: Vec<FocusHandle> = ids
             .iter()
@@ -574,7 +633,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 fitted: self.fit_words && self.look == Look::SmallSegments,
             };
             let element = match self.look {
-                Look::Segments | Look::SmallSegments => {
+                Look::Segments | Look::SmallSegments | Look::CompactSegments => {
                     state.segment(&ids[index], option, self.look, palette)
                 }
                 Look::Radios | Look::RadioRows => {
@@ -681,7 +740,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 .items_stretch()
                 .gap(px(CARD_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.
-            Look::Segments | Look::SmallSegments => group
+            Look::Segments | Look::SmallSegments | Look::CompactSegments => group
                 .gap(px(2.))
                 .p(px(2.))
                 .border_1()
@@ -701,7 +760,23 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         // innermost control's help (`with_hover_help`). It is also the group's accessible description, as every
         // control's is, except for the generic container, which takes no description (module docs).
         let group = super::with_hover_help(group, &self.id, &self.help, named, None, window, cx);
-        group.children(options)
+        // Only the tail stays together. Earlier chips can use the rest of its line before the rule and the tail fit.
+        let tail = self
+            .chip_tail
+            .filter(|tail| tail.start < options.len())
+            .map(|tail| {
+                div()
+                    .id(tail.id)
+                    .debug_selector(move || tail.id.into())
+                    .flex()
+                    .items_center()
+                    .gap(px(CHIP_GAP))
+                    .border_l_1()
+                    .border_color(theme::color(palette.border_dim))
+                    .pl(px(CHIP_GAP))
+                    .children(options.split_off(tail.start))
+            });
+        group.children(options).children(tail)
     }
 }
 
@@ -743,9 +818,8 @@ impl OptionState {
     /// One segment of `.segmented-control`: transparent with the control hover fill, or the accent fill with the
     /// inverse ink and semibold words when chosen, one step up the accent family under the pointer so hovering the
     /// choice does not hide it. Its focus ring is inset (the old `outline-offset: -3px`), in the inverse ink on the
-    /// chosen segment, so it stays visible inside the rounded well. Under [`Look::SmallSegments`] it is the status
-    /// filter's ([`RadioGroup::small_segments`]): shorter and narrower, in smaller words, and as wide as every other
-    /// segment.
+    /// chosen segment, so it stays visible inside the rounded well. The status filter and compact form variants keep
+    /// this well and use a shorter segment. The form variant sizes the segment from its label with its own padding.
     fn segment<V>(
         self,
         id: &SharedString,
@@ -753,7 +827,6 @@ impl OptionState {
         look: Look,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
-        let small = look == Look::SmallSegments;
         let (fill, hover, ring) = if self.chosen {
             (
                 palette.accent_fill,
@@ -764,23 +837,25 @@ impl OptionState {
             (theme::TRANSPARENT, palette.control_hover, palette.accent)
         };
         let ink = self.filled_ink(option, palette.fg_0, palette);
-        let (min_height, pad_x, text_size, line_height) = if small {
+        let (min_height, pad_x, text_size, line_height) = if look == Look::Segments {
+            (
+                SEGMENT_MIN_HEIGHT,
+                SEGMENT_PAD.1,
+                metrics::TEXT_MD,
+                SEGMENT_LINE_HEIGHT,
+            )
+        } else {
             (
                 SMALL_SEGMENT_MIN_HEIGHT,
-                if self.fitted {
+                if look == Look::CompactSegments {
+                    COMPACT_SEGMENT_PAD_X
+                } else if self.fitted {
                     FITTED_SEGMENT_PAD_X
                 } else {
                     SMALL_SEGMENT_PAD_X
                 },
                 metrics::TEXT_SM,
                 SMALL_SEGMENT_LINE_HEIGHT,
-            )
-        } else {
-            (
-                SEGMENT_MIN_HEIGHT,
-                SEGMENT_PAD.1,
-                metrics::TEXT_MD,
-                SEGMENT_LINE_HEIGHT,
             )
         };
         div()
@@ -792,7 +867,7 @@ impl OptionState {
             // their words ([`RadioGroup::fit_words`]); those and every other look grow from their words' width and never
             // shrink below it (`flex: 1 0 auto`).
             .map(|segment| {
-                if small && !self.fitted {
+                if look == Look::SmallSegments && !self.fitted {
                     segment.flex_1().min_w_0()
                 } else {
                     segment.flex_grow(1.).flex_shrink_0()
@@ -825,7 +900,12 @@ impl OptionState {
                     .hover(move |style| style.bg(theme::color(hover)))
             })
             .when(!self.enabled, |segment| segment.opacity(0.5))
-            .children(contents(option, ink, self.filled_description_ink(palette)))
+            .children(contents(
+                option,
+                ink,
+                self.filled_description_ink(palette),
+                self.chosen,
+            ))
             .when(self.ring, |segment| {
                 segment.child(
                     div()
@@ -841,8 +921,7 @@ impl OptionState {
             })
     }
 
-    /// One chip of the launcher's harness row (`.launch-composer-options > button`, at the launcher form's size; see
-    /// [`CHIP_MIN_HEIGHT`]): the well color inside a 1.5-pixel edge, or the accent fill with the inverse ink when
+    /// One compact chip of the launcher's harness row: the well color inside a hairline, or the accent fill with inverse ink when
     /// chosen, the words regular weight either way. The old chips had no hover fill, no pointer cursor (no rule set
     /// one, unlike the segments' `cursor: pointer`) and no disabled look of their own (the stylesheet's colors overrode
     /// the browser's disabled ink); this one keeps the first two and dims an unavailable chip as every other look does,
@@ -886,11 +965,16 @@ impl OptionState {
             .border_color(theme::color(palette.border))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))
-            .text_size(metrics::TEXT_MD)
+            .text_size(metrics::TEXT_SM)
             .line_height(px(SEGMENT_LINE_HEIGHT))
             .text_color(theme::color(ink))
             .when(!self.enabled, |chip| chip.opacity(0.5))
-            .children(contents(option, ink, self.filled_description_ink(palette)))
+            .children(contents(
+                option,
+                ink,
+                self.filled_description_ink(palette),
+                self.chosen,
+            ))
             .when(self.ring, |chip| {
                 chip.child(
                     div()
@@ -923,7 +1007,7 @@ impl OptionState {
         } else {
             palette.border
         };
-        let inset = -(CHIP_EDGE + 3.);
+        let inset = -(CARD_EDGE + 3.);
         let illustrated = preview.is_some();
         div()
             .id(ElementId::Name(id.clone()))
@@ -934,7 +1018,7 @@ impl OptionState {
             .gap(px(CARD_INNER_GAP))
             .min_w_0()
             .p(px(CARD_PAD))
-            .border(px(CHIP_EDGE))
+            .border(px(CARD_EDGE))
             .border_color(theme::color(edge))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(if illustrated {
@@ -1005,7 +1089,7 @@ impl OptionState {
             .text_color(theme::color(ink))
             .when(self.enabled, |radio| radio.cursor_pointer())
             .child(self.circle(palette))
-            .children(contents(option, ink, palette.fg_1))
+            .children(contents(option, ink, palette.fg_1, self.chosen))
     }
 
     /// The same native mark serves a plain radio, a described row, and an illustrated choice.
@@ -1054,22 +1138,33 @@ impl OptionState {
 
 /// What an option shows after any circle: its glyph, then its words, then its description line under them. A plain
 /// option's label is a direct text child, as it was before glyphs and descriptions existed, so those options draw
-/// exactly as they did. The glyph takes `ink`, the words' ink; the description takes `description_ink` at its own
+/// exactly as they did. A harness mark uses its identity ink until chosen. The description takes its own ink and
 /// regular weight, so a chosen segment's semibold stays on the label.
 fn contents<V>(
     option: &RadioOption<V>,
     ink: Token,
     description_ink: Token,
+    chosen: bool,
 ) -> Vec<gpui::AnyElement> {
     let mut children = Vec::with_capacity(2);
     let words = option.glyph.is_none_or(|glyph| glyph.words);
     if let Some(glyph) = option.glyph {
+        let size = if glyph.mark_ink.is_some() {
+            CHIP_MARK
+        } else {
+            GLYPH
+        };
+        let glyph_ink = if chosen {
+            ink
+        } else {
+            glyph.mark_ink.unwrap_or(ink)
+        };
         children.push(
             svg()
                 .path(glyph.icon.path())
-                .size(px(GLYPH))
+                .size(px(size))
                 .flex_none()
-                .text_color(theme::color(ink))
+                .text_color(theme::color(glyph_ink))
                 .into_any_element(),
         );
     }
