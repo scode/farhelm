@@ -2771,44 +2771,42 @@ a value is recorded. The same card appears from the title or any unmarked part o
 on keyboard focus. Every session-row hover, including the summary card and notification bell, sits just right of the
 sidebar, vertically centred on its target and shifted only to fit the window. A left-edge notch points back to the
 target's centre, clamped to the box's straight edge. A thin accent ring identifies a control while its help shows.
-Status marks get the notch alone.
-
-When there is no room to the right, it uses ordinary above/below placement without a notch or ring. The summary card
-names the title, status, agent, host, checkout when managed, directory, start and last-activity times, and what a click
-does; meaningful marks keep their own hover text. The summary may clip very long values or whole rows in a short window;
-the session view provides those details in full, except the start time, which only the summary card shows. Its agent
-line retains the stored launch facts and adds "YOLO observed" when the shield has status-line evidence, including when
-the launch was already YOLO. The actions-menu header describes only the stored launch. A row's own actions menu, beyond
-the lifecycle operations above, also offers a mark read / mark unread toggle — reachable there or by clicking the dot
-itself — that sets the session's seen state directly (see Status). Directly after it in the menu's first metadata group,
-**Pin to top** / **Unpin** toggles the shared pin. Directly after Unpin, **Move up** and **Move down** rearrange
-eligible pins relative to the displayed neighbor; an unavailable direction is hidden, and unpinned rows offer neither
-action. Accepting a move closes the menu and keeps keyboard focus on the moved row's menu button. Every session row
-except a shell carries one permission mark. Bash and Zsh show their own terminal-window marks, `$_` and `%_` in the
-inherited grey, with a hover that names the shell. An amber slashed shield means the session's launch is YOLO by the
-rule under Creation: its effective agent-launch permission is custom or YOLO, or its command was asserted to be YOLO. A
-green plain shield means an agent launch in guarded or an approval mode, or a command asserted not to be YOLO. A session
-created before launch kinds existed that was not an agent launch has no assertion and carries an amber question mark.
-Hover and screen-reader text name the specific agent-launch mode (guarded, custom, approve, smart approve, chat, or
-YOLO), or say that the mark is the assertion made when the command was launched, by the user or by an agent, and not
-something Farhelm checked, or that a pre-existing session's command was never classified. A grey dashed shield means the
-agent's own setting, including older sessions started without guarded flags. Its hover says Not classified and that the
-host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode
-from its status line. A definite no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO
-shield. Hover and screen-reader text name the observed mode and say it was seen on screen, while retaining the launch
-mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or
-obscured line, or an unrecognized mode cannot clear it. This errs toward safety: restoring a safer shield would risk
-leaving it there if a later switch back to YOLO went unnoticed. This never makes the shield safer than its launch
-choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor restart also clears it until
-new definite samples arrive. Command launches with a declared agent type are included; legacy sessions and the other
-agents are not read. This is advisory and best effort, not a promise of detection: a missed or late reading is outside
-the guarantee. It cannot see allow rules, hooks or managed policy. It is display only; host YOLO guards, spawned-session
-permission inheritance and approval decisions still use the stored launch alone. Every guarded hover names the agent's
-mode and meaning, shows the actual stored command under Launched with, and explains that allow rules, hooks, plugins,
-always-allow answers, sandbox settings and in-session switches can loosen it; agents may change behavior between
-versions. A custom hover says the flags were the user's, that Farhelm does not check them and counts the session as
-YOLO, and shows both the flags and the full stored command under Launched with. The launcher's permission choice has a
-separate ? button with that help, opening the docs section on permission modes.
+Status marks get the notch alone. When there is no room to the right, it uses ordinary above/below placement without a
+notch or ring. The summary card names the title, status, agent, host, checkout when managed, directory, start and
+last-activity times, and what a click does; meaningful marks keep their own hover text. The summary may clip very long
+values or whole rows in a short window; the session view provides those details in full, except the start time, which
+only the summary card shows. Its agent line retains the stored launch facts and adds "YOLO observed" when the shield has
+status-line evidence, including when the launch was already YOLO. The actions-menu header describes only the stored
+launch. A row's own actions menu, beyond the lifecycle operations above, also offers a mark read / mark unread toggle —
+reachable there or by clicking the dot itself — that sets the session's seen state directly (see Status). Directly after
+it in the menu's first metadata group, **Pin to top** / **Unpin** toggles the shared pin. Directly after Unpin, **Move
+up** and **Move down** rearrange eligible pins relative to the displayed neighbor; an unavailable direction is hidden,
+and unpinned rows offer neither action. Accepting a move closes the menu and keeps keyboard focus on the moved row's
+menu button. Every session row except a shell carries one permission mark. Bash and Zsh show their own terminal-window
+marks, `$_` and `%_` in the inherited grey, with a hover that names the shell. An amber slashed shield means the
+session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or YOLO, or its
+command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a command
+asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no assertion and
+carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded, custom,
+approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was launched, by the
+user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was never classified. A
+grey dashed shield means the agent's own setting, including older sessions started without guarded flags. Its hover says
+Not classified and that the host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read
+the agent's permission mode from its status line. A definite no-checks reading changes any shield other than YOLO or
+asserted-YOLO to the YOLO shield. Hover and screen-reader text name the observed mode and say it was seen on screen,
+while retaining the launch mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized
+non-YOLO mode, an unreadable or obscured line, or an unrecognized mode cannot clear it. This errs toward safety:
+restoring a safer shield would risk leaving it there if a later switch back to YOLO went unnoticed. This never makes the
+shield safer than its launch choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor
+restart also clears it until new definite samples arrive. Command launches with a declared agent type are included;
+legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of detection: a
+missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is display only;
+host YOLO guards, spawned-session permission inheritance and approval decisions still use the stored launch alone. Every
+guarded hover names the agent's mode and meaning, shows the actual stored command under Launched with, and explains that
+allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it; agents may
+change behavior between versions. A custom hover says the flags were the user's, that Farhelm does not check them and
+counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The launcher's
+permission choice has a separate ? button with that help, opening the docs section on permission modes.
 
 Hover help keeps neighboring choices visible wherever the window has room. Menu items, dropdown choices and actions in
 the notification and tunnels lists show help just outside the panel, to the right if it fits and to the left otherwise.
