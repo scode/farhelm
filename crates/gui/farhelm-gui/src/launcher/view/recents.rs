@@ -309,9 +309,14 @@ impl Launcher {
                     }
                 });
             })
-            .on_click(move |_, window, cx| {
+            .on_click(move |event, window, cx| {
                 let _ = on_click.update(cx, |launcher, cx| {
-                    launcher.take_strip_recent(&clicked, window, cx);
+                    let mark = focus::Mark::take(cx);
+                    if launcher.take_strip_recent(&clicked, window, cx)
+                        && matches!(event, gpui::ClickEvent::Mouse(_))
+                    {
+                        focus::focus_in_layer(&launcher.search.focus_handle(cx), &mark, window, cx);
+                    }
                 });
             });
             // `button + button { border-top: 1px solid var(--border-row) }`.

@@ -107,8 +107,8 @@ use std::rc::Rc;
 use farhelm_input_mapping::Platform;
 use gpui::{
     AnyElement, App, AppContext as _, Context, ElementId, Entity, FocusHandle, Focusable as _,
-    InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, SharedString, Styled,
-    Subscription, Window, div, prelude::FluentBuilder as _,
+    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, SharedString,
+    Styled, Subscription, Window, div, prelude::FluentBuilder as _,
 };
 use gpui::{KeyBinding, KeybindingKeystroke, Keystroke};
 
@@ -486,6 +486,8 @@ pub struct TextInput {
     monospace: bool,
     /// The field's height in place of Kit's ([`TextInput::height`]).
     height: Option<Pixels>,
+    /// The primary command field uses a larger type size than ordinary form inputs.
+    line_text_size: Option<Pixels>,
     /// A decorative icon before a single-line field's text, such as the Settings search magnifier.
     line_prefix: Option<AnyElement>,
     /// A decoration outside the single-line input's text area, such as the key cap on Settings search.
@@ -497,6 +499,17 @@ pub struct TextInput {
     /// What the sequence prefix does in this field with nothing selected, and by which platform's rule, if anything
     /// ([`TextInput::on_unselected_prefix`]).
     on_unselected_prefix: Option<(Platform, PrefixHandler)>,
+}
+
+/// Kit tracks the input frame separately from its editor. A click on a decoration must send typing to the
+/// same editor as a click on the text itself.
+fn line_adornment(element: AnyElement, editor: FocusHandle) -> gpui::Div {
+    div()
+        .on_mouse_down(MouseButton::Left, move |_, window, cx| {
+            window.prevent_default();
+            editor.focus(window, cx);
+        })
+        .child(element)
 }
 
 /// What a field runs for the sequence prefix with nothing selected ([`TextInput::on_unselected_prefix`]).
@@ -587,6 +600,7 @@ impl TextInput {
             on_vertical: None,
             monospace: false,
             height: None,
+            line_text_size: None,
             line_prefix: None,
             line_suffix: None,
             embedded: false,
@@ -622,6 +636,12 @@ impl TextInput {
     /// with [`TextInput::monospace`].
     pub fn height(mut self, height: Pixels) -> Self {
         self.height = Some(height);
+        self
+    }
+
+    /// Let a prominent single-line field set its type size while ordinary inputs keep the shared form size.
+    pub(crate) fn line_text_size(mut self, text_size: Pixels) -> Self {
+        self.line_text_size = Some(text_size);
         self
     }
 
@@ -793,9 +813,13 @@ impl RenderOnce for TextInput {
                     .aria_label(self.label)
                     .bg(theme::color(palette.well))
                     .rounded(metrics::RADIUS_SM)
-                    .text_size(metrics::TEXT_MD)
-                    .when_some(self.line_prefix, Input::prefix)
-                    .when_some(self.line_suffix, Input::suffix)
+                    .text_size(self.line_text_size.unwrap_or(metrics::TEXT_MD))
+                    .when_some(self.line_prefix, |input, prefix| {
+                        input.prefix(line_adornment(prefix, handle.clone()))
+                    })
+                    .when_some(self.line_suffix, |input, suffix| {
+                        input.suffix(line_adornment(suffix, handle))
+                    })
                     .when(self.embedded, |input| input.appearance(false))
                     .when(self.monospace, |input| {
                         input.font_family(crate::assets::TERMINAL_FONT)

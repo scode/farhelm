@@ -145,10 +145,10 @@ fn new_container_shows_its_rows_with_unusable_hosts_disabled(cx: &mut TestAppCon
         "before the recipe's place is pushed"
     );
     assert!(
-        name_of(cx, "launcher-summary-target")
-            .is_some_and(|name| name.starts_with("Command · new web container on host1")),
+        name_of(cx, "launcher-launch")
+            .is_some_and(|name| name.starts_with("Launch Command · new web container on host1")),
         "{:?}",
-        name_of(cx, "launcher-summary-target")
+        name_of(cx, "launcher-launch")
     );
 }
 
