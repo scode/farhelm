@@ -1714,6 +1714,8 @@ async fn stop_session_unknown_id_returns_404_with_supervisor_message() {
 /// 200, preserving bare successes and carrying a true archive fact through
 /// to the client that will decide whether to animate its own Delete. An
 /// archive also advances the host's Trash epoch, which a bare delete leaves.
+/// Hold the reply until the cached row goes away, so cache forgetting cannot
+/// supply the fleet wake the archive owes.
 #[farhelm_testtrace::test]
 async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
     use farhelm_proto::ControlMsg;
@@ -1722,6 +1724,9 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
 
     for archived in [false, true] {
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+        let (delete_seen, seen) = tokio::sync::oneshot::channel();
+        let (send_reply, reply) = tokio::sync::oneshot::channel();
+        let (close_peer, close) = tokio::sync::oneshot::channel();
         let peer = tokio::spawn(async move {
             let (r, w) = tokio::io::split(peer_side);
             let mut reader = FrameReader::new(r);
@@ -1737,6 +1742,8 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
                 panic!("expected DeleteSession, got {request:?}");
             };
             assert_eq!(session_id, "sess-1");
+            delete_seen.send(()).unwrap();
+            reply.await.unwrap();
             writer
                 .write_control(&ControlMsg::SessionDeleted {
                     req_id,
@@ -1745,6 +1752,7 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
                 })
                 .await
                 .unwrap();
+            close.await.unwrap();
         });
 
         let harness = rest_harness::spliced_helm(client_side).await;
@@ -1757,7 +1765,21 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
             .body(axum::body::Body::empty())
             .unwrap();
 
-        let response = app.oneshot(request).await.unwrap();
+        let waiting = tokio::spawn(app.oneshot(request));
+        tokio::time::timeout(std::time::Duration::from_secs(5), seen)
+            .await
+            .expect("waiting for the fixture to receive Delete")
+            .expect("the fixture received Delete");
+        let host = rest_harness::local_id(&harness.store).await;
+        let (claim, _) = crate::sessions::host_client(&harness.state, host).unwrap();
+        harness
+            .manager
+            .forget_session(&claim, "sess-1")
+            .await
+            .unwrap();
+        let revision = harness.manager.events().revision();
+        send_reply.send(()).unwrap();
+        let response = waiting.await.unwrap().unwrap();
         assert_eq!(response.status(), axum::http::StatusCode::OK);
         let body = axum::body::to_bytes(response.into_body(), usize::MAX)
             .await
@@ -1781,7 +1803,13 @@ async fn delete_session_happy_path_returns_200_with_the_archive_fact() {
             .map(|view| view.trash_epoch)
             .sum();
         assert_eq!(epochs, u64::from(archived), "archived={archived}");
+        assert_eq!(
+            harness.manager.events().revision(),
+            revision + u64::from(archived),
+            "only the archive should wake the fleet after the row is gone"
+        );
 
+        close_peer.send(()).unwrap();
         peer.await.unwrap();
     }
 }
@@ -1839,7 +1867,105 @@ async fn delete_session_passes_the_supervisors_notice_to_the_caller() {
         value,
         serde_json::json!({"notice": "The managed checkout at /work/bar-1 was not archived"})
     );
+    assert!(harness.store.notices().await.unwrap().notices.is_empty());
 
+    peer.await.unwrap();
+}
+
+/// Once the Delete reply has timed out, only the shared notice can tell
+/// the user where the supervisor left the checkout.
+#[farhelm_testtrace::test]
+async fn a_late_delete_keeps_its_checkout_notice_in_the_feed() {
+    use farhelm_proto::ControlMsg;
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use tower::ServiceExt;
+
+    let detail = "The managed checkout at /work/late-1 was not archived";
+    let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
+    let (delete_seen, seen) = tokio::sync::oneshot::channel();
+    let (finish_delete, finish) = tokio::sync::oneshot::channel();
+    let (close_peer, close) = tokio::sync::oneshot::channel();
+    let peer = tokio::spawn(async move {
+        let (r, w) = tokio::io::split(peer_side);
+        let mut reader = FrameReader::new(r);
+        let mut writer = FrameWriter::new(w);
+        handshake(&mut reader, &mut writer, "supervisor")
+            .await
+            .unwrap();
+        let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+        let ControlMsg::DeleteSession { req_id, .. } = request else {
+            panic!("expected DeleteSession, got {request:?}");
+        };
+        delete_seen.send(()).unwrap();
+        finish.await.unwrap();
+        writer
+            .write_control(&ControlMsg::SessionDeleted {
+                req_id,
+                archived: false,
+                notice: Some(detail.into()),
+            })
+            .await
+            .unwrap();
+        close.await.unwrap();
+    });
+
+    let harness = rest_harness::spliced_helm(client_side).await;
+    let router = harness.router();
+    let request = axum::http::Request::builder()
+        .method("DELETE")
+        .uri(harness.local_session_uri("/api/sessions/sess-1"))
+        .header("host", "127.0.0.1:7433")
+        .body(axum::body::Body::empty())
+        .unwrap();
+    let waiting = tokio::spawn(router.oneshot(request));
+    tokio::time::timeout(std::time::Duration::from_secs(5), seen)
+        .await
+        .expect("waiting for the fixture to receive Delete")
+        .expect("the supervisor fixture received Delete");
+    tokio::time::pause();
+    tokio::time::advance(crate::sessions::HOST_REPLY_BOUND).await;
+    let response = rest_harness::within_reply_bound(waiting)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(response.status(), axum::http::StatusCode::GATEWAY_TIMEOUT);
+    let body = axum::body::to_bytes(response.into_body(), 8 * 1024)
+        .await
+        .unwrap();
+    assert!(String::from_utf8_lossy(&body).contains("notices bell"));
+    tokio::time::resume();
+    // The supervisor can publish removal before replying. Forget the row
+    // first so an ordinary cache wake cannot stand in for the notice's wake.
+    let host = rest_harness::local_id(&harness.store).await;
+    let (claim, _) = crate::sessions::host_client(&harness.state, host).unwrap();
+    harness
+        .manager
+        .forget_session(&claim, "sess-1")
+        .await
+        .unwrap();
+    let mut revisions = harness.manager.events().subscribe();
+    assert!(harness.store.notices().await.unwrap().notices.is_empty());
+    finish_delete.send(()).unwrap();
+
+    let notice = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            revisions.changed().await.unwrap();
+            let notices = harness.store.notices().await.unwrap().notices;
+            if let Some(notice) = notices.into_iter().next() {
+                break notice;
+            }
+        }
+    })
+    .await
+    .expect("committing the notice must wake the feed");
+    assert_eq!(
+        notice.content,
+        farhelm_proto::notices::NoticeContent::LateDelete {
+            detail: detail.into()
+        }
+    );
+    assert!(!notice.read && !notice.resolved);
+    close_peer.send(()).unwrap();
     peer.await.unwrap();
 }
 

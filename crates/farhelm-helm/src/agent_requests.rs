@@ -17730,6 +17730,7 @@ mod tests {
         #[derive(Clone, Copy)]
         enum Answer {
             Deleted(u32),
+            DeletedWithNotice(&'static str),
             Sealed,
             NotFound,
         }
@@ -17797,6 +17798,11 @@ mod tests {
                             req_id,
                             outcome: farhelm_proto::SealOutcome::Deleted { remaining },
                             notice: None,
+                        },
+                        Answer::DeletedWithNotice(detail) => ControlMsg::SessionDeletedOrSealed {
+                            req_id,
+                            outcome: farhelm_proto::SealOutcome::Deleted { remaining: 1 },
+                            notice: Some(detail.into()),
                         },
                         Answer::Sealed => ControlMsg::SessionDeletedOrSealed {
                             req_id,
@@ -18541,11 +18547,16 @@ mod tests {
         /// Delete still holds the host's provisioning lock and nothing has
         /// changed: the session listed, nothing destroyed. Once the answer is
         /// released, a `Deleted` stops listing the session and keeps the
-        /// environment; a `Sealed` shows the host as being deleted while its
-        /// destruction is held, then forgets the host.
+        /// environment, with the reported checkout path in the notice feed.
+        /// A `Sealed` shows the host as being deleted while its destruction
+        /// is held, then forgets the host.
         #[farhelm_testtrace::test]
         async fn an_environment_delete_answers_at_the_bound_and_its_late_answer_lands() {
-            for (label, late) in [("Deleted", Answer::Deleted(1)), ("Sealed", Answer::Sealed)] {
+            const CHECKOUT_NOTICE: &str = "The managed checkout at /work/one was not archived";
+            for (label, late) in [
+                ("Deleted", Answer::DeletedWithNotice(CHECKOUT_NOTICE)),
+                ("Sealed", Answer::Sealed),
+            ] {
                 let (h, _, _, containers) = container_fleet().await;
                 let destruction = hold_destruction(&containers);
                 let release = Arc::new(tokio::sync::Notify::new());
@@ -18594,6 +18605,19 @@ mod tests {
                     await_unlisted(&h, owned, "one").await;
                     assert!(registered(&h, owned).await, "the environment stays");
                     assert_eq!(destroys(&containers), 0);
+                    poll_until(
+                        || async {
+                            let notices = h.store.notices().await.unwrap().notices;
+                            notices.into_iter().find(|notice| {
+                                notice.host == Some(owned)
+                                    && matches!(&notice.content,
+                                        farhelm_proto::notices::NoticeContent::LateDelete { detail }
+                                        if detail == CHECKOUT_NOTICE)
+                            })
+                        },
+                        || "the environment's checkout notice did not reach the feed".into(),
+                    )
+                    .await;
                 }
             }
         }

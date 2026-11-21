@@ -4002,21 +4002,6 @@ pub(crate) async fn delete_session(
         if guard != farhelm_proto::DeleteGuard::Unconditional {
             return http_error(sandbox::user_only_delete());
         }
-        // Bounded like every other host-waiting route the GUI sends (see
-        // `HOST_REPLY_BOUND`): the turn among this host's environment Deletes
-        // and the supervisor's answer can each take minutes. An "unasked"
-        // answer that arrives in time keeps its marker; one that would have
-        // come later is what the bound gives up (see the 504's words).
-        return within_host_reply_bound_saying(
-            async move {
-                match sandbox::delete_environment_session(&state, &key).await {
-                    Ok(outcome) => axum::Json(outcome).into_response(),
-                    Err(error) => http_error(error),
-                }
-            },
-            sandbox::environment_session_delete_carries_on(),
-        )
-        .await;
     }
     if query.delete_sandbox {
         // The warned whole-environment Delete destroys the machine through
@@ -4033,18 +4018,56 @@ pub(crate) async fn delete_session(
         )
         .await;
     }
-    // The ordinary session Delete is bounded like rename (see
-    // `HOST_REPLY_BOUND`), so a slow host cannot hold every later GUI command
-    // behind it. `do_delete_session` refuses a plain Delete of a session in a
-    // disposable environment first, which only the two warned Deletes above
-    // may remove.
-    within_host_reply_bound(async move {
-        match do_delete_session(&state, &key, guard, None).await {
-            Ok(outcome) => axum::Json(outcome).into_response(),
-            Err(e) => http_error(e),
-        }
-    })
-    .await
+    // The host reply bound keeps a slow Delete from holding up the UI channel.
+    // A timely environment reply still carries its count or "unasked" marker.
+    // A retained environment can also leave its removed session's checkout on disk.
+    let environment = query.delete_environment_session;
+    let timed_out = if environment {
+        sandbox::environment_session_delete_carries_on()
+    } else {
+        format!(
+            "the host did not answer within {} seconds; Delete is still running. The session list will show its result. If the checkout is left behind, look for its location in the notices bell.",
+            HOST_REPLY_BOUND.as_secs()
+        )
+    };
+    let (send_notice, late_notice) = tokio::sync::oneshot::channel();
+    let request_state = Arc::clone(&state);
+    let delete_key = key.clone();
+    let response = within_host_reply_bound_saying(
+        async move {
+            let result = if environment {
+                sandbox::delete_environment_session(&request_state, &delete_key).await
+            } else {
+                do_delete_session(&request_state, &delete_key, guard, None).await
+            };
+            match result {
+                Ok(outcome) => {
+                    if let Some(notice) = outcome.notice.clone() {
+                        let _ = send_notice.send(notice);
+                    }
+                    axum::Json(outcome).into_response()
+                }
+                Err(e) => http_error(e),
+            }
+        },
+        timed_out,
+    )
+    .await;
+    // A timely result carries its own notice. After the reply deadline no
+    // caller sees that body, so the host's notice history owns the message.
+    if response.status() == axum::http::StatusCode::GATEWAY_TIMEOUT {
+        tokio::spawn(async move {
+            if let Ok(detail) = late_notice.await
+                && let Err(error) = state
+                    .store
+                    .record_late_delete(key, detail, Arc::clone(state.manager.events()))
+                    .await
+            {
+                warn!(%error, "could not record the late Delete notice");
+            }
+        });
+    }
+    response
 }
 
 /// Delete through the same approval denial, teardown and local cleanup for
@@ -4110,9 +4133,11 @@ async fn delete_session_teardown(
         .await?;
     // An archived checkout is new Trash content. Windows whose listing cannot
     // prove the session vanished (a filter, a truncated fleet) learn of it only
-    // through the host's Trash epoch, published before the fleet wake below.
+    // through the host's Trash epoch. Wake the fleet even when its cache has
+    // already forgotten the deleted session.
     if outcome.archived {
         state.trash_requests.changed(claim.host);
+        state.manager.events().bump();
     }
     forget_deleted_session(state, &claim, id).await;
     Ok(outcome)
@@ -5024,6 +5049,7 @@ async fn finish_replacement(
             // As for Delete: an archived source checkout is new Trash content.
             if outcome.archived {
                 state.trash_requests.changed(claim.host);
+                state.manager.events().bump();
             }
             outcome.notice
         }

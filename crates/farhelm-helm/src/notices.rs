@@ -57,12 +57,31 @@ const SESSION_LIMIT_SCHEMA: &str = "
 /// in SQLite's table-level UNIQUE constraint. Fresh databases and upgrades use
 /// exactly the same condition identity and cascade. AUTOINCREMENT prevents a
 /// stale panel's IDs naming later notices.
-pub(crate) const SCHEMA: &str = "
+const DESKTOP_PATH_SCHEMA: &str = "
     CREATE TABLE notices (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
         kind TEXT NOT NULL CHECK (
             (kind IN ('stuck_trash', 'host_session_limit') AND host_id IS NOT NULL)
+            OR (kind IN ('fleet_session_limit', 'desktop_login_path_unavailable') AND host_id IS NULL)
+        ),
+        condition_key TEXT NOT NULL,
+        raised_at INTEGER NOT NULL,
+        read INTEGER NOT NULL CHECK (read IN (0, 1)),
+        resolved INTEGER NOT NULL CHECK (resolved IN (0, 1)),
+        content TEXT NOT NULL,
+        UNIQUE (host_id, kind, condition_key)
+    ) STRICT;
+    CREATE UNIQUE INDEX notices_app_condition ON notices (kind, condition_key) WHERE host_id IS NULL;
+";
+
+/// Notice history and read marks share the same ID allocator across upgrades.
+pub(crate) const SCHEMA: &str = "
+    CREATE TABLE notices (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        host_id INTEGER REFERENCES hosts (id) ON DELETE CASCADE,
+        kind TEXT NOT NULL CHECK (
+            (kind IN ('stuck_trash', 'host_session_limit', 'late_delete') AND host_id IS NOT NULL)
             OR (kind IN ('fleet_session_limit', 'desktop_login_path_unavailable') AND host_id IS NULL)
         ),
         condition_key TEXT NOT NULL,
@@ -100,6 +119,11 @@ pub(crate) fn upgrade_session_limits(tx: &rusqlite::Transaction<'_>) -> anyhow::
 pub(crate) fn upgrade_desktop_login_path_notice(
     tx: &rusqlite::Transaction<'_>,
 ) -> anyhow::Result<()> {
+    rebuild_notices(tx, DESKTOP_PATH_SCHEMA)
+}
+
+/// Add one-time cleanup notices for Deletes that finish after their reply.
+pub(crate) fn upgrade_late_delete_notice(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
     rebuild_notices(tx, SCHEMA)
 }
 
@@ -368,7 +392,8 @@ fn record_trash(
             NoticeContent::StuckTrash { bytes, .. } => *bytes,
             NoticeContent::HostSessionLimit
             | NoticeContent::FleetSessionLimit
-            | NoticeContent::DesktopLoginPathUnavailable => None,
+            | NoticeContent::DesktopLoginPathUnavailable
+            | NoticeContent::LateDelete { .. } => None,
         });
         let content = match &entry.stuck {
             Some(stuck) => NoticeContent::StuckTrash {
@@ -461,6 +486,32 @@ pub(crate) async fn observe_trash(
 }
 
 impl HelmStore {
+    /// Persist a late Delete's cleanup details independently of the session it removed.
+    /// A second observation of the same outcome keeps the original notice's
+    /// read state. Wake the feed after the write so its first read sees it.
+    pub(crate) async fn record_late_delete(
+        &self,
+        key: crate::store::SessionKey,
+        detail: String,
+        events: Arc<manager::FleetEvents>,
+    ) -> anyhow::Result<()> {
+        self.conn()
+            .call("late checkout notice task panicked", move |conn| {
+                let content = serde_json::to_string(&NoticeContent::LateDelete { detail })?;
+                let changed = conn.execute(
+                    "INSERT INTO notices (host_id, kind, condition_key, raised_at, read, resolved, content)
+                     VALUES (?1, 'late_delete', ?2, ?3, 0, 0, ?4)
+                     ON CONFLICT(host_id, kind, condition_key) DO NOTHING",
+                    rusqlite::params![key.host, key.session_id, raised_now(), content],
+                )?;
+                if changed != 0 {
+                    events.bump();
+                }
+                Ok(())
+            })
+            .await
+    }
+
     /// Apply the desktop's lookup result before the first client reads its notices.
     /// One recurrence keeps its identity and any read state until explicitly cleared.
     pub(crate) async fn record_desktop_login_path(&self, available: bool) -> anyhow::Result<()> {
@@ -531,7 +582,13 @@ pub(crate) async fn marks(
             let tx = conn.transaction()?;
             let changed = {
                 let sql = match body.action {
-                    MarkAction::Read => "UPDATE notices SET read = 1 WHERE id = ?1 AND read = 0",
+                    // A late Delete is an event. Once read, it has no active
+                    // condition to resolve and is available to Clear resolved.
+                    MarkAction::Read => {
+                        "UPDATE notices SET read = 1,
+                        resolved = CASE kind WHEN 'late_delete' THEN 1 ELSE resolved END
+                        WHERE id = ?1 AND read = 0"
+                    }
                     MarkAction::ClearResolved => {
                         "DELETE FROM notices WHERE id = ?1 AND resolved = 1"
                     }
@@ -889,6 +946,47 @@ pub(crate) mod tests {
             .unwrap();
         assert!(added.id > 100 && added.host.is_none());
         assert!(old.iter().all(|notice| after.contains(notice)));
+        upgraded
+            .record_late_delete(
+                crate::store::SessionKey::new(host, "former-session"),
+                "Checkout left at /work/left".into(),
+                Arc::new(manager::FleetEvents::default()),
+            )
+            .await
+            .unwrap();
+        let notices = upgraded.notices().await.unwrap().notices;
+        let late = notices
+            .iter()
+            .find(|notice| matches!(notice.content, NoticeContent::LateDelete { .. }))
+            .unwrap();
+        assert!(late.id > added.id);
+        assert!(after.iter().all(|notice| notices.contains(notice)));
+    }
+
+    /// A completed Delete has no later condition read to resolve its notice.
+    /// Read acknowledgement makes it clearable with the ordinary panel action.
+    #[farhelm_testtrace::test]
+    async fn a_late_checkout_notice_can_be_cleared_after_it_is_read() {
+        let harness = FleetBuilder::new().await.start().await;
+        let host = rest_harness::local_id(&harness.store).await;
+        harness
+            .store
+            .record_late_delete(
+                crate::store::SessionKey::new(host, "former-session"),
+                "Checkout left at /work/left".into(),
+                Arc::clone(harness.manager.events()),
+            )
+            .await
+            .unwrap();
+        let notice = harness.store.notices().await.unwrap().notices.remove(0);
+        let ids = [notice.id];
+        assert!(!notice.read && !notice.resolved);
+        mark(&harness, "clear_resolved", &ids).await;
+        assert_eq!(harness.store.notices().await.unwrap().notices, [notice]);
+        mark(&harness, "read", &ids).await;
+        assert!(harness.store.notices().await.unwrap().notices[0].resolved);
+        mark(&harness, "clear_resolved", &ids).await;
+        assert!(harness.store.notices().await.unwrap().notices.is_empty());
     }
 
     /// Wait for a particular state of a persisted ceiling notice. The
