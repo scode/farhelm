@@ -3531,7 +3531,9 @@ another app and back do not count.
 
 Once the user has moved on, the result moves no focus, opens no dialog and switches no session. It shows up where it
 belongs (the session's row, a question card on its session) or as a notice the user can click. A launch that fails after
-the user moved on shows a notice, and clicking it brings back the launcher with its draft and error.
+the user moved on shows a notice, and clicking it brings back the launcher with its draft and error. One exception
+(decided 2026-11-21): a Replace whose source is still the selected session selects its replacement when it finishes,
+even after the user moved on, because the session they were looking at is gone; it still moves no keyboard focus.
 
 If the user has not moved on, the result may take focus, and lands somewhere safe: a new session opens with its terminal
 focused, and a question starts on its harmless answer (Cancel), never on the risky one. A launch that finishes while the
