@@ -26118,3 +26118,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `oxnpxttozrskzsorxmunvlwvknlwmqwm`, bookmark
   `plan/brick-test-guard-oracles/02-prerequisite-guards-separately`,
   [PR #4384](https://github.com/scode/farhelm/pull/4384/changes).
+
+## installer-file-symlink-test-masks-nofollow-removal.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
+  reviewed. `files_are_replaced_whole_and_links_are_never_followed`
+  (crates/farhelm-supervisor/src/installation/dirs.rs:~303-331) checks that `open_file(dir, "link")` fails. But "link"
+  points at the temp directory, and `open_file` (dirs.rs:~95-111) also refuses any non-regular file after opening ("is
+  not a regular file"). So the assertion "a link is never read through" would still pass with `OFlags::NOFOLLOW`
+  removed. The `open_file` doc promises "refusing a symbolic link", and the test's doc promises "a ... link is never
+  followed when classifying or opening".
+- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
+  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
+  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
+  revise it.
+- Completion criteria: Add a symlink to a regular file (e.g. to the existing "target") and assert that `open_file`
+  refuses it, so the test fails when `NOFOLLOW` is removed from `open_file`. Keep the directory-link assertions for
+  `open_folder`/`entry_kind`. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file and its index
+  entry.
+- Execution: change `mzotztsmxmupznkuzuxtssupyxqrosnm`, bookmark
+  `plan/installer-symlink-file-oracle/01-file-symlink-assertion`,
+  [PR #4383](https://github.com/scode/farhelm/pull/4383/changes).
