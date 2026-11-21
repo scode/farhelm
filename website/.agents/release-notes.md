@@ -22,7 +22,8 @@ An entry can show screenshots of what it changed, behind a closed **show screens
 each entry by a pull request number the entry cites; the generator places them, and fails the build when no entry of
 that release cites the number. `CHANGELOG.md` and the GitHub release stay text only. Add a `Shot` named
 `v<X-Y-Z>-<what>` in `scripts/docs-shots/release-notes.py` and put its full name, `release-notes/v<X-Y-Z>-<what>`, in
-the listing for `vX.Y.Z`. On Linux, run `scripts/docs-screenshots.sh --local --only release-notes` while drafting, then
+the listing for `vX.Y.Z`. On Linux, draft the affected shots in one `scripts/docs-screenshots.sh --local` run by passing
+`--only release-notes/<shot>` for each, or `--only release-notes` for the whole page. Then run
 `scripts/docs-screenshots.sh --local` for the full 2x capture that publication needs. The first publication freezes the
 shot (`website/AGENTS.md`, "Published release notes are frozen"). See `docs/docs-shots/SPEC.md`, "Adding or changing a
 shot", for staging more of the fleet. Give a screenshot only to a highlighted entry whose change is visible, such as a

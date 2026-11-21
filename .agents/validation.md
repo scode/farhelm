@@ -802,14 +802,17 @@ systemd or SSH substrate ran.
 - `python3 -B scripts/test-docs-shots.py` — the docs screenshot engine (`scripts/docs_shots.py`): page modules refused
   without SHOTS, with bad or duplicate shot names, or with empty or non-id regions or a non-id park target; crop unions
   padded, clamped to the content after the Linux frame crop, and scaled; a release declaration matched to its version's
-  listing, a published release shot skipped unless requested, and against a stand-in harness, failed captures leaving no
-  output while later shots run and layer reset failing after six Escape presses; malformed annotations and crop limits
-  refused, callout text wrapped and boxes placed as the old browser overlay did, `{session:}` and `{host:}` targets
-  resolved from the run, and a drawn callout kept whole inside the crop with the uncovered pixels left as captured (with
-  `rsvg-convert`; without it that test prints `SKIPPED`, which is missing coverage). Seconds, no app or network. Run it
-  when the engine, `scripts/docs_callouts.py` or its page modules change. The shell checks listed with the README hero
-  also cover its capture command. Run `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and
-  the complete capture record. Inspect the images it prints. Use `--only <page>` for a focused live run.
+  listing, a published release shot skipped unless requested, repeatable page and shot selection in declaration order,
+  refusal of unknown names and individually selected frozen shots, the local wrapper clearing only selected outputs, and
+  against a stand-in harness, failed captures leaving no output while later shots run and layer reset failing after six
+  Escape presses; malformed annotations and crop limits refused, callout text wrapped and boxes placed as the old
+  browser overlay did, `{session:}` and `{host:}` targets resolved from the run, and a drawn callout kept whole inside
+  the crop with the uncovered pixels left as captured (with `rsvg-convert`; without it that test prints `SKIPPED`, which
+  is missing coverage). Seconds, no app or network. Run it when the engine, `scripts/docs_callouts.py` or its page
+  modules change. The shell checks listed with the README hero also cover its capture command. Run
+  `scripts/docs-screenshots.sh --local` on Linux to check the staged app at 2x and the complete capture record. For a
+  GUI change, pass `--only <page>` or `--only <page>/<shot>` for every affected page or shot in one invocation and
+  inspect the images it prints.
 - `python3 scripts/record-test-run.py --kind development --selection 'demo video recorder' --concurrency 'one unittest process' -- python3 -B scripts/test-readme-video.py`
   — checks segment timing, mark selection, complete frames, encode arguments and output ownership. For the capture
   overlay, run `cargo nextest run -p farhelm-gui --features agent --lib -E 'test(/^demo_video::/)'` through the
@@ -1142,8 +1145,9 @@ systemd or SSH substrate ran.
   `shellcheck scripts/boat/sandbox/*.sh` — the boat harness's own checks (the Rust shard, GPUI and docs screenshot
   runner and its pool): the shard configuration dropping only the local fixture build and keeping the scoped Podman
   setup, how an exec's output frames are read (an exec without its exit frame is never trusted), how a docs run's pages
-  spread over its members, and the default sandbox name prefix. Run them when the harness changes; seconds, no sandbox.
-  Using the harness itself is described in `.agents/boat.md`.
+  spread over its members with the same page's shots kept together, which old outputs a selected docs run clears, and
+  the default sandbox name prefix. Run them when the harness changes (seconds, no sandbox). Using the harness itself is
+  described in `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
   `python3 -m py_compile scripts/test-worker/remote/prune.py` — the SSH test worker harness's own checks (the driver,
   the worker's bootstrap, runners, lock and stop, and the sync's prune). Run them when the harness changes; seconds, no

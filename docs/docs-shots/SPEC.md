@@ -85,9 +85,9 @@ conflict by hand-editing it.
 
 Publishing requires every page's shots from one complete capture against one main commit. Published release shots are
 carried over unchanged. A complete run writes `capture.json` beside the shots, naming the commit and each PNG's
-checksum. `--only <page>` deletes that record, as does a full run whose app code (`crates/`, `Cargo.toml`, `Cargo.lock`)
-differs from main or which used `--no-build`. Such a full run still captures for preview but exits 3 and explains why.
-The harness asks cargo where it builds, so `CARGO_TARGET_DIR` does not affect this decision.
+checksum. A run with any `--only` selector deletes that record, as does a full run whose app code (`crates/`,
+`Cargo.toml`, `Cargo.lock`) differs from main or which used `--no-build`. Such a full run still captures for preview but
+exits 3 and explains why. The harness asks cargo where it builds, so `CARGO_TARGET_DIR` does not affect this decision.
 
 The publisher refuses a partial record, a referenced shot the run did not produce, or a shot whose bytes changed after
 capture. This preserves one identifiable UI version across the published set.
@@ -96,7 +96,8 @@ capture. This preserves one identifiable UI version across the published set.
 
 A release shot is frozen when `website/src/release-notes/*.json` lists it and `website/src/data/docs-shots.json` records
 it. The capture skips it even if its steps are still declared. The publisher carries its bytes over from the pinned
-snapshot and refuses a publish if the image is missing. Today's UI may no longer match the old release.
+snapshot and refuses a publish if the image is missing. Today's UI may no longer match the old release. Selecting a
+frozen picture by full shot name with `--only` returns a refusal and names the recapture option.
 
 For a deliberate correction, make sure the shot has steps in `scripts/docs-shots/release-notes.py`, then run
 `scripts/docs-screenshots.sh --local --recapture-release-shot release-notes/v<X-Y-Z>-<what>`. The full run records the
@@ -126,22 +127,24 @@ can carry in the callouts, per the editorial rules. The crop always grows to kee
 and `max_height` cap the crop in logical pixels, keeping its top left, for a region much larger than what matters in it,
 such as the terminal or the session list, which run to the window's foot.
 
-Run `scripts/docs-screenshots.sh --local --only <page>` to develop that page. The engine resets layers before its steps,
-then captures and crops each shot. Inspect every successful image for the intended controls and machine details. A
-one-page capture cannot be published. Pages reference a shot with `<Screenshot name="<page>/<shot>" alt="…" />` in MDX;
-the alt text explains what the image shows.
+To develop or check shots, run `scripts/docs-screenshots.sh --local` with one `--only <page>` or `--only <page>/<shot>`
+per affected page or shot. The engine validates names before staging the app, then captures each selected shot once in
+declaration order, resetting layers before each shot's steps. Inspect every successful image for the intended controls
+and machine details. Selected runs are drafts. Pages reference a shot with `<Screenshot name="<page>/<shot>" alt="…" />`
+in MDX; the alt text explains what the image shows.
 
 For release notes, add a `Shot` named `v<X-Y-Z>-<what>` to `scripts/docs-shots/release-notes.py`. List its full name,
 `release-notes/v<X-Y-Z>-<what>`, in `website/src/release-notes/vX.Y.Z.json`. For example, `v1-2-3-new-control` goes in
-`v1.2.3.json`. The listing also supplies the entry's PR number and alt text. Draft with `--only release-notes`, then run
-the full capture for publication. Add invented hosts, sessions or templates to `docs/docs-shots/scenario.json5` as
-needed, preserving the existing shots. For state the engine cannot stage yet, add the scenario fields and seed them
-before the shot steps run. Follow `stage_templates` in `scripts/docs_shots.py`, which calls the private helm's API.
+`v1.2.3.json`. The listing also supplies the entry's PR number and alt text. Draft with `--only release-notes/<shot>` or
+`--only release-notes`, then run the full capture for publication. Add invented hosts, sessions or templates to
+`docs/docs-shots/scenario.json5` as needed, preserving the existing shots. For state the engine cannot stage yet, add
+the scenario fields and seed them before the shot steps run. Follow `stage_templates` in `scripts/docs_shots.py`, which
+calls the private helm's API.
 
 ## Refreshing
 
-Run `scripts/docs-screenshots.sh --local` on Linux for the full 2x capture and its `capture.json`. Use `--only <page>`
-to work on one page.
+Run `scripts/docs-screenshots.sh --local` on Linux for the full 2x capture and its `capture.json`. For a check after a
+GUI change, name all affected pages or shots with repeated `--only` in one run.
 
 For a bulk refresh, read UI changes since the manifest's `captured_from`, update the affected modules and page wording,
 capture every page, inspect the pictures, then publish and commit the manifest with the page changes. Published release

@@ -3,7 +3,7 @@
 #
 # One command, so that "refresh the docs screenshots" is a thing an agent can
 # be told without it inventing a procedure. Runs the GPUI test harness through
-# scripts/docs_shots.py for every page module (or one page), and prints each
+# scripts/docs_shots.py for every page module (or selected shots), and prints each
 # PNG's path. Linux renders at the scenario's scale on a private Mutter.
 # The PNGs land in the docs website's gitignored
 # website/public/docs-shots-local/, where the local preview shows them at
@@ -13,7 +13,7 @@
 # bulk"). A complete run writes capture.json beside the shots, naming the main
 # commit the checkout is based on, which the publish script requires and
 # records in the manifest, with a checksum of every PNG so a publish can tell
-# the shots are that run's. A one-page run (--only, for drafting) deletes it,
+# the shots are that run's. A selected run (--only, for drafting) deletes it,
 # and so does a run that cannot vouch for showing main's UI: one whose app
 # code differs from that main commit, or one that skipped the build
 # (--no-build). Such a full run still captures, for the preview, but exits 3
@@ -23,11 +23,11 @@
 # Published release shots are frozen (docs/docs-shots/SPEC.md, "Release
 # shots are frozen"). The engine skips them unless explicitly recaptured.
 #
-# Usage: scripts/docs-screenshots.sh --local [--only PAGE] [--no-build] [--recapture-release-shot NAME]...
+# Usage: scripts/docs-screenshots.sh --local [--only PAGE[/SHOT]]... [--no-build] [--recapture-release-shot NAME]...
 #   --local      capture on this machine through the GPUI test harness;
 #                required, although it is the only route, so that the
 #                command every procedure documents keeps working
-#   --only PAGE  capture only that page's shots (scripts/docs-shots/PAGE.py)
+#   --only PAGE[/SHOT]  capture a page or one named shot on it; repeatable
 #   --no-build   reuse the harness's existing binaries (the
 #                shots can then be previewed but not published)
 #   --recapture-release-shot NAME
@@ -43,7 +43,7 @@
 
 repo="$(cd "$(dirname "$0")/.." && pwd)" || exit 1
 output="$repo/website/public/docs-shots-local"
-only=""
+only=()
 build=true
 local_mode=false
 recapture=()
@@ -52,8 +52,8 @@ while [ $# -gt 0 ]; do
     --local) local_mode=true ;;
     --only)
       shift
-      test -n "${1:-}" || { echo "--only needs a page name" >&2; exit 2; }
-      only="$1"
+      test -n "${1:-}" || { echo "--only needs a page or page/shot name" >&2; exit 2; }
+      only+=("$1")
       ;;
     --no-build) build=false ;;
     --recapture-release-shot)
@@ -76,32 +76,26 @@ if [ "$local_mode" != true ]; then
   exit 2
 fi
 
-if [ -n "$only" ]; then
-  case "$only" in
-    *[!a-z0-9-]* | -*) echo "--only takes a page name in lowercase kebab case, got '$only'" >&2; exit 2 ;;
-  esac
-fi
-
 engine=(python3 -B "$repo/scripts/docs_shots.py")
 selection=()
-[ -z "$only" ] || selection+=(--only "$only")
+only_release_notes=true
+for name in "${only[@]}"; do
+  selection+=(--only "$name")
+  [ "$name" = release-notes ] || only_release_notes=false
+done
 for shot in "${recapture[@]}"; do
   selection+=(--recapture-release-shot "$shot")
 done
-# Reject a mistyped correction before clearing the last capture.
-if [ "${#recapture[@]}" -gt 0 ]; then
+# Only validated engine names may reach the cleanup paths. A typo leaves the previous run intact.
+if [ "${#selection[@]}" -gt 0 ]; then
   "${engine[@]}" --check-selection "${selection[@]}" || exit 2
-fi
-
-if [ -n "$only" ]; then
-  test -f "$repo/scripts/docs-shots/$only.py" || { echo "no shots for page '$only' (scripts/docs-shots/$only.py)" >&2; exit 2; }
 fi
 
 # Whether this full run can produce a publishable record, and if not, why.
 # Decided before building and capturing, which take minutes.
 base=""
 unpublishable=""
-if [ -z "$only" ]; then
+if [ "${#only[@]}" -eq 0 ]; then
   if [ "$build" != true ]; then
     unpublishable="--no-build skips the builds, so nothing proves the binaries are this checkout's"
   elif ! base=$(git -C "$repo" merge-base HEAD refs/remotes/origin/main 2>/dev/null); then
@@ -120,13 +114,19 @@ record="$output/capture.json"
 rm -f "$record" || exit 1
 
 # Clear the shots this run replaces, so a shot whose declaration was deleted or
-# renamed does not linger and get published. A one-page run clears only that
-# page's shots. Only the PNG files go, never the directories: the docs preview
+# renamed does not linger and get published. A page selector owns that page's
+# PNGs. A shot selector owns just that PNG. Keep the directories: the docs preview
 # (Astro's dev server) serves this directory from its public folder, and once
 # it has seen the directory deleted it answers 404 for everything in it until
 # it is restarted, even after the directory is recreated.
-if [ -n "$only" ]; then
-  find "$output/$only" -name '*.png' -type f -delete 2>/dev/null
+if [ "${#only[@]}" -gt 0 ]; then
+  for name in "${only[@]}"; do
+    if [[ "$name" == */* ]]; then
+      rm -f "$output/$name.png" || exit 1
+    elif [ -d "$output/$name" ]; then
+      find "$output/$name" -name '*.png' -type f -delete || exit 1
+    fi
+  done
 else
   find "$output" -name '*.png' -type f -delete 2>/dev/null
 fi
@@ -145,12 +145,22 @@ elif [ "$status" -ne 0 ]; then
   echo "the capture did not complete; see the run directory printed above" >&2
   exit 1
 fi
-if [ -n "$only" ]; then
-  found=$(find "$output/$only" -name '*.png' 2>/dev/null | sort)
+# Print only the files this selection could have produced. A page and its shot
+# may both be named, and that file should be listed once.
+if [ "${#only[@]}" -gt 0 ]; then
+  found=$(
+    for name in "${only[@]}"; do
+      if [[ "$name" == */* ]]; then
+        [ ! -f "$output/$name.png" ] || printf '%s\n' "$output/$name.png"
+      elif [ -d "$output/$name" ]; then
+        find "$output/$name" -name '*.png' -type f
+      fi
+    done | sort -u
+  )
 else
   found=$(find "$output" -name '*.png' 2>/dev/null | sort)
 fi
-if [ -z "$found" ] && [ "$only" = release-notes ]; then
+if [ -z "$found" ] && [ "${#only[@]}" -gt 0 ] && [ "$only_release_notes" = true ]; then
   # An empty page is normal between releases, or when only frozen declarations remain.
   echo "no Release notes shot to capture" >&2
   exit 0
@@ -166,7 +176,7 @@ printf '%s\n' "$found"
 # be among its PNGs: the publish refuses any other published release shot
 # it finds in a record, so a capture by tooling that predates the freeze
 # cannot replace one by accident.
-test -z "$only" || exit 0
+test "${#only[@]}" -eq 0 || exit 0
 if [ -n "$unpublishable" ]; then
   echo "captured, but these shots cannot be published: $unpublishable" >&2
   exit 3

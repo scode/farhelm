@@ -10,8 +10,8 @@ binaries built there:
 
 - hash partitions of a Rust nextest archive (the workspace run, or any selection from it), one partition per sandbox;
 - the GPUI app's end-to-end suites (`scripts/gui-e2e-smoke.py` and `scripts/gui-lifecycle.py`) on one sandbox;
-- the docs website's screenshot captures (`scripts/docs-screenshots.sh`), one page or the whole set, spread over the
-  pool (`website/.agents/refreshing.md`, "With N boats").
+- the docs website's screenshot captures (`scripts/docs-screenshots.sh`), selected shots or the whole set, spread over
+  the pool (`website/.agents/refreshing.md`, "With N boats").
 
 Builds, lints, doctests and the GPUI goldens stay local. The sandboxes have a Rust toolchain, but a cold build there
 costs more than the run it would save, and the goldens compare pixels with references fetched through the maintainer's
@@ -61,16 +61,17 @@ All subcommands take `--scratch <dir>` (outside the checkout, in your scratch di
    binaries with the source, and runs the chosen suites (both by default) one after the other through the recorder with
    `--no-build`. The paste step of the smoke is skipped on Linux, as it is locally.
 3. Docs screenshots:
-   `scripts/boat/boat-tests.ts docs --scratch <dir> --out <dir> [--no-build] [--only <page>]... [--members <n>]` ships
-   the checkout's files (untracked ones git would not ignore included, for page modules being written) and the app
-   binaries as `gui` does, runs `scripts/docs-screenshots.sh --local --no-build` for each named page, spread round-robin
-   over as many free members as it can claim (up to `--members`, one per page by default, within the budget), or the
-   whole capture on one member, and brings the PNGs back to `<out>/docs/shots/<page>/`. A run from shipped binaries is
-   never publishable. `docs --build-there` is the publishable one: it ships the source with main recorded beside it and
-   no binaries, and the member builds and captures every page in one run, which writes the capture record
-   (`<out>/docs/shots/capture.json`) a publish needs. A cold build there takes most of the run. Captures run as a
-   sandbox account of their own, `fhshots`, since the capture's leak check refuses any shot that draws the capturing
-   account's name, and the sandbox's own account, `user`, is a word the app prints (the Add host dialog's `user@host`).
+   `scripts/boat/boat-tests.ts docs --scratch <dir> --out <dir> [--no-build] [--only <page[/shot]>]... [--members <n>]`
+   ships the checkout's files (untracked ones git would not ignore included, for page modules being written) and the app
+   binaries as `gui` does. Pass every affected page or shot in one invocation. The harness keeps a page's selected shots
+   together, spreads pages round-robin across available members (up to `--members`, one per page by default, within the
+   budget), and starts the app once per member. A full capture uses one member. PNGs come back to
+   `<out>/docs/shots/<page>/`. A run from shipped binaries is never publishable. `docs --build-there` is the publishable
+   one: it ships the source with main recorded beside it and no binaries, and the member builds and captures every page
+   in one run, which writes the capture record (`<out>/docs/shots/capture.json`) a publish needs. A cold build there
+   takes most of the run. Captures run as a sandbox account of their own, `fhshots`, since the capture's leak check
+   refuses any shot that draws the capturing account's name, and the sandbox's own account, `user`, is a word the app
+   prints (the Add host dialog's `user@host`).
 4. Read each `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh and tmux for a
    Rust shard; the binaries' presence and unresolved libraries for a GUI run; then the summary, failures and any runtime
    `SKIPPED` lines. A failed run's recorder directories come back as `runs.tar.gz`; keep them as evidence. Rust shards

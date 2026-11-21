@@ -45,11 +45,12 @@ apply. Use one scratch pool for the whole refresh, `--budget N`, and keep its sa
 than creating and deleting them per capture: `scripts/boat/boat-tests.ts up --count N` once at the start, and `down` at
 the end, after a failure or abort too, reporting anything it says is still present.
 
-- Draft and check pages there: `scripts/boat/boat-tests.ts docs --scratch <dir> --budget N --no-build --only <page>...`
-  runs the named pages spread over up to N sandboxes and brings the PNGs back to `<out>/docs/shots/`. Look at them
-  there, or copy a page's into `website/public/docs-shots-local/<page>/` for the preview. Build the app locally first
-  (`--no-build` ships what the last local build left), and rebuild after any change under `crates/`. Delegates that
-  draft pages get the same command and no local captures.
+- Draft and check the affected screenshots in one invocation:
+  `scripts/boat/boat-tests.ts docs --scratch <dir> --budget N --no-build --out <dir> [--only <page[/shot]>]...`. Shots
+  of the same page stay together. Each of the up to N sandboxes starts the app once and brings the PNGs back to
+  `<out>/docs/shots/`. Look at them there, or copy a page's into `website/public/docs-shots-local/<page>/` for the
+  preview. Build the app locally first (`--no-build` ships what the last local build left), and rebuild after any change
+  under `crates/`. Delegates that draft pages get the same command and no local captures.
 - The capture that gets published runs there too, once every page is right:
   `scripts/boat/boat-tests.ts docs --scratch <dir> --budget N --build-there --out <dir>` builds the app on a sandbox
   from the shipped source and captures every page in one run, so its record vouches for binaries built from main's app

@@ -12,7 +12,9 @@ from a staged fleet and published off main; `docs/docs-shots/SPEC.md` is the des
 staged or rewritten. In short:
 
 A page's shots are declared in `scripts/docs-shots/<page>.py`; see `docs/docs-shots/SPEC.md` for the page module
-contract. On Linux, `scripts/docs-screenshots.sh --local --only <page>` runs them at 2x through the GPUI test harness.
+contract. To draft or check screenshots after a GUI change, run `scripts/docs-screenshots.sh --local` with
+`--only <page>` or `--only <page>/<shot>` for each affected page or shot. Include all selectors in one invocation. The
+GPUI test harness captures them at 2x on Linux.
 
 A shot's annotations (red callouts with arrows, and highlight rings) are declared with it and drawn onto the picture by
 the engine; see `docs/docs-shots/SPEC.md`, "Adding or changing a shot". For a full capture, run

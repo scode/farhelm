@@ -4,10 +4,10 @@
 # the whole staged fleet and the app under software rendering, CPU-bound work that a shared development machine under
 # load starves until the capture's idle waits time out; a sandbox gives it cores of its own.
 #
-# Usage: run-docs.sh <checkout> <shipped|build> [<page>]. `shipped` runs the binaries the development machine sent;
+# Usage: run-docs.sh <checkout> <shipped|build> [<page[/shot]>...]. `shipped` runs the binaries the development machine sent;
 # `build` has the capture build them here first, which is what lets a full capture write its publishable record
-# (`capture.json`), since the capture then vouches for binaries built from the shipped source. With a page, only that
-# page's shots (`--only`, for drafting); without, the full capture. Writes /home/user/out/docs/summary.txt, docs.log,
+# (`capture.json`), since the capture then vouches for binaries built from the shipped source. With selectors, one
+# draft capture for the whole share; without, the full capture. Writes /home/user/out/docs/summary.txt, docs.log,
 # and shots.tar.gz holding the captured PNGs and, when the run could write one, the full capture's record.
 set -u
 # As in run-gui.sh: drop the ambient capability boat's exec hands every command, so a run sees an ordinary login's
@@ -18,7 +18,7 @@ if [ -z "${BOAT_CAPS_DROPPED:-}" ] && ! grep -qE '^CapAmb:[[:space:]]*0+$' /proc
 fi
 M=$1
 MODE=$2
-PAGE=${3:-}
+shift 2
 case "$MODE" in
   shipped) build=(--no-build) ;;
   build) build=() ;;
@@ -49,7 +49,9 @@ uid=$(id -u fhshots)
 for _ in $(seq 50); do test -d "/run/user/$uid" && break; sleep 0.2; done
 sudo -n chown -R fhshots:fhshots "$M" || exit 1
 docs=(scripts/docs-screenshots.sh --local "${build[@]}")
-[ -z "$PAGE" ] || docs+=(--only "$PAGE")
+for name in "$@"; do
+  docs+=(--only "$name")
+done
 # shellcheck disable=SC2024 # the log is ours to write, as `user`, not the capture's
 sudo -n -u fhshots env -i HOME=/home/fhshots USER=fhshots LOGNAME=fhshots LANG=C.UTF-8 \
   PATH=/usr/local/cargo/bin:/usr/local/bin:/usr/bin:/bin CARGO_HOME=/home/fhshots/.cargo \

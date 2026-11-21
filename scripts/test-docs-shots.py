@@ -58,7 +58,7 @@ class DocsShots(unittest.TestCase):
     def page(self, declaration):
         """Write one page using the engine's public Shot import, as a real page module does."""
         (self.root / "page.py").write_text("from docs_shots import Shot\n" + declaration)
-        return engine.load_pages(self.root, "page")
+        return engine.load_pages(self.root, ["page"])
 
     def test_missing_shots_is_refused(self):
         """A page without SHOTS would silently capture nothing; it must fail before any app starts."""
@@ -111,9 +111,78 @@ class DocsShots(unittest.TestCase):
 
     def test_release_notes_module_is_discovered(self):
         """The full run discovers the release page, even when there are no declarations to drive."""
-        pages = dict(engine.load_pages(engine.HERE / "docs-shots", None))
+        pages = dict(engine.load_pages(engine.HERE / "docs-shots", []))
         self.assertIn("release-notes", pages)
         self.assertIsInstance(pages["release-notes"], list)
+
+    def test_mixed_selectors_capture_once_in_declaration_order(self):
+        """A page and its shot may overlap. Preserve capture order without starting the app for each selector."""
+        for page in ("a", "b"):
+            (self.root / f"{page}.py").write_text(
+                "from docs_shots import Shot\n"
+                "SHOTS = [Shot(n, lambda b: None, ['id:one']) for n in ('second', 'first')]\n"
+            )
+        only = ["b/first", "a/first", "a", "b/first"]
+        pages = engine.load_pages(self.root, only)
+        selected = engine.select_shots(pages, self.root, [], only=only)
+        run, out = self.root / "run", self.root / "out"
+        run.mkdir()
+        (run / "run.json").write_text("{}")
+        harness = Harness()
+        self.assertEqual(engine.capture_pages(harness, batch, run, selected, out), {})
+        self.assertEqual([Path(args[0]).name for args in harness.captures],
+                         ["a-second-full.png", "a-first-full.png", "b-first-full.png"])
+        self.assertEqual(sorted(str(p.relative_to(out)) for p in out.rglob("*.png")),
+                         ["a/first.png", "a/second.png", "b/first.png"])
+
+    def test_unknown_selectors_name_the_page_or_shot(self):
+        """Refuse typos before the wrapper can clear existing PNGs or start a capture."""
+        with self.assertRaisesRegex(ValueError, "missing/shot.*unknown docs screenshot page"):
+            engine.load_pages(self.root, ["missing/shot"])
+        # A real file can have a stem of "..". Its selector must never reach the wrapper's output cleanup.
+        (self.root / "...py").write_text("SHOTS = []\n")
+        with self.assertRaisesRegex(ValueError, "expected a lowercase kebab-case page"):
+            engine.load_pages(self.root, [".."])
+        pages = self.page("SHOTS = [Shot('one', lambda b: None, ['id:one'])]")
+        with self.assertRaisesRegex(ValueError, "page/missing.*unknown docs screenshot"):
+            engine.select_shots(pages, self.root, [], only=["page/missing"])
+
+    def test_wrapper_clears_and_lists_only_selected_outputs(self):
+        """Drafts invalidate the publish record, but keep unrelated PNGs. A refused selector changes neither."""
+        scripts = self.root / "scripts"
+        scripts.mkdir()
+        wrapper = scripts / "docs-screenshots.sh"
+        shutil.copyfile(engine.HERE / wrapper.name, wrapper)
+        (scripts / "docs_shots.py").write_text(
+            "from pathlib import Path\n"
+            "import sys\n"
+            "args = sys.argv[1:]\n"
+            "only = [args[i + 1] for i, arg in enumerate(args) if arg == '--only']\n"
+            "if only != ['a/one', 'b', 'b/new']:\n"
+            "    sys.exit(2)\n"
+            "if '--check-selection' not in args:\n"
+            "    out = Path(args[args.index('--out') + 1])\n"
+            "    assert not (out / 'a/one.png').exists() and not (out / 'b/old.png').exists()\n"
+            "    for name in ['a/one', 'b/new']:\n"
+            "        (out / (name + '.png')).write_text('fresh')\n"
+        )
+        out = self.root / "website/public/docs-shots-local"
+        existing = [out / "capture.json", out / "a/one.png", out / "a/two.png", out / "b/old.png"]
+        for path in existing:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("old")
+        command = ["bash", str(wrapper), "--local", "--no-build"]
+        invalid = subprocess.run([*command, "--only", "a/typo"], capture_output=True, text=True)
+        self.assertEqual(invalid.returncode, 2, invalid.stderr)
+        self.assertTrue(all(path.read_text() == "old" for path in existing))
+
+        result = subprocess.run([*command, "--only", "a/one", "--only", "b", "--only", "b/new"],
+                                capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout.splitlines(), [str(out / "a/one.png"), str(out / "b/new.png")])
+        self.assertEqual((out / "a/two.png").read_text(), "old")
+        self.assertFalse((out / "capture.json").exists())
+        self.assertFalse((out / "b/old.png").exists())
 
     def test_only_listed_and_published_release_shots_are_frozen(self):
         """A first capture reaches the publisher's path, while a published image needs an explicit recapture request."""
@@ -131,6 +200,11 @@ class DocsShots(unittest.TestCase):
         self.assertEqual(engine.capture_pages(Harness(), batch, run, selected, out), {})
         self.assertEqual(list((out / "release-notes").iterdir()), [out / f"{fresh}.png"])
         self.assertEqual(engine.select_shots(pages, self.root, [frozen]), pages)
+        self.assertEqual(engine.select_shots(pages, self.root, [], only=["release-notes"]),
+                         [("release-notes", [new]), ("page", [])])
+        for declared_pages in (pages, [("release-notes", [new])]):
+            with self.assertRaisesRegex(ValueError, "frozen release shot; use --recapture-release-shot"):
+                engine.select_shots(declared_pages, self.root, [], only=[frozen])
         with self.assertRaisesRegex(ValueError, "not a published release shot"):
             engine.select_shots(pages, self.root, [fresh])
         with self.assertRaisesRegex(ValueError, "add its shot"):
