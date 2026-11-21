@@ -187,14 +187,14 @@ images still in use must be released first.
 A sandbox session runs in a Tensorlake sandbox of its own, created from a recipe when the session starts. The recipe
 needs a built Tensorlake snapshot first.
 
-In the [session launcher](/docs/using/start-a-session/#choose-where-it-runs), choose **New sandbox** under **Runs on**,
-then a **Recipe**. **New sandbox** shows once a Tensorlake API key is saved. Each recipe is listed with its CPUs and
-memory, and one that cannot start a sandbox yet is unavailable with the reason, such as **No snapshot yet** or a missing
-SSH key that you create in Settings → **Tensorlake**. **Folder** is fixed to the sandbox's home directory, without
-**Browse** or recent directories; choose **Managed checkout** to clone a repository inside the sandbox instead. Below
-**Folder**, once Farhelm's SSH key exists, the launcher shows the command that registers that key with Tensorlake, with
-**Copy registration command**, because Farhelm cannot check whether you have run it. The **Agent** and **Command** tabs
-both work.
+In the [session launcher](/docs/using/start-a-session/#choose-where-it-runs), choose **New sandbox** from the **Host**
+menu, then a **Recipe**. **New sandbox** shows once a Tensorlake API key is saved. Each recipe is listed with its CPUs
+and memory, and one that cannot start a sandbox yet is unavailable with the reason, such as **No snapshot yet** or a
+missing SSH key that you create in Settings → **Tensorlake**. **Folder** is fixed to the sandbox's home directory,
+without **Browse** or recent directories; choose **Managed checkout** to clone a repository inside the sandbox instead.
+Below **Folder**, once Farhelm's SSH key exists, the launcher shows the command that registers that key with Tensorlake,
+with **Copy registration command**, because Farhelm cannot check whether you have run it. The **Agent** and **Command**
+tabs both work.
 
 **Launch** first asks **Create a sandbox for this session?** under the launcher's buttons. The question names the recipe
 with its CPU, memory and disk, says what bills while the sandbox runs and while it is suspended, and links Tensorlake

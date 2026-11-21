@@ -227,6 +227,11 @@ fn up_from_the_first_recent_restores_the_forms_enter(cx: &mut TestAppContext) {
     answer_history(&mut helm, cx, &two_setups());
     keys(cx, "down");
     assert!(recent_highlighted(cx, "launcher-recent-0"));
+    assert_eq!(
+        name_of(cx, "launcher-recent-enter").as_deref(),
+        Some("⏎"),
+        "outside Replace with the cap is the bare key"
+    );
     keys(cx, "up");
     assert!(!recent_highlighted(cx, "launcher-recent-0"));
     assert!(super::view_tests::search_focused(cx));
@@ -238,7 +243,9 @@ fn up_from_the_first_recent_restores_the_forms_enter(cx: &mut TestAppContext) {
     assert!(create.body.as_ref().unwrap()["launch"]["model"].is_null());
 }
 
-/// Replacement rows identify the action. Restart's rows explain the fixed destination and cannot apply a setup.
+/// Replacement rows identify the action. Why: Enter on a highlighted row in Replace with replaces the source, which
+/// deletes it, so both the row's name ("Replace: …") and its visible key cap ("⏎ Replace") must say so. Restart's rows
+/// explain the fixed destination and cannot apply a setup.
 #[gpui::test]
 fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(codex(None, None, None));
@@ -258,6 +265,11 @@ fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppCo
     test_support::click(cx, "launcher-search-row");
     keys(cx, "down");
     assert!(recent_highlighted(cx, "launcher-recent-0"));
+    assert_eq!(
+        name_of(cx, "launcher-recent-enter").as_deref(),
+        Some("⏎ Replace"),
+        "the highlighted row's cap names the replacement"
+    );
 
     let mut source = super::draft_tests::session(codex(None, None, None));
     source.restart_offer = RestartOffer::Resume;
