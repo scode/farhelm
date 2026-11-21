@@ -72,7 +72,9 @@ use tracing::warn;
 
 pub(crate) mod groups;
 mod sandbox;
-pub(crate) use sandbox::{EnvironmentUnasked, retry_environment_delete, spawn_seal_finisher};
+pub(crate) use sandbox::{
+    EnvironmentUnasked, finish_seal_locked, retry_environment_delete, spawn_seal_finisher,
+};
 pub(crate) use sandbox::{create_environment_session, create_sandbox_session, stop_and_suspend};
 
 /// Query parameters for `GET /api/sessions`: the filters and order. There is

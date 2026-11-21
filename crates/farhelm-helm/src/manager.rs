@@ -2886,10 +2886,10 @@ impl ConnectionManager {
     /// Whether `host`'s supervisor has reported a seal this helm has not yet
     /// finished acting on: its environment is to be destroyed.
     ///
-    /// Only setting a Tensorlake sandbox up again consults this, and refuses.
-    /// Suspend and Resume do not: they are refused as busy while a
-    /// destruction holds the host's provisioning lock, but once a destruction
-    /// has failed nothing on the helm stops one sent by an API client. The
+    /// Host removal uses this to preserve the latest deletion outcome.
+    /// Setting a Tensorlake sandbox up again is refused. Suspend and Resume
+    /// are refused as busy while destruction holds the provisioning lock.
+    /// After a failed destruction, an API client can still send either. The
     /// page offers neither for a host being deleted, and the seal record
     /// keeps the host shown as being deleted and destroyable by Retry
     /// whatever its machine's state.
