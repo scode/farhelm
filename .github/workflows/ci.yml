@@ -417,6 +417,10 @@ jobs:
       # as the UI's JS harness does.
       - run: node --test
         working-directory: website/feedback-tests
+      # The release-notes generator's app feed (the upgrade highlights the
+      # desktop app reads) has its own tests, which need the installed
+      # website dependencies above.
+      - run: node --test website/scripts/release-notes.test.mjs
 
   dprint:
     runs-on: ubicloud

@@ -396,8 +396,9 @@ fn ntfy_search_hands_focus_over_only_if_the_user_has_not_moved_on(cx: &mut TestA
     }
 }
 
-/// Every catalog entry names a control or group in its section. Use a Mac fixture with an updater and both kinds of
-/// file warning so the conditional entries have something drawn. A saved Tensorlake key draws the sandbox list.
+/// Every catalog entry names a control or group in its section. Use a Mac fixture with an updater that offers upgrade
+/// highlights and both kinds of file warning so the conditional entries have something drawn. A saved Tensorlake key
+/// draws the sandbox list.
 #[gpui::test]
 fn every_catalog_entry_corresponds_to_something_drawn(cx: &mut TestAppContext) {
     let (mut helm, cx, _) = open_rail(
@@ -409,11 +410,18 @@ fn every_catalog_entry_corresponds_to_something_drawn(cx: &mut TestAppContext) {
     );
     cx.update(|_, cx| {
         use crate::desktop::updates::fake::{Feed, Seen, fake_host};
+        use crate::desktop::updates::notes::{UpgradeNotes, UpgradeNotesHost};
         let (feed, seen) = (
             std::rc::Rc::new(Feed::default()),
             std::rc::Rc::new(Seen::default()),
         );
-        crate::desktop::updates::keep(Some(fake_host(&feed, &seen, false)), cx);
+        let mut host = fake_host(&feed, &seen, false);
+        // The Show what's new switch is drawn only for an app that can show upgrade highlights.
+        host.upgrade_notes = Some(UpgradeNotesHost {
+            running: "1.0.0".to_owned(),
+            check: Box::new(|_, _| Box::pin(async { Ok(UpgradeNotes::Current) })),
+        });
+        crate::desktop::updates::keep(Some(host), cx);
     });
     settle(cx);
     open_settings(cx);

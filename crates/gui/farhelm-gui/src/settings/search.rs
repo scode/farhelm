@@ -172,14 +172,18 @@ fn catalog(platform: Platform) -> Vec<Entry> {
         if section == Section::Notifications {
             entries.push(add(SOUNDS_ID, SOUNDS_LABEL, &[SOUNDS_HELP], Target::Top));
         }
-        if section != Section::AgentTrust {
-            entries.extend(
-                Choice::ALL
-                    .iter()
-                    .copied()
-                    .filter(|choice| choice.section() == section)
-                    .map(Entry::choice),
-            );
+        let section_choices = || {
+            Choice::ALL
+                .iter()
+                .copied()
+                .filter(move |choice| choice.section() == section)
+                .map(Entry::choice)
+        };
+        // Results follow the drawing order. Every section draws its switches before its other controls, except App,
+        // which draws the updater's controls first and the Show what's new switch after them.
+        let choices_last = section == Section::App;
+        if section != Section::AgentTrust && !choices_last {
+            entries.extend(section_choices());
         }
         match section {
             Section::Sessions | Section::Hosts => {}
@@ -395,6 +399,9 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     Target::AppUpdates,
                 ),
             ]),
+        }
+        if choices_last {
+            entries.extend(section_choices());
         }
     }
     entries.retain(|entry| entry.target != Target::Tunnels || terminal::shown_on(platform));
