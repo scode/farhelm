@@ -536,10 +536,11 @@ missing, the token file is still installed, the connection remains usable, and h
 need gh. The next connection or credential replacement retries it.
 
 In Settings the editor opens at its top, including Back, with field labels smaller than its section captions. Its
-actions and leave/delete questions and refusal messages stay visible at the bottom of the scrolling panel, above the
-unchanged Close footer. Switching Settings sections hides those actions with the editor. In Add host, the same answers
-use the dialog's pinned footer. Keyboard navigation reaches the answers after the fields. As with other framed dialogs,
-a very short window scrolls the whole card when its header and footer cannot fit.
+actions, delete confirmation, and refusal messages stay visible at the bottom of the scrolling panel, above Close.
+Switching Settings sections hides those actions with the editor. In Add host, the same answers use the dialog's pinned
+footer. The question about saving before leaving appears centered over whichever dialog hosts the editor. Keyboard
+navigation reaches the footer after the fields. As with other framed dialogs, a very short window scrolls the whole card
+when its header and footer cannot fit.
 
 Settings also lists **Sandboxes not on this helm**: sandbox names beginning with `farhelm-host-`, `farhelm-sess-`,
 `farhelm-build-` or `farhelm-prepare-` that no host or recipe build or preparation on this helm owns. A session-owned

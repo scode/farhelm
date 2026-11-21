@@ -2,10 +2,8 @@
 //! fields and the requirements note, Ubuntu packages and Tunnels; and its answers, Delete, Cancel and Save, which
 //! Settings pins at the bottom of its dialog rather than letting them scroll with the fields.
 //!
-//! SPEC.md, "Topology" (the Recipes paragraphs: "The editor replaces the list in place"; "In Settings the editor opens
-//! at its top, including Back, with field labels smaller than its section captions. Its actions and leave/delete
-//! questions and refusal messages stay visible at the bottom of the scrolling panel, above the unchanged Close footer.
-//! Switching Settings sections hides those actions with the editor"). Ported from the old app's `RecipeEditor`
+//! SPEC.md, "Topology": the editor replaces the list in place, and Settings pins its actions and refusal messages
+//! above Close. The leave question opens over the dialog. Ported from the old app's `RecipeEditor`
 //! (`tensorlake/recipe_editor.rs` at reference commit `24bc0580`), with its words and the `.recipe-editor` rules in
 //! `app.css`, and shaped after this app's Credentials editor (`settings/credentials/editor.rs`), whose in-place pattern
 //! it shares: a view of its own that its section holds, closed through the section by its entity id, so a late reply
@@ -40,8 +38,8 @@
 //!   starting in Name and no Back, while Add host's Escape and header close ask before closing Add host as Settings'
 //!   do. Each host decides where a departure goes.
 //! - **Leaving asks first, and Delete confirms.** Back, Cancel and closing the hosting dialog ask "Save these changes
-//!   before leaving?" while the form has unsaved changes, and Delete asks before it deletes; [`leaving`] has their
-//!   rules.
+//!   before leaving?" over the hosting dialog while the form has unsaved changes. Delete's confirmation stays
+//!   inline in the footer. [`leaving`] has their rules.
 
 mod credentials;
 mod leaving;
@@ -49,9 +47,9 @@ mod leaving;
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::recipes::{CreateRecipe, RecipeSave, RecipeView, check_recipe_name};
 use gpui::{
-    AnyElement, App, Context, Entity, EntityId, FocusHandle, FontWeight, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, WeakEntity, Window, div, px,
+    AnyElement, AnyWindowHandle, App, Context, Entity, EntityId, FocusHandle, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Role, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
 use super::Recipes;
@@ -62,6 +60,7 @@ use crate::components::{
 use crate::environment_ui;
 use crate::focus::Mark;
 use crate::host_text::HostText;
+use crate::layers::LayerId;
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::Inline;
 use crate::session;
@@ -294,9 +293,11 @@ pub(crate) struct Editor {
     saving: bool,
     /// Whether this editor's Delete is out.
     deleting: bool,
-    /// The leave question, while it is up in the answers' place ([`leaving`]), with the departure it asks about: a
-    /// done save finishes that departure while the question is still open, unanswered.
-    leave_question: Option<(Departure, Inline<Departure>)>,
+    /// The leave question's layer and destination. A save settling while the question is open needs to finish
+    /// that departure or close the question so the refusal is visible.
+    leave_question: Option<(Departure, LayerId)>,
+    /// The host window, needed to check or close a leave layer when an asynchronous save settles.
+    window: AnyWindowHandle,
     /// The delete confirmation, while it is up in the answers' place, frozen on the recipe's name.
     delete_question: Option<Inline<String>>,
     /// Where the leave question's Save goes once the save it sent is done, and the press that answered it.
@@ -305,6 +306,8 @@ pub(crate) struct Editor {
     refused: Refused,
     /// Back's focus handle, where focus starts when the editor opens ([`Editor::start`]).
     back: FocusHandle,
+    /// Save's handle survives a centered question taking and releasing focus around a refused save.
+    save_focus: FocusHandle,
 }
 
 impl Editor {
@@ -362,10 +365,12 @@ impl Editor {
             saving: false,
             deleting: false,
             leave_question: None,
+            window: window.window_handle(),
             delete_question: None,
             leaving: None,
             refused: Refused::default(),
             back: cx.focus_handle().tab_stop(true),
+            save_focus: cx.focus_handle().tab_stop(true),
         };
         editor.read_credentials(cx);
         editor
@@ -550,8 +555,8 @@ impl Editor {
                         // question still open was asked while the save was out, without Discard; it goes, and the
                         // ordinary answers come back under the helm's words, as after any refused leave.
                         editor.leaving = None;
-                        editor.leave_question = None;
                         editor.error = Some((refusal, sent));
+                        editor.dismiss_refused_leave(cx);
                         cx.notify();
                     })
                     .is_ok();
@@ -615,18 +620,17 @@ impl Editor {
     }
 
     /// The editor's answers for its hosting dialog to place (the module docs): the error, the busy line, then Delete
-    /// at the left and Cancel and Save at the right, or, while one is up, the leave question or the delete
-    /// confirmation in their place, as the old questions replaced the ordinary actions. Read from the editor as it is
-    /// now, so the host draws them in the same frame as the fields.
+    /// at the left and Cancel and Save at the right. The inline delete confirmation replaces those buttons.
+    /// The centered leave question has its own layer, so the host keeps drawing the ordinary footer under it.
     pub(crate) fn actions(editor: &Entity<Editor>, cx: &App) -> AnyElement {
         let this = editor.read(cx);
         let weak = editor.downgrade();
         let busy = this.busy();
-        let question: Option<AnyElement> = match (&this.leave_question, &this.delete_question) {
-            (Some((_, leave)), _) if leave.is_open(cx) => Some(leave.clone().into_any_element()),
-            (_, Some(delete)) if delete.is_open(cx) => Some(delete.clone().into_any_element()),
-            _ => None,
-        };
+        let question = this
+            .delete_question
+            .as_ref()
+            .filter(|delete| delete.is_open(cx))
+            .map(|delete| delete.clone().into_any_element());
         let row = question.unwrap_or_else(|| {
             let delete = this.saved.is_some().then(|| {
                 let weak = weak.clone();
@@ -667,6 +671,7 @@ impl Editor {
                 )
                 .accessible_name("Save")
                 .tier(Tier::Primary)
+                .focus(&this.save_focus)
                 // The old Save was `aria-disabled` while a saved recipe had no unsaved changes, and still saved when
                 // pressed.
                 .refused(this.saved.is_some() && !this.dirty(cx))

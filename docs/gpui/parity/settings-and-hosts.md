@@ -1245,12 +1245,11 @@ with unsaved changes. Replacing tests, in `crates/gui/farhelm-gui/src/settings/r
   `a_refused_save_keeps_the_draft_and_leaves_no_refusal_under_the_row`; the editor opening at its top, Back included,
   from a scrolled list, `the_editor_opens_at_its_top_from_a_scrolled_list`; the form locked while a save is out, the
   credential choices included, `while_a_save_is_out_the_form_takes_no_edit`. The look, in both palettes: the golden
-  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). The leave and delete questions in the
-  answers' place, `every_way_out_asks_first_and_keep_editing_stays` and
-  `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them: the reference screens have none, and the old
-  case only attached its pictures of them for review, asserting nothing of their look. A refused save from the leave
-  question takes the question away here, where the old one stayed up (Deviations, "Recipes", "The leave question goes
-  when it is answered").
+  `settings-recipe-editor` (see "Recipes" under Deviations for the answers' band). The centered leave question and
+  inline delete confirmation are covered by `every_way_out_asks_first_and_keep_editing_stays` and
+  `delete_asks_then_deletes_under_the_recipes_key`. No golden draws them. The reference screens have neither, and the
+  old case attached pictures for review. A refused save takes the leave question away and reveals the helm's words in
+  the editor, covered by `a_refused_save_takes_an_open_question_away`.
 - "a managed recipe is created, edited and deleted without exposing its token": the help saying where tokens are added
   and that the recipe keeps their names, not their values, `recipe_credential_tests.rs`
   `the_editor_says_where_credentials_are_added_and_that_it_keeps_names`; that no secret reaches the window is the
@@ -1744,10 +1743,9 @@ Where the port does not match the old app, and why. Each stays until the work na
   Save that names it is refused by the helm with its own words.
 - **The credential pickers show names in the interface font.** The old pickers were monospace (`font-mono`); the shared
   select has no monospace look, so the names read as the rest of the form's choices do.
-- **The leave question goes when it is answered.** The old question stayed up while its Save ran and after a refusal,
-  with the reason above it, so the user could answer again. The prompt's inline confirming answer runs once, so here
-  Save takes the question away; a refused save shows the helm's words above the ordinary answers, and leaving again asks
-  again.
+- **The leave question opens over the hosting dialog.** It sits above the Settings or Add host editor and its pinned
+  footer. Save closes the question and waits for the write. A refusal leaves the draft and shows the helm's words above
+  the editor's ordinary answers. The delete question still replaces those answers inline.
 - **A delete whose cleanup outlasts the helm's bound closes the editor and leaves the helm's words on the row.** The old
   editor waited for the delete however long its cleanup took. The helm now answers within 20 seconds, with a 504 saying
   the deletion carries on, the recipe leaving the list once it is gone, and, if it is still listed later, to delete it

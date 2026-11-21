@@ -17,7 +17,7 @@ use super::recipe_tests::{answer_account, entry, idle};
 use super::tests::{available, drawn, fill, label_of, open_settings, section_button, sent};
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::test_support::{any_open, click, focused_id, keys, settle};
+use crate::test_support::{any_open, bounds, center, click, focused_id, frame, keys, settle};
 
 // ---- Helpers -------------------------------------------------------------------------------------------------------
 
@@ -31,12 +31,18 @@ fn edit_rust_dev(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) 
     (helm, cx)
 }
 
-/// The inline question's title and its answers' labels in drawn order, or `None` while no question is up.
+/// The shared prompt's title and available answers, whether it is the leave layer or the inline delete band.
 fn question(cx: &mut VisualTestContext) -> Option<(String, Vec<String>)> {
     let title = label_of(cx, "prompt")?;
-    let answers = ["prompt-cancel", "prompt-alternative-0", "prompt-confirm"]
+    let answers = frame(cx)
         .into_iter()
-        .filter_map(|id| label_of(cx, id))
+        .filter(|node| {
+            matches!(
+                node.element_id.as_deref(),
+                Some("prompt-cancel" | "prompt-alternative-0" | "prompt-confirm")
+            )
+        })
+        .filter_map(|node| node.label.map(|label| label.to_string()))
         .collect();
     Some((title, answers))
 }
@@ -81,7 +87,7 @@ fn recipe_key(cx: &mut VisualTestContext, name: &str) -> (Option<Work>, Option<S
 /// SPEC.md: "Leaving it with unsaved changes, whether by its own Back or Cancel or by closing Settings with Escape or a
 /// close control, asks whether to save, discard or keep editing"; leaving at once would drop work the user typed.
 /// Specified: for each of Back, Cancel, Escape, the header's close control and the footer's Close, with a new recipe's
-/// name typed, the question shows in the answers' place with Keep editing, Discard and Save in the old order, focus on
+/// name typed, the question opens over the editor with Keep editing, Discard and Save in order, focus on
 /// Save, nothing sent and Settings still open; Keep editing takes it away and the draft is as typed.
 #[gpui::test]
 fn every_way_out_asks_first_and_keep_editing_stays(cx: &mut TestAppContext) {
@@ -105,8 +111,8 @@ fn every_way_out_asks_first_and_keep_editing_stays(cx: &mut TestAppContext) {
             "{how:?} asks"
         );
         assert!(
-            !drawn(cx, "recipe-save"),
-            "{how:?}: the question replaces the answers"
+            drawn(cx, "recipe-save"),
+            "{how:?}: the ordinary footer stays behind the question"
         );
         assert_eq!(
             focused_id(cx).as_deref(),
@@ -117,7 +123,11 @@ fn every_way_out_asks_first_and_keep_editing_stays(cx: &mut TestAppContext) {
             any_open(cx) && drawn(cx, "recipe-editor"),
             "{how:?}: nothing left"
         );
-        click(cx, "prompt-cancel");
+        if matches!(how, Leave::Escape) {
+            keys(cx, "escape");
+        } else {
+            click(cx, "prompt-cancel");
+        }
         assert_eq!(
             question(cx),
             None,
@@ -143,12 +153,19 @@ fn an_unchanged_editor_leaves_without_asking(cx: &mut TestAppContext) {
 
 /// "Saving or discarding then completes the close": Discard must finish what the user asked for, a return to the list
 /// for Back and the dialog's close for a close control, without saving. Specified: Back then Discard shows the list
-/// and sends nothing; reopened and changed, the footer's Close then Discard closes Settings and sends nothing.
+/// and sends nothing; reopened and changed, Escape then Discard closes Settings and sends nothing.
 #[gpui::test]
 fn discard_finishes_the_leave_without_saving(cx: &mut TestAppContext) {
     let (mut helm, cx) = edit_rust_dev(cx);
     fill(cx, "recipe-disk", "30");
     click(cx, "recipe-back");
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
+    assert!(
+        !bounds(cx, "prompt").contains(&center(cx, "settings-close")),
+        "the host Close is outside the question"
+    );
+    click(cx, "settings-close");
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
     click(cx, "prompt-alternative-0");
     assert!(
         !drawn(cx, "recipe-editor") && drawn(cx, "recipes-list"),
@@ -158,7 +175,8 @@ fn discard_finishes_the_leave_without_saving(cx: &mut TestAppContext) {
 
     open_editor_with(&mut helm, cx, "recipe-edit-rust-dev", json!([]));
     fill(cx, "recipe-disk", "30");
-    click(cx, "settings-footer-close");
+    leave_by(cx, Leave::Escape);
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
     click(cx, "prompt-alternative-0");
     assert!(!any_open(cx), "Settings closed");
     assert_eq!(sent(&mut helm), [], "nothing was saved");
@@ -212,8 +230,8 @@ fn the_questions_save_finishes_the_leave_once_the_save_is_done(cx: &mut TestAppC
     assert!(drawn(cx, "recipe-save"));
 }
 
-/// Closing Settings from another section while the editor holds unsaved changes must not ask out of sight: the
-/// question shows in the editor's answers, which only Recipes draws. Specified: with a change typed and Hosts shown,
+/// Closing Settings from another section reveals the recipe behind its question so Keep editing has somewhere to return.
+/// Specified: with a change typed and Hosts shown,
 /// Escape shows Recipes again with the question up and focus on Save, and Settings stays open.
 #[gpui::test]
 fn a_close_from_another_section_shows_recipes_first(cx: &mut TestAppContext) {
