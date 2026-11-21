@@ -161,7 +161,8 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   full comparison and the runner's default of four processes (capped at available CPUs). While iterating on a particular
   view, use `--scene PATTERN` (repeatable). `--jobs 1` runs only one renderer process.
 - `python3 -B scripts/test-check-gui-goldens.py` (private comparison outputs, the update lock, scene selection and
-  completeness against a stand-in renderer, including an interrupted worker)
+  completeness against a stand-in renderer, an interrupted worker and the golden changes page with its native review
+  requests. The GUI unit tests cover the native highlight and resize calculations.)
 - `python3 -B scripts/gui-goldens.py --self-test` (fetching and publishing the golden references)
 - `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report), and one end-to-end run of the
   GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a
