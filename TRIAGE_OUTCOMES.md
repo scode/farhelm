@@ -852,20 +852,6 @@
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## trailing-agent-launch-placement-docs-obsolete-caller-contract.md
-
-- Outcome: `fix code`.
-- Assessment: None. Internal comments wrongly say that ordinary agent creates pass no recipes, and they link to a helper
-  that does not exist. Verified: agent_launch.rs:149-151 and :183 still mention `resolve_environment`, which does not
-  exist (the real helper is `resolve_placed`). launcher.rs:661-662 still says "Agent callers supply no recipes".
-  agent_requests.rs:2465 passes recipes through resolve_placed.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-sealed-delete-comment-hold-versus-seal-record.md
 
 - Outcome: `fix code`.
@@ -878,19 +864,6 @@
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## trailing-create-history-current-claim-comment-contradiction.md
-
-- Outcome: `fix code`.
-- Assessment: None. A create-path comment says the remembered default skips the connection-claim recheck "by design",
-  but its writer is now inside the claim-guarded transaction. Verified: The comment is still at sessions.rs:1983-1986,
-  and record_created_history's guard is at :2309-2345.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md
 
@@ -918,47 +891,6 @@
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-podman.md`.
 
-## trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md
-
-- Outcome: `fix code`.
-- Assessment: None. A test docstring says `~/.local/bin/tmux` "is the user's own tmux, not anything Farhelm installed"
-  and that earlier releases "always" used the private directory. Releases before 0.18.0 did install it beside the
-  binary. Verified: The docstring is still at provisioning.rs:1055-1061. SPEC.md:205 acknowledges the pre-0.18.0
-  shared-folder copy.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-ssh-provisioning-test-private-server-coverage-docstring.md
-
-- Outcome: `fix code`.
-- Assessment: None. A test's docstring says it checks that uninstall ends "the private server", but the test only starts
-  and checks terminal hosts. Verified: still at `crates/farhelm-helm/src/provisioning.rs:14215-14217`. The fixture has
-  no tmux setup or check.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-clone-protocol-docs-omit-environment-hostless-contract.md
-
-- Outcome: `fix code`.
-- Assessment: None directly. Protocol docs say a Clone without a host exists only so an old request can be refused. A
-  sandbox or container clone requires the host to be omitted (SPEC.md:4676). Verified: still at
-  `crates/farhelm-proto/src/lib.rs:1997-1998` and :1831-1832. The helm routes a hostless environment clone at
-  agent_requests.rs:3883 / 4311.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md
 
 - Outcome: `fix code`.
@@ -972,19 +904,6 @@
 - Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## trailing-agent-clone-wire-docs-unconditional-host-requirement.md
-
-- Outcome: `fix code`.
-- Assessment: None directly. Same stale "Clone requires a host" protocol docs as
-  `trailing-clone-protocol-docs-omit-environment-hostless-contract.md`. Verified: still at
-  `crates/farhelm-proto/src/lib.rs:1831-1832` and :1997-1998.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-launch-comment-terminal-host-inherits-tab-marker.md
 

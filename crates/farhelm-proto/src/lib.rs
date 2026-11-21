@@ -1924,9 +1924,10 @@ pub enum TemplateKeyEdit {
 /// ## The two creating verbs, and why they take a host NAME
 ///
 /// `Create` and `Clone` both carry `host: Option<String>`, naming a host by
-/// the display NAME [`AgentHost::name`] reports. `Clone` requires it (an
-/// absent one is decoded only to be refused); `Create` may leave it to a
-/// template that sets the host, and a spawn never names one (protocol 40).
+/// the display NAME [`AgentHost::name`] reports. An ordinary `Clone` names a
+/// host. A clone of an environment omits it and uses the source's recipe and
+/// place. `Create` may leave placement to its templates, and a spawn never
+/// names a host (protocol 40).
 /// The listing also exposes the stable host ID so duplicate names remain
 /// distinct, but acting commands accept names only and refuse ambiguity.
 ///
@@ -2076,9 +2077,10 @@ pub enum AgentVerb {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         spawn: Option<SpawnPlacement>,
     },
-    /// Create a copy of an explicitly named session on an explicitly named
-    /// host — same working directory, title, and agent unless overridden —
-    /// answered with [`AgentReply::Created`].
+    /// Copy an explicitly named session, preserving its launch and title by
+    /// default. An ordinary clone names the destination host. An environment
+    /// clone uses the source's recipe and place. Both answer with
+    /// [`AgentReply::Created`].
     ///
     /// AGENT RESOLUTION is the whole substance of this verb, and it has no
     /// silent fallback:
@@ -2089,12 +2091,12 @@ pub enum AgentVerb {
         /// The exact session to copy. It may be the asking session, but is
         /// never inferred from it.
         source_session_id: Option<String>,
-        /// The target host's display NAME. `None` is retained only so an old
-        /// wire shape can be decoded and refused.
+        /// Display NAME of the ordinary target host. Omit this for an
+        /// environment clone, whose source supplies the placement.
         host: Option<String>,
         /// Override the source's working directory. Absent copies it,
         /// which is what makes a same-host clone mean "another session on
-        /// this project".
+        /// this project". Omit this for an environment clone too.
         cwd: Option<String>,
         /// Override the source's title. Absent copies it.
         title: Option<String>,

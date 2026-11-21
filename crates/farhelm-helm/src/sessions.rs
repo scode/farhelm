@@ -1980,10 +1980,9 @@ async fn create_session_request(
     // for a create: `create_target` resolves the host, takes the connection,
     // and mints the claim from the same borrow of the actor's status, so there
     // is no interval between "which install" and "which connection" for
-    // anything to land in. The cache seed this create goes on to make
-    // revalidates the same claim under the host's write lock; the remembered
-    // default does not, by design: it is a helm-wide suggestion rather than
-    // a claim about the install currently behind this registry row.
+    // anything to land in. Cache seeding and history recording revalidate
+    // that claim under the host's write lock. Each write skips a claim
+    // that is stale when it checks.
     crate::precondition::incarnation_holds(&claim, req.expected_incarnation)?;
     // An agent's approved launch keeps the trust its card showed; a user's
     // create decides trust now, for the folder it lands in.

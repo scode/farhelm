@@ -295,10 +295,6 @@ consequences.
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-agent-launch-placement-docs-obsolete-caller-contract.md`](trailing-agent-launch-placement-docs-obsolete-caller-contract.md)
-  — Placement documentation misstates ordinary-create inputs and links a missing helper. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-environment-test-responders-heartbeat-control-decode.md`](trailing-environment-test-responders-heartbeat-control-decode.md)
   — Environment test responders panic on valid heartbeat frames. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
@@ -322,10 +318,6 @@ consequences.
 - [`trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md`](trailing-stopped-idle-local-arc-blocks-direct-manager-drop.md)
   — Stopped actors retain strong manager references across idle waits. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-create-history-current-claim-comment-contradiction.md`](trailing-create-history-current-claim-comment-contradiction.md)
-  — Create routing comment promises history can bypass connection-claim checks. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md`](trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md)
   — Unanswered-status regression test can skip the settled failure boundary. Abbreviated collection; confidence,
@@ -366,18 +358,6 @@ consequences.
 - [`trailing-provisioning-shared-environment-preparation-progress.md`](trailing-provisioning-shared-environment-preparation-progress.md)
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md`](trailing-provisioning-cleanup-test-misstates-pre-0-18-tmux-ownership.md)
-  — Cleanup test misstates legacy tmux ownership. Abbreviated collection; confidence, proposed dismissals and unresolved
-  consequences are preserved in the entry.
-
-- [`trailing-ssh-provisioning-test-private-server-coverage-docstring.md`](trailing-ssh-provisioning-test-private-server-coverage-docstring.md)
-  — SSH integration test still claims private-tmux teardown coverage. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-clone-protocol-docs-omit-environment-hostless-contract.md`](trailing-clone-protocol-docs-omit-environment-hostless-contract.md)
-  — Clone protocol docs reject the omission required by environment clones. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
   — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
@@ -421,10 +401,6 @@ consequences.
 
 - [`trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md`](trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md)
   — Missing-entry fixture premise overstates its inventory check. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-agent-clone-wire-docs-unconditional-host-requirement.md`](trailing-agent-clone-wire-docs-unconditional-host-requirement.md)
-  — Clone wire documentation still forbids the new environment clone form. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
