@@ -594,6 +594,10 @@ impl Commands {
                 let phase = if script.contains("farhelm-base.log") {
                     "bootstrap".to_owned()
                 } else if script.contains("getent passwd --") {
+                    assert!(
+                        args.windows(2).any(|pair| pair == ["--workdir", "/"]),
+                        "passwd lookup must also work on an image without /root"
+                    );
                     format!("{}-login", item.stage)
                 } else if script.contains("/proc/1/comm") {
                     "readiness".into()
@@ -709,6 +713,10 @@ impl Commands {
                 Ok(output(0, &id))
             }
             ("rm", _) => {
+                assert!(
+                    args.iter().any(|arg| arg == "--volumes"),
+                    "owned container removal must include anonymous volumes"
+                );
                 let gated = self.state.lock().unwrap().removal_gate;
                 if gated {
                     self.removal_release.notified().await;

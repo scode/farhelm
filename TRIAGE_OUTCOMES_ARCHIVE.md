@@ -34721,6 +34721,72 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: `wwqkznmqtvzvoyyrpwtpqyxnwumynnuo`, `plan/triage-podman/01-connections-and-probes`,
   [draft PR](https://github.com/scode/farhelm/pull/4482/changes). Fixed as decided.
 
+## trailing-podman-rebuild-retires-fallback-before-success.md
+
+- Outcome: `fix code`.
+- Assessment: Pressing Rebuild on a working container recipe throws away its last working images before the new build
+  runs. If the rebuild fails (network or package outage), new sessions of that recipe cannot launch until a build
+  succeeds. Verified: environment/podman/build.rs ~250–258 moves both images into `retired_images` at Rebuild admission,
+  before `prepare_images_owned`. This deliberately forces a rebuild past the reuse shortcuts. SPEC.md (~5249):
+  "Superseded Farhelm-built images are removed after successful replacement once no container uses them. Rebuild at a
+  place and recipe deletion clean up that place's owned images." Tensorlake's rebuild replaces only after success
+  (SPEC.md ~574).
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code: force the rebuild with a flag and retire the old images only
+  on success. If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring
+  it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
+  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
+  the feedback file and its index entry.
+- Execution: `qnzlzvnvslurqpmwntmxsxuzqwyukymz`, `plan/triage-podman/02-images-and-removal`,
+  [draft PR](https://github.com/scode/farhelm/pull/4490/changes). Deferred to TODO.md, Near term → Plan follow-up, “Keep
+  working container images when Rebuild fails”. Keeping the working images would let launches bypass an active Rebuild.
+  Preserving job joining and fallback exceeds the outcome’s size gate.
+
+## anonymous-container-volumes-survive-removal.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Deleting a container session leaves behind any anonymous volumes its image declared, which keep using disk
+  on the container host. Verified: Still true for both removal paths: the legacy `rm -f --ignore` and the helm-side
+  `remove_container` `rm --force` (podman.rs ~438), neither passing `--volumes`. Managed Ubuntu declares no volumes, so
+  only custom images are affected. The spec says nothing about it.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code (`--volumes` on owned-container removal) and add a sentence to
+  SPEC. If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it
+  back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: `qnzlzvnvslurqpmwntmxsxuzqwyukymz`, `plan/triage-podman/02-images-and-removal`,
+  [draft PR](https://github.com/scode/farhelm/pull/4490/changes). Fixed as decided.
+
+## trailing-podman-account-observation-exec-guesses-root-home.md
+
+- Outcome: `fix code`.
+- Assessment: A custom container base that meets the documented requirements but has no `/root` directory fails to
+  build. Farhelm runs the account lookup as root with `/root` as its working directory. Verified:
+  `environment/podman/build.rs:65-72` runs `getent` as `root_user()`, which is hard-coded to home `/root` (:412-417).
+  SPEC.md's custom-base requirements do not mention `/root`. Podman and crun behavior come from the record's upstream
+  citations, not a local run.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code (run the lookup with a neutral workdir such as `/`). Discard
+  is reasonable too: an Ubuntu/Debian image without `/root` is very unusual. If the fix turns out not to be
+  straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
+  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
+  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `qnzlzvnvslurqpmwntmxsxuzqwyukymz`, `plan/triage-podman/02-images-and-removal`,
+  [draft PR](https://github.com/scode/farhelm/pull/4490/changes). Fixed as decided.
+
 ## valid-ssh-uri-short-label-parsing.md
 
 - Outcome: `fix code`.

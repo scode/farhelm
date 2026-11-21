@@ -446,12 +446,19 @@ impl Podman {
 
     /// Pause does not prevent whole-resource deletion. Revalidate ownership
     /// and confirm absence before callers discard any durable cleanup record.
+    /// The removal also asks Podman to collect unused anonymous volumes.
     async fn remove_container(&self, place: HostId, id: &str, role: &str) -> anyhow::Result<()> {
         if let Some(info) = self.inspect(place, id).await? {
             self.owned(&info, role).await?;
             self.require(
                 place,
-                vec!["rm".into(), "--force".into(), "--".into(), info.id],
+                vec![
+                    "rm".into(),
+                    "--force".into(),
+                    "--volumes".into(),
+                    "--".into(),
+                    info.id,
+                ],
                 COMMAND,
             )
             .await?;

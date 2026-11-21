@@ -447,6 +447,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   explicit wrap distinction as the colored-margin item above. Cover erasure both mid-row and just after a wrap,
   including selection and links across the seam.
 
+- **Keep working container images when Rebuild fails.** Rebuild currently retires a recipe's Podman software and
+  prepared images before building replacements (`crates/farhelm-helm/src/environment/podman/build.rs`). A package or
+  installer outage can leave a previously usable recipe unable to start new sessions. Force actual rebuilding with a
+  flag, retain the last usable images until replacement succeeds, and keep the ordinary freshness rules for later
+  launches. Launches for the same recipe and place must still join an active Rebuild and receive its outcome, even while
+  old images remain recorded. Coordinate source selection with the job registry and release any source guard before
+  awaiting the rebuild's publication. Test both a failure with a usable fallback and a launch concurrent with Rebuild.
+  Deferred from the Podman triage plan because preserving active-job joining exceeds the original size gate.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
