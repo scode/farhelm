@@ -7,4 +7,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `terminal-exit-and-placeholder-fixes.md` — let an exited agent's oldest line scroll into view and make the connecting placeholder readable in light appearance, closing two triage outcomes
 - [in-flight 481b08] `templates-list-bolt-and-key.md` — center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
 - [in-flight 1d0dd1] `menu-shortcut-hints.md` — show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
-- [pending] `whats-new-on-upgrade.md` — after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
+- [in-flight 9adac2] `whats-new-on-upgrade.md` — after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
