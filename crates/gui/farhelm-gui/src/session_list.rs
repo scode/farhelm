@@ -1155,7 +1155,10 @@ impl Render for SessionList {
                                 focus,
                                 selected,
                                 marked,
-                                member_groups.contains_key(key),
+                                member_groups
+                                    .get(key)
+                                    .and_then(|id| headers.get(&groups::header_key(*id)))
+                                    .map(|header| header.name.as_str()),
                                 steps,
                                 window,
                                 cx,
@@ -1208,7 +1211,7 @@ fn draw_row(
     focus: &FocusHandle,
     selected: bool,
     marked: bool,
-    grouped: bool,
+    group: Option<&str>,
     steps: row::Steps,
     window: &mut Window,
     cx: &mut App,
@@ -1245,7 +1248,7 @@ fn draw_row(
         collections,
         selected,
         marked,
-        grouped,
+        group,
         steps,
         menu,
         bell,

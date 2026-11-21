@@ -33102,3 +33102,92 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: `krqoukkwylmuwkswupsynlmmtzzywwpy`, `plan/triage-spec-text/02-text-corrections`,
   [draft PR](https://github.com/scode/farhelm/pull/4471/changes). Fixed as decided.
+
+## bulk-action-uses-live-shell-guard.md
+
+- Outcome: `fix code`.
+- Assessment: marking.rs ~686: the button captures only `action`. bulk.rs ~499–531 re-reads rows and
+  `menu::skips_questions` at click time and recomputes the guards. The single-row paths use `Actionable::drawn`. Basis:
+  SPEC_impl.md "Questions: the prompt" (~984): "The same rule starts at the control that asks the question or sends the
+  request directly. Its handlers carry the drawn session key, row, skip preference and the parts of the environment's
+  state that determine the command." SPEC.md bulk (~2375): "Changed facts or confirmation preferences never dispatch a
+  destructive action by themselves." Fix: capture the drawn targets and preference in the button handler, as the row
+  paths do.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO.md entry “Keep bulk Stop and Delete bound to what the user saw.” Queued
+  dispatch and prompt refresh also require identity and environment scope checks. jj change `uxslpowwqoyl`, bookmark
+  `plan/triage-gui-sessions/01-session-list-actions`,
+  [draft PR #4469](https://github.com/scode/farhelm/pull/4469/changes).
+
+## bulk-mute-can-reset-window.md
+
+- Outcome: `fix code`.
+- Assessment: With more than about 65 sessions marked, choosing Mute or Unmute (and probably Pin or Mark read too) sends
+  one command per row in a single burst. The helm closes the connection once more than 64 are waiting, so the window
+  goes through "Reconnecting to the helm…" with only part of the batch applied. Verified: Confirmed.
+  `session_list/marking.rs` ~897-922 sends every eligible write at once. `ui_channel.rs` `MAX_QUEUED_COMMANDS = 64`
+  closes the channel when exceeded, with the comment "A real GUI never comes close", which bulk marking makes false.
+  SPEC.md ~2347-2349 says metadata choices "reuse the ordinary writes", and SPEC.md "Losing the connection to the helm"
+  expects resets only on real connection failure. Not measured: how fast the helm drains the queue.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code. Pace bulk metadata writes the way bulk Stop/Delete already
+  are. If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it
+  back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Deferred to the Near term TODO.md entry “Pace metadata changes to marked sessions.” Reply pacing with
+  acceptance-time refusals, ordinary commands and queue cleanup exceeded the size gate. jj change `uxslpowwqoyl`,
+  bookmark `plan/triage-gui-sessions/01-session-list-actions`,
+  [draft PR #4469](https://github.com/scode/farhelm/pull/4469/changes).
+
+## session-groups-lose-membership-in-accessibility-tree.md
+
+- Outcome: `fix spec+code`.
+- Assessment: Screen-reader users get no word of which group a session row belongs to; sighted users see it from
+  indentation and a guide line. Verified: `session_list/row.rs:472-584` adds only indent and guide for `grouped`;
+  accessible name/description omit the group. SPEC.md requires accessible text for the header toggle, counts and
+  collapsed dot, but says nothing about member rows.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix spec+code (state the parity principle; add the group name to member
+  rows' accessible description) If the fix turns out not to be straightforward, or needs significant additional
+  complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. A member row's accessible description includes the group shown by the list. jj change
+  `uxslpowwqoyl`, bookmark `plan/triage-gui-sessions/01-session-list-actions`,
+  [draft PR #4469](https://github.com/scode/farhelm/pull/4469/changes).
+
+## sidebar-order-stays-held-after-shift-sweep.md
+
+- Outcome: `fix code`.
+- Assessment: After a Shift sweep released outside the sidebar, the list can keep its old order for up to five seconds
+  if the pointer stays still. Verified: `pin_drag_moved` calls `pointer_activity` for every captured move wherever the
+  pointer is (`pin_drag.rs:1171-1177`), which sets `pointer_over = true` (`hold.rs:138-143`); the capture stops the
+  rows' own hover listener, so no leave arrives until the next move. SPEC.md: the client shows the order again "as soon
+  as the pointer leaves the list", and "an active marking sweep keeps the hold even if the pointer leaves". Ending the
+  hold at sweep end is implied, not written, so not clearly settled.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code (only count captured moves inside the rows' bounds as
+  activity; tiny), or discard with the group If the fix turns out not to be straightforward, or needs significant
+  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
+  item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. A sweep released outside the rows applies a waiting order immediately and retains its marks. jj
+  change `uxslpowwqoyl`, bookmark `plan/triage-gui-sessions/01-session-list-actions`,
+  [draft PR #4469](https://github.com/scode/farhelm/pull/4469/changes).

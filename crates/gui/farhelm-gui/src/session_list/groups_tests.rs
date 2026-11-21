@@ -67,6 +67,12 @@ fn members_keep_their_indent_when_the_list_goes_compact(cx: &mut TestAppContext)
         check(cx) < height,
         "Compact removed the loose row's second line"
     );
+
+    // Hover's text is the same description the member's open control exposes to accessibility clients.
+    let member = "session-row-member";
+    let at = test_support::center(cx, member);
+    let description = super::row_tests::help_at(cx, member, at).expect("member description");
+    assert!(description.starts_with("Group Project. "));
 }
 
 /// The marker carries selection while the chosen member is hidden. Choosing it must leave shared collapse alone,

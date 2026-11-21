@@ -261,8 +261,8 @@ impl Inks {
 /// row's summary card ([`SummaryCard::of`]), its open control's hover help. `focus` is the row's own focus handle,
 /// which the list owns and registers with its list state: the row's item tracks it so it contains whichever of the
 /// row's controls holds focus, and never takes focus itself. `hover` is where the item records whether the pointer is
-/// over it, for the menu button's reveal. `marked` draws the marked look (see the module docs). `grouped` follows the
-/// displayed band, including while the hovered list holds a moved member in its former slot. `list` is the session list
+/// over it, for the menu button's reveal. `marked` draws the marked look. `group` names the displayed group, including
+/// while the hovered list holds a moved member in its former slot. `list` is the session list
 /// the row reports activation to: a plain click opens the session and clears the marks, Shift or Cmd or Ctrl marks
 /// instead (a Shift press can also begin a sweep, which the list decides), and the keyboard's Enter and Space carry no
 /// modifiers, so they always open.
@@ -275,7 +275,7 @@ pub(crate) fn row(
     collections: &Collections,
     selected: bool,
     marked: bool,
-    grouped: bool,
+    group: Option<&str>,
     steps: Steps,
     menu: AnyElement,
     bell: Option<AnyElement>,
@@ -349,7 +349,17 @@ pub(crate) fn row(
         }
         .into()
     };
+    // The virtual list can drop the header while its members remain on screen. Keep that context on each control.
+    let words = match group {
+        Some(group) => HostSentence::new(id.clone())
+            .text("Group ")
+            .host(&HostText::from_host(group))
+            .text(format!(". {}", words.accessible_text()))
+            .into(),
+        None => words,
+    };
     let help = place.place(HoverHelp::card(summary::CARD_WIDTH, card, words));
+    let grouped = group.is_some();
 
     let (live, ended) = match badge {
         Some(Badge::Live(live)) => (Some(live), None),

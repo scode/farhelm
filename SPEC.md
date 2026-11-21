@@ -2654,7 +2654,9 @@ and accessible description name the open session. Opening a member leaves the gr
 collapsed header draws the dot of its most urgent matching member with a live attention color: waiting (red), unseen
 idle (blue), then running (green). A muted member counts only while waiting on a connected host. The dot uses the same
 mark as its row and the tooltip names that member and status. The header only draws the dot while collapsed and a member
-qualifies. Its accessible text gives the same information. Marks and row actions follow the displayed rows.
+qualifies. Its accessible text gives the same information. Marks and row actions follow the displayed rows. Member rows
+include the name of their displayed group in their accessible description, including when the header has scrolled
+offscreen. It gives screen-reader users the same group context as the indentation and guide.
 
 The header menu offers **Rename**, **Ungroup**, **Move up** and **Move down** when available. Ungroup removes the group
 and makes its members ungrouped. Its pinned members stay pinned and append to the global pins in their group order. A
