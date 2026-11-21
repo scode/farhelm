@@ -288,24 +288,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Make the model family names consistent.** Every model in the launcher's model list belongs to a family (Sol, Fable,
-  GLM and so on), and the families are named in three different styles: Sol, Astra, Luna and Terra by a plain word
-  (`sol`), Claude and Muse by a full model ID (`claude-fable-5`, `muse-spark-1.3-contributor`), and GLM and Grok with a
-  version in the name (`glm-5.3`, `grok-4.5`). A name with a version stops fitting once a successor ships, and the words
-  you can type in the launcher to get a family's newest model (`fable`, `spark`, `glm`, ...) need a separate lookup
-  table to map onto these names (`FAMILY_WORDS` in `crates/farhelm-proto/src/launcher.rs`). Pick one style, most likely
-  the typed word itself, rename the families, and drop the lookup table if it becomes redundant. Raised by the
-  model-families landing, 2026-11-19. Plan: `plans/queue/model-family-cleanup.md`.
-
-- **Shorter refusal for a model family word typed with the wrong agent.** With Claude chosen in the launcher, typing
-  `sol` in the model field and pressing Enter says "sol is offered by Codex or Goose or Pi or OMP or OpenCode; choose
-  Codex or Goose or Pi or OMP or OpenCode to use it". It is accurate but long and clumsy, no test covers it, and SPEC.md
-  does not describe it. Something like "Claude has no sol model; choose an agent that offers it." would do; add a test
-  and a SPEC.md line. In the same change, drop the family word that the helm sends to the app with every model: both are
-  the same build and already have the word table, so that protocol field and its roughly 35 test lines add nothing; let
-  the app work out the word itself. Raised by the model-family-shorthand landing, 2026-11-19. Plan:
-  `plans/queue/model-family-cleanup.md`.
-
 - **Decide whether saving a launch template checks where its command's placeholders stand.** A custom command launch can
   use placeholders such as `{cwd}`, which Farhelm fills in. Each must stand alone as an unquoted word: `"{cwd}"` or
   `--dir={cwd}` is refused, and SPEC.md says it is refused "on save". But saving a launch template only checks the

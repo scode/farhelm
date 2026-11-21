@@ -198,8 +198,8 @@ impl Launcher {
                     self.model_field.error =
                         Some("Choose a harness for this model family".to_owned());
                 }
-                ModelEnterTarget::OwnedElsewhere { id, owners } => {
-                    self.model_field.error = Some(owned_elsewhere_message(&id, &owners));
+                ModelEnterTarget::OwnedElsewhere { id, chosen, owners } => {
+                    self.model_field.error = Some(owned_elsewhere_message(&id, chosen, &owners));
                 }
             }
         }

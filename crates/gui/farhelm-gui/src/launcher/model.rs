@@ -69,9 +69,10 @@ pub(crate) enum ModelEnterTarget {
     NeedsHarness(String),
     /// Several agent types offer this family word. Which agent to use is a separate choice.
     NeedsHarnessForFamily,
-    /// A typed id only other agent types offer, while one is chosen: said ([`owned_elsewhere_message`]), not applied.
+    /// A family word or current model ID that the chosen agent does not offer.
     OwnedElsewhere {
         id: String,
+        chosen: LaunchHarness,
         owners: Vec<LaunchHarness>,
     },
 }
@@ -132,6 +133,7 @@ pub(super) fn family_target(
         let owners: Vec<_> = latest.map(|model| model.harness).collect();
         return (!owners.is_empty()).then(|| ModelEnterTarget::OwnedElsewhere {
             id: query.to_owned(),
+            chosen: current,
             owners,
         });
     }
@@ -194,6 +196,7 @@ pub(crate) fn model_enter_target(
             Some(known) => ModelEnterTarget::Option((*known).into()),
             None if owners.iter().any(|model| model.latest) => ModelEnterTarget::OwnedElsewhere {
                 id: draft.to_owned(),
+                chosen: current,
                 owners: owners
                     .iter()
                     .filter(|model| model.latest)
@@ -216,13 +219,18 @@ pub(crate) fn model_enter_target(
     ModelEnterTarget::NeedsHarness(draft.to_owned())
 }
 
-/// What [`ModelEnterTarget::OwnedElsewhere`] says: which agent types offer the typed model, so the user can pick it
-/// there on purpose.
-pub(crate) fn owned_elsewhere_message(id: &str, owners: &[LaunchHarness]) -> String {
-    let labels = owners
-        .iter()
-        .map(|owner| harness_label(*owner))
-        .collect::<Vec<_>>()
-        .join(" or ");
-    format!("{id} is offered by {labels}; choose {labels} to use it")
+/// Name the chosen agent and give a specific next choice when the model has one owner.
+pub(crate) fn owned_elsewhere_message(
+    id: &str,
+    chosen: LaunchHarness,
+    owners: &[LaunchHarness],
+) -> String {
+    let chosen = harness_label(chosen);
+    match owners {
+        [owner] => format!(
+            "{chosen} has no {id} model; choose {} to use it.",
+            harness_label(*owner)
+        ),
+        _ => format!("{chosen} has no {id} model; choose an agent that offers it."),
+    }
 }

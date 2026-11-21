@@ -1066,17 +1066,19 @@ agent choice is independent of that destination:
   GUI never turns a model identifier into an argv fragment. The catalog knows older and current model IDs, with one
   latest model per family and agent type. Replacing a model keeps its ID and supported efforts in the catalog. A clearly
   obsolete model leaves only by deliberate removal. Typing a model never changes a selected harness: the typed id is
-  read as that harness spells it (for OpenCode, a bare Zen name means `opencode/<model>`). A latest model only other
-  harnesses offer is refused with a message naming them. An older ID can still be used as a custom model on an
-  explicitly chosen harness that has no entry for it, preserving existing launches that used the same spelling. Choosing
-  another harness's model from the full model list switches the harness on purpose. With no harness selected yet, a
-  typed known model fills in its owning harness (a bare `gpt-6-luna` picks Codex). A custom model or an ID offered by
-  several harnesses needs an explicit harness.
+  read as that harness spells it (for OpenCode, a bare Zen name means `opencode/<model>`). For a family word or current
+  model ID offered only by other agents, the launcher says “Claude has no sol model; choose an agent that offers it.” If
+  only one agent offers it, the message names that agent, as in “Codex has no fable model; choose Claude to use it.” An
+  older ID can still be used as a custom model on an explicitly chosen harness that has no entry for it, preserving
+  existing launches that used the same spelling. Choosing another harness's model from the full model list switches the
+  harness on purpose. With no harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna`
+  picks Codex). A custom model or an ID offered by several harnesses needs an explicit harness.
 
-  In the launcher's model field, an exact family word such as `sol`, ignoring ASCII case, highlights the family's latest
-  model for the chosen harness. Enter chooses its full model ID. Without a chosen harness, a family with one owner
-  supplies that harness. A family with several owners asks the user to choose one. Prefixes and full IDs keep their
-  usual model-text behavior. Model words in the template editor and CLI are literal IDs.
+  Every model family has a versionless name such as `sol` or `glm-flash`. In the launcher's model field, typing that
+  name exactly, ignoring ASCII case, highlights the family's latest model for the chosen harness. Enter chooses its full
+  model ID. Without a chosen harness, a family with one owner supplies that harness. A family with several owners asks
+  the user to choose one. Prefixes and full IDs keep their usual model-text behavior. Model words in the template editor
+  and CLI are literal IDs.
 
   The launcher and template editor offer the current models first and put earlier members of each family under **Older
   models**. Launcher search uses the same heading and still offers past-launch matches for older IDs.
@@ -1133,7 +1135,9 @@ agent choice is independent of that destination:
   A held Enter never launches.
 
   An exact family word in launcher search preselects its latest model, using the first matching harness when none is
-  chosen. Existing search words such as `grok` keep their meaning.
+  chosen. When a word names both an agent and a model family, such as `grok`, typing it alone chooses that agent if none
+  is selected, even while models are loading. With an agent selected, the word searches for models on that agent.
+  `model:grok` explicitly searches for the model family.
 
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector for agent launches. Claude,
   Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id; Cursor chat id; Pi and OMP

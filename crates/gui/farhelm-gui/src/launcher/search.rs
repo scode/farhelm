@@ -520,21 +520,35 @@ impl Results {
 /// The rows `inputs` offer (see the module docs).
 pub fn search(inputs: &Inputs<'_>) -> Results {
     let (scope, value) = scoped(inputs.query);
-    // Template names compare by Unicode lowercase, as they are matched; every other row by ASCII lowercase.
-    let lower = match scope {
-        Scope::Templates => value.to_lowercase(),
-        _ => value.to_ascii_lowercase(),
-    };
     let agent_tab = inputs.tab == Tab::Agent;
     // Models and efforts follow the agent type only on the Agent tab; the Command tab searches every agent type's
     // models.
     let harness = inputs.harness.filter(|_| agent_tab);
     let agent_without_harness = agent_tab && inputs.harness.is_none();
+    let family_word = is_catalog_family_word(value);
+    // A word such as `grok` has two meanings. An unset agent gives the agent name priority. With an agent set,
+    // use model scope so a missing model cannot switch agents or become a session name.
+    let colliding_harness = (scope == Scope::All && family_word)
+        .then(|| {
+            HARNESS_SEARCH_ORDER
+                .into_iter()
+                .find(|kind| harness_label(*kind).eq_ignore_ascii_case(value))
+        })
+        .flatten();
+    let (scope, preferred_harness) = match (colliding_harness, harness) {
+        (Some(_), Some(_)) => (Scope::Model, None),
+        (preferred, _) => (scope, preferred),
+    };
+    // Template names compare by Unicode lowercase, as they are matched; every other row by ASCII lowercase.
+    let lower = match scope {
+        Scope::Templates => value.to_lowercase(),
+        _ => value.to_ascii_lowercase(),
+    };
     let mut rows = Vec::new();
     let any = |wanted: Scope| scope == wanted || scope == Scope::All;
     let matches = |word: &str| lower.is_empty() || word.contains(&lower);
     let blank_all = scope == Scope::All && value.is_empty();
-    if any(Scope::Model) && inputs.catalog.is_none() && is_catalog_family_word(value) {
+    if any(Scope::Model) && inputs.catalog.is_none() && preferred_harness.is_none() && family_word {
         // An exact family word waits for the release catalog. A history or name row could consume it first.
         return Results {
             rows,
@@ -720,7 +734,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     let family = inputs.catalog.unwrap_or_default().iter().find(|model| {
         harness.is_none_or(|chosen| chosen == model.harness) && model.matches_family_word(value)
     });
-    let default = default_index(scope, &lower, &rows, family);
+    let default = default_index(scope, &lower, &rows, family, preferred_harness);
     let message = if rows.is_empty() && reason.is_none() {
         empty_message(
             scope,
@@ -740,17 +754,23 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
     }
 }
 
-/// The row preselected for an exact query: under a label, the first exact match in that label's own group; unlabelled,
-/// an exact effort, then permission, then model ID or family word, then agent type. Family words choose a current
-/// catalog row in display order. A past launch can match an ID but does not represent the latest of a family.
+/// Under a label, prefer an exact match in that label's group. An unlabelled exact agent word can choose that agent
+/// before a model of the same name when no agent is set. Otherwise, retain the ordinary per-group precedence.
+/// A past launch can match an ID, while a family word only selects a current catalog row.
 fn default_index(
     scope: Scope,
     lower: &str,
     rows: &[Row],
     family: Option<&LaunchCatalogModel>,
+    preferred_harness: Option<LaunchHarness>,
 ) -> usize {
     if lower.is_empty() {
         return 0;
+    }
+    if let Some(harness) = preferred_harness
+        && let Some(index) = rows.iter().position(|row| *row == Row::Harness(harness))
+    {
+        return index;
     }
     let priority: &[Group] = match scope {
         Scope::All => &[

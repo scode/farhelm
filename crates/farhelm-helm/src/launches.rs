@@ -10,7 +10,7 @@
 use farhelm_proto::{
     SessionLaunch,
     launch::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection},
-    launcher::{LaunchCatalogModel, catalog_family_word},
+    launcher::LaunchCatalogModel,
     session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
 };
 
@@ -141,7 +141,7 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "composer-2.5",
-        family: "composer-2.5",
+        family: "composer",
         latest: true,
         harness: LaunchHarness::Cursor,
         efforts: &[],
@@ -176,42 +176,42 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "claude-fable-5",
-        family: "claude-fable-5",
+        family: "fable",
         latest: true,
         harness: LaunchHarness::Claude,
         efforts: CLAUDE_EFFORTS,
     },
     CatalogModel {
         id: "muse-spark-1.3-contributor",
-        family: "muse-spark-1.3-contributor",
+        family: "spark",
         latest: true,
         harness: LaunchHarness::Muse,
         efforts: MUSE_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
-        family: "glm-5.3-flash",
+        family: "glm-flash",
         latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
-        family: "grok-4.5",
-        latest: true,
+        family: "grok",
+        latest: false,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
-        family: "grok-4.6",
+        family: "grok",
         latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
-        family: "glm-5.3",
+        family: "glm",
         latest: true,
         harness: LaunchHarness::Goose,
         efforts: GOOSE_EFFORTS,
@@ -246,28 +246,28 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
-        family: "glm-5.3-flash",
+        family: "glm-flash",
         latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
-        family: "grok-4.5",
-        latest: true,
+        family: "grok",
+        latest: false,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
-        family: "grok-4.6",
+        family: "grok",
         latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
-        family: "glm-5.3",
+        family: "glm",
         latest: true,
         harness: LaunchHarness::Pi,
         efforts: PI_EFFORTS,
@@ -302,28 +302,28 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "z-ai/glm-5.3-flash",
-        family: "glm-5.3-flash",
+        family: "glm-flash",
         latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.5",
-        family: "grok-4.5",
-        latest: true,
+        family: "grok",
+        latest: false,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "x-ai/grok-4.6",
-        family: "grok-4.6",
+        family: "grok",
         latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
     },
     CatalogModel {
         id: "z-ai/glm-5.3",
-        family: "glm-5.3",
+        family: "glm",
         latest: true,
         harness: LaunchHarness::Omp,
         efforts: OMP_EFFORTS,
@@ -358,28 +358,28 @@ const CATALOG: &[CatalogModel] = &[
     },
     CatalogModel {
         id: "opencode/glm-5.3-flash",
-        family: "glm-5.3-flash",
+        family: "glm-flash",
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/grok-4.5",
-        family: "grok-4.5",
-        latest: true,
+        family: "grok",
+        latest: false,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/grok-4.6",
-        family: "grok-4.6",
+        family: "grok",
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
     },
     CatalogModel {
         id: "opencode/glm-5.3",
-        family: "glm-5.3",
+        family: "glm",
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: OPENCODE_EFFORTS,
@@ -493,9 +493,6 @@ pub(crate) fn launcher_catalog() -> Vec<LaunchCatalogModel> {
         .map(|model| LaunchCatalogModel {
             id: model.id.to_owned(),
             family: model.family.to_owned(),
-            family_word: catalog_family_word(model.family)
-                .filter(|_| model.latest)
-                .map(str::to_owned),
             latest: model.latest,
             harness: model.harness,
             efforts: model.efforts.to_vec(),
@@ -1414,32 +1411,36 @@ mod tests {
         }
     }
 
-    /// A shortcut belongs to one family globally, even when several harnesses offer that family.
-    /// In particular GLM Flash remains searchable by its own ID.
+    /// Before the catalog arrives the launcher must recognize all and only the words it will later resolve.
     #[test]
-    fn family_words_name_single_families() {
-        let mut words = BTreeMap::new();
+    fn catalog_families_match_the_launchers_reserved_words() {
+        let catalog_families: BTreeSet<_> = CATALOG.iter().map(|model| model.family).collect();
+        let reserved = farhelm_proto::launcher::CATALOG_FAMILIES;
+        assert_eq!(catalog_families, reserved.iter().copied().collect());
+        assert_eq!(catalog_families.len(), reserved.len());
+    }
+
+    /// The shorthand follows Grok 4.6 on every offering, and the older ID stays in the same family.
+    #[test]
+    fn grok_family_keeps_the_older_id_and_uses_its_successor() {
         let catalog = super::launcher_catalog();
-        for model in &catalog {
-            if let Some(word) = model.family_word.as_deref() {
-                assert!(model.latest, "family word on older model {model:?}");
-                if let Some(family) = words.insert(word, model.family.as_str()) {
-                    assert_eq!(family, model.family, "two families for {word}");
-                }
+        for (harness, prefix) in [
+            (LaunchHarness::Goose, "x-ai"),
+            (LaunchHarness::Pi, "x-ai"),
+            (LaunchHarness::Omp, "x-ai"),
+            (LaunchHarness::OpenCode, "opencode"),
+        ] {
+            for (version, latest) in [("4.5", false), ("4.6", true)] {
+                let id = format!("{prefix}/grok-{version}");
+                let model = catalog
+                    .iter()
+                    .find(|model| model.harness == harness && model.id == id)
+                    .unwrap_or_else(|| panic!("{harness:?} must still offer {id}"));
+                assert_eq!(model.family, "grok", "{model:?}");
+                assert_eq!(model.latest, latest, "{model:?}");
+                assert_eq!(model.matches_family_word("GrOk"), latest, "{model:?}");
             }
         }
-        assert_eq!(
-            words,
-            BTreeMap::from([
-                ("astra", "astra"),
-                ("fable", "claude-fable-5"),
-                ("glm", "glm-5.3"),
-                ("luna", "luna"),
-                ("sol", "sol"),
-                ("spark", "muse-spark-1.3-contributor"),
-                ("terra", "terra"),
-            ])
-        );
     }
 
     /// Registering an older name preserves the efforts 0.41.0 accepted on its

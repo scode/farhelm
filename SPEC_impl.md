@@ -5221,8 +5221,8 @@ installation it is on, so it follows an open session the sidebar's filter hides
   tabbable row would unmount under the keyboard and drop focus out of the surrounding dialog.
 
   An exact catalog family word, compared ignoring ASCII case, highlights its latest row when the field can identify one
-  owning harness. Enter stores its concrete model ID. Search uses the same exact family word to preselect the first
-  matching current row in result order.
+  owning harness. Enter stores its concrete model ID. Search uses the same word to preselect a current model, with a
+  bare exact agent name taking precedence when no agent is selected.
 
 - The host registry (PLAN_M6.md item 3) reserves one row for the machine running the helm itself: auto-created at `open`
   if absent, never registered, retargeted, or removed through the ssh-host management API, so its destination and its
@@ -8824,11 +8824,11 @@ harness uses its own row when it has one. A foreign latest model reserves its sp
 allows the same explicit custom spelling the harness accepted before it was recognized. The GUI and helm compiler apply
 that rule to typed models and launches as well.
 
-A family word (`sol`, `fable`, …) follows the latest marker through the stable family key. The words live in one table
-beside the catalog types (`FAMILY_WORDS` in `crates/farhelm-proto/src/launcher.rs`), keyed by the family names the
-helm's catalog uses; a new family, or a family renamed when a successor ships, needs a decision about its word there,
-and the catalog test fails on a key the catalog no longer has. An exact family word waits for this catalog to load
-before either launcher field can apply it.
+The catalog's versionless `family` names are also the shorthand words. The `latest` marker selects the current model for
+each harness even when older rows share that family. The catalog sends the family and marker with each row. Before the
+catalog arrives, `CATALOG_FAMILIES` in `crates/farhelm-proto/src/launcher.rs` lets the launcher wait on an exact family
+word instead of treating it as custom input. A helm test pins that list to the set it serves. An unlabelled exact agent
+name with no agent selected, such as `grok`, already has a meaning and need not wait.
 
 The model field orders its selectable rows by generation, then by agent order and the catalog's row order. The same
 filter supplies the template editor's model buttons. The composer search puts older catalog matches under its own
