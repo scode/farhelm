@@ -1520,7 +1520,10 @@ impl ProvisioningService {
             Ok(registered) => registered,
             Err(error) => {
                 if let Some(existing) = existing {
+                    // An automatic scan may have skipped this temporary claim
+                    // even though registration failed before publishing a run.
                     self.memory.lock().await.busy.remove(&existing);
+                    self.manager.events().bump();
                 }
                 return Err(error);
             }
@@ -1534,6 +1537,7 @@ impl ProvisioningService {
             // wrote (a concurrent change of the registry); release that
             // claim and let the run claim its own host.
             self.memory.lock().await.busy.remove(&existing);
+            self.manager.events().bump();
         }
         self.start_run(host, pending, claimed).await
     }

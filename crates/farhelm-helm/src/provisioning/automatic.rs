@@ -3,7 +3,7 @@
 //! The fleet revision is the wake source: connection transitions, provisioning
 //! completion and preference writes all publish there. There is no retry timer.
 
-use super::{ProvisionRequest, ProvisioningService};
+use super::{ProvisionRequest, ProvisioningRequestError, ProvisioningService};
 use crate::manager::HostState;
 use crate::store::{HostId, HostKind};
 use std::collections::{HashMap, HashSet};
@@ -76,14 +76,11 @@ impl AutomaticUpdates {
     }
 }
 
-/// Match the rail's update badge, rather than Update all's broader idle-host list.
-/// Development or unparseable builds have unknown age; only a lower protocol
-/// then proves an update is needed. Newer peers are never automatic targets.
-/// That holds for a development build on the host's side too: SemVer sorts
-/// `0.0.0-unreleased` below every release, but a host running one was most
-/// likely updated by a devbuild under test, and putting the release back
-/// underneath it without asking would break that test. Manual Update still
-/// offers the way back.
+/// Use the rail's update badge rules with an exemption for development peers.
+///
+/// A developer may have installed the build under test on that host. Its
+/// protocol can be older than the helm's, and manual Update can still restore
+/// the release. An unparseable non-development build can qualify by protocol.
 fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> bool {
     if !kind.panel_updates() || busy {
         return false;
@@ -98,12 +95,16 @@ fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> 
             our_protocol,
             peer_build,
             ..
-        } => peer_protocol < our_protocol && !crate::hosts::build_is_newer(peer_build, helm_build),
+        } => {
+            peer_protocol < our_protocol
+                && !farhelm_proto::is_development_build(peer_build)
+                && !crate::hosts::build_is_newer(peer_build, helm_build)
+        }
         _ => false,
     }
 }
 
-/// Start at most one attempt per host incarnation for this helm lifetime.
+/// Start at most one attempt per host incarnation once Update is admitted or refused.
 /// Reserve before planning, not after run completion: a failed run clears busy
 /// and publishes its own revision before the start caller necessarily resumes.
 /// Skip a manual-only payload source before making any plan or recording any
@@ -165,6 +166,15 @@ pub(super) async fn scan(
         }
         .await;
         if let Err(error) = result {
+            // Manual work can claim the host while the automatic plan is in
+            // flight. Its completion wakes the listener to reconsider the host.
+            if matches!(
+                error.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::Busy(_))
+            ) {
+                attempted.remove(&host.id);
+                continue;
+            }
             // A refused probe can itself outlast a connection transition. The
             // no-retry boundary starts when refusal is known, not before SSH.
             if let Some(current) = service.manager.status(host.id) {
@@ -183,9 +193,8 @@ mod tests {
 
     /// Automatic targets must agree with the update badge, including release
     /// ordering, protocol urgency, busy exclusion and the reserved local row.
-    /// One exception to the badge: a host a devbuild updated (development
-    /// build, same protocol) is never an automatic target, or the installed
-    /// app would undo the devbuild under test by itself.
+    /// An older protocol still exempts a host running a development build,
+    /// since Automatic Update would otherwise undo the devbuild under test.
     #[farhelm_testtrace::test]
     fn eligibility_uses_age_and_protocol_without_downgrading() {
         let connected = |build: &str| HostState::Connected {
@@ -218,6 +227,12 @@ mod tests {
             remediation: "update".into(),
         };
         assert!(eligible(HostKind::Ssh, &skew(1, "1.0.0"), false, "2.0.0"));
+        assert!(!eligible(
+            HostKind::Ssh,
+            &skew(1, "0.0.0-unreleased"),
+            false,
+            "2.0.0"
+        ));
         assert!(eligible(
             HostKind::Ssh,
             &skew(1, "unknown"),
