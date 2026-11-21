@@ -34848,6 +34848,152 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   “Apply host identity rules to Podman places”. The paired legacy-binding decision is unsettled and both outcomes must
   share one identity record.
 
+## trailing-podman-tests-nested-build-module-registration.md
+
+- Outcome: `other`.
+- Assessment: None. The claim was that the Podman ownership, cleanup and private-input tests never compile. Verified:
+  refuted. `environment/podman/build.rs:9-11` declares `#[cfg(test)] #[path = "tests.rs"] mod tests;`. The parent record
+  itself marks it "refuted / excluded".
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Discarded under the unattended fallback. The nested
+  build module registers the test file explicitly and its namespace resolves correctly. The recorded Podman selection
+  ran tests from this module.
+
+## trailing-podman-acceptance-fallback-misses-inflight-ssh-bootstrap-storage.md
+
+- Outcome: `other`.
+- Assessment: None. If a remote Podman create stalls past 120s before libpod registers it, the real SSH test's fallback
+  cleanup can report clean while a storage-only builder remains. Verified: `owned_ids`
+  (podman_environments.rs:1545-1560) lists only by label, without `--external`. The trigger depends on an unobserved
+  filesystem stall.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). No change. The conditional gap concerns cleanup of a
+  test-owned SSH builder that has yet to enter normal inventory. The scenario still reports its failure, and no loss or
+  misattribution of test evidence was found.
+
+## trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md
+
+- Outcome: `other`.
+- Assessment: None. The test that a stopped container gets one automatic start and keeps its failure across unanswered
+  status reads can pass without ever completing a failed connection cycle. Verified: manager.rs:14533-14536 waits for
+  `checked + 2` provider calls and then calls `retry_now`. It never waits for a settled Unreachable.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix the code (wait for a settled failure, or use a one-attempt cadence). Discarding is also reasonable.
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Fixed. The test waits for a settled unreachable state
+  before restoring Stopped and checks that the failed automatic start stays failed.
+
+## trailing-podman-probe-dedup-test-asserts-before-spawned-task.md
+
+- Outcome: `other`.
+- Assessment: None. The container-host probe deduplication test asserts its call count before a duplicate spawned task
+  could run, so it would pass a duplicating regression. Verified: still at `environment/podman_probe.rs:992-993`: the
+  second refresh is followed immediately by a calls==1 assert, with no join of later tasks.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard, or batch into one test-hardening PR if the maintainer values it
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Fixed. The test proves that the repeated request
+  queues no second task while the first probe is held.
+
+## trailing-podman-proxy-exact-inheritance-test-shared-serializer-oracle.md
+
+- Outcome: `other`.
+- Assessment: None. The proxy privacy test computes its expected bytes with the production serializer, so a lossy
+  serializer change would pass. Verified: still at `environment/podman/failure_tests.rs:1033`
+  (`build::proxy_exports(&values)` as the oracle).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard or batch (or narrow the comment)
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Fixed. The test checks script bytes against a literal
+  with empty, quoted and multiline values independent of the production serializer.
+
+## trailing-podman-delete-lifecycle-test-equal-membership-oracle.md
+
+- Outcome: `other`.
+- Assessment: None. The real-container Delete test claims a helm that counted its own list would fail it, but its helm
+  and container hold the same membership. Verified: comment still at
+  `crates/farhelm/tests/e2e/podman_environments.rs:1469-1471`. Production uses the supervisor's answer.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard, or narrow the comment in the doc batch
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). No change. The end-to-end fixture exercises both
+  Delete outcomes with equal helm and container membership. Distinguishing which supplied the count would need a way to
+  hold the helm list stale across Delete and is outside the approved small-test scope.
+
+## trailing-podman-lost-session-create-test-misses-presend-store-witness.md
+
+- Outcome: `other`.
+- Assessment: None. The lost-create test says login and install facts become durable before run, but it reads them only
+  after create returns. Verified: the comment is still at `environment/podman/tests.rs:273`, and the fake send has no
+  session-store oracle. Production ordering is correct.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard or batch (or narrow the comment)
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Fixed. The command fixture observes the durable login,
+  pending-create marker and install facts at the first run send.
+
+## trailing-real-container-agent-host-list-oracle-omits-extra-ssh-hosts.md
+
+- Outcome: `other`.
+- Assessment: None. The real-container test says the hosts listing shows only the container, but it only checks
+  substring inclusion and exclusion. Verified: still at `podman_environments.rs:700` (claim) and :816-818
+  (`hosts.contains(own_name)`).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard or batch (parse the rows, or narrow the comment)
+- Execution: `kzwnmymxlmskpvvyknpzpkouwomumwln`, `plan/triage-podman/05-test-gaps`,
+  [draft PR](https://github.com/scode/farhelm/pull/4515/changes). Fixed. The real CLI test checks that the host listing
+  has exactly the container's own entry UUID, name and current marker.
+
 ## valid-ssh-uri-short-label-parsing.md
 
 - Outcome: `fix code`.

@@ -14511,7 +14511,8 @@ mod tests {
 
     /// A stopped episode permits one owned start, even when later status
     /// reads fail. The provider's real actor hold must park without deadlock,
-    /// and its failure survives unanswered reads until Suspended resets it.
+    /// and its failure survives a settled unreachable cycle until Suspended
+    /// resets it.
     #[farhelm_testtrace::test(start_paused = true)]
     async fn stopped_autostart_is_owned_once_and_retains_failure_across_unanswered_reads() {
         let source = ScriptedEnvironments::new(Ok(EnvironmentStatus::Stopped));
@@ -14541,9 +14542,14 @@ mod tests {
             1,
             "premise: the first owned start failed after its hold parked"
         );
-        let checked = source.checks().len();
         source.answer(Err(StatusUnanswered("scripted unanswered read".into())));
-        source.wait_for_checks(checked + 2).await;
+        // The outer failure transition runs after the retry ladder settles.
+        // A retry nudge during the ladder could bypass that transition.
+        fixture
+            .manager
+            .wait_for_state(host, |state| matches!(state, HostState::Unreachable { .. }))
+            .await
+            .unwrap();
         source.answer(Ok(EnvironmentStatus::Stopped));
         fixture.manager.retry_now(host).await.unwrap();
         let state = fixture
