@@ -951,11 +951,6 @@ consequences.
   sandbox launch does not persist the user's permission or wrapper choice. The initiating page's local mirror hides the
   omission until a reload.
 
-- [`replace-selection-focus-contract.md`](replace-selection-focus-contract.md) — The specifications give conflicting
-  answers about opening a replacement after the user types while its source remains selected. Current code follows the
-  explicit Replace selection rule. Whether that violates the new focus policy remains unverified after investigation and
-  needs a product-contract clarification.
-
 - [`cache-lock-repair-child-lifetime.md`](cache-lock-repair-child-lifetime.md) — Repository-cache repair assumes Git
   cannot outlive its outer-lock owner; a real collision or damage remains unverified after investigation.
 

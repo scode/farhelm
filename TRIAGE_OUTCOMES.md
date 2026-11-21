@@ -207,25 +207,6 @@
   so in the execution record. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## replace-selection-focus-contract.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The specification conflict
-  is still in current SPEC.md. "Replace selects its replacement if its source is still selected when it finishes"
-  (`SPEC.md:3242-3243`) sits against "Once the user has moved on, the result moves no focus, opens no dialog and
-  switches no session" (`SPEC.md:3528`). The desktop app follows the Replace rule: when the user has moved on it still
-  selects the replacement, through `selection::open_automatically`, just without focusing its terminal
-  (`crates/gui/farhelm-gui/src/session_list/replace.rs:23-27,416-422`). Nothing in the code is shown to be wrong; the
-  two spec rules need reconciling.
-- Decision: the maintainer picked "Make the spec match the app" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q3): where the desktop app deliberately does less than the spec promises, the spec is corrected
-  to describe the app.
-- Completion criteria: Correct SPEC.md and/or SPEC_impl.md so they describe the desktop app's current behavior for "Spec
-  disagrees on whether a finished Replace may switch sessions after the user typed", without adding behavior. No code
-  change. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment). Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## sandbox-checkout-hides-required-folder-setting.md
 
 - Outcome: `fix code`.
