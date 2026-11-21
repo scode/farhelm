@@ -28721,3 +28721,24 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   feedback file and its index entry.
 - Execution: change `pqmoxzzsxszxuuoyyvrnyqxsyxwxksso`, bookmark `pr/spec-hover-eight-line-cut`,
   [PR #4399](https://github.com/scode/farhelm/pull/4399/changes).
+
+## trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md
+
+- Outcome: `fix spec`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop Containers
+  section keeps a leftover Delete's failure only in its own state: `failure` in
+  `crates/gui/farhelm-gui/src/settings/containers.rs:127`, set at :310-311 and :328. A reply that arrives after Settings
+  closes goes nowhere, and reopening starts with no failure. On the helm side, `DELETE /api/container-orphans`
+  (`crates/farhelm-helm/src/environment/podman.rs:949-1010`) returns the error only as a 502 and keeps no failed
+  operation. SPEC.md:5201 says this list follows "the sandbox-leftovers pattern", and SPEC.md:553 says that pattern
+  keeps unfinished cleanup's error and Retry even after closing and reopening Settings. SPEC.md:5202-5205 separately
+  accepts log-only reporting for a Delete that times out.
+- Decision: the maintainer picked "Make the spec match the app" (2026-11-21 six-question triage page for findings that
+  cited removed UI code, Q3): where the desktop app deliberately does less than the spec promises, the spec is corrected
+  to describe the app.
+- Completion criteria: Correct SPEC.md and/or SPEC_impl.md so they describe the desktop app's current behavior for "A
+  failed container-leftover Delete's reason disappears when Settings closes", without adding behavior. No code change.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment). Remove the feedback file and its index entry.
+- Execution: change `xzwzoqtqxsuvrnsnkwwyonlytwtrxynw`, bookmark `pr/spec-container-leftover-failure-lifetime`,
+  [PR #4400](https://github.com/scode/farhelm/pull/4400/changes).
