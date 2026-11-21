@@ -132,11 +132,11 @@ jobs:
       #   signature: those are published only on get.farhelm.io now, so one
       #   here came from somewhere it should not have.
       - name: Take inventory of the release
+        timeout-minutes: 2
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
-          gh release view "$TAG" --json assets --jq '.assets[].name' | sort >published
           printf '%s\n' "$SUMS_MEMBERS" | grep -v '^$' | sort >payloads
           {
             cat payloads
@@ -148,13 +148,26 @@ jobs:
             printf '%s\n' "$OPTIONAL_METADATA" | grep -v '^$'
           } | sort -u >allowed
 
+          # GitHub can briefly return a stale or missing release immediately
+          # after creation. Use one complete snapshot for the downloads below.
+          for delay in 0 2 4 8 16; do
+            sleep "$delay"
+            if ! gh release view "$TAG" --json assets >release-assets.json; then
+              : >published
+              continue
+            fi
+            jq -r '.assets[] | select(.state == "uploaded" and .size > 0) | .name' release-assets.json | sort >published
+            if [ -z "$(comm -23 required published)" ]; then
+              break
+            fi
+          done
           missing=$(comm -23 required published)
           if [ -n "$missing" ]; then
             echo "$TAG is missing assets the release contract promises:" >&2
             printf '%s\n' "$missing" | sed 's/^/  /' >&2
             exit 1
           fi
-          unexpected=$(comm -23 published allowed)
+          unexpected=$(jq -r '.assets[].name' release-assets.json | sort | comm -23 - allowed)
           if [ -n "$unexpected" ]; then
             echo "$TAG carries assets the release contract does not name:" >&2
             printf '%s\n' "$unexpected" | sed 's/^/  /' >&2
@@ -165,6 +178,7 @@ jobs:
           echo "ok: $(wc -l <published) assets, all accounted for"
 
       - name: Download the published payloads
+        timeout-minutes: 5
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
@@ -172,10 +186,10 @@ jobs:
           mkdir -p assets
           while read -r name; do
             [ -n "$name" ] || continue
-            # One download per name rather than a glob: a missing asset must
-            # fail here, naming itself, instead of being silently skipped.
-            gh release download "$TAG" --pattern "$name" --dir assets
-            test -f "assets/$name"
+            # A fresh listing per payload can reintroduce a stale view.
+            url=$(jq -er --arg name "$name" '.assets[] | select(.name == $name) | .apiUrl' release-assets.json)
+            gh api "$url" -H 'Accept: application/octet-stream' >"assets/$name"
+            test -s "assets/$name"
           done <<<"$SUMS_MEMBERS"
 
       # Structure before contents. `scripts/check-release-archive.py` reads tar

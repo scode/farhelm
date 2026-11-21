@@ -1032,9 +1032,11 @@ systemd or SSH substrate ran.
   generator's app feed for the version floor, draft exclusion, styled highlights, folded counts and screenshot links.
   The website build also checks the generated page against the checked-in changelog. Run both on generator changes. CI's
   website job runs this test after the website build.
-- `dist generate --check` — `release.yml` is generated from `dist-workspace.toml` plus `.github/dist-build-setup.yml`,
-  and the release `plan` job refuses a stale one; this asks the same question before a tag has to. Needs the pinned
-  cargo-dist (`cargo install --locked cargo-dist --version 0.32.0`, the version `dist-workspace.toml` names).
+- `python3 releasing/generate-workflow.py --check` — renders cargo-dist's workflow from `dist-workspace.toml` and
+  `.github/dist-build-setup.yml`, applies the artifact checks and compares it to `release.yml`. Both CI and the release
+  plan run this check with cargo-dist 0.32.0. `python3 releasing/generate-workflow.py --self-test` exercises partial and
+  complete artifact sets, including selection of the manifest already on disk in the publishing job.
+  `shellcheck releasing/check-artifact-handoff.sh` checks the workflow's staging script.
 - `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
   from the checkout root — the dependency policy in `deny.toml`: every crate in the graph (every workspace feature and
   dev-dependencies included) has a license expression its allowlist satisfies, so no GPL, AGPL or LGPL-only crate gets

@@ -1,9 +1,9 @@
 # cargo-dist's configuration: the single source of truth for what a release
 # contains and how CI builds it (D7).
 #
-# `.github/workflows/release.yml` is GENERATED from this file. Never hand-edit
-# that workflow — change a value here and run `dist init --yes && dprint fmt`
-# to regenerate it. The custom workflow it calls (`sign-sums.yml`) and the step
+# `.github/workflows/release.yml` is GENERATED from this file. After changing
+# the config, run `python3 releasing/generate-workflow.py` with pinned dist on
+# PATH. The custom workflow it calls (`sign-sums.yml`) and the step
 # list it splices into every build job (`.github/dist-build-setup.yml`) are
 # ours to edit; the generated file is not.
 #
@@ -104,21 +104,20 @@
 #   step compares the plan job's computed announcement with the file so a
 #   heading dist misreads fails the build instead of naming a release wrong.
 #
-# One thing dist 0.32 does NOT offer: holding the GitHub Release as a draft
-# until the publish jobs finish. `dist host --steps=release` creates the
-# release and uploads the archives before `sign-sums` runs. That no longer
-# matters to installed software: nothing installs from a GitHub release
-# until the maintainer has published it on get.farhelm.io, and both the helm
-# and `install.sh` answer a release get.farhelm.io does not have with one
-# message (D17).
+# The GitHub release goes live before the separate `sign-sums` job runs.
+# The generator checks the full input set before cargo-dist can compute
+# checksums or merge manifests, and stages the final manifest from the host
+# runner's own disk. Downloading that freshly uploaded Actions artifact
+# again let v0.44.0-rc.1 reach publication with nine of ten assets. Installed
+# Farhelm and `install.sh` fetch only from get.farhelm.io, after the maintainer
+# has signed and published the validated release (D17).
 #
 # ## RECOVERY: a GitHub release that is incomplete or failed validation
 #
-# Two ways to land there, and one procedure for both. dist's `host` job creates
-# the release and uploads every asset in a single `gh release create … *`,
-# whose creation and uploads are separate remote operations underneath — so a
-# network failure partway through leaves a public release missing assets, and
-# re-running the job fails immediately on the release that already exists.
+# The `host` job creates the release with `gh release create`. GitHub CLI
+# creates a draft, uploads the assets, then publishes it in separate API
+# calls. A failure partway through can leave a draft that conflicts with a
+# rerun.
 # Separately, `sign-sums` can fail on its own after the release is public.
 #
 # Recovery, for the maintainer, from a machine with `gh`, BEFORE anything is
@@ -143,10 +142,8 @@
 # ## Residuals in the GENERATED workflow
 #
 # Three properties a security review would want in `release.yml` come from
-# cargo-dist's template, are not exposed as configuration in 0.32, and are
-# therefore NOT hand-patched — the file is regenerated, so a patch would
-# vanish at the next `dist init`. Checked against the 0.32.0 sources; each
-# would need an upstream change or a fork:
+# cargo-dist's template and are not exposed as configuration in 0.32. The
+# release generator's changes are confined to artifact handoff and inventory.
 #
 # - The tag is interpolated into shell text rather than passed as a quoted
 #   variable (`format('host --steps=create --tag={0}', github.ref_name)` in the
@@ -223,6 +220,9 @@ members = ["cargo:.", "dist:packaging/farhelm-desktop"]
 [dist]
 # The preferred dist version to use in CI (Cargo.toml SemVer syntax)
 cargo-dist-version = "0.32.0"
+# The generator checks the rendered workflow after adding artifact handoff
+# checks. Dist's stock comparison would reject those changes.
+allow-dirty = ["ci"]
 # CI backends to support
 ci = "github"
 # The installers to generate for each app
