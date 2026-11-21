@@ -316,3 +316,24 @@ script, write a closing entry in its log, and stop the watchdog. Never edit `pla
 ## Release note
 
 No release note needed.
+
+## Blocked
+
+Blocked on 2026-11-21 (claim acb5ce).
+
+### Which screenshot comparison path should the review page use?
+
+Reviewers used to open changed screenshots one at a time, which made it easy to miss a change on an unrelated screen.
+The drafts put each changed screenshot beside its reference and highlight the differing pixels. A clean full Linux
+update captured 328 screenshots in 35 seconds and all 328 matched, so there was no page to generate. Replaying changes
+since an earlier reference set took another 28 seconds to make the page for 68 changed or new screenshots. An
+all-changed stress test took 112 seconds to produce 328 highlights. Both page timings used up to 16 processes.
+
+The plan specifies the existing Python PNG helpers and asks that a large page add little time to a full update. The
+implementation reuses those helpers, and the measured cost is substantial when many screenshots change together.
+
+Should the executor try the PNG code already compiled into the golden test executable, or keep the Python implementation
+and accept the measured wait on large reviews? I recommend trying the compiled code. It keeps the portable HTML page and
+uses an existing dependency. It needs a new entry point in the golden test executable. Approval would let the executor
+benchmark the compiled path on the same two sets. Use it if both results meet the plan’s speed requirement. If the
+timings still show a substantial delay, bring them back before landing.
