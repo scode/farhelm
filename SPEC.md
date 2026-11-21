@@ -3083,8 +3083,9 @@ never gates the user's own typing. Status also decides whether Restart and Resta
 (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra confirmation. A recognized dialog
 also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
 not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
-agent. Grok and Antigravity can capture conversations through hooks in their own configuration. With explicit consent,
-Farhelm can install its own hook files before starting either agent. Both agents can launch without those files.
+agent. Grok and Antigravity can capture conversations through hooks in their own configuration. Each has a helm-wide
+opt-in, off by default. When enabled, the supervisor checks Farhelm's hook files before each start of that agent on any
+host or in any Farhelm environment. Both agents can launch without those files.
 OMP and Grok use generic activity only. Their approval prompts, and
 Antigravity's, show the generic running/idle classification, never waiting — a settled scope decision, not a reader
 waiting to be written.

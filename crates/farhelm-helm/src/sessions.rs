@@ -2176,6 +2176,10 @@ async fn do_create_session_with_environment(
     // history takes the reply's spelling instead (the cwd as that attempt
     // sent it, `~` expanded). Every other create's reply is this request's.
     let matched_by_request = request_fingerprint.is_some();
+    let setup_persistent_hooks = state
+        .store
+        .agent_hook_setup_enabled(mode.as_launch().agent_kind())
+        .await?;
     let session = client
         .create_session_with_extras(
             supervisor_cwd,
@@ -2184,6 +2188,7 @@ async fn do_create_session_with_environment(
             cols,
             rows,
             CreateExtras {
+                setup_persistent_hooks,
                 prompt,
                 named_start,
                 intent_key,
@@ -3581,13 +3586,15 @@ async fn do_restart_session_named(
         .as_ref()
         .is_some_and(|launch| crate::yolo_guard::create_is_yolo(launch.as_launch()));
     crate::yolo_guard::check(state, claim.host, is_yolo, confirm_yolo).await?;
+    let setup_persistent_hooks = state.store.agent_hook_setup_opt_ins().await?;
     let session = client
-        .restart_session_named(
+        .restart_session_with_hook_setup(
             id,
             stop_if_running,
             with.map(TrustResolvedLaunch::into_launch),
             expected_launch,
             named_start,
+            setup_persistent_hooks,
         )
         .await?;
     // Cache publication is best effort; the supervisor's successful reply stands.

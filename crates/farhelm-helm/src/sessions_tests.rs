@@ -3116,6 +3116,233 @@ async fn spliced_replace_harness(
     (harness, local)
 }
 
+/// The setting is applied to the new start, including when the source ran before opt-in. Test at the supervisor
+/// boundary so a reply that happens to look right cannot hide a missing request mark. New, desktop Clone, quick
+/// launch and desktop templates all send the ordinary resolved create body.
+#[farhelm_testtrace::test]
+async fn hook_setup_consent_reaches_creates_restarts_and_replacements() {
+    use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
+    use farhelm_proto::{
+        AgentKind, ControlMsg, LaunchHarness, LaunchSelection, PersistentHookSetup, RestartOffer,
+    };
+    use serde_json::json;
+
+    let grok: LaunchSelection = serde_json::from_value(json!({"harness": "grok"})).unwrap();
+    let agy: LaunchSelection = serde_json::from_value(json!({"harness": "antigravity"})).unwrap();
+    let stored_grok = crate::launches::compile(grok.clone()).unwrap();
+    let stored_agy = crate::launches::compile(agy.clone()).unwrap();
+    let named = "019a0000-0000-7000-8000-00000000c0de";
+    let new_grok = json!({"cwd": "/work", "launch": grok});
+    let new_agy_command = json!({"cwd": "/work", "command": {
+        "command": "agy {farhelm_args}", "yolo": false, "agent": "antigravity"
+    }});
+    for (suffix, body, source, kind, opted_in, expected, named_start) in [
+        (
+            "",
+            new_grok.clone(),
+            &stored_grok,
+            AgentKind::Grok,
+            false,
+            false,
+            false,
+        ),
+        (
+            "",
+            new_grok.clone(),
+            &stored_grok,
+            AgentKind::Grok,
+            true,
+            true,
+            false,
+        ),
+        (
+            "",
+            new_agy_command.clone(),
+            &stored_grok,
+            AgentKind::Antigravity,
+            true,
+            false,
+            false,
+        ),
+        (
+            "restart",
+            json!({}),
+            &stored_grok,
+            AgentKind::Grok,
+            true,
+            true,
+            false,
+        ),
+        (
+            "restart",
+            json!({"with": grok, "conversation": named}),
+            &stored_grok,
+            AgentKind::Grok,
+            true,
+            true,
+            true,
+        ),
+        (
+            "replace",
+            json!({}),
+            &stored_grok,
+            AgentKind::Grok,
+            true,
+            true,
+            false,
+        ),
+        (
+            "replace",
+            json!({"with": {"cwd": "/work", "launch": grok, "conversation": named}}),
+            &stored_agy,
+            AgentKind::Grok,
+            true,
+            true,
+            true,
+        ),
+    ] {
+        assert_eq!(grok.harness, LaunchHarness::Grok);
+        let source = farhelm_proto::SessionInfo {
+            launch: source.clone(),
+            agent_kind: source.agent_kind(),
+            invocation: source.display_command(),
+            restart_offer: RestartOffer::Resume,
+            persistent_hook_setup: PersistentHookSetup::NotRequested,
+            cwd: "/work".into(),
+            ..rest_harness::session("source", 1)
+        };
+        let (client, peer) = tokio::io::duplex(64 * 1024);
+        let (h, local) = spliced_replace_harness(client, vec![source.clone()]).await;
+        let fleet = h.fleet.clone();
+        let exchange = tokio::spawn(async move {
+            let (read, write) = tokio::io::split(peer);
+            let mut reader = FrameReader::new(read);
+            let mut writer = FrameWriter::new(write);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+            let (req_id, launch, consent, selector) = match request {
+                ControlMsg::RestartSession {
+                    req_id,
+                    with,
+                    setup_persistent_hooks,
+                    named_start,
+                    session_id,
+                    ..
+                } if suffix == "restart" => {
+                    assert_eq!(session_id, "source");
+                    assert_eq!(with.is_some(), named_start.is_some());
+                    (
+                        req_id,
+                        with.unwrap_or(source.launch),
+                        setup_persistent_hooks.allows(kind),
+                        named_start,
+                    )
+                }
+                ControlMsg::CreateSession {
+                    req_id,
+                    launch: Some(launch),
+                    setup_persistent_hooks,
+                    named_start,
+                    ..
+                } if suffix != "restart" => (req_id, launch, setup_persistent_hooks, named_start),
+                other => panic!("{suffix} sent an unexpected request {other:?}"),
+            };
+            assert_eq!(launch.agent_kind(), kind);
+            assert_eq!(consent, expected);
+            assert_eq!(
+                selector.as_ref().map(|start| start.conversation.as_str()),
+                named_start.then_some(named)
+            );
+            let id = if suffix == "restart" {
+                "source"
+            } else {
+                "new-session"
+            };
+            let session = farhelm_proto::SessionInfo {
+                invocation: launch.display_command(),
+                launch,
+                agent_kind: kind,
+                ..rest_harness::session(id, 2)
+            };
+            fleet.edit(local, |script| {
+                script.sessions.retain(|session| session.id != id);
+                script.sessions.push(session.clone());
+            });
+            let reply = if suffix == "restart" {
+                ControlMsg::SessionRestarted { req_id, session }
+            } else {
+                ControlMsg::SessionCreated { req_id, session }
+            };
+            writer.write_control(&reply).await.unwrap();
+            if suffix == "replace" {
+                let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
+                let ControlMsg::DeleteSession {
+                    req_id, session_id, ..
+                } = request
+                else {
+                    panic!("expected the old session's delete, got {request:?}");
+                };
+                assert_eq!(session_id, "source");
+                fleet.edit(local, |script| {
+                    script.sessions.retain(|session| session.id != session_id)
+                });
+                writer
+                    .write_control(&ControlMsg::SessionDeleted {
+                        req_id,
+                        archived: false,
+                        notice: None,
+                    })
+                    .await
+                    .unwrap();
+            }
+        });
+        h.await_refreshed(local).await;
+        let key = store::SessionKey::new(local, "source");
+        assert!(h.store.has_cached_session(&key).await.unwrap());
+        h.store
+            .set_agent_hook_setup(AgentKind::Grok, opted_in)
+            .await
+            .unwrap();
+        assert_eq!(
+            h.store.agent_hook_setup_enabled(kind).await.unwrap(),
+            expected
+        );
+        // Targeted Restart can route with membership alone. A missing display payload must not alter the consent
+        // or introduce a whole-host listing round trip.
+        if suffix == "restart" && !named_start {
+            let changed = h.store.conn().call("poison the cached display payload", move |conn| {
+                Ok(conn.execute("UPDATE session_cache SET info_json = 'bad json' WHERE host_id = ?1 AND session_id = 'source'", [local])?)
+            }).await.unwrap();
+            assert_eq!(changed, 1);
+            assert!(h.store.has_cached_session(&key).await.unwrap());
+            assert!(
+                h.store
+                    .cached_session(local, "source")
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            h.fleet.edit(local, |script| {
+                script.truncated = true;
+                script.sessions.retain(|session| session.id != "source");
+            });
+        }
+        let path = if suffix.is_empty() {
+            "/api/sessions".into()
+        } else {
+            h.local_session_uri(&format!("/api/sessions/source/{suffix}"))
+        };
+        let (status, text) = post_text(&h, &path, body).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{suffix}: {text}");
+        tokio::time::timeout(Duration::from_secs(10), exchange)
+            .await
+            .unwrap()
+            .unwrap();
+    }
+}
+
 /// A replace whose request is dropped after its create reached the host still
 /// deletes the source.
 ///

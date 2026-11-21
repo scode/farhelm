@@ -2076,7 +2076,7 @@ async fn handle_resize(
 /// Keeping the optional bundle together makes an ordinary restart's absent
 /// fields explicit while preserving the protocol's partial-bundle refusal.
 struct RestartSessionRequest {
-    setup_persistent_hooks: bool,
+    setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     req_id: u64,
     session_id: String,
@@ -4247,7 +4247,7 @@ mod tests {
         let (mut tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::RestartSession {
-                setup_persistent_hooks: false,
+                setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 72,
                 session_id,
@@ -4978,7 +4978,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
-                setup_persistent_hooks: false,
+                setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 53,
                 session_id: session_id.to_string(),
@@ -9338,7 +9338,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
-                setup_persistent_hooks: false,
+                setup_persistent_hooks: Default::default(),
                 named_start: None,
                 req_id: 5,
                 session_id: "no-such-session".to_string(),
@@ -11408,7 +11408,7 @@ mod tests {
         let mut host = BusyHost::new().await;
 
         host.send(ControlMsg::RestartSession {
-            setup_persistent_hooks: false,
+            setup_persistent_hooks: Default::default(),
             named_start: None,
             req_id: 2,
             session_id: "another-session".to_string(),
@@ -11744,7 +11744,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
-                        setup_persistent_hooks: false,
+                        setup_persistent_hooks: Default::default(),
                         req_id: 3,
                         named_start: None,
                         session_id: "s1".into(),
@@ -11760,7 +11760,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
-                        setup_persistent_hooks: false,
+                        setup_persistent_hooks: Default::default(),
                         req_id: 4,
                         named_start: None,
                         session_id: "s1".into(),
@@ -12279,7 +12279,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
-                        setup_persistent_hooks: false,
+                        setup_persistent_hooks: Default::default(),
                         req_id: 2,
                         named_start: None,
                         session_id: "s1".into(),

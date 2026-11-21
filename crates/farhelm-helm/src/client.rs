@@ -1109,8 +1109,8 @@ struct UploadProgress {
 /// describe the session itself.
 ///
 /// Grouped rather than added as separate parameters because they share a
-/// property that is easy to lose sight of: all are OPTIONAL and all bear on
-/// the create's idempotency fingerprint (PLAN_M3.md item 6). The key and the
+/// property that is easy to lose sight of: the create's request fields bear on
+/// its idempotency fingerprint (PLAN_M3.md item 6). The key and the
 /// parent and checkout join the resolved fields that a retry must repeat,
 /// so changing any of them is a different request, refused as a key reuse
 /// rather than merged. `request_fingerprint`, when present, replaces those
@@ -1118,6 +1118,8 @@ struct UploadProgress {
 /// create in every respect.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct CreateExtras {
+    /// Helm policy for this start. The supervisor keeps the accepted choice across retries of a pending create.
+    pub setup_persistent_hooks: bool,
     /// Literal one-time first message, excluded from reusable launch settings.
     pub prompt: Option<String>,
     /// A one-time command, never recorded in reusable session launch settings.
@@ -3200,7 +3202,7 @@ impl SupervisorClient {
             .request(
                 req_id,
                 ControlMsg::CreateSession {
-                    setup_persistent_hooks: false,
+                    setup_persistent_hooks: extras.setup_persistent_hooks,
                     named_start: extras.named_start,
                     req_id,
                     parent: extras.parent,
@@ -3729,12 +3731,33 @@ impl SupervisorClient {
         expected_launch: Option<farhelm_proto::SessionLaunch>,
         named_start: Option<farhelm_proto::NamedConversationStart>,
     ) -> anyhow::Result<SessionInfo> {
+        self.restart_session_with_hook_setup(
+            id,
+            stop_if_running,
+            with,
+            expected_launch,
+            named_start,
+            Default::default(),
+        )
+        .await
+    }
+
+    /// Send the helm's current hook setup choice alongside the resolved launch. The ordinary client helpers default off.
+    pub(crate) async fn restart_session_with_hook_setup(
+        &self,
+        id: &str,
+        stop_if_running: bool,
+        with: Option<farhelm_proto::SessionLaunch>,
+        expected_launch: Option<farhelm_proto::SessionLaunch>,
+        named_start: Option<farhelm_proto::NamedConversationStart>,
+        setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
+    ) -> anyhow::Result<SessionInfo> {
         let req_id = self.req_id();
         match self
             .request(
                 req_id,
                 ControlMsg::RestartSession {
-                    setup_persistent_hooks: false,
+                    setup_persistent_hooks,
                     named_start,
                     req_id,
                     session_id: id.to_string(),
@@ -7449,7 +7472,7 @@ mod tests {
             .request(
                 7,
                 ControlMsg::RestartSession {
-                    setup_persistent_hooks: false,
+                    setup_persistent_hooks: Default::default(),
                     named_start: None,
                     req_id: 7,
                     session_id: "restarted".to_string(),

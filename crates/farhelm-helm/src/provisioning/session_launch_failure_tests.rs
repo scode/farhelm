@@ -260,17 +260,27 @@ impl Fixture {
         super::super::http::RunAccepted,
         tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
     ) {
-        let request = serde_json::from_value(serde_json::json!({
+        self.start_with(serde_json::json!({
             "cwd":"~","command":{"command":"true","yolo":false}
         }))
-        .unwrap();
+        .await
+    }
+
+    /// Exercise the ordinary environment admission with an explicitly typed launch when the test needs one.
+    async fn start_with(
+        &self,
+        request: serde_json::Value,
+    ) -> (
+        super::super::http::RunAccepted,
+        tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
+    ) {
         self.service
             .clone()
             .start_session_environment(
                 self.harness.state.clone(),
                 "dev".into(),
                 farhelm_proto::Place::PodmanHost(self.place),
-                request,
+                serde_json::from_value(request).unwrap(),
                 None,
             )
             .await
@@ -327,7 +337,12 @@ impl Fixture {
 
     /// Spliced supervisors handle real CreateSession frames. The harness owns
     /// heartbeat/list traffic; this peer owns exactly the initial create reply.
-    fn peer(&self, host: HostId, refused: bool) -> tokio::task::JoinHandle<usize> {
+    fn peer(
+        &self,
+        host: HostId,
+        refused: bool,
+        expected_hook_setup: bool,
+    ) -> tokio::task::JoinHandle<usize> {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         let (client, peer) = tokio::io::duplex(64 * 1024);
@@ -350,9 +365,18 @@ impl Fixture {
                 .await
                 .unwrap()
                 .expect("the real launch sent CreateSession");
-            let ControlMsg::CreateSession { req_id, .. } = parse_control(&frame).unwrap() else {
+            let ControlMsg::CreateSession {
+                req_id,
+                setup_persistent_hooks,
+                ..
+            } = parse_control(&frame).unwrap()
+            else {
                 panic!("unexpected first supervisor request");
             };
+            assert_eq!(
+                setup_persistent_hooks, expected_hook_setup,
+                "the first create must carry consent for the agent on this destination"
+            );
             let reply = if refused {
                 ControlMsg::Error {
                     req_id,
@@ -380,11 +404,20 @@ impl Fixture {
 #[farhelm_testtrace::test]
 async fn cold_container_launch_success_establishes_real_task_and_session_premise() {
     let f = Fixture::new().await;
+    f.store
+        .set_agent_hook_setup(farhelm_proto::AgentKind::Antigravity, true)
+        .await
+        .unwrap();
     f.commands.gate_session();
-    let (accepted, result) = f.start().await;
+    let (accepted, result) = f
+        .start_with(serde_json::json!({
+            "cwd": "~",
+            "command": {"command": "agy {farhelm_args}", "yolo": false, "agent": "antigravity"}
+        }))
+        .await;
     let host = f.at_session_run().await;
     assert_eq!(host, accepted.host_id);
-    let peer = f.peer(host, false);
+    let peer = f.peer(host, false, true);
     f.commands.release_session();
     let session = f.finish(host, result).await.unwrap();
     assert!(session.id.ends_with(":initial"));
@@ -460,7 +493,7 @@ async fn cold_container_launch_progress_names_its_steps_in_container_words() {
             ("create-session", "Launch the session"),
         ]
     );
-    let peer = f.peer(host, false);
+    let peer = f.peer(host, false, false);
     f.commands.release_session();
     f.finish(host, result).await.unwrap();
     assert_eq!(peer.await.unwrap(), 1);
@@ -501,7 +534,7 @@ async fn the_environment_route_answers_202_and_a_refused_launch_ends_its_run() {
     let run = body["run_id"].as_str().expect("the 202 names its run");
     let host = f.at_session_run().await;
     assert_eq!(body["host_id"], host, "the 202 names the launch's host");
-    let peer = f.peer(host, true);
+    let peer = f.peer(host, true, false);
     f.commands.release_session();
     let outcome = f
         .service
@@ -687,7 +720,7 @@ async fn normal_launch_rolls_back_prepare_create_proxy_attach_and_session_failur
         let (accepted, result) = f.start().await;
         let peer = if needs_peer {
             let host = f.at_session_run().await;
-            let peer = f.peer(host, true);
+            let peer = f.peer(host, true, false);
             f.commands.release_session();
             Some(peer)
         } else {

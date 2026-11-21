@@ -12213,7 +12213,7 @@ impl Supervisor {
             restart_with,
             expected_launch,
             None,
-            false,
+            Default::default(),
         )
         .await
     }
@@ -12229,7 +12229,7 @@ impl Supervisor {
         restart_with: Option<SessionLaunch>,
         expected_launch: Option<SessionLaunch>,
         named_start: Option<farhelm_proto::NamedConversationStart>,
-        setup_persistent_hooks: bool,
+        setup_persistent_hooks: farhelm_proto::PersistentHookOptIns,
     ) -> anyhow::Result<SessionInfo> {
         if let Some(launch) = &restart_with {
             validate_restart_with(launch)?;
@@ -12648,7 +12648,7 @@ impl Supervisor {
                 &entry_for_task,
                 &snapshot,
                 RelaunchPlan {
-                    setup_persistent_hooks,
+                    setup_persistent_hooks: setup_persistent_hooks.allows(snapshot.kind),
                     clear_capture,
                     argv,
                     launch_cwd,
@@ -20751,7 +20751,7 @@ pub(crate) mod tests {
                 Some(launch.clone()),
                 None,
                 Some(named.clone()),
-                false,
+                Default::default(),
             )
             .await
             .expect("named restart with a healthy reporter");
@@ -20819,7 +20819,7 @@ pub(crate) mod tests {
                 Some(launch.clone()),
                 None,
                 Some(named.clone()),
-                false,
+                Default::default(),
             )
             .await
             .expect_err("the launch-spec collision must abort the named restart");
@@ -20855,9 +20855,16 @@ pub(crate) mod tests {
         assert_eq!(listed.restart_offer, farhelm_proto::RestartOffer::Resume);
 
         std::fs::remove_file(&obstruction).expect("remove the deliberate collision");
-        sup.restart_session_named(&created.id, true, Some(launch), None, Some(named), false)
-            .await
-            .expect("named restart succeeds after removing the obstruction");
+        sup.restart_session_named(
+            &created.id,
+            true,
+            Some(launch),
+            None,
+            Some(named),
+            Default::default(),
+        )
+        .await
+        .expect("named restart succeeds after removing the obstruction");
         let cleared = sup.store.session(&created.id).await.unwrap().unwrap();
         assert_eq!(cleared.generation, restored.generation + 1);
         assert_eq!(cleared.captured_conversation, None);

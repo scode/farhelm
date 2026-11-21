@@ -4516,6 +4516,13 @@ no path values are stored in the notice.
   silent-hook diagnostic even though the launch adds no reporter arguments. The pending create row records consent so
   a keyed retry can finish the already accepted create with the same choice.
 
+  The helm saves an off-by-default switch for each of the two agents in `checkout_config` and exposes one
+  `GET` and `PUT /api/agent-hook-setup/{kind}` setting per agent. The shared launcher-prompt and session-hint dismissal
+  is a separate sparse preference per agent. The final create dispatch reads the setting from the resolved launch kind,
+  including starts from a retained launch, an agent request, or a new environment. On Restart and Restart with the
+  helm sends both choices. The supervisor uses only the one for the session's own agent kind under its lifecycle claim.
+  Thus an existing session uses current consent when it starts again, even if its cached launch is unreadable.
+
   The Antigravity adapter accepts the camelCase
   `conversationId`, `hookEventName` and `transcriptPath` and checks that any vendor discriminator agrees. Each event can
   independently select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt,

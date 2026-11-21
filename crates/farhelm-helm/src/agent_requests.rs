@@ -8265,6 +8265,7 @@ mod tests {
     /// sent the wrong bundle and echoed the right row back.
     #[derive(Debug, Clone)]
     struct SeenCreate {
+        setup_persistent_hooks: bool,
         prompt: Option<String>,
         cwd: String,
         launch: Option<farhelm_proto::SessionLaunch>,
@@ -8362,6 +8363,7 @@ mod tests {
                         }
                     }
                     ControlMsg::CreateSession {
+                        setup_persistent_hooks,
                         prompt,
                         named_start: None,
                         req_id,
@@ -8374,6 +8376,7 @@ mod tests {
                         ..
                     } => {
                         recorded.lock().expect("seen mutex").push(SeenCreate {
+                            setup_persistent_hooks,
                             prompt,
                             cwd: cwd.clone(),
                             launch: launch.clone(),
@@ -8506,19 +8509,25 @@ mod tests {
     /// Why: SPEC.md lets "a flag required by the verb, such as `--cwd` or
     /// the target host" be omitted when a template sets it; this pins that
     /// the helm, which owns the templates and the registry, resolves them,
-    /// and that the identity selects the right installation.
+    /// and that the identity selects the right installation. The destination also needs the opted-in hook setup for
+    /// the agent the template declares.
     #[farhelm_testtrace::test]
     async fn a_template_supplies_the_launch_folder_title_and_host() {
         let (client_side, peer) = tokio::io::duplex(64 * 1024);
         let seen = spawn_create_responder(peer, None);
         let (h, local, _remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
+        h.store
+            .set_agent_hook_setup(farhelm_proto::AgentKind::Grok, true)
+            .await
+            .unwrap();
         put_template(
             &h,
-            "builder-shell",
+            "builder-agent",
             farhelm_proto::launcher::TemplateFields {
                 host: Some("identity-builder".to_string()),
                 name: Some("from-template".to_string()),
-                ..command_template("sh")
+                agent: Some(farhelm_proto::LaunchHarness::Grok),
+                ..command_template("grok {farhelm_args}")
             },
         )
         .await;
@@ -8526,7 +8535,7 @@ mod tests {
             .handle(
                 origin_of(&h, local),
                 "asker",
-                template_create(&["builder-shell"], None),
+                template_create(&["builder-agent"], None),
             )
             .await;
         assert!(
@@ -8542,13 +8551,17 @@ mod tests {
         assert_eq!(seen.len(), 1, "the create reached the template's host");
         assert_eq!(seen[0].cwd, "/srv/t");
         assert_eq!(seen[0].title.as_deref(), Some("from-template"));
+        assert!(
+            seen[0].setup_persistent_hooks,
+            "the selected remote supervisor needs the current consent"
+        );
         assert_eq!(
             seen[0].launch,
             Some(farhelm_proto::SessionLaunch::Command(
                 farhelm_proto::CommandLaunch {
-                    command: "sh".to_string(),
+                    command: "grok {farhelm_args}".to_string(),
                     yolo: false,
-                    agent: None,
+                    agent: Some(farhelm_proto::LaunchHarness::Grok),
                     resume: None,
                 }
             ))
@@ -9360,7 +9373,7 @@ mod tests {
     /// guarded during admission. A clone that recompiled the selection instead
     /// of copying would fail it. The source deliberately differs from the
     /// caller and the destination is another host, proving neither identity
-    /// is inferred.
+    /// is inferred. The copied Grok launch uses the current hook setup consent without changing its stored command.
     #[farhelm_testtrace::test]
     async fn clone_sends_the_source_launch_verbatim() {
         let command = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
@@ -9372,7 +9385,7 @@ mod tests {
         let agent = farhelm_proto::SessionLaunch::Agent {
             selection: farhelm_proto::LaunchSelection {
                 permission_flags: None,
-                harness: farhelm_proto::LaunchHarness::Claude,
+                harness: farhelm_proto::LaunchHarness::Grok,
                 model: None,
                 effort: None,
                 permissions: None,
@@ -9380,7 +9393,7 @@ mod tests {
                 container: None,
                 workspace_trust: None,
             },
-            start: ["claude", "--from-an-older-catalog", "{farhelm_args}"]
+            start: ["grok", "--from-an-older-catalog", "{farhelm_args}"]
                 .map(String::from)
                 .to_vec(),
             resume: None,
@@ -9393,10 +9406,15 @@ mod tests {
                 cwd: "/srv/project".to_string(),
                 canonical_cwd: None,
                 invocation: launch.display_command(),
+                agent_kind: launch.agent_kind(),
                 launch: launch.clone(),
                 ..session("source", 1)
             };
             let (h, local, remote) = creating_fleet(client_side, vec![source]).await;
+            h.store
+                .set_agent_hook_setup(farhelm_proto::AgentKind::Grok, true)
+                .await
+                .unwrap();
 
             let handler = HelmAgentRequests::for_state(&h.state);
             // The older no-flag agent must not be recompiled into guarded
@@ -9465,6 +9483,10 @@ mod tests {
                 seen[0].launch,
                 Some(launch.clone()),
                 "the launch reaches the target whole, with nothing added"
+            );
+            assert_eq!(
+                seen[0].setup_persistent_hooks,
+                launch.agent_kind() == farhelm_proto::AgentKind::Grok
             );
             assert_eq!(
                 seen[0].cwd, "/srv/project",
