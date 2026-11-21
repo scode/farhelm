@@ -52,7 +52,7 @@ fn sync_view(view: &mut Viewport, model: &mut GridModel) -> bool {
 fn top_line(view: &Viewport, model: &GridModel) -> u64 {
     match view.row_at(model, view.top(model)) {
         ViewRow::Line(number) => number,
-        ViewRow::Notice => panic!("the view's top is the notice line"),
+        ViewRow::Notice | ViewRow::Blank => panic!("the view's top has no retained line"),
     }
 }
 
@@ -247,6 +247,35 @@ fn the_notice_line_sits_above_a_screen_with_no_history() {
     assert_eq!(view.row_at(&model, view.top(&model)), ViewRow::Notice);
     assert_eq!(view.top(&model) + 1, view.bottom(&model));
     assert!(!view.scroll_lines(&model, -1));
+}
+
+/// The full lift can use blank positions before line zero, even when a recovery notice is also present.
+#[test]
+fn lifted_rows_leave_the_oldest_line_and_notice_reachable() {
+    let mut model = opened(8, 3, 4);
+    send(&mut model, frame(1, 8, 3, 0));
+    let mut state = model.state().unwrap();
+    let mut view = Viewport::default();
+    for trimmed in [false, true] {
+        state.history_trimmed = trimmed;
+        send(&mut model, GridOutput::State(state));
+        sync_view(&mut view, &mut model);
+        view.set_top_padding(u16::MAX);
+        let first_line = position_of(0);
+        let first_content = first_line - u64::from(trimmed);
+        let padding = u64::from(farhelm_proto::grid::GRID_MAX_DIMENSION);
+        assert_eq!(view.first(&model), first_content - padding);
+        assert_eq!(view.notice(&model), trimmed.then_some(first_line - 1));
+        view.scroll_lines(&model, i64::MIN);
+        assert_eq!(view.top(&model), view.first(&model));
+        assert_eq!(view.row_at(&model, first_content - 1), ViewRow::Blank);
+        if trimmed {
+            assert_eq!(view.row_at(&model, first_content), ViewRow::Notice);
+        }
+        assert_eq!(view.row_at(&model, first_line), ViewRow::Line(0));
+        view.set_top_padding(0);
+        assert_eq!(view.top(&model), first_content);
+    }
 }
 
 /// Wire history uses safe-integer line numbers. Navigation must saturate rather than wrap to

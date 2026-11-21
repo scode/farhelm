@@ -4,20 +4,20 @@
 //! anchor keeps the same text visible until it is evicted; following the tail
 //! instead tracks the current screen. Relayout and resets invalidate old numbers.
 //!
-//! Navigation counts in positions, not line numbers: position `n + 1` is line
-//! `n`, so the row above the oldest retained line has a position of its own even
-//! when that line is numbered 0. That row is the notice line, shown when recovery
-//! lost some history (`history_trimmed`), as the old app's view put it. The
-//! supervisor numbers a rebuilt emulator's history from 0, so a recovered
-//! terminal's oldest line is usually line 0, and a notice numbered one line
-//! before it would land on that line and hide it.
+//! Line `n` starts at position `n + POSITION_PREFIX`, leaving room above line
+//! zero for a recovery notice and up to a grid's worth of blank rows. This
+//! lets the view scroll its oldest content past the rows clipped by a lift.
 
 use crate::{Damage, GridModel};
+use farhelm_proto::grid::GRID_MAX_DIMENSION;
 
-/// What sits at a navigation position: a retained line by its number, or the
-/// notice line above the oldest one.
+/// Enough room before line zero for a notice and the maximum possible lift.
+const POSITION_PREFIX: u64 = GRID_MAX_DIMENSION as u64 + 1;
+
+/// The content at a navigation position, including padding before any retained text.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ViewRow {
+    Blank,
     Notice,
     Line(u64),
 }
@@ -26,7 +26,7 @@ pub enum ViewRow {
 pub fn position_of(number: u64) -> u64 {
     // Line numbers are bounded by the wire format's safe integers, far below
     // `u64::MAX`; saturating keeps the function total anyway.
-    number.saturating_add(1)
+    number.saturating_add(POSITION_PREFIX)
 }
 
 /// One viewport anchor, a navigation position; `None` follows live output at
@@ -38,6 +38,7 @@ pub fn position_of(number: u64) -> u64 {
 pub struct Viewport {
     anchor: Option<u64>,
     alternate: bool,
+    top_padding: u16,
 }
 
 impl Viewport {
@@ -54,10 +55,10 @@ impl Viewport {
         reset
     }
 
-    /// The oldest position navigation can show; primary history is hidden on
+    /// The first content position. Primary history is hidden on
     /// alt-screen. When recovery lost some history, that is the notice line's
     /// ([`Viewport::notice`]), one before the oldest retained line.
-    pub fn first(&self, model: &GridModel) -> u64 {
+    fn first_content(&self, model: &GridModel) -> u64 {
         if model.state().is_some_and(|state| state.alt_screen) {
             return self.bottom(model);
         }
@@ -73,6 +74,18 @@ impl Viewport {
         }
     }
 
+    /// The oldest navigation position includes the blank rows needed by the pane's lift.
+    pub fn first(&self, model: &GridModel) -> u64 {
+        self.first_content(model) - u64::from(self.top_padding)
+    }
+
+    /// Reserve room to scroll content into view when the pane clips whole rows.
+    /// The anchor stays attached to its line, with the usual clamp to the new range.
+    pub fn set_top_padding(&mut self, rows: u16) -> bool {
+        let rows = rows.min(GRID_MAX_DIMENSION);
+        std::mem::replace(&mut self.top_padding, rows) != rows
+    }
+
     /// The position of the screen's top line: the view's top while it follows,
     /// and the bound a scrolled view's top stays below (reaching it follows).
     pub fn bottom(&self, model: &GridModel) -> u64 {
@@ -85,16 +98,17 @@ impl Viewport {
         let trimmed = model
             .state()
             .is_some_and(|state| state.history_trimmed && !state.alt_screen);
-        trimmed.then(|| self.first(model))
+        trimmed.then(|| self.first_content(model))
     }
 
-    /// What position `position` shows above the screen: the notice line, or a
-    /// line by its number (which the model may no longer hold).
+    /// Resolve a navigation position to a retained line, the notice or blank padding.
     pub fn row_at(&self, model: &GridModel, position: u64) -> ViewRow {
-        if Some(position) == self.notice(model) {
+        if position < self.first_content(model) {
+            ViewRow::Blank
+        } else if Some(position) == self.notice(model) {
             ViewRow::Notice
         } else {
-            ViewRow::Line(position.saturating_sub(1))
+            ViewRow::Line(position - POSITION_PREFIX)
         }
     }
 
