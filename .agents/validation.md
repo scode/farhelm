@@ -1153,8 +1153,9 @@ systemd or SSH substrate ran.
   the script changes; seconds, no network.
 - `python3 -B scripts/test-capture-agent-screens.py` — the fixture scrubber's replacement and refusal of private IPv4
   and IPv6 proxy URLs, including authorities with multiple `@` signs, punctuation and adjacent prose. Public links still
-  pass. Run it when the scrubber changes. Seconds, no network or vendor turns. The recorded agent screen fixtures
-  selection independently checks the Rust guard.
+  pass. Stand-ins also exercise the resolved executable, cleanup after startup metadata fails and retaining the run
+  directory until stop is confirmed. Run it when the scrubber or its host backend changes. Seconds, no network or vendor
+  turns. The recorded agent screen fixtures selection independently checks the Rust guard.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build discovery, child environment, verdicts and
   evidence retention against stand-ins. Run it when the runner changes. Seconds and zero vendor turns.
 - `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks of installed agent launch flags, conversation

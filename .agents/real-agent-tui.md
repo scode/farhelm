@@ -28,8 +28,10 @@ scripts/agent-tui.py wait "$run" 'Trust' --timeout 30   # or wait for specific t
 scripts/agent-tui.py type "$run" 'hello'           # literal text, not submitted
 scripts/agent-tui.py keys "$run" Enter             # named keys: Enter, Escape, Down, C-c
 scripts/agent-tui.py screen "$run"                 # the visible grid, as Farhelm's sampler sees it
-scripts/agent-tui.py stop "$run"                   # always: ends the program, removes the run directory
+scripts/agent-tui.py stop "$run"                   # ends the program and removes the run directory after confirmation
 ```
+
+An unconfirmed stop leaves the run directory and prints its location with the failure. The same stop command can retry.
 
 `scripts/agent-tui.py self-test` checks the tool itself against a small shell program, the environment scrub included.
 Run it after changing the script.

@@ -1,10 +1,17 @@
 #!/usr/bin/env python3
-"""Keep configured local proxy credentials out of public screen fixtures without running a vendor agent."""
+"""Exercise capture privacy and terminal host ownership using synthetic screens and stand-ins."""
 
 import importlib.util
-from pathlib import Path
+import io
+import subprocess
 import sys
+import tempfile
 import unittest
+from contextlib import chdir
+from pathlib import Path
+from unittest import mock
+
+import agent_screen_host as backend
 
 _spec = importlib.util.spec_from_file_location(
     "capture_agent_screens", Path(__file__).with_name("capture-agent-screens.py")
@@ -79,6 +86,92 @@ class ScrubberTests(unittest.TestCase):
             clean = scrubber.scrub(text)
             self.assertEqual(clean, "http://proxy.invalid" + suffix)
             self.assertIsNone(scrubber.check(clean))
+
+
+class HostRunTests(unittest.TestCase):
+    """Pin the binary and controller owned by a capture across startup and shutdown failures."""
+
+    def setUp(self):
+        self.root = Path(self.enterContext(tempfile.TemporaryDirectory()))
+        self.run_dir = self.root / "run"
+        self.run_dir.mkdir()
+        self.farhelm = self.root / "farhelm"
+        self.farhelm.touch()
+
+    def stand_in_for_controller(self):
+        """Supply a detached child that has reached the real readiness boundary without running Farhelm."""
+        child = mock.Mock(spec=subprocess.Popen)
+        child.stdout = io.BytesIO(b"ready\n")
+        child.pid = 123
+        child.wait.return_value = 0
+        self.enterContext(mock.patch.object(backend.tempfile, "mkdtemp", return_value=str(self.run_dir)))
+        self.enterContext(mock.patch.object(backend.select, "select", return_value=([child.stdout], [], [])))
+        launch = self.enterContext(mock.patch.object(backend.subprocess, "Popen", return_value=child))
+        return child, launch
+
+    def test_the_checked_binary_is_launched_even_for_a_bare_relative_path(self):
+        """The executable marker preserves the path exactly, including a trailing space in its file name."""
+        child, launch = self.stand_in_for_controller()
+        farhelm = self.farhelm.rename(self.root / "farhelm ")
+        with chdir(self.root):
+            run = backend.HostRun.start(Path("./farhelm "), self.root, 80, 24, ["fake-agent"])
+        launched = launch.call_args.args[0][0]
+        self.assertEqual(launched, str(farhelm.resolve()))
+        self.assertEqual(run.farhelm, launched)
+        self.assertIs(run.process, child)
+        self.assertEqual((self.run_dir / "pid").read_text().strip(), str(child.pid))
+
+    def test_pid_write_failure_stops_the_child_before_start_returns(self):
+        """The caller has no run handle if metadata fails after readiness. Startup still owns that child."""
+        child, _ = self.stand_in_for_controller()
+        write_text = Path.write_text
+
+        def write_except_pid(path, *args, **kwargs):
+            if path == self.run_dir / "pid":
+                raise PermissionError("pid metadata is unwritable")
+            return write_text(path, *args, **kwargs)
+
+        self.enterContext(mock.patch.object(Path, "write_text", autospec=True, side_effect=write_except_pid))
+        request = self.enterContext(mock.patch.object(backend.HostRun, "request"))
+        fallback = self.enterContext(mock.patch.object(
+            backend.subprocess, "run", return_value=subprocess.CompletedProcess([], 0, "")
+        ))
+        with self.assertRaisesRegex(PermissionError, "pid metadata is unwritable"):
+            backend.HostRun.start(self.farhelm, self.root, 80, 24, ["fake-agent"])
+        self.assertTrue(child.stdout.closed)
+        request.assert_called_once_with({"op": "stop"})
+        child.wait.assert_called_once_with(timeout=backend.STOP_SECONDS)
+        self.assertEqual(fallback.call_args.args[0][-2:], ["--state-dir", str(self.run_dir)])
+        self.assertFalse(self.run_dir.exists())
+
+    def test_interrupted_spawn_keeps_the_run_when_the_handle_is_unknown(self):
+        """A Ctrl+C during Popen leaves no child handle, but the detached process might already exist."""
+        _, launch = self.stand_in_for_controller()
+        launch.side_effect = KeyboardInterrupt
+        with self.assertRaisesRegex(backend.HostError, "launch interrupted") as failure:
+            backend.HostRun.start(self.farhelm, self.root, 80, 24, ["fake-agent"])
+        self.assertIn(str(self.run_dir), str(failure.exception))
+        self.assertEqual(backend.HostRun(self.run_dir).farhelm, str(self.farhelm))
+
+    def test_unconfirmed_stop_keeps_the_run_for_a_retry(self):
+        """Only a successful stop of the terminal hosts permits removing their sockets and diagnostics."""
+        (self.run_dir / "farhelm").write_text(str(self.farhelm))
+        log = self.run_dir / "log"
+        log.write_text("retained controller log")
+        run = backend.HostRun(self.run_dir)
+        self.enterContext(mock.patch.object(run, "request", side_effect=backend.HostError("controller exited")))
+        self.enterContext(mock.patch.object(backend.subprocess, "run", side_effect=[
+            subprocess.TimeoutExpired("fake-stop", 60, output=b"controller stop is still pending\n"),
+            subprocess.CompletedProcess([], 1, "host still reachable"),
+            subprocess.CompletedProcess([], 0, ""),
+        ]))
+        for reason in ("controller stop is still pending", "host still reachable"):
+            with self.assertRaisesRegex(backend.HostError, reason) as failure:
+                run.stop()
+            self.assertIn(str(self.run_dir), str(failure.exception))
+            self.assertEqual(log.read_text(), "retained controller log")
+        run.stop()
+        self.assertFalse(self.run_dir.exists())
 
 
 if __name__ == "__main__":

@@ -246,11 +246,6 @@ consequences.
   does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
   package-manager trigger remains unverified after investigation.
 
-- [`capture-failed-stop-erases-recovery.md`](capture-failed-stop-erases-recovery.md) — When the real-agent
-  inspection/capture tool cannot confirm its terminal host stopped, it hides that failure and still removes the run
-  directory needed to retry the supported stop command. Continued agent execution after the deletion has not been
-  demonstrated.
-
 - [`grid-text-omits-blank-columns.md`](grid-text-omits-blank-columns.md) — The new test helper can turn visibly
   separated terminal text into a different string. A test searching that transcript for the displayed text may then time
   out or match text that was never contiguous on screen. No currently failing assertion was identified.
@@ -276,14 +271,6 @@ consequences.
 - [`host-flood-stall-window-claim.md`](host-flood-stall-window-claim.md) — A migrated test now claims to cross the new
   terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
   does not establish output pressure. This is a new coverage-description error, with no observed product stall.
-
-- [`capture-startup-metadata-cleanup.md`](capture-startup-metadata-cleanup.md) — A screen-capture run can fail after
-  launching its agent but before returning the run handle, leaving the detached capture process and its terminal host
-  running without the caller cleaning them up.
-
-- [`capture-local-program-path.md`](capture-local-program-path.md) — Naming a Farhelm binary in the current directory
-  with --farhelm ./farhelm can fail to launch it or silently run another Farhelm found on PATH, so screen inspection can
-  use a different build than requested.
 
 - [`landing-tests-import-unregistered-module.md`](landing-tests-import-unregistered-module.md) — The documented
   landing-tool validation command can crash during import before testing any safeguards, because its dynamically loaded

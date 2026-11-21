@@ -88,7 +88,8 @@ class HostRun:
         farhelm_file = directory / "farhelm"
         if not farhelm_file.exists():
             raise HostError(f"{directory} is not a run directory of a started program")
-        self.farhelm = farhelm_file.read_text().strip()
+        # Only the record's newline is syntax. Whitespace can be part of an executable's name.
+        self.farhelm = os.fsdecode(farhelm_file.read_bytes().removesuffix(b"\n"))
 
     @classmethod
     def start(
@@ -96,42 +97,57 @@ class HostRun:
     ) -> HostRun:
         """Start `argv` in `cwd` in a terminal host of `cols` x `rows`, and return once the program runs.
 
-        On failure nothing is left running and the run directory is gone; the error carries the command's log.
+        Startup owns the detached controller until it returns the run. If startup fails, it tries to stop the
+        controller and its host before raising. The error names the recovery directory if that stop is unconfirmed.
         """
 
+        farhelm = farhelm.resolve()
         if not farhelm.is_file():
             raise HostError(f"{farhelm} is missing; build it with `cargo build -p farhelm`, or name one with --farhelm")
         directory = pathlib.Path(tempfile.mkdtemp(prefix="fh-tui-", dir="/tmp"))
-        (directory / "farhelm").write_text(str(farhelm.resolve()) + "\n")
-        log = directory / "log"
-        command = [
-            str(farhelm), "internal", "agent-screen", "--run-dir", str(directory), "--cwd", str(cwd.resolve()),
-            "--size", f"{cols}x{rows}", "--", *argv,
-        ]
-        with log.open("wb") as log_file:
-            # Its own session, so that a terminal's Ctrl+C or a hangup of the caller's terminal does not reach it: the
-            # run outlives the `start` that made it.
-            process = subprocess.Popen(
-                command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log_file, env=program_env(),
-                start_new_session=True,
-            )
-        assert process.stdout is not None
-        ready, _, _ = select.select([process.stdout], [], [], START_SECONDS)
-        line = process.stdout.readline() if ready else b""
-        process.stdout.close()
-        run = cls(directory, process)
-        if line.strip() != b"ready":
-            # Read the log before `stop` removes the directory it is in, once the command had a moment to finish
-            # writing it: a refused argument or an older `farhelm` without this command exits at once.
-            try:
-                process.wait(timeout=5)
-            except subprocess.TimeoutExpired:
-                pass
-            detail = log.read_text(errors="replace").strip() if log.exists() else ""
-            run.stop()
-            raise HostError(f"farhelm internal agent-screen did not start: {detail or 'no output'}")
-        (directory / "pid").write_text(f"{process.pid}\n")
-        return run
+        run = None
+        try:
+            (directory / "farhelm").write_bytes(os.fsencode(farhelm) + b"\n")
+            run = cls(directory)
+            log = directory / "log"
+            command = [
+                str(farhelm), "internal", "agent-screen", "--run-dir", str(directory), "--cwd", str(cwd.resolve()),
+                "--size", f"{cols}x{rows}", "--", *argv,
+            ]
+            with log.open("wb") as log_file:
+                # The detached controller is meant to outlive start, even if its caller's terminal hangs up.
+                run.process = subprocess.Popen(
+                    command, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=log_file, env=program_env(),
+                    start_new_session=True,
+                )
+            process = run.process
+            assert process.stdout is not None
+            with process.stdout as output:
+                ready, _, _ = select.select([output], [], [], START_SECONDS)
+                line = output.readline() if ready else b""
+            if line.strip() != b"ready":
+                # Capture the refused command's log before a successful stop can delete it.
+                try:
+                    process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    pass
+                detail = log.read_text(errors="replace").strip()
+                raise HostError(f"farhelm internal agent-screen did not start: {detail or 'no output'}")
+            (directory / "pid").write_text(f"{process.pid}\n")
+            return run
+        except BaseException as error:
+            if run is None or run.process is None:
+                # Popen can be interrupted after creating a child and before it returns the handle. The run marker
+                # is already usable for recovery in that interval, so a missing handle cannot authorize removal.
+                if run is not None and isinstance(error, KeyboardInterrupt):
+                    raise HostError(f"agent-screen launch interrupted. Kept {directory} for retry.") from error
+                shutil.rmtree(directory, ignore_errors=True)
+            else:
+                try:
+                    run.stop()
+                except HostError as cleanup:
+                    raise HostError(f"agent-screen startup failed ({error}). {cleanup}") from error
+            raise
 
     def request(self, payload: dict[str, object]) -> dict[str, object]:
         """Send one request on the control socket and return its answer, raising `HostError` on a refusal."""
@@ -186,8 +202,8 @@ class HostRun:
         """End the program and its host, and remove the run directory. Safe to call on a run that already ended.
 
         The command shuts its host down on `stop`. A command that is gone or does not finish in time may have left its
-        host running, so the state directory's own stop (`farhelm internal stop-terminal-hosts`) runs either way, and
-        the directory is removed whatever happened before.
+        host running, so the state directory's own stop (`farhelm internal stop-terminal-hosts`) runs either way.
+        A failed fallback raises with its diagnostic and retains the run directory so the stop can be retried.
 
         Only a command known to be this run's is ever signalled, because agents on this machine share one unix user
         and a pid can be reused: this process's own child (which cannot be reused before it is reaped), or a pid from
@@ -220,14 +236,23 @@ class HostRun:
                         pass
                     break
                 time.sleep(0.1)
+        unconfirmed = f"terminal host stop unconfirmed. Kept {self.dir} for retry."
         try:
-            subprocess.run(
+            stopped = subprocess.run(
                 [self.farhelm, "internal", "stop-terminal-hosts", "--state-dir", str(self.dir)],
-                stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, env=program_env(),
-                timeout=60, check=False,
+                stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=program_env(),
+                timeout=60, check=False, text=True, errors="replace",
             )
-        except (OSError, subprocess.TimeoutExpired):
-            pass
+        except subprocess.TimeoutExpired as error:
+            # TimeoutExpired carries bytes even when subprocess.run requested decoded text for a completed command.
+            partial = error.stdout.decode(errors="replace").strip() if error.stdout else ""
+            detail = f"{error}\n{partial}" if partial else str(error)
+            raise HostError(f"{unconfirmed} {detail}") from error
+        except OSError as error:
+            raise HostError(f"{unconfirmed} {error}") from error
+        if stopped.returncode != 0:
+            detail = stopped.stdout.strip() or f"exit {stopped.returncode}"
+            raise HostError(f"{unconfirmed} {detail}")
         shutil.rmtree(self.dir, ignore_errors=True)
 
     def _is_ours(self, pid: int) -> bool:
