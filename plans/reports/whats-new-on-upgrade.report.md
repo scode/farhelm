@@ -72,3 +72,93 @@ Each draft passed its independent source gate, and the draft messages went throu
 database fixtures that needed updating, a gap between the URL checked and the one opened, and two dialog issues. The app
 now opens the validated URL, leaves an active prompt in focus, and exposes the release text and total to assistive
 technology.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round, and main had gained nothing since the executor last rebased this plan. An independent
+reviewer and I read the five PRs. In the release instructions, no changed text has an agent sign, publish, deploy the
+website on its own or move `/latest`; the new wait sends you the urgent notification, and the feed check only reads. The
+new saved release and opt-out exist for both new and upgraded helms. The app's download is fixed to
+`https://farhelm.io/whats-new.json`, HTTPS only with no redirects, limited to 10 seconds and 2 MiB, run off the main
+thread, sends nothing but the request itself, and happens only in an installed stable Mac app with highlights on and a
+newer release running. If the request fails, nothing is shown and the app tries again at the next launch.
+
+#### Fixes made while landing
+
+One went in as a sixth PR, [#4432](https://github.com/scode/farhelm/pull/4432/changes):
+
+- The workspace run caught one failing test, which checks that every Settings search result points at something the
+  dialog draws. Its fake updater offered no upgrade highlights, so the new **Show what's new after updates** switch was
+  never drawn. Giving the fake highlights then exposed a real ordering bug: search listed the switch before the App
+  section's update controls, which the dialog draws first, while search results are meant to follow the drawing order.
+  Search now lists it after them, and the test gives its fake updater highlights. The executor's report lists only GUI
+  runs restricted to selected tests, which did not include this one.
+- CI's website job now also runs the release-notes generator's test, which only local runs ran before, and the list of
+  checks agents choose from says so.
+
+#### Checks
+
+The plan changes the docs website (the new feed and its generator, a dependency), the stable release instructions, the
+helm's database (to version 94), the app's channel to the helm, the desktop app, its GUI and reference pictures, SPEC.md
+and SPEC_impl.md. The landing ran the whole workspace suite, the desktop app's tests, the app's end-to-end smoke test
+and the lint runs (clippy) on a separate arm64 Linux test machine, and the website build and its new test, the
+screenshot comparisons and the small checks locally on x86_64.
+
+On the plan as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test machine (recorder run
+  `8e8c2629-83be-4b7e-b9c7-e2854e082b92`): 8194 of 8195 passed. One failed: the GUI test that checks every Settings
+  search result points at something the dialog draws (see the landing fix). No test reported skipping itself for a
+  missing machine capability.
+- `cargo nextest run -p farhelm-desktop`, on the test machine (recorder run `b57c8ef5-888f-4a3d-b712-50339b4eb1a8`): all
+  184 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test machine (recorder run `a229a185-20fb-43e4-8969-04678eec054b`):
+  every step passed but paste, which skips on Linux as it always does. Its steps include a run with the start dialogs
+  on.
+- `cargo clippy --all-targets -- -D warnings` and the desktop app's own two clippy runs (with and without
+  `--features agent`), on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `cba7cc7e-3bd8-4fdd-a696-3ab1247efe27`): passed, with the plan's new dialog and Settings pictures.
+- The website build (`bun install --frozen-lockfile && bun run build`) and
+  `node --test website/scripts/release-notes.test.mjs` (all 3 passed), locally.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `python3 scripts/check-agents-md.py`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py`, `dprint check` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After the landing fix (#4432), which changes the GUI's Settings search, that test, the CI workflow and one line of the
+test inventory:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `759541fb-207b-4d47-b546-b07bea619ddb`): all
+  3231 passed. A first attempt that fixed only the test (recorder run `ba167955-0c23-484f-a53d-a17ed2d690b6`) still
+  failed it, on the search order, which led to the code fix.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine: passed. `cargo fmt --all -- --check`, `dprint check`
+  and `python3 scripts/check-agents-md.py`, locally: passed.
+
+The other runs above still apply to the fix, which changes nothing outside the GUI's Settings search, CI and the
+inventory. Skipped: Mac runs and VoiceOver, which the report leaves to native release validation.
+
+#### Things you should know that the report does not say
+
+- A release can have no highlights at all, with every change only in the collapsed full list, which is a likely shape
+  for a patch release. Upgrading to one opens the dialog with only the version and "N additional changes not
+  highlighted". A small follow-up could record such a release as seen without opening the dialog, the way it already
+  does when highlights are turned off.
+- The new promotion step says you deploy the website yourself, while the separate instructions for website deploys still
+  let an agent deploy when you ask it to. So if you tell the release agent "you deploy it", it could read either rule as
+  applying. Neither reading lets an agent move `/latest`, but one sentence in the promotion step saying whether an agent
+  may deploy when you ask would remove the doubt.
+- The changelog fragment promises highlights "from the stable releases you missed". On the first upgrade from a helm
+  that never recorded a release, only the running release's highlights show, and nothing shows until the website is
+  deployed. The screenshot-links fragment says release notes "now have direct links to entries with screenshots"; the
+  change adds link targets (anchors) that such links can point at, not visible links. Release curation can fix both.
+- Whether farhelm.io serves the feed without a redirect is untested until the first deploy. If it redirected, the app
+  would show nothing and try again at each launch, and step 8's feed check would catch it before promotion.
+- The plan also adds the screenshot-list entry for the open session row menu picture that the menu shortcut plan added
+  in the previous round without one.
+
+#### What you should still do
+
+The report's native check stands: on the installed Mac app, after an upgrade, check the dialog appears after Welcome and
+Announcements and that VoiceOver reads it.
