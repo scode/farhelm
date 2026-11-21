@@ -2394,11 +2394,11 @@ explanation. The local display name is `Local (this machine)` unless aliased, wi
 keyboard-reachable button below Hosts, Settings and Help shows » and "Expand navigation rail" while collapsed, or «
 Collapse and "Collapse navigation rail" while expanded, and exposes its expanded state. It expands the whole rail, its
 foot included, to 220px beside the session list. Expanded host rows show the display name and a smaller destination
-underneath when different; long names truncate and remain available in full in the tooltip. Captions disappear, All
-hosts, Add host and the foot controls show labels, and each whole row highlights and selects as one click target.
-Picking a host keeps the rail expanded. Badges, menus and actions retain their behavior. Expansion is a helm preference
-that every client shares, so a window opens with the rail as it was last left; a helm that has none starts collapsed.
-Touch screens follow the same rules.
+underneath when different; long names truncate and remain available in the tooltip (cut, like all short hover help, at
+eight lines) and in full in the accessible name. Captions disappear, All hosts, Add host and the foot controls show
+labels, and each whole row highlights and selects as one click target. Picking a host keeps the rail expanded. Badges,
+menus and actions retain their behavior. Expansion is a helm preference that every client shares, so a window opens with
+the rail as it was last left; a helm that has none starts collapsed. Touch screens follow the same rules.
 
 Choosing a host sends a server-side query immediately and is not persisted, while All widens it again. Status, sort and
 the selected session remain unchanged. Unavailable hosts retain their last-known sessions; a removed selected host
@@ -4368,11 +4368,11 @@ preapproved web link). Always allow turns that host's setting on and then approv
 on fails, nothing is approved and the card stays up with the reason. It approves only the request it was answered on:
 other cards already waiting from that host stay until they are answered. Asking, target and clone-source session IDs
 remain distinct from titles and host names. The compact From line shows an isolated host, a quoted, ellipsized session
-title with its full text on hover, and the start and end of the requester's bare ID, without splitting an escape
-spelling. Its hover and accessible name carry the complete entry-prefixed ID with spaces, formatting characters and
-literal escape notation spelled distinctly. Copy ID copies that full raw reference. Target and clone-source IDs stay in
-full in single-line identity facts with Copy. Every copy uses the raw reference, including characters shown as escapes.
-Answering the card still uses its approval ID.
+title with its text on hover (cut at eight lines, in full in the accessible name), and the start and end of the
+requester's bare ID, without splitting an escape spelling. Its hover and accessible name carry the complete
+entry-prefixed ID with spaces, formatting characters and literal escape notation spelled distinctly. Copy ID copies that
+full raw reference. Target and clone-source IDs stay in full in single-line identity facts with Copy. Every copy uses
+the raw reference, including characters shown as escapes. Answering the card still uses its approval ID.
 
 Launch and restart cards show one Permissions row using the session list's classification. Shell launch cards name the
 shell and show the command with no Permissions row. For the other launch types, the row shows a warning YOLO chip for

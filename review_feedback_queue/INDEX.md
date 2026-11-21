@@ -416,10 +416,6 @@ consequences.
 - [`valid-ssh-uri-short-label-parsing.md`](valid-ssh-uri-short-label-parsing.md) — Valid SSH URIs with a trailing slash,
   service-name port or empty port can show an incorrectly shortened host label.
 
-- [`full-host-tooltip-conflicts-with-line-cap.md`](full-host-tooltip-conflicts-with-line-cap.md) — The shared tooltip
-  cap conflicts with full-value disclosure for host names and approval requester titles. The new admitted long-title
-  route is source-confirmed; original host-alias wrapping remains unmeasured.
-
 - [`discovery-registration-bypasses-host-row-lock.md`](discovery-registration-bypasses-host-row-lock.md) — Discovery
   registration can bypass a host row's execution lock, but a supported differing-path transition with lasting
   consequences remains missing.

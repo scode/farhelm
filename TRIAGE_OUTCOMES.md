@@ -82,26 +82,6 @@
   queue removal or a changelog fragment). Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## full-host-tooltip-conflicts-with-line-cap.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): SPEC.md promises the full
-  value on hover in two places: long host names in the expanded rail (2397) and the session title on an approval card's
-  From line (4364-4365). In the desktop app both go through ordinary sentence help: the rail avatar via
-  `HoverHelp::sentence` at `crates/gui/farhelm-gui/src/session_list/host_rail.rs:696-699`, and the approval title at
-  `approvals/card.rs:291-296`. Ordinary help is drawn with `line_clamp(TOOLTIP_MAX_LINES)` at 280 pixels wide
-  (`layers/tooltip.rs:1010-1015`), which is the eight-line cut SPEC_impl.md:871-872 specifies. A session title can be up
-  to the 64 KiB rename budget and will be cut. A 64-character alias full of escaped formatting characters may also
-  exceed eight lines.
-- Decision: the maintainer picked "Make the spec match the app" (2026-11-21 six-question triage page for findings that
-  cited removed UI code, Q3): where the desktop app deliberately does less than the spec promises, the spec is corrected
-  to describe the app.
-- Completion criteria: Correct SPEC.md and/or SPEC_impl.md so they describe the desktop app's current behavior for
-  ""Full name on hover" tooltips are cut at eight lines", without adding behavior. No code change. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the
-  feedback file and its index entry.
-- Execution: `pending`.
-
 ## legacy-quickstart-stops-surviving-supervisor.md
 
 - Outcome: `fix code`.
