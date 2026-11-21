@@ -272,14 +272,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
   settings or a periodic maintenance step as they grow.
 
-- **Harness behavior drift tests.** A suite, run semi-regularly rather than in every check run, that starts each real
-  agent harness Farhelm supports (Claude, Codex, Antigravity and the rest), as currently installed, and checks the
-  behavior Farhelm depends on: launch flags, conversation reports through the hook, the report checks Farhelm applies to
-  them, Restart and resume. The point is to notice when an upstream update breaks Farhelm, before a user does. Today
-  nothing does this: the tests drive stand-in agents and recorded transcripts, `scripts/agent-tui.py` is a manual tool,
-  and re-capturing agent screens (`docs/agent-screen-fixtures.md`) is a manual job that only covers status reading. It
-  spends real vendor turns, so it needs logins and a budget, and stays out of the default test run. Plan:
-  `plans/queue/harness-drift-tests.md`.
+- **Extend real harness drift tests.** Exercise conversation rotation in more installed agents, verify the identity
+  shown after Restart, check that subagent reports are rejected, and cover permission and question prompts and
+  additional model and effort flags.
 
 ### Trivial
 
@@ -287,15 +282,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   type/permission mode should go away. (Screenshot: hovering a session row in the sidebar draws a rectangle around the
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
-
-- **Test that a real Antigravity still gets its conversation reports accepted.** To keep Restart on the main
-  conversation rather than a subagent's, Farhelm now accepts a conversation report from Antigravity only when the
-  conversation's log starts the way a main conversation's did in Antigravity CLI 1.5.13 on Linux. Every test of that
-  check uses recorded logs, so if a later Antigravity writes its logs differently, Farhelm silently ignores every new
-  report and Restart keeps opening an old conversation, and no test notices. Add a test that runs the installed
-  Antigravity CLI, sends a short prompt, and checks that Farhelm accepts the report; it spends a real turn, so it
-  belongs with the harness drift tests (Near term) rather than in the default run. Raised by the
-  antigravity-subagent-check plan, 2026-11-20. Plan: `plans/queue/harness-drift-tests.md`.
 
 - **Vertically center the lightning bolt in the template list.** the layout of the lightning bolt in the template menu
   is off. it needs to be properly vertically centered. (Screenshot: on the Templates page, the ⚡ quick-launch marker to

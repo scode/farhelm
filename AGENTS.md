@@ -339,6 +339,8 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   scripts push the screenshot refs; never commit captured media on main; never hand-edit the wordmark SVGs.
 - **Agent screens** ("re-capture agent screens", checking a new claude or codex against status detection):
   `docs/agent-screen-fixtures.md`. Fence: it spends real vendor turns; only when asked or after an agent upgrade.
+- **Real agent tests** ("run real harness tests"): `docs/harness-drift-tests.md`. Fence: opt-in only, spends vendor
+  turns.
 - **Agent TUI behavior**: before relying on a claim about how an installed agent behaves in a terminal, read
   `.agents/real-agent-tui.md`.
 

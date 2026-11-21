@@ -1115,6 +1115,12 @@ systemd or SSH substrate ran.
 - `python3 -B scripts/test-capture-agent-screens.py` — the fixture scrubber's replacement and refusal of local proxy
   URLs with userinfo, and public links containing `@` in a path or query. Run it when the scrubber changes; seconds, no
   network or vendor turns. The recorded agent screen fixtures selection independently checks the Rust guard.
+- `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build discovery, child environment, verdicts and
+  evidence retention against stand-ins. Run it when the runner changes. Seconds and zero vendor turns.
+- `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks of installed agent launch flags, conversation
+  reports and Restart. Tracked agents spend a real vendor turn. The runner records each case and reports PASSED, COULD
+  NOT RUN or FAILED. See `docs/harness-drift-tests.md` for credentials and hook prerequisites. The ignored cases stay
+  out of default nextest, deflake, CI and release gates.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
