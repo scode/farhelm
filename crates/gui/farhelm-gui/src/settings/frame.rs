@@ -8,7 +8,7 @@ use gpui::{
     prelude::FluentBuilder as _, px, svg,
 };
 
-use super::{SECTION_GAP, Section, SettingsDialog};
+use super::{SECTION_GAP, Section, SettingsDialog, TrustAgent};
 use crate::assets::Icon;
 use crate::components::{self, Button, HoverHelp, Tier, scroll_from_controls, scroll_handle};
 use crate::{focus, layers, theme};
@@ -31,13 +31,14 @@ impl Group {
             | Section::Appearance
             | Section::Terminal
             | Section::Notifications
+            | Section::Credentials
             | Section::App => Self::General,
             Section::Hosts
             | Section::Checkouts
             | Section::Containers
             | Section::Recipes
             | Section::Tensorlake => Self::Placement,
-            Section::AgentTrust | Section::Credentials => Self::Agents,
+            Section::Agent(_) => Self::Agents,
         }
     }
 
@@ -77,7 +78,7 @@ impl Scope {
             | Section::Hosts
             | Section::Checkouts
             | Section::Containers
-            | Section::AgentTrust => Self::Hosts,
+            | Section::Agent(_) => Self::Hosts,
         }
     }
 
@@ -112,7 +113,8 @@ impl Section {
             Self::Containers => "Podman hosts and leftover containers",
             Self::Recipes => "Software and credentials for new containers and sandboxes",
             Self::Tensorlake => "Cloud sandboxes in your Tensorlake project",
-            Self::AgentTrust => "Answering agents' folder-trust questions in managed checkouts",
+            Self::Agent(harness) => TrustAgent::for_harness(harness)
+                .map_or("", |_| "Answering the agent's folder-trust questions"),
             Self::Credentials => "Secrets Farhelm hands to hosts for you",
         }
     }
@@ -121,13 +123,15 @@ impl Section {
     fn has_live_choices(self, cx: &gpui::App) -> bool {
         match self {
             Self::App => crate::desktop::updates::upgrade_notes(cx).is_some(),
+            Self::Agent(harness) => TrustAgent::for_harness(harness)
+                .and_then(TrustAgent::hint)
+                .is_some(),
             Self::Sessions
             | Self::Appearance
             | Self::Terminal
             | Self::Notifications
             | Self::Hosts
             | Self::Checkouts
-            | Self::AgentTrust
             | Self::Tensorlake => true,
             Self::Containers | Self::Recipes | Self::Credentials => false,
         }
@@ -142,12 +146,20 @@ impl Section {
             (20., 4., 13.)
         };
         let hue = Group::of(self).hue(palette);
-        let ink = theme::color(if selected { palette.on_fill } else { hue });
+        let tile_ink = theme::color(if selected { palette.on_fill } else { hue });
+        // Group color belongs to the tile. Agent glyphs keep the same ink as their marks in the session list.
+        let glyph_ink = theme::color(match self {
+            _ if selected => palette.on_fill,
+            Self::Agent(harness) => {
+                crate::harness::ink(crate::harness::glyph(harness), palette).unwrap_or(palette.fg_1)
+            }
+            _ => hue,
+        });
         div()
             .flex_none()
             .size(px(side))
             .rounded(px(corner))
-            .bg(ink.opacity(if selected { 0.20 } else { 0.24 }))
+            .bg(tile_ink.opacity(if selected { 0.20 } else { 0.24 }))
             .flex()
             .items_center()
             .justify_center()
@@ -155,7 +167,7 @@ impl Section {
                 svg()
                     .path(self.icon().path())
                     .size(px(glyph))
-                    .text_color(ink),
+                    .text_color(glyph_ink),
             )
     }
 }
@@ -169,9 +181,7 @@ impl SettingsDialog {
         let scroll = scroll_handle("settings-navigation-scroll".into(), window, cx);
         let searching = self.search.active();
         let sections = Group::ALL.into_iter().filter_map(|group| {
-            let rows: Vec<_> = Section::ALL
-                .iter()
-                .copied()
+            let rows: Vec<_> = Section::all()
                 .filter(|&section| Group::of(section) == group && section.listed(cx))
                 .filter_map(|section| {
                     let count = searching.then(|| self.search.section_count(section));
@@ -264,7 +274,7 @@ impl SettingsDialog {
             })
             .children(edited.then(|| super::editing::dot(selected, palette)));
         Button::new(
-            format!("settings-section-{}", section.key()),
+            section.button_id(),
             section.label(),
             HoverHelp::tooltip(format!("Show {} settings", section.label())).beside_list(false),
             Role::Button,
@@ -397,14 +407,16 @@ impl SettingsDialog {
                             )
                             .child(scope_line),
                     )
-                    .child(
-                        div()
-                            .text_size(px(12.))
-                            .line_height(px(16.))
-                            .text_color(theme::color(palette.fg_1))
-                            .truncate()
-                            .child(section.description()),
-                    ),
+                    .when(!section.description().is_empty(), |heading| {
+                        heading.child(
+                            div()
+                                .text_size(px(12.))
+                                .line_height(px(16.))
+                                .text_color(theme::color(palette.fg_1))
+                                .truncate()
+                                .child(section.description()),
+                        )
+                    }),
             )
             .into_any_element()
     }

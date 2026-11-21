@@ -5140,8 +5140,8 @@ settles from the reply current at that moment. The launcher has no trust state, 
 grouping ignores historical trust, summaries omit it, and activating a recent clears it before composing a new launch.
 
 `LaunchSelection.workspace_trust` remains on the wire and in stored selections: supervisors persist selections, and
-their strict decoding must still accept older fields. The helm overwrites the field from the agent trust section in
-Settings when composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce
+their strict decoding must still accept older fields. The helm overwrites the field from the selected agent's trust
+setting when composing a launch. Compilation remains a function of the selection alone so the YOLO guard can reproduce
 stored commands exactly. Codex true and false still compile to whole-argv config markers; the supervisor fills one at
 the shared spawn seam, after any GitHub checkout has fixed the final cwd, with a trusted or untrusted project override.
 The cwd is quoted as a TOML key and resolved on the target host; omitted trust adds no Codex override. Muse true adds
@@ -8826,7 +8826,7 @@ a sandbox recipe instead uses the separate optional recipe field described under
 fields are refused on decode, so a misspelled field is an error rather than a silently ignored edit. The retired
 `workspace_trust` field remains readable in `TemplateFields`, but application ignores it and every save drops it. The
 editor clears it in its draft and on delete undo; Save as template never offers it. This keeps old records usable
-without letting their trust choices bypass the agent trust section in Settings. The GUI's writes go through
+without letting their trust choices bypass the trust setting on the agent's Settings page. The GUI's writes go through
 `PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
 `DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The shared template save check validates a
 non-empty name of at most 128 bytes with no surrounding spaces or control characters, fields within the 64 KiB a create

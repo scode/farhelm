@@ -495,7 +495,7 @@ fn launch_and_restart_cards_explain_stored_workspace_trust() {
             }
         }
     }
-    assert!(TRUSTED_WORKSPACE.starts_with("Enabled in Agent trust settings."));
+    assert!(TRUSTED_WORKSPACE.starts_with("Enabled on the agent's Settings page."));
 }
 
 // ---- Launch cards ---------------------------------------------------------------------------------------------------

@@ -84,7 +84,7 @@
 //!   and its conversation selector's label is `conversation_label` in
 //!   `launcher/view/more_options.rs`. The desktop and helm check one-time
 //!   selectors with `farhelm_proto::conversation::validate_launch_conversation`.
-//!   Settings' Agent trust section names its agents with
+//!   The agent pages in Settings come from `LaunchHarness::ALL`. Their workspace trust controls use
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`
 //!   (a harness with no managed-checkout trust setting has no variant there,
 //!   as the helm's `trust_column` refuses it), whose exhaustive methods hold

@@ -1,4 +1,4 @@
-//! Settings → Agent trust holds the all-hosts opt-ins for answering workspace-trust questions. Claude, Codex, Muse and
+//! Each agent's Settings page holds its all-hosts opt-in for answering workspace-trust questions. Claude, Codex, Muse and
 //! Pi are scoped to managed checkouts. Antigravity also covers ordinary directories. Agents with a discovery hint
 //! have a separate switch that restores or dismisses it.
 //!
@@ -8,7 +8,7 @@
 //!
 //! - **The trust switches are helm configuration, not preferences.** Each lives behind its own route
 //!   (`/api/checkout-claude-trust` for Claude, the route the old app used, and `/api/checkout-agent-trust/<agent>` for
-//!   the others), which the helm does not push. So the section reads each once, when it is first shown in an
+//!   the others), which the helm does not push. Each page reads its own choice when it is first shown in an
 //!   opening of the dialog (the pattern the migration's orchestrator settled for reads that are not pushed), and a
 //!   reply reaches only the opening it was sent for, since it holds that dialog weakly. A switch whose read has not
 //!   answered, or failed, is unavailable rather than shown off: SPEC.md, "Failed settings reads never count as an off
@@ -82,7 +82,7 @@ pub enum TrustAgent {
 }
 
 impl TrustAgent {
-    /// Every agent, in the section's order.
+    /// Every trust agent, in the order the dialog stores their switches.
     pub(super) const ALL: [TrustAgent; 5] = [
         TrustAgent::Claude,
         TrustAgent::Codex,
@@ -97,13 +97,32 @@ impl TrustAgent {
     }
 
     /// A trust card is identified by the same agent mark as its session rows.
-    fn harness(self) -> LaunchHarness {
+    pub(super) const fn harness(self) -> LaunchHarness {
         match self {
             Self::Claude => LaunchHarness::Claude,
             Self::Codex => LaunchHarness::Codex,
             Self::Muse => LaunchHarness::Muse,
             Self::Pi => LaunchHarness::Pi,
             Self::Antigravity => LaunchHarness::Antigravity,
+        }
+    }
+
+    /// Which pages have a workspace trust switch. Settings has a page for every agent even if it has no trust control.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub(super) const fn for_harness(harness: LaunchHarness) -> Option<Self> {
+        match harness {
+            LaunchHarness::Claude => Some(Self::Claude),
+            LaunchHarness::Codex => Some(Self::Codex),
+            LaunchHarness::Muse => Some(Self::Muse),
+            LaunchHarness::Pi => Some(Self::Pi),
+            LaunchHarness::Antigravity => Some(Self::Antigravity),
+            LaunchHarness::Cursor
+            | LaunchHarness::Goose
+            | LaunchHarness::Omp
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh => None,
         }
     }
 
@@ -285,28 +304,11 @@ impl TrustAgent {
         if !info.workspace_trust_prompt {
             return None;
         }
-        TrustAgent::for_harness(info.launch.agent_selection()?.harness)
-            .filter(|agent| agent.hint().is_some())
-    }
-
-    /// The agent whose trust switch a structured launch of `harness` reads, for the harness-neutral
-    /// question. Claude is not one here: its question has its own flag ([`TrustAgent::asking`]), so the neutral flag
-    /// on a Claude launch adds no second band. The other harnesses have no trust switch.
-    #[warn(clippy::wildcard_enum_match_arm)]
-    fn for_harness(harness: LaunchHarness) -> Option<TrustAgent> {
-        match harness {
-            LaunchHarness::Codex => Some(TrustAgent::Codex),
-            LaunchHarness::Muse => Some(TrustAgent::Muse),
-            LaunchHarness::Pi => Some(TrustAgent::Pi),
-            LaunchHarness::Antigravity => Some(TrustAgent::Antigravity),
-            LaunchHarness::Claude
-            | LaunchHarness::Cursor
-            | LaunchHarness::Goose
-            | LaunchHarness::Omp
-            | LaunchHarness::OpenCode
-            | LaunchHarness::Grok
-            | LaunchHarness::Bash
-            | LaunchHarness::Zsh => None,
+        let agent = Self::for_harness(info.launch.agent_selection()?.harness)?;
+        match agent {
+            Self::Codex | Self::Muse | Self::Antigravity => Some(agent),
+            // Claude uses its own flag above. Pi offers a switch without a hint.
+            Self::Claude | Self::Pi => None,
         }
     }
 
@@ -396,6 +398,8 @@ pub(super) struct Trust {
     pub(super) state: Configured,
     /// The switch's focus handle, which the dialog keeps so the trust hint's entry point can put focus on it.
     pub(super) focus: FocusHandle,
+    /// Loading and navigating back to the page can overlap. Remember that its read is already in flight.
+    pub(super) read_started: bool,
 }
 
 /// One agent's block: its trust switch, its help (and Claude's caution box), its hint switch, and the failure lines,

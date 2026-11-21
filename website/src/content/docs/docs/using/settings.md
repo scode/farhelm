@@ -46,6 +46,12 @@ localhost links.
 [Sounds](/docs/using/session-list/#sounds-when-an-agent-needs-you) and
 [ntfy alerts](/docs/using/session-list/#ntfy-alerts). Use the play button beside any sound to hear it once.
 
+## Credentials
+
+GitHub tokens, agent logins and API endpoint tokens that recipes can use
+([Save named credentials](/docs/using/tensorlake-sandboxes/#save-named-credentials)). These are stored on the helm that
+shows you all your sessions. [The pieces](/docs/how-it-works/the-pieces/)
+
 ## App
 
 **App** appears only in the installed Farhelm app on your Mac, the one that updates itself. Its **Version** row shows
@@ -87,16 +93,11 @@ Your Tensorlake account, the SSH key Farhelm uses for sandboxes, **Create Tensor
 [**Sandboxes not on this helm**](/docs/using/tensorlake-sandboxes/#sandboxes-not-on-this-helm). Deleting a sandbox
 always asks.
 
-## Agent trust
+## Agents
 
-The switches that answer an agent's directory-trust question and control the hints shown above the terminal. For
-Antigravity the switch covers any directory. For the other agents it covers managed checkouts. See
-[when trust settings apply](/docs/using/start-a-session/#trust-in-managed-checkouts).
-
-## Credentials
-
-GitHub tokens, agent logins and API endpoint tokens that recipes can use
-([Save named credentials](/docs/using/tensorlake-sandboxes/#save-named-credentials)).
+Choose your agent under **Agents**. Every agent has a page, including agents with no settings to configure. Agents with
+a directory-trust switch have it on their own page, alongside the switch for their hint above the terminal where
+available. [Trust in managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts)
 
 ## Next
 

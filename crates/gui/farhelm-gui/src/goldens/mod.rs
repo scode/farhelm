@@ -15,7 +15,7 @@
 //! launcher's body with its outlined permanent answer, the Settings dialog at Sessions, at Appearance, at Hosts, at
 //! Recipes (empty, with recipes in each build state, with a recipe's per-place lines, and with a new recipe's editor
 //! open), at Tensorlake (with no key saved, and with a key saved and its list of sandboxes not on this helm), at
-//! Credentials, at Terminal and at Agent trust, the Hosts panel (closed, with Details, with a host failing to connect,
+//! Credentials, at Terminal and at agent pages, the Hosts panel (closed, with Details, with a host failing to connect,
 //! with a sandbox whose credentials were not delivered, with a host's setup running and failed, with outdated hosts'
 //! inline Update, and with a host's Update running), a host's progress card (whole, and previewed in a short window),
 //! the Add host dialog (on SSH, and on the Tensorlake sandbox kind with a key saved, also with a new recipe's editor
@@ -1173,16 +1173,22 @@ static SCENES: &[Scene] = &[
         setup: settings_checkouts_capped_setup,
     },
     Scene {
-        name: "settings-agent-trust",
+        name: "settings-claude",
         size: (800., 830.),
         draw: empty,
-        setup: settings_agent_trust_setup,
+        setup: settings_claude_setup,
     },
     Scene {
-        name: "settings-agent-trust-end",
+        name: "settings-antigravity",
         size: (800., 830.),
-        draw: settings_scroll_end,
-        setup: settings_agent_trust_end_setup,
+        draw: empty,
+        setup: settings_antigravity_setup,
+    },
+    Scene {
+        name: "settings-cursor",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_cursor_setup,
     },
     Scene {
         name: "settings-notifications",

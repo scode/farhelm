@@ -78,6 +78,24 @@ pub(crate) const fn name(harness: LaunchHarness) -> &'static str {
     }
 }
 
+/// Settings navigation IDs also identify the agent's search results. They stay stable when display names change.
+pub(crate) const fn settings_button_id(harness: LaunchHarness) -> &'static str {
+    match harness {
+        LaunchHarness::Codex => "settings-section-codex",
+        LaunchHarness::Claude => "settings-section-claude",
+        LaunchHarness::Antigravity => "settings-section-antigravity",
+        LaunchHarness::Muse => "settings-section-muse",
+        LaunchHarness::Cursor => "settings-section-cursor",
+        LaunchHarness::Goose => "settings-section-goose",
+        LaunchHarness::Pi => "settings-section-pi",
+        LaunchHarness::Omp => "settings-section-omp",
+        LaunchHarness::Grok => "settings-section-grok",
+        LaunchHarness::OpenCode => "settings-section-opencode",
+        LaunchHarness::Bash => "settings-section-bash",
+        LaunchHarness::Zsh => "settings-section-zsh",
+    }
+}
+
 /// The agent's own words for a mode without checks, as its status line shows them, for an agent type the supervisor
 /// reads a permission footer for (SPEC.md, "Session list": Claude, Grok, Muse and Cursor); `None` for the others,
 /// whose `screen_yolo` evidence the row ignores, so an inconsistent or older peer's flag cannot escalate a shield the

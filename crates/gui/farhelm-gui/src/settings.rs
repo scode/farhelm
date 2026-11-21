@@ -13,18 +13,18 @@
 //!   the frame or its close controls (`.app-settings-dialog[aria-label="Settings"]`).
 //! - **The sections.** A list of section buttons on the left, each with its icon and full label and the solid selection
 //!   fill on the one shown, and the shown section beside it under a heading of the same name. Only the sections this
-//!   build has are listed, in SPEC.md's order ([`Section::ALL`]), and App only while the desktop app's updater runs
+//!   build has are listed, in SPEC.md's order ([`Section::all`]), and App only while the desktop app's updater runs
 //!   ([`Section::listed`]). Each section's state lives in the dialog for as long as it is open, so a hidden section
 //!   keeps its pending saves, failure lines and unsaved text (Checkouts' fields); only the shown one is drawn, so Tab
 //!   never reaches a hidden control.
 //! - **Opening and closing.** [`open`] is the gear's entry point. It opens at Sessions with focus on its first switch
 //!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). [`open_at_agent_trust`] is a trust
-//!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
+//!   hint's. It opens the agent's own page and puts focus on its trust switch once the switch can take it. Escape, the
 //!   header's close control and the footer's Close check the same drafts. The close question names changes even on
 //!   hidden pages. Saving from it waits for acknowledged writes before closing. Closing returns focus to the gear
 //!   and sets [`Closings`], so the trust hint band can read the current trust setting.
 //! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
-//!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]; Agent trust's trust
+//!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]. The workspace trust
 //!   switches and Checkouts' spare switch save the same way through their own routes ([`configured`]). While the save
 //!   is in flight the control shows the value being saved (its draft); otherwise it shows what the helm stores, so a
 //!   refused save shows the stored value again, with the failure line under the control until its next save starts
@@ -114,6 +114,7 @@ use std::rc::Rc;
 
 use farhelm_helm_client::PathError;
 use farhelm_input_mapping::Platform;
+use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Context, Entity, FocusHandle,
@@ -204,8 +205,8 @@ pub fn open(
     open_at(Section::Sessions, opener, mark, window, cx)
 }
 
-/// [`open`], at `section` with focus on its first control (on the dialog itself at Appearance, Terminal and Agent
-/// trust, [`Section::first`]). The screenshot goldens call it for each section they picture; [`open_at_agent_trust`]
+/// [`open`], at `section` with focus on its first control (on the dialog itself for pages whose first control needs
+/// its own focus handling, [`Section::first`]). The screenshot goldens call it for each section. [`open_at_agent_trust`]
 /// opens through [`open_dialog`], the form that also hands back the dialog.
 pub(crate) fn open_at(
     section: Section,
@@ -292,24 +293,13 @@ pub(crate) struct Closings;
 
 impl gpui::Global for Closings {}
 
-/// Open Settings at Agent trust with focus on `agent`'s switch: a trust hint band's Settings button (SPEC.md: "Trust
-/// hints instead open agent trust at the relevant switch and scroll its block into view"). `opener` and `mark` are as
-/// [`open`]'s: the hint's button and the mark taken in its click handler.
+/// The trust hint band's Settings button opens the agent's own page at its trust switch. The hint's button and its
+/// click mark are the opener and mark, as in [`open`].
 ///
 /// The switch is unavailable until the section's read of the agent's trust answers ([`agent_trust`]), and an
-/// unavailable control cannot hold focus, so the dialog opens with focus on itself and moves focus to the switch once
-/// the read has answered, scrolling the switch into view ([`SettingsDialog::trust_known`]). That matters because only
-/// Claude's switch is always visible when the dialog opens: Muse's and Pi's lie below the fold at the dialog's full
-/// height, and Codex's too when the window caps the dialog's height. Nothing is asked of the focus coordinator until
-/// the read answers, so until then only the user moving on since `mark` (any key press or click, a click that leaves
-/// focus on the dialog included) or focus leaving the dialog stops the move. Once the read has answered, the move waits
-/// in the coordinator for the frame that draws the switch available, and any other focus move made before it lands
-/// drops it. If the read fails, focus stays on the dialog, beside the failure line.
-///
-/// NOTE: The reveal shows the switch, not the agent's whole block that SPEC.md's "scroll its block into view" names:
-/// for a switch that started below the fold, the help under it (and Muse's hint switch) can stay below the fold. This
-/// is accepted as it stands: revealing the whole block would take a change in the focus coordinator, and none is
-/// requested (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
+/// unavailable control cannot hold focus. The dialog holds focus until the read succeeds and the coordinator sees
+/// an available switch. A key or click after `mark`, including a click that leaves focus in place, ends the handover.
+/// When the read fails, the dialog keeps focus and shows the failure beside the switch.
 ///
 /// NOTE: Trust is not pushed. A hint band that shows only while its agent's trust is off (SPEC.md) does not learn from
 /// this function that the user turned trust on in Settings: it returns only the layer. As the old band did, the
@@ -321,8 +311,8 @@ pub fn open_at_agent_trust(
     window: &mut Window,
     cx: &mut App,
 ) -> Option<LayerId> {
-    let (layer, dialog) = open_dialog(Section::AgentTrust, opener, mark, window, cx)?;
-    // A fresh dialog has just sent its reads, so the switch is not available yet: focus waits for the answer.
+    let (layer, dialog) = open_dialog(Section::Agent(agent.harness()), opener, mark, window, cx)?;
+    // The switch becomes available in the first frame after the trust read answers.
     let handover = Handover {
         target: Target::Trust(agent),
         mark: *mark,
@@ -537,10 +527,13 @@ fn preferences(collections: &farhelm_helm_client::Collections) -> Option<&Prefer
     collections.get::<Preferences>(PREFERENCES_KEY)
 }
 
+const NO_AGENT_SETTINGS: &str = "There are no settings to configure for this agent.";
+const NO_AGENT_SETTINGS_ID: &str = "settings-agent-empty";
+
 /// A section of the dialog.
 ///
-/// Adding one is local: a variant here, its entry in [`Section::ALL`] at its place in SPEC.md's order, its key, label
-/// and icon, its body in [`SettingsDialog::body`], and whatever state it keeps in [`SettingsDialog`].
+/// Ordinary pages have an explicit order. Agent pages are derived from the launch harnesses so an agent appears even
+/// when Farhelm has no settings for it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Section {
     Sessions,
@@ -554,7 +547,7 @@ pub(crate) enum Section {
     Credentials,
     Terminal,
     Checkouts,
-    AgentTrust,
+    Agent(LaunchHarness),
     Notifications,
     /// The desktop app's own automatic-updates switch, listed only while its updater runs ([`Section::listed`]).
     App,
@@ -562,22 +555,31 @@ pub(crate) enum Section {
 
 impl Section {
     /// Settings navigation and search share this order so results follow the same sequence as the section list.
-    const ALL: &[Section] = &[
-        Section::Sessions,
-        Section::Appearance,
-        Section::Terminal,
-        Section::Notifications,
-        Section::App,
-        Section::Hosts,
-        Section::Checkouts,
-        Section::Containers,
-        Section::Recipes,
-        Section::Tensorlake,
-        Section::AgentTrust,
-        Section::Credentials,
-    ];
+    fn all() -> impl Iterator<Item = Section> {
+        [
+            Section::Sessions,
+            Section::Appearance,
+            Section::Terminal,
+            Section::Notifications,
+            Section::Credentials,
+            Section::App,
+            Section::Hosts,
+            Section::Checkouts,
+            Section::Containers,
+            Section::Recipes,
+            Section::Tensorlake,
+        ]
+        .into_iter()
+        .chain(
+            LaunchHarness::ALL
+                .iter()
+                .copied()
+                .filter(|harness| !harness.is_shell())
+                .map(Section::Agent),
+        )
+    }
 
-    /// Whether the dialog lists this section in this app: every section in [`Section::ALL`], except App, which only a
+    /// Whether the dialog lists this section in this app: every section in [`Section::all`], except App, which only a
     /// desktop app whose updater runs has (SPEC.md: "followed by **App** only in a desktop app whose updater is
     /// active"). The updater's own answer decides, so no platform or build is checked here.
     fn listed(self, cx: &App) -> bool {
@@ -592,26 +594,31 @@ impl Section {
             | Section::Credentials
             | Section::Terminal
             | Section::Checkouts
-            | Section::AgentTrust
+            | Section::Agent(_)
             | Section::Notifications => true,
         }
     }
 
-    /// The section's stable key, which its button's element id is built from.
+    /// Search uses the same stable suffix as the navigation button.
     fn key(self) -> &'static str {
+        self.button_id().trim_start_matches("settings-section-")
+    }
+
+    /// Element IDs stay the same as settings move within a page or groups change position.
+    fn button_id(self) -> &'static str {
         match self {
-            Section::Sessions => "sessions",
-            Section::Appearance => "appearance",
-            Section::Hosts => "hosts",
-            Section::Recipes => "recipes",
-            Section::Tensorlake => "tensorlake",
-            Section::Containers => "containers",
-            Section::Credentials => "credentials",
-            Section::Terminal => "terminal",
-            Section::Checkouts => "checkouts",
-            Section::AgentTrust => "agent-trust",
-            Section::Notifications => "notifications",
-            Section::App => "app",
+            Section::Sessions => "settings-section-sessions",
+            Section::Appearance => "settings-section-appearance",
+            Section::Hosts => "settings-section-hosts",
+            Section::Recipes => "settings-section-recipes",
+            Section::Tensorlake => "settings-section-tensorlake",
+            Section::Containers => "settings-section-containers",
+            Section::Credentials => "settings-section-credentials",
+            Section::Terminal => "settings-section-terminal",
+            Section::Checkouts => "settings-section-checkouts",
+            Section::Agent(harness) => crate::harness::settings_button_id(harness),
+            Section::Notifications => "settings-section-notifications",
+            Section::App => "settings-section-app",
         }
     }
 
@@ -627,7 +634,7 @@ impl Section {
             Section::Credentials => "Credentials",
             Section::Terminal => "Terminal",
             Section::Checkouts => "Checkouts",
-            Section::AgentTrust => "Agent trust",
+            Section::Agent(harness) => crate::harness::name(harness),
             Section::Notifications => "Notifications",
             Section::App => "App",
         }
@@ -645,7 +652,7 @@ impl Section {
             Section::Credentials => Icon::Lock,
             Section::Terminal => Icon::Terminal,
             Section::Checkouts => Icon::Branch,
-            Section::AgentTrust => Icon::AgentTrust,
+            Section::Agent(harness) => crate::harness::icon(crate::harness::glyph(harness)),
             Section::Notifications => Icon::Bell,
             Section::App => Icon::App,
         }
@@ -654,7 +661,7 @@ impl Section {
     /// The control focus starts on when Settings opens at this section: its first switch. `None` for Appearance and
     /// Terminal, whose first control is a radio group: its options' focus handles live in the component's own element
     /// state, out of the dialog's reach, so opening there focuses the dialog itself (see [`open_at`]). Nothing in the
-    /// app opens Settings at either; only their goldens do. `None` for Agent trust too, whose first switch is
+    /// app opens Settings at either; only their goldens do. `None` for agent pages too, whose trust switch is
     /// unavailable until the section's read answers ([`open_at_agent_trust`]), and for Checkouts, whose first control
     /// is a text field that is read-only until its read answers, and Credentials, Recipes and Tensorlake, whose
     /// controls wait for their reads too ([`credentials`], [`recipes`], [`tensorlake`]); only their goldens open at any
@@ -674,7 +681,7 @@ impl Section {
             Section::Credentials => None,
             Section::Terminal => None,
             Section::Checkouts => None,
-            Section::AgentTrust => None,
+            Section::Agent(_) => None,
             Section::Notifications => None,
             Section::App => None,
         }
@@ -705,23 +712,21 @@ pub(crate) struct SettingsDialog {
     /// Terminal's tunnel switch: its off save, the last failure in either direction and its focus handle
     /// ([`terminal::tunnel_switch`]).
     tunnels: TunnelConsent,
-    /// Agent trust's switches, in [`TrustAgent::ALL`]'s order. What they know comes from the read the section sends
-    /// the first time it is shown in this opening; `trust_read` says whether it was sent.
+    /// Trust switches, in [`TrustAgent::ALL`]'s order. Each page reads its own switch the first time it is shown.
     trust: Vec<Trust>,
-    trust_read: bool,
     /// Checkouts' two explicitly saved fields, made the first time the section is shown in this opening, which is when
-    /// they read their routes (the pattern Agent trust follows).
+    /// they read their routes.
     checkout_fields: Option<CheckoutFields>,
     /// Checkouts' spare switch. Its read is sent with the fields', so `checkout_fields` also says whether it was sent.
     spare: Configured,
     spare_focus: FocusHandle,
     /// Notifications' ntfy alerts form, made the first time the section is shown in this opening, which is when it
-    /// reads the helm's settings (the pattern Agent trust follows).
+    /// reads the helm's settings once for this opening.
     ntfy: Option<Entity<ntfy::NtfyAlerts>>,
     /// Terminal's file-types field, made the first time the section is shown in this opening ([`file_types`]).
     file_types: Option<Entity<file_types::FileTypes>>,
     /// The Containers section, made the first time it is shown in this opening, which is when it reads the helm's
-    /// container hosts and leftovers (the pattern Agent trust follows).
+    /// container hosts and leftovers.
     containers: Option<Entity<containers::Containers>>,
     /// App's automatic-updates switch: its focus handle and the reason its last press was not saved ([`app`]).
     app: app::AppUpdates,
@@ -812,9 +817,9 @@ impl SettingsDialog {
                     agent,
                     state: Configured::new(),
                     focus: cx.focus_handle().tab_stop(true),
+                    read_started: false,
                 })
                 .collect(),
-            trust_read: false,
             checkout_fields: None,
             spare: Configured::new(),
             spare_focus: cx.focus_handle().tab_stop(true),
@@ -857,8 +862,8 @@ impl SettingsDialog {
         Some(self.switches[Self::index(first)].focus.clone())
     }
 
-    /// Show `section`. Every section's state stays as it is: only which one is drawn changes. Showing Agent trust for
-    /// the first time in this opening reads the agents' trust choices, and showing Checkouts for the first time makes
+    /// Show `section`, keeping each page's state while it is hidden. Each agent's section reads its trust choice once
+    /// per opening. Showing Checkouts for the first time makes
     /// its fields (which read their routes) and reads the spare switch, showing Notifications for the first time makes
     /// its form, which reads the helm's ntfy settings, and showing Containers for the first time makes its section,
     /// which reads the leftovers and asks the helm to check every container host. Showing Credentials makes it the
@@ -952,14 +957,15 @@ impl SettingsDialog {
                 });
             });
         }
-        if section == Section::AgentTrust && !self.trust_read {
-            self.trust_read = true;
-            for agent in TrustAgent::ALL {
-                let dialog = cx.weak_entity();
-                agent.read(cx, move |answer, cx| {
-                    let _ = dialog.update(cx, |dialog, cx| dialog.trust_known(agent, answer, cx));
-                });
-            }
+        if let Section::Agent(harness) = section
+            && let Some(agent) = TrustAgent::for_harness(harness)
+            && !self.trust[agent.index()].read_started
+        {
+            self.trust[agent.index()].read_started = true;
+            let dialog = cx.weak_entity();
+            agent.read(cx, move |answer, cx| {
+                let _ = dialog.update(cx, |dialog, cx| dialog.trust_known(agent, answer, cx));
+            });
         }
         cx.notify();
     }
@@ -1474,33 +1480,41 @@ impl SettingsDialog {
                     .chain(std::iter::once(card::rows([spare], cx).into_any_element()))
                     .collect()
             }
-            Section::AgentTrust => self
-                .trust
-                .iter()
-                .map(|trust| {
-                    let agent = trust.agent;
+            Section::Agent(harness) => match TrustAgent::for_harness(harness) {
+                Some(agent) => {
+                    let trust = &self.trust[agent.index()];
                     let weak = cx.weak_entity();
-                    agent_trust::block(
-                        trust,
-                        &self.refused,
-                        move |on, _, cx| {
-                            let _ = weak.update(cx, |dialog, cx| {
-                                let index = agent.index();
-                                dialog.toggle_configured(
-                                    agent.id(),
-                                    move |dialog| &mut dialog.trust[index].state,
-                                    on,
-                                    |on| agent.command(on),
-                                    cx,
-                                )
-                            });
-                        },
-                        |choice| self.switch(choice, preferences, cx),
-                        cx,
-                    )
-                    .into_any_element()
-                })
-                .collect(),
+                    vec![
+                        agent_trust::block(
+                            trust,
+                            &self.refused,
+                            move |on, _, cx| {
+                                let _ = weak.update(cx, |dialog, cx| {
+                                    let index = agent.index();
+                                    dialog.toggle_configured(
+                                        agent.id(),
+                                        move |dialog| &mut dialog.trust[index].state,
+                                        on,
+                                        |on| agent.command(on),
+                                        cx,
+                                    )
+                                });
+                            },
+                            |choice| self.switch(choice, preferences, cx),
+                            cx,
+                        )
+                        .into_any_element(),
+                    ]
+                }
+                None => vec![
+                    div()
+                        .id(NO_AGENT_SETTINGS_ID)
+                        .role(Role::Label)
+                        .aria_label(NO_AGENT_SETTINGS)
+                        .child(card::help(NO_AGENT_SETTINGS, cx))
+                        .into_any_element(),
+                ],
+            },
             Section::Notifications => std::iter::once(self.sounds(preferences, cx))
                 .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
                 .collect(),

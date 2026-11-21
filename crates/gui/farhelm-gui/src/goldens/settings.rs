@@ -1,6 +1,5 @@
-//! Golden scenes for the Settings dialog, one scene per section, a few states of its Recipes section, and Tensorlake
-//! with a key saved and its list of sandboxes not on this helm. Agent trust has a second viewport for its last
-//! block. The scene list itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
+//! Golden scenes for the Settings dialog. The agent pages cover Claude's caution, Antigravity's directory-trust
+//! controls and an agent with no controls. `SCENES` in `mod.rs` names each scene and sets its viewport.
 
 use crate::focus::Mark;
 use crate::{session, test_support};
@@ -21,11 +20,11 @@ enum RecipeEditorFixture {
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-tensorlake`,
-/// `settings-containers`, `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-agent-trust`,
+/// `settings-containers`, `settings-credentials`, `settings-terminal`, `settings-checkouts`, `settings-claude`,
 /// `settings-notifications` and `settings-app`): focus on the section's first switch (on the dialog itself at
-/// Appearance, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, Agent trust and Notifications),
-/// naming and automatic remote-host updates on because the row stores no choice for either. Agent trust's reads of
-/// each agent's trust, sent as it opens, are answered at once with the trust off and the hint not dismissed,
+/// Appearance, Recipes, Tensorlake, Containers, Credentials, Terminal, Checkouts, agent pages and Notifications),
+/// naming and automatic remote-host updates on because the row stores no choice for either. The displayed agent's
+/// trust read is answered at once with the trust off and the hint shown,
 /// Checkouts' reads as the reference stack had them: no default folder, no post-clone command, and a checkout kept
 /// ready, Notifications' read of the ntfy settings with the helm's defaults
 /// (off, `https://ntfy.sh`, no topic, Default priority, no token), Credentials' and Tensorlake's reads of the account
@@ -762,19 +761,37 @@ pub(super) fn settings_checkouts_capped(
     settings_scroll_end(state, window, cx)
 }
 
-/// Agent trust at the top of the section, the view paired with the old app's reference.
-pub(super) fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
-    settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
+/// Claude's trust switch, its caution and its hint switch belong to the same page.
+pub(super) fn settings_claude_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::LaunchHarness;
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(LaunchHarness::Claude),
+        window,
+        cx,
+    );
 }
 
-/// Start at the same section and stage a scroll to show Antigravity's switch, caveats and hint below the fold.
-pub(super) fn settings_agent_trust_end_setup(
-    state: &SceneState,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    settings_agent_trust_setup(state, window, cx);
-    stage_scroll_end(state, false);
+/// Antigravity's trust applies to ordinary directories, which its help and hint switch explain.
+pub(super) fn settings_antigravity_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::LaunchHarness;
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(LaunchHarness::Antigravity),
+        window,
+        cx,
+    );
+}
+
+/// An agent with no settings still has a page so someone looking for it can find that answer.
+pub(super) fn settings_cursor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use farhelm_proto::LaunchHarness;
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(LaunchHarness::Cursor),
+        window,
+        cx,
+    );
 }
 
 /// A pending focus reveal can move the viewport back to the top. Finish only after the laid-out body reaches its end.
