@@ -114,7 +114,9 @@ kebab case and unique within the page. `steps` is a function taking the engine's
 annotations before starting the app. Use the element IDs in the GPUI source (`.id(...)`; a `debug_selector` name is not
 a target the bridge can see), and wait for the state the shot needs rather than adding delays. Steps never launch a
 session or change a setting. The optional `park` is an `id:` target for a static spot that has no hover or tooltip
-reaction and stays clear of overlays; capture hovers it directly instead of searching.
+reaction and stays clear of overlays; capture hovers it directly instead of searching. When automatic parking finds no
+quiet spot, the failure names the candidates and why they were rejected. The report shows up to twelve reasons, with a
+count of any others, and puts the hover attempts the bridge refused first.
 
 A target may name a staged session or host by its scenario name, `{session:<title>}` or `{host:<key>}`, wherever the
 facade, a region, a park spot or an annotation takes one: the app's ids for rows and rail entries carry the helm's

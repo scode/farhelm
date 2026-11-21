@@ -158,9 +158,9 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   workspace batteries because they need the software renderer the script selects, and needing read access to the storage
   repository that holds their references (or a fetched copy in `FARHELM_GOLDENS_DIR`)
 - `python3 -B scripts/gui-goldens.py --self-test` (fetching and publishing the golden references)
-- `python3 -B scripts/test-gui-agent.py`, and one end-to-end run of the GPUI app harness from `.agents/validation.md`
-  (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a `screenshot`, then `stop`), which needs `mutter` and
-  lavapipe
+- `python3 -B scripts/test-gui-agent.py` (including the bounded automatic parking report), and one end-to-end run of the
+  GPUI app harness from `.agents/validation.md` (`scripts/gui-agent.py <run dir> start`, a `snapshot` and a
+  `screenshot`, then `stop`), which needs `mutter` and lavapipe
 - `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot batch page)
 - `python3 -B scripts/test-docs-shots.py` (repeatable page and shot selection, draft output boundaries, frozen release
   shots, crop geometry and capture failures against a stand-in harness); one live `scripts/docs-screenshots.sh --local`

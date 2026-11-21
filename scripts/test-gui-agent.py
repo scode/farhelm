@@ -1718,8 +1718,8 @@ class CaptureTest(unittest.TestCase):
         only with its centre outside every drawn hover or tooltip element (an undrawn one counts for nothing), never
         without a drawn area itself, and only as the first entry of its id path, which `id:<path>` resolves to."""
         tree = {"nodes": [
-            {"visible": rect(0, 0, 100, 100), "flags": {"hover": True}},
-            {"visible": rect(200, 0, 50, 50), "flags": {"tooltip": True}},
+            {"id": "session-list", "visible": rect(0, 0, 100, 100), "flags": {"hover": True}},
+            {"label": "Help", "visible": rect(200, 0, 50, 50), "flags": {"tooltip": True}},
             {"visible": rect(300, 0, 0, 0), "flags": {"hover": True}},
             {"visible": rect(400, 0, 50, 50), "flags": {"mouse": True}},
         ]}
@@ -1733,6 +1733,13 @@ class CaptureTest(unittest.TestCase):
             {"key": {"path": ""}, "visible": rect(600, 0, 50, 50)},
         ]
         self.assertEqual(gui_agent.park_targets(entries, tree), ["id:brand", "id:plain"])
+        rejected = []
+        self.assertEqual(gui_agent.park_targets(entries, tree, rejected=rejected), ["id:brand", "id:plain"])
+        self.assertEqual(rejected, [
+            ("id:rows/row", "its centre is inside the reacting element session-list"),
+            ("id:rail/help", "its centre is inside the reacting element Help"),
+            ("id:hidden", "the element has no visible area"),
+        ])
 
     def needles(self) -> tuple[list[str], list[str]]:
         """The needles for a run in this test's directory, reached through a symlink so its two spellings differ."""
@@ -1957,6 +1964,44 @@ class CaptureTest(unittest.TestCase):
 
         with self.assertRaisesRegex(RuntimeError, "hover id:title.*covered"):
             self.capture_with(refused, "--keep-focus", "--park", "id:title")
+
+    def test_parking_failure_names_filtered_and_refused_candidates_with_a_bound(self):
+        """A failed capture should identify both reacting elements and refusals from the actual hover command.
+
+        A frame with many filtered candidates still shows the bridge's reason first. It reports the number of
+        hidden entries and gives up before focusing the terminal or taking a screenshot.
+        """
+        bridge, asked = self.stand_in_bridge((2560, 1600), {"width": 1280.0, "height": 800.0, "scale": 2.0})
+        long_path = "layer/" * 60 + "brand"
+
+        def crowded(run, record, args, capture=False):
+            response = bridge(run, record, args, capture=capture)
+            if args[0] == "snapshot":
+                entries = json.loads(response.stdout)["entries"]
+                entries[1]["key"]["path"] = long_path
+                entries.extend({"key": {"path": f"filtered-{i}"}, "visible": rect(10, 10, 9, 9)}
+                               for i in range(13))
+                response.stdout = json.dumps({"entries": entries})
+            elif args[0] == "tree":
+                tree = json.loads(response.stdout)
+                tree["nodes"][0]["id"] = "foreground-row"
+                response.stdout = json.dumps(tree)
+            elif args[0] == "hover":
+                self.assertEqual(args, ["hover", f"id:{long_path}"])
+                response.returncode = 1
+                response.stderr = f"{long_path} (button {'label ' * 90}) is covered by a foreground dialog"
+            return response
+
+        with self.assertRaises(RuntimeError) as failure:
+            self.capture_with(crowded, "--keep-focus")
+        message = str(failure.exception)
+        self.assertIn("/brand: the bridge refused hover:", message)
+        self.assertIn("is covered by a foreground dialog", message)
+        self.assertIn("id:rows: its centre is inside the reacting element foreground-row", message)
+        self.assertIn("... and 3 more rejected candidates", message)
+        self.assertLess(len(message), 1600, "the bridge supplied a long reason")
+        self.assertEqual([args for args in asked if args[0] == "hover"], [["hover", f"id:{long_path}"]])
+        self.assertFalse(any(args[0] == "screenshot" for args in asked))
 
 
 class ProcessIdentityTest(unittest.TestCase):

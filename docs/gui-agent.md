@@ -327,7 +327,9 @@ dialog or field whose focus must stay where the shot's steps left it. Pointer pa
 waits, the leak checks before and after, the screenshot, Linux frame crop and size check still run. The docs runner
 always uses this option. Without it the README hero's terminal settling stays as described above.
 
-`--park id:TARGET` hovers the named spot instead of searching, fails if it is covered, and keeps the idle wait.
+`--park id:TARGET` hovers the named spot instead of searching, fails if it is covered, and keeps the idle wait. If the
+automatic search fails, the error identifies the candidates that could not be hovered and the elements that made other
+candidates unsafe. It lists up to twelve reasons, starting with hover refusals, and counts the rest.
 
 Any failure stops with the step and the reason, writes nothing to OUT, and leaves the shot in the run directory to look
 at. A size failure quotes the window's points and scale. A window smaller than requested means the screen's usable area
