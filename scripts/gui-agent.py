@@ -233,6 +233,11 @@ ENSURE_HOSTS_ENV = "FARHELM_DESKTOP_AGENT_ENSURE_HOSTS"
 # launcher or a template composes names one of these, and a staged scenario's sessions do too.
 STAGED_AGENTS = ("codex", "claude", "muse", "cursor-agent", "opencode", "goose", "pi", "omp", "grok", "agy")
 
+# The programs the helm launches for its shell choices (also in `program`), which get no wrapper: a shell is no
+# vendor's program, so a staged shell session runs the machine's own shell under the private HOME, which holds nothing
+# of the caller's. A `bash` wrapper would also shadow the bash that a session's own commands run by name.
+STAGED_REAL_SHELLS = ("bash", "zsh")
+
 # The file a wrapper runs, with `sh`, from the session's working directory when it is there: a scenario writes one into
 # each session's scratch directory to give it its own replay (`exec <fixtures> fake-agent --script replay ... "$@"`).
 # The wrapper passes it every argument the session's command line and the supervisor gave the agent.
@@ -1167,7 +1172,8 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
 # `LaunchPermission` in crates/farhelm-proto/src/launch.rs (snake_case; scripts/test-gui-agent.py checks them against
 # that source). `custom` is left out of the permissions on purpose: it needs its own flags, which a scenario has no
 # field for.
-LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok", "antigravity")
+LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok", "antigravity",
+                    "bash", "zsh")
 LAUNCH_EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")
 LAUNCH_PERMISSIONS = ("guarded", "yolo", "approve", "smart_approve", "chat")
 

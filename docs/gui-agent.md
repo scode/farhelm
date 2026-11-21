@@ -179,14 +179,15 @@ are removed, and so are credentials and vendor settings, by name pattern: anythi
 (`ANTHROPIC_`, `CLAUDE_`, `OPENAI_`, `CODEX_`, `AWS_`, which covers the cloud credentials Claude Code's Bedrock mode
 uses, and a few more) or ending in `_KEY`, `_TOKEN`, `_SECRET` or `_PASSWORD`, and the caller's ssh agent
 (`SSH_AUTH_SOCK`), which nothing in the run needs since the private sshd has a key of its own. There is no option to
-turn any of that off. `staging/bin` holds a wrapper for every harness name that runs the fake agent: the script
-`.staged-agent` in the session's working directory with `sh` when there is one (that is how a scenario gives each
-session its own replay), and the basic script otherwise, with every argument passed on. The private HOME's login profile
-puts the wrappers first on PATH again after the system's profile, because the supervisor starts sessions through a login
-shell and a system profile may rebuild PATH (macOS's `path_helper` does). `start` refuses a build directory that holds a
-program of a harness's name, because the launch shim puts the directory of the supervisor's `farhelm` ahead of
-everything else on a session's PATH. `scripts/test-gui-agent.py` resolves every name through a staged run's PATH and
-through the machine's own login shell and checks each reaches its wrapper.
+turn any of that off. The helm's shell choices (`bash`, `zsh`) are not wrapped: a staged shell session runs the
+machine's own shell under the private HOME. `staging/bin` holds a wrapper for every harness name that runs the fake
+agent: the script `.staged-agent` in the session's working directory with `sh` when there is one (that is how a scenario
+gives each session its own replay), and the basic script otherwise, with every argument passed on. The private HOME's
+login profile puts the wrappers first on PATH again after the system's profile, because the supervisor starts sessions
+through a login shell and a system profile may rebuild PATH (macOS's `path_helper` does). `start` refuses a build
+directory that holds a program of a harness's name, because the launch shim puts the directory of the supervisor's
+`farhelm` ahead of everything else on a session's PATH. `scripts/test-gui-agent.py` resolves every name through a staged
+run's PATH and through the machine's own login shell and checks each reaches its wrapper.
 
 A staged run also turns `--scripted-hosts` on, with no way to turn it off, also when `scripts/gui-lifecycle.py`
 relaunches it (every launch through the bridge, `start`'s and a relaunch's, decides from the run's record;

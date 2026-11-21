@@ -127,7 +127,8 @@ def select_shots(
     requested = set(recapture)
     selectors = set(only or [])
     for name in sorted((selectors & frozen) - requested):
-        raise ValueError(f"--only {name!r}: frozen release shot; use --recapture-release-shot {name} to replace it")
+        raise ValueError(f"--only {name!r}: frozen release shot; use --recapture-release-shot {name} to replace it, "
+                         f"with no --only or with --only {RELEASE_PAGE}")
     for name in sorted(requested):
         if not name.startswith(f"{RELEASE_PAGE}/") or name not in frozen:
             raise ValueError(f"--recapture-release-shot {name}: not a published release shot "

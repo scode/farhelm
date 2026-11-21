@@ -65,13 +65,14 @@ All subcommands take `--scratch <dir>` (outside the checkout, in your scratch di
    ships the checkout's files (untracked ones git would not ignore included, for page modules being written) and the app
    binaries as `gui` does. Pass every affected page or shot in one invocation. The harness keeps a page's selected shots
    together, spreads pages round-robin across available members (up to `--members`, one per page by default, within the
-   budget), and starts the app once per member. A full capture uses one member. PNGs come back to
-   `<out>/docs/shots/<page>/`. A run from shipped binaries is never publishable. `docs --build-there` is the publishable
-   one: it ships the source with main recorded beside it and no binaries, and the member builds and captures every page
-   in one run, which writes the capture record (`<out>/docs/shots/capture.json`) a publish needs. A cold build there
-   takes most of the run. Captures run as a sandbox account of their own, `fhshots`, since the capture's leak check
-   refuses any shot that draws the capturing account's name, and the sandbox's own account, `user`, is a word the app
-   prints (the Add host dialog's `user@host`).
+   budget), and starts the app once per member. A full capture uses one member. Before claiming a member, a run clears
+   what it replaces in `<out>/docs/shots/`: every PNG for a full run, the selected pages' and shots' PNGs and the
+   capture record for a selected one. PNGs come back to `<out>/docs/shots/<page>/`. A run from shipped binaries is never
+   publishable. `docs --build-there` is the publishable one: it ships the source with main recorded beside it and no
+   binaries, and the member builds and captures every page in one run, which writes the capture record
+   (`<out>/docs/shots/capture.json`) a publish needs. A cold build there takes most of the run. Captures run as a
+   sandbox account of their own, `fhshots`, since the capture's leak check refuses any shot that draws the capturing
+   account's name, and the sandbox's own account, `user`, is a word the app prints (the Add host dialog's `user@host`).
 4. Read each `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh and tmux for a
    Rust shard; the binaries' presence and unresolved libraries for a GUI run; then the summary, failures and any runtime
    `SKIPPED` lines. A failed run's recorder directories come back as `runs.tar.gz`; keep them as evidence. Rust shards
