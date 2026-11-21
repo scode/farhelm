@@ -110,10 +110,10 @@ pub const TAB_ID_ENV_VAR: &str = "FARHELM_TAB_ID";
 /// An earlier cut did that by EXCLUSION — sweep the session marker,
 /// subtract anything wearing a tab marker — and it had a hole that only
 /// shows up when farhelm supervises farhelm. A supervisor running inside
-/// somebody's tab inherits that tab's `FARHELM_TAB_ID`, its terminal hosts
-/// inherit it, and every INNER agent it launches inherits it too. Under
-/// exclusion, every one of those inner agents looks like a tab process and
-/// escapes its own session's stop entirely. Positive marking closes it:
+/// somebody's tab inherits that tab's `FARHELM_TAB_ID`. Terminal hosts start
+/// with an empty environment, but a child launch spec can carry inherited
+/// variables. Under exclusion, a stale outer tab marker in that spec could
+/// make the inner agent escape its own session's stop. Positive marking closes it:
 /// an inner agent carries `FARHELM_AGENT_ID=<its own session>`, which is
 /// what stop selects on, and the stale outer tab marker decides nothing.
 ///
@@ -1224,10 +1224,9 @@ pub fn exec_launch_spec_with_seam(
     //
     // Among the things deliberately REMOVED is the opposite kind's marker
     // (see [`AGENT_ID_ENV_VAR`]): a supervisor running inside somebody's
-    // farhelm tab passes that tab's `FARHELM_TAB_ID` down through its own
-    // terminal hosts, and an inner agent still wearing it would be filed as a
-    // tab process by its own session's stop sweep and never reaped. This
-    // is the exec that ends that inheritance.
+    // Farhelm tab can carry its outer `FARHELM_TAB_ID` in the child launch
+    // environment. The exec scrubs it so the agent's descendants carry
+    // only this launch's ownership markers.
     let err = agent_command(&spec).exec();
     let report = format!(
         "exec_failed argv0={} errno={}: {err}",

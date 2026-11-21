@@ -862,17 +862,10 @@ pub enum SessionStatus {
     /// exists — there is no "error, but no detail" case the way there is
     /// an "exited, but its terminal could not reduce it to a code" case.
     Error { detail: String },
-    /// The host rebooted (or, for an agent an earlier release left in its
-    /// private tmux server, the supervisor ended that server at startup) while
-    /// this session's durable last-known outcome was launching or running, and
-    /// the agent's terminal — the only liveness truth this system keeps — did
-    /// not survive that (PLAN_M3.md item 2,
-    /// SPEC.md's Durability section). Distinct from `Unknown`: `Unknown`
-    /// means "not yet asked"; `Interrupted` means "asked, via the one reboot
-    /// detector this system has (a changed stored boot id), and the answer is
-    /// structurally unknowable now, not merely unasked yet." Persists until
-    /// the user acts (restart, archive, delete); nothing — including another
-    /// supervisor restart on the same boot — clears it on its own.
+    /// A reboot or retirement of a legacy tmux terminal interrupted a
+    /// session recorded as launching, running or stopping. The terminal
+    /// can no longer report how the program ended. This outcome persists
+    /// until the user acts or the supervisor finds a definitive launch error.
     Interrupted,
 }
 

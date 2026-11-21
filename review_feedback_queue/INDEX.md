@@ -52,10 +52,6 @@ consequences.
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md`](trailing-environment-delete-docs-overstate-admission-timeout-as-decision-bound.md)
-  — Delete documentation overstates the admission timeout's decision guarantee. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`omitted-session-row-drops-live-tabs.md`](omitted-session-row-drops-live-tabs.md) — A list update can take away the
   shell tab you’re using and make the agent terminal receive your next typing. The shell on the host can keep running.
 
@@ -136,10 +132,6 @@ consequences.
 - [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
-
-- [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
-  documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
-  operation may perform host I/O while holding the lock.
 
 - [`stop-wait-test-releases-exit-before-wait-witness.md`](stop-wait-test-releases-exit-before-wait-witness.md) — The
   regression can miss Stop ceasing to wait for final terminal output, leaving a lost opportunity to return the complete
@@ -289,32 +281,12 @@ consequences.
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md`](trailing-interrupted-doc-defines-only-reboot-attribution-after-retirement.md)
-  — Interruption documentation still claims boot-id change is its only detector. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
-  — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md)
   — Unmarked tab-shell cleanup loses its integrated regression oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-checkout-status-borrower-reload-keeps-origin-runtime.md`](trailing-checkout-status-borrower-reload-keeps-origin-runtime.md)
   — borrower reload fixture retains a competing origin runtime. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-tab-settle-gate-bare-link-out-of-scope.md`](trailing-tab-settle-gate-bare-link-out-of-scope.md) —
-  TabSettleGate retains an unresolved documentation link through the pinned tip. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-restart-definitive-comment-promises-no-external-effects.md`](trailing-restart-definitive-comment-promises-no-external-effects.md)
-  — Definitive-Restart documentation overpromises absence of external effects. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-restart-reply-stale-tab-rediscovery-comment.md`](trailing-restart-reply-stale-tab-rediscovery-comment.md) —
-  Restart reply comment promises a removed tab rediscovery path. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
 - [`trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md`](trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md)
@@ -333,21 +305,9 @@ consequences.
   — deleted ambiguous-create test loses published-handle and pending-intent oracles. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md`](trailing-held-start-documentation-retains-the-retired-uncancelled-tmux-child-lifetime.md)
-  — held-start documentation retains the retired uncancelled-tmux child lifetime. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-deleted-startup-error-artifact-readonly-oracle.md`](trailing-deleted-startup-error-artifact-readonly-oracle.md)
   — Deleted reload test loses read-only Error-artifact ownership oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-host-scan-lock-map-forbids-required-host-io.md`](trailing-host-scan-lock-map-forbids-required-host-io.md) —
-  Host-scan lock map forbids the terminal calls its fence must span. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md`](trailing-sentinel-reload-comment-denies-recorded-host-delete-fallback.md)
-  — Reload comment incorrectly makes the runtime handle Delete's only host ownership record. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md`](trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md)
   — Host-backed teardown removes the owner-exit test's exit barrier. Abbreviated collection; confidence, proposed
@@ -357,17 +317,9 @@ consequences.
   — Terminal-less test documentation treats host loss as proof no program survives. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md`](trailing-supervisor-clone-doorway-testdoc-universal-host-requirement.md)
-  — Creating-verb test documentation still requires a host for every clone. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md`](trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md)
   — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-stop-comment-falsely-bans-retaining-original-final-screen.md`](trailing-stop-comment-falsely-bans-retaining-original-final-screen.md)
-  — Stop comment incorrectly says full-screen final frames are never retained. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md`](trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md)
   — List-limit test checks an undrained reply cache. Abbreviated collection; confidence, proposed dismissals and
@@ -380,10 +332,6 @@ consequences.
 - [`trailing-test-one-shot-sample-before-host-catch-up.md`](trailing-test-one-shot-sample-before-host-catch-up.md) —
   Persistence test can skip an uncaught-up host. Abbreviated collection; confidence, proposed dismissals and unresolved
   consequences are preserved in the entry.
-
-- [`trailing-sampler-docs-promise-deleted-capture-failure-reset.md`](trailing-sampler-docs-promise-deleted-capture-failure-reset.md)
-  — Sampler field documentation still promises the deleted capture-failure reset. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-removed-completed-keyed-create-reboot-replay-oracle.md`](trailing-removed-completed-keyed-create-reboot-replay-oracle.md)
   — Deleting the kind test also removes the completed-create reboot retry oracle. Abbreviated collection; confidence,
@@ -409,10 +357,6 @@ consequences.
   — Migrated seal CHECK assertion accepts a duplicate-key failure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md`](trailing-outcome-backfill-comment-falsely-promises-live-probe-after-legacy-retirement.md)
-  — Outcome-backfill comment promises live reconciliation that legacy rows no longer receive. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md`](trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md)
   — Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
@@ -427,10 +371,6 @@ consequences.
 
 - [`trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md`](trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md)
   — shared gate docs claim hook installations that the module no longer has. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md`](trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md)
-  — Connection writer diagnostics still point to the deleted stream checkpoint. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
