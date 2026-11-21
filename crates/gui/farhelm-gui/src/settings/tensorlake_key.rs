@@ -259,6 +259,7 @@ pub(super) const DASHBOARD_HELP: &str = "Create a key in the Tensorlake dashboar
 /// one with Tensorlake, and keeps each until the dialog closes, so its typed key survives section switches and the
 /// credential editor.
 pub(super) struct TensorlakeKey {
+    pub(super) save_receipt: super::editing::SaveReceipt,
     account: Entity<TensorlakeAccount>,
     /// Where it is drawn ([`Place`]).
     place: Place,
@@ -297,6 +298,7 @@ impl TensorlakeKey {
         });
         let key = Self::key_input(window, cx);
         let form = TensorlakeKey {
+            save_receipt: super::editing::SaveReceipt::default(),
             account,
             place,
             key,
@@ -383,11 +385,33 @@ impl TensorlakeKey {
         self.key.input().set_placeholder(placeholder, window, cx);
     }
 
-    /// Save the typed key. Does nothing while the form is locked or the field is blank, when Save is drawn busy or
-    /// unavailable.
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The Helm never reads the saved key back. An empty field therefore represents an unchanged form.
+    pub(super) fn edit_state(&self) -> super::editing::EditState {
+        super::editing::EditState::of(self.key.draft().is_saving(), self.typed_key().is_some())
+    }
+
+    /// Test and Clear hold Save for this copy of the key field.
+    pub(super) fn holds_save(&self) -> bool {
+        self.working
+    }
+
+    /// Compare keys using the same trimming as Save. The value stays in memory and never goes in the close question.
+    pub(super) fn typed_key(&self) -> Option<&str> {
+        let typed = self.key.draft().value().trim();
+        (!typed.is_empty()).then_some(typed)
+    }
+
+    /// Clear the typed replacement without sending a Clear command for the stored key.
+    pub(super) fn discard(&mut self, cx: &mut Context<Self>) {
+        self.key.discard(self.window, cx);
+        self.outcome = None;
+        cx.notify();
+    }
+
+    /// Save the typed key and report whether the operation was admitted.
+    pub(super) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.locked(cx) || self.key.draft().value().trim().is_empty() {
-            return;
+            return false;
         }
         let started = DraftInput::save(
             self,
@@ -412,9 +436,12 @@ impl TensorlakeKey {
                     Outcome::Accepted(_) => {}
                 }
                 form.hold(cx);
+                form.save_receipt.settle(&settled.outcome, cx);
             },
         );
+        let sent = started.is_ok();
         self.started(started, cx);
+        sent
     }
 
     /// Clear the saved key. Does nothing while the form is locked or no key is saved, when Clear is drawn busy or
@@ -528,6 +555,7 @@ impl Render for TensorlakeKey {
                 }),
             )
             .height(px(choices::FIELD_HEIGHT)),
+            self.typed_key().map(|_| palette),
         );
 
         let unloaded = self.account.read(cx).unreadable().cloned();
@@ -575,18 +603,6 @@ impl Render for TensorlakeKey {
                 let _ = weak.update(cx, |form, cx| form.clear(cx));
             }
         });
-        let save = Button::new(
-            format!("{ID}-save"),
-            "Save",
-            HoverHelp::tooltip("Save this API key for this helm"),
-            Role::Button,
-        )
-        .tier(Tier::Primary)
-        .disabled(key_set.is_none() || self.key.draft().value().trim().is_empty())
-        .busy(busy)
-        .on_click(move |_, window, cx| {
-            let _ = weak.update(cx, |form, cx| form.save(window, cx));
-        });
 
         let outcome = self.outcome().map(|outcome| match outcome {
             Ok(words) => choices::outcome_line(
@@ -626,7 +642,7 @@ impl Render for TensorlakeKey {
             .child(field)
             .child(choices::help(DASHBOARD_HELP, cx))
             .child(choices::help(self.place.elsewhere(), cx))
-            // `.dialog-actions`: Test, Clear and Save at the form's end, in the old order.
+            // Test and Clear stay beside the API key field. Save lives in the Settings footer.
             .child(
                 div()
                     .flex()
@@ -634,8 +650,7 @@ impl Render for TensorlakeKey {
                     .gap(px(8.))
                     .w_full()
                     .child(test)
-                    .child(clear)
-                    .child(save),
+                    .child(clear),
             )
             .children(busy.then(|| {
                 choices::outcome_line(

@@ -188,6 +188,8 @@ pub(super) fn open_settings(cx: &mut VisualTestContext) {
 
 /// The visible part of the Settings page, between its pinned heading and footer.
 const DIALOG_BODY: &str = "settings-body";
+/// All Settings forms put Save in the footer. The host settings and launcher checkout fields keep their own Save.
+const FOOTER_SAVE: &str = "settings-footer-save";
 
 /// Whether the element drawn under `selector` lies wholly inside, top to bottom, the element drawn under `region`: a
 /// control in a scrolling region shows whole only when this holds.
@@ -2502,13 +2504,6 @@ impl Field {
         }
     }
 
-    fn save(self) -> &'static str {
-        match self {
-            Field::Folder => "checkout-folder-save",
-            Field::PostClone => "checkout-post-clone-save",
-        }
-    }
-
     fn path(self) -> &'static str {
         match self {
             Field::Folder => "/api/checkout-root",
@@ -2616,8 +2611,7 @@ fn checkouts_reads_its_routes_once_and_stays_locked_until_they_answer(cx: &mut T
     type_into(cx, Field::PostClone, "typed early");
     assert_eq!(text(cx, Field::Folder), "", "read-only until read");
     assert_eq!(text(cx, Field::PostClone), "", "read-only until read");
-    click(cx, Field::Folder.save());
-    click(cx, Field::PostClone.save());
+    assert!(!drawn(cx, FOOTER_SAVE));
     click(cx, super::checkouts::SPARE_ID);
     assert_eq!(sent(&mut helm), [], "nothing saves before the reads answer");
 
@@ -2632,9 +2626,7 @@ fn checkouts_reads_its_routes_once_and_stays_locked_until_they_answer(cx: &mut T
         "a disabled command shows empty"
     );
     assert_eq!(switch_on(cx, super::checkouts::SPARE_ID), Some(false));
-    click(cx, Field::Folder.save());
-    click(cx, Field::PostClone.save());
-    assert_eq!(sent(&mut helm), [], "an untouched Save writes nothing");
+    assert!(!drawn(cx, FOOTER_SAVE), "unchanged fields have no Save");
     click(cx, section_button(Section::Hosts));
     click(cx, section_button(Section::Checkouts));
     assert_eq!(sent(&mut helm), [], "read once per opening");
@@ -2652,14 +2644,11 @@ fn the_folder_saves_an_edited_draft_trimmed_and_reads_it_back(cx: &mut TestAppCo
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     type_into(cx, Field::Folder, "  ~/edited  ");
-    click(cx, Field::Folder.save());
+    click(cx, FOOTER_SAVE);
     let (id, body) = one_put(&mut helm, Field::Folder.path());
     assert_eq!(body, json!({ "root": "~/edited" }));
     assert_eq!(preference_work(cx), Some(Work::Save));
-    assert_eq!(
-        label_of(cx, Field::Folder.save()).as_deref(),
-        Some("Saving…")
-    );
+    assert!(painted(cx).contains("Saving…"));
     // Typed into the field itself (Save holds focus after its click). The field is read-only, and the draft would put
     // back an edit that got in anyway, so this pins the visible rule, not which of the two guards held.
     type_into(cx, Field::Folder, "x");
@@ -2695,7 +2684,7 @@ fn the_folder_saves_an_edited_draft_trimmed_and_reads_it_back(cx: &mut TestAppCo
         "",
         "the premise: the field is empty"
     );
-    click(cx, Field::Folder.save());
+    click(cx, FOOTER_SAVE);
     let (_, body) = one_put(&mut helm, Field::Folder.path());
     assert_eq!(body, json!({ "root": null }), "an empty folder clears it");
 }
@@ -2709,7 +2698,7 @@ fn a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections(
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     type_into(cx, Field::Folder, "relative-folder");
-    click(cx, Field::Folder.save());
+    click(cx, FOOTER_SAVE);
     let (id, _) = one_put(&mut helm, Field::Folder.path());
     let reason = "fixture: not the relative path 'relative-folder'";
     helm.reply(id, 400, Some(json!(reason)));
@@ -2733,7 +2722,7 @@ fn a_refused_folder_discards_its_draft_and_keeps_the_reason_across_sections(
         click(cx, section_button(Section::Sessions));
         click(cx, section_button(Section::Checkouts));
     }
-    click(cx, Field::Folder.save());
+    assert!(!drawn(cx, FOOTER_SAVE));
     assert_eq!(
         sent(&mut helm),
         [],
@@ -2774,7 +2763,7 @@ fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut 
         "explicit disable shows empty"
     );
     type_into(cx, Field::PostClone, "original edit");
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     let (id, body) = one_put(&mut helm, Field::PostClone.path());
     assert_eq!(body, json!({ "command": "original edit", "expected": "" }));
     let reason = "This checkout setting changed elsewhere.";
@@ -2785,7 +2774,7 @@ fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut 
     assert_eq!(reads[0].1, Field::PostClone.path());
     type_into(cx, Field::PostClone, "typed before the reply");
     assert_eq!(text(cx, Field::PostClone), "", "discarded and read-only");
-    click(cx, Field::PostClone.save());
+    assert!(!drawn(cx, FOOTER_SAVE));
     assert_eq!(sent(&mut helm), []);
 
     helm.reply(reads[0].0, 503, Some(json!("fixture: read failed")));
@@ -2795,7 +2784,7 @@ fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut 
         Some(reason)
     );
     assert!(drawn(cx, "checkout-post-clone-read-error"));
-    assert!(!drawn(cx, Field::PostClone.save()));
+    assert!(!drawn(cx, FOOTER_SAVE));
     click(cx, "checkout-post-clone-retry");
     let reads = sent_reads(&mut helm);
     assert_eq!(reads.len(), 1);
@@ -2811,7 +2800,7 @@ fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut 
         label_of(cx, "checkout-post-clone-error").as_deref(),
         Some(reason)
     );
-    click(cx, Field::PostClone.save());
+    assert!(!drawn(cx, FOOTER_SAVE));
     assert_eq!(
         sent(&mut helm),
         [],
@@ -2821,7 +2810,7 @@ fn a_stale_post_clone_save_waits_for_a_fresh_base_before_editing_again(cx: &mut 
     type_into(cx, Field::PostClone, " # new edit");
     let edited = text(cx, Field::PostClone);
     assert_ne!(edited, "cli command", "the new value is editable");
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     let (_, body) = one_put(&mut helm, Field::PostClone.path());
     assert_eq!(
         body,
@@ -2846,7 +2835,7 @@ fn the_post_clone_command_keeps_its_spacing_and_only_all_whitespace_clears_it(
     cx.simulate_input("printf 'second'  ");
     let chosen = "  printf 'first'\nprintf 'second'  ";
     assert_eq!(text(cx, Field::PostClone), chosen);
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     let (id, body) = one_put(&mut helm, Field::PostClone.path());
     assert_eq!(body, json!({ "command": chosen }));
     helm.reply(id, 204, None);
@@ -2866,7 +2855,7 @@ fn the_post_clone_command_keeps_its_spacing_and_only_all_whitespace_clears_it(
     keys(cx, "enter");
     cx.simulate_input(" ");
     assert_eq!(text(cx, Field::PostClone), "  \n ", "the premise");
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     let (_, body) = one_put(&mut helm, Field::PostClone.path());
     assert_eq!(body, json!({ "command": null }));
 }
@@ -2883,31 +2872,39 @@ fn a_stored_carriage_return_survives_an_edit(cx: &mut TestAppContext) {
     show_checkouts(&mut helm, cx, Value::Null, json!(stored), true);
     assert_eq!(text(cx, Field::PostClone), stored);
     type_into(cx, Field::PostClone, " # edited");
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     let (_, body) = one_put(&mut helm, Field::PostClone.path());
     let sent = body["command"].as_str().unwrap_or_default().to_owned();
     assert!(sent.contains(" # edited"), "{sent:?}");
     assert_eq!(sent.replacen(" # edited", "", 1), stored);
 }
 
-/// SPEC_impl.md, "Work that finishes later": an explicit save is the operation store's work and outlives the dialog
-/// (the old "a pending checkout folder save survives closing settings"). Specified: a folder save in flight when Escape
-/// closes Settings still holds the preference row's key; the helm's reply frees it with nothing more sent, since no
-/// field is left to read the route back for.
+/// An explicit save outlives the close gesture but Settings stays open until it settles. Escape asks, with no
+/// Discard while the folder save is in flight. The done answer sends its read back and closes Settings.
 #[gpui::test]
-fn a_folder_save_in_flight_goes_on_after_the_dialog_closes(cx: &mut TestAppContext) {
+fn a_folder_save_in_flight_holds_settings_open_until_done(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     type_into(cx, Field::Folder, "~/survives-close");
-    click(cx, Field::Folder.save());
+    click(cx, FOOTER_SAVE);
     let (id, _) = one_put(&mut helm, Field::Folder.path());
     keys(cx, "escape");
-    assert!(!any_open(cx), "the premise: Settings closed");
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?")
+    );
+    assert!(
+        !drawn(cx, "prompt-alternative-0"),
+        "the write is already out"
+    );
     assert_eq!(preference_work(cx), Some(Work::Save));
     helm.reply(id, 204, None);
     settle(cx);
+    assert!(!any_open(cx), "the completed save closes Settings");
     assert_eq!(preference_work(cx), None);
-    assert_eq!(sent(&mut helm), []);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, Field::Folder.path());
 }
 
 /// The spare switch follows Agent trust's rules: a failed read never counts as off, a flip saves at once through its
@@ -3133,7 +3130,7 @@ fn a_failed_folder_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppC
         Some("fixture folder read refused")
     );
     assert!(drawn(cx, "checkout-folder-retry"));
-    assert!(!drawn(cx, Field::Folder.save()), "Retry takes Save's place");
+    assert!(!drawn(cx, FOOTER_SAVE), "Retry takes Save's place");
     type_into(cx, Field::Folder, "typed");
     assert_eq!(text(cx, Field::Folder), "", "still read-only");
 
@@ -3146,9 +3143,10 @@ fn a_failed_folder_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppC
     assert_eq!(text(cx, Field::Folder), "~/stored");
     assert!(!drawn(cx, "checkout-folder-retry"));
     assert!(!drawn(cx, "checkout-folder-error"));
-    assert!(drawn(cx, Field::Folder.save()));
+    assert!(!drawn(cx, FOOTER_SAVE));
     type_into(cx, Field::Folder, "/more");
     assert_eq!(text(cx, Field::Folder), "~/stored/more", "editable now");
+    assert!(drawn(cx, FOOTER_SAVE));
 }
 
 /// SPEC.md: "Switching sections preserves unsaved fields", and closing discards them (the dialog's module docs). A
@@ -3167,8 +3165,121 @@ fn an_unsaved_draft_survives_a_section_switch_and_goes_with_the_dialog(cx: &mut 
     assert_eq!(text(cx, Field::PostClone), draft);
     assert_eq!(sent(&mut helm), [], "nothing was saved");
     keys(cx, "escape");
+    click(cx, "prompt-alternative-0");
     show_checkouts(&mut helm, cx, Value::Null, json!("stored"), true);
     assert_eq!(text(cx, Field::PostClone), "stored");
+}
+
+/// Checkouts' single footer Save must serialize the two writes on the shared key. Its first read-back is still
+/// sent as before, and the second field waits for the first acknowledgment even if the user asks to Close and then
+/// chooses Keep editing.
+#[gpui::test]
+fn one_checkout_save_writes_both_changed_fields_in_order(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    fill(cx, Field::Folder.selector(), "~/work");
+    fill(cx, Field::PostClone.selector(), "make setup");
+    assert!(drawn(cx, FOOTER_SAVE), "the two fields are edited");
+    click(cx, FOOTER_SAVE);
+    let (folder, body) = one_put(&mut helm, Field::Folder.path());
+    assert_eq!(body, json!({"root": "~/work"}));
+    click(cx, "settings-footer-close");
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?")
+    );
+    assert!(
+        !drawn(cx, "prompt-alternative-0"),
+        "an acknowledged save is still pending"
+    );
+    click(cx, "prompt-cancel");
+    assert!(any_open(cx));
+    assert!(
+        sent(&mut helm).is_empty(),
+        "the second write is still queued"
+    );
+    helm.reply(folder, 204, None);
+    settle(cx);
+    let requests = sent(&mut helm);
+    assert_eq!(requests.len(), 2, "the refetch and second write");
+    assert_eq!(
+        (requests[0].method, requests[0].path.as_str()),
+        (Method::Get, Field::Folder.path())
+    );
+    assert_eq!(
+        (requests[1].method, requests[1].path.as_str()),
+        (Method::Put, Field::PostClone.path())
+    );
+    assert_eq!(requests[1].body, Some(json!({"command": "make setup"})));
+    helm.reply(requests[0].id, 200, Some(json!({"root": "~/work"})));
+    helm.reply(requests[1].id, 204, None);
+    settle(cx);
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, Field::PostClone.path());
+}
+
+/// Discarding Clear saved token restores the input's ability to accept a replacement.
+#[gpui::test]
+fn discarding_an_ntfy_clear_unlocks_the_token_field(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(
+        &mut helm,
+        cx,
+        ntfy("https://ntfy.sh", "alerts", "default", true),
+    );
+    reach(cx, "ntfy-clear-token");
+    keys(cx, "space");
+    assert_eq!(switch_on(cx, "ntfy-clear-token"), Some(true));
+    click(cx, "settings-footer-discard");
+    assert_eq!(switch_on(cx, "ntfy-clear-token"), Some(false));
+    assert!(
+        sent(&mut helm).is_empty(),
+        "Discard does not write the token"
+    );
+    fill(cx, "ntfy-token", "replacement");
+    let (_, body) = save_ntfy(&mut helm, cx);
+    assert_eq!(body["token"], "replacement");
+}
+
+/// Closing must name hidden forms and keep later drafts when a save fails. The first refusal selects that form's
+/// page. Checkouts remains unsaved and never sends a write over the refusal.
+#[gpui::test]
+fn close_save_stops_at_the_first_failure_and_shows_that_page(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
+    fill(cx, Field::PostClone.selector(), "make setup");
+    click(cx, section_button(Section::Notifications));
+    let reads = sent_reads(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].1, "/api/ntfy-alerts");
+    helm.reply(
+        reads[0].0,
+        200,
+        Some(ntfy("https://ntfy.sh", "stored", "default", false)),
+    );
+    settle(cx);
+    fill(cx, "ntfy-topic", "edited");
+    click(cx, section_button(Section::Sessions));
+    assert_eq!(heading(cx).as_deref(), Some("Sessions"));
+    click(cx, "settings-footer-close");
+    assert_eq!(
+        label_of(cx, "prompt").as_deref(),
+        Some("Save changes before closing?")
+    );
+    assert!(painted(cx).contains("Unsaved: ntfy alerts, Checkout settings"));
+    click(cx, "prompt-confirm");
+    let (alerts, _) = one_put(&mut helm, "/api/ntfy-alerts");
+    helm.reply(alerts, 400, Some(json!("fixture: cannot save alerts")));
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Notifications"));
+    assert_eq!(
+        label_of(cx, "ntfy-error").as_deref(),
+        Some("fixture: cannot save alerts")
+    );
+    assert_eq!(sent(&mut helm), [], "the other page sent no write");
+    click(cx, section_button(Section::Checkouts));
+    assert_eq!(text(cx, Field::PostClone), "make setup");
 }
 
 // ---- Notifications: ntfy alerts ------------------------------------------------------------------------------------
@@ -3249,7 +3360,7 @@ pub(super) fn reach(cx: &mut VisualTestContext, id: &str) {
 
 /// Press Save, and return the one command it sent, which must be the settings' `PUT`: its id and body.
 fn save_ntfy(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> (u64, Value) {
-    reach(cx, "ntfy-save");
+    reach(cx, FOOTER_SAVE);
     keys(cx, "space");
     let sent = sent(helm);
     assert_eq!(sent.len(), 1, "one command was sent: {sent:?}");
@@ -3275,7 +3386,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     click(cx, "ntfy-enabled");
     assert_eq!(sent(&mut helm), [], "a form not read yet takes no edit");
     assert_eq!(available(cx, "ntfy-enabled"), Some(false));
-    assert_eq!(available(cx, "ntfy-save"), Some(false));
+    assert!(!drawn(cx, FOOTER_SAVE));
 
     helm.reply(
         read,
@@ -3284,8 +3395,10 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
     );
     settle(cx);
     assert_eq!(switch_on(cx, "ntfy-enabled"), Some(false));
+    assert!(!drawn(cx, FOOTER_SAVE), "the stored values are unchanged");
+    fill(cx, "ntfy-topic", "saved-more");
     let (id, body) = save_ntfy(&mut helm, cx);
-    let mut expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved",
+    let expected = json!({ "enabled": false, "server_url": "https://ntfy.example", "topic": "saved-more",
                                "priority": "high", "token": null });
     assert_eq!(body, expected);
     assert_eq!(
@@ -3293,15 +3406,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
         Some(Work::Save),
         "under the preferences key"
     );
-    let stored = ntfy("https://ntfy.example", "saved", "high", true);
-    helm.reply(id, 200, Some(stored.clone()));
-    settle(cx);
-    // The topic field shows the stored topic, not only the draft: typing at its end extends it.
-    click(cx, "ntfy-topic");
-    cx.simulate_input("-more");
-    let (id, body) = save_ntfy(&mut helm, cx);
-    expected["topic"] = json!("saved-more");
-    assert_eq!(body, expected);
+    let stored = ntfy("https://ntfy.example", "saved-more", "high", true);
     helm.reply(id, 200, Some(stored));
     settle(cx);
     click(cx, section_button(Section::Sessions));
@@ -3313,7 +3418,7 @@ fn notifications_reads_its_settings_once_and_stays_locked_until_they_answer(
 /// must send what was typed, show the helm's answer, and then hold no token, or the next Save would send it again,
 /// possibly to another server. Specified: a server, topic and token typed, the switch turned on and High pressed in the
 /// priority segments, Save sends all five in one `PUT` and shows "Working…" while it is out; the helm's answer shows
-/// "ntfy alert settings saved"; a second Save sends the same form with no token.
+/// "ntfy alert settings saved"; a later edit sends the new topic with no token.
 #[gpui::test]
 fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -3346,7 +3451,10 @@ fn a_save_sends_the_whole_form_and_holds_no_token_after(cx: &mut TestAppContext)
     );
     assert!(!drawn(cx, "ntfy-working"));
 
+    assert!(!drawn(cx, FOOTER_SAVE), "acknowledgment leaves no draft");
+    fill(cx, "ntfy-topic", "next-topic");
     let (_, body) = save_ntfy(&mut helm, cx);
+    form["topic"] = json!("next-topic");
     form["token"] = Value::Null;
     assert_eq!(body, form, "the token field was emptied");
 }
@@ -3382,6 +3490,7 @@ fn a_refused_save_keeps_the_form_with_the_helms_words_until_closed(cx: &mut Test
     settle(cx);
 
     keys(cx, "escape");
+    click(cx, "prompt-alternative-0");
     assert!(!any_open(cx), "the premise: Settings closed");
     show_ntfy(
         &mut helm,
@@ -3389,8 +3498,15 @@ fn a_refused_save_keeps_the_form_with_the_helms_words_until_closed(cx: &mut Test
         ntfy("https://ntfy.sh", "kept", "default", false),
     );
     assert!(!drawn(cx, "ntfy-error"), "closing discarded the outcome");
+    assert!(!drawn(cx, FOOTER_SAVE), "closing discarded the draft");
+    reach(cx, "ntfy-enabled");
+    keys(cx, "space");
     let (_, body) = save_ntfy(&mut helm, cx);
-    assert_eq!(body["topic"], json!("kept"), "and the draft");
+    assert_eq!(
+        body["topic"],
+        json!("kept"),
+        "the new edit uses the stored topic"
+    );
 }
 
 /// SPEC.md: "Changing to another server clears a saved token unless a new one is entered, and the form says so before
@@ -3449,14 +3565,8 @@ fn another_server_says_a_saved_token_will_be_cleared_before_saving(cx: &mut Test
         Some(false),
         "the premise: Clear is off again"
     );
-    let (id, body) = save_ntfy(&mut helm, cx);
-    assert_eq!(body["token"], Value::Null, "the token field was read-only");
-    helm.reply(
-        id,
-        200,
-        Some(ntfy("http://localhost:1", "alerts", "default", false)),
-    );
-    settle(cx);
+    assert!(!drawn(cx, FOOTER_SAVE), "the read-only field took no edit");
+    assert!(sent(&mut helm).is_empty());
     reach(cx, "ntfy-clear-token");
     keys(cx, "space");
     let (_, body) = save_ntfy(&mut helm, cx);
@@ -3479,7 +3589,7 @@ fn a_failed_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppContext)
         Some("could not read ntfy alert settings")
     );
     assert_eq!(available(cx, "ntfy-enabled"), Some(false));
-    assert_eq!(available(cx, "ntfy-save"), Some(false));
+    assert!(!drawn(cx, FOOTER_SAVE));
 
     reach(cx, "ntfy-retry");
     keys(cx, "space");
@@ -3494,7 +3604,7 @@ fn a_failed_read_shows_its_reason_and_retry_reads_again(cx: &mut TestAppContext)
     settle(cx);
     assert!(!drawn(cx, "ntfy-load-error"));
     assert_eq!(available(cx, "ntfy-enabled"), Some(true));
-    assert_eq!(available(cx, "ntfy-save"), Some(true));
+    assert!(!drawn(cx, FOOTER_SAVE));
 }
 
 /// The topic field of the ntfy form drawn last.
@@ -3538,7 +3648,7 @@ fn nothing_edits_the_form_while_its_save_is_in_flight(cx: &mut TestAppContext) {
         "the segment took no click"
     );
     assert_eq!(switch_on(cx, "ntfy-priority-Default"), Some(true));
-    reach(cx, "ntfy-save");
+    reach(cx, FOOTER_SAVE);
     keys(cx, "space");
     assert_eq!(sent(&mut helm), [], "nothing more was sent");
     let topic = topic_input(cx);
@@ -3676,7 +3786,7 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
         "the premise: in flight"
     );
     type_into(cx, Field::PostClone, "make setup");
-    click(cx, Field::PostClone.save());
+    click(cx, FOOTER_SAVE);
     assert_eq!(sent(&mut helm), [], "the key held the field back");
     assert_eq!(busy_line(cx, "checkout-post-clone"), busy_alert());
     click(cx, super::checkouts::SPARE_ID);
@@ -3684,7 +3794,8 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
     assert_eq!(busy_line(cx, super::checkouts::SPARE_ID), busy_alert());
 
     click(cx, section_button(Section::Notifications));
-    reach(cx, "ntfy-save");
+    fill(cx, "ntfy-topic", "draft");
+    reach(cx, FOOTER_SAVE);
     keys(cx, "space");
     assert_eq!(sent(&mut helm), [], "the key held the form back");
     assert_eq!(busy_line(cx, "ntfy"), busy_alert());
@@ -3707,12 +3818,14 @@ fn the_fields_the_spare_switch_and_ntfy_say_why_a_press_sent_nothing(cx: &mut Te
 
 /// The frame scrolls a long section inside the body, above the pinned footer, so the section's last line must clear
 /// the footer once the body is scrolled to its end, or it can never be read whole. Checkouts is the tallest section,
-/// taller than the body at the dialog's full height, and ends with the spare switch's documentation link. Specified: in
-/// a window 1000 pixels tall, Checkouts shown and its body wheeled far past its end, the link lies wholly inside the
+/// taller than a capped dialog's body, and ends with the spare switch's documentation link. Specified: in
+/// a window 560 pixels tall, Checkouts shown and its body wheeled far past its end, the link lies wholly inside the
 /// body's visible part, whose lower edge is the footer's upper one (the frame's body and footer are sibling rows).
 #[gpui::test]
 fn the_tallest_sections_last_line_clears_the_footer_scrolled_to_the_end(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    cx.simulate_resize(size(px(720.), px(560.)));
+    settle(cx);
     show_checkouts(&mut helm, cx, Value::Null, Value::Null, true);
     let body = bounds(cx, DIALOG_BODY);
     assert!(
@@ -3788,8 +3901,7 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
     let id = send_test(&mut helm, cx);
     assert_eq!(label_of(cx, "ntfy-working").as_deref(), Some("Working…"));
     assert!(!drawn(cx, "ntfy-saved"), "a test took the saved line away");
-    reach(cx, "ntfy-save");
-    keys(cx, "space");
+    assert!(!drawn(cx, FOOTER_SAVE), "the saved form has no Save");
     click(cx, "ntfy-enabled");
     assert_eq!(
         sent(&mut helm),
@@ -3831,6 +3943,7 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
 
     reach(cx, "ntfy-send-test");
     keys(cx, "escape");
+    click(cx, "prompt-alternative-0");
     assert!(!any_open(cx), "the premise: Settings closed");
     show_ntfy(
         &mut helm,
@@ -3838,10 +3951,10 @@ fn send_test_sends_nothing_of_the_form_and_reports_how_it_went(cx: &mut TestAppC
         ntfy("https://ntfy.sh", "saved-again", "default", false),
     );
     assert!(!drawn(cx, "ntfy-tested"), "closing discarded the line");
-    let (_, body) = save_ntfy(&mut helm, cx);
+    let topic = topic_input(cx);
     assert_eq!(
-        body["topic"],
-        json!("saved-again"),
+        cx.update(|_, cx| topic.text(cx).to_string()),
+        "saved-again",
         "closing discarded the draft"
     );
 }

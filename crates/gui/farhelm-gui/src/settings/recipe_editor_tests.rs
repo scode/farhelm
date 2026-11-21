@@ -177,7 +177,7 @@ fn one_recipe() -> Vec<Value> {
 /// dialog's footer region, not in the scrolling body, or a long form would push Save out of view. Specified: the list
 /// offers New recipe and an Edit per row; New recipe replaces the list with the editor titled "New recipe", focus on
 /// Back; opening sends the credential catalog's read and nothing else; Cancel and Save are drawn inside the dialog's
-/// pinned notices, with the Close row still drawn; Back with a typed name, then Discard in the question it asks,
+/// pinned footer with Close; Back with a typed name, then Discard in the question it asks,
 /// sends nothing (no save, and no read of the recipes: they are pushed), closes the editor, shows the list and puts
 /// focus on New recipe.
 #[gpui::test]
@@ -197,16 +197,22 @@ fn new_recipe_opens_the_editor_in_place_and_back_returns_to_the_list(cx: &mut Te
         Some("New recipe")
     );
     assert_eq!(focused_id(cx).as_deref(), Some("recipe-back"));
-    let (notices, save, cancel) = (
-        bounds(cx, "settings-notices"),
+    let (close, save, cancel) = (
+        bounds(cx, "settings-footer-close"),
         bounds(cx, "recipe-save"),
         bounds(cx, "recipe-cancel"),
     );
-    assert!(
-        notices.contains(&save.center()) && notices.contains(&cancel.center()),
-        "Cancel and Save are pinned in the dialog's notices: {notices:?} {save:?} {cancel:?}"
+    assert!(cancel.right() < save.left() && save.right() < close.left());
+    assert_eq!(
+        save.center().y,
+        close.center().y,
+        "Save is pinned beside Close"
     );
-    assert!(drawn(cx, "settings-footer-close"), "the Close row stays");
+    assert_eq!(
+        cancel.center().y,
+        close.center().y,
+        "Cancel is pinned beside Close"
+    );
     assert_eq!(
         sent(&mut helm),
         [],

@@ -332,6 +332,11 @@ impl Editor {
     /// kept visible when the catalog lacks it, and the picker's missing line under it then. Unavailable until the
     /// catalog is read and while a save is out.
     fn picker(&self, pick: Pick, chosen: &str, cx: &Context<Self>) -> AnyElement {
+        let saved = match pick {
+            Pick::Github => &self.baseline.github_token_credential,
+            Pick::Token(agent) => &agent.of(&self.baseline).0.token_credential,
+            Pick::Login(agent) => agent.of(&self.baseline).2,
+        };
         let PickWords {
             id,
             label: text,
@@ -385,7 +390,7 @@ impl Editor {
             .gap(px(LABEL_GAP))
             .w_full()
             .min_w_0()
-            .child(label(text, cx))
+            .child(label(text, self.host.has_back() && chosen != saved, cx))
             .child(select)
             .children(
                 (loaded && gone)
@@ -425,6 +430,7 @@ impl Editor {
     fn agent_block(&self, agent: Agent, cx: &Context<Self>) -> AnyElement {
         let words = agent.words();
         let choice = self.choices.agent(agent);
+        let (saved_endpoint, saved_mode, _) = agent.of(&self.baseline);
         let weak = cx.weak_entity();
         let modes = [
             (
@@ -476,6 +482,7 @@ impl Editor {
                         &choice.url,
                         "The endpoint's base URL; a tunnel's sandbox port works here",
                         true,
+                        self.host.has_back() && choice.url.text(cx) != saved_endpoint.base_url,
                         cx,
                     ))
                     .child(self.picker(Pick::Token(agent), &choice.token, cx))
@@ -491,10 +498,12 @@ impl Editor {
             .flex_col()
             .gap(px(LABEL_GAP))
             .child(
-                div()
-                    .text_size(metrics::TEXT_MD)
-                    .text_color(theme::color(theme::palette(cx).fg_0))
-                    .child(words.label),
+                crate::settings::editing::caption(
+                    words.label,
+                    (self.host.has_back() && choice.mode != saved_mode).then(|| theme::palette(cx)),
+                )
+                .text_size(metrics::TEXT_MD)
+                .text_color(theme::color(theme::palette(cx).fg_0)),
             )
             .child(div().flex().child(modes))
             .children(fields)

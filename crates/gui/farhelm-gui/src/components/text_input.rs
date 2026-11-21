@@ -319,6 +319,18 @@ impl TextInputState {
         self.1.replace(self.text(cx));
     }
 
+    /// Stage an edit for a golden. Kit raises the change event so a form's usual draft binding sees it.
+    #[cfg(test)]
+    pub(crate) fn edit_for_golden(&self, text: &'static str, window: &mut Window, cx: &mut App) {
+        assert!(!self.2.get(), "the golden's input must be ready to edit");
+        match &self.0 {
+            Field::Line(input) => input.update(cx, |state, cx| state.replace_all(text, window, cx)),
+            Field::Row(area) | Field::Area(area) => {
+                area.update(cx, |state, cx| state.replace_all(text, window, cx))
+            }
+        }
+    }
+
     /// Switch a single-line secret field between masked and readable without replacing its text or focus handle.
     pub(crate) fn set_masked(&self, masked: bool, window: &mut Window, cx: &mut App) {
         if let Field::Line(input) = &self.0 {

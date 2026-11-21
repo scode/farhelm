@@ -881,7 +881,7 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
         "nothing saved to test"
     );
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    reach(cx, "tensorlake-key-save");
+    reach(cx, "settings-footer-save");
     keys(cx, "space");
     let (id, method, path, body) = one_command(&mut helm);
     assert_eq!((method, path.as_str()), (Method::Put, "/api/tensorlake"));
@@ -938,7 +938,7 @@ fn the_tensorlake_key_saves_tests_and_clears_with_write_only_metadata(cx: &mut T
     assert_eq!(key_typed(cx), "", "Clear emptied the typed key");
 
     fill(cx, "tensorlake-key", "fictional-bad-key");
-    reach(cx, "tensorlake-key-save");
+    reach(cx, "settings-footer-save");
     keys(cx, "space");
     let (id, _, _, _) = one_command(&mut helm);
     helm.reply(id, 400, Some(json!("the key is not valid")));
@@ -984,22 +984,19 @@ fn the_tensorlake_key_waits_for_the_account_read(cx: &mut TestAppContext) {
         "",
         "the field is read-only until the account answers"
     );
-    for control in [
-        "tensorlake-key-test",
-        "tensorlake-key-clear",
-        "tensorlake-key-save",
-    ] {
+    for control in ["tensorlake-key-test", "tensorlake-key-clear"] {
         assert_eq!(
             available(cx, control),
             Some(false),
             "{control} waits for the account"
         );
     }
+    assert!(!drawn(cx, "settings-footer-save"));
 
     answer(&mut helm, reads, &json!([]));
     settle(cx);
     assert!(painted(cx).contains("No key saved"));
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
     assert_eq!(key_typed(cx), "fictional-tensorlake-key");
-    assert_eq!(available(cx, "tensorlake-key-save"), Some(true));
+    assert_eq!(available(cx, "settings-footer-save"), Some(true));
 }

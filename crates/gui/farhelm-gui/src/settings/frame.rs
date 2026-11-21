@@ -243,14 +243,16 @@ impl SettingsDialog {
     /// The shared button keeps the platform's focus, tooltip and selection behavior for both ordinary and search rows.
     fn section_button(&self, section: Section, count: Option<usize>, cx: &Context<Self>) -> Button {
         let weak = cx.weak_entity();
+        let palette = theme::palette(cx);
         let selected = count.is_none() && section == self.shown;
+        let edited = self.section_edited(section, cx);
         let content = div()
             .flex_1()
             .min_w_0()
             .flex()
             .items_center()
             .gap(px(7.))
-            .child(section.tile(false, selected, theme::palette(cx)))
+            .child(section.tile(false, selected, palette))
             .child(div().flex_1().min_w_0().truncate().child(section.label()))
             .when_some(count, |row, count| {
                 row.child(
@@ -259,7 +261,8 @@ impl SettingsDialog {
                         .text_size(theme::metrics::TEXT_SM)
                         .child(count.to_string()),
                 )
-            });
+            })
+            .children(edited.then(|| super::editing::dot(selected, palette)));
         Button::new(
             format!("settings-section-{}", section.key()),
             section.label(),
@@ -272,6 +275,16 @@ impl SettingsDialog {
         .when_some(count, |button, count| {
             let matches = if count == 1 { "match" } else { "matches" };
             button.accessible_name(format!("{} ({count} {matches})", section.label()))
+        })
+        .when(edited, |button| {
+            let name = count.map_or_else(
+                || format!("{} (unsaved changes)", section.label()),
+                |count| {
+                    let matches = if count == 1 { "match" } else { "matches" };
+                    format!("{} ({count} {matches}, unsaved changes)", section.label())
+                },
+            );
+            button.accessible_name(name)
         })
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |dialog, cx| {

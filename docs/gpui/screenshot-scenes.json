@@ -2899,9 +2899,19 @@
       "reference": "settings-terminal"
     },
     {
+      "golden": "settings-terminal-edited",
+      "title": "Settings at Terminal with edited file types and a pinned Save",
+      "reference": null
+    },
+    {
       "golden": "settings-checkouts",
       "title": "Settings at Checkouts, no default folder or post-clone command, a checkout kept ready",
       "reference": "settings-checkouts"
+    },
+    {
+      "golden": "settings-checkouts-edited",
+      "title": "Settings at Checkouts with an edited default folder and a pinned Save",
+      "reference": null
     },
     {
       "golden": "settings-agent-trust",
@@ -2917,6 +2927,16 @@
       "golden": "settings-notifications",
       "title": "Settings at Notifications, the Sounds switches at their defaults above the ntfy alerts form over the helm's defaults",
       "reference": "settings-notifications"
+    },
+    {
+      "golden": "settings-notifications-edited",
+      "title": "Settings at Notifications, scrolled to an edited ntfy topic and pinned Save",
+      "reference": null
+    },
+    {
+      "golden": "settings-unsaved",
+      "title": "Closing Settings with unsaved ntfy alert and checkout settings",
+      "reference": null
     },
     {
       "golden": "settings-app",

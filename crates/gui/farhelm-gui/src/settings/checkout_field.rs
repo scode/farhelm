@@ -265,6 +265,9 @@ pub struct CheckoutField {
     /// The words under the field: the caller's for a folder (the old field's `note`), the old wording for the command.
     note: SharedString,
     input: DraftInput,
+    /// Settings places Save in the dialog footer. The launcher and host settings keep the field's own buttons.
+    pinned_save: bool,
+    pub(super) save_receipt: super::editing::SaveReceipt,
     /// Whether the latest read completed successfully. A pending read or a failure locks the field and both saves.
     loaded: bool,
     /// The load the rendered buttons belong to. A mouse event can reach the last frame after a fresh read has
@@ -327,6 +330,8 @@ impl CheckoutField {
             target,
             note,
             input,
+            pinned_save: false,
+            save_receipt: super::editing::SaveReceipt::default(),
             loaded: false,
             read_generation: 0,
             compare_on_save: false,
@@ -390,6 +395,42 @@ impl CheckoutField {
         cx.notify();
     }
 
+    /// Put the field's Save in Settings' footer while keeping its Retry and its outcomes beside the input.
+    pub(super) fn with_pinned_save(mut self) -> Self {
+        self.pinned_save = true;
+        self
+    }
+
+    /// Wait for the fake helm's initial read before a golden types into this field.
+    #[cfg(test)]
+    pub(super) fn input_for_golden(&self) -> Option<TextInputState> {
+        self.loaded.then(|| self.input.input().clone())
+    }
+
+    /// Folder and post-clone command have independent baselines even though Settings can save them in one action.
+    pub(super) fn edit_state(&self) -> super::editing::EditState {
+        let draft = self.input.draft();
+        super::editing::EditState::of(
+            draft.is_saving(),
+            draft.is_touched() && draft.value() != self.input.stored().unwrap_or_default(),
+        )
+    }
+
+    /// Restore this field without issuing a read or writing the other checkout field.
+    pub(super) fn discard(&mut self, cx: &mut Context<Self>) {
+        self.input.discard(self.window, cx);
+        cx.notify();
+    }
+
+    /// The footer acts on the current load. Unlike a field-local button, it cannot clear a host override.
+    pub(super) fn save_from_settings(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        self.save(false, self.read_generation, window, cx)
+    }
+
     /// Save the draft, or with `use_default` clear the host's folder (the module docs). Does nothing before the read
     /// has answered, while it failed, while a save is in flight, for an untouched draft, and for Use default where it
     /// is not offered, all cases in which the button is drawn busy or not drawn. A save the operation store refuses
@@ -400,10 +441,10 @@ impl CheckoutField {
         shown_read: u64,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) {
+    ) -> bool {
         let draft = self.input.draft();
         if !self.loaded || self.read_generation != shown_read || draft.is_saving() {
-            return;
+            return false;
         }
         let allowed = if use_default {
             self.target.offers_default() && self.has_override
@@ -411,7 +452,7 @@ impl CheckoutField {
             draft.is_touched()
         };
         if !allowed {
-            return;
+            return false;
         }
         let key = self.target.key();
         let target = self.target.clone();
@@ -432,15 +473,17 @@ impl CheckoutField {
             cx,
             |field, settled, cx| {
                 field.save_answered(&settled.outcome, cx);
+                field.save_receipt.settle(&settled.outcome, cx);
             },
         );
         // Another save may hold the key (any Settings save, for the all-hosts configuration), which the field then says.
         self.refused.record(self.target.words().id, &started);
-        match started {
+        match &started {
             Ok(()) => self.saved = false,
             Err(not_started) => tracing::debug!(?not_started, "checkout field not saved"),
         }
         cx.notify();
+        started.is_ok()
     }
 
     /// Keep the field locked across the save and its refetch. A refusal discards the edit now so even a failed read
@@ -520,7 +563,8 @@ impl Render for CheckoutField {
             Target::PostClone => input,
         };
         // `.checkout-root-label`: the label's words over the field, as wide as the section.
-        let label = choices::labelled(words.label, words.id, input);
+        let edited = self.pinned_save && self.edit_state() != super::editing::EditState::Clean;
+        let label = choices::labelled(words.label, words.id, input, edited.then_some(palette));
 
         // Retry in place of Save while the read has failed, as in the old field; Use default under Save where offered.
         let mut buttons = Vec::new();
@@ -532,7 +576,7 @@ impl Render for CheckoutField {
                 })
                 .busy(saving),
             );
-        } else {
+        } else if !self.pinned_save {
             let save = weak.clone();
             buttons.push(
                 Button::new(

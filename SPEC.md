@@ -502,9 +502,9 @@ packages for every base. The custom-base note explains that the base must run sy
 passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git. The build checks these requirements
 first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their
 official installers and saves a snapshot or image at that place. The editor replaces the list in place. Leaving it with
-unsaved changes, whether by its own Back or Cancel or by closing Settings with Escape or a close control, asks whether
-to save, discard or keep editing, and saving or discarding then completes the close. Delete asks for confirmation. A
-list refresh that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+unsaved changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing Settings includes the
+recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned footer. A list refresh
+that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
@@ -2449,8 +2449,14 @@ and section list scroll independently. At 620px wide and below, the dialog shows
 list. **‹ Settings** returns to the list. The gear always opens sessions and focuses its first switch, including at
 phone width. Trust hints instead open agent trust at the relevant switch and scroll its block into view. Section buttons
 follow the platform's normal Tab rules. Switching sections preserves unsaved fields, outcome lines and pending saves. A
-recipe draft can hold Settings open for the editor's leave question. Closing discards other unsaved fields. Escape and
-either close control return focus to the gear when Settings closes.
+dot marks each edited field and section. The footer stays visible as the page scrolls. Switches outside forms save at
+once. Forms have one Save and Discard in the footer on pages with unsaved changes. The recipe and credential editors
+place their own actions there as well. For Checkouts, the same Save writes the changed folder and command in order.
+Closing with unsaved changes, from Escape or either Close control, asks once with the affected forms named and offers
+**Keep editing**, **Discard** and **Save**. Discard is absent while a save is in flight. A close that saves waits for
+pending operations and sends the remaining saves one at a time. The first failure keeps Settings open and shows the
+affected page with its error. Two different unsaved Tensorlake keys leave Settings open on Credentials with a message to
+save the desired key first. When Settings closes, focus returns to the gear.
 
 The **Search** field above the section list finds settings by section, label or help text. While a query is active, the
 list shows the sections with matches under their group headings and gives each section's count. Cmd+F on a Mac or Ctrl+F
@@ -2465,10 +2471,10 @@ Back, Name, a write-only secret field, Delete, Cancel and Save. The agent-login 
 Claude accepts the token from `claude setup-token`; Codex accepts a pasted or selected `auth.json`, validated only as a
 JSON object of at most 64 KiB. A selected file is shown by name and validation status, with Clear to return to the empty
 paste box. Pasted text stays visible for editing. An empty replacement keeps the saved value. Settings never returns a
-saved secret; a failed save keeps the draft and shows its reason. Closing discards unsaved text without a recipe-style
-departure question. Recipes select API endpoint tokens, GitHub tokens and Claude or Codex subscription logins by name;
-setup, connection and replacement delivery resolve current saved values. A successful save with failed deliveries closes
-and clears the secret editor, and shows the delivery failures on the Credentials overview. The Codex login editor
+saved secret. A failed save keeps the draft and shows its reason. Closing Settings includes the credential draft in the
+unsaved-changes question. Recipes select API endpoint tokens, GitHub tokens and Claude or Codex subscription logins by
+name; setup, connection and replacement delivery resolve current saved values. A successful save with failed deliveries
+closes and clears the secret editor, and shows the delivery failures on the Credentials overview. The Codex login editor
 explains that copies share a rotating refresh token: when one copy renews, the other copies cannot renew and need a
 fresh sign-in, so use one login per host. It recommends a proxy or load balancer through an API endpoint for shared
 inference access and makes the user responsible for following the provider's terms of service. Delete is unavailable
@@ -4706,8 +4712,8 @@ inside the environment the first attempt created, where a retry could not find i
   neither report nor revert a newer choice. A trust-hint choice copied by a reopened Settings dialog or another mounted
   hint also stops being current when its save fails; reopening while that save is pending does not keep the failed
   choice alive or inherit the closed dialog's alert. A failed corrective read leaves trust settings unavailable rather
-  than treating unknown trust as off. Closing Settings before the helm refuses an ntfy save drops that refusal. The
-  first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
+  than treating unknown trust as off. An ntfy save refused during the Settings close question leaves the form open with
+  its reason. The first visit to Notifications in the reopened dialog reads the saved ntfy settings from the helm.
 - Connection state per host is always visible on its rail avatar, with name and phase on hover and to screen readers;
   reconnection uses bounded retries followed by periodic low-frequency re-probing, so a host that comes back overnight
   resurfaces by itself. Hosts swaps session content for the complete management surface. Each row and its rail avatar

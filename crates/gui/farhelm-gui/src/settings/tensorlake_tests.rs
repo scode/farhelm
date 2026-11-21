@@ -14,8 +14,8 @@ use serde_json::{Value, json};
 use super::Section;
 use super::tensorlake::{ASK_ID, EXPERIMENTAL_WARNING, USAGE_CREDITS_NOTE};
 use super::tests::{
-    available, drawn, fill, into_view, label_of, open_rail, open_settings, painted,
-    preference_work, reach, section_button, sent, switch_on,
+    available, drawn, fill, label_of, open_rail, open_settings, painted, preference_work, reach,
+    section_button, sent, switch_on,
 };
 use crate::layers;
 use crate::operations::Work;
@@ -46,10 +46,8 @@ fn ready_ssh_key() -> Value {
 const REGISTER_COMMAND: &str =
     "tl sbx ssh keys add --name farhelm-fixture 'ssh-ed25519 AAAAFixture farhelm-fixture'";
 
-/// Show `section` by its button the way a user does, scrolling the dialog's body back to the button first: the
-/// section list scrolls with the body, so after Tab took focus far down the section the button is out of view.
+/// The full-size fixture keeps the navigation buttons reachable even when the current page is scrolled.
 fn show_section(cx: &mut VisualTestContext, section: Section) {
-    into_view(cx, section_button(section));
     click(cx, section_button(section));
 }
 
@@ -160,14 +158,10 @@ fn the_warning_heads_the_section_and_a_failed_read_locks_it_until_a_retry(cx: &m
     );
     fill(cx, "tensorlake-key", "fictional-early-key");
     assert_eq!(typed_here(cx), "", "the field takes no typing");
-    for control in [
-        "tensorlake-key-test",
-        "tensorlake-key-clear",
-        "tensorlake-key-save",
-        ASK_ID,
-    ] {
+    for control in ["tensorlake-key-test", "tensorlake-key-clear", ASK_ID] {
         assert_eq!(available(cx, control), Some(false), "{control} is locked");
     }
+    assert!(!drawn(cx, "settings-footer-save"));
 
     press(cx, "tensorlake-key-retry");
     let reads = sent(&mut helm);
@@ -234,7 +228,7 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
     settle(cx);
     assert!(painted(cx).contains("No key saved"));
     fill(cx, "tensorlake-key", "fictional-key-saved-there");
-    press(cx, "tensorlake-key-save");
+    click(cx, "settings-footer-save");
     let (id, body) = one_account_save(&mut helm);
     assert_eq!(body, json!({ "api_key": "fictional-key-saved-there" }));
     helm.reply(id, 200, Some(account(true, false)));
@@ -269,9 +263,41 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
         "fictional-key-typed-here",
         "the other form's draft is its own"
     );
-    press(cx, "tensorlake-key-save");
+    click(cx, "settings-footer-save");
     let (_, body) = one_account_save(&mut helm);
     assert_eq!(body, json!({ "api_key": "fictional-key-typed-here" }));
+}
+
+/// The two key fields write one account. A close Save cannot choose between different replacement drafts.
+#[gpui::test]
+fn closing_with_two_different_key_drafts_never_chooses_one(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    let read = show_tensorlake(&mut helm, cx);
+    helm.reply(read.id, 200, Some(account(false, false)));
+    settle(cx);
+    fill(cx, "tensorlake-key", "fictional-first-key");
+    show_section(cx, Section::Credentials);
+    let reads = sent(&mut helm);
+    assert_eq!(reads.len(), 1);
+    assert_eq!(reads[0].path, "/api/credentials");
+    helm.reply(reads[0].id, 200, Some(json!([])));
+    settle(cx);
+    fill(cx, "tensorlake-key", "fictional-second-key");
+    assert_eq!(typed_in_credentials(cx), "fictional-second-key");
+    show_section(cx, Section::Tensorlake);
+    assert_eq!(typed_here(cx), "fictional-first-key");
+    click(cx, "settings-close");
+    click(cx, "prompt-confirm");
+    assert!(
+        painted(cx)
+            .contains("Two different Tensorlake keys are typed. Save the one you want first.")
+    );
+    assert_eq!(typed_in_credentials(cx), "fictional-second-key");
+    assert!(
+        sent(&mut helm)
+            .iter()
+            .all(|request| request.method == Method::Get)
+    );
 }
 
 // ---- Creating sandboxes --------------------------------------------------------------------------------------------

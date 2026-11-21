@@ -109,6 +109,8 @@ pub struct DialogFrame {
     fixed_height: Option<Pixels>,
     split_body: bool,
     footer_lead: Option<AnyElement>,
+    footer_actions: Option<AnyElement>,
+    separate_close: bool,
     notices: Option<AnyElement>,
     top_band: Option<AnyElement>,
     notices_rule: bool,
@@ -146,6 +148,8 @@ impl DialogFrame {
             fixed_height: None,
             split_body: false,
             footer_lead: None,
+            footer_actions: None,
+            separate_close: false,
             notices: None,
             top_band: None,
             notices_rule: false,
@@ -233,6 +237,18 @@ impl DialogFrame {
     /// Each pane supplies its own padding and registers its own focus scroll region.
     pub(crate) fn split_body(mut self) -> Self {
         self.split_body = true;
+        self
+    }
+
+    /// Place an editor's own controls in the footer's answer row. Its work status belongs in the notices above it.
+    pub(crate) fn footer_actions(mut self, actions: impl IntoElement) -> Self {
+        self.footer_actions = Some(actions.into_any_element());
+        self
+    }
+
+    /// Separate a trailing Close from the editor or save controls that precede it.
+    pub(crate) fn separate_close(mut self) -> Self {
+        self.separate_close = true;
         self
     }
 
@@ -463,15 +479,29 @@ impl RenderOnce for DialogFrame {
         // A frame with nothing for its footer to hold draws none: the Templates dialog, whose editor carries its own
         // action row inside the body (SPEC.md: "the complete editor keeps scrolling within the dialog, including its
         // editor-local action footer").
-        let has_row = !self.answers.is_empty() || self.note.is_some() || self.footer_lead.is_some();
+        let has_row = !self.answers.is_empty()
+            || self.note.is_some()
+            || self.footer_lead.is_some()
+            || self.footer_actions.is_some();
         let has_footer = has_row || self.notices.is_some();
+        let mut buttons = self.answers;
+        let close = self.separate_close.then(|| buttons.pop()).flatten();
         let answers = div()
             .flex()
             .flex_wrap()
             .justify_end()
             .items_center()
             .gap(px(8.))
-            .children(self.answers.into_iter().map(Button::help_below));
+            .children(self.footer_actions)
+            .children(buttons.into_iter().map(Button::help_below))
+            .children(close.map(|close| {
+                div()
+                    .flex_none()
+                    .border_l_1()
+                    .border_color(theme::color(palette.border_dim))
+                    .pl(px(8.))
+                    .child(close.help_below())
+            }));
         // The answers' row. Every shape lets the answers wrap at the footer's width: a row item never shrinks below its
         // content unless told to (`min_w_0`), and answers that cannot wrap are cut at the frame's start edge, Cancel
         // first.

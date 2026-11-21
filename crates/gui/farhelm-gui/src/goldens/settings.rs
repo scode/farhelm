@@ -148,44 +148,52 @@ fn settings_scene_with(
         if let Some(platform) = tunnels {
             crate::settings::decide_tunnels_for_opened(platform, cx);
         }
-        let mut helm = answering.borrow_mut();
-        for read in helm.commands() {
-            let trust = read.path.starts_with("/api/checkout-claude-trust")
-                || read.path.starts_with("/api/checkout-agent-trust/");
-            let answer = if trust {
-                serde_json::json!({ "enabled": false, "hint_dismissed": false })
-            } else {
-                match read.path.as_str() {
-                    "/api/checkout-root" => serde_json::json!({ "root": null }),
-                    "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
-                    "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
-                    "/api/credentials" => serde_json::json!([]),
-                    "/api/container-orphans" => serde_json::json!([]),
-                    // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
-                    // pictures rows that can build, which takes a saved key, and so does Tensorlake's list of
-                    // sandboxes not on this helm.
-                    "/api/tensorlake" => serde_json::json!({
-                        "api_key_set": section == crate::settings::Section::Recipes || tensorlake_key,
-                        "create_without_asking": false,
-                        "helm_tag": "fixture",
-                        "ssh_key": { "state": "not_created" },
-                    }),
-                    "/api/ntfy-alerts" => {
-                        match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
-                            Ok(defaults) => defaults,
-                            Err(_) => continue,
-                        }
-                    }
-                    _ => continue,
-                }
-            };
-            helm.reply(read.id, 200, Some(answer));
-        }
+        answer_settings_reads(&mut answering.borrow_mut(), section, tensorlake_key);
     });
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     keep.push(Box::new(watch));
+}
+
+/// A later section in the same opening receives the same fake configuration as if it were the first.
+fn answer_settings_reads(
+    helm: &mut FakeHelm,
+    section: crate::settings::Section,
+    tensorlake_key: bool,
+) {
+    for read in helm.commands() {
+        let trust = read.path.starts_with("/api/checkout-claude-trust")
+            || read.path.starts_with("/api/checkout-agent-trust/");
+        let answer = if trust {
+            serde_json::json!({ "enabled": false, "hint_dismissed": false })
+        } else {
+            match read.path.as_str() {
+                "/api/checkout-root" => serde_json::json!({ "root": null }),
+                "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
+                "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
+                "/api/credentials" => serde_json::json!([]),
+                "/api/container-orphans" => serde_json::json!([]),
+                // Credentials' and Tensorlake's key forms picture no key saved, as their references do; Recipes
+                // pictures rows that can build, which takes a saved key, and so does Tensorlake's list of
+                // sandboxes not on this helm.
+                "/api/tensorlake" => serde_json::json!({
+                    "api_key_set": section == crate::settings::Section::Recipes || tensorlake_key,
+                    "create_without_asking": false,
+                    "helm_tag": "fixture",
+                    "ssh_key": { "state": "not_created" },
+                }),
+                "/api/ntfy-alerts" => {
+                    match serde_json::to_value(farhelm_proto::ntfy::Settings::default()) {
+                        Ok(defaults) => defaults,
+                        Err(_) => continue,
+                    }
+                }
+                _ => continue,
+            }
+        };
+        helm.reply(read.id, 200, Some(answer));
+    }
 }
 
 /// Settings as the gear opens it, at Sessions.
@@ -210,10 +218,7 @@ pub(super) fn settings_recipes_setup(state: &SceneState, window: &mut Window, cx
     settings_scene(state, crate::settings::Section::Recipes, window, cx);
 }
 
-/// Settings at Recipes with a new recipe's editor open, as New recipe opens it, against the reference
-/// `settings-recipes`, whose set has no editor scene: the form from its top with focus on Back, Managed Ubuntu chosen
-/// among the Software cards, and the editor's Cancel and Save pinned above the Close row, ruled off from it. The
-/// dialog's body is shorter than the form, so the lower fields are below the fold, as a user first sees them.
+/// Stage an edited name so the golden shows the draft note beside the recipe editor's pinned answers.
 pub(super) fn settings_recipe_editor_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene_with(
         state,
@@ -225,6 +230,7 @@ pub(super) fn settings_recipe_editor_setup(state: &SceneState, window: &mut Wind
         window,
         cx,
     );
+    stage_draft(state, crate::settings::Section::Recipes, DraftStep::Edit);
 }
 
 /// Settings at Recipes with recipes in the states a row draws differently, against the reference `settings-recipes`,
@@ -580,6 +586,160 @@ pub(super) fn settings_agent_trust_end(
 /// helm's defaults. Focus starts on the dialog itself (`Section::first`), so no ring shows.
 pub(super) fn settings_notifications_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::Notifications, window, cx);
+}
+
+/// Edited screens use the real form subscription after the initial reads settle, so the footer and field dots
+/// come from the same draft state as an edit typed in the app.
+struct DraftScene {
+    section: crate::settings::Section,
+    step: Cell<DraftStep>,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DraftStep {
+    Edit,
+    VerifyDraft,
+    OpenNotifications,
+    EditNotifications,
+    AskToClose,
+    Done,
+}
+
+fn stage_draft(state: &SceneState, section: crate::settings::Section, first: DraftStep) {
+    state.keep.borrow_mut().push(Box::new(DraftScene {
+        section,
+        step: Cell::new(first),
+    }));
+}
+
+/// A stable frame can precede the second form's read. Do not finish a draft screenshot during that gap.
+pub(super) fn draft_pending(state: &SceneState) -> bool {
+    state.keep.borrow().iter().any(|item| {
+        item.downcast_ref::<DraftScene>()
+            .is_some_and(|draft| draft.step.get() != DraftStep::Done)
+    })
+}
+
+pub(super) fn settings_terminal_edited_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::settings::Section;
+    settings_terminal_setup(state, window, cx);
+    stage_draft(state, Section::Terminal, DraftStep::Edit);
+}
+
+pub(super) fn settings_notifications_edited_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::settings::Section;
+    settings_notifications_setup(state, window, cx);
+    stage_draft(state, Section::Notifications, DraftStep::Edit);
+}
+
+pub(super) fn settings_checkouts_edited_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::settings::Section;
+    settings_checkouts_setup(state, window, cx);
+    stage_draft(state, Section::Checkouts, DraftStep::Edit);
+}
+
+pub(super) fn settings_unsaved_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::settings::Section;
+    settings_checkouts_setup(state, window, cx);
+    stage_draft(state, Section::Checkouts, DraftStep::OpenNotifications);
+}
+
+/// Advance the edited scene once per frame. The close question follows two actual draft changes in one dialog.
+pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::settings::{self, Section};
+
+    let keep = state.keep.borrow();
+    // The renderer draws once before setup so an anchored scene can measure its opener.
+    let Some(draft) = keep
+        .iter()
+        .find_map(|item| item.downcast_ref::<DraftScene>())
+    else {
+        return div().into_any_element();
+    };
+    let step = draft.step.get();
+    let section = match step {
+        DraftStep::Edit | DraftStep::OpenNotifications => draft.section,
+        DraftStep::EditNotifications => Section::Notifications,
+        DraftStep::VerifyDraft => {
+            if settings::draft_changed_for_opened(draft.section, cx) {
+                draft.step.set(DraftStep::Done);
+            }
+            return div().into_any_element();
+        }
+        DraftStep::AskToClose => {
+            if settings::draft_changed_for_opened(Section::Checkouts, cx)
+                && settings::draft_changed_for_opened(Section::Notifications, cx)
+            {
+                draft.step.set(DraftStep::Done);
+                window.defer(cx, |window, cx| {
+                    let settings = crate::layers::top_container(window, cx);
+                    assert!(settings.is_some(), "Settings must be open with both drafts");
+                    assert!(crate::layers::dismiss_top(window, cx));
+                    let question = crate::layers::top_container(window, cx);
+                    assert!(
+                        question.is_some() && question != settings,
+                        "the close question opened"
+                    );
+                });
+            }
+            return div().into_any_element();
+        }
+        DraftStep::Done => return div().into_any_element(),
+    };
+    if step == DraftStep::EditNotifications {
+        let helm = keep
+            .iter()
+            .find_map(|item| item.downcast_ref::<Rc<RefCell<FakeHelm>>>())
+            .expect("the second page reads from the scene's helm");
+        answer_settings_reads(&mut helm.borrow_mut(), section, false);
+    }
+    if let Some(input) = settings::draft_input_for_opened(section, cx) {
+        let text = match section {
+            Section::Terminal => "md, txt, json, png, jpg, log",
+            Section::Checkouts => "~/work/managed",
+            Section::Notifications => "farhelm-lab",
+            Section::Recipes => "rust-tools",
+            _ => unreachable!("the scene only edits its staged fields"),
+        };
+        let next = match step {
+            DraftStep::OpenNotifications => DraftStep::EditNotifications,
+            DraftStep::EditNotifications => DraftStep::AskToClose,
+            DraftStep::Edit => DraftStep::VerifyDraft,
+            DraftStep::VerifyDraft | DraftStep::AskToClose | DraftStep::Done => {
+                unreachable!("these steps do not edit a field")
+            }
+        };
+        draft.step.set(next);
+        window.defer(cx, move |window, cx| {
+            input.edit_for_golden(text, window, cx);
+            if step == DraftStep::OpenNotifications {
+                settings::show_for_opened(Section::Notifications, window, cx);
+            } else if section == Section::Notifications {
+                // The clean scene shows the top of Sounds. Scroll this version to show the topic and its footer.
+                window.dispatch_event(
+                    gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                        position: point(px(500.), px(415.)),
+                        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-1000.))),
+                        ..Default::default()
+                    }),
+                    cx,
+                );
+            }
+        });
+    }
+    div().into_any_element()
 }
 
 /// Settings at App (reference `settings-app`), over a fake desktop updater kept as the app's
