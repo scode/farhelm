@@ -353,10 +353,6 @@ consequences.
   may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
   replacement-folder grant.
 
-- [`old-process-regression-misses-cli-premise.md`](old-process-regression-misses-cli-premise.md) — The
-  old-running-version regression can fail because its fixture omits a CLI observation, even if the intended old-process
-  guard regresses. The production guard remains correct.
-
 - [`installer-prerequisite-test-conflates-two-guards.md`](installer-prerequisite-test-conflates-two-guards.md) —
   Supplying neither prerequisite cannot show that each prerequisite is independently required. The test can miss removal
   of either production guard; no shipped installer defect is established.

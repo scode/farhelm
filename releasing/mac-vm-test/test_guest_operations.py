@@ -436,12 +436,15 @@ printf 'installer contract satisfied\\n'
             managed_result(self.value, self.output, {'status': 'pass', 'detail': 'fixture UI claim'})
 
     def test_old_running_process_cannot_pass_candidate_relaunch(self):
-        """Installed bytes alone do not prove that Restart actually returned the candidate process."""
+        """A correct app bundle and CLI can coexist with the old running app.
+
+        Supply both candidate versions so only the old process blocks the pass.
+        """
         self.value['check_id'] = 'update-relaunch'
         self.value['context']['update_path'] = 'ordinary'
         record = {'completed': ['versions'], 'receipts': [], 'continuity': None,
             'observations': {'versions': {'installed': '0.30.0', 'bundle': '0.30.0',
-                'desktop_running': True, 'running_versions': ['0.29.0']}}}
+                'desktop_running': True, 'running_versions': ['0.29.0'], 'cli': {'stdout': 'farhelm 0.30.0\n'}}}}
         write_json(self.output / 'managed-operations.json', record)
         with self.assertRaisesRegex(TesterError, 'running-version'):
             managed_result(self.value, self.output, {'status': 'pass', 'detail': 'fixture UI claim'})
