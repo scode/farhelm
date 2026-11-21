@@ -188,13 +188,15 @@ def test_handoffs():
             return subprocess.run(
                 ["bash", ROOT / "releasing/check-artifact-handoff.sh", distrib, phase],
                 cwd=tree,
-                env={**os.environ, "RELEASE_ARCHIVES": "\n".join(archives)},
+                # GitHub's YAML block scalar retains its final newline.
+                env={**os.environ, "RELEASE_ARCHIVES": "\n".join(archives) + "\n"},
                 capture_output=True,
                 text=True,
                 check=False,
             )
 
-        assert run("local").returncode == 0
+        result = run("local")
+        assert result.returncode == 0, result
         missing = distrib / archives[-1]
         missing.unlink()
         result = run("local")
