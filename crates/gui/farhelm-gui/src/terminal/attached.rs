@@ -933,7 +933,7 @@ impl AttachedTerminal {
         }
     }
 
-    /// How far the shown screen is lifted now (see [`lift`]), for the session pane's tests, which check that held
+    /// How far the shown screen is lifted now (see [`lift_rows`]), for the session pane's tests, which check that held
     /// notices take no room; `None` before a screen is shown and measured.
     #[cfg(test)]
     pub(crate) fn shown_lift(&self, cx: &App) -> Option<f32> {
@@ -1449,7 +1449,7 @@ impl AttachedTerminal {
     }
 
     /// The screen cell under `position` (window coordinates), clamped into the screen, or `None` before the grid is
-    /// measured. The screen may be lifted for the exit or status line ([`lift`]), which moves its cells up with it.
+    /// measured. The screen may be lifted for the exit or status line ([`lift_rows`]), which moves its cells up with it.
     /// The lookup is the old app's mouse cell (`Geometry::cell`), where a point exactly on a boundary belongs to the
     /// cell before it.
     fn cell_at(&self, position: Point<Pixels>, cx: &App) -> Option<(u16, u16)> {
@@ -1591,8 +1591,8 @@ impl AttachedTerminal {
     }
 
     /// Shift+PageUp (`direction` -1) or Shift+PageDown (1): scroll the shown screen a page less a line, the old app's
-    /// step, so the line at one edge stays in view as a landmark. Reaching the live screen follows it again. On the
-    /// alternate screen there is no history, so nothing moves, and the key still does not reach the program.
+    /// step, so the line at one edge stays in view as a landmark. Reaching the live screen follows it again. The
+    /// alternate screen can scroll past any clipped rows while its primary history stays hidden.
     fn scroll_page(&mut self, direction: i64, cx: &mut Context<Self>) {
         let Some(view) = self.committed.clone() else {
             return;
@@ -1819,8 +1819,10 @@ impl AttachedTerminal {
         let held = self.notices_held(cx);
         let exit = !held && shown.state.and_then(|state| state.exit).is_some();
         let band = !held && self.status_line().is_some();
+        let lifted_rows = lift_rows(rows, cell_height, room, exit, band);
         Some(Placement {
-            lift: lift(rows, cell_height, room, exit, band),
+            lift: f32::from(lifted_rows) * cell_height,
+            lifted_rows,
             cell_height,
             rows,
         })
@@ -1831,6 +1833,8 @@ impl AttachedTerminal {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct Placement {
     lift: f32,
+    /// Also used by navigation and selection so they agree with the physical clip.
+    lifted_rows: u16,
     cell_height: f32,
     rows: u16,
 }
@@ -1976,7 +1980,7 @@ fn program_input(
     }
 }
 
-/// How far the screen moves up to fit `room`: whole rows, at most all of them, so no row is left half visible and the
+/// How many rows the screen moves up to fit `room`: at most all of them, so no row is left half visible and the
 /// newest rows (a program's latest output, a shell's prompt) are the ones that show.
 ///
 /// With an `exit` line the screen needs a row more, and any shortfall lifts it, so the line never covers a row: the old
@@ -1985,27 +1989,27 @@ fn program_input(
 /// shortfall: the fit sizes rows by an 80x24 reference cell while the grid is drawn with its own, so at fractional
 /// scales (1.25, 1.75, 2.5) a fitted grid can be a pixel or two taller than its room, and lifting a whole row of a live
 /// terminal away for that would hide its top row for nothing. The bottom few pixels are clipped instead.
-fn lift(rows: u16, cell_height: f32, room: f32, exit: bool, band: bool) -> f32 {
+fn lift_rows(rows: u16, cell_height: f32, room: f32, exit: bool, band: bool) -> u16 {
     let rows_height = f32::from(rows) * cell_height;
-    let (needed, tolerance) = if exit {
-        (rows_height + cell_height, 0.)
+    let needed = if exit {
+        rows_height + cell_height
     } else if band {
-        (rows_height, 0.)
+        rows_height
     } else {
-        return 0.;
+        return 0;
     };
     let shortfall = needed - room;
-    if shortfall > tolerance && cell_height > 0. {
-        rows_height.min((shortfall / cell_height - 1e-6).ceil() * cell_height)
+    if shortfall > 0. && cell_height > 0. {
+        rows.min((shortfall / cell_height - 1e-6).ceil() as u16)
     } else {
-        0.
+        0
     }
 }
 
 impl AttachedTerminal {
     /// The status line: the old terminal's red `.banner` (the shared [`Banner`]), with Reconnect in `.banner-reclaim`'s
     /// place. It sits above the grid in the pane's flow, as the old banner did, but the fit measures the whole pane,
-    /// so showing or hiding it never resizes the program; the screen is lifted by whole rows instead (see [`lift`]).
+    /// so showing or hiding it never resizes the program. The screen is lifted by whole rows (see [`lift_rows`]).
     fn banner(&self, line: StatusLine, cx: &mut Context<Self>) -> Banner {
         let mut sentence = HostSentence::new("terminal-status").text(line.words);
         if let Some(reason) = &line.reason {
@@ -2164,7 +2168,16 @@ impl Render for AttachedTerminal {
         // is dirty against what was known before this frame, keep its old paint and show the old cursor.
         let phase = self.cursor_phase(window, cx);
         if let Some(view) = &self.committed {
-            view.update(cx, |view, cx| view.set_cursor_phase(phase, cx));
+            let padding = self
+                .placement(view.read(cx), cx)
+                .map_or(0, |placement| placement.lifted_rows);
+            view.update(cx, |view, cx| {
+                view.set_cursor_phase(phase, cx);
+                // The layout and navigation agree before the uncached child draws in this frame.
+                if view.viewport.set_top_padding(padding) {
+                    view.update_shown();
+                }
+            });
         }
         let state = self.committed.as_ref().and_then(|view| view.read(cx).state);
         let (_, ground) = style::defaults(state);
@@ -3904,8 +3917,8 @@ fn drag_scroll_lines(distance: f32) -> i64 {
 impl AttachedTerminal {
     /// The line position under `position` (window coordinates) for a selection: the nearest cell boundary when
     /// `boundary` (how a character or column selection's ends move), else the cell itself. Rows above or below the
-    /// screen clamp to its first or last row, so a drag past an edge selects to it; the notice line stands for the
-    /// line below it. `None` before the grid is measured.
+    /// visible screen clamp to its first or last row, so a drag past an edge selects to it. The notice line stands
+    /// for the line below it. `None` before the grid is measured or when the lift clips every row.
     fn selection_position(
         &self,
         position: Point<Pixels>,
@@ -3927,6 +3940,10 @@ impl AttachedTerminal {
             f64::from(f32::from(position.y - origin.y) + placement.lift),
             boundary,
         )?;
+        let row = row.max(placement.lifted_rows);
+        if row >= placement.rows {
+            return None;
+        }
         let line = view.line_at_row(row)?;
         Some(Position { line, col })
     }

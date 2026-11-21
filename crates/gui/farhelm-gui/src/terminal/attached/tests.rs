@@ -1329,21 +1329,80 @@ fn a_live_exit_shows_its_line(cx: &mut TestAppContext) {
     assert_eq!(h.read(|owner, cx| owner.shown_lift(cx)), Some(0.));
 }
 
+/// At the scroll limit the first painted row below the clip must hold the oldest content.
+/// The exit line keeps its bounds, and a drag above the pane clamps to visible text.
+#[gpui::test]
+fn an_exited_terminal_reaches_the_start_of_its_history(cx: &mut TestAppContext) {
+    for (trimmed, exit, band, expected_lift) in [
+        (false, true, false, 1),
+        (true, true, false, 1),
+        (false, true, true, 2),
+        (false, false, true, 1),
+    ] {
+        // App bootstrap owns one set of focus and layer registries per test case.
+        let mut app = cx.new_app();
+        let mut h = harness(&mut app);
+        h.attach_with_history(40);
+        let exit_state = exit.then(|| serde_json::json!({"code":0}));
+        h.fake().output(
+            serde_json::from_value(serde_json::json!({
+                "t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":null,
+                "default_bg":null,"history_trimmed":trimmed,"exit":exit_state
+            }))
+            .unwrap(),
+        );
+        settle(h.cx);
+        if band {
+            h.fake()
+                .detach(Some(DetachCode::Stalled), DETACH_REASON_STALLED);
+            settle(h.cx);
+        }
+        assert_eq!(h.banner_drawn(), band);
+        let exit_line = h.cx.debug_bounds("terminal-exit");
+        assert_eq!(exit_line.is_some(), exit);
+        let (first_visible, above) = h.read(|owner, cx| {
+            let view = owner.committed.as_ref().unwrap().read(cx);
+            let placement = owner.placement(view, cx).unwrap();
+            let first = (placement.lift / placement.cell_height).round() as usize;
+            let above = owner.grid_origin.unwrap() + point(px(1.), px(-2. * placement.lift));
+            (first, above)
+        });
+        assert_eq!(
+            first_visible, expected_lift,
+            "the measured clip for exit={exit}, band={band}"
+        );
+        h.wheel(1000.);
+        let expected = if trimmed {
+            crate::terminal::TRIMMED_TEXT
+        } else {
+            "h0"
+        };
+        assert_eq!(h.text().unwrap().lines().nth(first_visible), Some(expected));
+        let from = h.at_cell(2, u16::try_from(first_visible + 2).unwrap());
+        h.drag(from, above, Modifiers::none());
+        let selection = h.selection().expect("drag reaches visible history");
+        assert_eq!(selection.start.line.min(selection.end.line), 0);
+        assert_eq!(h.cx.debug_bounds("terminal-exit"), exit_line);
+        drop(h);
+        app.quit();
+    }
+}
+
 /// The screen is lifted by whole rows to fit its room, so the newest rows stay in view: under the status line, which
 /// takes room the fit leaves to the grid, and above the exit line, which needs a row of its own (the old app's
 /// placement). Neither showing, nothing is lifted.
 #[test]
 fn the_screen_lifts_by_whole_rows_to_fit_its_room() {
     // With an exit line: 21 rows of 22 pixels in 480 leave 18 pixels, short of a line by 4, so one row goes up.
-    assert_eq!(lift(21, 22., 480., true, false), 22.);
-    assert_eq!(lift(20, 22., 480., true, false), 0.);
-    assert_eq!(lift(20, 22., 462., true, false), 0.);
+    assert_eq!(lift_rows(21, 22., 480., true, false), 1);
+    assert_eq!(lift_rows(20, 22., 480., true, false), 0);
+    assert_eq!(lift_rows(20, 22., 462., true, false), 0);
     // A grid far taller than its room lifts by no more than all of its rows.
-    assert_eq!(lift(3, 22., 10., true, false), 66.);
+    assert_eq!(lift_rows(3, 22., 10., true, false), 3);
     // Under the status line: a 29-pixel band over a fitted grid lifts it two rows, and any shortfall lifts.
-    assert_eq!(lift(21, 22., 462. - 29., false, true), 44.);
-    assert_eq!(lift(21, 22., 461.5, false, true), 22.);
-    assert_eq!(lift(21, 22., 462., false, true), 0.);
+    assert_eq!(lift_rows(21, 22., 462. - 29., false, true), 2);
+    assert_eq!(lift_rows(21, 22., 461.5, false, true), 1);
+    assert_eq!(lift_rows(21, 22., 462., false, true), 0);
 }
 
 /// A live terminal is never lifted, even when its fitted grid is taller than its room. The fit sizes rows by an 80x24
@@ -1360,7 +1419,7 @@ fn a_fitted_live_grid_is_never_lifted_at_a_fractional_scale() {
         overshoot > 1.,
         "the premise: {rows} rows of {cell_height} overshoot by {overshoot}"
     );
-    assert_eq!(lift(rows, cell_height, 1020., false, false), 0.);
+    assert_eq!(lift_rows(rows, cell_height, 1020., false, false), 0);
 }
 
 /// While the status line shows, the kept screen's last row stays in view: the screen is lifted by whole rows into the

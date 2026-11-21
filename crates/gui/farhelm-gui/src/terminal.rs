@@ -489,10 +489,8 @@ impl TerminalView {
         }
     }
 
-    /// Where the view is, for the scrollbar: the screen's rows out of every line navigation can reach (the history, the
-    /// notice line if any, and the screen), with the view's top counted from the first of them. On the alternate
-    /// screen that is the screen alone, so there is nothing to scroll; nor is there behind the catch-up placeholder,
-    /// which hides the view until its replay is complete.
+    /// Where the view is, for the scrollbar: the screen's rows out of every position navigation can reach, including
+    /// blank padding for lifted rows. The catch-up placeholder hides the view until its replay is complete.
     pub fn scroll_position(&self) -> ScrollbarLines {
         if !self.visible {
             return ScrollbarLines {
@@ -573,8 +571,7 @@ impl TerminalView {
     }
 
     /// The line shown in view row `row`, if any: a history or screen line by its number. The notice line is not text,
-    /// so it stands for the oldest line below it, as a press on it did in the old app; a blank row past the screen
-    /// names nothing.
+    /// so it stands for the oldest line below it, as a press on it did in the old app. Blank padding names no line.
     pub fn line_at_row(&self, row: u16) -> Option<u64> {
         let position = self.viewport.top(&self.model) + u64::from(row);
         let bottom = self.viewport.bottom(&self.model);
@@ -583,6 +580,7 @@ impl TerminalView {
             return (y < self.rows.len() as u64).then(|| self.model.screen_base() + y);
         }
         match self.viewport.row_at(&self.model, position) {
+            ViewRow::Blank => None,
             ViewRow::Notice => Some(self.oldest_line()),
             ViewRow::Line(number) => Some(number),
         }
@@ -811,6 +809,10 @@ impl TerminalView {
                 continue;
             }
             let number = match self.viewport.row_at(&self.model, position) {
+                ViewRow::Blank => {
+                    shown.push(ShownRow::Blank);
+                    continue;
+                }
                 ViewRow::Notice => {
                     shown.push(ShownRow::Notice);
                     continue;
