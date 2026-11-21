@@ -1,0 +1,48 @@
+# Require ownership of test state parents
+
+## What this was about
+
+Farhelm's test recorder and deflake sweep accepted a sticky parent directory owned by another account. That account
+could still replace entries, contrary to the tools' documented ownership protection. The triage decision was to enforce
+ownership in both tools. Each now requires its state directory's immediate parent to belong to the account running the
+tool or to root.
+
+## Things you should know
+
+The normal root-owned system temporary directory still qualifies. A custom recorder output location is subject to the
+same immediate-parent check. The triage outcome moved to the archive with the draft PR link.
+
+The evaluation delegate read part of the validation inventory before its output was truncated. Its prescribed evaluation
+steps completed, and I checked the actual event stream and cleanup state.
+
+## Open questions and possible follow-ups
+
+None.
+
+## Pull requests
+
+- Require ownership in the test recorder and deflake, with tests and docs.
+  [#4386](https://github.com/scode/farhelm/pull/4386/changes)
+
+## Checks
+
+- On the working tree captured in `9badcd35`, `python3 -B scripts/test-record-test-run.py` passed 58 (recorder
+  `8b4b9a73-af40-4ccc-a83a-9157b5d5a4c1`). `python3 -B deflake/test-deflake.py` passed 16 (recorder
+  `4989e2fd-67b5-429a-9946-701eedc53a0b`). After tightening the fixtures, the recorder ownership case passed on its own
+  (recorder `17a6f125-705f-4284-a210-09b1de2c82d4`) and all three deflake state-root cases passed (recorder
+  `0b585c42-50c9-430e-8513-ccafcd686c78`). Those two attempts cover the corrected test files captured in `2ac3e5b4`. The
+  final rebase kept the checked driver, recorder and corrected test files byte-identical.
+- Ran `deflake/bin/deflake start --profile eval` and the background `wait` loop through the cold delegate in the
+  isolated EVAL checkout. Run `611ed519-74b8-47a9-9ae9-1093c36eb092` on fixture revision `17f3e782d90f` classified the
+  planted Rust flake after three passing reruns (initial recorder `7aceb28d-5d82-4b39-88a0-aa5d4fefc141`) and the
+  planted JS failure after three failing reruns (initial recorder `b5335197-87e0-448a-b475-6b0fe2656161`). The delegate
+  made local flake and fix commits. After the finish event, `wait` returned exit 4, confirming the run was over with no
+  pending events. I verified build-output cleanup.
+- Targeted `dprint check`, `git diff --check`, instruction-link and changelog format checks passed. The instruction
+  checker still reports the existing archived heading warning. The focused Python checks and isolated sweep cover the
+  changed tooling, so a full runtime workspace sweep was skipped.
+
+## Review
+
+The independent source review and commit wording read passed. The review led to a simulated non-root effective UID in
+both fixtures, so the root-owned parent case detects a regression when the tests run as root.
