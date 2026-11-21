@@ -250,3 +250,18 @@ A finding matches when all of these hold:
 This covers that specific handoff, including loss of the unrelated process's work. It does not cover selecting the wrong
 host initially, omitting identity verification, storing a process number for later use, or carrying a bare number across
 other asynchronous work or waits outside this verification-to-signal handoff.
+
+### Harm whose route is not established in shipped code
+
+Added 2026-11-21; decided by the maintainer in the 2026-10-26 triage.
+
+A finding matches when every consequence that would make it worth triage depends on a step nobody has shown to happen in
+shipped code: a missing source premise, platform or vendor behavior nobody verified, an input sequence no shipped
+control produces, or speculation about work that is not implemented yet. Such a finding is not recorded. Whoever later
+establishes the route records it then, with the route.
+
+The filter is about the route, not the size of the harm: a finding whose route is established stays outside it however
+rare its trigger. A finding with an established lesser consequence beside an unestablished stronger one does not match;
+record it bucketed by what is established, as `review_feedback_queue/AGENTS.md`, "Priority buckets", describes. A
+finding whose unestablished consequence could be in the `highest` bucket still goes through the independent drop check
+(`review_feedback_queue/.agents/recording.md`, "Independent drop check") before it is dropped under this filter.

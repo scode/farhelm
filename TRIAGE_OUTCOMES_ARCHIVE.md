@@ -25864,3 +25864,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   and its index entry.
 - Execution: change `tmruwznqostqqlpwnwlxpopmrrslkumz`, bookmark `pr/stale-triage-discards`,
   [PR #4367](https://github.com/scode/farhelm/pull/4367/changes).
+
+## removal-destination-collapses-distinguishing-spaces.md
+
+- Outcome: `other`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  Destinations that differ only by repeated spaces render identically, because the body paragraphs and inline peer spans
+  use normal white-space. SPEC.md:1531 says "A shortened heading retains the full destination in the body". However, no
+  valid live SSH destination with repeated spaces was shown, and the copied-command extension depends on unverified
+  clipboard and harm premises.
+- Decision: the user picked "Discard all, and add a review filter" (2026-10-26 ten-question triage page, Q1).
+- Completion criteria: add a filter to `review_feedback_queue/FILTER.md`: a finding whose harmful route is not
+  established in shipped code (a missing premise, unverified platform or vendor behavior, an input sequence no shipped
+  control produces, or speculation about unimplemented work) is not recorded; whoever establishes the route records it
+  then. No code change. Remove the feedback file and its index entry.
+- Execution: change `wnyvvltrmuwzpwmrwqkxkztkmtuunqux`, bookmark `pr/filter-unestablished-harm-routes`,
+  [PR #4369](https://github.com/scode/farhelm/pull/4369/changes).
