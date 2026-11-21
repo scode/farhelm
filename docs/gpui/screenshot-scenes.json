@@ -3356,6 +3356,11 @@
       "golden": "tab-only-stop-confirmation",
       "title": "Stop of a session whose only remaining terminals are tabs",
       "reference": null
+    },
+    {
+      "golden": "settings-recipe-editor-delete-anyway",
+      "title": "Recipe Delete after an unconfirmed image save, asking to delete anyway",
+      "reference": null
     }
   ],
   "reference_scenes": [

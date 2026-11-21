@@ -1340,7 +1340,10 @@ async fn recipe_delete_needs_explicit_consent_to_forget_an_absent_capture() {
         ordinary.headers()[RECIPE_CAPTURE_CONFIRMATION_HEADER],
         "confirmation-required"
     );
-    assert_eq!(f.recipe_state().await.retired_images, [tag.clone()]);
+    assert_eq!(
+        f.recipe_state().await.retired_images,
+        std::slice::from_ref(&tag)
+    );
 
     let confirmed = "/api/tensorlake/recipes/dev?forget_missing_captures=true";
     let refused = delete(confirmed).await;

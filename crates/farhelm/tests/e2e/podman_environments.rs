@@ -1468,9 +1468,8 @@ impl Fixture {
     /// count it made, and the second seals it and the helm destroys it before
     /// answering.
     ///
-    /// The count must be exactly the one session left; a helm that counted
-    /// its own list, or a supervisor that sealed with a session remaining,
-    /// fails here. The final checks are independent of the helm's answer:
+    /// The count must be exactly the one session left; a supervisor that
+    /// sealed with a session remaining fails here. The final checks are independent of the helm's answer:
     /// Podman's own view of the container and the hosts listing.
     async fn delete_sessions_until_sealed(
         &self,
