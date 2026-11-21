@@ -337,9 +337,6 @@ consequences.
 - [`pinned-host-dialog-chrome-can-hide-content.md`](pinned-host-dialog-chrome-can-hide-content.md) — The deleted dialog
   record still has an unresolved Host Settings footer-clipping case; exact geometry is unverified.
 
-- [`session-view-fallback-omits-start-time.md`](session-view-fallback-omits-start-time.md) — The promised fallback for
-  clipped hover details omits a session's separate start time.
-
 - [`repository-search-reports-empty-before-reply.md`](repository-search-reports-empty-before-reply.md) — Partial
   repository search reports no matches while discovery is still pending.
 
