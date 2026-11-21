@@ -688,26 +688,6 @@
   index entry.
 - Execution: planned in `plans/queue/triage-helm.md`.
 
-## uri-spare-capacity-missing-from-memory-budget.md
-
-- Outcome: `fix code`.
-- Assessment: None directly. Hostile hyperlink output can make a terminal use more memory than Farhelm's stated
-  per-terminal bound, because spare string capacity in stored links is not counted. Verified: Accepted from the file's
-  vendor citations (cell.rs charges `uri.len()`, not its capacity). SPEC_impl.md:2546-2551 states "at most 64 MiB of
-  cell extras ... under a vendored per-terminal cap that no path can exceed" and "at least 5 per GiB if all of them are
-  hostile". Worst case is roughly up to 2x the extras physically. No measurement.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code: `shrink_to_fit` the URI in the vendored cell code, with its
-  patch-file entry. That keeps the stated budget true. If the fix turns out not to be straightforward, or needs
-  significant additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code,
-  tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and
-  brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
 ## successful-suspend-flashes-connecting.md
 
 - Outcome: `fix code`.

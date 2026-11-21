@@ -132,12 +132,17 @@ impl ExtraStorage {
     /// A new link charged to this storage, or `None` if it and the cell extra
     /// that will carry it would take the storage past
     /// `MAX_EXTRA_STORAGE_BYTES`.
+    ///
+    /// The budget charges URI bytes by length, so discard spare capacity
+    /// before retaining the URI. The boxed slice fixes the capacity at its
+    /// length and converts back to a string without another allocation.
     pub fn link(&self, link: VteHyperlink) -> Option<Hyperlink> {
         let mut inner = HyperlinkInner::new(link.id, link.uri);
         let bytes = inner.id.len() + inner.uri.len() + crate::term::HYPERLINK_COST;
         if !self.has_room(bytes + crate::term::CELL_EXTRA_COST) {
             return None;
         }
+        inner.uri = inner.uri.into_boxed_str().into_string();
         inner.charge = Some(self.charge(bytes));
         Some(Hyperlink { inner: Arc::new(inner) })
     }
@@ -505,6 +510,21 @@ mod tests {
 
     use crate::grid::Row;
     use crate::index::Column;
+
+    /// Farhelm patch: retained URI capacity must match the charge even
+    /// when a caller hands us a string with unused capacity.
+    #[test]
+    fn a_charged_hyperlink_discards_unused_uri_capacity() {
+        let storage = ExtraStorage::default();
+        let mut uri = String::with_capacity(128);
+        uri.push_str("https://example.invalid/");
+        assert!(uri.capacity() > uri.len());
+
+        let link = storage.link(VteHyperlink { id: Some("test".into()), uri }).unwrap();
+        assert_eq!(link.uri(), "https://example.invalid/");
+        assert_eq!(link.inner.uri.capacity(), link.uri().len());
+        assert_eq!(storage.used(), link.id().len() + link.uri().len() + crate::term::HYPERLINK_COST);
+    }
 
     #[test]
     fn cell_size_is_below_cap() {

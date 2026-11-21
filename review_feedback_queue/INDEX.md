@@ -189,10 +189,6 @@ consequences.
   blink a block cursor even when the program requests it steady, while the wire contract says blinking is the default
   unless the program says otherwise.
 
-- [`uri-spare-capacity-missing-from-memory-budget.md`](uri-spare-capacity-missing-from-memory-budget.md) — Hyperlink
-  allocations can be larger than the terminal memory estimate counts, although the logical storage counter still obeys
-  its cap.
-
 - [`host-lock-table-contradicts-startup-span.md`](host-lock-table-contradicts-startup-span.md) — Farhelm's maintenance
   documentation states a lifecycle-lock constraint that startup deliberately violates, obscuring which recovery
   operation may perform host I/O while holding the lock.

@@ -108,8 +108,9 @@ it reaches the parser: a pre-scan would need a second parser to know where seque
   many there are: such output takes about 390 MiB per terminal at 12,000 lines of 200 columns, and about 6 GB with
   maximal hyperlinks. Each `Term` now has an `ExtraStorage` that every cell extra and every link is charged to: an extra
   `CELL_EXTRA_COST` (160 bytes, its allocation and the most its combining characters take, as 64-bit glibc rounds them),
-  a link its `id` and URI lengths plus `HYPERLINK_COST` (128 bytes for its own allocations). A charge is given back when
-  what it was charged for is dropped, and a copy that alacritty makes when it changes a shared extra is charged too. The
+  a link its `id` and URI lengths plus `HYPERLINK_COST` (128 bytes for its own allocations). A link discards spare URI
+  capacity before the terminal retains it, so the charge covers the URI bytes it keeps. A charge is given back when what
+  it was charged for is dropped, and a copy that alacritty makes when it changes a shared extra is charged too. The
   limit is hard: every change that would make a new extra goes through the storage's setters, which check for room
   first, and degrade the cell when there is none. An added combining character is dropped, an added underline color
   falls back to the default, an OSC 8 ends the active hyperlink (like one over the length caps), and a removal that
@@ -442,7 +443,7 @@ records" after the records).
   pair it prints.
 - Upstream code: `alacritty_terminal/src/term/cell.rs`, `Cell::push_zerowidth`.
 - Patch hunks (`alacritty_terminal`, `term/cell.rs`): `@@ -36,6 +43,18 @@` (`MAX_ZEROWIDTH_CHARS`, which the extra
-  storage's `CELL_EXTRA_COST` is sized by) and `@@ -162,6 +360,10 @@` (`push_zerowidth`); the test in `term/mod.rs`
+  storage's `CELL_EXTRA_COST` is sized by) and `@@ -162,6 +365,10 @@` (`push_zerowidth`); the test in `term/mod.rs`
   `@@ -3299,4 +3832,1060 @@`.
 - Tests: `term::tests::zerowidth_characters_per_cell_are_capped` (vendored);
   `a_combining_character_flood_is_capped_per_cell` (`farhelm-terminal-emulator`, `tests/hostile.rs`).
@@ -920,11 +921,11 @@ records" after the records).
 - Fix: each `Term` has an `ExtraStorage`, a byte count shared through an `Arc<AtomicUsize>` by everything charged to it.
   A `CellExtra` is charged `CELL_EXTRA_COST` (160 bytes) when `ExtraStorage::adopt` takes on a fresh one and again when
   a charged one is copied (the charge's `Clone`); a hyperlink made by `ExtraStorage::link` is charged its `id` and URI
-  lengths plus `HYPERLINK_COST` (128); every charge is refunded in `Drop`. Every path that could make a new extra goes
-  through `ExtraStorage`'s setters (`push_zerowidth`, `set_underline_color`, `set_hyperlink`, `clear_wide`), which check
-  for room first; without room they degrade the cell (a combining mark dropped, an underline color falling back to the
-  default, a link ended, or, when removing an attribute would copy a shared extra, the cell's whole extra dropped), so
-  the count never exceeds `MAX_EXTRA_STORAGE_BYTES`.
+  lengths plus `HYPERLINK_COST` (128) after compacting the URI. Every charge is refunded in `Drop`. Every path that
+  could make a new extra goes through `ExtraStorage`'s setters (`push_zerowidth`, `set_underline_color`,
+  `set_hyperlink`, `clear_wide`), which check for room first; without room they degrade the cell (a combining mark
+  dropped, an underline color falling back to the default, a link ended, or, when removing an attribute would copy a
+  shared extra, the cell's whole extra dropped), so the count never exceeds `MAX_EXTRA_STORAGE_BYTES`.
 - Why Farhelm needs it: every terminal's emulator runs in one long-lived supervisor, where one program must not be able
   to grow the shared process without bound. The per-terminal memory budget rests on this limit
   (`farhelm-terminal-emulator`, `src/lib.rs`, "Memory budget").
@@ -934,15 +935,16 @@ records" after the records).
   `Term::write_at_cursor` (`clear_wide`), `Term::set_hyperlink` and `Term::terminal_attribute` (`Attr::UnderlineColor`,
   `Attr::Reset`).
 - Patch hunks (`alacritty_terminal`): in `term/cell.rs`, `@@ -1,5 +1,12 @@` beyond the header (the `Hash`, `Hasher` and
-  `AtomicUsize` imports), `@@ -72,6 +91,177 @@` (`ExtraStorage`, `StorageCharge`), `@@ -80,6 +270,10 @@` and
-  `@@ -93,7 +287,7 @@` (`HyperlinkInner`'s charge), `@@ -126,6 +320,10 @@` (`CellExtra`'s charge); in `term/mod.rs`,
-  `@@ -1,23 +1,35 @@` (the import), `@@ -41,6 +53,63 @@`, its `MAX_EXTRA_STORAGE_BYTES`, `CELL_EXTRA_COST` and
-  `HYPERLINK_COST`, `@@ -327,6 +396,14 @@` and `@@ -441,15 +518,18 @@` (the field), `@@ -953,6 +1033,235 @@`, its last
-  accessor, `extra_storage()`, `@@ -998,7 +1307,9 @@` (`write_at_cursor`), `@@ -1080,7 +1543,17 @@`, its
-  `push_zerowidth` change, `@@ -1873,7 +2366,26 @@`, its last two statements, `@@ -1881,15 +2393,19 @@`
-  (`terminal_attribute`); the tests in `@@ -3299,4 +3832,1060 @@`. `ExtraStorage`'s setters also return early when
-  nothing changes, the same check as the next record's, at this layer.
-- Tests: `term::tests::hyperlinks_are_bounded_by_the_extra_storage`,
+  `AtomicUsize` imports), `@@ -72,6 +91,182 @@` (`ExtraStorage`, `StorageCharge`), `@@ -80,6 +275,10 @@` and
+  `@@ -93,7 +292,7 @@` (`HyperlinkInner`'s charge), `@@ -126,6 +325,10 @@` (`CellExtra`'s charge), and the URI capacity
+  test in `@@ -297,6 +511,21 @@`; in `term/mod.rs`, `@@ -1,23 +1,35 @@` (the import), `@@ -41,6 +53,63 @@`, its
+  `MAX_EXTRA_STORAGE_BYTES`, `CELL_EXTRA_COST` and `HYPERLINK_COST`, `@@ -327,6 +396,14 @@` and `@@ -441,15 +518,18 @@`
+  (the field), `@@ -953,6 +1033,235 @@`, its last accessor, `extra_storage()`, `@@ -998,7 +1307,9 @@`
+  (`write_at_cursor`), `@@ -1080,7 +1543,17 @@`, its `push_zerowidth` change, `@@ -1873,7 +2366,26 @@`, its last two
+  statements, `@@ -1881,15 +2393,19 @@` (`terminal_attribute`); the tests in `@@ -3299,4 +3832,1060 @@`.
+  `ExtraStorage`'s setters also return early when nothing changes, the same check as the next record's, at this layer.
+- Tests: `term::cell::tests::a_charged_hyperlink_discards_unused_uri_capacity`,
+  `term::tests::hyperlinks_are_bounded_by_the_extra_storage`,
   `term::tests::combining_characters_and_underline_colors_are_bounded` and
   `term::tests::restoring_a_saved_cursor_cannot_grow_the_storage_past_the_limit` (vendored);
   `floods_of_cell_extras_are_bounded` (`farhelm-terminal-emulator`, `tests/hostile.rs`),
@@ -975,8 +977,8 @@ records" after the records).
   while a link is active makes a copy per cell, and are kept so that this change can go upstream on its own.
 - Upstream code: `alacritty_terminal/src/term/cell.rs`, `Cell::set_underline_color`, `Cell::set_hyperlink`,
   `Cell::clear_wide`.
-- Patch hunks (`alacritty_terminal`, `term/cell.rs`): `@@ -170,7 +372,9 @@` (`clear_wide`), `@@ -186,7 +390,10 @@`
-  (`set_underline_color`), `@@ -208,7 +415,9 @@` (`set_hyperlink`).
+- Patch hunks (`alacritty_terminal`, `term/cell.rs`): `@@ -170,7 +377,9 @@` (`clear_wide`), `@@ -186,7 +395,10 @@`
+  (`set_underline_color`), `@@ -208,7 +420,9 @@` (`set_hyperlink`).
 - Tests: none isolates these hunks. `term::tests::repeating_an_unchanged_attribute_copies_nothing` (vendored) pins the
   behavior through the terminal, but the extra storage's setters return before calling `Cell::set_underline_color` or
   `Cell::set_hyperlink` when nothing changes, and nothing tests `clear_wide` on a shared extra without combining
