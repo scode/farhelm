@@ -59,8 +59,8 @@ pub(super) enum FolderProblem {
 }
 
 impl FolderProblem {
-    /// The problem `message` names, from the supervisor's fixed refusal words (`ensure_cwd_usable` and its siblings),
-    /// found anywhere in it, since the helm can wrap the supervisor's sentence in its own.
+    /// Match the first supervisor refusal phrase in `message`. The helm can wrap that sentence, and the supervisor
+    /// appends the path after its reason, so a later match can be part of the folder name.
     pub(super) fn recognize(message: &str) -> Option<FolderProblem> {
         [
             ("working directory does not exist: ", FolderProblem::Missing),
@@ -71,7 +71,8 @@ impl FolderProblem {
             ("working directory is not usable: ", FolderProblem::Unusable),
         ]
         .into_iter()
-        .find(|(words, _)| message.contains(words))
+        .filter_map(|(words, problem)| message.find(words).map(|offset| (offset, problem)))
+        .min_by_key(|(offset, _)| *offset)
         .map(|(_, problem)| problem)
     }
 
@@ -244,7 +245,7 @@ mod tests {
 
     /// The supervisor's folder refusals are recognized wherever the helm puts them, and nothing else is: a timeout or a
     /// busy host must never mark a folder that may well exist. Specified: each of the three phrasings, alone and inside
-    /// a helm sentence, and two inconclusive answers.
+    /// a helm sentence, paths that contain a different refusal phrase, and two inconclusive answers.
     #[test]
     fn only_the_supervisors_folder_words_name_a_problem() {
         assert_eq!(
@@ -259,6 +260,18 @@ mod tests {
         );
         assert_eq!(
             FolderProblem::recognize("working directory is not usable: /root"),
+            Some(FolderProblem::Unusable)
+        );
+        assert_eq!(
+            FolderProblem::recognize(
+                "create refused: working directory is not a directory: /project/working directory does not exist: notes"
+            ),
+            Some(FolderProblem::NotADirectory)
+        );
+        assert_eq!(
+            FolderProblem::recognize(
+                "working directory is not usable: /project/working directory is not a directory: draft (permission denied)"
+            ),
             Some(FolderProblem::Unusable)
         );
         assert_eq!(FolderProblem::recognize("the host timed out"), None);

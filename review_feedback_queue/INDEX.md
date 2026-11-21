@@ -341,10 +341,6 @@ consequences.
   defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are
   established, arbitrary path substitution is not.
 
-- [`folder-refusal-classifier-matches-path-text.md`](folder-refusal-classifier-matches-path-text.md) — A path containing
-  familiar error phrases can be misclassified as missing rather than refused or non-directory. This changes an advisory
-  annotation, not launch authority; the rare-diagnostic filter's scope is ambiguous.
-
 - [`fresh-claude-trust-birthtime-contract-conflict.md`](fresh-claude-trust-birthtime-contract-conflict.md) — Initial
   fresh-checkout creation can edit Claude trust without the no-birth-time check stated elsewhere. Fresh-creation rules
   may intentionally be an exception; this is a source/specification conflict, not an established unauthorized
