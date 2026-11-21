@@ -1627,6 +1627,7 @@ mod tests {
             req_id,
             sealed: false,
             sessions: vec![SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -1696,6 +1697,7 @@ mod tests {
         let msg = ControlMsg::SessionCreated {
             req_id: 7,
             session: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -1738,6 +1740,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 9,
             session: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -1841,6 +1844,7 @@ mod tests {
                     parent: None,
                     launch: SessionLaunch::plain_command("agent"),
                     title: Some("parent".to_string()),
+                    setup_persistent_hooks: false,
                     cols: 80,
                     rows: 24,
                 },
@@ -2036,6 +2040,7 @@ mod tests {
                     parent: None,
                     launch: SessionLaunch::plain_command("agent"),
                     title: Some("parent".to_string()),
+                    setup_persistent_hooks: false,
                     cols: 80,
                     rows: 24,
                 },

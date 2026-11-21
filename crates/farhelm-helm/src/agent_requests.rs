@@ -5445,6 +5445,7 @@ mod tests {
 
     fn session_info(id: &str, status: SessionStatus) -> SessionInfo {
         SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,

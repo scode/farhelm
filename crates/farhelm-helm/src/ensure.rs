@@ -494,6 +494,7 @@ mod tests {
                 row.id,
                 "identity-known",
                 (vec![farhelm_proto::SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,

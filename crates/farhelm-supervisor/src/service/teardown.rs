@@ -1347,6 +1347,8 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -1929,6 +1931,8 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -1994,6 +1998,8 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4004,6 +4010,7 @@ mod tests {
         assert!(sup.store.session("s-race").await.unwrap().is_some());
         assert!(source.is_dir());
         let inputs = CreateInputs {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             cwd,

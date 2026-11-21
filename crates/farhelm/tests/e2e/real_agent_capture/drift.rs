@@ -225,12 +225,15 @@ fn has_manual_hook(path: &Path, vendor: &str) -> bool {
         .is_some_and(|value| contains_command(&value, vendor))
 }
 
-/// Resolve the two documented manual hook layouts. The test reads only existing configuration.
+/// Check the files the installed agent discovers. The drift test reads existing hook configuration.
 fn manual_hook_configured(vendor: &str) -> bool {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     match vendor {
-        "antigravity" => home
-            .is_some_and(|home| has_manual_hook(&home.join(".gemini/config/hooks.json"), vendor)),
+        "antigravity" => home.is_some_and(|home| {
+            let config = home.join(".gemini/config");
+            has_manual_hook(&config.join("hooks.json"), vendor)
+                || has_manual_hook(&config.join("plugins/farhelm/hooks.json"), vendor)
+        }),
         "grok" => std::env::var_os("GROK_HOME")
             .map(PathBuf::from)
             .or_else(|| home.map(|home| home.join(".grok")))
@@ -610,7 +613,7 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         && !manual_hook_configured(vendor)
     {
         return Err(DriftError::CouldNotRun(format!(
-            "manual {vendor} Farhelm hook is absent or unreadable (see the agent setup guide)"
+            "the {vendor} Farhelm hook is absent or unreadable (see the agent setup guide)"
         )));
     }
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");

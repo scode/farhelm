@@ -563,6 +563,7 @@ mod tests {
     fn row(id: &str, created_at: i64, host: HostId) -> SessionRow {
         SessionRow {
             info: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,

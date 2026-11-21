@@ -309,8 +309,7 @@ pub(super) struct SpawnedInHost {
     /// The files this launch owns: its spec and the rest of its launch
     /// artifacts, which the caller removes if the launch is given up.
     pub(super) artifacts: LaunchArtifacts,
-    /// Whether this launch's argv carried the conversation hook, as
-    /// [`Supervisor::with_farhelm_args`] decided.
+    /// Whether this launch's command or vendor configuration carries the conversation hook.
     ///
     /// Returned rather than left on the supervisor because the cell that
     /// records it, `RunCells::hooked`, belongs to the entry PUBLISHED for
@@ -318,6 +317,8 @@ pub(super) struct SpawnedInHost {
     /// the launch is confirmed. Both callers carry this value forward to
     /// that publication; nothing else reads it.
     pub(super) hooked: bool,
+    /// Companion result for agents whose hooks are discovered from configuration files.
+    pub(super) persistent_hook_setup: farhelm_proto::PersistentHookSetup,
     /// [`Supervisor::host_scan`] held shared since just before the host's
     /// first stage started: the caller keeps it until the host's entry is
     /// on the session map, or releases it before giving the host up.
@@ -457,6 +458,7 @@ impl Supervisor {
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
         initial_snapshot: Option<Vec<u8>>,
+        setup_persistent_hooks: bool,
     ) -> Result<SpawnedInHost, HostSpawnFailure> {
         let PreparedLaunch {
             cwd,
@@ -465,6 +467,7 @@ impl Supervisor {
             cmd,
             hooked,
             hook_skip,
+            persistent_hook_setup,
         } = self
             .prepare_launch(
                 id,
@@ -478,6 +481,7 @@ impl Supervisor {
                 scope,
                 preparation,
                 initial_prompt,
+                setup_persistent_hooks,
             )
             .await
             .map_err(HostSpawnFailure::Spec)?;
@@ -639,19 +643,14 @@ impl Supervisor {
         // is known to be running. The store fences the record on this
         // generation, which the row already carries.
         if let Some(skip) = hook_skip {
-            self.notify_session(
-                id,
-                generation,
-                super::super::notifications::NotificationKind::HookNotAdded,
-                &skip.text(),
-            )
-            .await;
+            self.notify_hook_skip(id, generation, skip).await;
         }
         self.track_pending_hold(id, generation, artifacts.spec(), host.clone());
         Ok(SpawnedInHost {
             host,
             artifacts,
             hooked,
+            persistent_hook_setup,
             spawning,
         })
     }

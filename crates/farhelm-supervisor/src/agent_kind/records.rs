@@ -44,7 +44,7 @@ pub async fn read_record(
 /// an open that would never return, and the `fstat`-based regular-file
 /// check validates the object actually opened, even if the path was replaced
 /// between report admission and verification.
-async fn open_regular_file(path: &Path) -> anyhow::Result<Option<tokio::fs::File>> {
+pub(super) async fn open_regular_file(path: &Path) -> anyhow::Result<Option<tokio::fs::File>> {
     let opened = tokio::fs::OpenOptions::new()
         .read(true)
         .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
@@ -63,7 +63,7 @@ async fn open_regular_file(path: &Path) -> anyhow::Result<Option<tokio::fs::File
         .map_err(|e| anyhow::Error::new(e).context(format!("stat of open {}", path.display())))?;
     if !metadata.is_file() {
         anyhow::bail!(
-            "{} is not a regular file; refusing to read it as a conversation record",
+            "{} is not a regular file; refusing to read it",
             path.display()
         );
     }

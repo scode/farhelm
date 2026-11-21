@@ -969,6 +969,9 @@ pub struct SupervisorSeams {
     /// supervisor that resolves to nothing refuses `~` creates with a
     /// clear error rather than guessing.
     pub user_home: Option<PathBuf>,
+    /// Grok's configuration root for fixtures that provide an explicit user home. Omitting it uses that home's
+    /// `.grok` directory, so tests with temporary homes cannot pick up an ambient `GROK_HOME`.
+    pub grok_home: Option<PathBuf>,
     /// How often the supervisor's own periodic task fires — see
     /// [`crate::service::ticker`] for what rides that cadence and
     /// [`TICKER_INTERVAL`] for why production picks the value it does.
@@ -1159,6 +1162,7 @@ impl Default for SupervisorSeams {
             session_start_path: None,
             faults: FaultHooks::default(),
             user_home: None,
+            grok_home: None,
             ticker_interval: TICKER_INTERVAL,
             activity_quantum: ACTIVITY_STAMP_QUANTUM,
             work_start_clock: Arc::new(work_start_now),
@@ -2314,6 +2318,8 @@ fn unrecorded_outcome(original: anyhow::Error, settle: anyhow::Error) -> anyhow:
 /// checked" — `Supervisor::launch_session` performs no validation of its
 /// own and would have no way to.
 struct LaunchRequest {
+    /// The create's host-wide hook opt-in, recovered from the accepted row when a keyed create is resumed.
+    setup_persistent_hooks: bool,
     /// Transient input applied after placeholder expansion, never persisted
     /// in the session's launch. Pending create retries retain it separately.
     prompt: Option<String>,
@@ -2395,6 +2401,7 @@ struct LaunchRequest {
 /// than the session (and are deliberately absent from the fingerprint),
 /// since the launch does need them.
 pub(crate) struct CreateInputs<'a> {
+    pub(crate) setup_persistent_hooks: bool,
     pub(crate) prompt: Option<String>,
     /// One-time start only; the ordinary launch still supplies durable choices.
     pub(crate) named_start: Option<farhelm_proto::NamedConversationStart>,
@@ -3319,14 +3326,8 @@ fn relaunched_entry(
             first_input: Arc::new(std::sync::Mutex::new(None)),
             capture: Arc::new(std::sync::Mutex::new(capture)),
             // Fresh cells with fresh VALUES, on every relaunch. Both describe a
-            // LAUNCH's hook injection and the diagnostic spent on it, not the
-            // conversation: a launch this process has not spawned yet is not
-            // hooked until `with_hook_argv` says so, and `publish_relaunched`
-            // is what raises the flag when it did. Carrying them over would
-            // state something about the
-            // new launch that only the old one had established, and would carry
-            // a warning already spent — so a second broken launch of the same
-            // session would trip the wire silently.
+            // launch's hook setup and the warning spent on it. `publish_relaunched` arms the flag for this run
+            // after its launch confirms. Carrying over a spent warning would silence a failed hook in the new run.
             hooked: hook_flag(false),
             hook_warned: hook_flag(false),
             // Classification is never carried over, though the conversation is: the stored
@@ -3710,8 +3711,10 @@ struct PreparedLaunch {
     /// The terminal's command: the login shell running the launch shim
     /// ([`Supervisor::shim_window_command`]), the scope wrapper inside it.
     cmd: Vec<String>,
-    /// Whether the agent's argv carries the conversation hook.
+    /// Whether this generation starts with a Farhelm conversation hook, from its command or vendor configuration.
     hooked: bool,
+    /// The attempt's outcome, carried into the published session after its host starts.
+    persistent_hook_setup: farhelm_proto::PersistentHookSetup,
     /// The hook Farhelm could not add, told to the user once the launch
     /// is known to be running.
     hook_skip: Option<super::notifications::HookSkip>,
@@ -3726,6 +3729,7 @@ struct StartedLaunch {
     artifacts: LaunchArtifacts,
     /// See [`SpawnedInHost::hooked`].
     hooked: bool,
+    persistent_hook_setup: farhelm_proto::PersistentHookSetup,
     /// `Supervisor::host_scan` held shared since just before the host's
     /// first stage started (`host_launch::SpawnedInHost::spawning`): kept
     /// until the entry is published, released before the host is given up.
@@ -4018,6 +4022,8 @@ struct Relaunched {
     /// Raising it on the published entry is the only placement that
     /// survives.
     hooked: bool,
+    /// Setup was decided for this new generation, including for a restart from a session with no installed hooks.
+    persistent_hook_setup: farhelm_proto::PersistentHookSetup,
     /// The session's tabs to report with the restart: the preflight list,
     /// since a restart keeps every tab open.
     tabs: Vec<TabInfo>,
@@ -4038,6 +4044,8 @@ struct RestartWithBundle {
 /// lifecycle claim; the spawned task owns the rest of the restart even if its
 /// client disconnects.
 struct RelaunchPlan {
+    /// The helm's current opt-in, independent of the stored launch and the previous run's setup result.
+    setup_persistent_hooks: bool,
     /// Withdraw old capture only for a named start without subsequent reports.
     clear_capture: bool,
     argv: Vec<String>,
@@ -5196,6 +5204,8 @@ pub struct Supervisor {
     /// once because what a `~` means must not
     /// shift mid-life with the daemon's environment.
     pub(super) user_home: Option<PathBuf>,
+    /// The supervisor's Grok configuration override, resolved beside its home rather than from a login shell.
+    grok_home: Option<PathBuf>,
     /// Serializes each session's report/refresh capture transaction, across
     /// every kind and every capture mutation/readiness path.
     ///
@@ -6199,6 +6209,18 @@ impl Supervisor {
             .clone()
             .or_else(|| std::env::var_os("HOME").map(PathBuf::from))
             .filter(|home| !home.as_os_str().is_empty());
+        let grok_home = seams
+            .grok_home
+            .clone()
+            .or_else(|| {
+                seams
+                    .user_home
+                    .is_none()
+                    .then(|| std::env::var_os("GROK_HOME"))
+                    .flatten()
+                    .map(PathBuf::from)
+            })
+            .filter(|home| !home.as_os_str().is_empty());
         // Made before the reload, which adopts the hosts of host rows and
         // gives each runtime this notifier, so their exits reach the ticker.
         let (host_liveness, host_liveness_receiver) = crate::hosts::LivenessNotifier::channel();
@@ -6285,6 +6307,7 @@ impl Supervisor {
             trash_remover: Arc::new(super::trash_remover::Remover::default()),
             repository_scanner: crate::repository_discovery::RepositoryScanner::new("git"),
             user_home,
+            grok_home,
             capture_locks: Arc::new(KeyedLocks::default()),
             report_drain: tokio::sync::Mutex::new(()),
             report_watch_lifetime: tokio::sync::watch::channel(()).0,
@@ -7198,6 +7221,7 @@ impl Supervisor {
                 row.id.clone(),
                 Arc::new(SessionEntry {
                     info: SessionInfo {
+                        persistent_hook_setup: row.persistent_hook_setup,
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -8734,6 +8758,7 @@ impl Supervisor {
         };
         self.create_session_admitted(
             CreateInputs {
+                setup_persistent_hooks: false,
                 prompt,
                 named_start: None,
                 cwd: &requested_cwd,
@@ -8931,6 +8956,7 @@ impl Supervisor {
     ) -> anyhow::Result<SessionInfo> {
         self.create_session(
             CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 cwd,
@@ -8985,6 +9011,7 @@ impl Supervisor {
     async fn validate_create(&self, inputs: CreateInputs<'_>) -> anyhow::Result<LaunchRequest> {
         require_active_launch(&inputs.launch)?;
         let CreateInputs {
+            setup_persistent_hooks,
             prompt,
             named_start,
             cwd,
@@ -9166,6 +9193,7 @@ impl Supervisor {
         self.refuse_pending_archive(&cwd, canonical_cwd.as_deref())
             .await?;
         Ok(LaunchRequest {
+            setup_persistent_hooks,
             prompt,
             named: named_start.is_some(),
             parent,
@@ -9822,6 +9850,7 @@ impl Supervisor {
                     .map_err(|message| RequestError::new(ErrorKind::InvalidRequest, message))?;
             }
             Ok(LaunchRequest {
+                setup_persistent_hooks: row.setup_persistent_hooks_on_create,
                 prompt: inputs.prompt,
                 named: inputs.named_start.is_some(),
                 parent: row.parent,
@@ -10282,6 +10311,7 @@ impl Supervisor {
                     )
                 };
                 let info = SessionInfo {
+                    persistent_hook_setup: row.persistent_hook_setup,
                     terminal_missing,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -10459,6 +10489,16 @@ impl Supervisor {
             warn!(session = %info.id, error = %format!("{error:#}"),
                 "could not clear the retained launch's hook diagnostic");
         }
+        // Hook setup may already have happened when the host could not be adopted. The generation's row has the
+        // outcome even when there was no successful host reply to carry it back to the caller.
+        let mut info = info.clone();
+        if info.persistent_hook_setup.is_not_requested()
+            && snapshot.kind.offers_persistent_hooks()
+            && let Ok(Some(row)) = self.store.session(&info.id).await
+            && row.generation == generation
+        {
+            info.persistent_hook_setup = row.persistent_hook_setup;
+        }
         // A host runtime is published only before an orderly stop gathers
         // the host terminals it closes (`Self::publishable`).
         let mut sessions = self.sessions.lock().await;
@@ -10588,6 +10628,7 @@ impl Supervisor {
         _guards: &CreateGuards,
     ) -> anyhow::Result<SessionInfo> {
         let LaunchRequest {
+            setup_persistent_hooks,
             prompt,
             named,
             parent,
@@ -10775,6 +10816,8 @@ impl Supervisor {
             // the same initial kind and template it would have had if
             // the first attempt had not crashed.
             let row = StoredSession {
+                persistent_hook_setup: Default::default(),
+                setup_persistent_hooks_on_create: setup_persistent_hooks,
                 conversation_source: None,
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
@@ -10931,6 +10974,8 @@ impl Supervisor {
                 _ => None,
             };
             let mut row = StoredSession {
+                persistent_hook_setup: Default::default(),
+                setup_persistent_hooks_on_create: setup_persistent_hooks,
                 conversation_source: None,
                 capture_ownership_version: 0,
                 omp_reporter_asset: None,
@@ -11287,7 +11332,8 @@ impl Supervisor {
                 crate::agent_kind::LaunchPhase::Start
             },
         );
-        let info = SessionInfo {
+        let mut info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -11420,6 +11466,7 @@ impl Supervisor {
                 // A create's terminal starts empty; only Restart seeds
                 // a new host with the history it keeps.
                 None,
+                setup_persistent_hooks,
             )
             .await
         {
@@ -11428,10 +11475,12 @@ impl Supervisor {
                 artifacts,
                 hooked,
                 spawning,
+                persistent_hook_setup,
             }) => Ok(StartedLaunch {
                 terminal: host,
                 artifacts,
                 hooked,
+                persistent_hook_setup,
                 spawning: Some(spawning),
             }),
             Err(HostSpawnFailure::Spec(error)) => Err(FailedStart::Spec(error)),
@@ -11473,13 +11522,14 @@ impl Supervisor {
                 })
             }
         };
-        let (terminal, artifacts, hooked, mut spawning) = match started {
+        let (terminal, artifacts, hooked, persistent_hook_setup, mut spawning) = match started {
             Ok(StartedLaunch {
                 terminal,
                 artifacts,
                 hooked,
+                persistent_hook_setup,
                 spawning,
-            }) => (terminal, artifacts, hooked, spawning),
+            }) => (terminal, artifacts, hooked, persistent_hook_setup, spawning),
             Err(FailedStart::Spec(error)) => {
                 // For an ordinary launch the spec was the FIRST external side
                 // effect and did not land, so its row can be rolled back. A
@@ -11622,6 +11672,7 @@ impl Supervisor {
                 return Err(error);
             }
         };
+        info.persistent_hook_setup = persistent_hook_setup;
         // The launch reached its terminal — the host and its child exist,
         // and the shim is on its way to `exec` (whether the agent itself
         // then starts is a separate question this create never answers) —
@@ -11849,7 +11900,6 @@ impl Supervisor {
         // launch stays recorded for the next supervisor.
         let mut sessions = self.sessions.lock().await;
         let terminal = self.publishable(Some(terminal));
-        let mut info = info;
         info.terminal_missing = terminal.is_none();
         sessions.insert(
             id,
@@ -12149,6 +12199,7 @@ impl Supervisor {
     /// stopped. It is compared under the lifecycle claim, which every
     /// Restart with also takes, so none can land between the comparison and
     /// the relaunch.
+    #[cfg(test)]
     pub(crate) async fn restart_session(
         self: &Arc<Self>,
         session_id: &str,
@@ -12162,6 +12213,7 @@ impl Supervisor {
             restart_with,
             expected_launch,
             None,
+            false,
         )
         .await
     }
@@ -12177,6 +12229,7 @@ impl Supervisor {
         restart_with: Option<SessionLaunch>,
         expected_launch: Option<SessionLaunch>,
         named_start: Option<farhelm_proto::NamedConversationStart>,
+        setup_persistent_hooks: bool,
     ) -> anyhow::Result<SessionInfo> {
         if let Some(launch) = &restart_with {
             validate_restart_with(launch)?;
@@ -12595,6 +12648,7 @@ impl Supervisor {
                 &entry_for_task,
                 &snapshot,
                 RelaunchPlan {
+                    setup_persistent_hooks,
                     clear_capture,
                     argv,
                     launch_cwd,
@@ -12657,6 +12711,7 @@ impl Supervisor {
         plan: RelaunchPlan,
     ) -> anyhow::Result<SessionInfo> {
         let RelaunchPlan {
+            setup_persistent_hooks,
             clear_capture,
             argv,
             launch_cwd,
@@ -12805,6 +12860,7 @@ impl Supervisor {
                 argv,
                 launch_cwd,
                 seed,
+                setup_persistent_hooks,
             )
             .await;
         // Publication, rather than reply construction, is the boundary at
@@ -12952,8 +13008,15 @@ impl Supervisor {
                 // in the list with nothing durable behind it, and every
                 // later operation on it would fail in a more confusing
                 // place than this one.
+                // An ambiguous restart can have prepared its own hook files. Publish the result for the
+                // generation the store kept, even when the launch never returned a terminal handle.
+                let mut recovered_info = entry.info.clone();
                 let still_exists = match self.store.session(&id).await {
-                    Ok(row) => row.is_some(),
+                    Ok(Some(row)) => {
+                        recovered_info.persistent_hook_setup = row.persistent_hook_setup;
+                        true
+                    }
+                    Ok(None) => false,
                     // Unknown is treated as "still there": losing a live
                     // session from the map costs its terminal, its stop and
                     // its delete, while keeping a doomed entry costs one
@@ -13007,7 +13070,6 @@ impl Supervisor {
                     previous.abort();
                 }
                 if still_exists {
-                    let recovered_info = entry.info.clone();
                     sessions.insert(
                         id.clone(),
                         relaunched_entry(
@@ -13066,6 +13128,7 @@ impl Supervisor {
         argv: Vec<String>,
         launch_cwd: String,
         seed: Option<host_restart::RestartSeed>,
+        setup_persistent_hooks: bool,
     ) -> Result<SessionInfo, RelaunchFailure> {
         // The tab strip as it is before any side effect: the reply reports
         // it, since a Restart leaves the tabs as they are.
@@ -13083,6 +13146,7 @@ impl Supervisor {
             launch_cwd,
             tabs,
             seed,
+            setup_persistent_hooks,
         )
         .await
     }
@@ -13140,6 +13204,7 @@ impl Supervisor {
             scope,
             outcome,
             hooked,
+            persistent_hook_setup,
             tabs,
         } = result;
         let restart_offer = {
@@ -13150,6 +13215,7 @@ impl Supervisor {
             )
         };
         let mut info = SessionInfo {
+            persistent_hook_setup,
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -14416,6 +14482,7 @@ impl Supervisor {
         scope: Option<&str>,
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
+        setup_persistent_hooks: bool,
     ) -> anyhow::Result<PreparedLaunch> {
         // Start and Restart share this boundary, but a refusal must name the
         // field the user can correct, including when an old row reaches spawn.
@@ -14603,6 +14670,13 @@ impl Supervisor {
             return Err(anyhow::Error::new(e).context("writing launch spec"));
         }
 
+        let (persistent_hook_setup, persistent_hook_skip) = self
+            .setup_vendor_hooks(id, snapshot.kind, setup_persistent_hooks)
+            .await;
+        let hooked =
+            hooked || persistent_hook_setup == farhelm_proto::PersistentHookSetup::Installed;
+        let hook_skip = persistent_hook_skip.or(hook_skip);
+
         // Launch provenance for the OMP ownership proof, recorded for
         // EVERY OMP launch from the one place that decides injection:
         // the gated asset's file name when the launch hooked it (`None`
@@ -14635,13 +14709,13 @@ impl Supervisor {
             literal_argv.as_deref().unwrap_or(&spec.argv),
         )
         .await;
-        // The same argv decision must survive supervisor restart for every
+        // The hook decision must survive supervisor restart for every
         // agent, independently of OMP's admission provenance. Best effort:
         // a failed write leaves this launch runnable, with reload diagnostics
         // disabled rather than delaying or refusing a healthy launch.
         if let Err(error) = self
             .store
-            .record_launch_hooked(id, generation, hooked)
+            .record_persistent_hook_setup(id, generation, hooked, &persistent_hook_setup)
             .await
         {
             warn!(session = %id, error = %format!("{error:#}"),
@@ -14656,8 +14730,58 @@ impl Supervisor {
             shell,
             cmd,
             hooked,
+            persistent_hook_setup,
             hook_skip,
         })
+    }
+
+    /// Start with the supervisor's environment and the owning helm's consent. An agent's login shell can choose a
+    /// different home later, but its environment is unavailable until after this preparation step.
+    async fn setup_vendor_hooks(
+        &self,
+        id: &str,
+        kind: AgentKind,
+        requested: bool,
+    ) -> (
+        farhelm_proto::PersistentHookSetup,
+        Option<super::notifications::HookSkip>,
+    ) {
+        use super::notifications::HookSkip;
+        use farhelm_proto::PersistentHookSetup;
+
+        if !requested || !kind.offers_persistent_hooks() {
+            return (PersistentHookSetup::NotRequested, None);
+        }
+        if !self.seams.agent_hooks.allows(kind) {
+            let reason = crate::agent_kind::HOOKS_DISABLED_REASON;
+            info!(session = %id, ?kind, reason, "skipping persistent conversation hook setup");
+            return (
+                PersistentHookSetup::Failed {
+                    reason: reason.to_owned(),
+                },
+                None,
+            );
+        }
+        match crate::agent_kind::persistent_hooks::install(
+            kind,
+            self.user_home.as_deref(),
+            self.grok_home.as_deref(),
+            &self.session_farhelm_exe_str,
+        )
+        .await
+        {
+            Ok(()) => (PersistentHookSetup::Installed, None),
+            Err(error) => {
+                let reason = format!("{error:#}");
+                warn!(session = %id, ?kind, %reason, "could not set up persistent conversation hooks");
+                (
+                    PersistentHookSetup::Failed {
+                        reason: reason.clone(),
+                    },
+                    Some(HookSkip::PersistentSetup(reason)),
+                )
+            }
+        }
     }
 
     /// Drop the durable launching record for a create this process is
@@ -14943,6 +15067,7 @@ impl Supervisor {
     ) {
         let snapshot = IntegrationSnapshot::of(&row.launch);
         let info = SessionInfo {
+            persistent_hook_setup: row.persistent_hook_setup.clone(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -16344,6 +16469,7 @@ pub async fn connect(state_dir: &Path) -> anyhow::Result<UnixStream> {
 pub(crate) mod tests {
     mod claude_pin;
     pub(crate) mod host_terminals;
+    mod persistent_hooks;
 
     /// Wrapper syntax must execute, but every composed suffix element remains
     /// exactly one argument, even when it contains shell syntax or a marker.
@@ -16477,6 +16603,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     None,
+                    false,
                 )
                 .await
                 .expect("the fixture must reach spec publication");
@@ -16514,6 +16641,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     None,
+                    false,
                 )
                 .await;
             let Err(error) = invalid else {
@@ -16661,6 +16789,7 @@ pub(crate) mod tests {
         };
         assert!(sup.store.session("interrupted").await.unwrap().is_none());
         let inputs = |prompt: &str| CreateInputs {
+            setup_persistent_hooks: false,
             prompt: Some(prompt.into()),
             named_start: None,
             cwd,
@@ -16748,6 +16877,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
+                    false,
                 )
                 .await
                 .expect("the fixture must reach spec publication");
@@ -16816,6 +16946,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: "named".into(),
                     parent: None,
                     title: "named".into(),
@@ -16853,6 +16985,7 @@ pub(crate) mod tests {
             "fixture binds the original named request"
         );
         let inputs = CreateInputs {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: Some(named.clone()),
             cwd: &cwd,
@@ -17470,6 +17603,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     cwd,
@@ -17967,6 +18101,8 @@ pub(crate) mod tests {
             sup.store
                 .insert_session(
                     crate::store::StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         conversation_source: Some("hook".to_string()),
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
@@ -18076,6 +18212,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -18178,6 +18316,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -19203,6 +19343,7 @@ pub(crate) mod tests {
     pub(crate) fn entry_with(terminal: Option<HostTerminal>, outcome: LastOutcome) -> SessionEntry {
         SessionEntry {
             info: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -19270,6 +19411,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -20532,6 +20675,7 @@ pub(crate) mod tests {
         let created = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     cwd: cwd.to_str().expect("UTF-8 fixture path"),
@@ -20607,6 +20751,7 @@ pub(crate) mod tests {
                 Some(launch.clone()),
                 None,
                 Some(named.clone()),
+                false,
             )
             .await
             .expect("named restart with a healthy reporter");
@@ -20674,6 +20819,7 @@ pub(crate) mod tests {
                 Some(launch.clone()),
                 None,
                 Some(named.clone()),
+                false,
             )
             .await
             .expect_err("the launch-spec collision must abort the named restart");
@@ -20709,7 +20855,7 @@ pub(crate) mod tests {
         assert_eq!(listed.restart_offer, farhelm_proto::RestartOffer::Resume);
 
         std::fs::remove_file(&obstruction).expect("remove the deliberate collision");
-        sup.restart_session_named(&created.id, true, Some(launch), None, Some(named))
+        sup.restart_session_named(&created.id, true, Some(launch), None, Some(named), false)
             .await
             .expect("named restart succeeds after removing the obstruction");
         let cleared = sup.store.session(&created.id).await.unwrap().unwrap();
@@ -20778,6 +20924,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -20905,6 +21053,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -20972,6 +21122,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: source.map(str::to_string),
                     capture_ownership_version: version,
                     omp_reporter_asset: None,
@@ -21362,6 +21514,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 1,
                     omp_reporter_asset: None,
@@ -21422,6 +21576,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: id.clone(),
                     parent: None,
                     title: "Pi wait fixture".into(),
@@ -21577,6 +21733,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: id.clone(),
                     parent: None,
                     title: "Claude wait fixture".into(),
@@ -22381,6 +22539,8 @@ pub(crate) mod tests {
             sup.store
                 .insert_session(
                     StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         conversation_source: source,
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
@@ -22490,6 +22650,8 @@ pub(crate) mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: id.clone(),
                     parent: None,
                     title: "Pi".into(),
@@ -23178,6 +23340,8 @@ await new Promise(() => {});
                 .store
                 .insert_session(
                     StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         id: id.to_string(),
                         parent: None,
                         title: "Omp".into(),
@@ -24550,6 +24714,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: id.to_string(),
                     parent: None,
                     title: "Omp".into(),
@@ -24615,6 +24781,7 @@ exit 1
                 None,
                 None,
                 None,
+                false,
             ),
             async {
                 // Panics in here are caught, never left to unwind
@@ -24772,6 +24939,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -24867,6 +25036,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -24929,6 +25100,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -25032,6 +25205,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -25130,6 +25305,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -25716,6 +25893,8 @@ exit 1
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -26265,6 +26444,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 1,
@@ -26957,6 +27137,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -27099,6 +27281,7 @@ exit 1
         let created = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,
@@ -27153,6 +27336,7 @@ exit 1
         let refused = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,
@@ -27259,6 +27443,8 @@ exit 1
             .await
             .unwrap();
         let row = StoredSession {
+            persistent_hook_setup: Default::default(),
+            setup_persistent_hooks_on_create: false,
             conversation_source: None,
             capture_ownership_version: 0,
             omp_reporter_asset: None,
@@ -27383,6 +27569,7 @@ exit 1
         let refusal = sup
             .create_session_admitted(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: Some(retry_prompt.into()),
                     named_start: None,
                     github_checkout: None,
@@ -27496,6 +27683,7 @@ exit 1
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 github_checkout: None,
@@ -27548,6 +27736,7 @@ exit 1
             .expect("supervisor");
         let refusal = match sup
             .validate_create(CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 github_checkout: None,
@@ -27597,6 +27786,7 @@ exit 1
             .expect("supervisor");
         let resolved = sup
             .validate_create(CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 github_checkout: None,
@@ -27668,6 +27858,7 @@ exit 1
             let created = sup
                 .create_session(
                     CreateInputs {
+                        setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,
                         github_checkout: None,
@@ -27771,6 +27962,7 @@ exit 1
         let mut tasks = tokio::task::JoinSet::new();
         let launch_dir = state.path().join("launch");
         let request = |req_id: u64, yolo: bool| ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id,
@@ -27984,6 +28176,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     id: "refused".into(),
                     parent: None,
                     title: "retained".into(),
@@ -28147,6 +28341,7 @@ exit 1
         let other = "b".repeat(64);
         let request = |req_id: u64, command: &str, key: Option<&str>, digest: &str| {
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id,
@@ -28610,6 +28805,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -28698,6 +28895,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -28851,6 +29050,7 @@ exit 1
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     req_id,
@@ -28904,6 +29104,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 6,
@@ -28968,6 +29169,7 @@ exit 1
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 1,
@@ -29048,6 +29250,7 @@ exit 1
         let mut channels = ConnectionChannels::default();
         let mut tasks = tokio::task::JoinSet::new();
         let request = |req_id: u64, title: &str| ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id,
@@ -29359,6 +29562,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -29456,6 +29661,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -29783,6 +29990,7 @@ exit 1
         let created = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,
@@ -29886,6 +30094,8 @@ exit 1
             sup.store
                 .insert_session(
                     StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         conversation_source: None,
                         capture_ownership_version: 0,
                         omp_reporter_asset: None,
@@ -30041,6 +30251,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -30188,6 +30400,8 @@ exit 1
             .expect("supervisor");
         let cwd = state.path().to_string_lossy().to_string();
         let stranded = StoredSession {
+            persistent_hook_setup: Default::default(),
+            setup_persistent_hooks_on_create: false,
             conversation_source: None,
             capture_ownership_version: 0,
             omp_reporter_asset: None,
@@ -30241,6 +30455,7 @@ exit 1
         let reply = sup
             .launch_reserved(
                 LaunchRequest {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named: false,
                     parent: None,
@@ -30334,6 +30549,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -30519,6 +30736,7 @@ exit 1
             .expect("supervisor");
         let create = match sup
             .validate_create(CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 github_checkout: None,
@@ -30628,6 +30846,8 @@ exit 1
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -32468,6 +32688,7 @@ exit 1
         let info = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     github_checkout: None,
@@ -32651,6 +32872,7 @@ exit 1
                 checkout.preview.cwd = preview.cwd.clone();
                 let launch = sup
                     .validate_create(CreateInputs {
+                        setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,
                         cwd: "",
@@ -32716,6 +32938,7 @@ exit 1
             checkout.preview.cwd = preview.cwd.clone();
             let launch = sup
                 .validate_create(CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     cwd: "",
@@ -33448,6 +33671,7 @@ exit 1
         };
         let sup = checkout_crash_supervisor(&state, CreateStage::AfterRecord).await;
         let inputs = || CreateInputs {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             cwd: "",
@@ -33855,6 +34079,7 @@ exit 1
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 cwd: "",
@@ -33890,6 +34115,7 @@ exit 1
     ) -> anyhow::Result<SessionInfo> {
         sup.create_session(
             CreateInputs {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 cwd: "",
@@ -37209,6 +37435,7 @@ exit 1
                 &entry,
                 &snapshot,
                 RelaunchPlan {
+                    setup_persistent_hooks: false,
                     clear_capture: false,
                     argv: vec!["sh".into(), "-c".into(), "exit 0".into()],
                     launch_cwd: "/tmp".into(),
@@ -37262,6 +37489,7 @@ exit 1
         let origin = sup
             .create_session(
                 CreateInputs {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     cwd: "",
@@ -37624,6 +37852,7 @@ exit 1
             let refusal = sup
                 .create_session(
                     CreateInputs {
+                        setup_persistent_hooks: false,
                         prompt: None,
                         named_start: None,
                         cwd: cwd.to_str().unwrap(),

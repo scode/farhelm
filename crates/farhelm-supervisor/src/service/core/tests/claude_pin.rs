@@ -67,6 +67,8 @@ async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {
         resume_template: integration.resume_template.clone(),
     };
     let row = StoredSession {
+        persistent_hook_setup: Default::default(),
+        setup_persistent_hooks_on_create: false,
         id: id.into(),
         parent: None,
         title: "Positional pin fixture".into(),

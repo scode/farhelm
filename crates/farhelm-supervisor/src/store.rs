@@ -77,6 +77,7 @@
 
 use anyhow::Context;
 use base64::Engine as _;
+use farhelm_proto::PersistentHookSetup;
 use rusqlite::{Connection, OptionalExtension};
 use std::collections::{HashMap, HashSet};
 use std::path::Path;
@@ -89,7 +90,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 36;
+pub const SCHEMA_VERSION: i64 = 37;
 
 /// The supervisor remembers its owner even with no live helm connection.
 pub(crate) struct StoredHelmOwner {
@@ -891,6 +892,10 @@ pub struct PriorRun {
     /// Finality proof for the prior external run, restored only when the
     /// failed restart provably started nothing outside the database.
     pub launch_boot_ended: bool,
+    /// The previous run's hook diagnostic, restored with its setup result.
+    launch_hooked: bool,
+    /// Setup result of the previous run in its stored form, restored with the previous terminal on a definitive abort.
+    persistent_hook_setup: Option<String>,
     /// The kind of terminal the previous run's `terminal_address` names
     /// ([`StoredSession::terminal_kind`]). Restored with the address: a
     /// Restart of an old-kind row (its tmux terminal ended at startup)
@@ -904,7 +909,7 @@ pub struct PriorRun {
 /// whether it may open a new generation: the outcome quartet, the terminal
 /// address, the current generation, the captured conversation, the current
 /// launch's scope selection, ownership provenance, boot-finality proof and
-/// terminal kind — in that order.
+/// terminal kind, persistent hook setup, and hook diagnostic — in that order.
 ///
 /// Named only because the tuple is wide enough that clippy (rightly) asks
 /// for it; it has exactly one producer and one consumer, both inside that
@@ -918,6 +923,8 @@ type RelaunchBasisColumns = (
     i64,
     i64,
     String,
+    Option<String>,
+    i64,
 );
 
 /// The columns [`SessionStore::restart_pending_launch`] reads inside its
@@ -1448,13 +1455,17 @@ pub struct StoredSession {
     /// already collected costs nothing but a fall through to the sweep.
     /// `false` is never a degradation — it is exactly M2's stop.
     pub launch_scoped: bool,
-    /// Whether this launch's argv received Farhelm's conversation hook.
+    /// Whether this launch received Farhelm's conversation hook in argv or through successful setup in the agent's home.
     ///
     /// Recorded before the host starts, fenced by generation, and reset when a
     /// relaunch opens its new generation. Reload restores this fact so the
     /// silent-hook warning can start at the next qualifying Enter. Rows from
     /// before schema 29 default false; their argv cannot be reconstructed.
     pub launch_hooked: bool,
+    /// What Farhelm did to install the vendor's persistent hooks for this launch.
+    pub persistent_hook_setup: PersistentHookSetup,
+    /// The accepted create's opt-in, retained so recovery uses the same consent after a supervisor stops mid-create.
+    pub setup_persistent_hooks_on_create: bool,
     /// A recorded host reboot ended every possible writer of this launch.
     /// This is finality proof, not a cached negative read: existing launch
     /// failures still need inspection. New launches clear it; a definitive
@@ -1774,7 +1785,9 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  launch_boot_ended  INTEGER NOT NULL DEFAULT 0,
                  codex_report_pin TEXT,
                  terminal_kind TEXT NOT NULL
-                     CHECK (terminal_kind IN ('tmux', 'host'))
+                     CHECK (terminal_kind IN ('tmux', 'host')),
+                 persistent_hook_setup TEXT,
+                 setup_persistent_hooks_on_create INTEGER NOT NULL DEFAULT 0
              ) STRICT;
 
              CREATE TABLE supervisor_meta (
@@ -1841,7 +1854,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 36;
+             PRAGMA user_version = 37;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2618,6 +2631,23 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 35 to 36")?;
         version = 36;
     }
+    if version == 36 {
+        // Historical fixtures can rewind the schema stamp. Real version 36 rows gain the unset result.
+        let has_setup: bool = conn.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sessions') WHERE name = 'persistent_hook_setup')",
+            [],
+            |row| row.get(0),
+        )?;
+        let add = if has_setup {
+            ""
+        } else {
+            "ALTER TABLE sessions ADD COLUMN persistent_hook_setup TEXT;
+             ALTER TABLE sessions ADD COLUMN setup_persistent_hooks_on_create INTEGER NOT NULL DEFAULT 0;"
+        };
+        conn.execute_batch(&format!("BEGIN; {add} PRAGMA user_version = 37; COMMIT;"))
+            .context("migrating schema from version 36 to 37")?;
+        version = 37;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2964,9 +2994,9 @@ fn insert_session_row(
           generation, launch_scoped, parent, session_token, \
           last_activity_at, last_work_started_at, conversation_source, session_launch, \
           capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
-          terminal_kind) \
+          terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create) \
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, \
-                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26)",
+                 ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27, ?28)",
         rusqlite::params![
             row.id,
             row.title,
@@ -2994,6 +3024,8 @@ fn insert_session_row(
             i64::from(row.launch_hooked),
             i64::from(row.launch_boot_ended),
             row.terminal_kind.column(),
+            encode_persistent_hook_setup(&row.persistent_hook_setup)?,
+            row.setup_persistent_hooks_on_create,
         ],
     )
     .context("inserting session row")?;
@@ -3045,17 +3077,23 @@ const SESSION_COLUMNS: &str = "id, title, cwd, terminal_address, \
                                last_activity_at, last_work_started_at, conversation_source, \
                                session_launch, \
                                capture_ownership_version, omp_reporter_asset, omp_launch_program, launch_hooked, launch_boot_ended, \
-                               terminal_kind";
+                               terminal_kind, persistent_hook_setup, setup_persistent_hooks_on_create";
 
 /// The raw columns of one session row, before the fallible decoding that
 /// cannot happen inside a rusqlite row mapper (whose error type is
 /// rusqlite's own — see `load_all`'s two-stage comment).
 ///
 /// The trailing members are the raw creation sequence, the raw launch JSON
-/// and the raw terminal kind; every other column is already in place on the
-/// partially-built `StoredSession`, because only these (with the outcome)
-/// can be REFUSED.
-type SessionColumns = (StoredSession, OutcomeColumns, i64, Option<String>, String);
+/// the raw terminal kind, and the optional hook setup JSON. Every other column is already in place on the
+/// partially built `StoredSession`.
+type SessionColumns = (
+    StoredSession,
+    OutcomeColumns,
+    i64,
+    Option<String>,
+    String,
+    Option<String>,
+);
 
 /// Read one row's columns positionally, matching [`SESSION_COLUMNS`].
 ///
@@ -3088,12 +3126,15 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
             omp_reporter_asset: r.get(20)?,
             omp_launch_program: r.get(21)?,
             launch_hooked: r.get::<_, i64>(22)? != 0,
+            persistent_hook_setup: PersistentHookSetup::default(),
+            setup_persistent_hooks_on_create: r.get(26)?,
             launch_boot_ended: r.get::<_, i64>(23)? != 0,
         },
         (r.get(4)?, r.get(5)?, r.get(6)?, r.get(7)?),
         r.get::<_, i64>(14)?,
         r.get(18)?,
         r.get(24)?,
+        r.get(25)?,
     ))
 }
 
@@ -3115,8 +3156,18 @@ fn read_session_columns(r: &rusqlite::Row<'_>) -> rusqlite::Result<SessionColumn
 /// session could capture an identity and then be unable to resume with it,
 /// SPEC.md's exact-conversation promise silently false).
 fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> {
-    let (mut row, (state, exit_code, annotation, error_detail), creation_seq, launch, kind) =
-        columns;
+    let (
+        mut row,
+        (state, exit_code, annotation, error_detail),
+        creation_seq,
+        launch,
+        kind,
+        hook_setup,
+    ) = columns;
+    if let Some(hook_setup) = hook_setup {
+        row.persistent_hook_setup = serde_json::from_str(&hook_setup)
+            .with_context(|| format!("session {} has an unreadable hook setup result", row.id))?;
+    }
     row.terminal_kind =
         TerminalKind::from_column(&kind).with_context(|| format!("session {}", row.id))?;
     row.creation_seq = u64::try_from(creation_seq)
@@ -3147,6 +3198,15 @@ fn decode_session_row(columns: SessionColumns) -> anyhow::Result<StoredSession> 
             .with_context(|| format!("session {}", row.id))?,
     }
     Ok(row)
+}
+
+/// Older rows and launches that never requested setup share the empty form.
+fn encode_persistent_hook_setup(setup: &PersistentHookSetup) -> anyhow::Result<Option<String>> {
+    if setup.is_not_requested() {
+        Ok(None)
+    } else {
+        Ok(Some(serde_json::to_string(setup)?))
+    }
 }
 
 /// The load-time checks a legacy session's stored launch has always had
@@ -4094,7 +4154,8 @@ impl SessionStore {
                         .context("beginning the retained-create-refusal transaction")?;
                     let updated = tx
                         .execute(
-                            "UPDATE sessions SET outcome_state = 'error', error_detail = ?2, launch_hooked = 0 \
+                            "UPDATE sessions SET outcome_state = 'error', error_detail = ?2, launch_hooked = 0, \
+                         persistent_hook_setup = NULL \
                      WHERE id = ?1 AND outcome_state IN ('launching', 'interrupted')",
                             rusqlite::params![session_id, refusal_detail],
                         )
@@ -4605,7 +4666,7 @@ impl SessionStore {
                         .query_row(
                             "SELECT outcome_state, exit_code, annotation, error_detail, \
                      terminal_address, generation, captured_conversation, launch_scoped, \
-                     capture_ownership_version, launch_boot_ended, terminal_kind \
+                     capture_ownership_version, launch_boot_ended, terminal_kind, persistent_hook_setup, launch_hooked \
                      FROM sessions WHERE id = ?1",
                             rusqlite::params![id],
                             |r| {
@@ -4618,6 +4679,8 @@ impl SessionStore {
                                     r.get(8)?,
                                     r.get(9)?,
                                     r.get(10)?,
+                                    r.get(11)?,
+                                    r.get(12)?,
                                 ))
                             },
                         )
@@ -4632,6 +4695,8 @@ impl SessionStore {
                         capture_ownership_version,
                         launch_boot_ended,
                         prior_kind,
+                        persistent_hook_setup,
+                        launch_hooked,
                     )) = current
                     else {
                         return Ok(RelaunchDecision::Gone);
@@ -4656,6 +4721,8 @@ impl SessionStore {
                         terminal_address,
                         scoped: scoped != 0,
                         launch_boot_ended: launch_boot_ended != 0,
+                        persistent_hook_setup,
+                        launch_hooked: launch_hooked != 0,
                         terminal_kind: TerminalKind::from_column(&prior_kind)
                             .with_context(|| format!("session {id}"))?,
                     };
@@ -4672,6 +4739,7 @@ impl SessionStore {
                         "UPDATE sessions SET outcome_state = ?2, exit_code = ?3, annotation = ?4, \
                  error_detail = ?5, terminal_address = '', generation = ?6, launch_scoped = ?7, \
                  omp_reporter_asset = NULL, omp_launch_program = NULL, launch_hooked = 0, launch_boot_ended = 0, \
+                 persistent_hook_setup = NULL, \
                  codex_report_pin = NULL, terminal_kind = COALESCE(?8, terminal_kind) \
                  WHERE id = ?1",
                         rusqlite::params![
@@ -4753,6 +4821,8 @@ impl SessionStore {
         let kind = prior.terminal_kind.column();
         let scoped = i64::from(prior.scoped);
         let launch_boot_ended = i64::from(prior.launch_boot_ended);
+        let launch_hooked = i64::from(prior.launch_hooked);
+        let persistent_hook_setup = prior.persistent_hook_setup.clone();
         let cleared_capture = prior.cleared_capture.clone();
         self.conn
             .call(
@@ -4765,7 +4835,7 @@ impl SessionStore {
                      captured_conversation = CASE WHEN ?10 THEN ?11 ELSE captured_conversation END, \
                      conversation_source = CASE WHEN ?10 THEN ?12 ELSE conversation_source END, \
                      capture_ownership_version = CASE WHEN ?10 THEN ?13 ELSE capture_ownership_version END, \
-                     terminal_kind = ?14 \
+                     terminal_kind = ?14, persistent_hook_setup = ?15, launch_hooked = ?16 \
                      WHERE id = ?1 AND generation = ?7",
                     rusqlite::params![
                         id,
@@ -4782,6 +4852,8 @@ impl SessionStore {
                         cleared_capture.as_ref().and_then(|capture| capture.1.as_deref()),
                         cleared_capture.as_ref().map_or(0, |capture| capture.2),
                         kind,
+                        persistent_hook_setup,
+                        launch_hooked,
                     ],
                 )
                 .context("restoring the outcome a failed restart replaced")?;
@@ -5707,12 +5779,8 @@ impl SessionStore {
             .await
     }
 
-    /// Record this generation's hook policy before its process can start.
-    ///
-    /// This is a diagnostic fact about the argv, not a claim that the agent
-    /// started or that its hook works. A stale spawn cannot overwrite the next
-    /// launch's policy; a missing or replaced row makes this a no-op. Recording
-    /// false also withdraws diagnostics for an ambiguously retained create.
+    /// Change whether a generation may warn about a silent hook. A retained create can disarm the diagnostic
+    /// while keeping the persistent setup result.
     pub async fn record_launch_hooked(
         &self,
         id: &str,
@@ -5729,6 +5797,32 @@ impl SessionStore {
                         rusqlite::params![id, generation, i64::from(hooked)],
                     )
                     .context("recording the launch's conversation hook policy")?;
+                    Ok(())
+                },
+            )
+            .await
+    }
+
+    /// Publish the observed hook setup with the hook flag. The generation fence excludes a superseded spawn.
+    pub(crate) async fn record_persistent_hook_setup(
+        &self,
+        id: &str,
+        generation: i64,
+        hooked: bool,
+        setup: &PersistentHookSetup,
+    ) -> anyhow::Result<()> {
+        let id = id.to_string();
+        let setup = encode_persistent_hook_setup(setup)?;
+        self.conn
+            .call(
+                "launch hook setup task panicked",
+                move |conn: &mut Connection| -> anyhow::Result<()> {
+                    conn.execute(
+                        "UPDATE sessions SET launch_hooked = ?3, persistent_hook_setup = ?4 \
+                         WHERE id = ?1 AND generation = ?2",
+                        rusqlite::params![id, generation, i64::from(hooked), setup],
+                    )
+                    .context("recording the launch's conversation hook setup")?;
                     Ok(())
                 },
             )
@@ -7073,6 +7167,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -9914,6 +10010,44 @@ mod tests {
         assert!(!fresh.launch_boot_ended);
     }
 
+    /// A pre-opt-in session keeps its hook diagnostic but gains neither consent nor a setup result on upgrade.
+    #[farhelm_testtrace::test]
+    async fn persistent_hook_setup_migration_leaves_old_sessions_unset() {
+        let (dir, store) = fresh_store().await;
+        let path = dir.path().join("supervisor.db");
+        let mut row = launching_row("old-session");
+        row.launch_hooked = true;
+        store.insert_session(row, None).await.unwrap();
+        let before = store.session("old-session").await.unwrap().unwrap();
+        drop(store);
+        {
+            let conn = Connection::open(&path).unwrap();
+            conn.execute_batch(
+                "ALTER TABLE sessions DROP COLUMN persistent_hook_setup;
+                 ALTER TABLE sessions DROP COLUMN setup_persistent_hooks_on_create;
+                 PRAGMA user_version = 36;",
+            )
+            .unwrap();
+            assert!(
+                conn.prepare("SELECT persistent_hook_setup FROM sessions")
+                    .is_err()
+            );
+            assert!(
+                conn.prepare("SELECT setup_persistent_hooks_on_create FROM sessions")
+                    .is_err()
+            );
+        }
+        let store = SessionStore::open(&path, true).await.unwrap();
+        let migrated = store.session("old-session").await.unwrap().unwrap();
+        assert_eq!(migrated, before);
+        assert!(migrated.launch_hooked);
+        assert_eq!(
+            migrated.persistent_hook_setup,
+            PersistentHookSetup::NotRequested
+        );
+        assert!(!migrated.setup_persistent_hooks_on_create);
+    }
+
     /// A hook belongs to one launch, even when Restart preserves its identity.
     /// New generations clear the flag atomically, and late writes from the old
     /// spawn must not re-arm it. The next spawn can record either policy.
@@ -9922,6 +10056,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let mut row = launching_row("hook-policy");
         row.launch_hooked = true;
+        row.persistent_hook_setup = PersistentHookSetup::Installed;
         store.insert_session(row, None).await.unwrap();
         assert!(
             store
@@ -9940,18 +10075,22 @@ mod tests {
         let reset = store.session("hook-policy").await.unwrap().unwrap();
         assert_eq!(reset.generation, claim.generation);
         assert!(!reset.launch_hooked);
+        assert_eq!(
+            reset.persistent_hook_setup,
+            PersistentHookSetup::NotRequested
+        );
         store
-            .record_launch_hooked("hook-policy", 0, true)
+            .record_persistent_hook_setup("hook-policy", 0, true, &PersistentHookSetup::Installed)
             .await
             .unwrap();
+        let fenced = store.session("hook-policy").await.unwrap().unwrap();
         assert!(
-            !store
-                .session("hook-policy")
-                .await
-                .unwrap()
-                .unwrap()
-                .launch_hooked,
+            !fenced.launch_hooked,
             "the old generation must not overwrite the reset"
+        );
+        assert_eq!(
+            fenced.persistent_hook_setup,
+            PersistentHookSetup::NotRequested
         );
         store
             .record_launch_hooked("hook-policy", claim.generation, true)
@@ -9976,6 +10115,18 @@ mod tests {
                 .unwrap()
                 .unwrap()
                 .launch_hooked
+        );
+        assert!(
+            store
+                .abort_relaunch("hook-policy", claim.generation, &claim.prior)
+                .await
+                .unwrap()
+        );
+        let restored = store.session("hook-policy").await.unwrap().unwrap();
+        assert!(restored.launch_hooked);
+        assert_eq!(
+            restored.persistent_hook_setup,
+            PersistentHookSetup::Installed
         );
     }
 
@@ -10234,6 +10385,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -10294,6 +10447,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -10934,6 +11089,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -11016,6 +11173,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -11158,6 +11317,8 @@ mod tests {
             store
                 .insert_session(
                     StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         conversation_source: None,
                         capture_ownership_version: 0,
                         id: "s-structured".to_string(),
@@ -12216,6 +12377,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -12295,6 +12458,8 @@ mod tests {
     /// legacy launch so the load-time checks these tests exercise apply.
     fn launching_row(id: &str) -> StoredSession {
         StoredSession {
+            persistent_hook_setup: Default::default(),
+            setup_persistent_hooks_on_create: false,
             conversation_source: None,
             capture_ownership_version: 0,
             omp_reporter_asset: None,
@@ -14271,6 +14436,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -14767,6 +14934,8 @@ mod tests {
         store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -16291,6 +16460,8 @@ mod tests {
     async fn a_relaunch_takeover_preserves_a_rename_that_landed_between_the_attempts() {
         let (_dir, store) = fresh_store().await;
         let stranded = |title: &str| StoredSession {
+            persistent_hook_setup: Default::default(),
+            setup_persistent_hooks_on_create: false,
             conversation_source: None,
             capture_ownership_version: 0,
             omp_reporter_asset: None,

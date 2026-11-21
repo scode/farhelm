@@ -25,9 +25,9 @@
 //! 2. **Conversation identity from reports.** Each integrated agent names its
 //!    own conversation through a hook, plugin, or extension. Exact-file checks
 //!    verify a reported target; they never discover an identity. Locator
-//!    vocabularies stay vendor-specific. Reporter artifacts stay in Farhelm's
-//!    state; Goose alone retains its credential-free reporter declaration in
-//!    conversation metadata.
+//!    vocabularies stay vendor-specific. Reporter artifacts normally stay in Farhelm's state. Goose retains its
+//!    credential-free reporter declaration in conversation metadata. Grok and Antigravity discover dedicated hook
+//!    files in their configuration, which an opted-in launch can install.
 //! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
 //!    classifier can compare successive screens, but it cannot know which
 //!    redraws are vendor-owned decoration or which still screen proves a
@@ -137,7 +137,9 @@
 //! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
 //!   materializes which extension a kind loads; the extensions themselves
 //!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
-//!   those agents' event subscriptions, report payloads, and ordering. In
+//!   those agents' event subscriptions, report payloads, and ordering. `persistent_hooks.rs` writes the files Grok
+//!   and Antigravity discover, with the paths and contents answered in their respective modules. The helm and GUI
+//!   use `AgentKind::offers_persistent_hooks` for the shared capability. In
 //!   the `farhelm` crate, `hook.rs` (parsing
 //!   each vendor's hook callback payload) and `goose_hook.rs` (Goose's MCP
 //!   reporter endpoint, which builds Goose's report itself).
@@ -267,6 +269,7 @@ pub(crate) mod goose;
 pub(crate) mod grok;
 mod muse;
 pub(crate) mod omp;
+pub(crate) mod persistent_hooks;
 pub(crate) mod pi;
 mod records;
 pub(crate) mod report_pin;
@@ -900,7 +903,7 @@ struct PiIntegration;
 /// session header, which is the one header-shape difference from Pi.
 struct OmpIntegration;
 
-/// Grok is manually hooked and resumes only from an exact verified UUID.
+/// Grok discovers the hook from its configuration and resumes only from an exact verified UUID.
 struct GrokIntegration;
 
 /// Antigravity reports from user-installed hooks, independent of launch flags.
@@ -2623,7 +2626,7 @@ impl AgentHooks {
 ///   [`AgentHooks::All`].
 /// - `none` maps to [`AgentHooks::None`].
 /// - Anything else is read as a comma-separated list of kind names
-///   (`claude`, `codex`, `goose`, `pi`, `omp`, `muse` — the automatically configured
+///   (`claude`, `codex`, `goose`, `pi`, `omp`, `muse`, `grok`, `antigravity` — the automatically configured
 ///   kinds, spelled as the protocol spells each [`AgentKind`], rather than a
 ///   spelling invented for this variable). Whitespace around each token is trimmed, and matching is
 ///   case-insensitive throughout this grammar: this is a value a human
@@ -2639,10 +2642,8 @@ impl AgentHooks {
 ///
 /// ## Failure mode: fail open, not partially
 ///
-/// A token outside `all`, `none`, `claude`, `codex`, `goose`, `pi`, `omp`, and
-/// `muse` invalidates the WHOLE value, not just that token. `grok` is not a
-/// token because this switch cannot remove a manually installed callback. A
-/// `tracing::warn!` names the bad
+/// A token outside the grammar invalidates the whole value. For Grok and Antigravity the policy only controls writes
+/// before launch. The agent can still discover hooks already on disk. A `tracing::warn!` names the bad
 /// token and the full offending value, and the result is `All`. The
 /// reasoning is that this variable is an opt-OUT — a typo in it must not
 /// silently turn into "opt out of everything" (which is what an
@@ -2667,6 +2668,8 @@ pub fn parse_agent_hooks(value: &str) -> AgentHooks {
             "pi" => kinds.push(AgentKind::Pi),
             "omp" => kinds.push(AgentKind::Omp),
             "muse" => kinds.push(AgentKind::Muse),
+            "grok" => kinds.push(AgentKind::Grok),
+            "antigravity" => kinds.push(AgentKind::Antigravity),
             _ => {
                 tracing::warn!(
                     token,
@@ -4387,6 +4390,11 @@ mod tests {
         assert_eq!(
             parse_agent_hooks("Claude,CODEX"),
             AgentHooks::Only(vec![AgentKind::Claude, AgentKind::Codex])
+        );
+        assert_eq!(
+            parse_agent_hooks("Grok,ANTIGRAVITY"),
+            AgentHooks::Only(vec![AgentKind::Grok, AgentKind::Antigravity]),
+            "either persistent installer can be selected without enabling all hooks"
         );
 
         // An empty element is an unrecognized token, not a skipped one.

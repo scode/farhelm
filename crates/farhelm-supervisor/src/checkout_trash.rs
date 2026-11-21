@@ -2160,6 +2160,8 @@ mod tests {
             store
                 .insert_session(
                     crate::store::StoredSession {
+                        persistent_hook_setup: Default::default(),
+                        setup_persistent_hooks_on_create: false,
                         id: id.into(),
                         parent: None,
                         title: id.into(),

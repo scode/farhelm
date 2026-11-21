@@ -208,6 +208,7 @@ impl Supervisor {
         launch_cwd: String,
         tabs: Vec<TabInfo>,
         seed: Option<RestartSeed>,
+        setup_persistent_hooks: bool,
     ) -> Result<SessionInfo, RelaunchFailure> {
         let id = entry.info.id.clone();
         if let Err(crash) = self.host_restart_fault(HostRestartStage::GenerationClaimed) {
@@ -253,12 +254,14 @@ impl Supervisor {
                 None,
                 None,
                 blob,
+                setup_persistent_hooks,
             )
             .await;
         let SpawnedInHost {
             host,
             artifacts,
             hooked,
+            persistent_hook_setup,
             spawning,
         } = match spawned {
             Ok(spawned) => spawned,
@@ -340,6 +343,7 @@ impl Supervisor {
                         scope,
                         outcome: LastOutcome::Launching,
                         hooked,
+                        persistent_hook_setup,
                         tabs,
                     },
                 )
@@ -370,6 +374,7 @@ impl Supervisor {
                     scope,
                     outcome,
                     hooked,
+                    persistent_hook_setup,
                     tabs,
                 },
             )

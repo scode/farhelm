@@ -3083,8 +3083,9 @@ never gates the user's own typing. Status also decides whether Restart and Resta
 (see Lifecycle operations), where a wrong reading costs at most a skipped or an extra confirmation. A recognized dialog
 also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
 not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
-agent. Users install the documented Grok and Antigravity hooks themselves to enable conversation capture. Both can
-launch before those hooks are installed. OMP and Grok use generic activity only. Their approval prompts, and
+agent. Grok and Antigravity can capture conversations through hooks in their own configuration. With explicit consent,
+Farhelm can install its own hook files before starting either agent. Both agents can launch without those files.
+OMP and Grok use generic activity only. Their approval prompts, and
 Antigravity's, show the generic running/idle classification, never waiting — a settled scope decision, not a reader
 waiting to be written.
 
@@ -3125,8 +3126,9 @@ reports. That correction says which conversation a Restart before now would have
 the conversation of the agent process that started it, without claiming no further ancestor can correct it. Every other
 refused report (from a subagent, from an agent process the session's agent started itself, overtaken by a relaunch or
 delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
-conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. The manual Grok and
-Antigravity hooks do not start the silent-hook timer. After a supervisor restart, a launch that received the hook starts
+conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For Grok and
+Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After a
+supervisor restart, a launch that received the hook starts
 its silent-hook clock at the next qualifying Enter; launches stored before this behavior was introduced stay unchecked.
 Each notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
 never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
@@ -3949,21 +3951,21 @@ report replaces it; Codex, Muse and Antigravity report at the first prompt, so p
 the old conversation. Goose cannot report on this resume, so a named Restart with clears its old capture in the relaunch
 transaction; a definitive pre-spawn abort restores it, an ambiguous failure does not. The same clearing applies when
 Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`) or when the conversation reporter's
-extension cannot be prepared, since no report can then replace the old capture; Grok and Antigravity's manual callbacks
-are independent of that switch. Cursor, OpenCode and named Goose starts do not gain later plain Restart from this
+extension cannot be prepared, since no report can then replace the old capture. For Grok and Antigravity the switch
+controls setup at launch. Either agent can still report through hooks already on disk. Cursor, OpenCode and named Goose
+starts do not gain later plain Restart from this
 choice. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not
 supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
 exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
 whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
-session over. What capture never does is write to the agent's own configuration or record directories. The opt-in
-managed-checkout Claude trust edit is a separate, narrowly scoped exception to the no-agent-configuration rule; it does
-not participate in capture. A hook passed on the command line for one launch is allowed because it writes nothing the
+session over. Capture uses the agent's record directories read-only. Farhelm may change an agent's configuration only
+for the opt-in managed-checkout Claude trust edit and the opt-in Grok and Antigravity hook files. The Claude trust edit
+is independent of capture. A hook passed on the command line for one launch is allowed because it writes nothing the
 vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch that carried
 it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state directory
 and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log. Vendor-owned
-state is the boundary the no-agent-configuration rule from Status is protecting, and that rule's own example — hooks
-written into the agent's configuration — still stands. Grok and Antigravity have documented opt-in hooks. The user owns
-the configuration entries. Every integrated agent type identifies conversations only through accepted reports; Farhelm
+state is the boundary these limits protect. The Grok and Antigravity opt-in covers the files named for Farhelm. Existing
+manual hooks elsewhere still work. Every integrated agent type identifies conversations only through accepted reports; Farhelm
 never selects a conversation by scanning vendor state. Historical stored identities remain usable under the same
 per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
 conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
