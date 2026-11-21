@@ -125,8 +125,9 @@ fn render(agent: &Command) -> String {
          resume, which the table's OFFER column also spells resume. Any other value says why\n\
          it cannot: not_captured (no conversation Farhelm can resume was captured),\n\
          no_conversation_reporting (Farhelm has no conversation reporting for that agent), or\n\
-         no_resume_command (a command launch created without a resume command), spelled\n\
-         not-captured, no-reporting and no-resume-command in the table. A running session's\n\
+         no_resume_command (no stored resume command: a command launch created without one,\n\
+         or an older agent launch from before they were stored), spelled not-captured,\n\
+         no-reporting and no-resume-command in the table. A running session's\n\
          not_captured normally turns into resume, depending on its agent:\n",
     );
     out.push_str(&readiness_lines());

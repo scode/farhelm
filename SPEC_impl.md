@@ -8488,10 +8488,11 @@ described below; the agent relay still has no selector for a different conversat
 supervisor can fill the session's resume command with a captured conversation it accepts, and otherwise names why it
 cannot: `not_captured` for an agent type that reports conversations but has no usable identity (nothing reported yet, an
 identity from before ownership proofs, a Pi or OMP file that no longer matches), `no_conversation_reporting` for a
-session with no integration at all, and `no_resume_command` (protocol 39) for a command launch that declared an agent
-type without opting into Resume. `resume` kept its spelling because agents in running sessions read it; the reasons
-replaced `fresh_only` and `fallback_template`. Protocol 37 removed the `mode` field from `RestartSession` and from the
-agent relay's `Restart` verb, with `RestartMode` itself: a restart whose current offer is not `resume` is refused with a
+session with no integration at all, and `no_resume_command` (protocol 39) for a launch with no stored resume command: a
+command launch that declared an agent type without opting into Resume, or an older agent launch from before resume
+commands were stored. `resume` kept its spelling because agents in running sessions read it; the reasons replaced
+`fresh_only` and `fallback_template`. Protocol 37 removed the `mode` field from `RestartSession` and from the agent
+relay's `Restart` verb, with `RestartMode` itself: a restart whose current offer is not `resume` is refused with a
 `Conflict` naming the reason, before anything is stopped, and the fresh relaunch of the stored invocation and the
 verbatim run of a placeholder-free resume command are gone. Since launch kinds (protocol 39) a resume command must
 contain `{conversation}`, so no new session can carry one; a legacy session that stored one keeps it, but it is never
