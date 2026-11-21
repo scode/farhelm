@@ -28807,3 +28807,23 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `slvzsrymtkmyxqlvlwyplzpunostqrvn`, bookmark
   `plan/desktop-updater-unreadable-optout/01-unreadable-setting-means-off`,
   [PR #4407](https://github.com/scode/farhelm/pull/4407/changes).
+
+## trailing-legacy-container-delete-existing-object-removal-oracle-lost.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): Legacy removal still
+  exists in `crates/farhelm-supervisor/src/container.rs:184-205` (`podman rm -f`, then `container exists` must return
+  1), and SPEC_impl.md:8371 still requires it. No test makes the removal itself necessary. In
+  `only_confirmed_absence_releases_the_cleanup_fence` (container.rs:276-298) the fake engine exits 125 on `rm` and a
+  fixed code for everything else, without recording or changing state.
+  `crates/farhelm/tests/e2e/containerized_sessions.rs:260` deletes a session that never had a container. Removing the
+  `rm` call would leave every test passing.
+- Decision: the maintainer picked "Add the first two tests, discard the rest" (2026-11-21 six-question triage page for
+  findings that cited removed UI code, Q5); this is one of the two tests.
+- Completion criteria: Add the missing regression check the Assessment describes ("Nothing checks that Delete actually
+  removes an old container"), so the product regression it names would fail a test. Size gate: about 100 lines of diff
+  (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment). Remove the feedback file
+  and its index entry.
+- Execution: change `xlwunxlkvuynxwwrypyrvnnlkzlutxpz`, bookmark
+  `plan/container-delete-and-link-group-tests/01-container-delete-removal-test`,
+  [PR #4412](https://github.com/scode/farhelm/pull/4412/changes).

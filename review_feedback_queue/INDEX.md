@@ -1491,10 +1491,6 @@ consequences.
   — Retired container isolation tests were deliberately removed. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-legacy-container-delete-existing-object-removal-oracle-lost.md`](trailing-legacy-container-delete-existing-object-removal-oracle-lost.md)
-  — Legacy Delete loses its existing-container removal oracle. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
 - [`trailing-upload-ack-priority-regression-oracle-removed.md`](trailing-upload-ack-priority-regression-oracle-removed.md)
   — Upload credit priority loses its end-to-end regression check. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
