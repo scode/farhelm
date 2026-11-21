@@ -209,12 +209,19 @@ class GoldenRunnerTests(unittest.TestCase):
         self.assertFalse(self.marker.exists())
 
     def test_any_unknown_pattern_prevents_render_even_when_another_matches(self):
-        """Treat a typo as a failed selection, including when it accompanies a broad valid match."""
+        """Treat a typo as a failed selection, including when it accompanies a broad valid match. The refusal comes
+        before the update clears anything, so an earlier full update's captures and marker, not yet published,
+        survive it."""
+        earlier = self.tool.CAPTURES / PLATFORM / "first--light.png"
+        earlier.parent.mkdir(parents=True)
+        earlier.write_bytes(b"earlier capture")
+        self.marker.write_text("8\n", encoding="utf-8")
         render = mock.Mock()
         with self.assertRaisesRegex(ValueError, "missing-page"):
             self.run_suite(render, patterns=["*", "missing-page"])
         render.assert_not_called()
-        self.assertFalse(self.marker.exists())
+        self.assertEqual(earlier.read_bytes(), b"earlier capture")
+        self.assertEqual(self.marker.read_text(encoding="utf-8"), "8\n")
 
     def test_scene_groups_are_stable_disjoint_and_capped(self):
         """A CPU cap changes the number of processes without dropping any catalog entries."""

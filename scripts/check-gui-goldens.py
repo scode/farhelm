@@ -230,6 +230,9 @@ def run_locked(tool, base_env: dict[str, str], update: bool, patterns: list[str]
                cargo_args: list[str], test_args: list[str], jobs: int, lock: int | None) -> int:
     """An update owns the default capture directory until every writer has exited and the marker is decided."""
     references = None
+    # Build and resolve the patterns first, so a failed build or a mistyped --scene leaves the last captures alone.
+    binary = build_binary(base_env, cargo_args)
+    names = select_scenes(list_scenes(binary, base_env), patterns)
     if update:
         captures = tool.CAPTURES
         # Drop the old marker and pictures before drawing. The digest ties this output to the manifest in this run.
@@ -239,9 +242,7 @@ def run_locked(tool, base_env: dict[str, str], update: bool, patterns: list[str]
             pass
         captures.mkdir(parents=True)
         tool.record_manifest(captures, tool.MANIFEST)
-    binary = build_binary(base_env, cargo_args)
-    names = select_scenes(list_scenes(binary, base_env), patterns)
-    if not update:
+    else:
         # A custom Cargo target can be shared by many checkouts. Both comparisons and their automatically fetched
         # references belong to this run in the checkout, so another invocation cannot replace either mid-render.
         tool.WORK.mkdir(parents=True, exist_ok=True)

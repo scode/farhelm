@@ -1468,7 +1468,7 @@ enum GoldenRun {
 }
 
 impl GoldenRun {
-    /// The script supplies absolute paths because Cargo runs the test from the crate's directory.
+    /// The script supplies absolute paths because it runs the test binary from the crate's directory.
     fn from_env() -> anyhow::Result<Self> {
         if let Some(captures) = std::env::var_os("FARHELM_UPDATE_GOLDENS") {
             return Ok(Self::Update {
