@@ -4,7 +4,7 @@
 //! precede run, replacements precede retirement, and no user base is removed.
 
 use super::*;
-use crate::environment::recipes::PodmanRecipeState;
+use crate::environment::recipes::{PodmanRecipeState, UnconfirmedImageCapture};
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -687,14 +687,19 @@ impl Podman {
     /// Removal never forces usage away and never includes user base images.
     async fn retire_images(&self, name: &str, place: HostId) -> anyhow::Result<()> {
         let _source = self.0.builds.lock_podman_use(name, place).await?;
-        self.retire_images_unlocked(name, place).await
+        self.retire_images_unlocked(name, place, false).await
     }
 
     /// Callers hold source exclusion, including the guard-gated deletion path.
     /// Images still used by any container remain in the retirement record.
-    /// A pending commit tag needs a positive observation before absence can
-    /// settle it. A disconnected commit may publish after an earlier lookup.
-    async fn retire_images_unlocked(&self, name: &str, place: HostId) -> anyhow::Result<()> {
+    /// A disconnected capture may publish after an absent lookup. Keep the
+    /// tag unless the caller holds explicit consent from recipe Delete.
+    async fn retire_images_unlocked(
+        &self,
+        name: &str,
+        place: HostId,
+        forget_missing_captures: bool,
+    ) -> anyhow::Result<()> {
         for mut id in self.state(name, place).await?.retired_images {
             if self.exists(place, "image", &id).await? {
                 let text = self
@@ -761,11 +766,13 @@ impl Podman {
                     !self.exists(place, "image", &id).await?,
                     "the retired image still exists"
                 );
-            } else {
-                anyhow::ensure!(
-                    image_id(&id).is_ok(),
-                    "an unanswered image capture has no confirmed outcome; its ownership tag was retained"
-                );
+            } else if image_id(&id).is_err() && !forget_missing_captures {
+                // Keep the question available if this host answered after
+                // the caller's reply timed out. Ownership still lives in the
+                // retirement list and remains subject to a fresh lookup.
+                self.edit(name, place, move |state| state.absent_capture = Some(id))
+                    .await?;
+                return Err(UnconfirmedImageCapture.into());
             }
             self.edit(name, place, move |state| {
                 state.retired_images.retain(|old| old != &id)
@@ -790,6 +797,7 @@ impl Podman {
             .await?
             .context("the recipe no longer exists")?;
         let mut failures = Vec::new();
+        let mut unconfirmed_capture = false;
         for (place, _) in state.podman {
             let result = async {
                 let _source = self.0.builds.lock_podman_cleanup(name, place, deletion).await?;
@@ -798,13 +806,17 @@ impl Podman {
                     if let Some(image) = state.image.take() { state.retired_images.push(image.id); }
                     if let Some(image) = state.prepared.take() { state.retired_images.push(image.id); }
                 }).await?;
-                self.retire_images_unlocked(name, place).await?;
+                self.retire_images_unlocked(name, place, deletion.may_forget_missing_captures()).await?;
                 anyhow::ensure!(!self.state(name, place).await?.needs_cleanup(),
                     "owned images are still in use; delete their containers before deleting the recipe");
                 self.0.store.update_tensorlake_recipe_state(name, move |_, state| { state.podman.remove(&place); }).await?;
                 Ok::<_, anyhow::Error>(())
             }.await;
             if let Err(error) = result {
+                if error.is::<UnconfirmedImageCapture>() {
+                    unconfirmed_capture = true;
+                    continue;
+                }
                 failures.push(format!(
                     "container host {place}: {}",
                     crate::tensorlake::shell::shown(&error.to_string())
@@ -816,6 +828,9 @@ impl Podman {
             "recipe cleanup did not finish: {}",
             failures.join("; ")
         );
+        if unconfirmed_capture {
+            return Err(UnconfirmedImageCapture.into());
+        }
         Ok(())
     }
 

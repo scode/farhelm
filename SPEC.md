@@ -506,8 +506,10 @@ passwordless sudo, be Ubuntu or Debian with apt, and include bash, curl and git.
 first and stops with the missing requirement. Help explains that Farhelm then installs Claude Code and Codex with their
 official installers and saves a snapshot or image at that place. The editor replaces the list in place. Leaving it with
 unsaved changes by its own Back or Cancel asks whether to save, discard or keep editing. Closing Settings includes the
-recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned footer. A list refresh
-that fails keeps the rows shown, says they may be out of date, and offers **Retry loading**.
+recipe draft in the dialog's unsaved-changes question. Delete asks for confirmation in the pinned footer. If Podman
+reports no image for an interrupted capture, the footer asks again and offers **Delete anyway**. The question warns that
+an image could still appear on the container host and need cleanup later. A list refresh that fails keeps the rows
+shown, says they may be out of date, and offers **Retry loading**.
 
 Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoint requires a base URL and offers named
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft

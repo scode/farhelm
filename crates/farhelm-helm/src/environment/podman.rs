@@ -28,6 +28,7 @@ pub(crate) mod failure_tests;
 
 const COMMAND: Duration = Duration::from_secs(30);
 const IMAGE_WORK: Duration = Duration::from_secs(1800);
+
 const UBUNTU: &str = "docker.io/library/ubuntu@sha256:fe81560990fae86dc4743202b2cb4d3df98d0bcf949173cecef15ce1127ef852";
 const PROXY_NAMES: [&str; 10] = [
     "http_proxy",

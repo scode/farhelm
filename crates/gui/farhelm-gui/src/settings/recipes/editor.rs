@@ -391,14 +391,19 @@ impl Editor {
         }
     }
 
-    /// Open the same inline question as Delete and check that it owns the footer.
+    /// Open the production inline question for a saved recipe's Delete.
     #[cfg(test)]
     pub(in crate::settings) fn ask_delete_for_golden(
         &mut self,
+        question: crate::settings::SavedRecipeQuestion,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        self.ask_delete(window, cx);
+        let name = self.saved.clone().expect("the golden has a saved recipe");
+        let forget_missing_captures =
+            matches!(question, crate::settings::SavedRecipeQuestion::DeleteAnyway);
+        let mark = crate::focus::Mark::take(cx);
+        self.ask_recipe_delete(name, forget_missing_captures, &mark, window, cx);
         assert!(
             self.delete_question
                 .as_ref()

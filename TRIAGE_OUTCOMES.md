@@ -2122,24 +2122,6 @@
   fix code (one e2e case per shell: launch, Running/Idle, missing-program Error)
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## trailing-podman-pending-commit-tag-no-dispatch-crash-never-settles.md
-
-- Outcome: `fix code`.
-- Assessment: If the helm stops at the wrong moment during an image capture (or the capture's outcome is otherwise never
-  confirmed), the recipe can never be deleted and its container host cannot be removed or retargeted; nothing in the UI
-  clears it. Verified: build.rs `retire_images_unlocked` (~758): an absent pending tag fails with "an unanswered image
-  capture has no confirmed outcome; its ownership tag was retained", with no settle path. This is a helm crash, not the
-  supervisor crash the 2026-10-10 acceptance names, and the result is lasting.
-- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Offer an explicit
-  "delete anyway"" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we
-  definitely need to batch these in a much smaller set of plans. please try to separate them by area of code so there is
-  a good chance of them running concurrently."
-- Completion criteria: When a recipe's image capture outcome is unknown and the tagged image is absent, recipe Delete
-  asks for an explicit confirmation and then settles the pending marker, so the recipe can be deleted and its container
-  host removed or retargeted. Medium; the maintainer accepted the new confirmation path. Remove the feedback file and
-  its index entry.
-- Execution: planned in `plans/queue/triage-podman.md`.
-
 ## trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md
 
 - Outcome: `fix code`.

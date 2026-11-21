@@ -113,6 +113,8 @@ struct State {
     invalid_commit_reply: bool,
     absent_run: Option<(String, AbsentRun)>,
     fail_absence: bool,
+    fail_image_absence: bool,
+    hold_image_absence: bool,
     proxy: Option<BTreeMap<String, String>>,
     calls: Vec<Vec<String>>,
     inputs: Vec<(Vec<String>, Vec<u8>)>,
@@ -128,6 +130,7 @@ pub(crate) struct Commands {
     phases: watch::Sender<Vec<String>>,
     session_release: Notify,
     removal_release: Notify,
+    image_absence_release: Notify,
     helm: String,
     store: HelmStore,
     place: HostId,
@@ -141,6 +144,7 @@ impl Commands {
             phases: watch::Sender::new(vec![]),
             session_release: Notify::new(),
             removal_release: Notify::new(),
+            image_absence_release: Notify::new(),
             helm,
             store,
             place,
@@ -429,6 +433,15 @@ impl Commands {
                     "Config":{"Labels":{"farhelm.helm":self.helm,"farhelm.role":item.role,"farhelm.recipe":"dev"}}}]).to_string()))
             }
             ("image", Some("exists")) => {
+                let held = self.state.lock().unwrap().hold_image_absence;
+                if held {
+                    self.phases
+                        .send_modify(|phases| phases.push("held-image-absence".into()));
+                    self.image_absence_release.notified().await;
+                }
+                if self.state.lock().unwrap().fail_image_absence {
+                    return Ok(failure("image-absence-unanswered"));
+                }
                 Ok(output(if self.image(last).is_some() { 0 } else { 1 }, ""))
             }
             ("image", Some("inspect")) => {
@@ -1259,6 +1272,93 @@ async fn absent_helper_create_allows_immediate_rebuild_only_after_definite_refus
             drop(retry);
         }
     }
+}
+
+/// An interrupted capture can leave a durable tag with no image. Recipe
+/// Delete keeps that tag until the user agrees to forget it, and even a
+/// confirmed retry needs a positive absence report from the container host.
+/// A late absence report must still let the next Delete ask for consent.
+#[farhelm_testtrace::test]
+async fn recipe_delete_needs_explicit_consent_to_forget_an_absent_capture() {
+    use axum::extract::{Path, Query, State};
+    use axum::http::{StatusCode, Uri};
+    use farhelm_proto::http::RECIPE_CAPTURE_CONFIRMATION_HEADER;
+    let f = Fixture::new().await;
+    let tag = format!(
+        "localhost/farhelm-{}-software:interrupted",
+        f.provider.tag().await.unwrap()
+    );
+    assert!(f.commands.image(&tag).is_none());
+    let pending = tag.clone();
+    f.provider
+        .edit("dev", f.place, move |state| {
+            state.retired_images.push(pending)
+        })
+        .await
+        .unwrap();
+    let delete = |uri: &'static str| {
+        crate::tensorlake::recipes::delete_recipe(
+            State(f.state()),
+            Path("dev".into()),
+            Query::try_from_uri(&Uri::from_static(uri)).unwrap(),
+        )
+    };
+    const RECIPE: &str = "/api/tensorlake/recipes/dev";
+    f.commands.state.lock().unwrap().hold_image_absence = true;
+    tokio::time::pause();
+    let timed_out = crate::rest_harness::within_reply_bound(delete(RECIPE)).await;
+    assert_eq!(timed_out.status(), StatusCode::GATEWAY_TIMEOUT);
+    assert!(
+        f.commands
+            .phases()
+            .iter()
+            .any(|phase| phase == "held-image-absence"),
+        "the cleanup reached the container host before timing out"
+    );
+    tokio::time::resume();
+    let state = f.state();
+    let mut bumped = state.manager.events().subscribe();
+    f.commands.state.lock().unwrap().hold_image_absence = false;
+    f.commands.image_absence_release.notify_one();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while state.recipe_builds().is_deleting("dev") {
+            bumped.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("the absence answer settled the original Delete");
+
+    // A host that could not answer again cannot prevent the earlier positive
+    // observation from reaching the confirmation. The later retry still
+    // needs to ask the host before it can change ownership.
+    f.commands.state.lock().unwrap().fail_image_absence = true;
+    let ordinary = delete(RECIPE).await;
+    assert_eq!(ordinary.status(), StatusCode::CONFLICT);
+    assert_eq!(
+        ordinary.headers()[RECIPE_CAPTURE_CONFIRMATION_HEADER],
+        "confirmation-required"
+    );
+    assert_eq!(f.recipe_state().await.retired_images, [tag.clone()]);
+
+    let confirmed = "/api/tensorlake/recipes/dev?forget_missing_captures=true";
+    let refused = delete(confirmed).await;
+    assert!(!refused.status().is_success());
+    assert!(
+        !refused
+            .headers()
+            .contains_key(RECIPE_CAPTURE_CONFIRMATION_HEADER)
+    );
+    assert_eq!(f.recipe_state().await.retired_images, [tag]);
+
+    f.commands.state.lock().unwrap().fail_image_absence = false;
+    assert!(delete(confirmed).await.status().is_success());
+    assert!(
+        f.store
+            .tensorlake_recipe_row("dev")
+            .await
+            .unwrap()
+            .is_none()
+    );
 }
 
 /// A new provider process can observe changed place proxies while reusing the

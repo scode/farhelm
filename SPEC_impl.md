@@ -6192,7 +6192,10 @@ After successful build/preparation replacement, remove a superseded owned image 
 cleans the place's replaced images, and recipe deletion cleans owned images at every place before forgetting their
 records. Never delete a user's base image. Reject Farhelm-managed checkpoint images as recipe bases. Discover leftovers
 with Podman's label-filtered listing at usable cached places and every place referenced by an environment row. Failed
-explicit cleanup keeps its resource and reason visible for retry. No startup cleanup worker is introduced.
+explicit cleanup keeps its resource and reason visible for retry. An unanswered Podman capture keeps its ownership tag
+even when Podman reports it absent. Recipe Delete can ask for consent to forget that tag even if the absence report came
+after a previous Delete's reply timed out. A confirmed Delete checks again and forgets the tag only if Podman reports
+absence. If the image exists, it follows the usual ownership and usage checks. No startup cleanup worker is introduced.
 
 ### Environment ownership and refusal
 

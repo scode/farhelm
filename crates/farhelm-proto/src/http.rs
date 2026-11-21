@@ -93,6 +93,10 @@ pub const HOST_BUSY_OPERATION: &str = "operation-in-progress";
 pub const ENVIRONMENT_UNASKED_HEADER: &str = "x-farhelm-environment-unasked";
 /// The one value of [`ENVIRONMENT_UNASKED_HEADER`].
 pub const ENVIRONMENT_UNASKED: &str = "nothing-decided";
+/// A recipe Delete found an absent image tag from an unanswered capture.
+pub const RECIPE_CAPTURE_CONFIRMATION_HEADER: &str = "x-farhelm-recipe-capture-confirmation";
+/// The recipe Delete may forget that capture only with explicit consent.
+pub const RECIPE_CAPTURE_CONFIRMATION_REQUIRED: &str = "confirmation-required";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they

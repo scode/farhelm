@@ -15,7 +15,7 @@ use super::Section;
 use super::recipe_editor_tests::{draft, one_command, open_editor_with, show};
 use super::recipe_tests::{answer_account, entry, idle};
 use super::tests::{available, drawn, fill, label_of, open_settings, section_button, sent};
-use crate::operations::{OpKey, Work};
+use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session;
 use crate::test_support::{any_open, bounds, center, click, focused_id, frame, keys, settle};
 
@@ -324,6 +324,53 @@ fn delete_asks_then_deletes_under_the_recipes_key(cx: &mut TestAppContext) {
         "the done delete closed the editor"
     );
     assert_eq!(focused_id(cx).as_deref(), Some("recipe-new"));
+}
+
+/// Only a second explicit answer lets the helm forget a capture whose image
+/// is absent. Cancel is the default and leaves the recipe open without
+/// resending Delete. Confirm uses the existing recipe operation key.
+#[gpui::test]
+fn an_unconfirmed_recipe_capture_requires_delete_anyway(cx: &mut TestAppContext) {
+    let (mut helm, cx) = edit_rust_dev(cx);
+    for confirm in [false, true] {
+        click(cx, "recipe-delete");
+        click(cx, "prompt-confirm");
+        let request = one_command(&mut helm);
+        assert_eq!(
+            (request.method, request.path.as_str()),
+            (Method::Delete, "/api/tensorlake/recipes/rust-dev")
+        );
+        helm.reply_marked(
+            request.id,
+            409,
+            vec![HelmMarker::RecipeCaptureConfirmation],
+            Some(json!("the capture outcome is unknown")),
+        );
+        settle(cx);
+        let (warning, answers) = question(cx).expect("missing capture asks in the footer");
+        assert!(warning.contains("could still appear"), "{warning}");
+        assert_eq!(answers, ["Cancel", "Delete anyway"]);
+        assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+        assert_eq!(recipe_key(cx, "rust-dev"), (None, None));
+        if !confirm {
+            click(cx, "prompt-cancel");
+            assert!(drawn(cx, "recipe-editor"));
+            assert_eq!(sent(&mut helm), []);
+        }
+    }
+    click(cx, "prompt-confirm");
+    let delete = one_command(&mut helm);
+    assert_eq!(
+        (delete.method, delete.path.as_str()),
+        (
+            Method::Delete,
+            "/api/tensorlake/recipes/rust-dev?forget_missing_captures=true"
+        )
+    );
+    assert_eq!(recipe_key(cx, "rust-dev").0, Some(Work::Save));
+    helm.reply(delete.id, 204, None);
+    settle(cx);
+    assert!(!drawn(cx, "recipe-editor"));
 }
 
 /// The helm refuses a delete at once while the recipe is in use or already being deleted; the user needs its words

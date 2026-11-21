@@ -212,18 +212,22 @@ pub enum HelmMarker {
     /// Delete on which nothing was decided, because the environment's own
     /// Farhelm could not be asked.
     EnvironmentUnasked,
+    /// [`crate::http::RECIPE_CAPTURE_CONFIRMATION_HEADER`]: recipe Delete
+    /// can continue if the user accepts forgetting an unanswered capture.
+    RecipeCaptureConfirmation,
 }
 
 impl HelmMarker {
     /// Every marker, in the order a [`Reply`] lists them: what the helm
     /// checks a response's headers against.
-    pub const ALL: [HelmMarker; 6] = [
+    pub const ALL: [HelmMarker; 7] = [
         HelmMarker::Precondition,
         HelmMarker::CreateUnaccepted,
         HelmMarker::YoloConfirmation,
         HelmMarker::RemoveHostInstead,
         HelmMarker::HostBusy,
         HelmMarker::EnvironmentUnasked,
+        HelmMarker::RecipeCaptureConfirmation,
     ];
 
     /// The response header that states this marker, and the one value it
@@ -247,6 +251,10 @@ impl HelmMarker {
             HelmMarker::EnvironmentUnasked => {
                 (http::ENVIRONMENT_UNASKED_HEADER, http::ENVIRONMENT_UNASKED)
             }
+            HelmMarker::RecipeCaptureConfirmation => (
+                http::RECIPE_CAPTURE_CONFIRMATION_HEADER,
+                http::RECIPE_CAPTURE_CONFIRMATION_REQUIRED,
+            ),
         }
     }
 }
@@ -1413,6 +1421,12 @@ mod tests {
                 "x-farhelm-environment-unasked",
                 "nothing-decided",
                 "environment_unasked",
+            ),
+            (
+                HelmMarker::RecipeCaptureConfirmation,
+                "x-farhelm-recipe-capture-confirmation",
+                "confirmation-required",
+                "recipe_capture_confirmation",
             ),
         ];
         assert_eq!(

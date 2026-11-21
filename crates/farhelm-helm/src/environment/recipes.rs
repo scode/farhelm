@@ -30,6 +30,12 @@ pub(crate) struct PreparedInstallFacts {
     pub(crate) farhelm_version: String,
 }
 
+/// An image provider needs explicit consent to forget an unanswered capture
+/// after observing an absent tag. The observation does not settle ownership.
+#[derive(Debug, thiserror::Error)]
+#[error("an unanswered image capture has no confirmed outcome; its ownership tag was retained")]
+pub(crate) struct UnconfirmedImageCapture;
+
 /// One place host's owned Podman artifacts, stored in the recipe's state_json.
 /// Empty state loads from older records. Resource IDs remain recorded through
 /// failed cleanup, independently of saves to the recipe definition. The provider
@@ -58,6 +64,11 @@ pub(crate) struct PodmanRecipeState {
     /// A fresh commit tag precedes its send and becomes a canonical image ID
     /// after observation. An unresolved absent tag retains ambiguous ownership.
     pub(crate) retired_images: Vec<String>,
+    /// The tag last observed absent. This lets Delete ask for consent on
+    /// retry even if that observation took longer than the HTTP reply bound.
+    /// The confirmed request checks the host again before forgetting it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) absent_capture: Option<String>,
 }
 
 impl PodmanRecipeState {
@@ -254,6 +265,17 @@ pub(crate) struct RecipeState {
 }
 
 impl RecipeState {
+    /// A Delete can ask again from local state once a provider observed
+    /// absence. An observation is usable only while its tag is still recorded.
+    pub(crate) fn needs_capture_consent(&self) -> bool {
+        self.podman.values().any(|state| {
+            state
+                .absent_capture
+                .as_ref()
+                .is_some_and(|tag| state.retired_images.contains(tag))
+        })
+    }
+
     /// Session launches never start a billed Tensorlake software build.
     /// Host-backed recipes build lazily under their provider's shared job.
     pub(crate) fn require_launch_source(&self, place: farhelm_proto::Place) -> anyhow::Result<()> {

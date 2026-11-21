@@ -44,7 +44,7 @@ use std::sync::Arc;
 use anyhow::Context as _;
 use axum::{
     Json,
-    extract::{Path, State, rejection::JsonRejection},
+    extract::{Path, Query, State, rejection::JsonRejection},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
@@ -54,7 +54,7 @@ use farhelm_proto::tensorlake::recipes::{
 use rusqlite::{Connection, OptionalExtension as _};
 
 use super::build::{CleanupRefusal, RecipeState, StartRefusal, decode_state};
-use crate::{AppState, store::HelmStore};
+use crate::{AppState, environment::recipes::UnconfirmedImageCapture, store::HelmStore};
 
 /// The request body cap for recipe writes. 500 typical package names, a few
 /// tunnels and two endpoints fit with room to spare. This also bounds literal
@@ -590,6 +590,14 @@ pub(crate) async fn update_recipe(
     }
 }
 
+/// Explicit consent is scoped to the recipe named by this Delete request.
+/// Ordinary callers send no query option and retain any unanswered capture.
+#[derive(serde::Deserialize)]
+pub(crate) struct RecipeDeleteQuery {
+    #[serde(default)]
+    forget_missing_captures: bool,
+}
+
 /// `DELETE /api/tensorlake/recipes/{name}`: the compatibility route deletes
 /// the one shared recipe across all places, answering within the host reply
 /// bound (`crate::sessions::HOST_REPLY_BOUND`) counted from here.
@@ -616,10 +624,12 @@ pub(crate) async fn update_recipe(
 /// answer at once, never as the 504. No lookup before the cleanup starts
 /// waits on Tensorlake or a host, so there is no separate, shorter bound
 /// before admission; the local reads are not bounded themselves and take
-/// milliseconds in practice.
+/// milliseconds in practice. An absent image from an unanswered Podman
+/// capture asks for explicit consent before the helm forgets its ownership.
 pub(crate) async fn delete_recipe(
     State(state): State<Arc<AppState>>,
     Path(name): Path<String>,
+    Query(query): Query<RecipeDeleteQuery>,
 ) -> Response {
     let timed_out = format!(
         "recipe {name}'s cleanup did not finish within {} seconds; the deletion carries on, and \
@@ -627,14 +637,21 @@ pub(crate) async fn delete_recipe(
          it again to see why",
         crate::sessions::HOST_REPLY_BOUND.as_secs()
     );
-    crate::sessions::within_host_reply_bound_saying(delete_recipe_owned(state, name), timed_out)
-        .await
+    crate::sessions::within_host_reply_bound_saying(
+        delete_recipe_owned(state, name, query),
+        timed_out,
+    )
+    .await
 }
 
 /// Keep deletion admission through job cancellation and every confirmed
 /// cleanup even if the HTTP caller disappears during a remote command, or
 /// [`delete_recipe`] has already answered that the deletion carries on.
-async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
+async fn delete_recipe_owned(
+    state: Arc<AppState>,
+    name: String,
+    query: RecipeDeleteQuery,
+) -> Response {
     // Admission: refuse what local state already refuses, then take the
     // shared deletion admission. An unknown recipe (404), one a host uses
     // (409) and one already being deleted (409) are refused here, before
@@ -650,27 +667,33 @@ async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
         Ok(users) => return refusal_response(&name, Refusal::InUse(users)),
         Err(error) => return storage_failure("delete the Tensorlake recipe", error),
     }
-    // Only for a clear answer, the one PUT gives: the store's final
-    // transaction still refuses a recipe that went missing meanwhile.
-    match state.store.tensorlake_recipe_row(&name).await {
-        Ok(Some(_)) => {}
-        Ok(None) => return refusal_response(&name, Refusal::Missing),
-        Err(error) => return storage_failure("delete the Tensorlake recipe", error),
-    }
     let builds = Arc::clone(state.tensorlake.builds());
     let guard = match builds.begin_delete(&name) {
-        Ok(guard) => guard,
+        Ok(guard) => guard.with_missing_capture_consent(query.forget_missing_captures),
         Err(refusal) => {
             state.manager.events().bump();
             return cleanup_refusal_response(&name, refusal);
         }
     };
+    // Read the previous observation after taking admission. A Delete that
+    // just finished may have saved it while this request was arriving.
+    let recipe_state = match state.store.tensorlake_recipe_row(&name).await {
+        Ok(Some((_, recipe_state))) => recipe_state,
+        Ok(None) => return refusal_response(&name, Refusal::Missing),
+        Err(error) => return storage_failure("delete the Tensorlake recipe", error),
+    };
+    if !query.forget_missing_captures && recipe_state.needs_capture_consent() {
+        return capture_confirmation_response();
+    }
     // The cleanup: from here on the wait is on Tensorlake and container hosts.
     if let Err(error) = state.manager.providers().clean_recipe(&name, &guard).await {
         // Release admission before the bump, as the success path does: a
         // client reacting to the bump may send the Delete again at once.
         drop(guard);
         state.manager.events().bump();
+        if error.is::<UnconfirmedImageCapture>() {
+            return capture_confirmation_response();
+        }
         return crate::http_error(error);
     }
     let deleted = state.store.delete_tensorlake_recipe(name.clone()).await;
@@ -681,6 +704,20 @@ async fn delete_recipe_owned(state: Arc<AppState>, name: String) -> Response {
         Ok(Err(refusal)) => refusal_response(&name, refusal),
         Err(error) => storage_failure("delete the Tensorlake recipe", error),
     }
+}
+
+/// Use the same helm-only marker for a current observation and for a retry
+/// whose preceding Delete saved that observation after its reply timed out.
+fn capture_confirmation_response() -> Response {
+    use farhelm_proto::http::{
+        RECIPE_CAPTURE_CONFIRMATION_HEADER, RECIPE_CAPTURE_CONFIRMATION_REQUIRED,
+    };
+    (
+        StatusCode::CONFLICT,
+        [(RECIPE_CAPTURE_CONFIRMATION_HEADER, RECIPE_CAPTURE_CONFIRMATION_REQUIRED)],
+        "The outcome of an image capture is unknown. An image could still appear after this recipe is deleted.",
+    )
+        .into_response()
 }
 
 /// The HTTP answer for a delete whose Tensorlake cleanup did not finish.

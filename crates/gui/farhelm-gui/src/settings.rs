@@ -498,9 +498,22 @@ pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
     }
 }
 
+/// The saved-recipe scenes stage either the first Delete or the follow-up
+/// that needs explicit consent to forget an absent image capture.
+#[cfg(test)]
+#[derive(Clone, Copy)]
+pub(crate) enum SavedRecipeQuestion {
+    Delete,
+    DeleteAnyway,
+}
+
 /// Stage the real saved-recipe editor and optionally open its inline delete question.
 #[cfg(test)]
-pub(crate) fn open_saved_recipe_for_opened(ask_delete: bool, window: &mut Window, cx: &mut App) {
+pub(crate) fn open_saved_recipe_for_opened(
+    question: Option<SavedRecipeQuestion>,
+    window: &mut Window,
+    cx: &mut App,
+) {
     let saved = recipe_tests::entry("rust-dev", recipe_tests::idle(), serde_json::Value::Null);
     let saved = serde_json::from_value(saved).expect("the saved recipe fixture decodes");
     let recipes = layers::last_opened::<SettingsDialog>(cx)
@@ -510,8 +523,10 @@ pub(crate) fn open_saved_recipe_for_opened(ask_delete: bool, window: &mut Window
         recipes.open_editor(Some(&saved), window, cx);
         recipes.editor().expect("the saved recipe editor is open")
     });
-    if ask_delete {
-        editor.update(cx, |editor, cx| editor.ask_delete_for_golden(window, cx));
+    if let Some(question) = question {
+        editor.update(cx, |editor, cx| {
+            editor.ask_delete_for_golden(question, window, cx)
+        });
     }
 }
 
