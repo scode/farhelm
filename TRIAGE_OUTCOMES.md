@@ -253,21 +253,6 @@
   way, remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/spare-builder-fifo-release.md`.
 
-## quick-launch-preparation-refusal-uses-plain-alert.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer: A quick
-  launch that cannot read recent setups (or the host list) sets `preparation_error` (create_form.rs:4619-4662), which
-  renders as a plain `p.create-session-error` with role=alert (create_form.rs:6052-6053) rather than the bordered "Not
-  launched." alert. SPEC.md:949-953 requires that alert for "every refused launch (New, Clone, Replace with, quick
-  launch)" but says "Errors that are not a refused launch ... keep the plain line".
-- Decision: the user picked "Fix each with the smallest truthful correction" (2026-10-26 ten-question triage page, Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
-  and its index entry.
-- Execution: `pending`.
-
 ## session-view-fallback-omits-start-time.md
 
 - Outcome: `fix spec`.
