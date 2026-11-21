@@ -126,9 +126,8 @@ pub enum Tier {
     /// lit bolt is also reported pressed ([`Button::pressed`]), without the pressed fill: the amber glyph is its look.
     /// Under the keyboard ring a bolt, lit or not, has no fill, as the old one had none ([`Button::fill`]).
     QuickMark { lit: bool },
-    /// `.templates-number-key`: a template's number-key button, a ghost in a tight 4-pixel box whose text (a chord, in
-    /// the monospace face, given as [`Button::content`]) is the quiet `--fg-2` with no key and the accent once one is
-    /// bound (`bound`). The same hover note as [`Tier::QuickMark`].
+    /// A template's number-key cap has one width for both states so assigning a key never shifts its row's text.
+    /// The unassigned cap has a dashed edge. The caller provides the monospace label through [`Button::content`].
     NumberKey { bound: bool },
     /// `.templates-row`: a template's row in the Templates list, a ghost as wide as its row (`width: 100%`) whose
     /// content (the template's name over its summary, given as [`Button::content`]) sits at its left, 10 by 12 pixels
@@ -201,10 +200,14 @@ const TERMINAL_TAB_PAD: (f32, f32) = (3., 10.);
 const TERMINAL_TAB_CLOSE_PAD: (f32, f32) = (3., 7.);
 /// The [`Tier::NumberKey`] box's padding on every side.
 const NUMBER_KEY_PAD: f32 = 4.;
+/// Leaves 18 pixels for the widest label at 10 pixels of text, including the Mac command glyph and a digit.
+const NUMBER_KEY_WIDTH: f32 = 28.;
 /// The [`Tier::FieldRemove`] box: `.templates-remove`'s `width: 30px; height: 34px`.
 const FIELD_REMOVE_SIZE: (f32, f32) = (30., 34.);
 /// The [`Tier::TemplateRow`] box's padding, vertical then horizontal (`.templates-row`: `10px 12px`).
 const TEMPLATE_ROW_PAD: (f32, f32) = (10., 12.);
+/// The inset to a template row's first line, including the button's one-pixel border.
+pub(crate) const TEMPLATE_ROW_VERTICAL_INSET: f32 = TEMPLATE_ROW_PAD.0 + 1.;
 /// The [`Tier::RecentSetup`] box: `height: 36px; padding: 0 14px`. The old row had no border; every button here has a
 /// 1-pixel (transparent) edge, so the padding is a pixel less to keep the content 14 pixels in.
 const RECENT_SETUP_HEIGHT: f32 = 36.;
@@ -672,7 +675,12 @@ impl Button {
             }
             Tier::NumberKey { bound } => {
                 let ink = if bound { palette.accent } else { palette.fg_2 };
-                return (None, palette.control_hover, None, ink);
+                return (
+                    None,
+                    palette.control_hover,
+                    Some(palette.border_dialog),
+                    ink,
+                );
             }
             _ => {}
         }
@@ -1129,6 +1137,13 @@ impl RenderOnce for Button {
             // lines may shrink, so a long name or summary is cut rather than widening the list.
             .when(self.tier == Tier::TemplateRow, |button| {
                 button.w_full().min_w_0().justify_start()
+            })
+            .when(matches!(self.tier, Tier::NumberKey { .. }), |button| {
+                button
+                    .w(px(NUMBER_KEY_WIDTH))
+                    .when(self.tier == (Tier::NumberKey { bound: false }), |cap| {
+                        cap.border_dashed()
+                    })
             })
             // A recent setup's row fills the strip's well at a fixed height, square-cornered inside the well's own
             // rounding, its cells laid out from the left at the strip's 13 pixels.

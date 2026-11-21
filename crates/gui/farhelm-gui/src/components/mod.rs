@@ -66,6 +66,7 @@ mod transition;
 mod tests;
 
 pub use banner::Banner;
+pub(crate) use button::TEMPLATE_ROW_VERTICAL_INSET;
 pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
 pub use command_well::{COMMAND_TEXT, CommandWell};

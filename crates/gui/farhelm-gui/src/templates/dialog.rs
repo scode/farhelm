@@ -56,6 +56,7 @@ use std::time::Duration;
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::{LaunchCatalogModel, LaunchTemplate};
 use farhelm_proto::ui_channel::{Availability, Collection};
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, AppContext as _, Context, FocusHandle, FontWeight, InteractiveElement as _,
     IntoElement, ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _,
@@ -67,7 +68,10 @@ use super::fields::taken_refusal;
 use super::shortcuts::{self, Bindings, KEYS};
 use super::summary;
 use crate::assets::Icon;
-use crate::components::{Button, DialogFrame, HoverHelp, IconButton, MenuHeader, MenuItem, Tier};
+use crate::components::{
+    Button, DialogFrame, HoverHelp, IconButton, MenuHeader, MenuItem, TEMPLATE_ROW_VERTICAL_INSET,
+    Tier,
+};
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, Dialog, Dismissal, LayerId, Popover};
@@ -382,6 +386,13 @@ const BOLT_WIDTH: f32 = 28.;
 const KEY_TEXT: f32 = 10.;
 /// The number-key menu's width, as wide as the old flyout drew its longest description.
 const KEY_MENU_WIDTH: f32 = 260.;
+/// Center the controls on the first two lines and their insets. The marked row grows only below this area,
+/// so its new chord line cannot move the bolt or cap away from a pointer resting on either one.
+const ROW_CONTROLS_HEIGHT: f32 =
+    2. * (SMALL_LINE_HEIGHT + TEMPLATE_ROW_VERTICAL_INSET) + ROW_LINE_GAP;
+/// Keep one chord line's space in the list before a template is marked. A long list sets the centered
+/// dialog's height, and growing it on the first mark would move the entire list.
+const ROW_CHORD_HEIGHT: f32 = 17.;
 
 impl TemplatesDialog {
     /// Whether a write this dialog sent is in flight: a ⚡ or number-key write, the editor's save or delete, or an Undo.
@@ -873,10 +884,11 @@ impl TemplatesDialog {
             bound: bound.is_some(),
         })
         .content(
-            // `.templates-number-key`: 10-pixel monospace digits.
+            // The cap fits the abbreviated label. Hover help carries the full chord.
             div()
                 .font_family(crate::assets::TERMINAL_FONT)
                 .text_size(px(KEY_TEXT))
+                .whitespace_nowrap()
                 .child(shortcuts::key_button_text(bound)),
         )
         // Open as the layer manager says: Escape or a press outside closes the menu without telling this dialog.
@@ -928,6 +940,7 @@ impl TemplatesDialog {
             lines = lines.child(
                 div()
                     .text_size(px(summary::CHORD_TEXT))
+                    .line_height(px(ROW_CHORD_HEIGHT))
                     .font_family(crate::assets::TERMINAL_FONT)
                     .text_color(theme::color(row_detail_ink(palette, open, palette.fg_2)))
                     .child(super::QUICK_LAUNCH_SHORTCUT_NAME),
@@ -968,22 +981,23 @@ impl TemplatesDialog {
                     .accessible_name(),
             )
             .flex()
-            .items_center()
+            .items_start()
             .gap(px(4.))
-            // The bolt is anchored to the first line, so it does not move when the marked row gains its chord line.
             .child(
                 div()
                     .flex_none()
-                    .w(px(BOLT_WIDTH))
-                    .self_stretch()
-                    .child(bolt),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .relative()
-                    .child(key)
-                    .child(anchor.track()),
+                    .h(px(ROW_CONTROLS_HEIGHT))
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .child(div().flex_none().w(px(BOLT_WIDTH)).child(bolt))
+                    .child(
+                        div()
+                            .flex_none()
+                            .relative()
+                            .child(key)
+                            .child(anchor.track()),
+                    ),
             )
             .child(div().flex_1().min_w_0().child(opener))
             .into_any_element()
@@ -1303,6 +1317,13 @@ impl Render for TemplatesDialog {
             .flex()
             .flex_col()
             .gap(px(ROW_GAP))
+            .when(
+                !templates.is_empty()
+                    && !templates
+                        .iter()
+                        .any(|template| bindings.is_marked(&template.name)),
+                |list| list.pb(px(ROW_CHORD_HEIGHT + ROW_LINE_GAP)),
+            )
             .child(layers::beside_edge("templates-help-edge", window, cx))
             .children(
                 templates
