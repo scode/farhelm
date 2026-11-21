@@ -392,9 +392,10 @@ action: strict retained event and protocol records must prove no command, native
 observation, and the executor must acknowledge stopped cleanup. Up to three fresh attempts back off 60, 120 and 240
 seconds within the checkpoint deadline; every failed attempt and its hashes remain retained and reported. No permission
 block, uncertain action or feedback send is retried. Update checks reobserve the public default after backoff and stop
-if it changed. `--timeout` bounds each checkpoint including backoff (30–3600 seconds, default 1200). Exact native text
-entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial delivery. Each turn
-receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test. Bonus native
+if it changed. `--timeout` sets the base budget per checkpoint (30–3600 seconds, default 1200). The effective budget
+includes any checkpoint-specific floor listed below and is shared by the initial turn, backoff and retries. Exact native
+text entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial delivery. Each
+turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test. Bonus native
 readiness additionally proves a real Finder window move and folder double-click before installing Farhelm. P0 retains
 its smaller prerequisites. A gesture tool's successful return is insufficient: an independent same-window frame change
 must establish drag delivery, or that fixture stops as unavailable. Status remains queryable while a turn runs; cleanup
@@ -526,11 +527,10 @@ unavailable check, never a pass. The report folds each old-session result into i
 additional Remove and Uninstall checks bring P0 to seven named results. This test does not check that the upgrade ends
 the old terminals releases before terminal hosts left running; the supervisor's Rust tests cover that startup step.
 
-These checkpoints get longer tester turns than `--timeout`'s default: at least 2400 seconds for the updater pair's
-`old-fixture` and 1800 for each old-session check (never above the 3600-second maximum), since they wait on genuine
-agent conversations and an agent Restart. A run initialized before P0 carried old sessions keeps its retained verdicts,
-but `serve` and `test` refuse its `p0-updater-upgrade` pair: start a new run rather than hold it to half of the new
-contract.
+These checkpoints raise the base budget to at least 2400 seconds for the updater pair's `old-fixture` and 1800 for each
+old-session check (within the 3600-second maximum), since they wait on genuine agent conversations and an agent Restart.
+A run initialized before P0 carried old sessions keeps its retained verdicts, but `serve` and `test` refuse its
+`p0-updater-upgrade` pair: start a new run rather than hold it to half of the new contract.
 
 The final two P0 checkpoints exercise the remote host's actual menu items. Remove must forget its registration and
 cached sessions while leaving the original supervisor and both live sessions intact; re-adding the same pinned

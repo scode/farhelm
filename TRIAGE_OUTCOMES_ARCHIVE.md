@@ -34333,3 +34333,91 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: No change under Q14. The pass tally can include held time after a dependency block is answered, affecting
   when the plan is picked. jj change `qxvpwulr`, bookmark `plan/triage-tooling/05-plans-workflow-items`,
   [draft PR #4499](https://github.com/scode/farhelm/pull/4499/changes).
+
+## stable-recut-removes-retained-announcement-anchor.md
+
+- Outcome: `other`.
+- Assessment: If a stable release with an in-app announcement fails after its tag is pushed and is re-cut as the next
+  patch version, the announcement's "Release notes" link points at a version anchor the website no longer has. The link
+  opens the release-notes page but not the right section. Verified: Confirmed. `releasing/.agents/stable.md`,
+  "Re-cutting a stable release", keeps each entry's version on purpose and renames the CHANGELOG heading.
+  `release_announcements.rs` builds `#vX.Y.Z` from the entry's version. `website/scripts/release-notes.mjs` emits
+  anchors only from CHANGELOG headings. The trigger is rare (stable announcement + spent tag + re-cut).
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard. The link still reaches the page. If fixed, an alias anchor for the spent version is the smallest
+  change.
+- Execution: No change under Q14. The retained announcement still opens the release notes page, but its original version
+  fragment can miss the renamed section after a re-cut. jj change `zrlsrywvqylx`, bookmark
+  `plan/triage-tooling/06-release-and-brick-tooling`,
+  [draft PR #4502](https://github.com/scode/farhelm/pull/4502/changes).
+
+## brick-recovery-truncates-checkpoint-budget.md
+
+- Outcome: `other`.
+- Assessment: None for users. In the Mac release brick test, a recoverable provider rate limit (429) can leave the slow
+  old-session checks with too little time for their retry, or block the retry outright under a small `--timeout`.
+  Verified: Confirmed. `brick_test.py` gives the first task `turn_timeout(...)` (2400/1800 s floors) but sets
+  `checkpoint_deadline = clock + timeout` from the raw `--timeout`. BRICK-TEST.md contradicts itself: line ~395 says
+  "`--timeout` bounds each checkpoint including backoff", while ~529 says these checkpoints get at least 2400/1800 s.
+  Not covered by plan brick-test-guard-oracles (its acceptance is about other guards).
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code + doc. Base the deadline on the effective first-turn timeout and reconcile the two BRICK-TEST.md
+  sentences.
+- Execution: Fixed. Each checkpoint’s effective first-turn budget also bounds backoff and retries. A pre-action refusal
+  on the 2400-second old fixture can retry with 2330 seconds left after ten seconds of elapsed time and a 60-second
+  backoff. jj change `zrlsrywvqylx`, bookmark `plan/triage-tooling/06-release-and-brick-tooling`,
+  [draft PR #4502](https://github.com/scode/farhelm/pull/4502/changes).
+
+## trailing-selected-above-handoff-floor-legacy-target-missing-tmux-launch-advice.md
+
+- Outcome: `other`.
+- Assessment: A Mac user who picks an older release (for example v0.35.0, above the handoff floor) through
+  `FARHELM_VERSION` gets no tmux prerequisite advice from the current installer. That old app then refuses to start
+  without tmux, with its own remedy alert. Verified: `scripts/install.sh` has no tmux handling, and
+  `HANDOFF_FLOOR=0.31.1-dev.0` (:101). SPEC.md:5674-5675: "Farhelm neither requires nor looks for one on any machine."
+  No spec text speaks to selected older targets.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard (explicit old-release selection is rare, and the old app gives its own actionable refusal)
+- Execution: No change under Q14. The current installer gives no advance tmux advice for selected older releases. The
+  older app itself reports its missing prerequisite and remedy. jj change `zrlsrywvqylx`, bookmark
+  `plan/triage-tooling/06-release-and-brick-tooling`,
+  [draft PR #4502](https://github.com/scode/farhelm/pull/4502/changes).
+
+## brick-test-deferral-reuses-continuity-files.md
+
+- Outcome: `other`.
+- Assessment: Maintainer release tooling only. During the Mac release brick test, if the remote-update check defers or
+  fails before taking its own counter sample, the harness can report a harness error instead of the real failure
+  verdict. Verified: Code unchanged since be6cb86e1. `self.state` is pass-wide (`managed-state.json` in pass_dir).
+  `save_record` exports `state['continuity']` for remote-update (guest_operations.py ~299). `continuity_remote_after`
+  raises ObservationNotReady before sampling (~828), which leaves continuity-before's receipt names in place.
+  guest_tester.py ~345 copies those names into the result, and `validate_observation` resolves them in the current
+  attempt's directory (~471-480), where they do not exist, so it raises TesterError. Not covered by plan
+  brick-test-guard-oracles. Real incidence is unmeasured.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: fix code (keep the exported continuity names attempt-local and add a test that defers after a real earlier
+  pair)
+- Execution: Fixed. Each attempt exports its own continuity filenames. A deferral after a prior checkpoint’s saved pair
+  can preserve its unavailable verdict, and a completed sample still exports its two files. jj change `zrlsrywvqylx`,
+  bookmark `plan/triage-tooling/06-release-and-brick-tooling`,
+  [draft PR #4502](https://github.com/scode/farhelm/pull/4502/changes).

@@ -284,6 +284,36 @@ class NativeCoordinatorTests(unittest.TestCase):
         self.assertEqual(delays, [])
         self.assertEqual(sum(row['check_id'] == 'p1-feedback-send' for row in self.seen), 1)
 
+    def test_provider_retry_keeps_the_effective_old_fixture_budget(self):
+        """A safe retry uses the checkpoint floor minus elapsed time and backoff."""
+        self.finish_preceding_pairs()
+        self.fixture.prepare('p0-updater-upgrade')
+        now = 100.0
+        self.run.clock = lambda: now
+        budgets = []
+
+        def pause(delay):
+            """Spend the retry delay in the same clock that measures the checkpoint."""
+            nonlocal now
+            now += delay
+
+        self.run.pause = pause
+
+        def execute(controller, envelope, files):
+            """Refuse the old-fixture turn before it acts, after consuming ten seconds."""
+            nonlocal now
+            if envelope['check_id'] == 'old-fixture':
+                budgets.append(envelope['timeout_seconds'])
+                if len(budgets) == 1:
+                    now += 10
+                    return self.provider_archive(controller, envelope)
+            return self.archive(controller, envelope)
+
+        self.run.tester = execute
+        with mock.patch('brick_test.download', return_value=b'v0.24.0'):
+            self.run.test('p0-updater-upgrade', source=self.source, timeout=30)
+        self.assertEqual(budgets, [2400, 2330])
+
     def test_unknown_native_image_cannot_supply_command_evidence(self):
         """Native bytes in an unfamiliar format cannot impersonate an independent command receipt."""
         self.prepare()

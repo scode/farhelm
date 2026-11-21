@@ -868,7 +868,8 @@ it never retries feedback, uncertain actions or failed cleanup.
                     entry['tester']['guest_directory'] = context['pass_directory'] + '/' + task['attempt']
                     entry['tester']['termination_observed'] = False
                     self.save()
-                checkpoint_deadline = self.clock() + timeout
+                # The first turn's floor also applies to the budget shared by its retries.
+                checkpoint_deadline = self.clock() + task['timeout_seconds']
                 for provider_attempt in range(len(PROVIDER_BACKOFF) + 1):
                     with c.locked():
                         label = self.tester(c, task, source_files)
@@ -1663,7 +1664,8 @@ def main():
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
         elif name == 'test':
-            child.add_argument('--timeout', type=int, default=1200, help='hard deadline per guest tester turn')
+            child.add_argument('--timeout', type=int, default=1200,
+                               help='base checkpoint budget in seconds, shared with retries')
         elif name == 'retry-unavailable':
             child.add_argument('--reason', required=True, help='fixture repair and why repeating the checkpoint is safe')
         elif name == 'record':
