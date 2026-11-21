@@ -1,9 +1,9 @@
 # Run all tests and fix
 
 NOTE: This is not a finishing gate and not something to start on your own initiative. It is what an explicit "run all
-tests and fix" request means: every check this machine can run, one deflake sweep for the runtime batteries, then the
-release gate in GitHub, with straightforward fixes validated and landed along the way. Expect it to take several hours,
-most of it the sweep.
+tests and fix" request means: local checks (including live agent drift), one deflake sweep for the runtime batteries,
+then the release gate in GitHub, with straightforward fixes validated and landed along the way. Expect it to take
+several hours, most of it the sweep.
 
 The point is to find, before a release is cut, what the release process would otherwise find: deterministic failures
 that crept in because no ordinary gate runs a suite, and failures that only happen on GitHub's runners. It was first
@@ -21,14 +21,15 @@ Before starting, read these in full, and again after any compaction or resume:
 - `.agents/test-evidence.md` (the recorder and retained runs)
 - `.agents/machine.md` (scratch environments, `CARGO_TARGET_DIR`, what stays where it goes)
 - `docs/test-sleep-check.md` (the sleep checker's isolated interpreter)
+- `docs/harness-drift-tests.md` (the live agent suite and its prerequisites)
 
 > NOTE: In an unattended run (plan executor, landing monitor, delegate), an instruction here to ask, confirm with, or
 > propose to the maintainer follows `AGENTS.md`, "Unattended runs".
 
 ## Ground rules
 
-- Nothing runs twice locally. The runtime batteries run only inside the deflake sweep; the static checks below are
-  exactly what the sweep does not run. Do not "warm up" by running a battery the sweep will run anyway.
+- Nothing runs twice locally. The deflake sweep owns the routine runtime batteries. The tooling checks and live agent
+  suite below have their own commands.
 - Fix what is straightforward, on one linear jjstack stack, one draft PR per fix, with the per-PR gates from
   `AGENTS.md`, "Tests and validation", and `.agents/validation.md`, and a cold-read commit message. Straightforward
   means a clear cause and a small, low-risk fix inside the existing design: a test that assumes an old limit, a lint, a
@@ -127,6 +128,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
   tooling)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy guard; no vendor turns)
+- `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins with zero vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
@@ -230,6 +232,13 @@ explicit SKIPPED output as missing real-environment coverage and exclude it from
 A failure here is fixed or recorded per the ground rules before going on. Static fixes can be verified at once by
 rerunning the check.
 
+### Real agent drift
+
+Run `python3 -B scripts/run-harness-drift.py` on Linux as part of this explicitly requested flow, before the sweep. Each
+tracked agent spends a real vendor turn. Record PASSED, COULD NOT RUN and FAILED separately with the recorder run IDs.
+Missing credentials or manual hooks leave coverage unknown for that agent. Keep going through the rest of this flow and
+preserve the evidence for any failures.
+
 ## 3. Deflake sweep
 
 Run one sweep with `deflake/AGENTS.md`'s waiting, classification and event-handling protocol, including its rule that
@@ -275,10 +284,10 @@ Only once the static checks pass and the sweep has finished with every failure f
 
 ## 5. Report
 
-Report, in product terms per `AGENTS.md`, "Talking to the user": the checks run in step 2 and their results; the sweep's
-run id and its events; each flake recorded; the fix stack bottom-up with each PR's link, landing status and the failure
-it fixes; anything recorded for the maintainer's judgment instead of fixed; the GitHub run URLs and their verdicts; what
-was skipped and why; and the working log's path.
+Report, in product terms per `AGENTS.md`, "Talking to the user": the checks run in step 2 and their results, including
+the live agent verdicts and recorder run IDs; the sweep's run id and its events; each flake recorded; the fix stack
+bottom-up with each PR's link, landing status and the failure it fixes; anything recorded for the maintainer's judgment
+instead of fixed; the GitHub run URLs and their verdicts; what was skipped and why; and the working log's path.
 
 ## Keeping this file honest
 
