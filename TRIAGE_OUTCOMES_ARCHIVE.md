@@ -26094,3 +26094,27 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `lovtmpvywvzpttwnqlmtlwmvrvqmnppt`, bookmark
   `plan/brick-test-guard-oracles/01-old-process-cli-premise`,
   [PR #4382](https://github.com/scode/farhelm/pull/4382/changes).
+
+## installer-prerequisite-test-conflates-two-guards.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by code reading on main e9ea6d08 (not run), by a delegated checker whose verdict triage
+  reviewed. `test_old_installer_waits_for_both_fixture_and_verified_inputs`
+  (releasing/mac-vm-test/test_guest_operations.py:145-151) has the docstring "A clean Mac alone cannot justify
+  overwriting an old or dirty Linux fixture later in setup". It dispatches `install_previous` with neither prerequisite
+  completed, so it passes whether the guard at guest_operations.py:265-266
+  (`not {'fixture_clean', 'verify_previous'} <= self.completed`) requires one prerequisite or both. The test's name and
+  docstring promise that each one is independently required, which the fixture cannot show.
+- Decision: recorded without a per-item question on the maintainer's 2026-10-26 instruction to auto-triage every
+  remaining item that is not likely mooted by the planned infallible GUI–helm connection (TODO.md), is clearly a bug
+  needing no spec or product judgment, and is straightforward to fix without complexity or scope creep. The user can
+  revise it.
+- Completion criteria: The test (or two subtests) dispatches `install_previous` once with only `fixture_clean` in
+  `operations.completed` and once with only `verify_previous`. Each must raise the "clean and verified" error, with the
+  runner set to fail if it is invoked. Keep the existing none-completed case or replace it. Run the mac-vm-test Python
+  unit tests through the repository's recorded test-run path. Size gate: about 100 lines of diff (code, tests and docs,
+  not counting this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the
+  feedback file and its index entry.
+- Execution: change `oxnpxttozrskzsorxmunvlwvknlwmqwm`, bookmark
+  `plan/brick-test-guard-oracles/02-prerequisite-guards-separately`,
+  [PR #4384](https://github.com/scode/farhelm/pull/4384/changes).
