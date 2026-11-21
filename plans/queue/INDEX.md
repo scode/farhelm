@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [complete] `hosts-small-fixes.md` — disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
 - [complete] `templates-list-bolt-and-key.md` — center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
-- [in-flight 1d0dd1] `menu-shortcut-hints.md` — show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
+- [complete] `menu-shortcut-hints.md` — show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
 - [in-flight 9adac2] `whats-new-on-upgrade.md` — after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
 - [pending] `launcher-command-field.md` — make the session launcher's search field its header and starting point, with hints, a left column of recent setups, templates and results, a calmer form, and no footer summary
 - [pending] `settings-dialog-refresh.md` — give Settings grouped sections with one hue per group, cards under a sticky page heading, a pinned footer Save for every form, and a question before closing with unsaved changes (after `whats-new-on-upgrade.md`)
