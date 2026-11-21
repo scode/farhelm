@@ -1255,7 +1255,7 @@ impl FleetBuilder {
     /// is about the local row scripts it explicitly.
     pub(crate) async fn new() -> FleetBuilder {
         let dir = tempfile::tempdir().expect("temp state dir");
-        let store = HelmStore::open(&dir.path().join("helm.db"))
+        let store = HelmStore::open_fixture(&dir.path().join("helm.db"))
             .await
             .expect("open helm.db");
         let fleet = ScriptedFleet::new();

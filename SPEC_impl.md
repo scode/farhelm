@@ -4946,6 +4946,12 @@ helms start unseen. The dismissal belongs to the helm so closing the welcome car
 client's next load. A failed or timed-out read is never evidence of unseen. This migration prevents older helms from
 opening the database.
 
+The upgrade highlights choice and the last build whose highlights were shown or skipped live beside `welcome_seen`.
+Only `show_whats_new: false` opts out. `last_whats_new_release` stores a SemVer string. A later dismissal advances it
+under the same write lock that merges the sparse preference patch. A delayed dismissal from an older build cannot
+roll it back. A new database seeds the record with its creation version for a release build. A database upgraded from
+before the record was introduced leaves it unset so the client can offer highlights for the running release once.
+
 Helm schema 56 adds nullable `preferences.name_session_on_quick_launch`. Unset and true enable quick-launch naming; only
 false disables it, so upgraded helms have the same default as fresh ones. Null restores the enabled default and omission
 preserves the stored choice. Older helms refuse this schema.
