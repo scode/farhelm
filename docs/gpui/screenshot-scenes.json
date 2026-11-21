@@ -2819,6 +2819,16 @@
       "reference": "launcher-agent"
     },
     {
+      "golden": "launcher-host-menu",
+      "title": "The launcher Host menu with existing hosts and choices for a new environment",
+      "reference": null
+    },
+    {
+      "golden": "launcher-new-container",
+      "title": "New session with a container recipe, Container host and the container's home",
+      "reference": null
+    },
+    {
       "golden": "templates-dialog",
       "title": "The Templates dialog's list: summaries, the ⚡ template with its chord line, a bound number key, the editor not opened yet",
       "reference": "templates-dialog"
@@ -2827,6 +2837,11 @@
       "golden": "template-editor",
       "title": "The Templates dialog with codex-deep open in its editor: name, switch, agent type, model with its suggestions, effort, Duplicate, Delete and Save",
       "reference": "template-editor"
+    },
+    {
+      "golden": "template-destination-editor",
+      "title": "A template with its own Host and Destination fields and the shared placement controls",
+      "reference": null
     },
     {
       "golden": "template-number-menu",

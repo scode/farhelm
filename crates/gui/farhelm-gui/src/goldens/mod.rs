@@ -928,6 +928,13 @@ static SCENES: &[Scene] = &[
         setup: template_editor_setup,
     },
     Scene {
+        name: "template-destination-editor",
+        // Show the optional fields and their actions together in the scrolling editor.
+        size: (1010., 1140.),
+        draw: empty,
+        setup: template_destination_editor_setup,
+    },
+    Scene {
         name: "template-number-menu",
         size: (1010., 940.),
         draw: template_number_menu_scene,
@@ -940,6 +947,18 @@ static SCENES: &[Scene] = &[
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_new_setup,
+    },
+    Scene {
+        name: "launcher-host-menu",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_host_menu_setup,
+    },
+    Scene {
+        name: "launcher-new-container",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_container_setup,
     },
     Scene {
         name: "template-launcher",

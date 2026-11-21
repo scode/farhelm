@@ -9,7 +9,7 @@
 //!   (`.templates-incompatible`); a field whose stored text the editor shows escaped says how to replace it.
 //! - **A choice** (the old `Choice`) is a segmented group for two to five options and a select for more, counted after
 //!   a stored value no option offers is added as "<value> (not offered)", so such a value is shown rather than lost.
-//! - **The host** uses the shared [`build_placement_rows`] in authoring mode. Existing host shows the editor's Host
+//! - **The host** uses the shared [`build_placement_controls`] in authoring mode. Existing host shows the editor's Host
 //!   select, whose choices are recorded install identities. New sandbox shows Recipe. New container shows Recipe and
 //!   Container host. The editor keeps a stored install identity visible as "Unavailable host (retained)" if no listed
 //!   host has it, just as the shared controls retain a missing recipe or container host. The authoring rules (only an
@@ -45,7 +45,7 @@ use crate::components::{
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
 use crate::launcher::destination_rows::{
-    PlacementEdit, PlacementMode, build_placement_rows, destination_choice,
+    PlacementEdit, PlacementMode, build_placement_controls, destination_choice,
 };
 use crate::launcher::draft::{DestinationKind, harness_label};
 use crate::launcher::model::{ModelOption, OLDER_MODELS, model_options};
@@ -533,11 +533,12 @@ impl Rows<'_> {
     fn host(&self) -> Vec<AnyElement> {
         let target = self.editor.draft.fields.launch_target();
         let weak = self.weak.clone();
-        let mut controls = build_placement_rows(
+        let controls = build_placement_controls(
             PlacementMode::Authoring,
             target.as_ref(),
             self.recipes,
             self.hosts,
+            None,
             move |edit, window, cx| {
                 with_editor(&weak, window, cx, |editor, window, cx| match edit {
                     PlacementEdit::RunsOn(target) => editor.choose_runs_on(target, window, cx),
@@ -558,12 +559,24 @@ impl Rows<'_> {
                     }
                 });
             },
-            |_, label, control| self.labelled(label, control).into_any_element(),
         );
+        let mut rows = Vec::new();
+        rows.extend(controls.runs_on.map(|control| {
+            self.labelled("Runs on", control.into_any_element())
+                .into_any_element()
+        }));
+        rows.extend(controls.recipe.map(|control| {
+            self.labelled("Recipe", control.into_any_element())
+                .into_any_element()
+        }));
+        rows.extend(controls.container_host.map(|control| {
+            self.labelled("Container host", control.into_any_element())
+                .into_any_element()
+        }));
         if target.is_none() {
-            controls.push(self.host_select());
+            rows.push(self.host_select());
         }
-        controls
+        rows
     }
 
     /// The Existing host select: the hosts with a recorded install identity, by that identity (SPEC.md: "A template

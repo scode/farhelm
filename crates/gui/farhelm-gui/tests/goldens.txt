@@ -118,8 +118,12 @@ linux/inline-prompt--dark.png 8250e424c4f5da2573166f4e375ead472ce66c56
 linux/inline-prompt--light.png ba01554c80aabc7ec6293f52d47d6f34a60fce58
 linux/keyboard-shortcuts-dialog--dark.png bef6d89f6614d8f0a9ecd15d3ddf658d42eceb5a
 linux/keyboard-shortcuts-dialog--light.png 67b6ed0b4dfdaa9d4526024e5a29d59489678387
-linux/launcher-new--dark.png 0db4e9293a385c1e954d39aa80f4361758358886
-linux/launcher-new--light.png 276b47671d002054d68723afa75c8fa012023f4a
+linux/launcher-host-menu--dark.png 2b236e08321e341a3a12dc928749b09adb21f5f2
+linux/launcher-host-menu--light.png 9f787dd4798063492b1ca09eef6b2c936fbf4a3e
+linux/launcher-new--dark.png 466344c3b39f47e6fc62f98bf2a2ac266ff6ef9d
+linux/launcher-new--light.png e221c374dd6b86ca60ad4bb074223a311dacb387
+linux/launcher-new-container--dark.png b5bab1a7d18a1f59a344457f1dc8e8f53efdc166
+linux/launcher-new-container--light.png e7905d491b47d4a780eb5c659863c8304b69b835
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
 linux/linux-title-bar--light.png bf63e2f218b51f882bc6a66258bbf7a1c8a187e5
 linux/notice-banner--dark.png d296fc1a9d4afa4ddad8ceb978bd5220dcb043e3
@@ -276,6 +280,8 @@ linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54
 linux/switch--light.png c9201c7be7cddf684884b2764fa0365e33df51d5
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e
 linux/tab-strip--light.png 3646e8f9c7dff120d426435c698ff01563d55764
+linux/template-destination-editor--dark.png 387bedac880d8fbb765c3ad504ef685530b427ea
+linux/template-destination-editor--light.png a013e77c5a6afc350a8e9c781d4b9ba983dc42f4
 linux/template-editor--dark.png e0ddaadb21e0e9dbd5e3d841cc5f49e720abdb18
 linux/template-editor--light.png a85e85f765e998b81fe01392fc3fe31db0521c39
 linux/template-launcher--dark.png a3bf5786ea99bd8641940771b24f170406d49bed

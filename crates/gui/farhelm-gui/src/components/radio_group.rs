@@ -58,6 +58,7 @@
 //!   ([`RadioGroup::fit_words`]), each segment as wide as its words with tighter sides.
 //! - **Compact segments** ([`RadioGroup::compact_segments`]): the launcher's Effort and Permissions controls, with
 //!   the same height as small segments and room beside the words when the group sits alongside other fields.
+//!   The Destination switch uses [`RadioGroup::heading_segments`] to sit on the heading line.
 //! - **Plain radios** ([`RadioGroup::radios`]): the launcher's YOLO fieldset, a circle before each option's words.
 //! - **Chips** ([`RadioGroup::chips`]): the launcher's harness row (`.launch-composer-options`), separate bordered
 //!   buttons on the well color, wrapping with a 6-pixel gap. Related chips can follow a divider in the same flow.
@@ -116,6 +117,7 @@ const SMALL_SEGMENT_LINE_HEIGHT: f32 = 16.8;
 const FITTED_SEGMENT_PAD_X: f32 = 3.;
 const SMALL_SEGMENTS_BASIS: f32 = 220.;
 const COMPACT_SEGMENT_PAD_X: f32 = 8.;
+const HEADING_SEGMENT_HEIGHT: f32 = 20.;
 
 /// Compact enough for the harness picker to wrap with the form's width.
 const CHIP_MIN_HEIGHT: f32 = 26.;
@@ -281,6 +283,7 @@ enum Look {
     Segments,
     SmallSegments,
     CompactSegments,
+    HeadingSegments,
     Radios,
     RadioRows,
     Chips,
@@ -406,6 +409,12 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// around them, and the well takes the group's content width so its neighbors can fit beside it.
     pub(crate) fn compact_segments(mut self) -> Self {
         self.look = Look::CompactSegments;
+        self
+    }
+
+    /// Keep a modifier of a field group shorter than the group's inputs. The options still use their full labels.
+    pub(crate) fn heading_segments(mut self) -> Self {
+        self.look = Look::HeadingSegments;
         self
     }
 
@@ -633,9 +642,10 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 fitted: self.fit_words && self.look == Look::SmallSegments,
             };
             let element = match self.look {
-                Look::Segments | Look::SmallSegments | Look::CompactSegments => {
-                    state.segment(&ids[index], option, self.look, palette)
-                }
+                Look::Segments
+                | Look::SmallSegments
+                | Look::CompactSegments
+                | Look::HeadingSegments => state.segment(&ids[index], option, self.look, palette),
                 Look::Radios | Look::RadioRows => {
                     let row = self.look == Look::RadioRows;
                     state
@@ -740,9 +750,16 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 .items_stretch()
                 .gap(px(CARD_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.
-            Look::Segments | Look::SmallSegments | Look::CompactSegments => group
+            Look::Segments
+            | Look::SmallSegments
+            | Look::CompactSegments
+            | Look::HeadingSegments => group
                 .gap(px(2.))
-                .p(px(2.))
+                .p(px(if self.look == Look::HeadingSegments {
+                    1.
+                } else {
+                    2.
+                }))
                 .border_1()
                 .border_color(theme::color(palette.border_dim))
                 .rounded(metrics::RADIUS_MD)
@@ -837,12 +854,21 @@ impl OptionState {
             (theme::TRANSPARENT, palette.control_hover, palette.accent)
         };
         let ink = self.filled_ink(option, palette.fg_0, palette);
-        let (min_height, pad_x, text_size, line_height) = if look == Look::Segments {
+        let (min_height, pad_x, pad_y, text_size, line_height) = if look == Look::Segments {
             (
                 SEGMENT_MIN_HEIGHT,
                 SEGMENT_PAD.1,
+                SEGMENT_PAD.0,
                 metrics::TEXT_MD,
                 SEGMENT_LINE_HEIGHT,
+            )
+        } else if look == Look::HeadingSegments {
+            (
+                HEADING_SEGMENT_HEIGHT,
+                COMPACT_SEGMENT_PAD_X,
+                1.,
+                metrics::TEXT_SM,
+                14.,
             )
         } else {
             (
@@ -854,6 +880,7 @@ impl OptionState {
                 } else {
                     SMALL_SEGMENT_PAD_X
                 },
+                SEGMENT_PAD.0,
                 metrics::TEXT_SM,
                 SMALL_SEGMENT_LINE_HEIGHT,
             )
@@ -884,7 +911,7 @@ impl OptionState {
             })
             .gap(px(GLYPH_GAP))
             .min_h(px(min_height))
-            .py(px(SEGMENT_PAD.0))
+            .py(px(pad_y))
             .px(px(pad_x))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))

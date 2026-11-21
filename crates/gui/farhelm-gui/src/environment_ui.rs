@@ -210,8 +210,7 @@ impl ProviderUi {
         }
     }
 
-    /// The launcher's Runs on segment for this provider, which names the new resource a launch creates rather than an
-    /// existing host (the old app's `ProviderUi::segment`).
+    /// Name the resource the launcher will create. The host menu and Templates' Runs on use the same words.
     pub(crate) fn segment(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => "New sandbox",
@@ -228,6 +227,14 @@ impl ProviderUi {
             ProviderKind::Podman => {
                 "Create a disposable container from a recipe on one of your hosts"
             }
+        }
+    }
+
+    /// A short qualification beside the launcher menu's action to start a new environment.
+    pub(crate) fn launch_offer_tag(self) -> Option<&'static str> {
+        match self.0 {
+            ProviderKind::Podman => Some("experimental"),
+            ProviderKind::Tensorlake => None,
         }
     }
 
@@ -273,9 +280,8 @@ impl ProviderUi {
         }
     }
 
-    /// The launcher's note under Folder while a recipe is chosen: where the session's files live, and what the new
-    /// environment costs while it runs and when its last session goes (the old app's `ProviderUi::launch_help`, worded
-    /// as it was).
+    /// Detail for the chosen environment in the Host picker's help. The billing and deletion facts that must be
+    /// visible before launch also appear in [`Self::launch_notice`].
     pub(crate) fn launch_help(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
@@ -288,6 +294,16 @@ impl ProviderUi {
                  live inside it. Suspend freezes processes while keeping memory in use; deleting its last session \
                  removes the container and its files."
             }
+        }
+    }
+
+    /// Billing and deletion information the launcher shows even when the user skips the creation confirmation.
+    pub(crate) fn launch_notice(self) -> Option<&'static str> {
+        match self.0 {
+            ProviderKind::Tensorlake => Some(
+                "This session's sandbox bills while running. Suspend stops CPU and memory billing. Deleting its last session removes the sandbox and its files.",
+            ),
+            ProviderKind::Podman => None,
         }
     }
 

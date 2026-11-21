@@ -71,7 +71,7 @@ fn tmp_listing() -> Value {
 
 /// Browse asks the chosen host, on its connection, for the folder as typed, and lists what it answers: the folder
 /// itself, its parent, that there are more, then each folder (a host value drawn escaped); taking one makes it the
-/// folder as the user's own choice and closes the listing. Browse sits under the Host row. Why: SPEC.md,
+/// folder as the user's own choice and closes the listing. Browse follows the Folder segment. Why: SPEC.md,
 /// "explicit browsing asks the selected supervisor for one bounded directory level" (old "composer path actions …
 /// browse the selected remote host" and "launcher action-button Enter keeps reset browse and cancel").
 #[gpui::test]
@@ -81,11 +81,11 @@ fn browse_lists_one_level_and_taking_a_folder_chooses_it(cx: &mut TestAppContext
         browse_request(&mut helm, cx).is_none(),
         "the premise: opening asks nothing"
     );
-    let (button, host_row) = (
+    let (button, folder) = (
         test_support::bounds(cx, "launcher-browse"),
-        test_support::bounds(cx, "launcher-host-row"),
+        test_support::bounds(cx, "launcher-folder-row"),
     );
-    assert!(button.top() > host_row.bottom(), "Browse follows Host");
+    assert!(button.left() >= folder.right(), "Browse follows Folder");
     test_support::click(cx, "launcher-browse");
     let request = browse_request(&mut helm, cx).expect("Browse asked the host");
     assert_eq!(
@@ -297,8 +297,7 @@ fn browse_is_not_offered_where_the_folder_cannot_change(cx: &mut TestAppContext)
     );
 }
 
-/// Replace with holds its host but not its folder, so Browse sits under the held host. Why: the old launcher showed it
-/// there.
+/// Replace with holds its host, while Browse stays available on the editable folder segment of that address.
 #[gpui::test]
 fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
     let source = super::draft_tests::session(super::view_tests::codex(None, None, None));
@@ -312,13 +311,13 @@ fn browse_is_offered_under_replace_withs_held_host(cx: &mut TestAppContext) {
         "the premise: Replace with holds its host"
     );
     test_support::frame(cx);
-    let (button, host_row) = (
+    let (button, folder) = (
         test_support::bounds(cx, "launcher-browse"),
-        test_support::bounds(cx, "launcher-host-row"),
+        test_support::bounds(cx, "launcher-folder-row"),
     );
     assert!(
-        button.top() > host_row.bottom(),
-        "Browse follows the held host"
+        button.left() >= folder.right(),
+        "Browse follows the editable folder"
     );
 }
 
