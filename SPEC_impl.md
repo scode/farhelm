@@ -1901,8 +1901,8 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   set, scroll region, cursor style) the lost output set until the program sets it again; nothing makes a program do that
   on `SIGWINCH`, and many set their modes only at startup, so the setting can stay wrong until the program restarts.
   Unverified either way: no test covers what real programs resend on a resize.
-- **The terminal switch points** (`service/terminals.rs`'s `Terminal`, which is a host's runtime: the supervisor serves
-  no other kind of terminal) answer for a session from its host's runtime. Status reads three classes of evidence: a
+- **The terminal switch points** answer from each session's `HostTerminal` runtime (`hosts/terminal.rs`). The module
+  `service/terminals.rs` resolves current terminal IDs and tracks attachments. Status reads three classes of evidence: a
   running child is live, a processed exit record is an exit with its code, a host that has ended is gone, and a host
   that cannot be read is unattributed, which records nothing durable at all (not even a launch sentinel), lists an
   unsettled session as unknown, and makes Stop, Restart, a guarded Delete and prompt delivery refuse, also when it
@@ -1951,25 +1951,32 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   opens in one ("Tabs in hosts" below). A create commits the kind with the launching row, before anything starts, so a
   crash between the start and its confirmation leaves a row that says where to look. A retried keyed create whose
   interrupted row is a tmux row (left by an older supervisor) keeps that kind through the store's takeover, so a row
-  that turns out to have launched replays as itself; one the takeover claims is refused before anything starts and
-  rolled back like a launch whose spec never landed, the refusal settled against its intent key: the evidence that
-  allowed the retry was gathered for tmux, so starting it in a host instead would be a guess, and this supervisor
-  creates no tmux terminal. The launch is built up to its command as any launch is (the spec, the hooks, the login
-  shell, and the shim's command line with its `systemd-run --user --scope` wrapper), and the host's child runs that
-  command: the agent keeps its launch scope, and the host gets no scope of its own, living in the supervisor's control
-  group. The child's environment (`host_child_env`, the same for agent and tab hosts) is the supervisor's own
-  environment with the launch environment over it, then the terminal's own variables over both: `TERM=xterm-256color`
-  (the terminal type the emulator implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION`
-  set to the build's version, the one the emulator's XTVERSION answer names. These four are always set, so a supervisor
-  started from some other terminal passes none of its claims on. Then `SHELL` (the user's login shell, also when a test
-  seam replaces the launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when nothing gave one. `TMUX`, `TMUX_PANE` and
-  systemd's `LISTEN_*` are never passed on: a supervisor started inside the user's own tmux has the first two, and the
-  child is in no tmux. Nothing claims tmux, and no tmux is asked anything for the launch. A login shell's startup file
-  that starts tmux when `TMUX` is unset therefore runs during the agent's launch, as in any terminal outside tmux
-  (SPEC.md, "Session view"); until 2026-11 the child got `TERM_PROGRAM=tmux`, the private server's version and a
-  placeholder `TMUX` that held such an autostart back, and a host started then keeps that environment until its agent is
-  restarted. The container environment uses this ordinary path inside its own supervisor. The host's tag binds it to the
-  session and the launch generation, and confirming the launch writes the socket's name to the row's `terminal_address`.
+  that turns out to have launched replays as itself. A row the takeover claims is refused before anything starts. The
+  refusal is settled against its intent key. It follows the failed-create rollback policy. The supervisor can roll back
+  a create with no fresh checkout plan or with a fresh checkout still recorded as planned. If the earlier attempt may
+  have allocated a checkout, including when the allocation record cannot be read, it retains the error session and
+  checkout records for inspection and Delete. The retry evidence was gathered for tmux and cannot authorize a launch in
+  a terminal host.
+
+  The launch is built up to its command as any launch is (the spec, the hooks, the login shell, and the shim's command
+  line with its `systemd-run --user --scope` wrapper), and the host's child runs that command: the agent keeps its
+  launch scope, and the host gets no scope of its own, living in the supervisor's control group. The child's environment
+  (`host_child_env`, the same for agent and tab hosts) is the supervisor's own environment with the launch environment
+  over it, then the terminal's own variables over both: `TERM=xterm-256color` (the terminal type the emulator
+  implements), `COLORTERM=truecolor`, `TERM_PROGRAM=farhelm` and `TERM_PROGRAM_VERSION` set to the launch build's
+  version. At launch that version agrees with the emulator's XTVERSION reply. A surviving program keeps its launch
+  environment after a supervisor update. XTVERSION replies then come from the emulator built into the new supervisor.
+  These four are always set, so a supervisor started from some other terminal passes none of its claims on. Then `SHELL`
+  (the user's login shell, also when a test seam replaces the launch shell), `PWD`, and `PATH` as `/usr/bin:/bin` when
+  nothing gave one. `TMUX`, `TMUX_PANE` and systemd's `LISTEN_*` are never passed on: a supervisor started inside the
+  user's own tmux has the first two, and the child is in no tmux. Nothing claims tmux, and no tmux is asked anything for
+  the launch. A login shell's startup file that starts tmux when `TMUX` is unset therefore runs during the agent's
+  launch, as in any terminal outside tmux (SPEC.md, "Session view"); until 2026-11 the child got `TERM_PROGRAM=tmux`,
+  the private server's version and a placeholder `TMUX` that held such an autostart back, and a host started then keeps
+  that environment until its agent is restarted. The container environment uses this ordinary path inside its own
+  supervisor. The host's tag binds it to the session and the launch generation, and confirming the launch writes the
+  socket's name to the row's `terminal_address`.
+
   **The launch record**: the socket's name is drawn before the host's first stage starts, and before that first stage is
   given the spec (it starts nothing until it has read it whole), the launch's artifacts record the socket's name and the
   first stage's process, pinned to its start identity (`<state>/launch/<id>.<generation>.host`). A supervisor that dies
@@ -2078,14 +2085,18 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   its socket is removed; a host that cannot be confirmed ended is logged and left to the session's Delete, which finds
   it by its record, and to the next start. Ending it before the reply keeps Delete out meanwhile; a wedged old host can
   hold the reply for the runtime's 15-second `Shutdown` bound plus the verified signal's graces. A replacement that does
-  not start is unwound as a failed create is: a host the start may have left is ended, the launch's spec, waypoint and
-  host record are removed and its process tree swept, and the failure is definitive, so the previous outcome, the row's
-  `terminal_address` and the old host as the session's terminal come back (the generation stays advanced, so the row's
-  `terminal_address` then names a host tagged with an earlier generation, which reload takes as the row's own). The
-  restored terminal, like a published one, goes back only before an orderly stop gathers the host terminals (otherwise a
-  placeholder, its runtime stopped), and a runtime the restored entry does not hold is stopped. Only a replacement host
-  that cannot be confirmed ended keeps the launching record: the session then holds no terminal, the old host's runtime
-  is stopped, and both hosts stay reachable by their records. A restart that finds its row deleted when it confirms
+  not start is unwound as a failed create is. The supervisor confirms any replacement host has ended, tries to remove
+  the spec, waypoint and host record, and sweeps the replacement's process tree. Removal failures accompany the launch
+  error. After definitive unwind the supervisor tries to restore the previous outcome, the row's `terminal_address` and
+  the old host as the session's terminal (the generation stays advanced, so the row's `terminal_address` then names a
+  host tagged with an earlier generation, which reload takes as the row's own). The restored terminal, like a published
+  one, goes back only before an orderly stop gathers the host terminals (otherwise a placeholder, its runtime stopped),
+  and a runtime the restored entry does not hold is stopped. If the replacement host's end or the process-tree sweep
+  cannot be confirmed, the new generation keeps its launching record with no published main terminal. The old host's
+  runtime stops and its host stays reachable by its record. A replacement host that may still be running keeps its host
+  record.
+
+  A sweep failure comes after host record removal was attempted. A restart that finds its row deleted when it confirms
   sweeps the new agent's tree and ends both hosts. A restarted agent's runtime is published only before an orderly stop
   gathers the host terminals, as a create's is. The session's host tabs keep running across a Restart, but while the
   session is off the session map for the Restart's window its tab cell is held beside the map, under the same lock as
@@ -2111,7 +2122,7 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   marker sweep. **The residual**: the earlier host of a restart whose replacement started but was never confirmed and is
   gone by the next start (its launch record names nothing, so the fallback above does not apply) stays until the
   session's Delete, or a later restart is confirmed and a supervisor starts. So does the old host of a restart that
-  failed ambiguously in a running supervisor (a replacement that could not be confirmed ended): the session holds no
+  failed ambiguously in a running supervisor (host end or process-tree cleanup unconfirmed): the session holds no
   terminal, so the next Restart from that supervisor starts empty while the old host, with the history, runs on until a
   later start supersedes it or Delete ends it. And a runtime stopped while it encodes a checkpoint or a seed leaves its
   emulator away for good; a runtime is stopped only where its host is given up (a stopping supervisor, or a create's, a
@@ -2424,8 +2435,8 @@ from the stored selection; those raw words are joined with spaces, followed by e
 with the shared text quoting helper. Cwd/trust, hooks and the initial prompt are filled before quoting the suffix. The
 editor keeps raw word slices while using the existing literal splitter for shape checks; stored vectors keep their old
 shape validation and acquire Bash meaning without migration. Display joins only the prefix raw, then quotes the literal
-agent words. The shim and its container branch receive the same Bash vector, so expansion happens on the session's host
-or inside its container. Unwrapped agent launches and legacy snapshots keep direct exec.
+agent words. The launch shim runs the Bash vector in the session's environment. For container sessions the supervisor
+inside the container uses this same launch path. Unwrapped agent launches and legacy snapshots keep direct exec.
 
 Never-started errors may retain the last five nonblank lines of the failed terminal's final screen, at most 500 UTF-8
 bytes after presentation-unsafe characters are escaped. The excerpt follows Farhelm's diagnosis in the existing durable
@@ -4464,27 +4475,28 @@ no path values are stored in the notice.
   accepted or definitively refused report is deleted; one that could not be read from disk, or was refused for an
   `Internal` failure (a store or terminal host that could not be read), or was judged while a relaunch moved the session
   to a new generation, is put back unless the slot was refilled, in which case the newer report wins, and ends that
-  session's pass. A report made under an earlier launch, or whose terminal no longer exists, fails the anchor and is
-  discarded. Reports of a session that is not published yet wait for the pass after publication. Drains never overlap; a
-  taken slot found at the start of a drain belongs to a supervisor that died mid-drain and is put back. A pass that
-  finds another drain running skips draining rather than waiting behind a slow admission; Restart is the exception and
-  waits for it, then drains again, because a report waiting on disk may name the conversation it is about to resume, and
-  after the relaunch that report would be discarded as the old launch's. The watch task also waits for the drain lock,
-  so an event is never lost to an already-running drain. Every settled report leaves a verdict line in the session's
-  hook log, beside the hook's own `written` line: `acked`, or `refused` with the error kind and reason. An `acked` Stop
-  need not change the conversation: Claude's or Muse's pin can silently turn a rival away, and Codex can acknowledge a
-  Stop without effect. Delete removes the drop directory; a pass removes one whose session no longer exists, which a
-  hook racing the delete can recreate. The supervisor creates the report root with mode 0700 before attaching notify's
-  recommended recursive watcher (inotify on Linux, default FSEvents on macOS). An independent task drains the whole
-  root; a single stored wake coalesces bursts and retains events during a drain. A 100 ms pause between drains bounds
-  the feedback from retried reports linked back into place. Access events are ignored so the drain's own reads cannot
-  keep waking it. The timer remains the backstop. Watch setup or backend failure logs once and disables the watch for
-  that supervisor lifetime, without changing periodic pickup. The ticker handle owns the watcher's cooperative stop;
-  in-flight admission completes before backend drop requests native shutdown (notify's inotify thread finishes
-  asynchronously). A closed supervisor lifetime channel ends an idle watch when the last supervisor reference
-  disappears. macOS backend batching can add latency; pickup on Linux is normally well below a second. A report made
-  while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary (mid-update) may miss
-  reports briefly, which is accepted.
+  session's pass. A report whose ancestry fails to match the current launch's anchor is discarded. An ended terminal
+  host can still supply its retained child anchor for a report from that launch. A missing or unavailable terminal or
+  child anchor gives the retryable `Internal` result. Reports of a session that is not published yet wait for the pass
+  after publication. Drains never overlap; a taken slot found at the start of a drain belongs to a supervisor that died
+  mid-drain and is put back. A pass that finds another drain running skips draining rather than waiting behind a slow
+  admission; Restart is the exception and waits for it, then drains again, because a report waiting on disk may name the
+  conversation it is about to resume, and after the relaunch that report would be discarded as the old launch's. The
+  watch task also waits for the drain lock, so an event is never lost to an already-running drain. Every settled report
+  leaves a verdict line in the session's hook log, beside the hook's own `written` line: `acked`, or `refused` with the
+  error kind and reason. An `acked` Stop need not change the conversation: Claude's or Muse's pin can silently turn a
+  rival away, and Codex can acknowledge a Stop without effect. Delete removes the drop directory; a pass removes one
+  whose session no longer exists, which a hook racing the delete can recreate. The supervisor creates the report root
+  with mode 0700 before attaching notify's recommended recursive watcher (inotify on Linux, default FSEvents on macOS).
+  An independent task drains the whole root; a single stored wake coalesces bursts and retains events during a drain. A
+  100 ms pause between drains bounds the feedback from retried reports linked back into place. Access events are ignored
+  so the drain's own reads cannot keep waking it. The timer remains the backstop. Watch setup or backend failure logs
+  once and disables the watch for that supervisor lifetime, without changing periodic pickup. The ticker handle owns the
+  watcher's cooperative stop; in-flight admission completes before backend drop requests native shutdown (notify's
+  inotify thread finishes asynchronously). A closed supervisor lifetime channel ends an idle watch when the last
+  supervisor reference disappears. macOS backend batching can add latency; pickup on Linux is normally well below a
+  second. A report made while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary
+  (mid-update) may miss reports briefly, which is accepted.
 
   Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
   per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for
@@ -6876,26 +6888,27 @@ lifetime helper remains.
 Protected `/api/tensorlake/orphans` recognizes `farhelm-sess-` alongside the ordinary host, builder and preparer
 prefixes. It lists reserved-name sandboxes not owned by a host row or a deterministic builder/preparer name of a saved
 recipe. A session-owned launch or cleanup leftover with a host row stays visible in Hosts; no session membership
-evidence is needed to make it manageable. `/api/tensorlake/orphans/{id}` DELETE rechecks the prefix and current
-ownership under the host provisioning lock. An owned resource uses host Delete sandbox instead. It terminates the
-sandbox, waits for termination, and deletes snapshots by source sandbox ID using the existing bounded removal calls. The
-delete runs on a helm-owned task so closing Settings cannot cancel cleanup, and its reply comes within the UI channel's
-host reply bound: a cleanup still running then gets a 504 saying it carries on, and the list shows it as running until
-it ends (see "The UI channel"). The sandbox lookup before the cleanup is recorded is cut off after 10 seconds, so a
-Tensorlake that does not answer it gets that lookup's own 502, not a 504 promising a cleanup nothing records. The
-service retains in-flight and failed explicit cleanup operations in memory, including canonical sandbox ID, display
-facts and the failure reason; the list overlays those operations on vendor discovery because terminated sandboxes
-disappear from that discovery. Settings shows running cleanup and offers Retry cleanup after failure, including after
-closing/reopening Settings or losing the vendor's terminated sandbox record. A retry still rechecks local ownership.
-Only a successful snapshot sweep removes the operation; nothing retries automatically. A helm restart loses this
-in-memory operation state; a session-owned leftover still has its durable host resource record and remains visible in
-Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither path adds automatic startup
-reconciliation. The desktop list (`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) is read only when its
-answer can have changed, never on a timer: when the opening's account first says a key is saved, on Refresh, after a key
-Save or Clear in this opening, after every answer to a Delete, and when the pushed hosts list gains or loses a
-Tensorlake host. No other fleet change reads it, so a rejected key is never resent on unrelated notices. A successful
-Test reads nothing, whether the list was healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure
-fixed elsewhere, shows after Refresh or reopening Settings.
+evidence is needed to make it manageable. `/api/tensorlake/orphans/{id}` DELETE rechecks the reserved name prefix and
+refuses a sandbox whose name belongs to a current host or recipe on this helm. It also refuses concurrent cleanup of the
+same canonical sandbox ID. It terminates the sandbox, waits for termination, and deletes snapshots by source sandbox ID
+using the existing bounded removal calls. The delete runs on a helm-owned task so closing Settings cannot cancel
+cleanup, and its reply comes within the UI channel's host reply bound: a cleanup still running then gets a 504 saying it
+carries on, and the list shows it as running until it ends (see "The UI channel"). The sandbox lookup before the cleanup
+is recorded is cut off after 10 seconds, so a Tensorlake that does not answer it gets that lookup's own 502, not a 504
+promising a cleanup nothing records. The service retains in-flight and failed explicit cleanup operations in memory,
+including canonical sandbox ID, display facts and the failure reason; the list overlays those operations on vendor
+discovery because terminated sandboxes disappear from that discovery. Settings shows running cleanup and offers Retry
+cleanup after failure, including after closing/reopening Settings or losing the vendor's terminated sandbox record. A
+retry still rechecks local ownership. Only a successful snapshot sweep removes the operation; nothing retries
+automatically. A helm restart loses this in-memory operation state; a session-owned leftover still has its durable host
+resource record and remains visible in Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither
+path adds automatic startup reconciliation. The desktop list
+(`crates/gui/farhelm-gui/src/settings/tensorlake_sandboxes.rs`) is read only when its answer can have changed, never on
+a timer: when the opening's account first says a key is saved, on Refresh, after a key Save or Clear in this opening,
+after every answer to a Delete, and when the pushed hosts list gains or loses a Tensorlake host. No other fleet change
+reads it, so a rejected key is never resent on unrelated notices. A successful Test reads nothing, whether the list was
+healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or
+reopening Settings.
 
 The list keeps its rows, its last failure and a "checked HH:MM" time in the viewer's local time beside each other. A
 saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out. Each read is a
@@ -8267,10 +8280,11 @@ constraint (see the GUI section's motivation), not an afterthought:
   (`crates/terminal-host/TESTING.md`: real-pty tests of the built binary, golden fixtures of every frame of every
   protocol version, property tests, at least 95% line coverage and mutation testing; the suite also runs in the focused
   macOS CI job), higher than the rest of the workspace's because a running host outlives every release that could fix
-  it. The supervisor's side starts real hosts from the built `farhelm`, never inside a test process, since a host forks;
-  the emulator is held to Farhelm's answer table, screen-text format and modes by its own tests (the recorded agents'
-  startup probes among them), the status readers by the captured agent screens painted into it, and its snapshot round
-  trip by property tests. `.agents/validation.md` names the selections.
+  it. The Rust e2e suite starts hosts from the built `farhelm`. On glibc Linux, the supervisor crate's unit tests start
+  them from a fresh invocation of their own test binary, before its test runner starts. Both start hosts in separate
+  processes because a host forks. The emulator is held to Farhelm's answer table, screen-text format and modes by its
+  own tests (the recorded agents' startup probes among them), the status readers by the captured agent screens painted
+  into it, and its snapshot round trip by property tests. `.agents/validation.md` names the selections.
 - **A CentOS Stream 9 container stands in for a host that is not the CI runner.** Provisioning accepts any Linux host
   with a usable systemd user manager, but every provisioning integration test dials `localhost`, and both CI and the
   release gate run on Ubuntu — so the case the retired `ID=ubuntu` gate existed to forbid, a helm installing onto a

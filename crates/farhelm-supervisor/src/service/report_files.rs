@@ -36,24 +36,21 @@
 //! deleted with the old one. The taken report is then either settled —
 //! accepted, or refused for a reason a retry cannot change (wrong kind, wrong
 //! launch, failed attribution, malformed) — and deleted, or it hit something
-//! transient — every refusal of kind `Internal` (a store or terminal that
-//! could not be read), and a session whose published entry a relaunch has
-//! already moved past — and is put back for a later pass unless a newer
-//! report has refilled the slot, in which case the newer one wins. A
-//! terminal host that is gone altogether is not transient: it reads as the
-//! terminal being gone, which is definitive. A transient outcome also ends that session's pass, so Grok's
-//! enrichment is never judged before its selection.
+//! transient. An `Internal` refusal includes a store that could not be read
+//! or a missing or unavailable terminal anchor. An entry a relaunch has
+//! already moved past also retries. Put the report back for a later pass
+//! unless a newer one has refilled the slot. A retry ends that session's
+//! pass, so Grok's enrichment is never judged before its selection.
 //!
 //! # Tying a report to its launch
 //!
 //! Every report, whatever its vendor, must carry the hook's recorded process
 //! chain, and the chain must reach the session's CURRENT terminal root
-//! process (`procs::anchor_chain`): by pid and start token while that
-//! process is alive, by pid alone once it has exited and its host still
-//! holds the terminal (see `Supervisor::owned_terminal_anchor`). Every
-//! launch runs a new root process, so a report made under an earlier
-//! launch, or one whose terminal is gone entirely (a reboot ended its
-//! host), is discarded.
+//! process (`procs::anchor_chain`), matching the pid and its recorded start
+//! identity when available. A host adopted after its child already exited
+//! can have only the pid (see `Supervisor::owned_terminal_anchor`). The
+//! recorded anchor can outlive the host, so final reports still go through
+//! ordinary attribution. A chain that misses the current anchor is refused.
 //! The per-kind attribution (Claude's position, Codex's, Grok's and OMP's
 //! corridors) then reads the same anchored chain.
 

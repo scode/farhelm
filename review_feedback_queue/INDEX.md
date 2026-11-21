@@ -162,10 +162,6 @@ consequences.
 - [`finished-task-handle-published-after-host-purge.md`](finished-task-handle-published-after-host-purge.md) — A
   completed uninstall or failed initial sandbox launch can leave task bookkeeping reinserted after its host was removed.
 
-- [`codex-wrapper-guides-omit-isolation-purpose.md`](codex-wrapper-guides-omit-isolation-purpose.md) — The wrapper
-  guides explain generated Codex arguments without explaining their role in keeping one session from sharing another's
-  daemon.
-
 - [`abbreviated-ipv4-short-label-scope-ambiguity.md`](abbreviated-ipv4-short-label-scope-ambiguity.md) — A valid
   abbreviated IPv4 destination can lose address components in its short label; whether such forms count as IP literals
   under the display contract is unresolved.
@@ -191,11 +187,6 @@ consequences.
 - [`runtime-recorder-guidance-conflict.md`](runtime-recorder-guidance-conflict.md) — Run-all-tests gives conflicting
   directions about whether emulator stress and memory tests require the runtime-test recorder; taking the optional
   direction can leave future failures without the normally required retained run record.
-
-- [`restart-unwind-omits-tree-sweep-failure.md`](restart-unwind-omits-tree-sweep-failure.md) — The authoritative
-  implementation specification incorrectly says a failed Restart restores the stopped old terminal whenever the
-  replacement host can be ended; failed cleanup of processes the replacement started is another ambiguous path, leaving
-  no displayed terminal.
 
 - [`mac-process-lookup-truncates-live-host-command.md`](mac-process-lookup-truncates-live-host-command.md) — On a Mac
   with an oversized process listing, test cleanup can erase a stopped host's live socket and state directory, leaving
@@ -294,9 +285,6 @@ consequences.
   tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
   lost terminal contents.
 
-- [`joined-link-spec-omits-cursor-tail-exception.md`](joined-link-spec-omits-cursor-tail-exception.md) — The broad
-  joined-link comparison promise omits an accepted cursor-positioned tail exception.
-
 - [`stable-recut-removes-retained-announcement-anchor.md`](stable-recut-removes-retained-announcement-anchor.md) — A
   different-version stable re-cut can remove the website anchor still targeted by carried announcements.
 
@@ -338,11 +326,6 @@ consequences.
 - [`terminal-attachment-trace-retains-raw-session-id.md`](terminal-attachment-trace-retains-raw-session-id.md) —
   Terminal attachment diagnostics retain a raw peer-supplied session identifier instead of the promised cleaned
   presentation copy.
-
-- [`version-agreement-lifetime-doc.md`](version-agreement-lifetime-doc.md) — The newly documented agreement between a
-  program's terminal-version environment and a terminal query needs a lifetime qualification. A surviving program keeps
-  its launch environment after a Farhelm update, while a new query after adoption receives the current emulator's
-  version. The established consequence is documentation ambiguity only; no application failure is assumed.
 
 - [`capture-failed-stop-erases-recovery.md`](capture-failed-stop-erases-recovery.md) — When the real-agent
   inspection/capture tool cannot confirm its terminal host stopped, it hides that failure and still removes the run
@@ -445,38 +428,6 @@ consequences.
 
 - [`dependency-block-counts-held-plan-time.md`](dependency-block-counts-held-plan-time.md) — A plan temporarily blocked
   by an abandoned dependency can accumulate overdue passes from time it was explicitly on hold.
-
-- [`orphan-cleanup-promises-unheld-provisioning-lock.md`](orphan-cleanup-promises-unheld-provisioning-lock.md) — The
-  implementation specification promises that orphan cleanup checks ownership under the host provisioning lock, but the
-  endpoint does not hold that lock. No supported destructive adoption race was established.
-
-- [`trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md`](trailing-testing-overview-falsely-generalizes-built-farhelm-host-program.md)
-  — Testing overview names the wrong executable for supervisor unit-test hosts. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md`](trailing-environment-agent-launch-specs-disagree-receipt-relative-versus-post-allow-timeout.md)
-  — environment launch contracts describe different effective waits. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-terminal-switch-point-names-deleted-terminal-type.md`](trailing-spec-terminal-switch-point-names-deleted-terminal-type.md)
-  — Rewritten terminal contract points to the deleted Terminal type. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-terminal-create-refusal-qualified-rollback-wording.md`](trailing-old-terminal-create-refusal-qualified-rollback-wording.md)
-  — Rollback phrase references a policy that already retains allocated checkouts. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-shim-container-execution-branch-retired.md`](trailing-spec-shim-container-execution-branch-retired.md)
-  — Launch contract still describes the retired shim container branch. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shift-enter-unconditional-pty-write-guarantee.md`](trailing-shift-enter-unconditional-pty-write-guarantee.md)
-  — Qualify the grid Shift+Enter single-write guarantee. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
-- [`trailing-spec-report-discard-on-terminal-disappearance.md`](trailing-spec-report-discard-on-terminal-disappearance.md)
-  — Report-discard contract does not match gone host terminals. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
 
 - [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
   — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed

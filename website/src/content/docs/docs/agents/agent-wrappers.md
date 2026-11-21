@@ -88,18 +88,20 @@ cannot be restarted at all, only replaced.
 ## What the wrapper must pass through
 
 With a prefix on the **Agent** tab, Farhelm composes the agent's arguments and places them after your prefix. With a
-custom command, it puts its arguments exactly where `{farhelm_args}` stands, and only there; for an agent that takes
-none it stands for nothing. Those arguments turn the agent's conversation reporting on, as
-[Agent hook injection](/docs/how-it-works/agent-hook-injection/) describes. A resume is no exception: the resume command
-is a complete command line in its own right — Farhelm fills in its `{conversation}` and `{farhelm_args}` and runs THAT
-instead of the start command, which is why the wrapper has to appear in it too.
+custom command, it puts its arguments exactly where `{farhelm_args}` stands, and only there. For an agent that takes
+none it stands for nothing. The arguments include those for
+[conversation reporting](/docs/how-it-works/agent-hook-injection/). For [Codex](/docs/agents/codex/#gotchas-and-quirks),
+pass through `--no-daemon` too, even with conversation reporting off. It keeps Codex's commands in your session and off
+the shared background server. The resume command is a complete command line in its own right — Farhelm fills in its
+`{conversation}` and `{farhelm_args}` and runs THAT instead of the start command, which is why the wrapper has to appear
+in it too.
 
 Farhelm's arguments are what a wrapper must forward, and one that treats everything after its own arguments as the
-command to run, verbatim, does. A wrapper that parses trailing options as its own eats them first, and the symptom is
-indirect: the agent never reports its conversation, and the session cannot be restarted. NOTE: that is the one thing
-Farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR wrapper stops at the
-agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>` against a live
-session shows what actually reached the agent.
+command to run, verbatim, does. A wrapper that parses trailing options as its own can swallow them. If it drops the
+conversation reporting arguments, the agent never reports its conversation and the session cannot be restarted. NOTE:
+that is the one thing Farhelm cannot check for you. Its own tests stand in `sh -c` for the real wrapper, so whether YOUR
+wrapper stops at the agent command and forwards the rest is something only you can verify — `ps -o args= -p <agent pid>`
+against a live session shows what actually reached the agent.
 
 Claude works through multiple wrappers that stay running, including a wrapper that starts another script which then
 starts Claude without `exec`. Farhelm follows the first Claude process whose conversation it accepts. Another Claude
@@ -217,4 +219,4 @@ wrapper: `env FOO=1 claude --resume {conversation} {farhelm_args}`.
 count, and a command whose only `{farhelm_args}` is there is refused. Pass it after the script as positional parameters
 instead and forward them, with a dummy `$0` ahead of them exactly as the `sh` example does:
 `bash -c 'claude "$@"' sh {farhelm_args}`. A script that names the agent and its arguments itself and does not forward
-`"$@"` drops Farhelm's arguments, and the only sign is that the agent never reports its conversation.
+`"$@"` drops Farhelm's arguments. For the Claude command above, the symptom is that it never reports its conversation.
