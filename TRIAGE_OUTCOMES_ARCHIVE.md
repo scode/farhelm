@@ -25972,3 +25972,19 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   file and its index entry.
 - Execution: change `szluqqkzoxopmmwtrkzzvmopznmvyynr`, bookmark `pr/spec-gui-convenience-state-lag`,
   [PR #4375](https://github.com/scode/farhelm/pull/4375/changes).
+
+## session-view-fallback-omits-start-time.md
+
+- Outcome: `fix spec`.
+- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
+  SPEC.md:1609 says "The summary may clip very long values or whole rows in a short window; the session view provides
+  those details in full", and SPEC.md:1608 lists start time among those details. The session view shows only effective
+  activity time. That wording came from the `fix spec` outcome at TRIAGE_OUTCOMES.md:16809-16823, which targeted the
+  directory. The fix could narrow the sentence or add a start-time display.
+- Decision: the user picked "Fix each with the smallest truthful correction" (2026-10-26 ten-question triage page, Q10).
+- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
+  the text is corrected to describe the code. Size gate: about 100 lines of diff (code, tests and docs, not counting
+  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
+  and its index entry.
+- Execution: change `mympxszkymkvxwprrprsxvkkkuqxmvws`, bookmark `pr/spec-session-view-start-time`,
+  [PR #4376](https://github.com/scode/farhelm/pull/4376/changes).
