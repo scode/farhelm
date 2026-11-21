@@ -110,12 +110,10 @@
 //! While the sender is behind it keeps only the latest unsent write, and it
 //! sends a write's parts within one cycle, with nothing else between them
 //! (a pause can hold back the rest of a write it has started, and a stall
-//! detach can end the attachment there). Bells and title changes have no message in the
-//! format (today's terminal does nothing on a bell, and a title reaches
-//! the viewer with the session's details), and the client honors only
-//! writes to the clipboard, not to the primary selection; so the runtime
-//! sends a subscription writes to the clipboard only, and nothing else can
-//! push one out of its bounded backlog.
+//! detach can end the attachment there). The terminal reports a completed
+//! primary-selection write through its status. The stream coalesces these
+//! into a textless `clipboard` message so a burst cannot evict a clipboard
+//! write. Bells and title changes never enter the notice backlog.
 //!
 //! # Input
 //!
@@ -340,6 +338,8 @@ pub(crate) struct GridStream {
     sent_state: Option<TerminalState>,
     /// The latest clipboard write not yet sent.
     clipboard: Option<String>,
+    /// The primary-selection generation already reported to this viewer.
+    primary_write_generation: u64,
     /// When the last live cycle started ([`MIN_CYCLE_INTERVAL`]).
     last_cycle: Option<tokio::time::Instant>,
 }
@@ -385,6 +385,7 @@ struct Capture {
 impl GridStream {
     pub(crate) fn new(parts: GridStreamParts) -> GridStream {
         let status = parts.host.subscribe();
+        let primary_write_generation = status.borrow().primary_write_generation;
         GridStream {
             channel: parts.channel,
             tx: parts.tx,
@@ -405,6 +406,7 @@ impl GridStream {
             frame_history_end: None,
             sent_state: None,
             clipboard: None,
+            primary_write_generation,
             last_cycle: None,
         }
     }
@@ -684,7 +686,6 @@ impl GridStream {
         self.park().await?;
         let now = tokio::time::Instant::now();
         self.last_cycle = Some(now);
-        self.drain_notices();
         let pending = self.relayout;
         let capped = self.relayout_capped;
         let mut history = std::mem::take(&mut self.history);
@@ -720,6 +721,9 @@ impl GridStream {
             .await;
         self.history = history;
         let (capture, status) = read?;
+        // The status can already report a primary completion from the same
+        // batch as a clipboard notice. Take those notices before sending it.
+        self.drain_notices();
         let Capture {
             screen,
             state,
@@ -785,6 +789,10 @@ impl GridStream {
         }
         if let Some(text) = self.clipboard.take() {
             messages.extend(clipboard_messages(ClipboardTarget::Clipboard, &text));
+        }
+        if status.primary_write_generation != self.primary_write_generation {
+            self.primary_write_generation = status.primary_write_generation;
+            messages.extend(clipboard_messages(ClipboardTarget::Primary, ""));
         }
         for message in messages {
             self.send(message).await?;

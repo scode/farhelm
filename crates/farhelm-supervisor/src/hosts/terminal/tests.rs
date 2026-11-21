@@ -1802,6 +1802,7 @@ fn the_adapters_map_each_liveness_like_a_pane() {
         child_start: Some(own.start),
         position: Position::default(),
         revision: 0,
+        primary_write_generation: 0,
         caught_up: true,
         checkpoint: None,
         history_trimmed: false,

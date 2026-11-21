@@ -231,14 +231,14 @@
 //! [`GRID_MAX_CLIPBOARD_PART_BYTES`] of text each (and within
 //! [`GRID_MAX_MESSAGE`] once encoded), split only at character boundaries,
 //! all naming the same target, the last with `last: true`. The whole write is
-//! at most [`GRID_MAX_CLIPBOARD_BYTES`]; the sender drops a larger one. The
-//! client writes the text to the clipboard when the last part arrives (SPEC.md
+//! at most [`GRID_MAX_CLIPBOARD_BYTES`]; the sender drops a larger one. For
+//! `target: "clipboard"`, the client copies the text when the last part arrives (SPEC.md
 //! says a program's OSC 52 writes are honored). Reads are never answered: there is no
 //! clipboard-read message, so a program cannot read what the user copied.
 //!
-//! The client honors only `target: "clipboard"`: `primary` writes are not
-//! copied to the system clipboard, because a program setting its selection
-//! must not overwrite what the user copied. The emulator maps an empty
+//! The sender reports primary-selection completion as a single `primary`
+//! message with empty text and `last: true`. The client counts it for
+//! drag guidance and leaves the system clipboard alone. The emulator maps an empty
 //! selector (and a list starting with `c`) to the clipboard, so a write with
 //! either reaches the system clipboard too.
 //!
@@ -1209,7 +1209,7 @@ pub enum GridOutput {
     Clipboard {
         target: ClipboardTarget,
         text: String,
-        /// This part completes the write; the client copies on it.
+        /// This part completes the write and can suppress drag guidance.
         last: bool,
     },
 }

@@ -838,16 +838,17 @@ async fn a_paused_stream_ends_when_its_input_fails() {
 
 /// Clipboard writes reach the viewer whole, and while it is behind only
 /// the latest unsent write is kept; neither a burst of bells nor writes to
-/// the primary selection push a write out, and the latter are not sent.
+/// the primary selection push a write out. A burst of primary writes
+/// produces one completion signal and carries no selection text.
 ///
 /// Why: a program's OSC 52 write is a copy the user expects; a burst of
 /// them while the viewer is paused must not queue without bound, the format
-/// keeps the newest, and bells and primary-selection writes, which the
-/// client does nothing with, must not cost it a write. Spec: a write of
+/// keeps the newest. Spec: a write of
 /// `copied` followed by 40 bells in one read arrives as one clipboard part;
 /// while paused, writes of `first` and `second` to the clipboard, each
 /// followed by ten writes to the primary selection, arrive, after resuming,
-/// as `second` alone.
+/// as `second` and one textless primary completion. A later primary write
+/// by itself also sends its completion, without waiting for a clipboard write.
 #[farhelm_testtrace::test]
 async fn clipboard_writes_arrive_whole_and_latest_per_target() {
     let (host, test_host) = host_with(1000).await;
@@ -894,13 +895,30 @@ async fn clipboard_writes_arrive_whole_and_latest_per_target() {
     viewer.resume();
     viewer
         .until("the writes after the resume", |viewer| {
-            viewer.client.clipboard.len() >= 2 && viewer.converged(end)
+            viewer.client.clipboard.len() >= 3 && viewer.converged(end)
         })
         .await;
+    let primary_notice = (ClipboardTarget::Primary, String::new());
     assert_eq!(
         viewer.client.clipboard[1..],
-        [(ClipboardTarget::Clipboard, "second".to_owned())]
+        [
+            (ClipboardTarget::Clipboard, "second".to_owned()),
+            primary_notice.clone()
+        ],
     );
+    drop(viewer);
+    let (host, test_host) = host_with(1000).await;
+    let mut viewer = Viewer::start(&host);
+    viewer
+        .until("a fresh viewer caught up", |viewer| viewer.converged(0))
+        .await;
+    test_host.output(&primary);
+    viewer
+        .until("the primary-only completion", |v| {
+            !v.client.clipboard.is_empty()
+        })
+        .await;
+    assert_eq!(viewer.client.clipboard, [primary_notice]);
 }
 
 /// The program's exit shows in `state`, and the stream goes on showing the

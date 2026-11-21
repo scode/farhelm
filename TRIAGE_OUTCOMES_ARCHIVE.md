@@ -33659,3 +33659,27 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. A runtime drains input and control requests admitted before closure. Restart also stops waiting for
   a reply if the runtime is aborted. Change `mmmlwyyrzmvs`, bookmark `plan/triage-terminal-host/04-restart-seed-drain`,
   [PR #4480](https://github.com/scode/farhelm/pull/4480/changes).
+
+## trailing-primary-write-notice-filter-drag-guidance.md
+
+- Outcome: `fix code`.
+- Assessment: After a program copies only to the primary selection (common on Linux), dragging still shows the "this
+  program handles selection itself" notice, which wrongly suggests nothing was copied. Verified: SPEC.md ~3402-3403 says
+  "Any completed program clipboard write, including a primary-selection write, suppresses it during the grace window."
+  The GUI counts writes to either target (`terminal/attached.rs:1161`). But the supervisor never sends primary writes:
+  `hosts/terminal.rs:3313-3323` forwards only `ClipboardTarget::Clipboard`, with a comment calling this deliberate
+  (backlog space, client honors only clipboard), and `service/grid_stream.rs:846` filters the same way. So the spec
+  promise is unmet by design.
+- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Forward a text-less
+  signal" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we definitely need
+  to batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance
+  of them running concurrently."
+- Completion criteria: The supervisor forwards a text-less "primary selection written" signal (an additive protocol
+  message is accepted); the GUI counts it toward suppressing the drag notice and never writes it to the clipboard. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. The runtime reports primary-selection completion separately from clipboard content. The viewer gets
+  a textless signal and counts it toward suppressing drag guidance. Change `rxwuvpstytkk`, bookmark
+  `plan/triage-terminal-host/05-primary-selection-signal`,
+  [PR #4484](https://github.com/scode/farhelm/pull/4484/changes).
