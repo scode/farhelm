@@ -357,6 +357,15 @@ pub(crate) fn hover(state: &HostStateView) -> Option<HostSentence> {
     }
 }
 
+/// The shared Update name for a single host. Keyboard and screen-reader users can tell which host a button
+/// affects in either list, with the same escaping as the host name shown on its row.
+pub(crate) fn accessible_name(host: &HostView) -> SharedString {
+    HostSentence::new("host-update-name")
+        .text("Update ")
+        .host(&display_name(host))
+        .accessible_name()
+}
+
 /// Host `host`'s inline `↑ Update` (`.host-update-button`), or `None` where the row draws none: its Update is not
 /// available (`available`, from the panel's frame) or its phase establishes no urgency. Named "Update <name>", with
 /// [`hover`] as its hover help. Pressing it starts the Update and moves focus to `toggle`, the row's menu toggle, as
@@ -369,10 +378,6 @@ pub(crate) fn button(
     let urgency = urgency(&host.state).filter(|_| available)?;
     let help = hover(&host.state)?;
     let id = host.id;
-    let name = HostSentence::new("host-update-name")
-        .text("Update ")
-        .host(&display_name(host))
-        .accessible_name();
     let button = Button::new(
         SharedString::from(format!("host-update-{id}")),
         "Update",
@@ -382,7 +387,7 @@ pub(crate) fn button(
     .tier(Tier::HostUpdate {
         required: urgency == Urgency::Required,
     })
-    .accessible_name(name)
+    .accessible_name(accessible_name(host))
     .content(
         div()
             .flex()

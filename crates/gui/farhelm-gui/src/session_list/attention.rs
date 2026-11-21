@@ -17,8 +17,9 @@
 //!   test, the work going on, and the setup or Update warning.
 //! - **Problem rows** ([`problem_words`]) say what is wrong and offer Details; **working rows** say "Setting up",
 //!   "Updating" or "Uninstalling" and the current step (or "Deleting" for an environment being destroyed, below),
-//!   over a progress bar, with no button; **update rows** offer Update, and a required one says sessions stay
-//!   unreachable until it is updated. Details, or a press anywhere on a row outside its button, shows Hosts through
+//!   over a progress bar, with no button; **update rows** offer Update with the host's name for assistive technology.
+//!   A required update says sessions stay unreachable until it is updated. Details, or a press anywhere on a row
+//!   outside its button, shows Hosts through
 //!   [`SessionList::show_hosts`] (which acknowledges the hosts' warnings) and asks the panel to bring that host's row
 //!   into view with its menu toggle focused ([`crate::hosts::HostsPanel::reveal`]); the session filter stays as it is.
 //! - **The header** counts the rows ("N hosts need attention") and offers Update all only while more than one row
@@ -883,6 +884,12 @@ fn row_element(
             )
         }
         Kind::Update { .. } => {
+            let name = update::accessible_name(&row.host);
+            let name = if launch_pending {
+                waiting(&name).into()
+            } else {
+                name
+            };
             let help = if launch_pending {
                 HoverHelp::tooltip(LAUNCH_PENDING)
             } else {
@@ -900,9 +907,8 @@ fn row_element(
                 )
                 .tier(Tier::Neutral)
                 .compact()
-                .when(launch_pending, |button| {
-                    button.busy(true).accessible_name(waiting("Update"))
-                })
+                .accessible_name(name)
+                .busy(launch_pending)
                 .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
                     update::start(id, mark, window, cx);
