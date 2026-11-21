@@ -256,7 +256,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_82` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_83` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -267,7 +267,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 82;
+pub const PROTOCOL_VERSION: u32 = 83;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -937,10 +937,32 @@ impl SessionStatus {
     }
 }
 
-/// A session as the supervisor reports it. The supervisor is authoritative
-/// (SPEC.md); the helm never invents or mutates these fields.
+/// What the supervisor did with the opt-in to install persistent conversation hooks for this run.
+/// Older session snapshots and launches without the opt-in default to `NotRequested`.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum PersistentHookSetup {
+    #[default]
+    NotRequested,
+    Installed,
+    Failed {
+        reason: String,
+    },
+}
+
+impl PersistentHookSetup {
+    /// Session snapshots omit the default so older stored rows and launches without setup use the same shape.
+    pub fn is_not_requested(&self) -> bool {
+        matches!(self, Self::NotRequested)
+    }
+}
+
+/// A session as the supervisor reports it. The supervisor is authoritative over these facts (SPEC.md).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct SessionInfo {
+    /// The current generation's result, so advice about Restart reflects what this launch attempted.
+    #[serde(default, skip_serializing_if = "PersistentHookSetup::is_not_requested")]
+    pub persistent_hook_setup: PersistentHookSetup,
     /// The supervisor holds no agent terminal for this session. A terminal
     /// it still holds may be unreachable or may retain an exited agent's
     /// output. Older cached rows omit this field and keep the ordinary
@@ -1588,6 +1610,22 @@ crate::enum_with_all! {
 }
 
 impl AgentKind {
+    /// Whether the agent discovers Farhelm's conversation hooks from a dedicated file in its own configuration.
+    /// The setting and launch prompt use this same answer for agent and declared command launches.
+    #[warn(clippy::wildcard_enum_match_arm)]
+    pub const fn offers_persistent_hooks(self) -> bool {
+        match self {
+            Self::Grok | Self::Antigravity => true,
+            Self::Claude
+            | Self::Codex
+            | Self::Goose
+            | Self::Pi
+            | Self::Omp
+            | Self::Muse
+            | Self::Generic => false,
+        }
+    }
+
     /// [`AgentKind::Generic`], as a function so it can name the serde
     /// default for a field that older senders omit.
     ///
@@ -3176,6 +3214,9 @@ pub enum ControlMsg {
     /// the helm fingerprints by the request the agent sent instead
     /// (`request_fingerprint`).
     CreateSession {
+        /// Helm consent for the supervisor to set up the supported agent's configuration before this start.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        setup_persistent_hooks: bool,
         /// Literal first message, appended only after the chosen start argv's
         /// Farhelm placeholders have been expanded. Never part of stored launch.
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3730,6 +3771,9 @@ pub enum ControlMsg {
     /// conversation, a working agent without consent, a vanished or
     /// repointed working directory — leaves the session untouched.
     RestartSession {
+        /// Use the current opt-in for this start. A saved launch does not carry consent into a later Restart.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        setup_persistent_hooks: bool,
         req_id: u64,
         /// Explicitly enter this conversation once, with Restart with only.
         /// Captured-identity proof gates apply only when this is absent.
@@ -5409,6 +5453,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_created_at_json_shape_is_pinned() {
         let info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -5601,6 +5646,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_github_fields_decode_absent_and_roundtrip() {
         let mut info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -5682,6 +5728,7 @@ mod tests {
             },
         };
         let with_payload = ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 30,
@@ -5871,7 +5918,8 @@ mod tests {
     /// report's vendor discriminator; version 29 adds the Grok harness/kind
     /// pair. Version 81 adds Bash and Zsh launch types. Version 82 adds the
     /// Antigravity workspace-trust marker, which older supervisors cannot
-    /// fill. These changes need a handshake refusal. Pinning the
+    /// fill. Version 83 adds consent for persistent hook setup on a create
+    /// or restart. Older supervisors would ignore that consent. Pinning the
     /// value here makes an accidental re-bump (or a forgotten one, if a
     /// later change needed it) a loud test failure rather than a silent
     /// drift discovered only by two builds refusing to talk to each other.
@@ -5882,8 +5930,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_82() {
-        assert_eq!(PROTOCOL_VERSION, 82);
+    fn protocol_version_is_pinned_at_83() {
+        assert_eq!(PROTOCOL_VERSION, 83);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -6245,6 +6293,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_request_fingerprint_is_omitted_when_unset() {
         let create = |request_fingerprint: Option<String>| ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 1,
@@ -7299,6 +7348,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_agent_kind_decodes_absent_as_generic_and_roundtrips() {
         let info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7360,6 +7410,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_annotation_and_restart_offer_json_shapes_are_pinned() {
         let bare = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7513,6 +7564,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn the_effective_activity_falls_back_to_creation_time_only_when_unknown() {
         let at = |created_at: i64, last_activity_at: i64| SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7559,6 +7611,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn effective_work_start_falls_back_stably_and_saturates() {
         let mut info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7608,6 +7661,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn session_info_tabs_json_shape_is_pinned() {
         let info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7658,6 +7712,7 @@ mod tests {
     #[test]
     fn a_session_cached_with_terminal_kinds_still_decodes() {
         let info = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -8023,6 +8078,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_agent_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 1,
@@ -8102,6 +8158,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_command_launch_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 2,
@@ -8160,6 +8217,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn create_session_inherited_spawn_json_shape_is_pinned() {
         let msg = ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 4,
@@ -8214,6 +8272,7 @@ mod tests {
             (None, false),
         ] {
             let msg = ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 3,
@@ -8299,6 +8358,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_roundtrips_through_frames() {
         let msg = ControlMsg::RestartSession {
+            setup_persistent_hooks: true,
             named_start: None,
             req_id: 42,
             session_id: "s1".to_string(),
@@ -8318,6 +8378,9 @@ mod tests {
         let reply = ControlMsg::SessionRestarted {
             req_id: 42,
             session: SessionInfo {
+                persistent_hook_setup: PersistentHookSetup::Failed {
+                    reason: "cannot write the hook file".into(),
+                },
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -8436,6 +8499,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn restart_session_json_shape_is_pinned() {
         let msg = ControlMsg::RestartSession {
+            setup_persistent_hooks: false,
             named_start: None,
             req_id: 7,
             session_id: "s1".to_string(),
@@ -8501,6 +8565,7 @@ mod tests {
         assert!(with.is_none());
 
         let msg = ControlMsg::RestartSession {
+            setup_persistent_hooks: false,
             named_start: None,
             req_id: 2,
             session_id: "s1".into(),
@@ -8532,6 +8597,7 @@ mod tests {
         let msg = ControlMsg::SessionRestarted {
             req_id: 8,
             session: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -8615,6 +8681,7 @@ mod tests {
         assert_eq!(
             msg,
             ControlMsg::RestartSession {
+                setup_persistent_hooks: false,
                 named_start: None,
                 req_id: 9,
                 session_id: "s1".to_string(),
@@ -8677,6 +8744,7 @@ mod tests {
                 ControlMsg::SessionRenamed {
                     req_id: 50,
                     session: SessionInfo {
+                        persistent_hook_setup: Default::default(),
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -9294,6 +9362,7 @@ mod tests {
             req_id: 1,
             sealed: false,
             sessions: vec![SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,

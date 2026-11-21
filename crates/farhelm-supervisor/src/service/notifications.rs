@@ -21,8 +21,7 @@
 //!
 //! - [`NotificationKind::HookSilent`]: the capture pass, when the 65-second
 //!   tripwire (`capture::report_liveness_tripwire`) fires for a launch.
-//! - [`NotificationKind::HookNotAdded`]: the spawn that decided not to add
-//!   Farhelm's arguments to a launch, for a reason the user did not choose.
+//! - [`NotificationKind::HookNotAdded`]: the spawn that could not configure the reporter for this launch.
 //! - [`NotificationKind::ResumeWithdrawn`]: the Codex and Grok refreshes that
 //!   withdraw a resume offer because the agent's own record went missing or
 //!   stopped matching.
@@ -259,21 +258,31 @@ pub(crate) fn legacy_hook_not_added_text(reason: &str) -> String {
 /// Why a spawn did not add Farhelm's conversation hook, when the user should
 /// hear about it (`crate::agent_kind::hook_skip_notifies` decides which skips
 /// qualify; turning hooks off with `FARHELM_AGENT_HOOKS` never does).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum HookSkip {
     /// A launch composed with `{farhelm_args}` whose reporter extension could
     /// not be set up.
     ReporterUnavailable,
+    /// The persistent files could not be prepared on the agent's machine. The launch can continue without them.
+    PersistentSetup(String),
     /// A session from before launch kinds whose own command was in the way,
     /// with the injection's reason.
     Legacy(&'static str),
 }
 
 impl HookSkip {
+    /// Persistent setup reports a configuration failure even if a previous capture or another hook can still resume.
+    fn requires_no_identity(&self) -> bool {
+        !matches!(self, Self::PersistentSetup(_))
+    }
+
     /// The notification text for this skip.
     pub(crate) fn text(self) -> String {
         match self {
             HookSkip::ReporterUnavailable => REPORTER_UNAVAILABLE_TEXT.to_string(),
+            HookSkip::PersistentSetup(reason) => format!(
+                "Farhelm could not set up the agent's conversation hooks ({reason}). It may miss the conversation for Restart."
+            ),
             HookSkip::Legacy(reason) => legacy_hook_not_added_text(reason),
         }
     }
@@ -369,12 +378,6 @@ impl Supervisor {
         kind: NotificationKind,
         text: &str,
     ) {
-        // A supervisor that has been replaced, or is shutting down, has no
-        // standing to write to the store, the same rule report admission
-        // follows; the supervisor that records next notices again.
-        if !self.may_record() {
-            return;
-        }
         let admission = if kind == NotificationKind::PodmanStopFailed {
             NotificationAdmission::RefreshChanged
         } else {
@@ -382,6 +385,38 @@ impl Supervisor {
                 unless_captured: kind.requires_no_identity(),
             }
         };
+        self.notify_session_with_admission(id, generation, kind, text, admission)
+            .await;
+    }
+
+    /// A configuration failure is still relevant when an existing hook or prior launch supplied the resume target.
+    pub(crate) async fn notify_hook_skip(&self, id: &str, generation: i64, skip: HookSkip) {
+        let admission = NotificationAdmission::Once {
+            unless_captured: skip.requires_no_identity(),
+        };
+        self.notify_session_with_admission(
+            id,
+            generation,
+            NotificationKind::HookNotAdded,
+            &skip.text(),
+            admission,
+        )
+        .await;
+    }
+
+    /// Store a diagnostic with the condition its text requires at the moment of publication.
+    async fn notify_session_with_admission(
+        &self,
+        id: &str,
+        generation: i64,
+        kind: NotificationKind,
+        text: &str,
+        admission: NotificationAdmission,
+    ) {
+        // A supervisor replaced or shutting down no longer owns diagnostic writes, just as with report admission.
+        if !self.may_record() {
+            return;
+        }
         let added = match self
             .store
             .record_notification_with_admission(

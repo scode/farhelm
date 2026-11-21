@@ -4235,8 +4235,8 @@ no path values are stored in the notice.
   bounded UTF-8 JSON document carrying the same UUID at `info.id`; a valid prefix is not enough. Report admission
   verifies that pair under the shared claim and publishes only the matching generation. Resume rechecks immediately
   before launch and substitutes the verified UUID, never either path. No history scan or path derivation participates.
-  Grok's manual hook configuration is the deliberate exception to per-launch injection: Farhelm invokes no editor and
-  writes no vendor file.
+  Grok discovers its reporter in the agent's configuration. The per-launch opt-in controls whether the supervisor sets
+  up Farhelm's file there.
 
   **Shared attribution framework and the five-step admission.** Attribution is shared mechanics in two halves, not Codex
   code. Collection runs in the hook, when it makes its report: from the hook itself upwards, at most 64 `Running` edges,
@@ -4439,7 +4439,8 @@ no path values are stored in the notice.
   touch them), an argv already configuring Muse's `hooks` or `hooks.*` through `-c` (those settings belong to the user),
   and — for any of these vendors — an argv containing a bare `--` (our flags would become prompt text).
   `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
-  wholesale or per kind, read once at supervisor start and carried as a seam value. Without an accepted report, a new
+  wholesale or per kind, read once at supervisor start and carried as a seam value. It also gates Farhelm's setup of
+  Grok's and Antigravity's persistent hook files. Without an accepted report, a new
   session cannot be restarted; no nearby record can supply a substitute identity.
   `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
   The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
@@ -4500,19 +4501,26 @@ no path values are stored in the notice.
   second. A report made while no supervisor runs waits on disk for the next one; a supervisor older than the hook binary
   (mid-update) may miss reports briefly, which is accepted.
 
-  Grok uses the same hook executable and report files but not this injection path. Its native TUI cannot take a
-  per-launch hook overlay, so the user installs three matcher groups under `$GROK_HOME/hooks`: one each for
-  `SessionStart`, `UserPromptSubmit`, and `Stop`, all invoking `farhelm internal hook --vendor grok` without
-  `--announce`. The tracked launch supplies the credential in the inherited environment; the configuration contains no
-  Farhelm token or session identity. Missing configuration leaves the Grok session usable but unable to gain a new exact
-  resume target.
+  Grok's native TUI discovers the hook in `$GROK_HOME/hooks/farhelm.json` (default `~/.grok/hooks/farhelm.json`).
+  Farhelm sets up matcher groups for `SessionStart`, `UserPromptSubmit`, and `Stop`. Antigravity discovers
+  `plugin.json` and `hooks.json` under `~/.gemini/config/plugins/farhelm/`. Farhelm's plugin registers `SessionStart`
+  and `Stop`. Existing callbacks in the shared `~/.gemini/config/hooks.json` still work.
 
-  Antigravity likewise uses manual configuration, with `SessionStart` and `Stop` entries in
-  `~/.gemini/config/hooks.json` invoking `farhelm internal hook --vendor antigravity`. The adapter accepts the camelCase
+  Protocol 83 lets a full-authority create or restart request opt in to writing those files. The supervisor resolves
+  the directories from its own `HOME` and `GROK_HOME` before it starts the terminal, creates the directories, and
+  replaces each differing file atomically. The command uses the stable `farhelm` forwarder and omits `--announce`,
+  because these callbacks also run outside Farhelm. The tracked launch supplies its credential in the environment.
+  The files hold no Farhelm token or session identity. When the host's hook policy allows setup, an install error goes
+  to the existing reporter setup notification and the per-generation setup result. A disabled host policy records its
+  reason without adding a notification. Either outcome allows the launch. A successful setup arms the ordinary
+  silent-hook diagnostic even though the launch adds no reporter arguments. The pending create row records consent so
+  a keyed retry can finish the already accepted create with the same choice.
+
+  The Antigravity adapter accepts the camelCase
   `conversationId`, `hookEventName` and `transcriptPath` and checks that any vendor discriminator agrees. Each event can
   independently select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt,
-  ignores `--announce`, and exits zero, keeping stderr quiet. The launch adds no reporter arguments and starts no
-  silent-hook tripwire. Farhelm shares positional attribution, the version-0 process pin and ancestor correction with
+  ignores `--announce`, and exits zero, keeping stderr quiet. Farhelm shares positional attribution, the version-0
+  process pin and ancestor correction with
   Claude and Muse. A correction records `AntigravityPinCorrected` once per launch.
 
   A process pin alone cannot distinguish Antigravity's main conversation from a child sharing its process. Under the
@@ -5221,7 +5229,7 @@ installation it is on, so it follows an open session the sidebar's filter hides
   `grok --no-leader --permission-mode auto` for guarded and `grok --no-leader --always-approve` for YOLO, refuses model
   and effort choices, and retains those flags before `--resume {conversation} {farhelm_args}` as argv elements. The
   dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity
-  classifier while the manually configured reporter supplies ownership-proven conversation capture. Antigravity launches
+  classifier while the configured reporter supplies ownership-proven conversation capture. Antigravity launches
   `agy` with optional `--model` and `--effort` and defaults new requests to `--mode auto`. YOLO compiles to
   `--dangerously-skip-permissions`, while Custom uses the submitted words. Both named starts and Restart use
   `--conversation {conversation}` with a literal ID. The supervisor appends one `--prompt-interactive=<prompt>` argument

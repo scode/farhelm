@@ -20,6 +20,35 @@ use std::path::Path;
 
 use farhelm_proto::conversation::GROK_LOCATOR_PREFIX as PREFIX;
 
+/// Grok merges this dedicated file with its other hook files. Its callbacks also run in ordinary Grok sessions,
+/// where the unannounced Farhelm command answers Grok without reporting anything.
+pub(super) fn persistent_hook_file(
+    home: Option<&Path>,
+    grok_home: Option<&Path>,
+    exe: &str,
+) -> anyhow::Result<super::persistent_hooks::HookFile> {
+    let path = match grok_home {
+        Some(root) => root.join("hooks/farhelm.json"),
+        None => home
+            .context("the supervisor has no HOME or GROK_HOME")?
+            .join(".grok/hooks/farhelm.json"),
+    };
+    let command = super::hook_command(
+        exe,
+        super::AgentInstructions::Off,
+        farhelm_proto::ReportVendor::Grok,
+    );
+    let group = serde_json::json!([{
+        "hooks": [{ "type": "command", "command": command, "timeout": 60 }],
+    }]);
+    super::persistent_hooks::HookFile::json(
+        path,
+        serde_json::json!({
+            "hooks": { "SessionStart": group, "UserPromptSubmit": group, "Stop": group },
+        }),
+    )
+}
+
 /// A canonical, timezone-independent ordering key for one RFC 3339 event.
 ///
 /// Fractions stay decimal rather than being rounded to nanoseconds. Grok's

@@ -230,6 +230,7 @@ fn create_launch(
 /// a field that widens what replays, be honored here without an authority
 /// check of its own.
 struct CreateRequest {
+    setup_persistent_hooks: bool,
     prompt: Option<String>,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     parent: Option<String>,
@@ -278,6 +279,7 @@ async fn handle_create_session(
     request: CreateRequest,
 ) {
     let CreateRequest {
+        setup_persistent_hooks,
         prompt,
         named_start,
         parent,
@@ -458,6 +460,7 @@ async fn handle_create_session(
         match sup
             .create_session_admitted(
                 CreateInputs {
+                    setup_persistent_hooks,
                     prompt,
                     named_start,
                     cwd: &cwd,
@@ -2073,6 +2076,7 @@ async fn handle_resize(
 /// Keeping the optional bundle together makes an ordinary restart's absent
 /// fields explicit while preserving the protocol's partial-bundle refusal.
 struct RestartSessionRequest {
+    setup_persistent_hooks: bool,
     named_start: Option<farhelm_proto::NamedConversationStart>,
     req_id: u64,
     session_id: String,
@@ -2213,6 +2217,7 @@ async fn handle_restart_session(
             panic();
         }
         let RestartSessionRequest {
+            setup_persistent_hooks,
             named_start,
             req_id,
             session_id,
@@ -2220,19 +2225,16 @@ async fn handle_restart_session(
             with,
             expected_launch,
         } = request;
-        let result = if named_start.is_some() {
-            sup.restart_session_named(
+        let result = sup
+            .restart_session_named(
                 &session_id,
                 stop_if_running,
                 with,
                 expected_launch,
                 named_start,
+                setup_persistent_hooks,
             )
-            .await
-        } else {
-            sup.restart_session(&session_id, stop_if_running, with, expected_launch)
-                .await
-        };
+            .await;
         match result {
             Ok(session) => {
                 send_reply(&tx, &ControlMsg::SessionRestarted { req_id, session }).await;
@@ -2683,6 +2685,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             send_reply(ctx.tx, &ControlMsg::BrowserForwardingSet { req_id }).await;
         }
         ControlMsg::CreateSession {
+            setup_persistent_hooks,
             prompt,
             named_start,
             req_id,
@@ -2714,6 +2717,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // refused by the HELM, which owns raw repo text; the
             // supervisor sees only resolved payloads.)
             let request = CreateRequest {
+                setup_persistent_hooks,
                 prompt,
                 named_start,
                 parent,
@@ -3057,6 +3061,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
             // kill the connection over it.
         }
         ControlMsg::RestartSession {
+            setup_persistent_hooks,
             named_start,
             req_id,
             session_id,
@@ -3069,6 +3074,7 @@ pub(crate) async fn handle_control(sup: &Arc<Supervisor>, msg: ControlMsg, ctx: 
                 ctx.tx,
                 ctx.tasks,
                 RestartSessionRequest {
+                    setup_persistent_hooks,
                     named_start,
                     req_id,
                     session_id,
@@ -4241,6 +4247,7 @@ mod tests {
         let (mut tasks, mut rx) = dispatch_for_test(
             &sup,
             ControlMsg::RestartSession {
+                setup_persistent_hooks: false,
                 named_start: None,
                 req_id: 72,
                 session_id,
@@ -4304,6 +4311,8 @@ mod tests {
             .store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4578,6 +4587,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     req_id,
@@ -4673,6 +4683,8 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4768,6 +4780,8 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4914,6 +4928,8 @@ mod tests {
         sup.store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: Some("hook".to_string()),
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4962,6 +4978,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                setup_persistent_hooks: false,
                 named_start: None,
                 req_id: 53,
                 session_id: session_id.to_string(),
@@ -5180,6 +5197,7 @@ mod tests {
     /// the combined cap that deliberately runs only after create admission.
     fn queued_create(cwd: &std::path::Path, key: &str, oversized: bool) -> ControlMsg {
         ControlMsg::CreateSession {
+            setup_persistent_hooks: false,
             prompt: None,
             named_start: None,
             req_id: 41,
@@ -7700,6 +7718,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 42,
@@ -7860,6 +7879,7 @@ mod tests {
         handle_restricted_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 63,
@@ -7982,6 +8002,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 66,
@@ -8115,6 +8136,8 @@ mod tests {
             .store
             .insert_session(
                 crate::store::StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -9245,6 +9268,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     req_id,
@@ -9314,6 +9338,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::RestartSession {
+                setup_persistent_hooks: false,
                 named_start: None,
                 req_id: 5,
                 session_id: "no-such-session".to_string(),
@@ -9539,6 +9564,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 98,
@@ -9607,6 +9633,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 97,
@@ -9671,6 +9698,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id,
@@ -9764,6 +9792,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     req_id,
@@ -9829,6 +9858,7 @@ mod tests {
         handle_control(
             &sup,
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 prompt: None,
                 named_start: None,
                 req_id: 4,
@@ -9898,6 +9928,7 @@ mod tests {
             handle_control(
                 &sup,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     prompt: None,
                     named_start: None,
                     req_id,
@@ -9988,6 +10019,7 @@ mod tests {
             "s1".to_string(),
             Arc::new(SessionEntry {
                 info: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -10177,6 +10209,7 @@ mod tests {
     fn fake_entry(id: &str, created_at: i64) -> Arc<SessionEntry> {
         Arc::new(SessionEntry {
             info: SessionInfo {
+                persistent_hook_setup: Default::default(),
                 terminal_missing: false,
                 screen_yolo: false,
                 claude_trust_prompt: false,
@@ -11375,6 +11408,7 @@ mod tests {
         let mut host = BusyHost::new().await;
 
         host.send(ControlMsg::RestartSession {
+            setup_persistent_hooks: false,
             named_start: None,
             req_id: 2,
             session_id: "another-session".to_string(),
@@ -11582,6 +11616,7 @@ mod tests {
                 unreachable!("queued_create builds a create");
             };
             ControlMsg::CreateSession {
+                setup_persistent_hooks: false,
                 req_id: 42,
                 prompt,
                 named_start,
@@ -11709,6 +11744,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        setup_persistent_hooks: false,
                         req_id: 3,
                         named_start: None,
                         session_id: "s1".into(),
@@ -11724,6 +11760,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        setup_persistent_hooks: false,
                         req_id: 4,
                         named_start: None,
                         session_id: "s1".into(),
@@ -12242,6 +12279,7 @@ mod tests {
                 &ask(
                     &sup,
                     ControlMsg::RestartSession {
+                        setup_persistent_hooks: false,
                         req_id: 2,
                         named_start: None,
                         session_id: "s1".into(),

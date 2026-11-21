@@ -1970,6 +1970,8 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,
@@ -4017,6 +4019,8 @@ mod tests {
         sup.store
             .insert_session(
                 StoredSession {
+                    persistent_hook_setup: Default::default(),
+                    setup_persistent_hooks_on_create: false,
                     conversation_source: None,
                     capture_ownership_version: 0,
                     omp_reporter_asset: None,

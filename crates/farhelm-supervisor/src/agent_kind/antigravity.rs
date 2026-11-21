@@ -1,8 +1,54 @@
-//! First-record verification for Antigravity's manual conversation hooks.
+//! Antigravity's conversation hook plugin and first-record verification.
 
 use super::{RECORD_PREFIX_BYTES, read_record_header};
+use anyhow::Context as _;
 use serde::Deserialize;
 use std::path::Path;
+
+/// Antigravity loads Farhelm's named hook group from a discovered plugin. Keeping both files under the plugin's own
+/// directory lets older manual hooks and other named groups stay in the user's shared configuration.
+pub(super) async fn persistent_hook_files(
+    home: &Path,
+    exe: &str,
+) -> anyhow::Result<[super::persistent_hooks::HookFile; 2]> {
+    use super::{AgentInstructions, hook_command, persistent_hooks::HookFile};
+    use farhelm_proto::ReportVendor;
+
+    let directory = home.join(".gemini/config/plugins/farhelm");
+    // Consent covers Farhelm's plugin directory. A symlink here can redirect hooks.json onto the shared hooks file.
+    match tokio::fs::symlink_metadata(&directory).await {
+        Ok(metadata) if !metadata.is_dir() => {
+            anyhow::bail!(
+                "{} is not a dedicated plugin directory",
+                directory.display()
+            );
+        }
+        Ok(_) => {}
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => {
+            return Err(error).with_context(|| format!("checking {}", directory.display()));
+        }
+    }
+    let command = hook_command(exe, AgentInstructions::Off, ReportVendor::Antigravity);
+    let callback = serde_json::json!([{ "type": "command", "command": command, "timeout": 60 }]);
+    Ok([
+        HookFile::json(
+            directory.join("plugin.json"),
+            serde_json::json!({
+                "name": "farhelm",
+                "displayName": "Farhelm",
+                "version": "1.0.0",
+                "description": "Reports conversations to Farhelm for Restart",
+            }),
+        )?,
+        HookFile::json(
+            directory.join("hooks.json"),
+            serde_json::json!({
+                "farhelm": { "SessionStart": callback, "Stop": callback },
+            }),
+        )?,
+    ])
+}
 
 /// Verify the first record of the exact transcript named by the report.
 ///

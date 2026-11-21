@@ -686,6 +686,7 @@ async fn create_session_request_with_omitted_dimensions_uses_80x24_defaults() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -802,6 +803,7 @@ async fn a_yolo_create_on_a_host_that_asks_is_refused_until_confirmed() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        persistent_hook_setup: Default::default(),
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -1019,6 +1021,7 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        persistent_hook_setup: Default::default(),
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -1203,6 +1206,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
                 .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                     req_id,
                     session: SessionInfo {
+                        persistent_hook_setup: Default::default(),
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -1468,6 +1472,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -3539,6 +3544,7 @@ async fn replace_of_a_live_raw_session_creates_a_new_id_and_removes_the_old() {
         assert_eq!(title, Some("sess-1".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -3807,6 +3813,7 @@ async fn a_create_reply_that_replays_the_source_id_is_refused_before_any_delete(
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -4156,6 +4163,7 @@ async fn a_delete_failure_after_a_successful_create_reports_both_ids_and_leaves_
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -4299,6 +4307,7 @@ async fn a_delete_lost_after_the_supervisor_applied_it_reports_an_unknown_outcom
             panic!("expected CreateSession, got {request:?}");
         };
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -4453,6 +4462,7 @@ async fn a_replace_retried_with_the_same_intent_key_after_a_delete_failure_creat
             .unwrap();
 
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -4673,6 +4683,7 @@ async fn a_replace_with_override_of_invocation_title_and_cwd_creates_it_and_remo
         assert_eq!(title, Some("replaced-with-title".to_string()));
         assert_eq!(intent_key, None);
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -4804,6 +4815,7 @@ async fn a_replace_with_body_forwards_its_initial_prompt_to_the_create() {
         );
         assert_eq!(cwd, "/replaced-with");
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -5021,6 +5033,7 @@ async fn a_replace_with_override_whose_delete_fails_after_a_successful_create_re
             ))
         );
         let created = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -5259,6 +5272,7 @@ async fn a_replace_with_create_reply_that_replays_the_source_id_is_refused_befor
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -5788,6 +5802,7 @@ async fn restart_session_passes_consent_through_and_returns_the_session() {
             .write_control(&ControlMsg::SessionRestarted {
                 req_id,
                 session: farhelm_proto::SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,
@@ -6466,6 +6481,7 @@ async fn rename_session_forwards_the_title_verbatim() {
         // must fail the full-struct comparison below even if the
         // title alone looked right.
         let mut expected_session = SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -6648,6 +6664,7 @@ async fn rename_session_missing_title_is_422_but_an_explicit_empty_title_is_acce
                 .write_control(&ControlMsg::SessionRenamed {
                     req_id,
                     session: farhelm_proto::SessionInfo {
+                        persistent_hook_setup: Default::default(),
                         terminal_missing: false,
                         screen_yolo: false,
                         claude_trust_prompt: false,
@@ -7080,6 +7097,7 @@ async fn a_create_prepared_against_a_replaced_connection_reaches_no_supervisor()
             .write_frame(&Frame::control(&ControlMsg::SessionCreated {
                 req_id,
                 session: SessionInfo {
+                    persistent_hook_setup: Default::default(),
                     terminal_missing: false,
                     screen_yolo: false,
                     claude_trust_prompt: false,

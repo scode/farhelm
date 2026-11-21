@@ -3200,6 +3200,7 @@ impl SupervisorClient {
             .request(
                 req_id,
                 ControlMsg::CreateSession {
+                    setup_persistent_hooks: false,
                     named_start: extras.named_start,
                     req_id,
                     parent: extras.parent,
@@ -3733,6 +3734,7 @@ impl SupervisorClient {
             .request(
                 req_id,
                 ControlMsg::RestartSession {
+                    setup_persistent_hooks: false,
                     named_start,
                     req_id,
                     session_id: id.to_string(),
@@ -4882,6 +4884,7 @@ mod tests {
 
     fn session(id: &str) -> SessionInfo {
         SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,
@@ -7446,6 +7449,7 @@ mod tests {
             .request(
                 7,
                 ControlMsg::RestartSession {
+                    setup_persistent_hooks: false,
                     named_start: None,
                     req_id: 7,
                     session_id: "restarted".to_string(),

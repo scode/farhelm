@@ -3023,6 +3023,7 @@ mod tests {
     /// diagnostics useful to these tests.
     fn scripted_session(id: &str, title: &str) -> SessionInfo {
         SessionInfo {
+            persistent_hook_setup: Default::default(),
             terminal_missing: false,
             screen_yolo: false,
             claude_trust_prompt: false,

@@ -51,6 +51,7 @@ fn session_list_body() -> SessionListBody {
     })
     .expect("a valid Codex selection compiles");
     let info = SessionInfo {
+        persistent_hook_setup: Default::default(),
         terminal_missing: false,
         screen_yolo: false,
         claude_trust_prompt: false,
