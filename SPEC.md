@@ -1163,33 +1163,33 @@ agent choice is independent of that destination:
   compound commands, pipes and redirection have Bash meaning. In the launcher's editable command fields, a spelled-out
   invisible character such as `<U+200B>` stands for that character. Each placeholder must stand as its own unquoted word
   in Bash and occupy a complete word from the literal split. A quoted placeholder, or one joined to other text where it
-  cannot be substituted safely, is refused on save and again at spawn for an older stored command. Farhelm inserts each
-  filled value as a single-quoted word, or one such word per argument for `{farhelm_args}`. The command may reference
-  the session's working directory as `{cwd}` and takes a required YOLO assertion: the user states whether the command
-  bypasses human, classifier, AI-reviewer and sandbox safety checks, and Farhelm believes the statement. Farhelm never
-  reads a command line to decide whether it is YOLO, what agent it runs, or how to resume it. A command launch may
-  optionally declare the agent type it runs. A declared agent type requires `{farhelm_args}` as a whole argument exactly
-  once in the command, which marks where Farhelm places that agent type's own launch integration arguments (including
-  the conversation-reporting hook, instructions pointer and Codex's `--no-daemon`, see Durability); it is replaced by
-  nothing for an agent type that takes no such arguments, so the rule never depends on which agent type was declared.
-  `{farhelm_args}` without a declared agent type is refused. Farhelm passes whatever turns its integration on as
-  arguments, never through the environment: every process the agent starts inherits the environment, including another
-  agent of the same type that it shells out to, so a hook carried there would reach runs that are not the session's. The
-  environment carries only settings that Farhelm's own reporter reads once an argument has turned it on, set on the
-  launched process directly and never written into the command. Declaring an agent type gives the session that agent
-  type's status reading and conversation reporting. It also allows opting into Resume, which requires a resume command
-  containing `{conversation}` and `{farhelm_args}`, each as a whole argument exactly once; Farhelm fills those and
-  `{cwd}` in and otherwise runs the resume command as written. Codex gets `--no-daemon` even with hooks off. A custom
-  Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`, or runs `codex agents` or `codex queue`
-  fails because Codex refuses that flag there; Farhelm does not detect these incompatible commands. `{conversation}` in
-  the start command is refused. The one exception to "as written" in either command: Codex's internal workspace-trust
-  markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled wherever one stands as a whole argument,
-  exactly as in a composed Codex agent launch (see SPEC_impl.md). A command launch with no declared agent type, or one
-  that does not opt into Resume, can never be restarted (see Lifecycle operations). The YOLO assertion covers the resume
-  command too. Search while the command launch kind is active still offers agent types, models, and recent setups, and
-  accepting one switches to the agent launch kind; accepting a folder, host, or name keeps the current launch kind, and
-  a template keeps it unless the template sets one. The command tab's YOLO assertion, declared agent type and Resume
-  choice are set in that tab's own fields, not through search.
+  cannot be substituted safely, is refused when saving a launch or a template and again at spawn for an older stored
+  command. Farhelm inserts each filled value as a single-quoted word, or one such word per argument for
+  `{farhelm_args}`. The command may reference the session's working directory as `{cwd}` and takes a required YOLO
+  assertion: the user states whether the command bypasses human, classifier, AI-reviewer and sandbox safety checks, and
+  Farhelm believes the statement. Farhelm never reads a command line to decide whether it is YOLO, what agent it runs,
+  or how to resume it. A command launch may optionally declare the agent type it runs. A declared agent type requires
+  `{farhelm_args}` as a whole argument exactly once in the command, which marks where Farhelm places that agent type's
+  own launch integration arguments (including the conversation-reporting hook, instructions pointer and Codex's
+  `--no-daemon`, see Durability); it is replaced by nothing for an agent type that takes no such arguments, so the rule
+  never depends on which agent type was declared. `{farhelm_args}` without a declared agent type is refused. Farhelm
+  passes whatever turns its integration on as arguments, never through the environment: every process the agent starts
+  inherits the environment, including another agent of the same type that it shells out to, so a hook carried there
+  would reach runs that are not the session's. The environment carries only settings that Farhelm's own reporter reads
+  once an argument has turned it on, set on the launched process directly and never written into the command. Declaring
+  an agent type gives the session that agent type's status reading and conversation reporting. It also allows opting
+  into Resume, which requires a resume command containing `{conversation}` and `{farhelm_args}`, each as a whole
+  argument exactly once; Farhelm fills those and `{cwd}` in and otherwise runs the resume command as written. Codex gets
+  `--no-daemon` even with hooks off. A custom Codex command that puts `{farhelm_args}` after `exec`, passes `--remote`,
+  or runs `codex agents` or `codex queue` fails because Codex refuses that flag there; Farhelm does not detect these
+  incompatible commands. `{conversation}` in the start command is refused. The one exception to "as written" in either
+  command: Codex's internal workspace-trust markers, `{codex:trusted-cwd}` and `{codex:untrusted-cwd}`, are filled
+  wherever one stands as a whole argument, exactly as in a composed Codex agent launch (see SPEC_impl.md). A command
+  launch with no declared agent type, or one that does not opt into Resume, can never be restarted (see Lifecycle
+  operations). The YOLO assertion covers the resume command too. Search while the command launch kind is active still
+  offers agent types, models, and recent setups, and accepting one switches to the agent launch kind; accepting a
+  folder, host, or name keeps the current launch kind, and a template keeps it unless the template sets one. The command
+  tab's YOLO assertion, declared agent type and Resume choice are set in that tab's own fields, not through search.
 - Launch templates: `tl:name` in the search box offers templates by name, and accepting one applies it. Applying a
   template makes the edits it contains, in the same way and with the same effects as making them by hand, in a fixed
   order: launch kind first, then agent type, then every other field. It can switch the launch kind, and choosing an
@@ -1247,23 +1247,25 @@ agent choice is independent of that destination:
   agent supports it or no agent is set. It explains that the message is sent on every launch from the template and can
   be edited in the launcher first; the list summary mentions it. Newline and tab remain editable. Invisible formatting
   is shown escaped and read-only, retaining its raw value through unrelated saves; removing and adding the field
-  replaces it. Incompatible fields stay visible and prevent saving until corrected or removed. Saving is explicit; Save
-  is greyed out and does nothing while there are no unsaved changes, and keeps keyboard focus after saving. A save the
-  helm refuses is reported, and the editor keeps the draft for correction, never treating it as saved and never retrying
-  it. Leaving asks Keep editing, Discard, or Save in that reading order, only when the draft has edits since opening or
-  saving that Save would store. The question is centered over the dialog and starts with focus on Save. An inferred
-  switch or removed legacy workspace-trust field enables Save but never makes leaving ask. Its shared header supplies
-  Close. The complete editor keeps scrolling within the dialog, including its editor-local action footer. Template names
-  are unique. Creating a template or renaming one refuses any whitespace in its name, including Unicode whitespace;
-  existing names with whitespace remain usable, can keep their name when other fields are saved, and retain delete undo.
-  The agent's template create command follows the same new-name rule. Duplicate opens an unsaved copy named
-  `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-` in that
-  suggestion. A workspace-trust field in an older template remains readable but is ignored when applied and omitted on
-  every save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the dialog for
-  about ten seconds; undo refuses if its old name has been taken. For a stored template that fails current save rules,
-  the control says "Delete permanently" before deletion and no undo is offered. The label the user saw decides: a click
-  on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the template list
-  changed in between. Closing the dialog ends its undo notice.
+  replaces it. Incompatible fields stay visible and prevent saving until corrected or removed. Every template save
+  checks that Farhelm placeholders in the launch and resume commands stand alone as unquoted words. Rules that depend on
+  the assembled setup, such as requiring a declared agent for `{farhelm_args}`, are checked at launch. Saving is
+  explicit; Save is greyed out and does nothing while there are no unsaved changes, and keeps keyboard focus after
+  saving. A save the helm refuses is reported, and the editor keeps the draft for correction, never treating it as saved
+  and never retrying it. Leaving asks Keep editing, Discard, or Save in that reading order, only when the draft has
+  edits since opening or saving that Save would store. The question is centered over the dialog and starts with focus on
+  Save. An inferred switch or removed legacy workspace-trust field enables Save but never makes leaving ask. Its shared
+  header supplies Close. The complete editor keeps scrolling within the dialog, including its editor-local action
+  footer. Template names are unique. Creating a template or renaming one refuses any whitespace in its name, including
+  Unicode whitespace; existing names with whitespace remain usable, can keep their name when other fields are saved, and
+  retain delete undo. The agent's template create command follows the same new-name rule. Duplicate opens an unsaved
+  copy named `<name>-copy`, then `<name>-copy-2` and so on until free, replacing whitespace in the source name with `-`
+  in that suggestion. A workspace-trust field in an older template remains readable but is ignored when applied and
+  omitted on every save, including duplicate and delete undo. Delete takes effect immediately and offers undo inside the
+  dialog for about ten seconds; undo refuses if its old name has been taken. For a stored template that fails current
+  save rules, the control says "Delete permanently" before deletion and no undo is offered. The label the user saw
+  decides: a click on "Delete permanently" never offers undo, and a click on plain "Delete" always does, even if the
+  template list changed in between. Closing the dialog ends its undo notice.
 
 - Quick launch: at most one saved template is marked with ⚡ in Templates. Its list button shows a muted outline bolt
   when unmarked and a filled amber bolt when marked, at the same size. Cmd+P on macOS or Ctrl+Shift+P elsewhere starts

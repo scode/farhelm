@@ -946,10 +946,6 @@ consequences.
 - [`selected-expanded-host-hover-white-on-white.md`](selected-expanded-host-hover-white-on-white.md) — In Light
   appearance, hovering the selected expanded host can make its name and destination unreadable.
 
-- [`template-save-placeholder-validation-contract-conflict.md`](template-save-placeholder-validation-contract-conflict.md)
-  — Template Save can retain a prefix that Launch later refuses, despite wording that the new placement check runs at
-  Save time.
-
 - [`cleanup-stop-transport-error-skips-delete.md`](cleanup-stop-transport-error-skips-delete.md) — A transport error
   from a cleanup Stop can prevent Delete even when the helper already knows the fake session's ID.
 

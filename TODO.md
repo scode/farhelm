@@ -288,16 +288,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row's agent mark and permission-mode icon.) hover is fine, but it should not act as if it's a clickable
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing
 
-- **Decide whether saving a launch template checks where its command's placeholders stand.** A custom command launch can
-  use placeholders such as `{cwd}`, which Farhelm fills in. Each must stand alone as an unquoted word: `"{cwd}"` or
-  `--dir={cwd}` is refused, and SPEC.md says it is refused "on save". But saving a launch template only checks the
-  template's shape, so a template can store such a command, and the launcher refuses it only when you launch from that
-  template. Decide whether the template editor should refuse it at save as well, or SPEC.md should say only the launcher
-  refuses it. A complication: a template can hold just part of a launch setup (a command without its agent type, say),
-  so some checks cannot run on a template alone, but the quoting and joining check can. The review item
-  `review_feedback_queue/template-save-placeholder-validation-contract-conflict.md` is the same question; settle both
-  together. Raised by the gui-ux-wording plan, 2026-11-19. Plan: `plans/queue/template-placeholder-validation.md`.
-
 - **Decide whether automatic host updates may install a devbuild's unsigned host builds.** A desktop app built from a
   working copy (a devbuild) has no signed release to download host builds from, so `scripts/devbuild-mac.sh` stages
   Linux builds in a local folder and the app installs those on remote hosts, without a signature check, when you click

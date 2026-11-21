@@ -8775,15 +8775,17 @@ fields are refused on decode, so a misspelled field is an error rather than a si
 editor clears it in its draft and on delete undo; Save as template never offers it. This keeps old records usable
 without letting their trust choices bypass the agent trust section in Settings. The GUI's writes go through
 `PUT /api/templates/{name}` (create or replace, last write wins, no version check, as SPEC.md wants) and
-`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The helm checks only the shape of a template
-the GUI writes (a non-empty name of at most 128 bytes with no surrounding spaces or control characters, and fields
-within the 64 KiB a create is held to); whether its fields apply is decided only when it is applied. An agent's template
-writes share the same store path but carry a precondition and a few refusals of their own (see "Permission prompts for
-agent actions"). New-name whitespace validation is separate from stored shape: the Templates editor checks only when the
-name changes, Save as template always checks, and the agent template-create branch checks before approval. The shared
-store and collision checks remain permissive so historical spaced names still save unchanged and delete undo can
-recreate them. Duplicate normalizes whitespace to hyphens in its suggested name and uses `-copy` / `-copy-N` suffixes,
-retaining the byte cap and collision search.
+`DELETE /api/templates/{name}`; `GET /api/templates` lists them by name. The shared template save check validates a
+non-empty name of at most 128 bytes with no surrounding spaces or control characters, fields within the 64 KiB a create
+is held to, and the placement of each Farhelm placeholder in the launch and resume commands. It uses the command
+launch's validator to refuse quoted placeholders or placeholders joined to other text. Whether its fields apply is
+decided when it is applied. Placeholder counts and requirements that depend on the assembled launch still belong to
+launch admission. An agent's template writes share the same store path but carry a precondition and a few refusals of
+their own (see "Permission prompts for agent actions"). New-name whitespace validation is separate from stored shape:
+the Templates editor checks only when the name changes, Save as template always checks, and the agent template-create
+branch checks before approval. The shared store and collision checks remain permissive so historical spaced names still
+save unchanged and delete undo can recreate them. Duplicate normalizes whitespace to hyphens in its suggested name and
+uses `-copy` / `-copy-N` suffixes, retaining the byte cap and collision search.
 
 An agent's quick-launch and number-key edits travel separately from template fields in protocol 60: those bindings
 belong to fleet preferences, not to a template's composable choices. The helm and Templates editor share the ⚡
