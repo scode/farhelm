@@ -266,12 +266,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
   also "Fix 'answer trust dialog' for Claude Code").
 
-- **Show the changed golden pictures on one page.** Visual reviews are handed paths to changed pictures and judge them
-  file by file, with nothing showing what changed or flagging a scene nobody meant to touch. Make a page of only the
-  changed and new pictures (reference, new picture and the differing pixels, light and dark) whenever a run finds any,
-  and describe one visual-review procedure in `.agents/validation.md` that GUI plans can point to. Plan:
-  `plans/queue/golden-changes-page.md`.
-
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
