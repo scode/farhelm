@@ -725,11 +725,16 @@ systemd or SSH substrate ran.
   `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet. The development
   profile optimizes the PNG, renderer and UI dependencies used here. In a single-process planning trial on Linux, this
   reduced the 328-picture update from 668 to 89 seconds of render time with identical files. At that point the update
-  encoded each PNG twice. Expect a rebuild when first switching to this profile.
+  encoded each PNG twice. Expect a rebuild when first switching to this profile. While iterating, target affected scenes
+  with `--scene 'settings-*'` (repeatable). This works in compare and update mode. Run a full `--update` before
+  publishing so changes to a shared component show up in every scene it reaches. Only a full successful update can
+  produce a completion marker. Additional Cargo build options go before a bare `--`. Only libtest output options are
+  supported after it, and `--scene` is the selector.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
-  update receives a completion marker only after rendering. Failed or empty updates cannot be published. Run it when the
-  runner changes. Seconds, no renderer or network.
+  update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.
+  The tests also cover Cargo's executable discovery, ordered pattern matching and an unmatched pattern refused before
+  rendering. Run it when the runner changes. Seconds, no renderer or network.
 - `python3 -B scripts/gui-goldens.py --self-test` — fetching and publishing the golden references, against a bare
   repository in a temporary directory standing in for the storage repository: a publish and a fetch round-tripping every
   picture under the one ref `refs/gui-goldens/keep` (never a branch or tag), a second publish adding a snapshot of only
