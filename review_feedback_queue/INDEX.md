@@ -955,10 +955,6 @@ consequences.
   sandbox checkout can be offered without exposing its missing global checkout-folder setting, then fail before billing
   with a Settings remedy.
 
-- [`frozen-sandbox-retains-header-lifecycle-answers.md`](frozen-sandbox-retains-header-lifecycle-answers.md) — Retained
-  header Restart and Replace questions, and an interrupted-session card during refresh, can keep enabled answers for a
-  frozen sandbox. The backend refuses those operations.
-
 - [`sandbox-launch-skips-remembered-agent-choices.md`](sandbox-launch-skips-remembered-agent-choices.md) — A successful
   sandbox launch does not persist the user's permission or wrapper choice. The initiating page's local mirror hides the
   omission until a reload.
