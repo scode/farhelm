@@ -307,4 +307,45 @@ mod tests {
             );
         }
     }
+
+    /// Legacy Delete must remove an existing object before confirming absence.
+    /// The stand-in reports the object present until it sees removal of that
+    /// exact name, so checking an already absent object cannot pass this test.
+    #[farhelm_testtrace::test]
+    async fn legacy_delete_removes_the_existing_container_before_confirming_absence() {
+        let (root, runtime) = fixture();
+        // An older installation named the container before this Delete ran.
+        let name = format!("farhelm-{}", runtime.session_id);
+        let engine = root.path().join("podman");
+        let present = root.path().join("present");
+        let removed = root.path().join("removed");
+        std::fs::write(&present, name.as_bytes()).unwrap();
+        std::fs::write(
+            &engine,
+            format!(
+                r#"#!/bin/sh
+root="${{0%/*}}"
+case "$#:$1:$2:$3:$4" in
+    "4:rm:-f:--ignore:{name}"|"3:rm:-f:{name}:") mv "$root/present" "$root/removed" ;;
+    "3:container:exists:{name}:") test -f "$root/present" ;;
+    *) exit 125 ;;
+esac
+"#
+            ),
+        )
+        .unwrap();
+        std::fs::set_permissions(&engine, std::fs::Permissions::from_mode(0o700)).unwrap();
+        let before = run_control(&engine, &["container", "exists", &name])
+            .await
+            .unwrap();
+        assert_eq!(before.status.code(), Some(0), "the old container exists");
+
+        let guard = runtime.acquire().await.unwrap();
+        guard.revoke().unwrap();
+        guard.remove_with_podman(Some(&engine)).await.unwrap();
+
+        assert_eq!(std::fs::read(removed).unwrap(), name.as_bytes());
+        assert!(!present.exists());
+        assert!(!runtime.initialization_path().exists());
+    }
 }
