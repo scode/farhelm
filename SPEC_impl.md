@@ -6760,10 +6760,10 @@ and a suspended one one call per re-probe (45 seconds). A sandbox suspended unde
 30-second refresh timeout tears the connection down.
 
 The host list takes observation time and attribution from the actor's `suspended` snapshot. The saved completion time
-survives a helm restart. A Running answer or successful fallback supervisor connection retires strictly older times. The
-evidence survives retries, holds and actor replacements. The actor records it before parking and starts the database
-clear outside the dial's deadline. The snapshot ignores retired times even if that write fails or a registry read is
-stale.
+survives a helm restart. When the actor observes Running or connects to the supervisor after a failed status check, its
+snapshot excludes strictly older completion times. That evidence survives retries, holds and actor replacements. After
+the connection phase, the actor tries to clear the stored time when its registry row carries an older one. The snapshot
+can exclude a time even when a write fails or a registry read is stale.
 
 Provisioning does not go through the actor's gate, so it checks the same state itself. Update and setting a host up
 again are refused for a host the manager shows suspended, before anything is probed and again before a confirmed run's
@@ -6814,10 +6814,12 @@ progress and unseen setup warnings keep their existing precedence. Tunnel failur
 eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
 
 An explicit Suspend keeps a saved time for the current pause. With no saved time or a newer Running observation, it
-records its own completion time even when Tensorlake is already paused. A resume and re-pause missed by the helm leaves
-the old time, as can a failed clear followed by a restart and an outside pause. A backwards wall-clock step, a delayed
-Running answer that arrives after a Suspend's confirming read, or two events in the same millisecond can also
-misattribute the pause. This affects wording.
+records its own completion time even when Tensorlake is already paused. Timing and attribution are best effort. A resume
+and re-pause missed by the helm, a failed lifecycle operation, a failed clear or stale registry read, or quitting during
+connection retries or lifecycle completion can leave or restore an older Suspend time. A temporary loss of status can
+also move the displayed observation time forward during the same pause. A backwards wall-clock step, a delayed Running
+answer that arrives after a Suspend's confirming read, or two events in the same millisecond can also misattribute the
+pause. This affects wording.
 
 The Suspend question uses the shared framed-dialog header, scroll body and footer as direct siblings; its existing
 lifecycle callback still owns acceptance and dispatch. Dismissal releases that modal before returning focus to the
@@ -7139,8 +7141,9 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
 - `farhelm agent delete --session <id> [--stop-if-running]` — removes an explicitly named session, refusing self-delete.
   Success prints `deleted <id>` on stdout and any checkout notice on stderr. The relay and helm both refuse self-delete;
   the helm derives a delete guard from the target state shown on its approval card and passes it unchanged to the
-  supervisor. Without the flag, anything alive is refused. UI and agent deletes share the helm's approval denial,
-  teardown and best-effort local cleanup; Replace shares the successful local cleanup after inheriting its pin.
+  supervisor. Without the flag, a live main program or terminal tab is refused. The usual teardown can still reap
+  background jobs left after the main program exits. UI and agent deletes share the helm's approval denial, teardown and
+  best-effort local cleanup; Replace shares the successful local cleanup after inheriting its pin.
 - `farhelm agent create` and ordinary `farhelm spawn` accept mutually exclusive `--prompt` and `--prompt-file` (`-`
   reads stdin). Shared flag parsing materializes at most one launch budget of UTF-8 text, allowing newline and tab but
   refusing other controls. Template writes use that same field, and listings include its text. The prompt travels beside
@@ -8350,11 +8353,12 @@ A verification warning keeps its leading mark, and a press still retries. Withou
 The update menu and the `?` menu are drawn from the same menu pieces as the session row's menu.
 
 The rail's notices bell sits at the top of the rail's foot, above Hosts (`crates/gui/farhelm-gui/src/rail_notices.rs`).
-The bell and its panel draw the helm's pushed notices straight from the store. Every close of the panel sends one read
-mark for the unread notices the last frame drew, so a notice that arrived after that frame stays unread; a failed mark
-is only logged and leaves the bell loud until the next close. Clear resolved removes only the resolved notices the panel
-showed. The trash cleanup notice's Retry now and Open Trash go through the Trash dialog's own command, guards and entry
-point, so the bell adds no second cleanup owner.
+The bell and its panel draw the helm's pushed notices straight from the store. Every close sends one read mark for the
+unread notices in the last displayed list, including rows outside the viewport. A notice that arrived after that frame
+stays unread. A failed mark is only logged and leaves the bell loud until the next close. Clear resolved sends the same
+list's resolved IDs, including rows outside the viewport. The helm deletes those still resolved when it acts. The trash
+cleanup notice's Retry now and Open Trash go through the Trash dialog's own command, guards and entry point, so the bell
+adds no second cleanup owner.
 
 The version's hover help comes from pure functions of the window's build and the updater's state: `version_help` in
 `crates/gui/farhelm-gui/src/sidebar/header.rs` without an updater, the updater's `readout` in
@@ -8836,20 +8840,21 @@ Application is one pure function, `farhelm_proto::launcher::apply_template`, com
 launcher state plus a template gives a new launcher state or a refusal naming the field, in SPEC.md's order (launch
 kind, then agent type, then the rest). Choosing an agent type on the agent launch kind runs
 `reconcile_harness_selection`, which moved from the UI into the same module together with the model-catalog row type, so
-a click, a search result and a template reconcile alike: setting a model runs the same reconciliation choosing it by
-hand does (an effort the new model does not offer goes), the custom model's owning agent type is tracked so a later
-change of agent type clears it, and with no agent type chosen a model only one agent type offers picks that type. Models
-are compared in the agent type's own catalog spelling, as the launcher and the helm's compiler compare them. The
-function refuses a field that does not apply to the launch kind then active, an agent-launch choice with no agent type
-(other than that single-owner model), an ID reserved by the model catalog, an effort or permission the agent type does
-not offer, a host the caller holds fixed, and a host no known install has (a host row in the identity-mismatch phase
-does not count, exactly as for the create default); any refusal leaves the launcher unchanged. Before that fold, the UI
-removes template assignments equal to the opening's held values: host in Replace with, and kind, active-kind agent,
-host, folder and raw title in Restart with. Host equality needs a usable recorded identity; folder equality ignores
-trailing slashes without expanding or resolving paths. Equal name and name kind are removed together. Remaining held
-assignments refuse in template order. An equal agent must never reach reconciliation, which can change historical unset
-permissions or clear model and effort. Prompt and command-resume removal remain refused; search results and recents
-retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host flag.
+a click, a search result and a template reconcile alike. Setting a model drops an effort the new model does not offer.
+On a change of agent type, a matching destination catalog entry takes ownership of the model, including an older entry.
+Otherwise a custom model owned by the old agent type is cleared. With no agent type chosen, a model only one agent type
+offers picks that type. Models are compared in the agent type's own catalog spelling, as the launcher and the helm's
+compiler compare them. The function refuses a field that does not apply to the launch kind then active, an agent-launch
+choice with no agent type (other than that single-owner model), an ID reserved by the model catalog, an effort or
+permission the agent type does not offer, a host the caller holds fixed, and a host no known install has (a host row in
+the identity-mismatch phase does not count, exactly as for the create default); any refusal leaves the launcher
+unchanged. Before that fold, the UI removes template assignments equal to the opening's held values: host in Replace
+with, and kind, active-kind agent, host, folder and raw title in Restart with. Host equality needs a usable recorded
+identity; folder equality ignores trailing slashes without expanding or resolving paths. Equal name and name kind are
+removed together. Remaining held assignments refuse in template order. An equal agent must never reach reconciliation,
+which can change historical unset permissions or clear model and effort. Prompt and command-resume removal remain
+refused; search results and recents retain their presence-based checks. The helm's `farhelm spawn` keeps the strict host
+flag.
 
 `farhelm-helm/src/launches.rs` owns the release catalog served by `GET /api/launch-catalog`. It records each model's
 family, harness, latest marker and accepted efforts. When a family gets a new model, move the latest marker to the

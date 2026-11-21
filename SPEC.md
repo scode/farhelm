@@ -142,8 +142,8 @@ updates use the same one-use plan mechanism. An Update click or the enabled auto
 update without a confirmation prompt. Update never downgrades a host: it installs the helm's own build, so a host whose
 supervisor reports a newer build is refused with both versions named, and the user updates the helm instead. It also
 refuses a host whose supervisor reports a database schema newer than the helm's build can open, which happens after a
-development build ran there; that host needs a build at least that new. A supervisor below this release's upgrade floor
-is also refused, with a manual recovery remedy: stop its Farhelm supervisor service, then remove its dedicated Farhelm
+development build ran there; that host needs a build at least that new. A build below this release's upgrade floor
+reported by the supervisor also blocks Update. For manual recovery, stop its service, then remove its dedicated Farhelm
 installation directory. The remedy names the executable the host reported; its parent may be a shared or custom binary
 directory, in which case only Farhelm-owned files are removed and the shared directory stays. Then remove the host from
 Farhelm and set it up again. Its data directory can stay, without a promise that the new release can use every feature's
@@ -342,11 +342,11 @@ and sessions will be gone; `Remove hosts without asking` never skips it. An agen
 a host is refused: only the user deletes a sandbox. Before each connection attempt such a host asks Tensorlake whether
 its sandbox is running, and never while it is connected. A sandbox that is suspended, by Tensorlake's idle timeout or
 anything else, shows the host as **Suspended**, a grey state, and Farhelm does not dial it: a new ssh connection to a
-suspended sandbox is refused, and a new request on an old one hangs. Its details say since when, and whether Tensorlake
-suspended it on its own. Farhelm checks again once per re-probe interval and connects by itself when the sandbox runs
-again; it never resumes a sandbox on its own. A sandbox Tensorlake no longer has makes the host unreachable with the
-advice to delete it. When Tensorlake cannot answer at all (no key, an outage), Farhelm dials anyway rather than cutting
-off a sandbox that may be running.
+suspended sandbox is refused, and a new request on an old one hangs. Its details show the recorded completion time when
+Farhelm attributes the pause to its own Suspend action. Otherwise they show when Farhelm noticed the suspension. Farhelm
+checks again once per re-probe interval and connects by itself when the sandbox runs again; it never resumes a sandbox
+on its own. A sandbox Tensorlake no longer has makes the host unreachable with the advice to delete it. When Tensorlake
+cannot answer at all (no key, an outage), Farhelm dials anyway rather than cutting off a sandbox that may be running.
 
 The hosts panel offers **Suspend** for Tensorlake hosts unless they are suspended, suspending or resuming, including
 when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when
@@ -1921,8 +1921,9 @@ such a directory against an identity recorded earlier follows this rule rather t
 2026-10-22: a checkout recorded without a creation time, whose folder still reports none, cannot be told from a folder
 removed and re-cloned at the same path, so Farhelm treats it as unconfirmed: Delete releases it without archiving it,
 with the notice below; the trash never deletes it permanently; and a new session started in it does not trust its agent
-automatically. A checkout recorded before creation times were kept, on a filesystem that reports them now, keeps the
-inode and device comparison.
+automatically. The launch that creates a fresh checkout can still apply the opt-in Claude trust edit because Farhelm
+just created the directory. A checkout recorded before creation times were kept, on a filesystem that reports them now,
+keeps the inode and device comparison.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
@@ -2055,7 +2056,7 @@ submission and focus-return behavior.
 - **Stop** terminates the agent, shell or command and its entire process tree, including dev servers and other
   descendants. It then closes the session's terminal tabs and their processes, under the same lifecycle claim. The
   session remains with its main terminal still viewable. With tabs open, Stop asks "Stop the agent and close N terminal
-  tabs?" (using "shell" for Bash or Zsh), or asks about the tabs alone when the main terminal has already ended, unless
+  tabs?" (using "shell" for Bash or Zsh), or names the remaining tabs when the main program has already exited, unless
   session confirmations are skipped (below). A tab that cannot be closed does not prevent the other tabs from closing;
   the reply names the failed tabs and the client shows that notice. Restart and an agent exiting on its own leave tabs
   running. Tabs can be opened after Stop; another Stop closes them too.
@@ -2076,24 +2077,26 @@ submission and focus-return behavior.
   session confirmations are skipped (below). Replace keeps its confirmation whatever the agent is doing unless session
   confirmations are skipped (below). Restart keeps whatever scrollback the session's agent terminal retained: the
   terminal is replaced by a new one for each run, which starts with the old one's scrollback above a blank screen in
-  default modes. What is carried over is the scrollback's text with its colors, styles and links, up to the new
+  default modes. What is carried over is the scrollback's text with color references, styles and links, up to the new
   terminal's limits, the oldest lines left out first (the terminal then says that some earlier output could not be
-  recovered). If the new terminal does not start and Farhelm confirms that the failed start has ended, the session keeps
-  its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot confirm that, the
-  session is left with no terminal and its next Restart starts an empty one. The new terminal starts empty instead, with
-  a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer exists (the process
-  that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT preserve the previous
-  run's last visible screen: the terminal is blank until the new agent draws, and a full-screen program's final frame
-  (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never capture a terminal's
-  screen and paint it back into a relaunched terminal ahead of the new process — a frame with no process behind it looks
-  live, accepts typing, and is overwritten when the real program draws, which is worse than blank. Restart touches the
-  agent terminal only: the session's open terminal tabs keep running in their own terminals until they are closed.
-  Restart may carry changed launch settings (Restart with, below); the launch kind, agent type, host, and working
-  directory remain fixed. If a harness rejects a changed model or other setting while resuming, that is an ordinary
-  launch failure; restart again with settings the harness accepts. After a Restart request has waited about two seconds,
-  an adjacent status shows a spinner, the host and elapsed seconds, updated about once a second until the reply arrives.
-  Restart makes no promise that a second press is harmless. Bash and Zsh have no conversation to resume. Their Restart
-  actions are unavailable, and Replace starts a fresh shell.
+  recovered). The new terminal starts with its default palette, so a program's palette changes can leave its old lines
+  looking different after Restart. If the new terminal does not start and Farhelm confirms that the failed start has
+  ended, the session keeps its previous terminal, its agent stopped, and Restart can be tried again; when Farhelm cannot
+  confirm that, the session is left with no terminal and its next Restart starts an empty one. The new terminal starts
+  empty instead, with a log entry, when the old one's scrollback cannot be read or copied. When the terminal no longer
+  exists (the process that kept it ended, or the host rebooted), Restart starts with an empty one. Restart does NOT
+  preserve the previous run's last visible screen: the terminal is blank until the new agent draws, and a full-screen
+  program's final frame (which was never in scrollback to begin with) is gone. Losing it is accepted. Farhelm must never
+  capture a terminal's screen and paint it back into a relaunched terminal ahead of the new process — a frame with no
+  process behind it looks live, accepts typing, and is overwritten when the real program draws, which is worse than
+  blank. Restart touches the agent terminal only: the session's open terminal tabs keep running in their own terminals
+  until they are closed. Restart may carry changed launch settings (Restart with, below); the launch kind, agent type,
+  host, and working directory remain fixed. If a harness rejects a changed model or other setting while resuming, that
+  is an ordinary launch failure; restart again with settings the harness accepts. After a Restart request has waited
+  about two seconds, an adjacent status shows a spinner, the host and elapsed seconds, updated about once a second until
+  the reply arrives. Restart makes no promise that a second press is harmless. Bash and Zsh have no conversation to
+  resume. Their Restart actions are unavailable, and Replace starts a fresh shell.
+
 - **Restart with** opens the session launcher in restart mode before resuming the session's own or a user-named
   conversation. It edits model, effort, permissions, wrapper prefix and conversation for an agent launch, or command,
   resume command and YOLO assertion for a command launch. Launch kind, agent type, host, folder or destination, session
@@ -2153,14 +2156,14 @@ submission and focus-return behavior.
   that checkout and explain that the replacement keeps working in it with its changes. For a source in a managed
   checkout, selecting Managed checkout warns below Where that the replacement starts from a fresh clone and that
   replacing the old checkout's last session moves it to the host's trash, as described under Managed checkouts. Its
-  launch button is the confirmation of that delete: while the source has anything alive, the launcher shows Replace's
+  launch button confirms the delete. While the source's main program or any tab is alive, the launcher shows Replace's
   warning about the source beside it, following the source's state as the client sees it while the launcher stays open,
   and launching carries the precondition matching what the launcher showed at the click (see the confirmation rule
   below). A source that has more alive by then, such as one restarted while the launcher was open, is kept: the new
   session is still created first, with no liveness check before it, and the user gets Replace's both-sessions-exist
   error.
 - **Delete** removes the session and its stored state, in any state, terminating the agent or shell and its tabs if
-  running — with confirmation that says so when anything is still alive, unless session confirmations are skipped
+  running. The confirmation names the main program or open tabs when present, unless session confirmations are skipped
   (below). Deletion may make partial progress before failing, including removing attachment files while retaining the
   session row for retry. There is no rollback guarantee. Report the failure visibly and allow a later Delete to finish
   cleanup; a retained row does not mean previously removed state has been restored. Stopping a live agent or shell can
@@ -2168,9 +2171,9 @@ submission and focus-return behavior.
   confirms the whole process tree is gone. From the moment a delete is committed until that answer arrives, the client
   that started the delete shows it prominently, as an expected wait rather than an error: the row shows a spinner and
   what is happening in place of its title (stopping the agent or shell, stopping its terminal tabs when only those are
-  alive, or, when nothing was alive, deleting), the open session's header shows the same in place of its actions, and a
-  scrim over its terminal says it again. The terminal's own "Detached" notice, which the delete itself causes, is held
-  back meanwhile; if the delete fails, the row and header come back with the refusal shown, and a held notice appears.
+  alive, or deleting if both have ended), the open session's header shows the same in place of its actions, and a scrim
+  over its terminal says it again. The terminal's own "Detached" notice, which the delete itself causes, is held back
+  meanwhile; if the delete fails, the row and header come back with the refusal shown, and a held notice appears.
 
 The off-by-default **Skip session confirmations** switch in Settings skips session row, header and bulk Stop, session
 row and bulk Delete, row Replace, header Restart, Replace and Delete, interrupted-card Replace, and terminal-tab Close.
@@ -2202,6 +2205,10 @@ skipping its question again if the setting remains on. No refusal opens a confir
 reachable in ordinary use because the command line and agents act on sessions while a GUI is open (see One GUI at a
 time). Accepted: a terminal tab opened between a prompt that named open tabs (alone, or together with stopping the
 agent) and the click is closed with the others; the prompt need not name the exact tabs it showed.
+
+Leftover background jobs are an exception to the confirmation rule. When the main program has exited, consent for Stop,
+Delete or Replace also covers those jobs. The operation reaps the ones it can identify within the containment limits
+below.
 
 Process-tree ownership is session-wide. Restart reaps leftover descendants within the containment limits below before
 relaunching. Stop and delete reap the agent's processes within those same limits. An agent exiting on its own does not
@@ -2266,15 +2273,16 @@ crash that lands at one exact moment of an operation, or to two independent rare
 systemd probe, a transient database read failure and a host that reports no identity, a lost report and a reused process
 number, and the like). Under those conditions it is accepted that a process on any host, the helm machine's own
 included, is left untracked, is later killed without the usual warning, or keeps running beside a relaunch or a new
-launch (Replace, New or Clone) in the same folder; that a session's recorded conversation is wrong until the agent next
-reports one, so Restart may resume a different conversation of that agent; or that the helm reconnects a host to its
-previous destination until the next reload. These are exceptions to Restart reaping leftover descendants before it
-relaunches, to failing visibly when cleanup is unconfirmed, to Restart resuming the conversation the agent last
-reported, and to a corrected destination taking effect, for those conditions only. In the maintainer's words, they are
-accepted when they are of the "the process on the remote host got killed" kind. Conversation tracking also has the
-accepted limits under Durability and resume, which need no crash or coinciding faults. Corrupting the supervisor's or
-the helm's database, bricking an installation, or similar lasting damage is never accepted, however unlikely the
-trigger.
+launch (Replace, New or Clone) in the same folder; that the main terminal can remain unattachable until the next
+supervisor start if its terminal host's socket was still missing during startup discovery; that a session's recorded
+conversation is wrong until the agent next reports one, so Restart may resume a different conversation of that agent; or
+that the helm reconnects a host to its previous destination until the next reload. These are exceptions to Restart
+reaping leftover descendants before it relaunches, to terminal attachment after supervisor recovery, to failing visibly
+when cleanup is unconfirmed, to Restart resuming the conversation the agent last reported, and to a corrected
+destination taking effect, for those conditions only. In the maintainer's words, they are accepted when they are of the
+"the process on the remote host got killed" kind. Conversation tracking also has the accepted limits under Durability
+and resume, which need no crash or coinciding faults. Corrupting the supervisor's or the helm's database, bricking an
+installation, or similar lasting damage is never accepted, however unlikely the trigger.
 
 ### Session view
 
@@ -2315,10 +2323,10 @@ an exited agent stays viewable with its scrollback — because a tab's shell exi
 A shell that dies before the tab's open completes still refuses the open loudly, with the shell's last words as the
 error.
 
-For as long as the app runs, the session view remembers the last terminal you chose in each session. It shows the agent
-terminal if you chose Agent or if the remembered tab is gone or unavailable to attach. If the session opens before its
-tab list arrives, Agent is available while the list loads. The remembered tab opens when it arrives if you have yet to
-press a key or click.
+For as long as the app runs, the session view remembers the last terminal you chose in each session. It shows the main
+terminal if you chose it or if the remembered tab is gone or unavailable to attach. The main tab is **Shell** when the
+session is known to run Bash or Zsh, and **Agent** otherwise. The main terminal is available while the tab list loads.
+The remembered tab opens when it arrives if you have yet to press a key or click.
 
 When a reachable host reports that a session has no agent terminal, the pane shows its metadata and a recovery card. The
 card explains the missing terminal and offers Restart when the session can resume, plus Replace (or Replace with for a
@@ -2969,8 +2977,9 @@ error, changed screen, recognized wait, or enough unchanged samples replaces the
 session with no cached status remains unclassified during that gap. An unclassified session restarts without asking,
 like any agent that does not read working (see Lifecycle operations), even though its terminal may be live.
 
-An interrupted session stays interrupted until the user acts: opening it and declining resume leaves it interrupted;
-restart or delete are the ways out.
+An interrupted session stays interrupted if the user opens it and declines resume. Restart is available for sessions
+that can resume. Replace starts a fresh shell for an interrupted Bash or Zsh session. The user can also delete the
+session.
 
 How a status is DRAWN depends on how much it has to say. The three live states are a color-coded dot beside the
 session's title — running pulses, waiting and idle do not — with the status word itself always present as text for
@@ -3050,9 +3059,9 @@ no stamp, and the session's creation time stands in as the displayed age. A sess
 all, never one counted from 1970.
 
 Running/waiting/idle discrimination for raw TUIs is inherently heuristic, and the waiting/idle boundary especially so.
-The bar: best-effort observation of the agent's screen, through one screen reader per agent type. The generic reader,
-used by every agent without a dedicated one, knows nothing about the agent: a screen that keeps changing is running, one
-that stopped changing is idle, and it never reports waiting. Claude Code, Codex and Muse have dedicated readers that
+The bar is best-effort observation of the agent's screen, through one screen reader per agent type. The generic reader,
+used by every agent without a dedicated one, reports running when sampled text changes and idle after consecutive
+unchanged samples, and it never reports waiting. Claude Code, Codex and Muse have their own dedicated readers that
 recognize what those agents draw — their busy indicators, their input prompt at rest, and verified question dialogs
 (workspace trust only for Muse) — and answer from that, so an idle agent's own redraws read idle. A screen they
 recognize as carrying no state (a menu the user opened) leaves the previous status in place, and a screen they do not
@@ -3070,6 +3079,9 @@ agent. Users install the documented Grok and Antigravity hooks themselves to ena
 launch before those hooks are installed. OMP and Grok use generic activity only. Their approval prompts, and
 Antigravity's, show the generic running/idle classification, never waiting — a settled scope decision, not a reader
 waiting to be written.
+
+Status also determines whether Suspend asks about activity. A mistaken reading can skip or add that question. Suspend
+still preserves the frozen processes.
 
 **Ntfy alerts** optionally reach the user away from the screen. Once enabled and configured in settings, the helm sends
 one alert when a session becomes waiting and remains so for 10 seconds, once per waiting spell. Leaving and re-entering
@@ -3153,9 +3165,10 @@ Other than ntfy waiting alerts, desktop or operating-system notifications are no
 Notifications about a host or the whole app have a separate bell at the top of the navigation rail's footer, above
 Hosts. It uses the same 16px size and quiet colors as its neighboring controls. Unread items make it filled red with an
 unread count; its accessible name reports that count too. Clicking opens newest-first history beside the bell. Escape,
-clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and marks only the items it
-showed as read. The bell then goes quiet; a failed best-effort mark may leave it loud until another close. Resolved
-items are quiet even if never opened, stay greyed in the panel, and can be removed with **Clear resolved**. Read and
+clicking outside, clicking the bell again or leaving the panel with keyboard focus closes it and marks the unread items
+in its last displayed list as read, including items outside the viewport. The bell then goes quiet; a failed best-effort
+mark may leave it loud until another close. Resolved items are quiet even if never opened and stay greyed in the panel.
+**Clear resolved** removes the resolved items in the last displayed list, including items outside the viewport. Read and
 cleared state is kept by the helm across resets and restarts. Removing a host removes its notices; an unreachable host
 keeps its last known notices.
 
@@ -3195,9 +3208,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - Full fidelity: colors, cursor movement, alternate screens, resize. If it works over plain SSH it must work here. The
   default palette, foreground, and background are Ghostty's defaults, and launched agents see `COLORTERM=truecolor`.
 - Decided 2026-11-21: that fidelity targets what common agent CLIs and shells use. The terminal need not match xterm in
-  rare modes, chords and wide-character edge cases (only the oldest X10 mouse mode, AltGr held with Shift+Enter, copying
-  across a wide character cut by a selection edge, lines wrapped over a thousand rows). A program-set cursor color is
-  not supported: the cursor keeps the theme's color.
+  rare modes, decorations, chords and wide-character edge cases (only the oldest X10 mouse mode, overline via SGR 53,
+  AltGr held with Shift+Enter, copying across a wide character cut by a selection edge, lines wrapped over a thousand
+  rows). A program-set cursor color is not supported: the cursor keeps the theme's color.
 - Settings can color the thin frame around every session's terminal with that session's host identity color. This is off
   by default and shared by every device. When on, a host with the default color uses the ordinary foreground color;
   every other host uses its chosen icon color at full strength. A host color change updates open session frames through
@@ -3264,7 +3277,7 @@ whatever the agent renders is what you see. There is no composer, no message abs
   before it crashed. After a gap the terminal carries on from its state before the lost output (after a supervisor
   restart, its latest checkpoint) with the output kept after it, the supervisor asks the program to redraw by making its
   terminal one row smaller and back, and the terminal shows "Some earlier output could not be recovered" above its
-  scrollback until the supervisor next restarts. What a gap cannot bring back: the lines the lost output put into the
+  scrollback for that terminal runtime's lifetime. What a gap cannot bring back: the lines the lost output put into the
   scrollback; the screen, until the program redraws it (agents and other full-screen programs redraw when their terminal
   is resized; a shell at its prompt does not, so its screen can show older contents with newer output drawn over them);
   any mode the lost output changed, such as the alternate screen, mouse reporting, bracketed paste or application cursor
@@ -3281,6 +3294,8 @@ whatever the agent renders is what you see. There is no composer, no message abs
   recovery from that checkpoint rebuilds the terminal without them: it shows the same notice when scrollback was left
   out, which then stays until the program clears its scrollback or the scrollback has turned over, and asks the program
   to redraw when the screen was left out.
+
+  When the supervisor has to adopt the terminal again, it can recover the terminal without the gap notice.
 - Opening a session attaches to it — and opening a CLIENT counts as opening a session. A freshly loaded client and a
   client whose open session disappears use the same choice: the first currently listed session in the helm's shared
   visit history, excluding the session just removed, else the newest-created listed session. While history is empty, the
@@ -3422,10 +3437,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   clipboard write, including a primary-selection write, suppresses it during the grace window. Clipboard operations are
   explicitly best-effort and silent on failure — the operating system's clipboard behavior is outside this system's
   control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule below, not a
-  lapse in it. Farhelm assumes the host's system clipboard works. A broken, hung or slow clipboard is not something
-  Farhelm adds complexity to support well: copies may be dropped while it is in that state, but nothing else in Farhelm
-  may stall because of it. On Wayland, keys typed while Farhelm is still fetching pasted text from the system clipboard
-  may reach the terminal before that text.
+  lapse in it. Farhelm assumes the host's system clipboard works. Copies may be dropped while it is broken, hung or
+  slow. A terminal paste the user starts on macOS may stall the window while the system clipboard supplies its contents.
+  Farhelm must stay responsive during other clipboard operations. On Wayland, keys typed while Farhelm is still fetching
+  pasted text from the system clipboard may reach the terminal before that text.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -5088,6 +5103,9 @@ release downloads or clipboard writes:
 - other hosts;
 - removing a host, which must respond promptly whatever that host is doing, if only to refuse because it is busy.
 
+The helm may plan and start background automatic updates one host at a time with bounded waits, provided interactive
+service to the other hosts keeps running.
+
 "Must not wait" is about the length of those operations, not about every moment of them. Terminal input and output,
 attaching, detaching and resizing may wait briefly on bounded local work that one of those operations does under a lock
 the terminals share, such as a delete's renames, directory syncs and final database commit, or the bounded shutdown of
@@ -5546,10 +5564,11 @@ unsafe rendering of remote input by the helm or GUI, secret disclosure, or viola
 
 Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions: the remembered
 permission mode and the recent setups the New dialog offers. Each is recorded from the user's own selection in the
-request that succeeded, never from what a host replies or lists. A supervisor's create reply, the settings a plain
-Replace copies from a listed row, and anything an agent creates do not qualify, because none of them is a choice the
-user made in the GUI. A choice is still recorded only once its create succeeds; the host's success decides whether it is
-recorded, never what.
+request that succeeded. A supervisor's create reply, the settings a plain Replace copies from a listed row, and anything
+an agent creates do not qualify, because none of them is a choice the user made in the GUI. A choice is recorded only
+once its create succeeds. When opt-in managed-checkout trust applies to an existing folder, the helm records the host's
+canonical path for that folder. The same path is used for the launch so the folder selected for trust stays the same
+through approval and dispatch.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
 from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from
@@ -5670,10 +5689,11 @@ The conversation-tracking limits under Durability and resume apply to every harn
 accept is not the lost user work this allowance excludes. They include the session's Resume target being replaced by a
 Goose sub-agent, a nested Goose run, or a child Pi that loads Farhelm's reporter, or withdrawn by such a Pi.
 
-Bash and Zsh shell sessions have basic activity reporting from the generic reader. It reports Running while the screen
-changes and Idle after the screen has been still for a few seconds, whether or not a prompt is visible. A program that
-keeps redrawing, such as `top`, reads Running as long as it does so. A command that prints nothing for a while reads
-Idle. Shell sessions have no agent Waiting state or conversation tracking.
+Bash and Zsh shell sessions have best-effort activity reporting from the generic reader. It samples a bounded amount of
+text from the bottom of the visible screen, so redraws elsewhere can go unnoticed. It reports Running when samples
+change and Idle after consecutive unchanged samples, regardless of whether a prompt is visible. The time to Idle can
+grow as more live sessions share the same host's sampling budget. Shell sessions have no agent Waiting state or
+conversation tracking.
 
 ### Supported user environments
 
@@ -5710,12 +5730,13 @@ shows **Sign-in needed** and waits for an explicit retry. A connection that drop
 again on reconnect. A failure before any question still retries automatically. Answers are sent to SSH without storing
 or logging them.
 
-The question opens beside its attention row, with the connection's purpose and the host's question. It keeps the host's
-line breaks and escapes control characters. The answer is masked until **Show** is pressed. **Send** or Enter answers.
-**Cancel** stops the connection attempt. A security-key notice gives the touch instruction and **Cancel**, and closes
-when SSH stops waiting for the touch. The host's rail avatar carries an amber key while sign-in is waiting or needed.
-Hosts and the unavailable session card each offer **Sign in**. An open question can play a chime under **Settings →
-Notifications → SSH sign-in**, on by default.
+An automatically opened question can appear beside a visible **Answer** or **Sign in** control in the attention row,
+Hosts or the unavailable session card. Pressing one of those controls opens the pending question beside it. The popover
+shows the connection's purpose and the host's question, keeping the host's line breaks and escaping control characters.
+The answer is masked until **Show** is pressed. **Send** or Enter answers. **Cancel** stops the connection attempt. A
+security-key notice gives the touch instruction and **Cancel**, and closes when SSH stops waiting for the touch. The
+host's rail avatar carries an amber key while sign-in is waiting or needed. Hosts and the unavailable session card each
+offer **Sign in**. An open question can play a chime under **Settings → Notifications → SSH sign-in**, on by default.
 
 Add host shows the setup connection's question inside the dialog, below the destination field. Cancelling this sign-in
 stops the check and keeps the destination and alias. The sessions connection may ask again after the dialog closes.
@@ -5863,10 +5884,11 @@ accepts it or chooses an earlier base. There is no automatic waiting threshold.
 
 Below-floor installations are refused by the target release's installer, for both app-initiated and Terminal updates,
 with an uninstall-then-reinstall remedy. The app recognizes that refusal and keeps a reinstall warning; older apps show
-an ordinary install failure instead. The helm refuses Update of a below-floor supervisor, on either protocol path and
-again when a retained plan executes, with the manual host recovery described in Topology. Development builds and
-unparseable versions are not evidence that an installation or host is below the floor. Release candidates and dev
-releases use ordinary SemVer precedence, so a floor release's own prereleases are below it.
+an ordinary install failure instead. The helm refuses Update when it observes a supervisor version below the floor, on
+either protocol path and again when a retained plan executes, with the manual host recovery described in Topology. An
+unobserved supervisor version, including when the supervisor is stopped, gives the helm no evidence that the host is
+below the floor. Development builds and unparseable versions are also exempt from the version comparison. Release
+candidates and dev releases use ordinary SemVer precedence, so a floor release's own prereleases are below it.
 
 The floor constrains update mechanics, not stored-data formats. Uninstall keeps local data, and the remote remedy lets
 the user keep the host's data directory too; a reinstall does not promise that every feature can read that older data.

@@ -32514,3 +32514,403 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Deferred to the Near term TODO entry "Consolidate the helpers duplicated across Farhelm." in `TODO.md`.
   Change `ptynkxqvpxkz`, bookmark `plan/triage-bookkeeping/02-duplicated-code-todo`,
   [PR #4466](https://github.com/scode/farhelm/pull/4466/changes).
+
+## guarded-delete-replace-omits-surviving-shell-work.md
+
+- Outcome: `fix spec`.
+- Assessment: After a shell session's main shell exits, background jobs it left in the session can keep running. Delete
+  or Replace then shows "nothing is running" (or asks nothing) or names only tabs, and still kills those jobs. Agent
+  approval cards for Delete do the same. Verified: SPEC.md lifecycle (~2147): "An agent exiting on its own does not
+  trigger a hunt for daemonized survivors; the session's next restart or its teardown does." The refusal rule names only
+  "the agent or any terminal tab". Teardown sweeps the whole session. I did not re-trace the supervisor guard line by
+  line.
+- Decision: Q3, the maintainer picked "Hang up shells; accept the reaping". (2026-11-21 fewest-questions triage page
+  (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of
+  plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Add to SPEC: a Stop, Delete or Replace prompt for a session whose main program has ended covers
+  its leftover background jobs, and teardown reaps them. No code change. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## tabs-only-stop-ends-surviving-shell-jobs.md
+
+- Outcome: `fix spec`.
+- Assessment: After the main shell exits, Stop asks only "Close N terminal tabs?" but also kills background jobs the
+  shell left in the session. Verified: SPEC.md Stop (~2037–2043) says Stop "terminates the agent, shell or command and
+  its entire process tree" and, with the main terminal ended, "asks about the tabs alone". The reap of the old launch
+  scope is consistent with "its next restart or its teardown does" the survivor hunt.
+- Decision: Q3, the maintainer picked "Hang up shells; accept the reaping". (2026-11-21 fewest-questions triage page
+  (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of
+  plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Add to SPEC: a Stop, Delete or Replace prompt for a session whose main program has ended covers
+  its leftover background jobs, and teardown reaps them. No code change. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## shell-main-tab-spec-still-says-agent.md
+
+- Outcome: `fix spec`.
+- Assessment: The spec says a session opens on its Agent tab, while Bash and Zsh sessions actually label that tab Shell.
+  Verified: SPEC.md ~2300-2301 still says "It shows the agent terminal if you chose Agent… Agent is available while the
+  list loads". The code labels the main tab Shell for shell rows (terminal/set.rs ~692-712). No spec text names the
+  Shell label.
+- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the spec passage as the Assessment describes, following the shell-naming principle.
+  Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## shell-recovery-spec-omits-replace.md
+
+- Outcome: `fix spec`.
+- Assessment: The Status spec says restart or delete are the only ways out of an interrupted session. For a Bash or Zsh
+  session, Restart is unavailable and Replace is the way out. Verified: SPEC.md ~2953-2954 says "restart or delete are
+  the ways out". SPEC.md ~2077-2078 says "Their Restart actions are unavailable, and Replace starts a fresh shell". The
+  code follows the second. This is an internal spec inconsistency, so the clearly-settled rule does not apply.
+- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the spec passage as the Assessment describes, following the shell-naming principle.
+  Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## late-bound-agent-host-misses-adoption.md
+
+- Outcome: `fix spec`.
+- Assessment: If the supervisor crashes while an agent's terminal is starting, and that terminal finishes starting only
+  after the replacement supervisor's startup scans, the agent keeps running but Farhelm cannot open its terminal until
+  another supervisor restart. Verified: I did not re-trace the handover code; the reviewer traced it at ca9b0a198.
+  SPEC.md (~2245): "Confirmed 2026-10-10 ... They do not extend to a supervisor crash that lands at one exact moment of
+  an operation ... it is accepted that a process ... is left untracked ...". Its enumerated exceptions do not name
+  attachment.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Covers it. Fix spec (widen the wording to "left
+  untracked or unattachable until the supervisor next starts"), then discard. Remove the feedback file and its index
+  entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## canonical-folder-history-contract-conflict.md
+
+- Outcome: `fix spec`.
+- Assessment: With managed-checkout trust on, the folder remembered for later launches can be the host's resolved
+  (canonical) path rather than the spelling the user typed. Verified: Confirmed mechanism (workspace_trust.rs replaces
+  cwd, carried into history). SPEC.md ~5528-5533: future defaults come "never from what a host replies". SPEC_impl.md
+  ~3530-3532: "When trust is granted, the helm carries that canonical cwd through approval, dispatch and history". The
+  two rules conflict, and no harm is established (same directory, same host).
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Yes. Fix spec: add the managed-trust canonical-path
+  exception to the "never from host replies" rule. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## fresh-claude-trust-birthtime-contract-conflict.md
+
+- Outcome: `fix spec`.
+- Assessment: On a filesystem with no creation times, the opt-in Claude trust for a brand-new managed checkout is still
+  granted on its first launch, although another rule says a checkout without a creation time gets no automatic trust.
+  Verified: Confirmed mechanism per reviewer (trust.rs edits without checking for a creation time). SPEC.md ~1721-1724
+  explicitly trusts "new managed checkouts ... immediately before the agent starts". SPEC.md ~1901-1906 says a checkout
+  recorded without a creation time "does not trust its agent automatically", which reads as aimed at later sessions in a
+  recorded checkout.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Fix spec. Say the creating launch of a fresh
+  checkout is exempt, since the folder was just created. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## automatic-update-planning-serializes-hosts.md
+
+- Outcome: `fix spec`.
+- Assessment: With automatic host updates on, the helm plans each host's update one at a time, so a slow host (slow SSH,
+  or a held environment-delete lock of up to 240 s) delays when later hosts' automatic updates begin. Nothing
+  interactive waits; only the background start order is delayed. Verified: automatic.rs `scan` loops over hosts and
+  awaits `plan_update` + `start_automatic_update` per host serially (confirmed). Each wait is bounded. The 240 s second
+  wait was not re-traced. SPEC.md "Waiting between operations on one host" says "other hosts" must not wait on slow
+  work; "Slow hosts" says one slow host "must not stop the helm serving the others". Neither says whether background
+  automatic-update scheduling counts.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Allow it. Fix spec with one sentence saying
+  background automatic-update starts may be serialized with bounded waits as long as interactive service to other hosts
+  is unaffected. No code change. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## host-restart-history-painter-omits-palette.md
+
+- Outcome: `fix spec`.
+- Assessment: If a program redefined terminal colors (OSC 4), a Restart carries the old scrollback over as color
+  numbers. The new terminal's default palette then shows those lines in different colors. Verified: Accepted from the
+  file (the history painter emits indexed SGR without the palette; the viewer resolves against the new palette).
+  SPEC.md:2059-2062 says Restart keeps scrollback "above a blank screen in default modes. What is carried over is the
+  scrollback's text with its colors". It does not say whether "its colors" means displayed colors or color references.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Fix spec to say carried-over colors are the
+  program's color references, shown in the new terminal's default palette. Few agents redefine the palette. Remove the
+  feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## recovery-gap-notice-lifetime-contract-conflict.md
+
+- Outcome: `fix spec`.
+- Assessment: After a terminal lost some output, "Some earlier output could not be recovered" is supposed to stay above
+  the scrollback until the supervisor restarts. If the supervisor reconnects to that terminal during the same run, the
+  notice can disappear early. Verified: Real conflict. SPEC.md (terminal experience, gap paragraph) says "until the
+  supervisor next restarts". SPEC_impl.md ("A gap never resets a healthy emulator ... for as long as that runtime runs:
+  a snapshot cannot carry the mark") says the notice lasts only while the terminal's runtime runs. The code matches
+  SPEC_impl.md. I did not trace the same-supervisor re-adoption path end to end.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec. Narrow SPEC.md to "while the supervisor
+  keeps that terminal connected (at most until it restarts)". Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## stopped-host-update-floor-unresolved.md
+
+- Outcome: `fix spec`.
+- Assessment: Update on a host whose supervisor is stopped. If its installed Farhelm is below the upgrade floor, Update
+  still goes ahead because nothing reads the installed version. Verified: Confirmed that the Absent probe proceeds
+  without reading the version. SPEC.md ~L5847-5849 says the helm refuses Update of a below-floor supervisor "on either
+  protocol path and again when a retained plan executes". The remedy text in SPEC.md ~L145-147 names "the executable the
+  host reported", which implies a supervisor that answered. SPEC.md also says dev builds and unparseable versions are
+  "not evidence" of being below the floor.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: Fix the spec: the floor gates observed versions,
+  and an unobserved version is not evidence, matching the dev-build exemption. Discard the code change. Remove the
+  feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## trailing-terminal-grid-lacks-sgr53-overline-after-old-route-retirement.md
+
+- Outcome: `fix spec`.
+- Assessment: Text a program draws with overline (SGR 53) shows without the line. The removed old renderer could draw
+  it. Verified: no overline handling in `vendor/vte` or the GUI, and no "overline" anywhere in the spec. SPEC.md ~3178
+  (decided 2026-11-21, #4396): "that fidelity targets what common agent CLIs and shells use. The terminal need not match
+  xterm in rare modes ..." Its list of examples does not name overline.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (name rare SGR decorations such as
+  overline among the accepted gaps), then discard. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## older-catalog-model-overrides-custom-owner.md
+
+- Outcome: `fix spec`.
+- Assessment: In a launch draft, switching agent can keep a model typed as custom for the old agent when the new agent's
+  catalog has an older model with the same name. Verified: `farhelm-proto/src/launcher.rs:181-213` counts a destination
+  catalog row (`candidate.harness == harness`) as ownership regardless of whether the source choice was custom.
+  SPEC_impl.md says "the custom model's owning agent type is tracked so a later change of agent type clears it", while
+  the same function deliberately keeps a destination-catalog model ("keeps a bare `gpt-6-luna` moved to OpenCode as
+  OpenCode's model"). The kept model is a real catalog model of the new agent and stays visible before launch.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (destination catalog rows win; custom
+  ownership clears only spellings the destination does not know), no code change Remove the feedback file and its index
+  entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## auto-sign-in-uses-session-anchor.md
+
+- Outcome: `fix spec`.
+- Assessment: If the sidebar's Answer is scrolled out of view, an automatically opened sign-in question can appear
+  beside the open session's card instead. Verified: every drawn sign-in action (attention row, Hosts, session card)
+  defers `consider` with its own anchor (`sign_in.rs:513-521`), and a visible one opens the shared popover (280-286).
+  SPEC.md: "The question opens beside its attention row." Restricting automatic opens to the attention row needs choices
+  about explicit Sign in and the Hosts surface.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec, no code change Remove the feedback file
+  and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## notice-panel-marks-offscreen-rows.md
+
+- Outcome: `fix spec`.
+- Assessment: In the rail's notifications panel, closing the panel marks every unread notice as read, including ones
+  scrolled out of view, and Clear resolved removes resolved ones the user never scrolled to. Verified: rail_notices.rs
+  ~456-465 builds `unread_shown` and `resolved_shown` from the whole store collection on render, not from viewport
+  visibility. The panel scrolls. SPEC.md ~3137 says close "marks only the items it showed as read", and SPEC_impl.md
+  ~8353 says "the unread notices the last frame drew". The point of those words is notices that arrive after the frame.
+  Whether "showed" means rendered in the list or visible in the viewport is a reading, not stated text.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (define it as listed in the open panel;
+  the code already does this) and discard the code change. Rail notices are few, and history beyond the viewport is a
+  minor loss. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## shell-status-samples-visible-tail.md
+
+- Outcome: `fix spec`.
+- Assessment: A Bash or Zsh session in a large window, running a program that redraws only near the top of the screen,
+  can read Idle while visibly active. A false Idle also skips the extra activity question before Suspend. Verified: The
+  file cites ticker.rs sampling `screen_tail(SAMPLE_TAIL_BYTES)` with a 4096-byte limit. An 80x24 screen fits whole, so
+  only large terminals are affected. SPEC.md "Status" ~3033 says status is "best-effort observation… Wrong status must
+  be cosmetic only". SPEC.md ~5655 for shells: "A program that keeps redrawing, such as `top`, reads Running as long as
+  it does so". That sentence does not mention the sampled region.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (say shell activity is the generic
+  best-effort reading of the lower screen and may miss changes elsewhere) and discard the code change. Remove the
+  feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## shell-idle-spec-omits-sampling-cadence.md
+
+- Outcome: `fix spec`.
+- Assessment: The spec says a quiet shell turns Idle "after a few seconds". On a host with many sessions it can take
+  about 12 seconds. Verified: SPEC.md ~5655 says "Idle after the screen has been still for a few seconds". SPEC_impl.md
+  explains that cadence grows with the fleet. The file's derivation is from source only.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (drop "a few seconds" or say it grows with
+  sessions per host). Or discard. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
+
+## tensorlake-lifecycle-loses-running-evidence.md
+
+- Outcome: `fix spec`.
+- Assessment: After a failed explicit Suspend or Resume that did see the sandbox running, a later pause from outside
+  Farhelm can be labelled with the old "suspended by Farhelm at …" time. Verified: The lifecycle path's Running read is
+  not fed to the actor's `running_seen_at`. The actor records Running only through `record_running` (manager.rs ~4892).
+  Code is unchanged since 405b3a3dc apart from unrelated #4416. SPEC_impl.md "Explicit Tensorlake Suspend…" (~6816-6820)
+  already accepts several misattribution routes ("This affects wording"), but not this one.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: fix spec (generalize the existing "This affects
+  wording" limitation to failed operations, quits and stale reads) and discard code changes for all five Tensorlake
+  items. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed in the shared “This affects wording” limitation
+  under Tensorlake hosts in SPEC_impl.md.
+
+## tensorlake-timestamp-clear-delayed-by-dial.md
+
+- Outcome: `fix spec`.
+- Assessment: Quitting Farhelm while it is retrying the connection to a running sandbox can keep an obsolete Suspend
+  time, which may then be shown for a later, different pause. Verified: manager.rs ~4199-4200 dispatches
+  `retire_suspend_attribution` only after `connect_phase` returns, so not during a long retry ladder. Shutdown aborts
+  without flushing.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
+  file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed in the shared “This affects wording” limitation
+  under Tensorlake hosts in SPEC_impl.md.
+
+## tensorlake-reprobe-moves-observed-time.md
+
+- Outcome: `fix spec`.
+- Assessment: If a Tensorlake status check fails once and the fallback dial also fails, the same suspension can later
+  show a newer "noticed" time. Verified: Source-only, per the file. It predates 405b3a3dc. The comment at manager.rs
+  ~612 overstates what is preserved.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code). The overstated
+  comment at ~612 could be reworded in the spec PR. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed in the shared “This affects wording” limitation
+  under Tensorlake hosts in SPEC_impl.md. Also corrected the observation-time comment.
+
+## tensorlake-stale-registry-skips-timestamp-clear.md
+
+- Outcome: `fix spec`.
+- Assessment: If the helm's registry re-reads fail after an explicit Suspend, a later successful reconnect skips
+  clearing the stored Suspend time. A quit then keeps it for a later pause. Verified: `retire_suspend_attribution`
+  (manager.rs ~4906-4920) clears only when the actor's cached row carries a stamp older than the Running evidence. A
+  stale cached row without the stamp skips the clear. SPEC_impl.md ~6765-6766 says the snapshot ignores retired times
+  despite stale reads, but that is in memory only.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
+  file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed in the shared “This affects wording” limitation
+  under Tensorlake hosts in SPEC_impl.md.
+
+## tensorlake-quit-rewrites-cleared-suspend-time.md
+
+- Outcome: `fix spec`.
+- Assessment: Quitting exactly while an explicit Suspend finishes can write back an earlier Suspend time that Farhelm
+  had just cleared, so the next launch shows the old attribution. Verified: Source-only, per the file. It needs quit to
+  overlap the window between the actor's clear and the lifecycle callback. Code is unchanged since 405b3a3dc.
+- Decision: Q9, the maintainer picked "Approve as listed" (write the current behavior into the spec). (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Apply the recommendation with no code change: same (fix spec, discard code) Remove the feedback
+  file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed in the shared “This affects wording” limitation
+  under Tensorlake hosts in SPEC_impl.md.
+
+## macos-terminal-paste-blocks-gui-thread.md
+
+- Outcome: `fix spec`.
+- Assessment: Pasting into a terminal on macOS reads the clipboard on the window's main thread. When the clipboard is
+  slow to deliver its contents (for example Universal Clipboard pulling text copied on an iPhone, or a hung app that
+  owns the clipboard), the whole Farhelm window freezes until it arrives. Verified: Confirmed.
+  `vendor/gpui-pre-macos/src/platform.rs` `read_from_clipboard_async` returns `Task::ready(read_payload())`. Its comment
+  says this is deliberate, to keep AppKit's thread ownership, and admits the read still blocks. SPEC.md ~3406-3408: "A
+  broken, hung or slow clipboard ... nothing else in Farhelm may stall because of it." The code contradicts that, but
+  the choice was deliberate, so this is not SETTLED.
+- Decision: Q5, the maintainer picked "Allow a requested paste to wait". (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: SPEC: a paste the user asked for may wait on a slow macOS clipboard; everything else keeps the
+  no-stall rule. No code change. Remove the feedback file and its index entry.
+- Execution: `rmrmvworuyoorsnuussorptztnyxqppn`, `plan/triage-spec-text/01-accepted-behavior`,
+  [draft PR](https://github.com/scode/farhelm/pull/4467/changes). Fixed as decided.
