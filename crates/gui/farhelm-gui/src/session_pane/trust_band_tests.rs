@@ -2,7 +2,8 @@
 //! buttons, its failure line, and which agent it speaks for. They port the old `claude-trust.spec.ts` and the band's
 //! half of `workspace-trust.spec.ts` (reference commit `24bc0580`), whose cases are named on the tests that replace
 //! them. The rules every agent's band shares are tested on Claude's; Codex's and Muse's tests cover what is the agent's
-//! own (its words, its switch, its dismissal and its occurrences).
+//! own (its words, its switch, its dismissal and its occurrences). Antigravity exercises those same actions in an
+//! ordinary directory, where the other hints are withheld.
 //!
 //! The window tests run the real main view over the helm client's fake, whose terminal streams the connection serves,
 //! and read what the window drew from GPUI's driver record of the frame. The open session is `a`, at the question of
@@ -68,6 +69,12 @@ const MUSE: Agent = Agent {
     switch: "settings-muse-trust",
     asking: muse_asking,
 };
+const ANTIGRAVITY: Agent = Agent {
+    route: "/api/checkout-agent-trust/antigravity",
+    field: "antigravity_trust_hint_dismissed",
+    switch: "settings-antigravity-trust",
+    asking: antigravity_asking,
+};
 
 /// The session filed under `key` at Claude's question, in the helm fixture's managed checkout, whatever its launch.
 fn claude_asking(key: &'static str) -> Fixture {
@@ -86,6 +93,16 @@ fn muse_asking(key: &'static str) -> Fixture {
     session(key)
         .launch(launched("muse"))
         .at_workspace_trust_question()
+}
+
+/// Antigravity's question in an ordinary directory. Clear both checkout ownership and launch provenance so neither
+/// can accidentally qualify the session for the managed-checkout hints.
+fn antigravity_asking(key: &'static str) -> Fixture {
+    session(key)
+        .launch(launched("antigravity"))
+        .at_workspace_trust_question()
+        .unmanaged()
+        .not_launched_as_checkout()
 }
 
 /// A structured agent launch of the harness whose wire name is `harness`, in the helm's wire form.
@@ -337,7 +354,7 @@ impl Trust<'_> {
 fn every_condition_withdraws_the_band_on_its_own() {
     let all = Facts {
         question: true,
-        managed: true,
+        eligible: true,
         agent_shown: true,
         trust: Some(false),
         dismissed: false,
@@ -348,7 +365,7 @@ fn every_condition_withdraws_the_band_on_its_own() {
     type Withdraw = fn(&mut Facts);
     let withdrawn: [(Withdraw, bool); 7] = [
         (|facts| facts.question = false, false),
-        (|facts| facts.managed = false, false),
+        (|facts| facts.eligible = false, false),
         (|facts| facts.agent_shown = false, false),
         (|facts| facts.trust = Some(true), false),
         (|facts| facts.trust = None, true),
@@ -737,7 +754,7 @@ const FLAG: &str = "Farhelm can answer it for managed checkouts through a comman
 /// The agent the band names decides whose switch it advertises and whose dismissal it stores, so a session must never
 /// borrow another agent's: the harness-neutral question flag says only that some agent asks (the old
 /// `TrustAgent::for_session`). Specified (`TrustAgent::asking`): Claude's own flag names Claude whatever the launch;
-/// without it, the neutral flag names Codex or Muse for a structured launch of that harness, and no agent for every
+/// without it, the neutral flag names Codex, Muse or Antigravity for a structured launch of that harness, and no agent for every
 /// other harness (Pi, whose approval is not a recognized question, and Claude, whose question has its own flag), for a
 /// command launch declaring Codex, or for a legacy session stored as Codex; with neither flag, no agent.
 #[test]
@@ -745,6 +762,7 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
     let flagged = [
         (LaunchHarness::Codex, TrustAgent::Codex),
         (LaunchHarness::Muse, TrustAgent::Muse),
+        (LaunchHarness::Antigravity, TrustAgent::Antigravity),
     ];
     let mut launches: Vec<(Value, Option<TrustAgent>)> = LaunchHarness::ALL
         .iter()
@@ -758,6 +776,10 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
         })
         .collect();
     launches.push((command_launch(), None));
+    launches.push((
+        json!({"kind": "command", "command": "agy", "yolo": false, "agent": "antigravity", "resume": null}),
+        None,
+    ));
     let legacy = json!({
         "kind": "legacy", "invocation": "codex", "agent_kind": "codex", "resume_template": null,
     });
@@ -789,19 +811,19 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
 /// SPEC.md: "Codex and Muse show the same nonmodal discovery hint ... The hint names the agent, offers Settings at its
 /// switch in Agent trust and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent" (the
 /// old `workspace-trust.spec.ts`, "${name} trust hint stays scoped to its managed agent terminal and own dismissal", its
-/// band half; the gates every agent's band shares are tested on Claude's above). Specified for `agent`, named `name`,
+/// band half; the gates every agent's band shares are tested on Claude's above). Specified for `agent`,
 /// with `other` the other flag-based agent: with `a` at `agent`'s question and its trust read off, the band shows the
-/// old words naming the agent and a Settings button; Settings opens with focus on `agent`'s switch once its read
+/// expected explanation and a Settings button; Settings opens with focus on `agent`'s switch once its read
 /// answers, and closing it reads `agent`'s trust again; × hides the band and stores nothing, `a` pushed at `other`'s
 /// question shows `other`'s band, and `a` pushed at `agent`'s question again shows the band, a new occurrence; Don't
 /// show again sends `agent`'s dismissal field alone, and with it stored the band stays away while `a` pushed at
 /// `other`'s question shows `other`'s.
-fn a_flag_agents_band_is_its_own(cx: &mut TestAppContext, agent: Agent, other: Agent, name: &str) {
+fn a_flag_agents_band_is_its_own(cx: &mut TestAppContext, agent: Agent, other: Agent, copy: &str) {
     let mut trust = open_as(cx, agent);
     trust.shown();
     assert_eq!(
-        test_support::label(trust.main.cx, COPY_ID),
-        Some(format!("{name} asks about trust for this checkout. {FLAG}"))
+        test_support::label(trust.main.cx, COPY_ID).as_deref(),
+        Some(copy)
     );
     assert_eq!(
         test_support::label(trust.main.cx, SETTINGS_ID).as_deref(),
@@ -856,13 +878,41 @@ fn a_flag_agents_band_is_its_own(cx: &mut TestAppContext, agent: Agent, other: A
 /// Codex's band, as [`a_flag_agents_band_is_its_own`] specifies it, with Muse as the other agent.
 #[gpui::test]
 fn codexs_band_is_its_own(cx: &mut TestAppContext) {
-    a_flag_agents_band_is_its_own(cx, CODEX, MUSE, "Codex");
+    a_flag_agents_band_is_its_own(
+        cx,
+        CODEX,
+        MUSE,
+        &format!("Codex asks about trust for this checkout. {FLAG}"),
+    );
 }
 
 /// Muse's band, as [`a_flag_agents_band_is_its_own`] specifies it, with Codex as the other agent.
 #[gpui::test]
 fn muses_band_is_its_own(cx: &mut TestAppContext) {
-    a_flag_agents_band_is_its_own(cx, MUSE, CODEX, "Muse");
+    a_flag_agents_band_is_its_own(
+        cx,
+        MUSE,
+        CODEX,
+        &format!("Muse asks about trust for this checkout. {FLAG}"),
+    );
+}
+
+/// An ordinary directory is enough to show Antigravity's hint. Its Settings action focuses the Antigravity switch,
+/// × lasts for the current question, and the saved dismissal leaves Codex's hint available.
+#[gpui::test]
+fn antigravitys_band_shows_in_an_ordinary_directory(cx: &mut TestAppContext) {
+    let row: SessionRow = serde_json::from_value(antigravity_asking("a").entry().value).unwrap();
+    assert!(
+        row.info.working_copy.is_none(),
+        "the premise: no managed checkout"
+    );
+    a_flag_agents_band_is_its_own(
+        cx,
+        ANTIGRAVITY,
+        CODEX,
+        "Antigravity asks whether to trust this folder. Farhelm can skip this question for plain folders and managed \
+         checkouts. It's off by default because repository hooks, settings and commands are then trusted.",
+    );
 }
 
 /// SPEC.md: "Pi has a switch but no hint band", and a session whose launch names no harness must not borrow Codex's

@@ -382,7 +382,7 @@ fn defer_after(state: &SceneState, window: &mut Window, cx: &mut App) {
     }
 }
 
-/// A host scene's one remaining step (opening the menu, scrolling the dialog), kept among the scene's kept values until
+/// A scene's one remaining step (opening a menu, scrolling a dialog), kept among the scene's kept values until
 /// a frame makes it possible. It runs once: run on every frame, its own redraw would ask for the next frame forever.
 struct Pending(Cell<bool>);
 
@@ -1015,6 +1015,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_agent_trust_setup,
+    },
+    Scene {
+        name: "settings-agent-trust-end",
+        size: (800., 830.),
+        draw: settings_agent_trust_end,
+        setup: settings_agent_trust_end_setup,
     },
     Scene {
         name: "settings-notifications",

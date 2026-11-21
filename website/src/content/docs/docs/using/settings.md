@@ -75,8 +75,9 @@ localhost links.
 
 ## Agent trust
 
-The switches that answer an agent's directory-trust question for new managed checkouts, and the hints the session view
-shows when an agent asks ([Trust in managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts)).
+The switches that answer an agent's directory-trust question and control the hints shown above the terminal. For
+Antigravity the switch covers any directory. For the other agents it covers managed checkouts. See
+[when trust settings apply](/docs/using/start-a-session/#trust-in-managed-checkouts).
 
 ## Notifications
 

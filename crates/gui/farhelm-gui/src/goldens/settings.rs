@@ -1,16 +1,16 @@
 //! Golden scenes for the Settings dialog, one scene per section, a few states of its Recipes section, and Tensorlake
-//! with a key saved and its list of sandboxes not on this helm. The scene list itself, `SCENES` with each scene's name
-//! and size, stays in `mod.rs`.
+//! with a key saved and its list of sandboxes not on this helm. Agent trust has a second viewport for its last
+//! block. The scene list itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
 
 use crate::focus::Mark;
 use crate::{session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
-use gpui::{App, Window};
-use std::cell::RefCell;
+use gpui::{AnyElement, App, IntoElement as _, Window, div, point, px};
+use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use super::SceneState;
+use super::{Pending, SceneState, take_pending};
 
 /// The Settings dialog over the fake helm's preference row, opened at `section` as the gear opens it (references
 /// `settings-sessions`, `settings-appearance`, `settings-hosts`, `settings-recipes`, `settings-tensorlake`,
@@ -536,10 +536,43 @@ pub(super) fn settings_checkouts_setup(state: &SceneState, window: &mut Window, 
     settings_scene(state, crate::settings::Section::Checkouts, window, cx);
 }
 
-/// Settings at Agent trust, every agent's trust off and every hint shown, as in the reference. Focus starts on the
-/// dialog itself (`Section::first`), so no ring shows.
+/// Agent trust at the top of the section, the view paired with the old app's reference.
 pub(super) fn settings_agent_trust_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     settings_scene(state, crate::settings::Section::AgentTrust, window, cx);
+}
+
+/// Start at the same section and stage a scroll to show Antigravity's switch, caveats and hint below the fold.
+pub(super) fn settings_agent_trust_end_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    settings_agent_trust_setup(state, window, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
+}
+
+/// Wait for the dialog to have a drawn body before sending the wheel event it needs to receive.
+pub(super) fn settings_agent_trust_end(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    if crate::layers::any_open(window, cx) && take_pending(state) {
+        window.defer(cx, |window, cx| {
+            window.dispatch_event(
+                gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                    position: point(px(500.), px(415.)),
+                    delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-4000.))),
+                    ..Default::default()
+                }),
+                cx,
+            );
+        });
+    }
+    div().into_any_element()
 }
 
 /// Settings at Notifications, as in the reference: the Sounds sub-heading with its switches at their defaults (the row

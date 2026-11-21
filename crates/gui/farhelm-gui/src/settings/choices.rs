@@ -75,6 +75,8 @@ pub(super) enum Choice {
     ShowCodexTrustHint,
     /// Agent trust: the same for Muse's hint. Pi has no hint, so no switch.
     ShowMuseTrustHint,
+    /// Agent trust: show Antigravity's hint in plain folders and managed checkouts.
+    ShowAntigravityTrustHint,
     /// Notifications, Sounds: Session waiting, on by default (the status sounds' switches read unset through
     /// [`Switches::from_preferences`], which the sounds' owner reads too).
     SoundWaiting,
@@ -98,6 +100,7 @@ impl Choice {
         Choice::ShowClaudeTrustHint,
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
+        Choice::ShowAntigravityTrustHint,
         Choice::SoundWaiting,
         Choice::SoundApproval,
         Choice::SoundTurnFinished,
@@ -114,9 +117,10 @@ impl Choice {
             Self::AutoUpdateRemoteHosts
             | Self::SkipHostSetupConfirmation
             | Self::SkipHostRemoveConfirmation => Section::Hosts,
-            Self::ShowClaudeTrustHint | Self::ShowCodexTrustHint | Self::ShowMuseTrustHint => {
-                Section::AgentTrust
-            }
+            Self::ShowClaudeTrustHint
+            | Self::ShowCodexTrustHint
+            | Self::ShowMuseTrustHint
+            | Self::ShowAntigravityTrustHint => Section::AgentTrust,
             Self::SoundWaiting
             | Self::SoundApproval
             | Self::SoundTurnFinished
@@ -136,6 +140,7 @@ impl Choice {
             Choice::ShowClaudeTrustHint => "claude_trust_hint_dismissed",
             Choice::ShowCodexTrustHint => "codex_trust_hint_dismissed",
             Choice::ShowMuseTrustHint => "muse_trust_hint_dismissed",
+            Choice::ShowAntigravityTrustHint => "antigravity_trust_hint_dismissed",
             Choice::SoundWaiting => "sound_waiting",
             Choice::SoundApproval => "sound_approval",
             Choice::SoundTurnFinished => "sound_turn_finished",
@@ -160,6 +165,7 @@ impl Choice {
             Choice::ShowClaudeTrustHint => preferences.claude_trust_hint_dismissed,
             Choice::ShowCodexTrustHint => preferences.codex_trust_hint_dismissed,
             Choice::ShowMuseTrustHint => preferences.muse_trust_hint_dismissed,
+            Choice::ShowAntigravityTrustHint => preferences.antigravity_trust_hint_dismissed,
             Choice::SoundWaiting
             | Choice::SoundApproval
             | Choice::SoundTurnFinished
@@ -175,7 +181,8 @@ impl Choice {
             }
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
-            | Choice::ShowMuseTrustHint => field != Some(true),
+            | Choice::ShowMuseTrustHint
+            | Choice::ShowAntigravityTrustHint => field != Some(true),
             Choice::SkipSessionConfirmations
             | Choice::ColorTerminalFrames
             | Choice::SkipHostSetupConfirmation
@@ -189,7 +196,8 @@ impl Choice {
         let stored = match self {
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
-            | Choice::ShowMuseTrustHint => !on,
+            | Choice::ShowMuseTrustHint
+            | Choice::ShowAntigravityTrustHint => !on,
             Choice::SkipSessionConfirmations
             | Choice::NameSessionsOnQuickLaunch
             | Choice::ColorTerminalFrames
@@ -216,6 +224,7 @@ impl Choice {
             Choice::ShowClaudeTrustHint => "settings-claude-trust-hint",
             Choice::ShowCodexTrustHint => "settings-codex-trust-hint",
             Choice::ShowMuseTrustHint => "settings-muse-trust-hint",
+            Choice::ShowAntigravityTrustHint => "settings-antigravity-trust-hint",
             Choice::SoundWaiting => "settings-sound-waiting",
             Choice::SoundApproval => "settings-sound-approval",
             Choice::SoundTurnFinished => "settings-sound-turn-finished",
@@ -241,6 +250,9 @@ impl Choice {
             }
             Choice::ShowCodexTrustHint => "Show the hint when Codex asks about a managed checkout",
             Choice::ShowMuseTrustHint => "Show the hint when Muse asks about a managed checkout",
+            Choice::ShowAntigravityTrustHint => {
+                "Show the hint when Antigravity asks about workspace trust"
+            }
             Choice::SoundWaiting => "Session waiting",
             Choice::SoundApproval => "Approval request",
             Choice::SoundTurnFinished => "Turn finished",
@@ -276,6 +288,9 @@ impl Choice {
             }
             Choice::ShowMuseTrustHint => {
                 "Show a note above the terminal when Muse asks about trust in a managed checkout"
+            }
+            Choice::ShowAntigravityTrustHint => {
+                "Show a note above the terminal when Antigravity asks whether to trust the folder"
             }
             Choice::SoundWaiting => "Play a bell when a session starts waiting for your answer",
             Choice::SoundApproval => {
@@ -327,6 +342,7 @@ impl Choice {
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
+            | Choice::ShowAntigravityTrustHint
             | Choice::SoundWaiting
             | Choice::SoundApproval
             | Choice::SoundTurnFinished
@@ -370,6 +386,9 @@ impl Choice {
             }
             Choice::ShowMuseTrustHint => {
                 "Could not save whether to show the Muse trust hint. Try again."
+            }
+            Choice::ShowAntigravityTrustHint => {
+                "Could not save whether to show the Antigravity trust hint. Try again."
             }
             Choice::SoundWaiting => "Could not save whether to play the waiting sound. Try again.",
             Choice::SoundApproval => {
