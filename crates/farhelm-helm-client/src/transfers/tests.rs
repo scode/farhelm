@@ -11,7 +11,7 @@ use farhelm_proto::{DownloadFileInfo, DownloadFileStatus};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
-use tokio::net::{TcpListener, TcpStream};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 
 const SECRET: &str = "device-secret";
 
@@ -348,11 +348,10 @@ async fn a_dead_connection_fails_visibly_and_says_whether_an_upload_may_have_lan
         assert!(matches!(error, TransferError::Lost(_)), "{error:?}");
         stub.request().await;
 
-        let closed = TcpListener::bind("127.0.0.1:0")
-            .await
-            .unwrap()
-            .local_addr()
-            .unwrap();
+        // Hold the port without listening until the connection is refused.
+        let reserved = TcpSocket::new_v4().unwrap();
+        reserved.bind("127.0.0.1:0".parse().unwrap()).unwrap();
+        let closed = reserved.local_addr().unwrap();
         let error = spawn(endpoint(closed))
             .upload("s1", file, "a.txt")
             .await

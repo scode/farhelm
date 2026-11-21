@@ -2065,8 +2065,16 @@ mod tests {
             .await;
         let harness = builder.start().await;
         harness.state._automatic_updates.stop();
+        // Finish publishing the first refresh before testing the preference
+        // wake. Connected status alone can precede its fleet publication.
+        harness.await_refreshed(host).await;
+        harness.refresh_to_completion(host).await;
+        // The scripted local actor also publishes while its initial dials settle.
+        let local = crate::rest_harness::local_id(&harness.store).await;
         harness
-            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await_state(local, |state| {
+                matches!(state, HostState::Unreachable { .. })
+            })
             .await;
         let root = tempfile::tempdir().unwrap();
         let backend = FakeBackend::skewed(root.path().into());

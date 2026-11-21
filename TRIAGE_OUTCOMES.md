@@ -1330,39 +1330,6 @@
   reference: Fix the code (tiny), or discard if checkouts with spaces are not a supported case for this runner.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## mac-fixture-cleanup-stop-budget.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tests only. The real-Mac test's cleanup runs the production stop script under a generic 30 s
-  limit. Production gives the same script longer, so cleanup could be cut off and leave the fixture behind. Verified:
-  Confirmed (`macos_real_tests.rs` ~L313-332 uses `require_shell`, while production uses `STOP_SUPERVISOR_TIMEOUT`). No
-  timeout has been observed.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code (tiny): use the same timeout.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-environment-test-responders-heartbeat-control-decode.md
-
-- Outcome: `other`.
-- Assessment: None. A scripted test supervisor panics on the helm's ordinary 30-second heartbeat. That only matters if a
-  test keeps it connected longer than 30 seconds. Verified: Partly fixed. `spawn_seal_responder_holding` now skips
-  non-Control frames (agent_requests.rs:17753-17761, from 7c83aed7a #3873). `spawn_launch_recording_responder`
-  (:15421-15427) still decodes every frame with `expect`. Its one caller does not use a paused clock, so it would need a
-  real run longer than 30 seconds.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code by copying the 3-line non-Control skip into the remaining responder.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-podman-tests-nested-build-module-registration.md
 
 - Outcome: `other`.
@@ -1614,24 +1581,6 @@
   fix code. Wait for the documented `> ` barrier before typing.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## upload-failure-test-lacks-pipe-holder-witness.md
-
-- Outcome: `other`.
-- Assessment: None. The test that a failed host upload does not hang can pass without the pipe-holding helper ever
-  starting, so it may not test the original hang. Verified: Confirmed (`provisioning/backend.rs`
-  `a_failed_upload_does_not_wait_on_a_blocked_feeder`). The holder is backgrounded and the shell exits 7 at once, with
-  no readiness signal and no check that the feeder actually blocked. The test's own NOTE says the shape is defensive and
-  not measured from OpenSSH.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard. The test covers a defensive shape, and making it a strong oracle takes nontrivial fixture work.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## suspended-plan-test-erases-its-suspension-premise.md
 
 - Outcome: `other`.
@@ -1758,23 +1707,6 @@
   Fix the code: use the existing `retire_supervisor` helper. Tiny.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## mac-uninstall-test-lacks-live-host-premise.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tests only (the real-Mac test). The uninstall check would still pass if a regression ended the
-  retained agent terminal host at Stop, because nothing confirms that host is alive before uninstall. Verified:
-  Confirmed. `macos_real_tests.rs` ~L736-762 checks only that processes are gone after uninstall, against identities
-  captured before Stop.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code (small): assert that host is alive after Stop.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-http-golden-omits-populated-environment.md
 
 - Outcome: `other`.
@@ -1793,22 +1725,6 @@
   shared serde type protects the GUI.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-nonfinal-environment-delete-cache-survivor-oracle.md
-
-- Outcome: `other`.
-- Assessment: None. A test for deleting one session from an environment would still pass if the helm forgot every
-  session on that host. Verified: agent_requests.rs:17990-18001 asserts only `!cached.contains("helper")`, never that
-  "starter" remains.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code: one assertion that the cache equals ["starter"].
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## trailing-stopped-episode-test-does-not-witness-settled-unavailable-cycle.md
 
 - Outcome: `other`.
@@ -1824,37 +1740,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   Fix the code (wait for a settled failure, or use a one-attempt cadence). Discarding is also reasonable.
 - Execution: planned in `plans/queue/triage-podman.md`.
-
-## trailing-host-phase-vocabulary-test-omits-stopped.md
-
-- Outcome: `other`.
-- Assessment: None. The test that keeps the agent-facing phase word equal to the wire tag claims to cover "every
-  variant", but it leaves out Stopped and Deleting. Verified: The hosts.rs:1619-1691 matrix has no Stopped or Deleting
-  entry.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code: add the two fixtures.
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## trailing-cancelled-trash-observation-test-misses-fleet-publication.md
-
-- Outcome: `other`.
-- Assessment: None. The cancellation test for Trash reads checks the per-host counter, but not the fleet event that
-  tells other windows to refresh. Verified: notices.rs:1179-1221 asserts the epoch only, with no fleet revision.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code (capture the revision before and assert after). Discarding is also reasonable.
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md
 
@@ -1952,21 +1837,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard or batch (parse the rows, or narrow the comment)
 - Execution: planned in `plans/queue/triage-podman.md`.
-
-## trailing-missing-release-entry-test-count-does-not-prove-exact-variant-inventory.md
-
-- Outcome: `other`.
-- Assessment: None. A fixture premise check says the variant "leaves out X and nothing else" but checks only absence
-  plus count. Verified: still at `provisioning/release_payloads.rs:2528-2529`.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard or batch
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md
 
@@ -2303,55 +2173,6 @@
   discard
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## connection-refusal-tests-release-port-too-early.md
-
-- Outcome: `other`.
-- Assessment: None. Two tests bind port 0, drop the listener, then connect expecting a refusal; another process could
-  grab the port in between. Verified: `farhelm-desktop/src/updater/transport_tests.rs:170-183` still `drop(listener)`
-  before connecting; transfers test similar. Consequence of the race is a spurious test failure, not a false pass. Not
-  covered by the AGENTS.md fixed-port rule (the port is kernel-chosen).
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard (or fix: keep a bound non-listening socket, a few lines each)
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## devbuild-startup-test-misses-first-scan.md
-
-- Outcome: `other`.
-- Assessment: None directly. The devbuild startup test checks the stored update choice only after the helm exits, so it
-  would not catch the first automatic scan running before the seed. Verified: test at
-  `farhelm-helm/src/lib.rs:1897-1953`; production seeds before serving (1405-1421), as the finding concedes.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard
-- Execution: planned in `plans/queue/triage-helm.md`.
-
-## automatic-update-wake-test-accepts-host-refresh.md
-
-- Outcome: `other`.
-- Assessment: None directly. The test that clearing the opt-out wakes host auto-updates could be satisfied by a late
-  first host refresh instead. Verified: `farhelm-helm/src/provisioning.rs:1980-2053` waits for Connected and one
-  completed scan, not for the initial collections read. Alternate wake producer not exercised.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard
-- Execution: planned in `plans/queue/triage-helm.md`.
-
 ## inline-sign-in-tests-conflate-identifiers.md
 
 - Outcome: `other`.
@@ -2406,22 +2227,6 @@
   fix code (add a first-callback child transcript, then assert no pin or identity and that a later main Stop still
   captures). Discard is also reasonable, since Antigravity is not a first-class harness.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## desktop-path-notice-first-read-untested.md
-
-- Outcome: `other`.
-- Assessment: None. No test checks the whole path from the desktop's failed PATH lookup to the first client seeing the
-  notice before the helm serves. Verified: I accepted the file's citations and did not re-trace them. SPEC_impl.md ~3925
-  requires the handoff before serving. Covering it would need a new desktop or embedded-helm test across components.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard (no defect, and the test would cost more than a tiny assertion)
-- Execution: planned in `plans/queue/triage-helm.md`.
 
 ## shell-session-e2e.md
 

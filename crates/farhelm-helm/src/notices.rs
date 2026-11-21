@@ -1283,6 +1283,9 @@ pub(crate) mod tests {
             .await;
         let host = rest_harness::local_id(&harness.store).await;
         harness.await_refreshed(host).await;
+        // No host-refresh wake may stand in for the cancelled observation.
+        harness.refresh_to_completion(host).await;
+        let before = harness.manager.events().revision();
         let (claim, _) = crate::sessions::host_client(&harness.state, host).unwrap();
         let gate = harness.state.trash_requests.lock(host).await;
         let mut next = Box::pin(harness.state.trash_requests.lock(host));
@@ -1314,7 +1317,11 @@ pub(crate) mod tests {
         assert_eq!(
             harness.state.trash_requests.epoch(host),
             1,
-            "cancellation cannot lose the committed observation's wake"
+            "cancellation cannot lose the committed Trash epoch"
+        );
+        assert!(
+            harness.manager.events().revision() > before,
+            "the committed revision must wake the rest of the fleet"
         );
     }
 

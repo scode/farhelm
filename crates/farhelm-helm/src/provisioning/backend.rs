@@ -26,7 +26,7 @@ pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// remote `farhelm` may come from another release, whose bound is not part of
 /// the command's stable contract; the ten seconds are also the margin for
 /// that.
-const STOP_SUPERVISOR_TIMEOUT: Duration = COMMAND_TIMEOUT
+pub(super) const STOP_SUPERVISOR_TIMEOUT: Duration = COMMAND_TIMEOUT
     .saturating_add(farhelm_supervisor::hosts::stop::COMMAND_BUDGET)
     .saturating_add(Duration::from_secs(10));
 /// `case` patterns, for a remote shell, matching exactly the diagnostics the
@@ -960,7 +960,7 @@ impl SystemBackend {
 
     /// [`Self::require_shell`] for a script that runs a command with its own,
     /// longer bound than [`COMMAND_TIMEOUT`].
-    async fn require_shell_within(
+    pub(super) async fn require_shell_within(
         &self,
         target: &ProvisioningTarget,
         script: &str,
@@ -4185,10 +4185,10 @@ mod tests {
         }
     }
 
-    /// Stands in for an upload process that exits with status 7 at once while
-    /// a detached holder (its own session, so outside the upload's process
-    /// group) keeps stdin, stdout and stderr open without reading. The holder
-    /// publishes its pid atomically so the test can end it.
+    /// Let the upload fail with status 7 while a detached holder keeps its
+    /// pipes open without reading. The uploader waits briefly for the holder
+    /// to publish its PID, which proves the holder inherited those pipes
+    /// before the test relies on the upload failure.
     ///
     /// NOTE: This is a defensive shape, not one measured from OpenSSH. A live
     /// shared-connection client exits only once the session's output has
@@ -4210,8 +4210,10 @@ mod tests {
             // unless it is redirected, and dash does not count `<&0` as one, so
             // the upload's stdin reaches the holder through fd 3.
             let script = format!(
-                "exec 3<&0; setsid sh -c 'echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\"; exec sleep 60' holder {} <&3 & exit 7",
-                shell_words::quote(self.holder_pid.to_str().unwrap())
+                "exec 3<&0; setsid sh -c 'echo $$ > \"$1.tmp\" && mv \"$1.tmp\" \"$1\" && exec sleep 60' holder {pid} <&3 & \
+                 n=0; while [ ! -s {pid} ] && [ \"$n\" -lt 100 ]; do n=$((n + 1)); sleep .02; done; \
+                 [ -s {pid} ] || exit 1; exit 7",
+                pid = shell_words::quote(self.holder_pid.to_str().unwrap())
             );
             let mut child = tokio::process::Command::new("sh");
             child
@@ -4270,21 +4272,25 @@ mod tests {
         )
         .await;
         // End the holder whatever happened; its pid file is complete once present.
-        if let Ok(text) = std::fs::read_to_string(&holder_pid)
-            && let Ok(pid) = text.trim().parse::<i32>()
-        {
+        let pid = std::fs::read_to_string(&holder_pid)
+            .ok()
+            .and_then(|text| text.trim().parse::<i32>().ok())
+            .filter(|pid| *pid > 1);
+        if let Some(pid) = pid {
             // SAFETY: the holder is this test's own fixture process.
             unsafe {
                 libc::kill(pid, libc::SIGKILL);
             }
         }
+        assert!(pid.is_some(), "the fixture never started its pipe holder");
         let failure = result
             .expect("a failed upload must not wait on a feeder blocked by held pipes")
             .expect_err("an upload that exits with status 7 fails");
         assert!(
-            failure.context.contains("payload transfer")
-                || failure.context.contains("transferring"),
-            "{failure:?}"
+            failure
+                .context
+                .contains("still open after the command exited; exit status: 7"),
+            "the holder must keep the pipes open after the upload exits: {failure:?}"
         );
     }
 

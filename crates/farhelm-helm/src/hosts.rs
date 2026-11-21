@@ -1680,6 +1680,11 @@ mod tests {
             HostStateView::Retired {
                 reason: "removed".to_string(),
             },
+            HostStateView::Stopped {
+                start_failed: None,
+                waiting_for_place: true,
+            },
+            HostStateView::Deleting { failure: None },
         ] {
             let encoded = serde_json::to_value(&state).unwrap();
             assert_eq!(

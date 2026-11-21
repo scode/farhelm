@@ -2524,10 +2524,15 @@ mod tests {
         let left_out = farhelm_asset(PayloadTarget::LinuxAarch64);
         let manifest = fixture_bytes("variants/without-linux-aarch64/SHA256SUMS");
         let listed = parse_sums(std::str::from_utf8(&manifest).unwrap()).unwrap();
-        assert!(
-            !listed.contains_key(&left_out) && listed.len() == assets::sums_members().len() - 1,
-            "the fixture premise: the variant leaves out {left_out} and nothing else: {listed:?}"
-        );
+        let expected: std::collections::BTreeSet<_> = assets::sums_members()
+            .into_iter()
+            .filter(|name| name != &left_out)
+            .collect();
+        let actual = listed
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(actual, expected, "the fixture must omit only {left_out}");
 
         let error = release
             .source(cache.path())
