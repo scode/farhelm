@@ -269,20 +269,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
   also "Fix 'answer trust dialog' for Claude Code"). Plan: `plans/queue/agent-trust-every-folder.md`.
 
-- **One Settings section per agent.** Settings gets a dedicated Agents group with one section per agent type, every
-  agent type included, holding that agent's settings. An agent with nothing to configure gets a section that says so
-  plainly: not finding your agent in Settings is what confuses people. The current agent-specific settings (the trust
-  switches, their hint switches and Claude's caution box) move into their agents' sections, and the Agent trust page
-  goes away. Credentials moves to the General group. Plan: `plans/queue/agent-hook-setup.md`.
-
-- **Install Grok and Antigravity conversation hooks automatically, opt-in.** Restart needs Farhelm's hooks in Grok and
-  Antigravity, which users install by hand today and forget (the maintainer did, and took a greyed-out Restart for a
-  bug). Add an all-hosts opt-in per agent. While it is on, every start of that agent installs or updates Farhelm's own
-  hook file on the machine it runs on. Ask in the launcher the first time, show a band in sessions launched without it,
-  and make the greyed Restart tooltip say to turn the setting on. The opt-in wording must say that Farhelm changes the
-  agent's own configuration, which affects the agent outside Farhelm too. Drop the manual setup instructions. Plan:
-  `plans/queue/agent-hook-setup.md`.
-
 - **Consolidate the helpers duplicated across Farhelm.** Work through the repeated helpers from the 2026-11-21 review.
   Reuse the existing shared module where one fits and keep each helper scoped to its actual callers. Locations below are
   from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to

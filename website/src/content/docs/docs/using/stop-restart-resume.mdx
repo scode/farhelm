@@ -26,7 +26,8 @@ conversation it can resume, because the agent cannot report one or none was capt
 hovering over it says why. Right after a launch that is usually just a wait: Farhelm captures a Codex or [Muse](/docs/agents/muse/) conversation once
 you submit your first prompt, a Pi or OMP conversation after the agent's first reply, a Claude conversation a few
 seconds after it starts, and a Goose conversation as soon as it starts. [Grok](/docs/agents/grok/#setup) and
-[Antigravity](/docs/agents/antigravity/#set-up-restart) require hooks you install and report after your first prompt.
+[Antigravity](/docs/agents/antigravity/#set-up-restart) report after your first prompt once Farhelm sets up their hooks.
+When the tooltip directs you to **Settings → Agents**, turn on hook setup there and start a new session.
 **Restart** can take a couple of seconds more to become
 available. If it never comes, replace is how you start the session over. [Supported agents](/docs/agents/) says which
 agents Farhelm can resume, and a command you run yourself needs an agent and a resume command declared for it; see
@@ -57,7 +58,8 @@ The entered conversation is a choice for this start only, as in [the session lau
 Farhelm keeps the previous conversation until it accepts the agent's report of the new one. Codex, Muse and Antigravity
 report at your first prompt. Restart before then still opens the previous conversation. Goose cannot report after this kind of start; naming a new
 conversation forgets the old one and leaves later Restart unavailable. The same happens for an agent whose Farhelm
-hooks are turned off with `FARHELM_AGENT_HOOKS`. The Grok and Antigravity hooks you install are independent of that setting.
+hooks are turned off with `FARHELM_AGENT_HOOKS`. A host can skip setting up Grok and Antigravity hooks with that
+variable. Hooks already installed can still report. See [Turning it off](/docs/how-it-works/agent-hook-injection/#turning-it-off).
 
 **Replace** starts the agent again from a fresh conversation, with the same agent, settings, and directory. For a Bash
 or Zsh session it starts a fresh shell. It makes a

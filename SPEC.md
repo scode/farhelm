@@ -3084,11 +3084,26 @@ never gates the user's own typing. Status also decides whether Restart and Resta
 also defers the missing-conversation warning's clock until an Enter outside that dialog, as described below; this does
 not delay delivering input. Farhelm-supplied integration must not make vendor configuration a condition of launching an
 agent. Grok and Antigravity can capture conversations through hooks in their own configuration. Each has a helm-wide
-opt-in, off by default. When enabled, the supervisor checks Farhelm's hook files before each start of that agent on any
-host or in any Farhelm environment. Both agents can launch without those files.
-OMP and Grok use generic activity only. Their approval prompts, and
-Antigravity's, show the generic running/idle classification, never waiting — a settled scope decision, not a reader
-waiting to be written.
+opt-in, off by default, on its page under Settings → Agents. When enabled, the supervisor installs or updates Farhelm's
+hook files before each start of that agent on any host or in any Farhelm environment. The change persists on the machine
+and the hooks run in sessions outside Farhelm, where they only answer the agent. Turning setup off leaves the files in
+place and the setting names the path to remove. Both agents can launch without those files.
+
+An explicit selection of Grok or Antigravity in the launcher offers **Set up and launch**, **Launch without**, and
+**Don't ask again** after a settings read confirms setup is off and the offer is enabled. The first saves the setting
+before continuing the launch. The second launches with no settings write and leaves the offer enabled for the next
+launcher. The third saves the agent's shared dismissal and leaves the draft open. The launcher explains the lasting
+change to the agent's configuration.
+
+A live Grok or Antigravity session whose launch did not request setup shows a nonmodal hint above the agent terminal
+while Restart is waiting for a captured conversation. The hint opens Settings at the setup switch, saves the shared
+dismissal with **Don't show again**, or hides this occurrence with **×**. The Settings page can restore both the
+launcher prompt and the hint. An accepted conversation ends the hint when Restart can resume it. A failed install has
+its own notification and Restart explanation. A host policy that disables setup supplies a reason for Restart without
+adding a notification.
+
+OMP and Grok use generic activity only. Their approval prompts, and Antigravity's, show the generic running/idle
+classification, never waiting — a settled scope decision, not a reader waiting to be written.
 
 Status also determines whether Suspend asks about activity. A mistaken reading can skip or add that question. Suspend
 still preserves the frozen processes.
@@ -3129,18 +3144,18 @@ refused report (from a subagent, from an agent process the session's agent start
 delete, or turned away by a passing error) is the system working and never notifies. A launch that still carries a
 conversation Farhelm captured earlier is never told Restart cannot resume it, because Restart can. For Grok and
 Antigravity, the silent-hook timer starts only when Farhelm verified its own hook files for that launch. After a
-supervisor restart, a launch that received the hook starts
-its silent-hook clock at the next qualifying Enter; launches stored before this behavior was introduced stay unchecked.
-Each notification says what happened and what the user can do about it, or, when nothing can be done, what they lose; it
-never points at a log. The silent-conversation-hook warning names the agent and when it normally reports its
-conversation, using the same timing as Restart's explanation. It says Restart cannot resume until that report arrives,
-and asks users of custom commands to check that they pass on `{farhelm_args}`; otherwise it invites feedback from the
-help (?) menu. There is at most one notification of each such problem per launch of the session's agent. The warning
-that the agent never reported its conversation and the warning that Restart stopped offering to resume are marked
-resolved when Restart can resume that launch's conversation again, including after a supervisor restart. The other
-session-tracking kinds and notifications from earlier launches stay as they are. If a resolved problem returns in the
-same launch, its existing notification reopens at the top as new and unread, even if the user had cleared it; repeated
-checks while it remains unresolved do not repeat it.
+supervisor restart, a launch that received the hook starts its silent-hook clock at the next qualifying Enter; launches
+stored before this behavior was introduced stay unchecked. Each notification says what happened and what the user can do
+about it, or, when nothing can be done, what they lose; it never points at a log. The silent-conversation-hook warning
+names the agent and when it normally reports its conversation, using the same timing as Restart's explanation. It says
+Restart cannot resume until that report arrives. For agents whose hooks are passed as launch arguments, the warning asks
+users of custom commands to check that they pass on `{farhelm_args}`. Grok and Antigravity's warning invites feedback
+from the help (?) menu, as it does for ordinary launches of the other agents. There is at most one notification of each
+such problem per launch of the session's agent. The warning that the agent never reported its conversation and the
+warning that Restart stopped offering to resume are marked resolved when Restart can resume that launch's conversation
+again, including after a supervisor restart. The other session-tracking kinds and notifications from earlier launches
+stay as they are. If a resolved problem returns in the same launch, its existing notification reopens at the top as new
+and unread, even if the user had cleared it; repeated checks while it remains unresolved do not repeat it.
 
 Earlier releases gave a session in which something still ran in an old terminal the old-terminal warning: it asked for
 the session to be restarted, replaced, stopped or deleted as soon as possible, because an upcoming release would
@@ -3954,27 +3969,29 @@ transaction; a definitive pre-spawn abort restores it, an ambiguous failure does
 Farhelm's conversation hooks are turned off for the agent (`FARHELM_AGENT_HOOKS`) or when the conversation reporter's
 extension cannot be prepared, since no report can then replace the old capture. For Grok and Antigravity the switch
 controls setup at launch. Either agent can still report through hooks already on disk. Cursor, OpenCode and named Goose
-starts do not gain later plain Restart from this
-choice. Heuristics that cannot be relied upon, such as correlating the vendor's files on disk with a launch, are not
-supported, because a wrong match resumes, and appends to, a conversation that is not the session's own. Checking the
-exact file a report names is verification of that report, not identification. A launch whose harness cannot report, or
-whose report never arrived, has no captured identity and cannot be restarted: Restart says why, and Replace starts the
-session over. Capture uses the agent's record directories read-only. Farhelm may change an agent's configuration only
-for the opt-in managed-checkout Claude trust edit and the opt-in Grok and Antigravity hook files. The Claude trust edit
-is independent of capture. A hook passed on the command line for one launch is allowed because it writes nothing the
-vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the launch that carried
-it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's own state directory
-and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook log. Vendor-owned
-state is the boundary these limits protect. The Grok and Antigravity opt-in covers the files named for Farhelm. Existing
-manual hooks elsewhere still work. Every integrated agent type identifies conversations only through accepted reports; Farhelm
-never selects a conversation by scanning vendor state. Historical stored identities remain usable under the same
-per-type Resume rules, regardless of their source. A reporting credential alone does not establish which Codex
-conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation and reuses
-it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report without a
-session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of that exact
-file without following symlinks and requires its session ID to match. A failed check withdraws the durable resume offer,
-which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never silently
-launches fresh under that request.
+starts do not gain later plain Restart from this choice. Heuristics that cannot be relied upon, such as correlating the
+vendor's files on disk with a launch, are not supported, because a wrong match resumes, and appends to, a conversation
+that is not the session's own. Checking the exact file a report names is verification of that report, not
+identification. A launch whose harness cannot report, or whose report never arrived, has no captured identity and cannot
+be restarted: Restart says why, and Replace starts the session over. For Grok and Antigravity the Restart explanation
+follows the reported setup result for that launch. It directs a session without setup to the agent's Settings page and a
+new start, gives the reason for a failed setup, or says that an installed hook normally reports after the first prompt
+while the agent is still running. Capture uses the agent's record directories read-only. Farhelm may change an agent's
+configuration only for the opt-in managed-checkout Claude trust edit and the opt-in Grok and Antigravity hook files. The
+Claude trust edit is independent of capture. A hook passed on the command line for one launch is allowed because it
+writes nothing the vendor owns — no configuration file, no conversation record, no trust state — and cannot outlive the
+launch that carried it. It is not invisible in the absolute: the report it delivers is written to a file in farhelm's
+own state directory and from there lands in farhelm's own database, and every run leaves a line in farhelm's own hook
+log. Vendor-owned state is the boundary these limits protect. The Grok and Antigravity opt-in covers the files named for
+Farhelm. Existing manual hooks elsewhere still work. Every integrated agent type identifies conversations only through
+accepted reports; Farhelm never selects a conversation by scanning vendor state. Historical stored identities remain
+usable under the same per-type Resume rules, regardless of their source. A reporting credential alone does not establish
+which Codex conversation is in the foreground. Goose persists a credential-free named MCP reporter with the conversation
+and reuses it on resume; Pi loads a private static extension from Farhelm's state directory on every launch. A Pi report
+without a session file withdraws the old resume target. Before a Pi resume, Farhelm reads the bounded first record of
+that exact file without following symlinks and requires its session ID to match. A failed check withdraws the durable
+resume offer, which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never
+silently launches fresh under that request.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
 terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.
@@ -4148,9 +4165,9 @@ nothing is written to disk. It is on by default, because an agent that has never
 for it, and `FARHELM_AGENT_INSTRUCTIONS=off` in the supervisor's environment removes it while leaving identity capture
 exactly as it was. A launch with no hook has no pointer either, for the plain reason that there is nothing to print it.
 The instructions themselves are printed only when that command is run, so a session where the user never mentions
-farhelm pays one line and nothing more. Grok's manually configured hooks omit `--announce`: Grok ignores the relevant
-stdout, so its integration delivers no instructions pointer. Antigravity's manual callbacks always receive an empty JSON
-object and a newline on stdout, including when reporting fails. They receive no instructions pointer.
+farhelm pays one line and nothing more. Farhelm's Grok and Antigravity hooks omit `--announce` because they also run
+outside Farhelm. Both integrations leave out the instructions pointer. Antigravity always receives an empty JSON object
+and a newline on stdout, including when reporting fails.
 
 Muse's `SessionStart` hook receives that pointer as developer context; its `Stop` hook omits the announcement. The
 observed Muse 1.4.14 hooks printed nothing on the terminal on success or failure, so no vendor-output exception is

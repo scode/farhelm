@@ -24,18 +24,18 @@ An agent may save a trust choice for the temporary directory. The Muse launcher 
 startup, so these cases disable their updaters for the test invocations using a launcher variable and a temporary OMP
 configuration overlay.
 
-The test uses the vendor's existing credentials. Antigravity and Grok also need the manual hooks described in the
+The test uses the vendor's existing credentials. Antigravity and Grok also need the conversation hooks described in the
 [Antigravity setup guide](../website/src/content/docs/docs/agents/antigravity.md) and
-[Grok setup guide](../website/src/content/docs/docs/agents/grok.md). Sign in and install or update the hooks yourself
-before retrying cases that need them. Tests use private Farhelm state and leave hook files alone. An agent running this
-suite never signs in or accepts a vendor update (`.agents/real-agent-tui.md`) and never installs or edits hooks; it
-reports the case as COULD NOT RUN and leaves those steps to the maintainer.
+[Grok setup guide](../website/src/content/docs/docs/agents/grok.md). Sign in and start a session with setup enabled
+before retrying a case that needs those hooks. Tests use private Farhelm state and leave hook files alone. The
+maintainer handles vendor sign-in, vendor updates and hook setup. An agent running this suite reports unmet
+prerequisites as COULD NOT RUN. The rules in `.agents/real-agent-tui.md` apply.
 
 ## Reading the result
 
 - **PASSED** means all of that case's live checks ran and succeeded.
 - **COULD NOT RUN** means a prerequisite was missing. The table gives the reason, such as a missing binary, a login
-  screen or an absent manual hook.
+  screen or an absent hook file.
 - **FAILED** means the CLI or test failed after starting. The retained run contains its output, source identity and
   `drift-verdict.json`. Keep that evidence before retrying.
 
