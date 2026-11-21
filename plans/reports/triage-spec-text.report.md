@@ -125,3 +125,66 @@ of the missing-output notice, the Suspend activity question, and the rare main-t
 review clarified the hyperlink comparison boundary, the Shift+Enter read split, fresh checkout rollback, best-effort
 Restart cleanup and the wrapper troubleshooting advice. All ten findings were corrected. The rebase preserved both PRs'
 reviewed and corrected source wording byte for byte. Both draft descriptions also passed a cold read.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs merged with a landing fix, #4479. No other plan landed in this round. Since the executor based the
+plan, main had gained a one-line TODO.md wording fix, and during the round a change that gives plan follow-up entries
+their own subsection of TODO.md; neither touches the text this plan changed. The plan changes only text: the two specs,
+two code comments, two docs pages, and the review queue and triage ledger. A script checked that all 35 findings left
+the queue and the open ledger and that each decision moved to the archive. An independent reviewer checked every changed
+sentence against the code it describes. All but five were accurate, and those five are corrected in the landing fix
+below. The reviewer also confirmed the two docs pages' new claim about Codex's `--no-daemon` against the code.
+
+Nine other plans from the same triage are in flight, and three of them change paragraphs this plan also rewrote: the
+spec's Restart bullet (triage-supervisor), the implementation notes' paragraph on cleaning up orphaned Tensorlake
+sandboxes (triage-tensorlake) and the paragraph on old terminals and a program's environment (triage-terminal-host).
+Their landings need a careful rebase that keeps both meanings, not just one side.
+
+#### Fixes made while landing
+
+All in [#4479](https://github.com/scode/farhelm/pull/4479/changes). Five sentences were wrong: three departed from the
+triage decision and two lost words in editing. Two of them replace statements in the report's "things you should know":
+fresh-checkout trust is not only Claude's, and the macOS paste stall is not only a terminal paste's.
+
+- **GUI defaults:** the rule that the GUI's remembered defaults and recent setups never come from what a host replies or
+  lists had been deleted. The decision was to add one exception to it: the host's canonical folder path recorded when
+  opt-in managed-checkout trust applies. The rule is back, with that exception stated after it.
+- **Paste on macOS:** the new text said only a paste into a terminal may stall the window. Any paste the user starts
+  reads the clipboard the same way, so it now says "a paste".
+- **Trust in a fresh checkout:** the new text said a fresh managed checkout's first launch can still apply Claude's
+  opted-in trust. In fact it applies every agent's opted-in trust, and the text now says so.
+- **Upgrade floor:** the refusal for a host below the upgrade floor had lost the words "Farhelm supervisor service" and
+  "manual recovery remedy", which the next sentence refers back to. Both are back.
+- **Custom commands page:** a sentence pointing to the Agent wrappers page had lost the noun its "one" referred to; it
+  now says that page shows how to write a wrapper that keeps the arguments.
+
+#### Checks
+
+The plan and the landing fix change only text: SPEC.md, SPEC_impl.md, two code comments with no doctest, two docs pages,
+and the review queue and triage ledger. So no runtime tests apply.
+
+- A script comparing the deleted feedback files, removed index lines and archived ledger entries: all 35 match, and none
+  is left in the open ledger.
+- `dprint check`, `python3 scripts/check-agents-md.py`, `cargo fmt --all -- --check` and the website build
+  (`bun install --frozen-lockfile && bun run build`) with its link check, on the plan as delivered and again after the
+  fix: passed.
+
+Skipped: every Rust, desktop and browser suite, since nothing that builds or runs changed; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+Possible follow-ups the reviewer found, none of them blocking:
+
+- This plan's new Status wording reads as if Replace were offered only for shells, but an interrupted session's card
+  offers Replace for every session. The reviewer rated it a follow-up because it describes no behavior wrongly, only
+  narrowly; I did not hold the landing for it.
+- This plan's new sentence about lost terminal output uses an internal term ("terminal runtime") that the spec never
+  defines. Same rating.
+- The implementation notes now say correctly that a failed Restart removes the replacement's host record before sweeping
+  its processes. An older code comment on that function still says the opposite order. That code belongs to
+  triage-supervisor, which is still to land, so the comment is left for it.
+- On Wayland, pasting into a text field can also block the window. The triage decision did not cover that.
