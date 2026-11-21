@@ -113,8 +113,15 @@ impl Section {
             Self::Containers => "Podman hosts and leftover containers",
             Self::Recipes => "Software and credentials for new containers and sandboxes",
             Self::Tensorlake => "Cloud sandboxes in your Tensorlake project",
-            Self::Agent(harness) => TrustAgent::for_harness(harness)
-                .map_or("", |_| "Answering the agent's folder-trust questions"),
+            Self::Agent(harness) => match (
+                TrustAgent::for_harness(harness).is_some(),
+                harness.agent_kind().offers_persistent_hooks(),
+            ) {
+                (true, true) => "Workspace trust and conversation hooks",
+                (true, false) => "Answering the agent's folder-trust questions",
+                (false, true) => "Conversation hooks for Restart",
+                (false, false) => "",
+            },
             Self::Credentials => "Secrets Farhelm hands to hosts for you",
         }
     }
@@ -123,9 +130,12 @@ impl Section {
     fn has_live_choices(self, cx: &gpui::App) -> bool {
         match self {
             Self::App => crate::desktop::updates::upgrade_notes(cx).is_some(),
-            Self::Agent(harness) => TrustAgent::for_harness(harness)
-                .and_then(TrustAgent::hint)
-                .is_some(),
+            Self::Agent(harness) => {
+                harness.agent_kind().offers_persistent_hooks()
+                    || TrustAgent::for_harness(harness)
+                        .and_then(TrustAgent::hint)
+                        .is_some()
+            }
             Self::Sessions
             | Self::Appearance
             | Self::Terminal

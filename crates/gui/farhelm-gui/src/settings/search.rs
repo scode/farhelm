@@ -23,6 +23,7 @@ use crate::components::{
     HoverHelp, OptionRow, TextInput, TextInputEvent, TextInputState, Vertical,
 };
 use crate::focus::{self, Mark};
+use crate::hook_setup::HookAgent;
 use crate::host_text::match_ranges as highlights;
 use crate::layers;
 use crate::theme::{self, Palette, metrics};
@@ -33,6 +34,7 @@ pub(super) enum Target {
     Top,
     Choice(Choice),
     Trust(TrustAgent),
+    HookSetup(HookAgent),
     AppUpdates,
     AppCheck,
     Tunnels,
@@ -144,6 +146,10 @@ impl Entry {
             (Section::Terminal, Target::Tunnels) => "tunnel",
             (Section::Terminal, Target::Top) if self.id == terminal::ID => "links browser",
             (Section::Checkouts, _) => "clone git",
+            (
+                Section::Agent(_),
+                Target::HookSetup(_) | Target::Choice(Choice::ShowHookSetupHint(_)),
+            ) => "hooks restart conversation resume",
             (Section::Agent(_), Target::Trust(_) | Target::Choice(_)) => "agent trust",
             (Section::Agent(_), Target::Top) if self.id == agent_trust::CAUTION_ID => "agent trust",
             (Section::Notifications, Target::Choice(_)) => "sound bell",
@@ -330,7 +336,9 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 ]);
             }
             Section::Agent(harness) => {
-                if let Some(agent) = TrustAgent::for_harness(harness) {
+                let trust = TrustAgent::for_harness(harness);
+                let hooks = HookAgent::for_harness(harness);
+                if let Some(agent) = trust {
                     entries.push(Entry::new(
                         section,
                         agent.id(),
@@ -347,7 +355,22 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         ));
                     }
                     entries.extend(agent.hint().map(Entry::choice));
-                } else {
+                }
+                if let Some(agent) = hooks {
+                    entries.push(Entry::new(
+                        section,
+                        agent.id(),
+                        super::hook_settings::LABEL,
+                        [
+                            super::hook_settings::TOOLTIP.to_owned(),
+                            agent.consent(),
+                            agent.removal().to_owned(),
+                        ],
+                        Target::HookSetup(agent),
+                    ));
+                    entries.push(Entry::choice(Choice::ShowHookSetupHint(agent)));
+                }
+                if trust.is_none() && hooks.is_none() {
                     entries.push(add(
                         NO_AGENT_SETTINGS_ID,
                         NO_AGENT_SETTINGS,

@@ -94,6 +94,8 @@ pub(crate) struct Fixture {
     /// The agent kind the supervisor recorded, in the helm's wire form (`generic` for a command it knows nothing
     /// about), when the test names one; else the helm fixture's, `codex`.
     agent_kind: Option<&'static str>,
+    /// A launch waiting for an installed callback and the supervisor's result from that launch.
+    hook_setup: Option<farhelm_proto::PersistentHookSetup>,
 }
 
 pub(crate) fn session(key: &'static str) -> Fixture {
@@ -123,6 +125,7 @@ pub(crate) fn session(key: &'static str) -> Fixture {
         mute: None,
         group: None,
         agent_kind: None,
+        hook_setup: None,
     }
 }
 
@@ -247,6 +250,12 @@ impl Fixture {
         self
     }
 
+    /// A reporting agent that has yet to capture a conversation, with its hook setup result from this run.
+    pub(crate) fn waiting_for_hooks(mut self, setup: farhelm_proto::PersistentHookSetup) -> Self {
+        self.hook_setup = Some(setup);
+        self
+    }
+
     pub(crate) fn entry(&self) -> KeyedEntry {
         let mut entry = session_entry(self.key);
         let value = &mut entry.value;
@@ -300,6 +309,10 @@ impl Fixture {
         }
         if let Some(kind) = self.agent_kind {
             value["agent_kind"] = json!(kind);
+        }
+        if let Some(setup) = &self.hook_setup {
+            value["restart_offer"] = json!("not_captured");
+            value["persistent_hook_setup"] = json!(setup);
         }
         entry
     }

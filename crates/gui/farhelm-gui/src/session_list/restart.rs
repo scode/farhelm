@@ -33,7 +33,7 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::session_requests::RestartSessionBody;
 use farhelm_proto::ui_channel::SessionRow;
-use farhelm_proto::{AgentKind, LaunchKind, ReadinessWording, RestartOffer, SessionStatus};
+use farhelm_proto::{LaunchKind, ReadinessWording, RestartOffer, SessionInfo, SessionStatus};
 use gpui::{App, Window};
 use serde_json::json;
 
@@ -80,7 +80,7 @@ pub(crate) fn offer_continuation(row: &SessionRow) -> String {
     let status = &row.info.status;
     let ended = status.has_ended();
     let offered = offer_clause(row, ended);
-    let note = feedback_note(row.info.restart_offer, ended);
+    let note = feedback_note(&row.info, ended);
     match status {
         SessionStatus::Interrupted => {
             format!("interrupted by a host reboot or a Farhelm update — {offered}.{note}")
@@ -104,7 +104,7 @@ pub(crate) fn offer_continuation(row: &SessionRow) -> String {
 pub(crate) fn offer_clause(row: &SessionRow, ended: bool) -> String {
     match row.info.restart_offer {
         RestartOffer::Resume => "restarting resumes this session's own conversation".to_owned(),
-        RestartOffer::NotCaptured => not_captured_clause(row.info.agent_kind, ended, REPLACE_STARTS_OVER),
+        RestartOffer::NotCaptured => not_captured_clause(&row.info, ended, REPLACE_STARTS_OVER),
         RestartOffer::NoConversationReporting if row.info.launch.is_shell() => {
             "this shell has no conversation to resume, so Replace starts a fresh shell".to_owned()
         }
@@ -126,12 +126,19 @@ pub(crate) fn offer_clause(row: &SessionRow, ended: bool) -> String {
 /// Replace.
 pub(crate) const REPLACE_STARTS_OVER: &str = "Replace starts the session over";
 
-/// What an uncaptured conversation means for a session of `kind`, ending in `start_over`, the way the surface offers to
+/// What an uncaptured conversation means for this session, ending in `start_over`, the way the surface offers to
 /// start the session over ([`REPLACE_STARTS_OVER`], or the interrupted card's Replace with for a legacy launch). While
 /// the agent may still report, it says, naming the agent, when Restart normally becomes available (the agent kind's own
 /// timing, the one source of those facts); once the agent has ended that would be false, so it says the conversation
 /// was never captured. A kind that names no agent gets the same shape with no per-agent claim.
-pub(crate) fn not_captured_clause(kind: AgentKind, ended: bool, start_over: &str) -> String {
+pub(crate) fn not_captured_clause(info: &SessionInfo, ended: bool, start_over: &str) -> String {
+    let kind = info.agent_kind;
+    if let Some(reason) = info
+        .persistent_hook_setup
+        .restart_blocker(kind, ReadinessWording::ToTheUser)
+    {
+        return format!("{reason}. {start_over}");
+    }
     let readiness = kind
         .display_name()
         .zip(kind.restart_readiness())
@@ -155,8 +162,13 @@ pub(crate) fn not_captured_clause(kind: AgentKind, ended: bool, start_over: &str
 /// The invitation to send feedback when an uncaptured conversation's Restart never arrives, after the explanation's own
 /// period; empty for every other offer. The app cannot tell a report still coming from one that never will, so it says
 /// what normally happens and asks to hear about it when that is wrong (SPEC.md, "Terminal experience").
-pub(crate) fn feedback_note(offer: RestartOffer, ended: bool) -> &'static str {
-    match (offer, ended) {
+pub(crate) fn feedback_note(info: &SessionInfo, ended: bool) -> &'static str {
+    if info.agent_kind.offers_persistent_hooks()
+        && info.persistent_hook_setup != farhelm_proto::PersistentHookSetup::Installed
+    {
+        return "";
+    }
+    match (info.restart_offer, ended) {
         (RestartOffer::NotCaptured, false) => {
             " (If Restart doesn't become available, please send feedback from the Help (?) menu.)"
         }
@@ -381,6 +393,26 @@ mod tests {
             "Resume conversation — interrupted by a host reboot or a Farhelm update — restarting resumes this \
              session's own conversation."
         );
+    }
+
+    /// Restart's tooltip uses the launch result so an off switch and a failed install never look like a normal wait.
+    #[test]
+    fn restart_hover_explains_grok_hook_setup_from_the_launch() {
+        use farhelm_proto::PersistentHookSetup;
+
+        let mut row = row(json!({"state": "running"}), "not_captured", "grok");
+        row.info.persistent_hook_setup = PersistentHookSetup::NotRequested;
+        let missing = hover_help(&row);
+        assert!(missing.contains("Settings → Agents → Grok"));
+        assert!(missing.contains("start a new session"));
+        row.info.persistent_hook_setup = PersistentHookSetup::Failed {
+            reason: "read-only directory".into(),
+        };
+        let failed = hover_help(&row);
+        assert!(failed.contains("read-only directory"));
+        assert!(!failed.contains("after your first prompt"));
+        row.info.persistent_hook_setup = PersistentHookSetup::Installed;
+        assert!(hover_help(&row).contains("after your first prompt"));
     }
 
     /// SPEC.md: a working agent's Restart confirms, and an idle, waiting or unknown one does not, "because a prompt

@@ -438,6 +438,8 @@ impl Launcher {
                 cx,
             ),
             Row::Model { id, harness, .. } => {
+                let picked_agent =
+                    self.draft.agent.harness != Some(harness) || self.draft.tab != Tab::Agent;
                 // A switch made from the Command tab raises no banner, as the draft's own rule says
                 // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the
                 // edit's escalation is judged as if from the Agent tab and dropped.
@@ -454,9 +456,14 @@ impl Launcher {
                     edit.escalation = None;
                 }
                 self.chose(edit, window, cx);
+                if picked_agent && self.draft.agent.harness == Some(harness) {
+                    self.check_hook_question(window, cx);
+                }
             }
             // A model from a past launch, recognized or custom on the agent it ran with.
             Row::HistoryModel { id, harness } => {
+                let picked_agent =
+                    self.draft.agent.harness != Some(harness) || self.draft.tab != Tab::Agent;
                 // A switch made from the Command tab raises no banner, as the draft's own rule says
                 // (`LaunchDraft::escalation_since`): the tab is switched here first, for the model's sake, so the
                 // edit's escalation is judged as if from the Agent tab and dropped.
@@ -473,6 +480,9 @@ impl Launcher {
                     edit.escalation = None;
                 }
                 self.chose(edit, window, cx);
+                if picked_agent && self.draft.agent.harness == Some(harness) {
+                    self.check_hook_question(window, cx);
+                }
             }
             Row::Effort(effort) => self.choose_effort(effort, cx),
             Row::Permission(permission) => {

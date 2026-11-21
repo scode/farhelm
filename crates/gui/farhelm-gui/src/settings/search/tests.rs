@@ -152,6 +152,16 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
             Choice::ShowCodexTrustHint.id(),
         ),
         ("stays quiet", Section::Notifications, super::SOUNDS_ID),
+        (
+            "grok conversation hooks",
+            Section::Agent(LaunchHarness::Grok),
+            "settings-grok-hook-setup",
+        ),
+        (
+            "antigravity conversation hooks",
+            Section::Agent(LaunchHarness::Antigravity),
+            "settings-antigravity-hook-setup",
+        ),
         ("dashboard", Section::Credentials, super::tensorlake_key::ID),
         ("dashboard", Section::Tensorlake, super::tensorlake_key::ID),
         ("urgent", Section::Notifications, "ntfy-priority"),

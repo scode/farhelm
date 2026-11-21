@@ -2656,6 +2656,8 @@ pub struct SessionSnapshot {
     /// to erase a report from a newer launch.
     pub generation: i64,
     pub restart_offer: RestartOffer,
+    /// The same generation's persisted setup fact, used when explaining an uncaptured conversation.
+    pub persistent_hook_setup: farhelm_proto::PersistentHookSetup,
     /// The resume template with `{conversation}` filled in, or `None` when
     /// there is no template or nothing captured to fill it with. A
     /// `RestartOffer::Resume` session always has one; that is what the
@@ -3661,11 +3663,12 @@ fn relaunch_argv(snapshot: &SessionSnapshot) -> anyhow::Result<Vec<String>> {
     // `restart_session` refuses first, knowing whether the session ended;
     // this keeps the pure function's own guarantee that an unavailable
     // offer never yields an argv.
-    if let Some(reason) =
-        snapshot
-            .restart_offer
-            .unavailable_reason(snapshot.kind, snapshot.launch_kind, false)
-    {
+    if let Some(reason) = snapshot.restart_offer.unavailable_reason(
+        snapshot.kind,
+        snapshot.launch_kind,
+        false,
+        &snapshot.persistent_hook_setup,
+    ) {
         return Err(RequestError::new(
             ErrorKind::Conflict,
             format!(
@@ -7530,6 +7533,7 @@ impl Supervisor {
             .flatten();
         Ok(Some(SessionSnapshot {
             restart_offer,
+            persistent_hook_setup: row.persistent_hook_setup,
             resume_argv,
             kind: snapshot.kind,
             launch_kind: row.launch.launch_kind(),
@@ -12399,6 +12403,7 @@ impl Supervisor {
                 snapshot.kind,
                 snapshot.launch_kind,
                 ended,
+                &snapshot.persistent_hook_setup,
             )
         {
             return Err(RequestError::new(
@@ -12421,6 +12426,7 @@ impl Supervisor {
                     snapshot.kind,
                     snapshot.launch_kind,
                     ended,
+                    &snapshot.persistent_hook_setup,
                 )
             {
                 return Err(RequestError::new(
@@ -17285,6 +17291,7 @@ pub(crate) mod tests {
             captured_conversation,
             generation: 0,
             restart_offer: offer,
+            persistent_hook_setup: Default::default(),
             resume_argv,
             canonical_cwd: None,
             capture_ownership_version: 0,
@@ -17313,7 +17320,12 @@ pub(crate) mod tests {
         ] {
             let snapshot = snapshot_offering(offer);
             let result = relaunch_argv(&snapshot);
-            match offer.unavailable_reason(snapshot.kind, snapshot.launch_kind, false) {
+            match offer.unavailable_reason(
+                snapshot.kind,
+                snapshot.launch_kind,
+                false,
+                &snapshot.persistent_hook_setup,
+            ) {
                 None => assert!(result.is_ok(), "{offer:?}: {result:?}"),
                 Some(reason) => {
                     let error = result.expect_err("an unavailable offer must not relaunch");

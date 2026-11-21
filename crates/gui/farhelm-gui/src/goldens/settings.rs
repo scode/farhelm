@@ -195,6 +195,9 @@ fn answer_settings_reads(
             serde_json::json!({ "enabled": false, "hint_dismissed": false })
         } else {
             match read.path.as_str() {
+                "/api/agent-hook-setup/grok" | "/api/agent-hook-setup/antigravity" => {
+                    serde_json::json!({ "enabled": false })
+                }
                 "/api/checkout-root" => serde_json::json!({ "root": null }),
                 "/api/checkout-post-clone" => serde_json::json!({ "command": null }),
                 "/api/checkout-spare" => serde_json::json!({ "enabled": true }),
@@ -778,6 +781,16 @@ pub(super) fn settings_antigravity_setup(state: &SceneState, window: &mut Window
     settings_scene(
         state,
         crate::settings::Section::Agent(LaunchHarness::Antigravity),
+        window,
+        cx,
+    );
+}
+
+/// Grok's page shows which files the all-hosts switch lets Farhelm write and how to undo those writes.
+pub(super) fn settings_grok_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(farhelm_proto::LaunchHarness::Grok),
         window,
         cx,
     );

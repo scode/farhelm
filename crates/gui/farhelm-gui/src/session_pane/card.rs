@@ -274,7 +274,7 @@ fn offers_replace_with(row: &SessionRow) -> bool {
 /// Name the reason the pane has no terminal and what each recovery action does. An interrupted session keeps the
 /// explanation about a reboot or update. The missing-terminal report does not identify a cause.
 pub(crate) fn text(row: &SessionRow) -> String {
-    let (offer, kind) = (row.info.restart_offer, row.info.agent_kind);
+    let offer = row.info.restart_offer;
     let lead = match row.info.status {
         SessionStatus::Interrupted if row.info.launch.is_shell() => {
             "A host reboot or a Farhelm update ended this session's shell"
@@ -291,7 +291,7 @@ pub(crate) fn text(row: &SessionRow) -> String {
         }
     };
     let clause = restart::offer_clause(row, true);
-    let note = restart::feedback_note(offer, true);
+    let note = restart::feedback_note(&row.info, true);
     // A legacy session's card offers Replace with, never plain Replace, so its text must not promise that "Replace
     // starts it over".
     if offers_replace_with(row) {
@@ -302,7 +302,7 @@ pub(crate) fn text(row: &SessionRow) -> String {
             )
         } else if offer == RestartOffer::NotCaptured {
             let start_over = "Replace with opens the launcher with its command to start it over";
-            let clause = restart::not_captured_clause(kind, true, start_over);
+            let clause = restart::not_captured_clause(&row.info, true, start_over);
             format!("{lead}. Farhelm will wait for you to choose Replace with — {clause}.{note}")
         } else {
             format!(

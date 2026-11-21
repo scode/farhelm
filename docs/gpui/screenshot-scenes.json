@@ -3010,7 +3010,22 @@
     },
     {
       "golden": "settings-antigravity",
-      "title": "Antigravity's page with its trust and hint switches",
+      "title": "Antigravity's page with hook setup, workspace trust and hint switches",
+      "reference": null
+    },
+    {
+      "golden": "settings-grok",
+      "title": "Grok's page with its all-hosts hook setup switch and hint preference",
+      "reference": null
+    },
+    {
+      "golden": "launcher-hook-setup",
+      "title": "The launcher asks for consent to set up Grok conversation hooks",
+      "reference": null
+    },
+    {
+      "golden": "session-hook-setup-hint",
+      "title": "The session hint for a Grok launch that is waiting for capture without setup",
       "reference": null
     },
     {

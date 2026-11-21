@@ -584,6 +584,13 @@ mod tests {
             "{text}"
         );
         assert!(!flowing.contains("submit your first prompt"), "{text}");
+        for name in ["Grok", "Antigravity"] {
+            assert!(
+                flowing.contains(&format!("Settings → Agents → {name}")),
+                "{text}"
+            );
+        }
+        assert!(!readiness_lines().contains("documentation"), "{text}");
         assert!(flowing.contains("Do not restart such a session; tell the user instead"));
         for line in readiness_lines().lines() {
             assert!(line.len() <= 88, "too wide ({}): {line}", line.len());

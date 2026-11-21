@@ -955,6 +955,31 @@ impl PersistentHookSetup {
     pub fn is_not_requested(&self) -> bool {
         matches!(self, Self::NotRequested)
     }
+
+    /// Explain a missing or failed setup for an uncaptured session. An installed hook uses ordinary report timing.
+    /// The reason is escaped for the terminal and desktop because it can include a path supplied by the host.
+    pub fn restart_blocker(&self, kind: AgentKind, wording: ReadinessWording) -> Option<String> {
+        if !kind.offers_persistent_hooks() {
+            return None;
+        }
+        let name = kind.display_name()?;
+        match self {
+            Self::Installed => None,
+            Self::NotRequested => {
+                let instruction = match wording {
+                    ReadinessWording::ToTheUser => "Turn on hook setup",
+                    ReadinessWording::Neutral => "The user can turn on hook setup",
+                };
+                Some(format!(
+                    "Farhelm did not set up its {name} conversation hooks for this session. {instruction} in Settings → Agents → {name} and start a new session"
+                ))
+            }
+            Self::Failed { reason } => Some(format!(
+                "Farhelm could not set up its {name} conversation hooks ({})",
+                crate::text::escaped(reason),
+            )),
+        }
+    }
 }
 
 /// The helm's current hook setup consent for Restart. The supervisor knows the session's actual kind under its
@@ -1473,10 +1498,14 @@ impl RestartOffer {
         kind: AgentKind,
         launch_kind: LaunchKind,
         ended: bool,
+        hook_setup: &PersistentHookSetup,
     ) -> Option<String> {
         let reason = match self {
             RestartOffer::Resume => return None,
             RestartOffer::NotCaptured => {
+                if let Some(reason) = hook_setup.restart_blocker(kind, ReadinessWording::Neutral) {
+                    return Some(format!("{reason}. Replace starts the session over"));
+                }
                 match (kind.display_name(), kind.restart_readiness(), ended) {
                     (Some(name), Some(readiness), false) => format!(
                         "Restart needs this session's own conversation, and none that Farhelm \
@@ -1527,8 +1556,7 @@ pub enum RestartReadiness {
     FirstPrompt,
     /// After the agent's first reply, once its conversation is saved.
     FirstReply,
-    /// After the first prompt, and only with Farhelm's hooks installed in
-    /// the agent by the user. Carries the name of its documentation page.
+    /// After the first prompt with Farhelm's persistent hooks set up. Carries the name of the agent's Settings page.
     FirstPromptWithHooks(&'static str),
 }
 
@@ -1563,8 +1591,8 @@ impl RestartReadiness {
     /// When Restart becomes available, as a clause that completes "Restart
     /// becomes available …" ("once you submit your first prompt").
     ///
-    /// The clause uses plain text because the refusal and notification
-    /// surfaces cannot render a link to the hook setup page.
+    /// The desktop's per-session reasons use the ordinary timing once the setup result is installed. The agent
+    /// instructions also name the setting because those instructions describe agents before a session starts.
     pub fn clause(self, wording: ReadinessWording) -> std::borrow::Cow<'static, str> {
         use std::borrow::Cow;
         let clause = match (self, wording) {
@@ -1579,16 +1607,12 @@ impl RestartReadiness {
             (RestartReadiness::FirstReply, _) => {
                 "after the agent's first reply, once the conversation is saved"
             }
-            (RestartReadiness::FirstPromptWithHooks(agent), ReadinessWording::ToTheUser) => {
-                return Cow::Owned(format!(
-                    "after your first prompt, and only if Farhelm's {agent} hooks are installed \
-                     (see the {agent} page in Farhelm's documentation)"
-                ));
+            (RestartReadiness::FirstPromptWithHooks(_), ReadinessWording::ToTheUser) => {
+                "after your first prompt"
             }
             (RestartReadiness::FirstPromptWithHooks(agent), ReadinessWording::Neutral) => {
                 return Cow::Owned(format!(
-                    "after the first prompt, and only if Farhelm's {agent} hooks are installed on \
-                     the host (see the {agent} page in Farhelm's documentation)"
+                    "after the first prompt with Farhelm's hooks set up (Settings → Agents → {agent})"
                 ));
             }
         };
@@ -5830,7 +5854,12 @@ mod tests {
         let offer = RestartOffer::NoResumeCommand;
         assert_eq!(
             offer
-                .unavailable_reason(AgentKind::Muse, LaunchKind::Agent, false)
+                .unavailable_reason(
+                    AgentKind::Muse,
+                    LaunchKind::Agent,
+                    false,
+                    &PersistentHookSetup::Installed
+                )
                 .as_deref(),
             Some(
                 "This agent launch has no stored resume command and Replace starts the session over"
@@ -5838,13 +5867,42 @@ mod tests {
         );
         assert_eq!(
             offer
-                .unavailable_reason(AgentKind::Muse, LaunchKind::Command, false)
+                .unavailable_reason(
+                    AgentKind::Muse,
+                    LaunchKind::Command,
+                    false,
+                    &PersistentHookSetup::Installed
+                )
                 .as_deref(),
             Some(
                 "Restart resumes through the launch's resume command, and this command launch did not opt \
                  into Resume; Replace starts the session over"
             )
         );
+    }
+
+    /// A not-yet-captured launch distinguishes missing consent, a failed installation, and ordinary first-prompt
+    /// readiness. Both persistent hook agents use the same Settings route in the supervisor's refusal.
+    #[farhelm_testtrace::test]
+    fn persistent_hooks_explain_restart_readiness_from_the_launch_result() {
+        for kind in [AgentKind::Grok, AgentKind::Antigravity] {
+            let reason = |setup| {
+                RestartOffer::NotCaptured
+                    .unavailable_reason(kind, LaunchKind::Agent, false, setup)
+                    .expect("there is no conversation to resume")
+            };
+            let missing = reason(&PersistentHookSetup::NotRequested);
+            let agent = kind.display_name().unwrap();
+            assert!(missing.contains(&format!("Settings → Agents → {agent}")));
+            assert!(missing.contains("start a new session"));
+            let installed = reason(&PersistentHookSetup::Installed);
+            assert!(installed.contains("after the first prompt"), "{installed}");
+            let failed = reason(&PersistentHookSetup::Failed {
+                reason: "read-only path".into(),
+            });
+            assert!(failed.contains("read-only path"), "{failed}");
+            assert!(!failed.contains("after the first prompt"));
+        }
     }
 
     /// Spec: every agent kind that reports conversations has a display name
@@ -5880,7 +5938,12 @@ mod tests {
                 assert_eq!(name, expected_name);
                 assert_eq!(readiness, None);
                 let reason = RestartOffer::NotCaptured
-                    .unavailable_reason(kind, LaunchKind::Agent, false)
+                    .unavailable_reason(
+                        kind,
+                        LaunchKind::Agent,
+                        false,
+                        &PersistentHookSetup::Installed,
+                    )
                     .unwrap();
                 assert!(!reason.contains("normally becomes available"), "{reason}");
                 continue;
@@ -5896,10 +5959,20 @@ mod tests {
                 "{kind:?}: {neutral}"
             );
             let reason = RestartOffer::NotCaptured
-                .unavailable_reason(kind, LaunchKind::Agent, false)
+                .unavailable_reason(
+                    kind,
+                    LaunchKind::Agent,
+                    false,
+                    &PersistentHookSetup::Installed,
+                )
                 .unwrap();
             let ended = RestartOffer::NotCaptured
-                .unavailable_reason(kind, LaunchKind::Agent, true)
+                .unavailable_reason(
+                    kind,
+                    LaunchKind::Agent,
+                    true,
+                    &PersistentHookSetup::Installed,
+                )
                 .unwrap();
             assert!(
                 ended.contains(&format!(
@@ -8082,7 +8155,12 @@ mod tests {
             assert_eq!(
                 offer.can_restart(),
                 offer
-                    .unavailable_reason(AgentKind::Codex, LaunchKind::Agent, false)
+                    .unavailable_reason(
+                        AgentKind::Codex,
+                        LaunchKind::Agent,
+                        false,
+                        &PersistentHookSetup::Installed
+                    )
                     .is_none(),
                 "{offer:?}: an offer either restarts or says why it cannot"
             );

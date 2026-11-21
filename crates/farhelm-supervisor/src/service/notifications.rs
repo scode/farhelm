@@ -217,21 +217,26 @@ pub(crate) const ANTIGRAVITY_PIN_CORRECTED_TEXT: &str = "Farhelm had been follow
 /// Explain the missed report using the same agent name and timing as Restart.
 ///
 /// Called only for a kind whose report is due by the first prompt, which
-/// guarantees both facts exist. The custom-command advice names the supported
-/// hook placeholder even for legacy sessions whose command predates it; the
-/// user can instead send feedback when Farhelm composed the launch itself.
+/// guarantees both facts exist. For reporters passed as launch arguments, custom-command advice names the supported
+/// hook placeholder even for legacy sessions whose command predates it. Persistent configuration uses feedback
+/// guidance because changing the launch arguments cannot repair those hooks.
 pub(crate) fn hook_silent_text(kind: AgentKind) -> String {
     let agent = kind.display_name().expect("a silent-hook agent has a name");
     let timing = kind
         .restart_readiness()
         .expect("a silent-hook agent has report timing")
         .clause(ReadinessWording::ToTheUser);
-    format!(
+    let missed = format!(
         "{agent} normally reports its conversation to Farhelm {timing}, so it should have by now. \
-         Until it does, Restart cannot resume this conversation. If you launched {agent} with a \
-         custom command, check that it passes on `{{farhelm_args}}`; otherwise, please send \
-         feedback from the help (?) menu."
-    )
+         Until it does, Restart cannot resume this conversation."
+    );
+    if kind.offers_persistent_hooks() {
+        format!("{missed} Please send feedback from the help (?) menu.")
+    } else {
+        format!(
+            "{missed} If you launched {agent} with a custom command, check that it passes on `{{farhelm_args}}`; otherwise, please send feedback from the help (?) menu."
+        )
+    }
 }
 
 /// The text of a [`NotificationKind::HookNotAdded`] notification for a
@@ -625,8 +630,14 @@ mod tests {
             assert!(text.contains(kind.display_name().expect("eligible agent name")));
             assert!(text.contains(readiness.clause(ReadinessWording::ToTheUser).as_ref()));
             assert!(text.contains("Restart cannot resume this conversation"));
-            assert!(text.contains("custom command"));
-            assert!(text.contains("`{farhelm_args}`"));
+            assert_eq!(
+                text.contains("custom command"),
+                !kind.offers_persistent_hooks()
+            );
+            assert_eq!(
+                text.contains("`{farhelm_args}`"),
+                !kind.offers_persistent_hooks()
+            );
             assert!(text.contains("feedback from the help (?) menu"));
             assert!(!text.to_lowercase().contains("log"), "{kind:?}: {text}");
         }

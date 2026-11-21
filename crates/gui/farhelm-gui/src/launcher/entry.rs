@@ -395,6 +395,12 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
 /// Restart with waits on the same conversation, ending with the same feedback invitation (the old
 /// `not_captured_with_reason`).
 fn not_captured_reason(info: &SessionInfo) -> String {
+    if let Some(reason) = info
+        .persistent_hook_setup
+        .restart_blocker(info.agent_kind, ReadinessWording::ToTheUser)
+    {
+        return format!("{reason}.");
+    }
     let ended = info.status.has_ended();
     let readiness = info
         .agent_kind
@@ -414,10 +420,7 @@ fn not_captured_reason(info: &SessionInfo) -> String {
         }
         (None, true) => "Farhelm never captured this session's conversation".to_owned(),
     };
-    format!(
-        "{reason}.{}",
-        restart::feedback_note(RestartOffer::NotCaptured, ended)
-    )
+    format!("{reason}.{}", restart::feedback_note(info, ended))
 }
 
 /// The note under Host when a Clone's source host no longer names the install the session ran on (retargeted onto

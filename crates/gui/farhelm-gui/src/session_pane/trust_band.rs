@@ -37,7 +37,7 @@ use std::collections::HashSet;
 use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight, HighlightStyle,
-    InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString,
+    InteractiveElement as _, IntoElement, ParentElement as _, Role, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled as _, StyledText, Subscription, WeakEntity, div,
     prelude::FluentBuilder as _, px,
 };
@@ -376,34 +376,9 @@ pub(crate) fn draw(
     let palette = theme::palette(cx);
     let weak = band.downgrade();
     Some(
-        div()
-            .id(BAND_ID)
-            .debug_selector(|| BAND_ID.into())
-            // Announced as it appears, without taking focus (SPEC.md: "is announced without taking focus").
-            .role(Role::Status)
-            .relative()
-            .flex_none()
-            .flex()
-            .flex_col()
-            .py(px(PAD.0))
-            .px(px(PAD.1))
-            .border_b_1()
-            .border_color(theme::color(palette.border))
-            .bg(theme::color(palette.bg_2))
-            .text_color(theme::color(palette.fg_0))
-            .text_size(metrics::TEXT_SM)
-            .line_height(px(LINE_HEIGHT))
-            .child(
-                div()
-                    .absolute()
-                    .top_0()
-                    .bottom_0()
-                    .left_0()
-                    .w(px(RULE))
-                    .bg(theme::color(palette.info)),
-            )
+        strip(BAND_ID, palette)
             .when(shows, |band| {
-                band.child(copy(&words, palette))
+                band.child(copy(COPY_ID, words.lead, words.rest, palette))
                     .child(actions(&weak, key, agent, &words, state))
             })
             .children(failed.filter(|_| failure).map(|words| {
@@ -420,20 +395,63 @@ pub(crate) fn draw(
     )
 }
 
+/// The nonmodal hint presentation lives above the terminal and announces itself without taking focus.
+pub(super) fn strip(id: &'static str, palette: &theme::Palette) -> Stateful<gpui::Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .role(Role::Status)
+        .relative()
+        .flex_none()
+        .flex()
+        .flex_col()
+        .py(px(PAD.0))
+        .px(px(PAD.1))
+        .border_b_1()
+        .border_color(theme::color(palette.border))
+        .bg(theme::color(palette.bg_2))
+        .text_color(theme::color(palette.fg_0))
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(LINE_HEIGHT))
+        .child(
+            div()
+                .absolute()
+                .top_0()
+                .bottom_0()
+                .left_0()
+                .w(px(RULE))
+                .bg(theme::color(palette.info)),
+        )
+}
+
 /// The explanation, its lead in bold info ink (`.claude-trust-band-copy strong`).
-fn copy(words: &BandWords, palette: &theme::Palette) -> impl IntoElement {
+pub(super) fn copy(
+    id: &'static str,
+    lead_words: &str,
+    rest: &str,
+    palette: &theme::Palette,
+) -> impl IntoElement {
     let lead = HighlightStyle {
         color: Some(theme::color(palette.info)),
         font_weight: Some(FontWeight::BOLD),
         ..HighlightStyle::default()
     };
-    let text = format!("{}{}", words.lead, words.rest);
+    let text = format!("{lead_words}{rest}");
     div()
-        .id(COPY_ID)
-        .debug_selector(|| COPY_ID.into())
+        .id(id)
+        .debug_selector(move || id.into())
         .role(Role::Label)
         .aria_label(SharedString::from(text.clone()))
-        .child(StyledText::new(text).with_highlights([(0..words.lead.len(), lead)]))
+        .child(StyledText::new(text).with_highlights([(0..lead_words.len(), lead)]))
+}
+
+pub(super) fn action_row() -> gpui::Div {
+    div()
+        .flex()
+        .flex_row()
+        .flex_wrap()
+        .gap(px(ACTIONS_GAP))
+        .mt(px(ACTIONS_GAP))
 }
 
 /// Settings, Don't show again and ×, each acting through `band` for `agent`'s question in the session filed under
@@ -484,13 +502,5 @@ fn actions(
             cx.notify();
         });
     });
-    div()
-        .flex()
-        .flex_row()
-        .flex_wrap()
-        .gap(px(ACTIONS_GAP))
-        .mt(px(ACTIONS_GAP))
-        .child(settings)
-        .child(dismiss)
-        .child(hide)
+    action_row().child(settings).child(dismiss).child(hide)
 }
