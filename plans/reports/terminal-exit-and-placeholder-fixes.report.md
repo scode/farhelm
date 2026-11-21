@@ -64,3 +64,52 @@ Both drafts passed independent source review. The scrollback review found the al
 prototype. The final review of that draft confirmed the TODO and archive carry the full scope. The Connecting review
 confirmed that the label draws on the default terminal background and that the existing screenshot scenes settle after
 Connecting has disappeared. Both final commit messages passed cold reads.
+
+### Landing
+
+#### What landed with it
+
+Nothing else landed in this round. Since this plan's work started, main gained the gui-launcher-feedback-fixes plan
+(launcher, Restart wording and feedback dialog fixes) and planning changes to TODO.md. An independent reviewer and I
+read this plan against them; none touches the terminal pane or the exit notice. The landing made no fixes of its own to
+this plan.
+
+#### Checks
+
+The plan changes one line of the desktop app's terminal pane (the color of its "Connecting" text) and adds a TODO.md
+entry, plus a changelog fragment and the triage records. The landing ran the desktop app's GUI test suite and the main
+lint (clippy) on a separate arm64 Linux test machine, and the screenshot comparisons and small checks locally on x86_64,
+on the plan stacked on main:
+
+- `cargo nextest run -p farhelm-gui`, on the test machine (recorder run `50eedd58-1508-486f-8e63-a85d76a9eb2f`): all
+  3226 tests passed. One of them checks that "Connecting" appears; none checks its color.
+- `cargo clippy --all-targets -- -D warnings`, on the test machine, not through the recorder: passed.
+- `python3 scripts/check-gui-goldens.py` (the screenshot comparisons), locally (recorder run
+  `21e329f2-7741-4dd9-a96b-d3caf0d4b67b`): passed. No reference picture shows the Connecting pane, so they do not cover
+  the new color.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format` (formatting, test and changelog lints), locally: passed.
+
+Skipped: the workspace suite and the end-to-end smoke test, since only one color in the GUI changed; and Mac runs, since
+nothing here is Mac-specific.
+
+#### Things you should know that the report does not say
+
+- Deferring the scrollback fix is what your triage decision allowed: "if any of these spiral into something very
+  complicated, the executor should make a near term todo item to follow up on it instead of adding tons of complexity",
+  with a size limit of about 100 changed lines, which the prototype passed at 137 before it was finished. The new Near
+  term entry says what is wrong, what done means and the edge cases.
+- The Connecting text's contrast on the pane's dark background works out at 7.9:1, up from 1.6:1 in the light appearance
+  and unchanged in the dark one. That figure is computed from the two colors; no test or screenshot shows the new color
+  on screen.
+- The color is set by naming the dark palette directly, the one place outside tests where a view does that instead of
+  asking for the current palette. The plan asked for exactly this, and it matches the pane, which stays dark in both
+  appearances until its first screen arrives.
+- The new TODO entry does not say where the details live: the code locations and the request for a test that scrolls
+  back after an exit are only in the archived triage outcome (`exit-notice-hides-oldest-scrollback-row.md` in
+  `TRIAGE_OUTCOMES_ARCHIVE.md`).
+
+#### What you should still do
+
+Nothing is required. Whoever picks up the scrollback TODO should read that archived triage outcome first; adding a
+one-line pointer to it in the TODO entry would make that hard to miss.
