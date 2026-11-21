@@ -12,6 +12,11 @@ can end with its folded full list below the highlights, an HTML details block ti
 (`releasing/.agents/changelog.md`, "Format"); the generator passes its frame lines through as markup, so it starts
 closed on the page as it does on GitHub, and Starlight's own styling for details blocks draws it.
 
+The build also serves `/whats-new.json` for the desktop app, from the same pass over the changelog. Version 1 includes
+finalized stable releases from v0.42.0 on. It carries highlight categories in page order, plain, bold and code text
+pieces, a count of the folded changes, and a link when an entry has screenshots. Keep changes to this JSON additive.
+Existing desktop releases keep reading it after newer versions ship. The public asset is generated and gitignored.
+
 An entry can show screenshots of what it changed, behind a closed **show screenshot** link under the entry's text.
 `website/src/release-notes/<version>.json` (for example `website/src/release-notes/v0.25.0.json`) lists them, naming
 each entry by a pull request number the entry cites; the generator places them, and fails the build when no entry of

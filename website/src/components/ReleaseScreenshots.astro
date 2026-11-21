@@ -12,15 +12,17 @@
 import Screenshot from './Screenshot.astro';
 
 interface Props {
+  /** The stable version-and-PR fragment used in the app's screenshot link. */
+  anchor: string;
   /** The entry's shots, in the order the release's list names them. */
   shots: { name: string; alt: string }[];
 }
 
-const { shots } = Astro.props;
+const { anchor, shots } = Astro.props;
 const label = shots.length === 1 ? 'show screenshot' : `show ${shots.length} screenshots`;
 ---
 
-<details class="release-screenshots">
+<details id={anchor} class="release-screenshots">
   <summary>{label}</summary>
   {shots.map((shot) => <Screenshot name={shot.name} alt={shot.alt} />)}
 </details>

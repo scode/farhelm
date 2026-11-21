@@ -107,6 +107,7 @@ same pin CI and release builds use; no second clippy run on floating stable is n
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` (includes both Claude
   instruction-file names in the repository inventory and mixed-case specification pointers)
 - `cd website && bun install --frozen-lockfile && bun run build`, and `cd website/feedback-tests && node --test`
+- `node --test website/scripts/release-notes.test.mjs` after installing website dependencies
 - `dist generate --check`
 - `python3 scripts/install-pinned-cargo-deny.py`, then `<printed directory>/cargo-deny --locked check licenses sources`
   (the dependency license and source policy in `deny.toml`)
