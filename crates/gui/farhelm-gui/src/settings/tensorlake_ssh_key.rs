@@ -51,15 +51,15 @@
 use farhelm_helm_client::Method;
 use farhelm_proto::tensorlake::SshKeyStatus;
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, Div, Entity, FocusHandle, FontWeight,
+    AnyWindowHandle, App, AppContext as _, Context, Div, Entity, FocusHandle,
     InteractiveElement as _, IntoElement, ParentElement as _, Render, Role, SharedString,
     StatefulInteractiveElement as _, Styled as _, Subscription, Window, div, px,
 };
 
 use std::time::Duration;
 
-use super::choices;
 use super::tensorlake_key::{TensorlakeAccount, path};
+use super::{card, choices};
 use crate::components::{Button, CommandWell, CopyFeedback, HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
@@ -103,9 +103,6 @@ const UNCHECKED: &str = "Farhelm cannot check that the key is registered, becaus
 /// The group's gap and the room above its title under the rule, as the section's other parts
 /// (`.host-settings-section`, `.host-settings-section + .host-settings-section`).
 const PART_GAP: f32 = 14.;
-const RULE_PAD: f32 = 20.;
-/// `.host-settings-section-title`'s size.
-const TITLE_TEXT: f32 = 11.;
 
 /// The SSH key group, a view of its own that the Tensorlake section makes with itself and keeps for the opening.
 pub(super) struct SshKey {
@@ -366,27 +363,27 @@ impl Render for SshKey {
             .aria_label("Farhelm's SSH key")
             .flex()
             .flex_col()
-            .gap(px(PART_GAP))
+            .gap(px(8.))
             .w_full()
             .min_w_0()
-            .pt(px(RULE_PAD))
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim))
             .child(
-                div()
+                card::heading(LABEL, None, None, cx)
                     .id(SharedString::from(format!("{ID}-heading")))
                     .role(Role::Heading)
-                    .aria_label(LABEL)
-                    .text_size(px(TITLE_TEXT))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child(LABEL),
+                    .aria_label(LABEL),
             )
-            .child(choices::help(HELP, cx))
-            .children(state)
-            .children(copied)
-            .children(failure)
-            .children(try_again)
-            .child(choices::help(UNCHECKED, cx))
+            .child(card::rows(
+                [div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(PART_GAP))
+                    .child(choices::help(HELP, cx))
+                    .children(state)
+                    .children(copied)
+                    .children(failure)
+                    .children(try_again)
+                    .child(choices::help(UNCHECKED, cx))],
+                cx,
+            ))
     }
 }

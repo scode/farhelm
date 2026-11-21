@@ -238,6 +238,7 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     options: Vec<RadioOption<V>>,
     disabled: bool,
     look: Look,
+    card_columns: u16,
     /// Whether small segments size from their words ([`RadioGroup::fit_words`]).
     fit_words: bool,
     on_change: Option<OnChange<V>>,
@@ -291,6 +292,7 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             options: Vec::new(),
             disabled: false,
             look: Look::Segments,
+            card_columns: CARD_COLUMNS,
             fit_words: false,
             on_change: None,
             on_enter: None,
@@ -373,6 +375,13 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
     /// says nothing about the keyboard. A described option's line is its accessible description, as in every look.
     pub fn cards(mut self) -> Self {
         self.look = Look::Cards;
+        self
+    }
+
+    /// Set the grid's column count where a dialog has room for a different number of cards in a row.
+    pub(crate) fn card_columns(mut self, columns: u16) -> Self {
+        debug_assert!(self.look == Look::Cards);
+        self.card_columns = columns;
         self
     }
 
@@ -665,11 +674,10 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 .border_color(theme::color(palette.border_dim))
                 .bg(theme::color(palette.card)),
             Look::Chips => group.gap(px(CHIP_GAP)),
-            // A grid in place of the row or the stack: every card a third of the width, and a row of cards as tall as
-            // its tallest, as the old grid's stretched items were.
+            // The cards share the available width, and a row grows to its tallest card.
             Look::Cards => group
                 .grid()
-                .grid_cols(CARD_COLUMNS)
+                .grid_cols(self.card_columns)
                 .items_stretch()
                 .gap(px(CARD_GAP)),
             // `.segmented-control`: the options in a well with a 2-pixel gap and padding inside a dim edge.

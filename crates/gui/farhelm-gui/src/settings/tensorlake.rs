@@ -32,11 +32,11 @@ use gpui::{
     Subscription, Window, div, px,
 };
 
-use super::Refused;
-use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices::{self, GROUP_GAP};
 use super::tensorlake_key::{self, TensorlakeAccount, TensorlakeKey};
 use super::tensorlake_sandboxes::Sandboxes;
 use super::tensorlake_ssh_key::SshKey;
+use super::{Refused, card};
 use crate::components::{Checkbox, HoverHelp};
 use crate::drafts::{self, Draft};
 use crate::host_text::HostSentence;
@@ -83,12 +83,8 @@ const WARNING_TEXT: f32 = 15.;
 const WARNING_LINE_HEIGHT: f32 = 21.75;
 const WARNING_MARGIN: f32 = 14.;
 
-/// `.host-settings-section`'s gap, and a later section's room above its title under the rule
-/// (`.host-settings-section + .host-settings-section`).
+/// The space between the warning, introduction and groups.
 const PART_GAP: f32 = 14.;
-const RULE_PAD: f32 = 20.;
-/// `.host-settings-section-title`'s size.
-const TITLE_TEXT: f32 = 11.;
 
 /// The switch's request: its own field and nothing else, so it cannot undo a key another form saved.
 fn ask_save(create_without_asking: bool) -> SaveSettings {
@@ -226,30 +222,24 @@ impl Tensorlake {
             .child(EXPERIMENTAL_WARNING)
     }
 
-    /// "Creating sandboxes": its title, the switch with its help, failure and busy lines, and the Usage Credits note,
-    /// ruled off from the key form above it as the old sections were.
+    /// Let the creation switch own its help and outcomes, with the Usage Credits paragraph below the card.
     fn creating(&self, cx: &Context<Self>) -> gpui::Stateful<Div> {
-        let palette = theme::palette(cx);
         let stored = self.stored(cx);
         let weak = cx.weak_entity();
-        let switch = div()
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
-            .child(
-                Checkbox::new(
-                    ASK_ID,
-                    ASK_LABEL,
-                    HoverHelp::tooltip(ASK_TOOLTIP),
-                    Role::Switch,
-                )
-                .switch()
-                .focus(&self.ask_focus)
-                .checked(stored == Some(true))
-                .disabled(stored.is_none())
-                .on_toggle(move |on, _, cx| {
-                    let _ = weak.update(cx, |section, cx| section.toggle(on, cx));
-                }),
-            );
+        let switch = Checkbox::new(
+            ASK_ID,
+            ASK_LABEL,
+            HoverHelp::tooltip(ASK_TOOLTIP),
+            Role::Switch,
+        )
+        .switch()
+        .content(card::switch_copy(ASK_LABEL, ASK_HELP, cx))
+        .focus(&self.ask_focus)
+        .checked(stored == Some(true))
+        .disabled(stored.is_none())
+        .on_toggle(move |on, _, cx| {
+            let _ = weak.update(cx, |section, cx| section.toggle(on, cx));
+        });
         // The old line was the helm's words alone, with none of the app's before them.
         let failure = self.ask.refusal().map(|reason| {
             choices::host_failure_line(
@@ -264,7 +254,6 @@ impl Tensorlake {
             .gap(px(GROUP_GAP))
             .min_w_0()
             .child(switch)
-            .child(choices::help(ASK_HELP, cx))
             .children(failure)
             .children(choices::busy_line(&self.refused, ASK_ID, cx));
         div()
@@ -273,22 +262,15 @@ impl Tensorlake {
             .aria_label("Creating sandboxes")
             .flex()
             .flex_col()
-            .gap(px(PART_GAP))
+            .gap(px(8.))
             .min_w_0()
-            .pt(px(RULE_PAD))
-            .border_t_1()
-            .border_color(theme::color(palette.border_dim))
             .child(
-                div()
+                card::heading("Creating sandboxes", None, None, cx)
                     .id("tensorlake-creating-heading")
                     .role(Role::Heading)
-                    .aria_label("Creating sandboxes")
-                    .text_size(px(TITLE_TEXT))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::color(palette.fg_1))
-                    .child("Creating sandboxes"),
+                    .aria_label("Creating sandboxes"),
             )
-            .child(group)
+            .child(card::rows([group], cx))
             .child(choices::help(USAGE_CREDITS_NOTE, cx))
     }
 }
@@ -306,7 +288,14 @@ impl Render for Tensorlake {
             .min_w_0()
             .child(Self::warning(cx))
             .child(choices::help(INTRO, cx))
-            .child(self.key.clone())
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(card::heading("API key", None, None, cx))
+                    .child(card::rows([self.key.clone()], cx)),
+            )
             .child(self.ssh_key.clone())
             .child(self.sandboxes.clone())
             .child(self.creating(cx))

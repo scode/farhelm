@@ -50,14 +50,13 @@ use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::environment::ContainerLeftoverView;
 use farhelm_proto::ui_channel::{Availability, Collection, ContainerCheckView, HostView};
 use gpui::{
-    App, Context, Div, ElementId, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Role, StatefulInteractiveElement as _, Styled as _, Window, div,
-    px,
+    App, Context, Div, ElementId, InteractiveElement as _, IntoElement, ParentElement as _, Render,
+    Role, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::{card, choices};
 use crate::components::{Button, HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
@@ -68,15 +67,9 @@ use crate::theme::{self, metrics};
 
 /// `.host-settings-section`'s gap between the section's parts.
 const PART_GAP: f32 = 14.;
-/// `.recipe-row`'s padding, top and bottom then left and right.
-const ROW_PAD: (f32, f32) = (8., 10.);
 /// `.recipe-row`'s gap between the host's name and its state.
 const ROW_GAP: f32 = 10.;
-/// The browser's default margins around the old `h4` heading and `p` status lines (1.33em and 1em at 16 pixels), which
-/// set the leftovers section's spacing.
-const HEADING_MARGIN: f32 = 21.;
 pub(super) const LEFTOVERS_LABEL: &str = "Containers not on this helm";
-const STATUS_MARGIN: f32 = 16.;
 
 /// The section's help, the old words.
 pub(super) const HELP: &str = "Containers run on your Linux hosts with rootless Podman, cgroup v2 and the systemd cgroup manager. \
@@ -130,6 +123,21 @@ pub(super) struct Containers {
 }
 
 impl Containers {
+    /// Let the golden wait for a real leftover read before asking the same question as Delete.
+    #[cfg(test)]
+    pub(super) fn first_leftover_for_golden(&self) -> Option<ContainerLeftoverView> {
+        self.leftovers.as_ref()?.as_ref().ok()?.first().cloned()
+    }
+
+    #[cfg(test)]
+    pub(super) fn ask_for_golden(
+        &mut self,
+        row: ContainerLeftoverView,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        self.ask(row, &Mark::take(cx), window, cx);
+    }
     /// The section, reading the leftovers and checking every container host now.
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         let mut section = Containers {
@@ -286,6 +294,7 @@ impl Containers {
             HoverHelp::tooltip("Cancel: keep this container"),
             Tier::Neutral,
         ))
+        .loud()
         // Deleting a container cannot be undone (SPEC.md, "Opening and closing": focus starts on Cancel then).
         .starts_on_cancel();
         self.question = Some(prompt::ask_inline(
@@ -348,21 +357,36 @@ impl Containers {
             .flex()
             .items_center()
             .gap(px(ROW_GAP))
-            .py(px(ROW_PAD.0))
-            .px(px(ROW_PAD.1))
-            .bg(theme::color(palette.bg_1))
-            .rounded(metrics::RADIUS_SM)
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
+            .text_size(metrics::TEXT_MD)
             .text_color(theme::color(palette.fg_0))
             .debug_selector(move || format!("containers-host-{index}"))
-            .child(host_text::element(&HostText::from_host(host.name.clone())))
+            .child(
+                div()
+                    .flex_none()
+                    .size(px(8.))
+                    .rounded_full()
+                    .bg(theme::color(crate::hosts::identity::tint(
+                        host.color, palette,
+                    ))),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(host_text::element(&HostText::from_host(host.name.clone()))),
+            )
             .child(
                 div()
                     .id(ElementId::Name(id.into()))
                     .role(Role::Status)
                     .aria_label(state.accessible_name())
+                    .max_w(gpui::relative(0.60))
                     .min_w_0()
+                    .text_color(theme::color(if check.usable {
+                        palette.ok
+                    } else {
+                        palette.warn
+                    }))
                     .child(state),
             )
             // No leading space: the old span's " · " lost its space at the start of its flex item, and the row's gap
@@ -378,10 +402,14 @@ impl Containers {
             .flex()
             .items_center()
             .gap(px(ROW_GAP))
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
+            .text_size(metrics::TEXT_MD)
             .debug_selector(move || format!("containers-leftover-{index}"))
-            .child(host_text::element(&HostText::from_host(row.name.clone())))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .child(host_text::element(&HostText::from_host(row.name.clone()))),
+            )
             .child(
                 Button::new(
                     format!("containers-leftover-{index}-delete"),
@@ -399,8 +427,7 @@ impl Containers {
             )
     }
 
-    /// A status line in the old section's paragraph look (16 pixels, the browser's default) saying `text`, under `id`
-    /// and named by its words, as this area's other status lines are.
+    /// A card's empty or loading row, with its words exposed as a status.
     fn status(id: &'static str, text: &'static str, cx: &App) -> gpui::Stateful<Div> {
         let palette = theme::palette(cx);
         div()
@@ -408,8 +435,7 @@ impl Containers {
             .debug_selector(move || id.to_owned())
             .role(Role::Status)
             .aria_label(text)
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
+            .text_size(metrics::TEXT_MD)
             .text_color(theme::color(palette.fg_0))
             .child(text)
     }
@@ -423,7 +449,6 @@ impl Containers {
 
 impl Render for Containers {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let palette = theme::palette(cx);
         let weak = cx.weak_entity();
         let refresh = Button::new(
             "containers-refresh",
@@ -437,47 +462,52 @@ impl Render for Containers {
             let _ = weak.update(cx, |section, cx| section.refresh(cx));
         });
 
-        // `section[aria-label="Container hosts"]`: its rows touch, as the old blocks did.
-        let hosts = div()
-            .id("containers-hosts")
-            .role(Role::Region)
-            .aria_label("Container hosts")
-            .flex()
-            .flex_col()
-            .min_w_0();
-        let hosts = match (&self.refused, container_hosts(cx)) {
-            (Some(refused), _) => hosts.child(Self::failure_line(
-                "containers-hosts-error",
-                &refused.reason,
-                cx,
-            )),
-            (None, Hosts::Reading) => hosts.child(Self::status(
-                "containers-hosts-reading",
-                "Reading container hosts…",
-                cx,
-            )),
+        let hosts: Vec<_> = match (&self.refused, container_hosts(cx)) {
+            (Some(refused), _) => vec![
+                Self::failure_line("containers-hosts-error", &refused.reason, cx)
+                    .into_any_element(),
+            ],
+            (None, Hosts::Reading) => vec![
+                Self::status("containers-hosts-reading", "Reading container hosts…", cx)
+                    .into_any_element(),
+            ],
             (None, Hosts::Unreadable(reason)) => {
-                hosts.child(Self::failure_line("containers-hosts-error", &reason, cx))
+                vec![Self::failure_line("containers-hosts-error", &reason, cx).into_any_element()]
             }
-            (None, Hosts::Listed(listed)) => hosts.children(
-                listed
-                    .iter()
-                    .enumerate()
-                    .map(|(index, (host, check))| Self::host_row(host, check, index, cx)),
-            ),
+            (None, Hosts::Listed(listed)) => listed
+                .iter()
+                .enumerate()
+                .map(|(index, (host, check))| {
+                    Self::host_row(host, check, index, cx).into_any_element()
+                })
+                .collect(),
         };
 
-        let heading = div()
+        let heading = card::heading(LEFTOVERS_LABEL, None, None, cx)
             .id("containers-leftovers-heading")
             .role(Role::Heading)
-            .aria_label(LEFTOVERS_LABEL)
-            .mt(px(HEADING_MARGIN))
-            .mb(px(HEADING_MARGIN))
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
-            .font_weight(FontWeight::BOLD)
-            .text_color(theme::color(palette.fg_0))
-            .child(LEFTOVERS_LABEL);
+            .aria_label(LEFTOVERS_LABEL);
+        let rows = match &self.leftovers {
+            None => vec![
+                Self::status(
+                    "containers-leftovers-reading",
+                    "Reading container leftovers…",
+                    cx,
+                )
+                .into_any_element(),
+            ],
+            Some(Err(reason)) => vec![
+                Self::failure_line("containers-leftovers-error", reason, cx).into_any_element(),
+            ],
+            Some(Ok(rows)) if rows.is_empty() => {
+                vec![Self::status("containers-leftovers-none", "None found", cx).into_any_element()]
+            }
+            Some(Ok(rows)) => rows
+                .iter()
+                .enumerate()
+                .map(|(index, row)| self.leftover_row(row, index, cx).into_any_element())
+                .collect(),
+        };
         let leftovers = div()
             .id("containers-leftovers")
             .role(Role::Region)
@@ -485,40 +515,23 @@ impl Render for Containers {
             .flex()
             .flex_col()
             .min_w_0()
+            .gap(px(8.))
             .child(heading)
+            .child(card::rows(
+                rows.into_iter()
+                    .chain(
+                        self.question
+                            .as_ref()
+                            .filter(|question| question.is_open(cx))
+                            .cloned()
+                            .map(IntoElement::into_any_element),
+                    )
+                    .chain(self.failure.as_ref().map(|reason| {
+                        Self::failure_line("containers-delete-error", reason, cx).into_any_element()
+                    })),
+                cx,
+            ))
             .child(choices::help(LEFTOVERS_HELP, cx));
-        let leftovers = match &self.leftovers {
-            None => leftovers.child(
-                Self::status(
-                    "containers-leftovers-reading",
-                    "Reading container leftovers…",
-                    cx,
-                )
-                .mt(px(STATUS_MARGIN)),
-            ),
-            Some(Err(reason)) => {
-                leftovers.child(div().mt(px(STATUS_MARGIN)).child(Self::failure_line(
-                    "containers-leftovers-error",
-                    reason,
-                    cx,
-                )))
-            }
-            Some(Ok(rows)) if rows.is_empty() => leftovers.child(
-                Self::status("containers-leftovers-none", "None found", cx).mt(px(STATUS_MARGIN)),
-            ),
-            Some(Ok(rows)) => leftovers.child(
-                div()
-                    .mt(px(STATUS_MARGIN))
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    .children(
-                        rows.iter()
-                            .enumerate()
-                            .map(|(index, row)| self.leftover_row(row, index, cx)),
-                    ),
-            ),
-        };
 
         div()
             .id("containers")
@@ -530,15 +543,23 @@ impl Render for Containers {
             .w_full()
             .min_w_0()
             .child(choices::help(HELP, cx))
-            .child(refresh)
-            .child(hosts)
-            .child(leftovers)
-            .children(self.question.clone())
-            .children(
-                self.failure
-                    .as_ref()
-                    .map(|reason| Self::failure_line("containers-delete-error", reason, cx)),
+            .child(
+                div()
+                    .id("containers-hosts")
+                    .role(Role::Region)
+                    .aria_label("Container hosts")
+                    .flex()
+                    .flex_col()
+                    .gap(px(8.))
+                    .child(card::heading(
+                        "Container hosts",
+                        None,
+                        Some(refresh.into_any_element()),
+                        cx,
+                    ))
+                    .children((!hosts.is_empty()).then(|| card::rows(hosts, cx))),
             )
+            .child(leftovers)
     }
 }
 

@@ -562,9 +562,20 @@ impl Render for CheckoutField {
             Target::Folder(_) => input.height(px(choices::FIELD_HEIGHT)),
             Target::PostClone => input,
         };
-        // `.checkout-root-label`: the label's words over the field, as wide as the section.
-        let edited = self.pinned_save && self.edit_state() != super::editing::EditState::Clean;
-        let label = choices::labelled(words.label, words.id, input, edited.then_some(palette));
+        // The Settings card has its own heading above the fields. Host settings and the launcher keep their scale.
+        let label = if self.pinned_save {
+            choices::field_with_caption(
+                words.id,
+                input,
+                super::card::caption(
+                    words.label,
+                    self.edit_state() != super::editing::EditState::Clean,
+                    palette,
+                ),
+            )
+        } else {
+            choices::labelled(words.label, words.id, input, None)
+        };
 
         // Retry in place of Save while the read has failed, as in the old field; Use default under Save where offered.
         let mut buttons = Vec::new();

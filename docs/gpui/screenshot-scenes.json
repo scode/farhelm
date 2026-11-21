@@ -2860,8 +2860,23 @@
     },
     {
       "golden": "settings-recipe-editor",
-      "title": "Settings at Recipes with a new recipe's editor open (no reference has the editor): the form from its top, focus on Back, the Software cards, and the editor's Cancel and Save pinned above the Close row",
+      "title": "Settings at Recipes with a new recipe editor open, showing the Software cards and Cancel and Save beside Close",
       "reference": "settings-recipes"
+    },
+    {
+      "golden": "settings-recipe-editor-end",
+      "title": "The last groups in a saved recipe's editor with Delete, Cancel and Save still visible",
+      "reference": null
+    },
+    {
+      "golden": "settings-recipe-editor-middle",
+      "title": "Settings recipe editor scrolled to the Software and tunnel fields",
+      "reference": null
+    },
+    {
+      "golden": "settings-recipe-editor-delete",
+      "title": "A saved recipe's wrapped delete question in the Settings editor footer at the minimum window size",
+      "reference": null
     },
     {
       "golden": "settings-recipes-places",
@@ -2884,14 +2899,34 @@
       "reference": "settings-tensorlake"
     },
     {
+      "golden": "settings-tensorlake-keys",
+      "title": "Settings at Tensorlake scrolled to the API key actions and SSH key card",
+      "reference": null
+    },
+    {
+      "golden": "settings-tensorlake-end",
+      "title": "Settings at Tensorlake scrolled to Creating sandboxes and the Usage Credits note",
+      "reference": null
+    },
+    {
       "golden": "settings-containers",
       "title": "Settings at Containers, three container hosts ready and no containers left behind",
       "reference": "settings-containers"
     },
     {
+      "golden": "settings-containers-question",
+      "title": "The Containers leftover card with an inline Delete question",
+      "reference": null
+    },
+    {
       "golden": "settings-credentials",
-      "title": "Settings at Credentials: the Not encrypted on disk warning, the Tensorlake API key form with no key saved, and the three lists with nothing saved",
+      "title": "Settings at Credentials with the storage warning, an unset Tensorlake API key and one saved GitHub token",
       "reference": "settings-credentials"
+    },
+    {
+      "golden": "settings-credential-editor",
+      "title": "The new agent login editor with the Claude Code and Codex marks and a masked synthetic login token",
+      "reference": null
     },
     {
       "golden": "settings-terminal",
@@ -2911,6 +2946,11 @@
     {
       "golden": "settings-checkouts-edited",
       "title": "Settings at Checkouts with an edited default folder and a pinned Save",
+      "reference": null
+    },
+    {
+      "golden": "settings-checkouts-capped",
+      "title": "Settings at Checkouts in the minimum window with an edit, scrolled to the last control",
       "reference": null
     },
     {

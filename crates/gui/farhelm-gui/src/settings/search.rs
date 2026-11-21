@@ -411,7 +411,9 @@ fn key_entry(section: Section, place: tensorlake_key::Place) -> Entry {
         section,
         ID,
         place.label(),
-        [KEY_HELP, REPLACE_HELP, DASHBOARD_HELP, place.elsewhere()],
+        [KEY_HELP, REPLACE_HELP, DASHBOARD_HELP, place.elsewhere()]
+            .into_iter()
+            .chain(place.heading_note()),
         Target::TensorlakeKey(place),
     )
 }

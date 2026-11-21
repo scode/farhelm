@@ -16,7 +16,7 @@ use gpui::{
 };
 
 use super::super::Refused;
-use super::super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::super::choices;
 use super::{
     Credentials, Group, delivery_failures, malformed, read_login, save_command, storage_warning,
     usage,
@@ -40,9 +40,15 @@ const LOGIN_ROWS: usize = 8;
 const REFUSED: &str = "credential-editor";
 
 /// The agents an agent login can be for, in the old segments' order.
-const AGENTS: [(CredentialKind, &str); 2] = [
-    (CredentialKind::ClaudeLogin, "Claude Code"),
-    (CredentialKind::CodexLogin, "Codex"),
+const AGENTS: [(CredentialKind, farhelm_proto::LaunchHarness); 2] = [
+    (
+        CredentialKind::ClaudeLogin,
+        farhelm_proto::LaunchHarness::Claude,
+    ),
+    (
+        CredentialKind::CodexLogin,
+        farhelm_proto::LaunchHarness::Codex,
+    ),
 ];
 
 /// A Codex login selected from disk. The editor paints only the basename and whether the login passes the helm's
@@ -237,6 +243,12 @@ impl Editor {
             Some(existing) => existing.name.clone(),
             None => self.name.text(cx).to_string(),
         }
+    }
+
+    /// The edited golden fills the masked field with a synthetic value so Save is available.
+    #[cfg(test)]
+    pub(in crate::settings) fn secret_for_golden(&self) -> TextInputState {
+        self.secret.input().clone()
     }
 
     /// A new agent login switched agents: the secret starts again, empty, in the new agent's field.
@@ -485,8 +497,7 @@ impl Editor {
                 HoverHelp::tooltip("Delete this saved credential"),
                 Role::Button,
             )
-            .tier(Tier::Danger)
-            .quiet(true)
+            .tier(Tier::DangerGhost)
             .disabled(in_use)
             .busy(busy)
             .on_click(move |_, _, cx| {
@@ -603,6 +614,7 @@ impl Render for Editor {
                 Role::Button,
             )
             .tier(Tier::Neutral)
+            .compact()
             .on_click(move |_, window, cx| Self::leave(&parent, id, group, window, cx))
         };
         // The agent choice, only for a new agent login: a saved one's kind is fixed.
@@ -617,12 +629,16 @@ impl Render for Editor {
                         HoverHelp::tooltip("The agent this login is for"),
                         Role::RadioGroup,
                     ),
-                    |group, (kind, word)| {
-                        group.option(RadioOption::new(
-                            word,
-                            HoverHelp::tooltip(format!("A {word} subscription login")),
-                            kind,
-                        ))
+                    |group, (kind, harness)| {
+                        let word = crate::harness::name(harness);
+                        group.option(
+                            RadioOption::new(
+                                word,
+                                HoverHelp::tooltip(format!("A {word} subscription login")),
+                                kind,
+                            )
+                            .icon(crate::harness::icon(crate::harness::glyph(harness))),
+                        )
                     },
                 )
                 .chosen(Some(self.kind))
@@ -631,8 +647,7 @@ impl Render for Editor {
                     let _ = weak.update(cx, |editor, cx| editor.choose_agent(kind, window, cx));
                 })
         });
-        let name = choices::labelled(
-            "Name",
+        let name = choices::field_with_caption(
             "credential-name",
             TextInput::new(
                 "credential-name",
@@ -643,7 +658,11 @@ impl Render for Editor {
                 ),
             )
             .height(px(choices::FIELD_HEIGHT)),
-            (!replacing && !self.name.text(cx).is_empty()).then_some(palette),
+            crate::settings::card::caption(
+                "Name",
+                !replacing && !self.name.text(cx).is_empty(),
+                palette,
+            ),
         );
         let secret = match &self.chosen_login {
             Some(login) => {
@@ -689,15 +708,14 @@ impl Render for Editor {
                         "Paste the value to save; Farhelm never shows it again"
                     }),
                 );
-                choices::labelled(
-                    label,
+                choices::field_with_caption(
                     "credential-secret",
                     if codex {
                         secret.monospace()
                     } else {
                         secret.height(px(choices::FIELD_HEIGHT))
                     },
-                    (!self.secret_value().is_empty()).then_some(palette),
+                    crate::settings::card::caption(label, !self.secret_value().is_empty(), palette),
                 )
             }
         };
@@ -745,25 +763,41 @@ impl Render for Editor {
             .gap(px(EDITOR_GAP))
             .w_full()
             .min_w_0()
-            .child(div().flex().child(back))
             .child(
                 div()
-                    .id("credential-editor-title")
-                    .debug_selector(|| "credential-editor-title".to_owned())
-                    .role(Role::Heading)
-                    .aria_label(title.clone())
-                    .text_size(px(LABEL_TEXT))
-                    .line_height(px(LABEL_LINE_HEIGHT))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child(title),
+                    .flex()
+                    .items_center()
+                    .gap(px(10.))
+                    .child(back)
+                    .child(
+                        div()
+                            .id("credential-editor-title")
+                            .debug_selector(|| "credential-editor-title".to_owned())
+                            .role(Role::Heading)
+                            .aria_label(title.clone())
+                            .text_size(theme::metrics::TEXT_MD)
+                            .line_height(px(18.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .text_color(theme::color(palette.fg_0))
+                            .child(title),
+                    ),
             )
-            .children(agent)
-            .child(name)
-            .child(secret)
-            .children(choose)
-            .children(agent_help.into_iter().map(|help| choices::help(help, cx)))
-            .child(choices::help(usage(self.existing.as_ref()), cx))
+            .child(crate::settings::card::rows([
+                div().flex().flex_col().gap(px(EDITOR_GAP))
+                    .children(agent.map(|agent| {
+                        div().flex().flex_col().gap(px(4.))
+                            .child(crate::settings::editing::caption(
+                                "Agent",
+                                (!replacing && self.kind != self.group.words().new_kind).then_some(palette),
+                            ))
+                            .child(div().flex().child(agent))
+                    }))
+                    .child(name)
+                    .child(secret)
+                    .children(choose)
+                    .children(agent_help.into_iter().map(|help| choices::help(help, cx)))
+                    .child(choices::help(usage(self.existing.as_ref()), cx)),
+            ], cx))
             .child(storage_warning(
                 "credential-storage-warning",
                 "Farhelm stores these in plain text in this helm's state, on the machine the helm runs on. Anyone \

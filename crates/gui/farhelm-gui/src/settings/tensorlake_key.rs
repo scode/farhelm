@@ -227,12 +227,18 @@ impl Place {
         }
     }
 
-    /// The second help line, which points at the other place, in the old form's words.
+    /// Credentials needs the account's name beside the group heading, since this page also holds other secrets.
+    pub(super) fn heading_note(self) -> Option<&'static str> {
+        match self {
+            Place::Credentials => Some("The same key as in Settings → Tensorlake"),
+            Place::Tensorlake => None,
+        }
+    }
+
+    /// The form's note about its other copy.
     pub(super) fn elsewhere(self) -> &'static str {
         match self {
-            Place::Credentials => {
-                "The same key as in Settings → Tensorlake. Changing it here changes it there."
-            }
+            Place::Credentials => "Changing it here changes it there.",
             Place::Tensorlake => "You can also change it in Settings → Credentials.",
         }
     }
@@ -541,8 +547,7 @@ impl Render for TensorlakeKey {
         let key_set = self.key_set(cx);
         let busy = self.working || self.key.draft().is_saving();
 
-        let field = choices::labelled(
-            self.place.label(),
+        let field = choices::field_with_caption(
             ID,
             TextInput::new(
                 ID,
@@ -555,7 +560,7 @@ impl Render for TensorlakeKey {
                 }),
             )
             .height(px(choices::FIELD_HEIGHT)),
-            self.typed_key().map(|_| palette),
+            super::card::caption(self.place.label(), self.typed_key().is_some(), palette),
         );
 
         let unloaded = self.account.read(cx).unreadable().cloned();

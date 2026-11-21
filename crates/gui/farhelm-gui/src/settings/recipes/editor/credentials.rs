@@ -28,6 +28,7 @@
 //! Credentials section draws them.
 
 use farhelm_helm_client::ApiPath;
+use farhelm_proto::LaunchHarness;
 use farhelm_proto::credentials::{Credential, CredentialKind};
 use gpui::{
     AnyElement, App, Context, InteractiveElement as _, IntoElement, ParentElement as _, Role,
@@ -37,8 +38,11 @@ use gpui::{
 use super::{Editor, Input, caption, field, label};
 use crate::components::{HoverHelp, RadioGroup, RadioOption, Select, SelectOption};
 use crate::host_text::HostText;
-use crate::settings::choices::{self, LABEL_GAP};
 use crate::settings::recipes::draft::{AgentMode, Draft, EndpointDraft};
+use crate::settings::{
+    card,
+    choices::{self, LABEL_GAP},
+};
 use crate::theme::{self, metrics};
 
 /// The endpoint URL's placeholder, the old one.
@@ -78,6 +82,14 @@ struct AgentWords {
 
 impl Agent {
     const ALL: [Agent; 2] = [Agent::Claude, Agent::Codex];
+
+    /// The Settings editor uses the same mark as sessions of the agent whose sign-in it configures.
+    fn harness(self) -> LaunchHarness {
+        match self {
+            Self::Claude => LaunchHarness::Claude,
+            Self::Codex => LaunchHarness::Codex,
+        }
+    }
 
     fn words(self) -> AgentWords {
         match self {
@@ -466,6 +478,12 @@ impl Editor {
         .on_change(move |&mode, _, cx| {
             let _ = weak.update(cx, |editor, cx| editor.choose_mode(agent, mode, cx));
         });
+        let in_settings = self.host.has_back();
+        let modes = if in_settings {
+            modes.small_segments().fit_words(true)
+        } else {
+            modes
+        };
         let fields = match choice.mode {
             AgentMode::None => None,
             AgentMode::Endpoint => Some(
@@ -490,6 +508,25 @@ impl Editor {
             ),
             AgentMode::Subscription => Some(self.picker(Pick::Login(agent), &choice.login, cx)),
         };
+        let name = div()
+            .flex()
+            .items_center()
+            .gap(px(8.))
+            .children(in_settings.then(|| card::agent_mark(agent.harness(), cx)))
+            .child(
+                crate::settings::editing::caption(
+                    words.label,
+                    (in_settings && choice.mode != saved_mode).then(|| theme::palette(cx)),
+                )
+                .text_size(metrics::TEXT_MD)
+                .text_color(theme::color(theme::palette(cx).fg_0)),
+            );
+        let mode = div().flex().child(modes);
+        let (name, mode) = if in_settings {
+            (name.flex_wrap().child(mode), None)
+        } else {
+            (name, Some(mode))
+        };
         div()
             .id(SharedString::from(words.id))
             .role(Role::Group)
@@ -497,15 +534,8 @@ impl Editor {
             .flex()
             .flex_col()
             .gap(px(LABEL_GAP))
-            .child(
-                crate::settings::editing::caption(
-                    words.label,
-                    (self.host.has_back() && choice.mode != saved_mode).then(|| theme::palette(cx)),
-                )
-                .text_size(metrics::TEXT_MD)
-                .text_color(theme::color(theme::palette(cx).fg_0)),
-            )
-            .child(div().flex().child(modes))
+            .child(name)
+            .children(mode)
             .children(fields)
             .child(choices::help(words.help, cx))
             .into_any_element()
@@ -514,26 +544,33 @@ impl Editor {
     /// The GitHub and Agents blocks, under the tunnels, with the catalog's state above them.
     pub(super) fn credential_blocks(&self, cx: &Context<Self>) -> Vec<AnyElement> {
         let mut blocks = self.catalog_state(cx);
+        let in_settings = self.host.has_back();
+        let group = |title, block| {
+            let heading = if in_settings {
+                card::heading(title, None, None, cx)
+            } else {
+                caption(title, cx)
+            };
+            super::editor_group(heading, block, in_settings, cx).into_any_element()
+        };
         blocks.push(
-            div()
+            group("GitHub", div()
                 .flex()
                 .flex_col()
                 .gap(px(LABEL_GAP))
-                .child(caption("GitHub", cx))
                 .child(self.picker(Pick::Github, &self.choices.github, cx))
                 .child(choices::help(
                     "Sessions get this token as GH_TOKEN, and git uses it for github.com over HTTPS, including fresh \
                      checkouts of private repositories. Add or replace tokens in Settings → Credentials.",
                     cx,
                 ))
-                .into_any_element(),
+            ),
         );
         blocks.push(
-            div()
+            group("Agents", div()
                 .flex()
                 .flex_col()
                 .gap(px(LABEL_GAP))
-                .child(caption("Agents", cx))
                 .child(choices::help(
                     "Choose how each agent authenticates. An API endpoint's base URL can point at a tunnel's sandbox \
                      port, such as http://127.0.0.1:8080. Saved tokens and subscription logins are in Settings → \
@@ -546,7 +583,7 @@ impl Editor {
                      their values.",
                     cx,
                 ))
-                .into_any_element(),
+            ),
         );
         blocks
     }
