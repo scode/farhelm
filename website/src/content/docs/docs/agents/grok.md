@@ -13,42 +13,15 @@ specific to Grok.
 Install and sign in to `grok` on every host you run it on. Farhelm starts it as `grok --no-leader`, which keeps Grok's
 backend inside the session; that costs some backend reuse and memory, and native subagents still work.
 
-Farhelm can follow a Grok conversation, and so restart it, only after you add three hooks to Grok's configuration
-yourself. Farhelm does not edit Grok's configuration. On every host, create `$GROK_HOME/hooks/farhelm.json` (or
-`~/.grok/hooks/farhelm.json` when `GROK_HOME` is unset), replacing `/absolute/path/to/farhelm` with the path of the
-`farhelm` command on that host:
+Turn on **Set up conversation hooks on all hosts** in **Settings → Agents → Grok**, or choose **Set up and launch** when
+the session launcher offers it. The setting starts off. Once enabled, Farhelm installs or updates
+`~/.grok/hooks/farhelm.json` on each machine where it starts Grok, including inside a container or sandbox. The hooks
+let **Restart** resume the conversation after your first prompt. The hooks also run when you start Grok outside Farhelm,
+where they exit quietly.
 
-```json
-{
-  "hooks": {
-    "SessionStart": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/absolute/path/to/farhelm internal hook --vendor grok", "timeout": 60 }
-        ]
-      }
-    ],
-    "UserPromptSubmit": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/absolute/path/to/farhelm internal hook --vendor grok", "timeout": 60 }
-        ]
-      }
-    ],
-    "Stop": [
-      {
-        "hooks": [
-          { "type": "command", "command": "/absolute/path/to/farhelm internal hook --vendor grok", "timeout": 60 }
-        ]
-      }
-    ]
-  }
-}
-```
-
-Grok merges every file in its hooks directory, so leave your other hook files alone. Restart Grok, and check with its
-`/hooks` view that all three entries loaded. To remove the integration, delete the file (or these three entries) and
-restart Grok. The hooks do nothing for a Grok you start outside Farhelm.
+If the supervisor has `GROK_HOME` set in its environment, Farhelm uses `$GROK_HOME/hooks/farhelm.json` instead. Setting
+`GROK_HOME` only in a shell startup file does not reach the supervisor. To remove the hooks, turn the setting off,
+delete the file from the machines where it was installed, and start a new Grok process.
 
 ## Gotchas and quirks
 
@@ -68,5 +41,5 @@ restart Grok. The hooks do nothing for a Grok you start outside Farhelm.
   package-manager launcher, or a renamed binary runs it normally, but Farhelm cannot follow its conversation, so
   **Restart** stays greyed out. So does a resident wrapper that is itself named `grok`, or whose program is named
   `grok-` followed by anything.
-- Grok is not told about `$farhelm` requests, because Farhelm's hooks for it are the ones you install.
+- Grok's conversation hooks do not introduce `$farhelm` requests.
 - Tested on Linux with Grok Build 1.0.40 and 1.0.50; not yet on a Mac.

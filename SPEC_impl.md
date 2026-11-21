@@ -4440,11 +4440,10 @@ no path values are stored in the notice.
   and — for any of these vendors — an argv containing a bare `--` (our flags would become prompt text).
   `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
   wholesale or per kind, read once at supervisor start and carried as a seam value. It also gates Farhelm's setup of
-  Grok's and Antigravity's persistent hook files. Without an accepted report, a new
-  session cannot be restarted; no nearby record can supply a substitute identity.
-  `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account of the same mechanism.
-  The injected command line outlives the binary that wrote it, so it is part of what newer binaries keep accepting (see
-  "What running sessions hold across versions").
+  Grok's and Antigravity's persistent hook files. Without an accepted report, a new session cannot be restarted; no
+  nearby record can supply a substitute identity. `website/src/content/docs/docs/how-it-works/agent-hook-injection.md`
+  is the user-facing account of the same mechanism. The injected command line outlives the binary that wrote it, so it
+  is part of what newer binaries keep accepting (see "What running sessions hold across versions").
 
   Claude's, Codex's and Muse's Stop hooks carry no instructions announcement: only SessionStart adds that context.
   Sessions launched before Stop was injected retain their old argv until relaunch. For Codex, a pending clear in one of
@@ -4502,33 +4501,37 @@ no path values are stored in the notice.
   (mid-update) may miss reports briefly, which is accepted.
 
   Grok's native TUI discovers the hook in `$GROK_HOME/hooks/farhelm.json` (default `~/.grok/hooks/farhelm.json`).
-  Farhelm sets up matcher groups for `SessionStart`, `UserPromptSubmit`, and `Stop`. Antigravity discovers
-  `plugin.json` and `hooks.json` under `~/.gemini/config/plugins/farhelm/`. Farhelm's plugin registers `SessionStart`
-  and `Stop`. Existing callbacks in the shared `~/.gemini/config/hooks.json` still work.
+  Farhelm sets up matcher groups for `SessionStart`, `UserPromptSubmit`, and `Stop`. Antigravity discovers `plugin.json`
+  and `hooks.json` under `~/.gemini/config/plugins/farhelm/`. Farhelm's plugin registers `SessionStart` and `Stop`.
+  Existing callbacks in the shared `~/.gemini/config/hooks.json` still work.
 
-  Protocol 83 lets a full-authority create or restart request opt in to writing those files. The supervisor resolves
-  the directories from its own `HOME` and `GROK_HOME` before it starts the terminal, creates the directories, and
-  replaces each differing file atomically. The command uses the stable `farhelm` forwarder and omits `--announce`,
-  because these callbacks also run outside Farhelm. The tracked launch supplies its credential in the environment.
-  The files hold no Farhelm token or session identity. When the host's hook policy allows setup, an install error goes
-  to the existing reporter setup notification and the per-generation setup result. A disabled host policy records its
-  reason without adding a notification. Either outcome allows the launch. A successful setup arms the ordinary
-  silent-hook diagnostic even though the launch adds no reporter arguments. The pending create row records consent so
-  a keyed retry can finish the already accepted create with the same choice.
+  Protocol 83 lets a full-authority create or restart request opt in to writing those files. The supervisor resolves the
+  directories from its own `HOME` and `GROK_HOME` before it starts the terminal, creates the directories, and replaces
+  each differing file atomically. The command uses the stable `farhelm` forwarder and omits `--announce`, because these
+  callbacks also run outside Farhelm. The tracked launch supplies its credential in the environment. The files hold no
+  Farhelm token or session identity. When the host's hook policy allows setup, an install error goes to the existing
+  reporter setup notification and the per-generation setup result. A disabled host policy records its reason without
+  adding a notification. Either outcome allows the launch. A successful setup arms the ordinary silent-hook diagnostic
+  even though the launch adds no reporter arguments. The pending create row records consent so a keyed retry can finish
+  the already accepted create with the same choice.
 
-  The helm saves an off-by-default switch for each of the two agents in `checkout_config` and exposes one
-  `GET` and `PUT /api/agent-hook-setup/{kind}` setting per agent. The shared launcher-prompt and session-hint dismissal
-  is a separate sparse preference per agent. The final create dispatch reads the setting from the resolved launch kind,
-  including starts from a retained launch, an agent request, or a new environment. On Restart and Restart with the
-  helm sends both choices. The supervisor uses only the one for the session's own agent kind under its lifecycle claim.
-  Thus an existing session uses current consent when it starts again, even if its cached launch is unreadable.
+  The helm saves an off-by-default switch for each of the two agents in `checkout_config` and exposes one `GET` and
+  `PUT /api/agent-hook-setup/{kind}` setting per agent. The shared launcher-prompt and session-hint dismissal is a
+  separate sparse preference per agent. The final create dispatch reads the setting from the resolved launch kind,
+  including starts from a retained launch, an agent request, or a new environment. On Restart and Restart with the helm
+  sends both choices. The supervisor uses only the one for the session's own agent kind under its lifecycle claim. Thus
+  an existing session uses current consent when it starts again, even if its cached launch is unreadable.
 
-  The Antigravity adapter accepts the camelCase
-  `conversationId`, `hookEventName` and `transcriptPath` and checks that any vendor discriminator agrees. Each event can
-  independently select a conversation. The callback always writes `{}` and a newline to stdout after its report attempt,
-  ignores `--announce`, and exits zero, keeping stderr quiet. Farhelm shares positional attribution, the version-0
-  process pin and ancestor correction with
-  Claude and Muse. A correction records `AntigravityPinCorrected` once per launch.
+  Settings and the first-pick launcher question share the same setting route. The launcher waits for a successful write
+  before sending a launch that accepted setup. The session hint and Restart wording use the supervisor's per-generation
+  setup result. They can explain an earlier launch even after the global opt-in changes, and a capture from an existing
+  callback immediately makes that launch eligible for Restart if it has a resume command.
+
+  The Antigravity adapter accepts the camelCase `conversationId`, `hookEventName` and `transcriptPath` and checks that
+  any vendor discriminator agrees. Each event can independently select a conversation. The callback always writes `{}`
+  and a newline to stdout after its report attempt, ignores `--announce`, and exits zero, keeping stderr quiet. Farhelm
+  shares positional attribution, the version-0 process pin and ancestor correction with Claude and Muse. A correction
+  records `AntigravityPinCorrected` once per launch.
 
   A process pin alone cannot distinguish Antigravity's main conversation from a child sharing its process. Under the
   capture claim and before committing any pin or identity change, admission reads the bounded first record of the
@@ -5236,8 +5239,8 @@ installation it is on, so it follows an open session the sidebar's filter hides
   `grok --no-leader --permission-mode auto` for guarded and `grok --no-leader --always-approve` for YOLO, refuses model
   and effort choices, and retains those flags before `--resume {conversation} {farhelm_args}` as argv elements. The
   dedicated kind preserves the ownership policy across helm and supervisor storage. It uses the generic activity
-  classifier while the configured reporter supplies ownership-proven conversation capture. Antigravity launches
-  `agy` with optional `--model` and `--effort` and defaults new requests to `--mode auto`. YOLO compiles to
+  classifier while the configured reporter supplies ownership-proven conversation capture. Antigravity launches `agy`
+  with optional `--model` and `--effort` and defaults new requests to `--mode auto`. YOLO compiles to
   `--dangerously-skip-permissions`, while Custom uses the submitted words. Both named starts and Restart use
   `--conversation {conversation}` with a literal ID. The supervisor appends one `--prompt-interactive=<prompt>` argument
   for a fresh or named start with an initial prompt. Attaching the value keeps leading dashes in the prompt from being

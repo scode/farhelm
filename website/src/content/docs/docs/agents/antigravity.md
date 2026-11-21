@@ -26,30 +26,15 @@ takes precedence. See [when Farhelm applies trust settings](/docs/using/start-a-
 
 ## Set up Restart
 
-Install two [Antigravity CLI hooks](https://antigravity.google/docs/hooks#managing-hooks-in-antigravity-cli) as the user
-who runs `agy`. For a container or sandbox session, set them up inside that environment. Run `command -v farhelm` there
-to get the full path of the `farhelm` command. Use that path in place of `/absolute/path/to/farhelm` below. The single
-quotes around the path keep spaces in it together.
+Turn on **Set up conversation hooks on all hosts** in **Settings → Agents → Antigravity**, or choose **Set up and
+launch** when the session launcher offers it. The setting starts off. Once enabled, Farhelm installs or updates its
+plugin at `~/.gemini/config/plugins/farhelm/` on each machine where it starts Antigravity, including inside a container
+or sandbox. **Restart** becomes available after your first prompt, once Antigravity reports the conversation. Outside
+Farhelm the hooks run and send Antigravity its expected empty reply.
 
-Create `~/.gemini/config/hooks.json` with this content. If you already have that file, add the `farhelm` entry alongside
-your other entries.
-
-```json
-{
-  "farhelm": {
-    "SessionStart": [
-      { "type": "command", "command": "'/absolute/path/to/farhelm' internal hook --vendor antigravity", "timeout": 60 }
-    ],
-    "Stop": [
-      { "type": "command", "command": "'/absolute/path/to/farhelm' internal hook --vendor antigravity", "timeout": 60 }
-    ]
-  }
-}
-```
-
-Start a new Antigravity session and run `/hooks` in it to check that both entries loaded. **Restart** becomes available
-after your first prompt, once Antigravity reports the conversation. You can still launch and explicitly open a
-conversation by ID without installing the hooks.
+To remove the hooks, turn the setting off, delete that plugin directory from the machines where it was installed, and
+start a new Antigravity process. If you previously set up hooks by hand, you can remove the old `farhelm` entry from
+`~/.gemini/config/hooks.json` separately. You can open a conversation by ID with the setting off.
 
 ## Find a conversation ID
 
@@ -71,9 +56,6 @@ the session launcher's **Conversation ID** field when you want to open that conv
   Farhelm ignore every new report without a notification.
 - Farhelm shows basic running and idle status by watching whether the screen changes. The workspace trust question shows
   as waiting in the session list. For approvals during a conversation, read and answer them in the terminal.
-- Remove the `farhelm` entry from the hooks file and start a new Antigravity process to turn off reports. The settings
-  that control the hooks Farhelm adds to other agents have no effect on these entries.
 - If you start `agy` through a script, see [Agent wrappers](/docs/agents/agent-wrappers/) for what the script must pass
   on.
-- The hooks do nothing when `agy` runs outside Farhelm, apart from the empty reply Antigravity expects.
-- Antigravity is not told about `$farhelm` requests, because Farhelm's hooks for it are the ones you install.
+- Antigravity's conversation hooks do not introduce `$farhelm` requests.

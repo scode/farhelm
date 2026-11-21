@@ -45,8 +45,9 @@ too. A missing command prints Bash's error in the session's terminal and leaves 
 Declaring the agent type gives the session what Farhelm does for that agent, as far as the agent allows: Claude's,
 Codex's and Muse's reading of the screen, including showing when the agent waits for you (for Muse, only at its
 directory-trust question), and conversation tracking for Claude, Codex, Muse, Goose, OMP, Pi,
-[Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart). Grok and Antigravity need
-hooks you install. Declaring Cursor or OpenCode gives no tracking, since Farhelm has none for them.
+[Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart). Grok and Antigravity use
+the hook setup switch on their own Settings pages. Declaring Cursor or OpenCode gives no tracking, since Farhelm has
+none for them.
 
 A declared agent needs `{farhelm_args}` in the command, once, as a whole argument, where that agent's own arguments go.
 Farhelm fills it in with the arguments that agent needs, including any arguments for conversation tracking. Your command

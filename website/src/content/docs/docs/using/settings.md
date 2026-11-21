@@ -99,6 +99,10 @@ Choose your agent under **Agents**. Every agent has a page, including agents wit
 a directory-trust switch have it on their own page, alongside the switch for their hint above the terminal where
 available. [Trust in managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts)
 
+[Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart) have their own **Set up
+conversation hooks on all hosts** switches. **Show the hook setup prompt and hint** restores the offer in the launcher
+and the hint above sessions started without setup.
+
 ## Next
 
 [Approve what agents do](/docs/using/approve-agent-requests/) covers the questions Farhelm asks before an agent acts.
