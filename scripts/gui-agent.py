@@ -1657,15 +1657,22 @@ def _drawn(rect: dict) -> bool:
     return rect["w"] > 0 and rect["h"] > 0
 
 
-def park_targets(entries: list[dict], tree: dict) -> list[str]:
+def park_targets(entries: list[dict], tree: dict, *, rejected: list[tuple[str, str]] | None = None) -> list[str]:
     """The `hover` targets that park the pointer where nothing in the window reacts to it, best first, as `id:` paths
     from a `snapshot -a --json`'s `entries`, judged against the same frame's raw `tree`.
 
     A target qualifies when the centre the bridge aims at lies outside every drawn element with a `hover` or `tooltip`
     flag, which would draw a highlight or a tooltip into the picture (a terminal link's tooltip once showed the run's
-    real path). Only the first entry of each id path is offered: the bridge resolves `id:<path>` to that one."""
-    hot = [node["visible"] for node in tree.get("nodes", [])
-           if _drawn(node["visible"]) and (node["flags"].get("hover") or node["flags"].get("tooltip"))]
+    real path). Only the first entry of each id path is considered, since the bridge resolves that path to the first
+    entry. When `rejected` is supplied, record why each named candidate was filtered out before asking the bridge."""
+    hot = [
+        (
+            node["visible"],
+            node.get("id") or node.get("label") or f"tree node {index} ({node.get('type', 'unnamed element')})",
+        )
+        for index, node in enumerate(tree.get("nodes", []))
+        if _drawn(node["visible"]) and (node["flags"].get("hover") or node["flags"].get("tooltip"))
+    ]
     targets, seen = [], set()
     for entry in entries:
         path = (entry.get("key") or {}).get("path", "")
@@ -1673,10 +1680,39 @@ def park_targets(entries: list[dict], tree: dict) -> list[str]:
             continue
         seen.add(path)
         box = entry["visible"]
+        target = f"id:{path}"
         x, y = box["x"] + box["w"] / 2, box["y"] + box["h"] / 2
-        if _drawn(box) and not any(_inside(rect, x, y) for rect in hot):
-            targets.append(f"id:{path}")
+        if not _drawn(box):
+            if rejected is not None:
+                rejected.append((target, "the element has no visible area"))
+            continue
+        blocker = next((name for rect, name in hot if _inside(rect, x, y)), None)
+        if blocker is None:
+            targets.append(target)
+        elif rejected is not None:
+            rejected.append((target, f"its centre is inside the reacting element {blocker}"))
     return targets
+
+
+def park_failure(rejected: list[tuple[str, str]]) -> str:
+    """Keep a large frame or verbose bridge error from burying the useful parking diagnostics."""
+    def compact(text: str, width: int) -> str:
+        # Long paths can carry the useful ID at the end. Bridge errors can also name the blocker after a long label.
+        text = " ".join(text.split())
+        if len(text) <= width:
+            return text
+        head = width // 2
+        return f"{text[:head]}…{text[-(width - head - 1):]}"
+
+    message = "no spot in the window is clear of hover and tooltip reactions to park the pointer on"
+    if not rejected:
+        return f"{message}\n  no named candidates in the snapshot"
+    limit = 12
+    lines = [message]
+    lines.extend(f"  {compact(target, 100)}: {compact(reason, 180)}" for target, reason in rejected[:limit])
+    if len(rejected) > limit:
+        lines.append(f"  ... and {len(rejected) - limit} more rejected candidates")
+    return "\n".join(lines)
 
 
 def capture_needles(run: Path, record: dict, user: str, home: str | None, hosts: list[str],
@@ -1814,12 +1850,17 @@ def capture(run: Path, record: dict, args: list[str], platform: str = sys.platfo
             # The bridge aims at an element's centre, so each candidate is tried in turn: one that something else
             # covers at its centre is refused by the bridge, and the next is tried.
             entries = json.loads(bridge("snapshot", "-a", "--json", "--no-source"))["entries"]
-            for target in park_targets(entries, json.loads(bridge("tree"))):
-                if bridge_cli(run, record, ["hover", target], capture=True).returncode == 0:
+            filtered, refused = [], []
+            for target in park_targets(entries, json.loads(bridge("tree")), rejected=filtered):
+                result = bridge_cli(run, record, ["hover", target], capture=True)
+                if result.returncode == 0:
                     print(f"capture: pointer parked on {target}", flush=True)
                     break
+                reason = result.stderr.strip() or f"exit status {result.returncode}"
+                refused.append((target, f"the bridge refused hover: {reason}"))
             else:
-                raise RuntimeError("no spot in the window is clear of hover and tooltip reactions to park the pointer on")
+                # Actual hover attempts offer the most direct lead, so show those before screened-out candidates.
+                raise RuntimeError(park_failure(refused + filtered))
         settle(lambda: json.loads(bridge("tree")), IDLE_MILLISECONDS / 1000)
 
     # Park first: on a Mac the pointer is the real one, wherever it was left on the screen, and resting on a link in the

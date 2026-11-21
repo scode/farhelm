@@ -275,12 +275,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   fails to settle, let a run render only named scenes without a partial run ever being publishable, and render four
   scenes at once by default (27 s). Plan: `plans/queue/goldens-fast-and-targeted.md`.
 
-- **Let a docs screenshot run target exactly the shots a change affects.** A run selects at most one page, and a parking
-  failure says only that no spot was clear. When a redesign removed the launcher's quiet title row, finding the one-line
-  fix for each shot took several staged captures of 9 to 13 minutes. Let one run name several pages or single shots,
-  locally and on boats, and make a parking failure list every spot it tried and why each was rejected. Plan:
-  `plans/queue/docs-shots-targeted-runs.md`.
-
 - **Show the changed golden pictures on one page.** Visual reviews are handed paths to changed pictures and judge them
   file by file, with nothing showing what changed or flagging a scene nobody meant to touch. Make a page of only the
   changed and new pictures (reference, new picture and the differing pixels, light and dark) whenever a run finds any,
