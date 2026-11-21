@@ -219,25 +219,6 @@
   way, remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/spare-builder-fifo-release.md`.
 
-## launch-input-database-duplication-rationale-overstated.md
-
-- Outcome: `fix spec`.
-- Assessment: by a delegated checker on main e9ea6d08 (code reading, not run), which left it for the maintainer:
-  Confirmed on current main. SPEC_impl.md:3433-3436 says a launch spec carries "nothing the session's own database row
-  does not already hold", and `service/launch_artifacts.rs:597-600` repeats this. But `Supervisor::spawn_agent` appends
-  the create-time initial prompt to the spec's argv (`service/core.rs:14625-14633`; test `:16459-16525`), while the
-  database keeps only its SHA-256 in the request fingerprint (`core.rs:1705-1727`: "The message itself belongs only to
-  the create, never the durable session launch"). The sentence is factually wrong. However, the maintainer's acceptance
-  of keeping current-generation specs until Delete (TRIAGE_OUTCOMES.md:1641-1705,
-  `superseded-launch-specs-never-removed.md` and its follow-ons) rested on "A leftover spec therefore exposes nothing
-  new".
-- Decision: the user picked "Fix each with the smallest truthful correction" (2026-10-26 ten-question triage page, Q10).
-- Completion criteria: change the wording so it is true, without adding behavior: where the code and the text disagree,
-  the text is corrected to describe the code. Size gate: about 100 lines of diff (code, tests and docs, not counting
-  this ledger, the queue removal or a changelog fragment); over it, block and bring it back. Remove the feedback file
-  and its index entry.
-- Execution: `pending`.
-
 ## settings-save-races-final-replacement.md
 
 - Outcome: `fix spec`.
