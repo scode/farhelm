@@ -1502,8 +1502,10 @@ in the terminal. **Exited** means the program started and then ended, however qu
 the user stopped the session before its agent finished starting, with that annotation. In the session launcher every
 refused launch (New, Clone, Replace with, quick launch) shows as a bordered alert with a warning icon beside Launch,
 starting "Not launched." before the refusal's own words, and announced to assistive technology. Restart mode uses the
-same alert beside Restart, with "Restart error." before the refusal's words. Errors that are not a refused launch, such
-as "Save as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
+same alert beside Restart, with "Restart error." before the refusal's words. A quick launch that could not be prepared
+(its templates or the host's recent setups could not be read) and opened New instead of launching says why on one plain
+line in the warning color above the search box, not in that alert. Errors that are not a refused launch, such as "Save
+as template" refusing a wrapper, keep the plain line. When the refusal says the folder does not exist, is not a
 directory or is not usable, the folder field is also marked and says so under it, naming the host, for as long as the
 form still names that host, its connection and that folder.
 

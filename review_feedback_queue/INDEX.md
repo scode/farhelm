@@ -366,10 +366,6 @@ consequences.
   The implementation specification's version/skew description omits the schema-based guard that can forbid Update. The
   product specification and actual guard remain intact.
 
-- [`quick-launch-preparation-refusal-uses-plain-alert.md`](quick-launch-preparation-refusal-uses-plain-alert.md) — A
-  quick-launch preparation read failure bypasses the new bordered refusal presentation. Whether the presentation
-  requirement or diagnostic filter covers this stage is unresolved; request admission stays safe.
-
 - [`folder-refusal-classifier-matches-path-text.md`](folder-refusal-classifier-matches-path-text.md) — A path containing
   familiar error phrases can be misclassified as missing rather than refused or non-directory. This changes an advisory
   annotation, not launch authority; the rare-diagnostic filter's scope is ambiguous.
