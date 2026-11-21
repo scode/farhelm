@@ -120,3 +120,43 @@ The source review for #4465 checked all 45 decisions and confirmed that the draf
 source review for #4466 checked all 17 decisions and their detail in the single TODO entry. Its findings led to putting
 the entry in the general Near term list, distinguishing the screenshot runner from the remaining scene fixture work, and
 pointing the cleanup at the current launcher renderers. Both drafts also passed commit-message cold reads.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs merged with a landing fix, #4470. Nothing else landed in this round, and main had gained nothing but
+queue bookkeeping since the executor based the plan. The plan changes only the review queue, the triage ledger and its
+archive, and TODO.md. Nine other plans from the same triage are in flight and touch the same files. Their landings will
+meet only textual conflicts in those files, where both sides are kept.
+
+I checked the change against the plan by script: 62 feedback files left the queue (the 45 discards and the 17
+duplicated-code findings), their 62 index lines went with them, and all 62 decisions moved to the archive with nothing
+left in the open ledger. An independent reviewer compared the 62 with the plan's list, found exactly those, and found
+the archive entries and the new Near term entry in the form the queue's rules and the plan ask for. Every file the new
+entry names still exists on main. Its line numbers come from the revision the findings were reviewed against, which the
+entry names, so some have drifted since.
+
+#### Fixes made while landing
+
+One, in [#4470](https://github.com/scode/farhelm/pull/4470/changes): the new TODO entry told readers to recheck the
+launcher's call sites after the launcher redesign, citing that plan's file. The redesign landed on 2026-11-21, and its
+plan file goes away once you approve its report, so the entry now names the redesign by its plan's name rather than by a
+file that will be deleted.
+
+#### Checks
+
+The plan and the landing fix change only Markdown bookkeeping files (the review queue, the triage ledger and archive,
+TODO.md), so no runtime tests apply.
+
+- A script comparing the diff's deleted feedback files, removed index lines and archived ledger entries: all 62 match,
+  and none is left in the open ledger.
+- `dprint check` and `python3 scripts/check-agents-md.py`, on the plan as delivered and after the fix: passed.
+
+Skipped: every Rust, desktop and browser suite, since nothing that builds or runs changed; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+The report says the entry already points at the launcher's current renderers. In fact its launcher line numbers come
+from before the redesign, and the entry tells readers to recheck them against it.
