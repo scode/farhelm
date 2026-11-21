@@ -143,37 +143,38 @@ update without a confirmation prompt. Update never downgrades a host: it install
 supervisor reports a newer build is refused with both versions named, and the user updates the helm instead. It also
 refuses a host whose supervisor reports a database schema newer than the helm's build can open, which happens after a
 development build ran there; that host needs a build at least that new. A build below this release's upgrade floor
-reported by the supervisor also blocks Update. For manual recovery, stop its service, then remove its dedicated Farhelm
-installation directory. The remedy names the executable the host reported; its parent may be a shared or custom binary
-directory, in which case only Farhelm-owned files are removed and the shared directory stays. Then remove the host from
-Farhelm and set it up again. Its data directory can stay, without a promise that the new release can use every feature's
-old data, or the user can delete it too if they accept losing it. While an update is running, its host row stays folded
-and shows `Updating…` until a progress snapshot is available, then shows the current step, completed-step count, and
-client-measured elapsed time inline in the status spot. Hovering that status opens the same card as a working host in
-the attention list: the host's mark and name, operation and completed-step count with elapsed time, every step with its
-status and explanation, the current step highlighted, and any degraded or failed step's reason. Connection detail
-follows the steps while the host is not connected, including the attempt and last connection error, and the run's own
-message follows when present. In a short window the step list shrinks, keeping the current step in view as it changes.
-If connection detail or a run message cannot fit beside a readable current step, only the oversized text becomes a
-preview of whole lines from its end and the card says `Full details in Hosts`. Messages that fit stay whole. The card
-remains non-interactive; opening Hosts through the host identity gives access to the whole diagnosis. This is the narrow
-exception to full detail on hover. The card uses the shared hover delay and beside-the-sidebar placement, is absent on
-touch, and adds no keyboard stop to the status label. The sidebar is too narrow to show a long step name, let alone the
-rest of the run. Reduced-motion settings replace the animated indicator with a static one. Remote binary upload appears
-as a separate step before installation, so the user can tell when network transfer is still underway. The row and its
-hover use the helm's readable names for the same steps in the plan, with completed work checked green, the running step
-pulsing amber (static under reduced motion), pending work grey, unchanged work grey, degraded work as an amber warning,
-and failure red with the helm's reason. Success returns the status spot to its normal label and leaves the row folded
-unless global details are on. Failure or an uncertain outcome still expands the row so its step list and diagnostic
-remain visible in Hosts. When setup or Update fails or has an uncertain outcome while Hosts is closed, the host's rail
-avatar shows a warning mark until Hosts is opened or a later run of that same action succeeds. Starting a retry does not
-acknowledge the warning, and an unrelated successful action does not clear it. Setup recovery by discovery can resolve
-the same failed setup run. Hosts never opens by itself. The Hosts header's `Update all` action makes the same authorized
-Update request for each remote host whose individual Update action is available at the click. A host already busy with
-setup or another run is skipped rather than queued for a later update; the local host is excluded. Each remote host
-keeps its own validation, progress, and result, so one failure does not hide or delay the others. Having an available
-Update action does not itself mean the host needs an update: the rail's update badge and the attention list's Update
-rows require a compatible older build or a lower protocol, as well as an available remote Update action.
+reported by the supervisor also blocks Update, with a manual recovery remedy: stop its Farhelm supervisor service, then
+remove its dedicated Farhelm installation directory. The remedy names the executable the host reported; its parent may
+be a shared or custom binary directory, in which case only Farhelm-owned files are removed and the shared directory
+stays. Then remove the host from Farhelm and set it up again. Its data directory can stay, without a promise that the
+new release can use every feature's old data, or the user can delete it too if they accept losing it. While an update is
+running, its host row stays folded and shows `Updating…` until a progress snapshot is available, then shows the current
+step, completed-step count, and client-measured elapsed time inline in the status spot. Hovering that status opens the
+same card as a working host in the attention list: the host's mark and name, operation and completed-step count with
+elapsed time, every step with its status and explanation, the current step highlighted, and any degraded or failed
+step's reason. Connection detail follows the steps while the host is not connected, including the attempt and last
+connection error, and the run's own message follows when present. In a short window the step list shrinks, keeping the
+current step in view as it changes. If connection detail or a run message cannot fit beside a readable current step,
+only the oversized text becomes a preview of whole lines from its end and the card says `Full details in Hosts`.
+Messages that fit stay whole. The card remains non-interactive; opening Hosts through the host identity gives access to
+the whole diagnosis. This is the narrow exception to full detail on hover. The card uses the shared hover delay and
+beside-the-sidebar placement, is absent on touch, and adds no keyboard stop to the status label. The sidebar is too
+narrow to show a long step name, let alone the rest of the run. Reduced-motion settings replace the animated indicator
+with a static one. Remote binary upload appears as a separate step before installation, so the user can tell when
+network transfer is still underway. The row and its hover use the helm's readable names for the same steps in the plan,
+with completed work checked green, the running step pulsing amber (static under reduced motion), pending work grey,
+unchanged work grey, degraded work as an amber warning, and failure red with the helm's reason. Success returns the
+status spot to its normal label and leaves the row folded unless global details are on. Failure or an uncertain outcome
+still expands the row so its step list and diagnostic remain visible in Hosts. When setup or Update fails or has an
+uncertain outcome while Hosts is closed, the host's rail avatar shows a warning mark until Hosts is opened or a later
+run of that same action succeeds. Starting a retry does not acknowledge the warning, and an unrelated successful action
+does not clear it. Setup recovery by discovery can resolve the same failed setup run. Hosts never opens by itself. The
+Hosts header's `Update all` action makes the same authorized Update request for each remote host whose individual Update
+action is available at the click. A host already busy with setup or another run is skipped rather than queued for a
+later update; the local host is excluded. Each remote host keeps its own validation, progress, and result, so one
+failure does not hide or delay the others. Having an available Update action does not itself mean the host needs an
+update: the rail's update badge and the attention list's Update rows require a compatible older build or a lower
+protocol, as well as an available remote Update action.
 
 **Update remote hosts automatically** in Settings starts on for new and upgraded installations, including installations
 that turned it off in a release before automatic updates became the default. Turning it off after upgrading saves a
@@ -1921,9 +1922,9 @@ such a directory against an identity recorded earlier follows this rule rather t
 2026-10-22: a checkout recorded without a creation time, whose folder still reports none, cannot be told from a folder
 removed and re-cloned at the same path, so Farhelm treats it as unconfirmed: Delete releases it without archiving it,
 with the notice below; the trash never deletes it permanently; and a new session started in it does not trust its agent
-automatically. The launch that creates a fresh checkout can still apply the opt-in Claude trust edit because Farhelm
-just created the directory. A checkout recorded before creation times were kept, on a filesystem that reports them now,
-keeps the inode and device comparison.
+automatically. The launch that creates a fresh checkout can still apply the agent trust settings the user opted into,
+because Farhelm just created the directory. A checkout recorded before creation times were kept, on a filesystem that
+reports them now, keeps the inode and device comparison.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
@@ -3441,9 +3442,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
   explicitly best-effort and silent on failure — the operating system's clipboard behavior is outside this system's
   control — a deliberate, named exception to the Errors and diagnostics section's surface-every-error rule below, not a
   lapse in it. Farhelm assumes the host's system clipboard works. Copies may be dropped while it is broken, hung or
-  slow. A terminal paste the user starts on macOS may stall the window while the system clipboard supplies its contents.
-  Farhelm must stay responsive during other clipboard operations. On Wayland, keys typed while Farhelm is still fetching
-  pasted text from the system clipboard may reach the terminal before that text.
+  slow. A paste the user starts on macOS may stall the window while the system clipboard supplies its contents. Farhelm
+  must stay responsive during other clipboard operations. On Wayland, keys typed while Farhelm is still fetching pasted
+  text from the system clipboard may reach the terminal before that text.
 - Dragging across a terminal link never opens its target, downloads a file or opens a saved file, including while a
   program has mouse reporting on. Small pointer jitter still counts as a click.
 - Links in terminal output open their http(s) target on click, with no confirmation or prompt of any kind, unless the
@@ -5571,11 +5572,12 @@ unsafe rendering of remote input by the helm or GUI, secret disclosure, or viola
 
 Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions: the remembered
 permission mode and the recent setups the New dialog offers. Each is recorded from the user's own selection in the
-request that succeeded. A supervisor's create reply, the settings a plain Replace copies from a listed row, and anything
-an agent creates do not qualify, because none of them is a choice the user made in the GUI. A choice is recorded only
-once its create succeeds. When opt-in managed-checkout trust applies to an existing folder, the helm records the host's
-canonical path for that folder. The same path is used for the launch so the folder selected for trust stays the same
-through approval and dispatch.
+request that succeeded, never from what a host replies or lists, with the one exception below. A supervisor's create
+reply, the settings a plain Replace copies from a listed row, and anything an agent creates do not qualify, because none
+of them is a choice the user made in the GUI. A choice is still recorded only once its create succeeds; the host's
+success decides whether it is recorded, never what. The exception: when opt-in managed-checkout trust applies to an
+existing folder, the helm records the host's canonical path for that folder. The same path is used for the launch so the
+folder selected for trust stays the same through approval and dispatch.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
 from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from
