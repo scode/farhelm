@@ -101,3 +101,110 @@ deferring Rebuild's image preservation, retaining Podman's exact absence observa
 clarifying the host-identity follow-up, and making the pre-send test fail if any expected saved fact is absent or
 different. Opus reviewed the recipe Delete screenshots and accepted the focused keyboard-focus and warning-copy
 rerender. Each PR message was read independently before submission.
+
+### Landing
+
+#### What landed with it
+
+The plan's five PRs merged with a landing fix, #4522, as the second of four plans landed together in this round, after
+the helm triage and before the exited-terminal scrollback fix and the status-mark hover change. Since the executor based
+the plan, main had gained the per-agent Settings and hook setup plan, which redrew the Settings sidebar; that made the
+plan's two new pictures stale (below). The helm triage touches no Podman, recipe or connection code, and the other two
+plans share no code with this one.
+
+The 18 triage outcomes were graduated by the plan's own commits. The review queue, its index and the outcome ledger
+conflicted with the helm triage's edits to the same files; the landing kept both sides by replaying each commit's own
+change onto the combined files, and a script then confirmed the queue, index and ledger agree. One cosmetic effect: in
+the outcome archive, this plan's entries sit before the helm triage's rather than after them.
+
+An independent reviewer read the five PRs against the plan, the triage outcomes and the specs. Apart from the stale
+pictures, it found no blocker:
+
+- **Outcomes.** All 18 were carried out as decided, and their records in the ledger say which way each went.
+- **Correctness.** The proxy refresh, the volume cleanup and the Delete anyway path behave as the outcomes asked: the
+  confirmation checks Podman again, and an image that turns out to exist takes the usual ownership checks.
+- **Protocol.** The new Delete anyway question changes only what the desktop app and its built-in helm say to each
+  other, which always come from the same build, so no protocol version bump was needed.
+- **Specs.** SPEC.md's recipe Delete text matches the app's wording and its Cancel default.
+
+#### Fixes made while landing
+
+All in [#4522](https://github.com/scode/farhelm/pull/4522/changes):
+
+- **Stale pictures.** The two pictures of the recipe Delete anyway question (light and dark) were captured before
+  Credentials moved into the General group of Settings, so they showed the old sidebar and failed the golden check. They
+  were captured again on the combined code and published, and the scene was added to the screenshot scene list, whose
+  own test refuses a picture it does not list.
+- **A lint.** A new test cloned a value only to compare it as a one-element list, which the lint run refuses.
+- **A false test comment.** The real-container Delete test's comment said a helm that counted its own session list would
+  fail it. The triage finding showed that it would not, and the plan closed that finding with no test change, so the
+  claim is removed from the comment.
+
+#### Checks
+
+The round landed four plans together: the helm triage, the Podman triage, the exited-terminal scrollback fix and the
+status-mark hover change. The landing ran their checks once, on all four stacked on main. The Rust workspace suite, the
+desktop app's tests, the lint runs and the end-to-end smoke test ran on a separate arm64 Linux test worker. The goldens,
+the website build and the small checks ran locally on x86_64. The workspace run used four build jobs, as in the last
+round, since runs with more had run out of memory on the worker; this round it had no memory or disk trouble.
+
+On the four plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four build jobs, on the test worker (recorder run
+  `8ba93f1d-d933-483b-a90a-eeac88311d3a`): all 8252 passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `890a2d33-0c71-410b-9498-3a792708a974`): all
+  184 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker, not through the recorder: failed on one lint in a new
+  Podman test, fixed in #4522.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `c732c6cc-ba70-4b34-853a-fe7961b6d297`): every
+  step passed but paste, which skips on Linux as it always does.
+- `python3 scripts/check-gui-goldens.py`, the full comparison, locally (recorder run
+  `2372fd39-11ef-4468-84d3-f1c70cdf9f7e`): failed only on the two pictures of the recipe Delete anyway question, which
+  the Podman plan had captured before main's Settings sidebar changed. Fixed in #4522.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, locally: failed because that new scene was missing from the
+  screenshot scene list. Fixed in #4522.
+- `python3 -B scripts/test-check-gui-goldens.py` (recorder run `952eb6e8-4c50-4a08-bc89-870dd1358b6d`),
+  `python3 -B scripts/gui-goldens.py --self-test`, `python3 -B scripts/test-docs-shots.py` (recorder run
+  `6c988518-9a04-4428-b87d-f5a1d49ede50`), `python3 -B scripts/test-gui-agent.py` (recorder run
+  `430497e6-e6fd-4d35-8648-4082a3b33d33`), the website build (`bun install --frozen-lockfile && bun run build`) with its
+  link check, `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment),
+  `dprint check`, `python3 scripts/check-agents-md.py` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After the landing fixes (#4521 to #4524):
+
+- `python3 scripts/check-gui-goldens.py --update`, locally (recorder run `6d8fe2d8-8886-45e5-a8f7-c1902f41d10c`):
+  re-rendered every picture and changed only the two Delete anyway pictures, which were then published.
+- `python3 scripts/check-gui-goldens.py --scene 'settings-recipe-*' --scene 'session-row-*'`, locally (recorder run
+  `9282ca4e-8230-435c-8d5d-20380af3477c`): passed.
+- `cargo nextest run -p farhelm-helm --lib`, on the test worker (recorder run `2b0cfd85-3205-4a06-97c1-d028a7ae46db`):
+  all 1801 passed.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and the same with `--features agent`, on the test
+  worker: passed. They had not run on the first pass, which stopped at the failing lint run.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+The rest of the first runs still applies after the fixes, which change only a Podman test's lint, a test comment, two
+pictures and the scene list, a code comment on the helm's notices table, SPEC.md wording, the desktop parity notes and a
+changelog note. Skipped: the Podman suite's opt-in real-engine and real-SSH variants, which neither triage plan needed
+beyond the real Podman environment test, which ran in the workspace run on the worker (about two minutes, not skipped);
+macOS, since no Mac was part of this landing and the pictures used the Linux renderer only; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+- The fix for a container whose Farhelm exits before connecting (the connection now reports the process exit instead of
+  an SSH failure) has no test that goes through a real connection attempt; only the message's classification is tested
+  on its own. That was the gap the finding was about, and the outcome asked for a test "where practical" without the
+  report saying why none was. A connection-manager test with a Podman container whose Farhelm exits early would close
+  it.
+- SPEC.md's sentence that removing a container also removes its unused anonymous volumes sits at the end of the section
+  on retired containerized sessions, although it covers recipe containers too. A reader looking up recipe containers
+  will not find it there.
+- The changelog note for the proxy fix says new containers pick up current proxy settings "even if the session launcher
+  was already open". From the triage assessment, a stale probe could be reused for as long as it was cached, not only
+  while the launcher was open; release curation should check that wording.
+- The "retargeted host alias can forget a live container" finding stays unfixed and is one of the two Plan follow-up
+  entries the report names.
