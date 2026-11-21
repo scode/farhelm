@@ -1881,6 +1881,47 @@ fn extras_the_stream_makes_are_shared_by_content() {
     assert!(diff(&live, &restored).is_empty());
 }
 
+/// A snapshot must preserve the stored groups of anonymous hyperlinks even
+/// when they lead to the same address. A replay can renumber whole groups.
+#[test]
+fn snapshot_comparison_distinguishes_split_and_merged_anonymous_links() {
+    let draw = |groups: &[&[u8]]| {
+        let mut screen = emulator(20, 4);
+        for group in groups {
+            feed(&mut screen, b"\x1b]8;;https://example.test/\x07");
+            feed(&mut screen, group);
+            feed(&mut screen, b"\x1b]8;;\x07");
+        }
+        screen
+    };
+    let link_at = |screen: &Emulator, column| {
+        screen.term().grid()[Line(0)][Column(column)]
+            .hyperlink()
+            .unwrap()
+    };
+    let mut joined = draw(&[b"ab"]);
+    let mut replayed = draw(&[b"ab"]);
+    let mut split = draw(&[b"a", b"b"]);
+    assert_eq!(link_at(&joined, 0), link_at(&joined, 1));
+    assert_ne!(link_at(&joined, 0), link_at(&replayed, 0));
+    assert_ne!(link_at(&split, 0), link_at(&split, 1));
+    // A different destination may have an explicit id that looks generated.
+    let id = link_at(&joined, 0);
+    let explicit = format!("\x1b]8;id={};https://other.test/\x07c\x1b]8;;\x07", id.id());
+    for screen in [&mut joined, &mut replayed, &mut split] {
+        feed(screen, explicit.as_bytes());
+    }
+    assert_eq!(link_at(&joined, 2).id(), id.id());
+    assert_ne!(link_at(&joined, 2).uri(), id.uri());
+    for screen in [&joined, &split] {
+        let restored = restore(&screen.snapshot(MAX).unwrap().blob).emulator;
+        assert!(diff(screen, &restored).is_empty());
+    }
+    assert!(diff(&joined, &replayed).is_empty());
+    assert!(!diff(&joined, &split).is_empty(), "a split link differs");
+    assert!(!diff(&split, &joined).is_empty(), "a merged link differs");
+}
+
 /// A cursor template whose link the stream cannot write (a URI holding
 /// DEL, which OSC 8 carries but `paint` does not put in a stream) is
 /// restored through its fixup, and the stream holds no link for it.

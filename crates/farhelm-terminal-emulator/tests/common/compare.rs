@@ -15,6 +15,7 @@ use farhelm_terminal_emulator::alacritty_terminal::term::TermMode;
 use farhelm_terminal_emulator::alacritty_terminal::term::cell::{Cell, Hyperlink};
 use farhelm_terminal_emulator::alacritty_terminal::term::color::COUNT;
 use farhelm_terminal_emulator::alacritty_terminal::vte::ansi::CharsetIndex;
+use std::collections::{HashMap, HashSet};
 
 /// The differences found, the first few in full.
 #[derive(Debug, Default)]
@@ -36,7 +37,8 @@ impl Diff {
     }
 }
 
-/// Every observable difference between `a` and `b`.
+/// Every observable difference between `a` and `b`, including splits or merges
+/// of hyperlinks whose ids were generated independently in each emulator.
 pub fn diff(a: &Emulator, b: &Emulator) -> Diff {
     let mut d = Diff::default();
     if a.size() != b.size() {
@@ -48,13 +50,15 @@ pub fn diff(a: &Emulator, b: &Emulator) -> Diff {
     if (*ta.mode() - ignored) != (*tb.mode() - ignored) {
         d.push(format!("mode {:?} vs {:?}", ta.mode(), tb.mode()));
     }
-    diff_grid(&mut d, "active", ta.grid(), tb.grid(), true);
+    let mut links = LinkGroups::default();
+    diff_grid(&mut d, &mut links, "active", ta.grid(), tb.grid(), true);
     // alacritty clears the alternate screen's cells on entry, so while it is
     // hidden only its saved cursor can ever be observed again; while it
     // shows, the hidden primary screen is wholly observable.
     let alternate = ta.mode().contains(TermMode::ALT_SCREEN);
     diff_grid(
         &mut d,
+        &mut links,
         "inactive",
         ta.inactive_grid(),
         tb.inactive_grid(),
@@ -126,10 +130,17 @@ pub fn diff(a: &Emulator, b: &Emulator) -> Diff {
     d
 }
 
-/// Compare two grids: their saved cursors always, and with `cells` also
-/// their cursors and every row, history included.
-fn diff_grid(d: &mut Diff, name: &str, a: &Grid<Cell>, b: &Grid<Cell>, cells: bool) {
-    if !cursor_eq(&a.saved_cursor, &b.saved_cursor) {
+/// Compare saved cursors even on the hidden alternate screen. Include the
+/// current cursor and rows, history included, when those cells can be seen.
+fn diff_grid(
+    d: &mut Diff,
+    links: &mut LinkGroups,
+    name: &str,
+    a: &Grid<Cell>,
+    b: &Grid<Cell>,
+    cells: bool,
+) {
+    if !cursor_eq(links, &a.saved_cursor, &b.saved_cursor) {
         d.push(format!(
             "{name} saved cursor: {} vs {}",
             show_cursor(&a.saved_cursor),
@@ -139,7 +150,7 @@ fn diff_grid(d: &mut Diff, name: &str, a: &Grid<Cell>, b: &Grid<Cell>, cells: bo
     if !cells {
         return;
     }
-    if !cursor_eq(&a.cursor, &b.cursor) {
+    if !cursor_eq(links, &a.cursor, &b.cursor) {
         d.push(format!(
             "{name} cursor: {} vs {}",
             show_cursor(&a.cursor),
@@ -160,7 +171,7 @@ fn diff_grid(d: &mut Diff, name: &str, a: &Grid<Cell>, b: &Grid<Cell>, cells: bo
                 &a[Line(line)][Column(column)],
                 &b[Line(line)][Column(column)],
             );
-            if !cell_eq(ca, cb) {
+            if !links.same_cell(ca, cb) {
                 d.push(format!(
                     "{name} cell {line},{column}: {} vs {}",
                     show_cell(ca),
@@ -192,11 +203,6 @@ pub fn cell_eq(a: &Cell, b: &Cell) -> bool {
 /// counter shared by every emulator in the process, so two emulators fed the
 /// same output never agree on them; two generated ids count as equal.
 pub fn link_eq(a: Option<&Hyperlink>, b: Option<&Hyperlink>) -> bool {
-    let generated = |link: &Hyperlink| {
-        link.id()
-            .strip_suffix("_alacritty")
-            .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()))
-    };
     match (a, b) {
         (None, None) => true,
         (Some(a), Some(b)) => {
@@ -206,9 +212,46 @@ pub fn link_eq(a: Option<&Hyperlink>, b: Option<&Hyperlink>) -> bool {
     }
 }
 
-fn cursor_eq(a: &Cursor<Cell>, b: &Cursor<Cell>) -> bool {
+fn generated(link: &Hyperlink) -> bool {
+    link.id()
+        .strip_suffix("_alacritty")
+        .is_some_and(|n| !n.is_empty() && n.bytes().all(|byte| byte.is_ascii_digit()))
+}
+
+/// Generated ids may differ between replays. Pair each link by id and URI
+/// so cells and cursor templates agree on a single partner without merging
+/// different destinations that happen to use the same id.
+#[derive(Default)]
+struct LinkGroups {
+    left_to_right: HashMap<Hyperlink, Hyperlink>,
+    used_right: HashSet<Hyperlink>,
+}
+
+impl LinkGroups {
+    fn same_cell(&mut self, a: &Cell, b: &Cell) -> bool {
+        if !cell_eq(a, b) {
+            return false;
+        }
+        let (Some(a), Some(b)) = (a.hyperlink(), b.hyperlink()) else {
+            return true;
+        };
+        if !generated(&a) || !generated(&b) {
+            return true;
+        }
+        if let Some(partner) = self.left_to_right.get(&a) {
+            return *partner == b;
+        }
+        if !self.used_right.insert(b.clone()) {
+            return false;
+        }
+        self.left_to_right.insert(a, b);
+        true
+    }
+}
+
+fn cursor_eq(links: &mut LinkGroups, a: &Cursor<Cell>, b: &Cursor<Cell>) -> bool {
     a.point == b.point
-        && cell_eq(&a.template, &b.template)
+        && links.same_cell(&a.template, &b.template)
         && a.input_needs_wrap == b.input_needs_wrap
         && CHARSETS
             .iter()
