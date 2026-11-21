@@ -462,6 +462,92 @@ pub(super) fn row_delete_confirmation_setup(state: &SceneState, _: &mut Window, 
     );
 }
 
+/// A connected sandbox can keep another session. The selected shell's Delete still warns that its processes and
+/// tabs close before it explains when the entire sandbox goes away.
+pub(super) fn environment_delete_confirmation_setup(
+    state: &SceneState,
+    _: &mut Window,
+    cx: &mut App,
+) {
+    use crate::session_list::environment_tests::{
+        Provider, bash_session, connected, environment_host, registry,
+    };
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        listing(
+            &["a", "b"],
+            &[
+                bash_session("a")
+                    .host(2)
+                    .tabs(1)
+                    .activity(TEST_NOW - 60)
+                    .title("Check the release build"),
+                session("b")
+                    .host(2)
+                    .activity(TEST_NOW - 120)
+                    .title("Watch integration tests"),
+            ],
+        ),
+        preferences(&["a"], None),
+        registry(&environment_host(Provider::Sandbox, connected())),
+    ]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    state.after.set(Some(|list, _, window, cx| {
+        let mark = Mark::take(cx);
+        if let Some(target) = crate::session_list::menu::actionable("a", cx) {
+            list.update(cx, |list, cx| list.delete(&target, &mark, window, cx));
+        }
+    }));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+}
+
+/// An exited shell's Stop still closes its extra tab. Hover confirms that the answer describes only that remaining tab.
+pub(super) fn tab_only_stop_confirmation_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::session_list::environment_tests::bash_session;
+    window.set_driver_enabled(true);
+    let fixture = bash_session("a")
+        .host(1)
+        .tabs(1)
+        .activity(TEST_NOW - 60)
+        .title("Build console")
+        .status(serde_json::json!({"state": "exited", "exit_code": 0}));
+    let row = serde_json::from_value(fixture.entry().value).expect("the shell's listed row");
+    session_list_scene(state, &[fixture], cx);
+    let question = crate::session_list::stop::question(
+        "a",
+        &row,
+        crate::session_list::stop::guard(&row),
+        None,
+    );
+    let mark = Mark::take(cx);
+    assert!(crate::prompt::ask(question, None, &mark, |_, _, _| {}, window, cx).is_some());
+    state.after.set(Some(rest_on_terminal_tabs_stop));
+}
+
+/// Wait for Stop to produce its answer control before moving the pointer onto the actual tooltip target.
+fn rest_on_terminal_tabs_stop(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    rest_pointer_on(
+        state,
+        "prompt-confirm",
+        |bounds| bounds.center(),
+        rest_on_terminal_tabs_stop,
+        window,
+        cx,
+    );
+}
+
 /// A pending Delete on the selected row (its spinner and "Stopping agent…" in place of the title, in the fill's ink)
 /// and a refused one on the idle row with new output (the helm's words under the row, in red). Motion is reduced, so
 /// the spinner holds its first step and the picture can settle. The refusal is answered before the pending Delete is

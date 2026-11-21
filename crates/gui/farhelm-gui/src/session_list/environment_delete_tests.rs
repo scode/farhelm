@@ -31,9 +31,10 @@ use crate::test_support::{self, focused_id, frame, meta};
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
 /// The session lane's question line for a sandbox: its consequence, then the environment's name.
-const SANDBOX_SESSION_LINE: &str = "Delete this session and its checkout? A checkout another session still uses stays. \
-                                    If this is the last session in its sandbox, the sandbox goes too, with every \
-                                    process and file in it and its snapshots. This cannot be undone. sandbox: \
+const SANDBOX_SESSION_LINE: &str = "Delete this session and its checkout? This stops any processes still running in \
+                                    the session and closes its terminal tabs. A checkout another session still uses \
+                                    stays. If this is the last session in its sandbox, the sandbox goes too, with \
+                                    every process and file in it and its snapshots. This cannot be undone. sandbox: \
                                     owned-environment";
 
 /// The whole lane's question line for a sandbox: its warning, then the environment's name.
@@ -276,9 +277,10 @@ fn a_containers_count_retires_when_it_is_deleted_and_its_notice_stays(cx: &mut T
     assert_eq!(
         label_of(cx, "session-delete-consequence-a").as_deref(),
         Some(
-            "Delete this session and its checkout? A checkout another session still uses stays. If this is the last \
-             session in its container, the container goes too, with every process and file in it. This cannot be \
-             undone. container: owned-environment"
+            "Delete this session and its checkout? This stops any processes still running in the session and closes \
+             its terminal tabs. A checkout another session still uses stays. If this is the last session in its \
+             container, the container goes too, with every process and file in it. This cannot be undone. container: \
+             owned-environment"
         )
     );
     test_support::click(cx, "prompt-confirm");

@@ -128,6 +128,18 @@ pub(crate) fn question(
 ) -> Question<Frozen> {
     let title = HostText::from_host(row.info.title.as_str());
     let program = program_word(row);
+    // The question and both answer hints must describe the same remaining work when the main program has ended.
+    let (confirm_help, cancel_help) = if row.info.status.has_ended() {
+        (
+            "Close this session's terminal tabs".to_owned(),
+            "Cancel: leave the terminal tabs open".to_owned(),
+        )
+    } else {
+        (
+            format!("Stop this session's {program} and close its terminal tabs"),
+            format!("Cancel: keep the {program} and terminal tabs running"),
+        )
+    };
     let consequence = match environment {
         Some((ui, _)) => format!(
             "{} {}",
@@ -140,9 +152,7 @@ pub(crate) fn question(
         "Stop confirmation",
         Answer::new(
             "Confirm stop",
-            HoverHelp::tooltip(format!(
-                "Stop this session's {program} and close its terminal tabs"
-            )),
+            HoverHelp::tooltip(confirm_help),
             Tier::Danger,
         ),
         Frozen {
@@ -159,9 +169,7 @@ pub(crate) fn question(
     )
     .cancel_answer(Answer::new(
         "Cancel",
-        HoverHelp::tooltip(format!(
-            "Cancel: keep the {program} and terminal tabs running"
-        )),
+        HoverHelp::tooltip(cancel_help),
         Tier::Neutral,
     ))
     .keeps_focus_on_empty_click();

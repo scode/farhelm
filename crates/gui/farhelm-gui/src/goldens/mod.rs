@@ -660,6 +660,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "session-environment-unavailable",
+        size: (1036., 348.),
+        draw: environment_unavailable_cards,
+        setup: no_setup,
+    },
+    Scene {
         name: "ssh-sign-in-code",
         size: (970., 522.),
         draw: sign_in_surfaces,
@@ -841,6 +847,18 @@ static SCENES: &[Scene] = &[
         size: (1000., 418.),
         draw: session_lists_then,
         setup: row_delete_confirmation_setup,
+    },
+    Scene {
+        name: "environment-delete-confirmation",
+        size: (1000., 418.),
+        draw: session_lists_then,
+        setup: environment_delete_confirmation_setup,
+    },
+    Scene {
+        name: "tab-only-stop-confirmation",
+        size: (1000., 418.),
+        draw: session_lists_then,
+        setup: tab_only_stop_confirmation_setup,
     },
     Scene {
         name: "session-list-deleting",

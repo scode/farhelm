@@ -243,22 +243,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-ui-deleting-environment-retains-running-reconnect-promise.md
-
-- Outcome: `fix code`.
-- Assessment: In the GPUI app, session_pane/unavailable.rs:264-279 sends `Deleting { .. }` to `phase::remedy`, which
-  returns None for `failure: None` (hosts/identity/phase.rs:657). That falls back to the keeps-running text.
-  environment_notice (:299-343) does not override Deleting. Basis: SPEC.md:1616-1617: "While deletion runs, Hosts and
-  the sidebar attention area show the sandbox as being deleted, and its sessions show as being deleted with their
-  actions unavailable." Containers follow the same rule (SPEC.md:5206 onward). Fix: give Deleting its own being-deleted
-  explanation in the card.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
-
 ## trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md
 
 - Outcome: `fix code`.
@@ -380,23 +364,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## suspend-treats-failed-session-refresh-as-complete.md
-
-- Outcome: `fix code`.
-- Assessment: session_list/environment.rs `activity_asks` (~503-518) checks only `HostStateView::Connected { .. }`, not
-  truncation or staleness, and ignores the host's `refresh: RefreshView::Failed`. `GET /api/sessions` serves the helm's
-  retained cache. A failed refresh keeps the previous rows and leaves the host Connected (ui_channel.rs ~1152-1162).
-  Basis: SPEC.md "Topology" ~352-354: "Suspend asks first when an agent on that host is working, its status is unknown
-  or stale, or activity cannot be checked completely. Immediate Suspend requires a connected host after the activity
-  read and a complete listing with conclusive non-working statuses." A failed refresh means activity was not checked.
-  Fix: ask unless the host's refresh view is Ok.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
-
 ## folder-suggestion-enter-can-submit-launcher.md
 
 - Outcome: `fix spec+code`.
@@ -455,24 +422,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## shared-environment-delete-omits-live-shell.md
-
-- Outcome: `fix code`.
-- Assessment: Deleting a session inside a sandbox or container asks "Delete this session and its checkout? ... If this
-  is the last session ... every process ...". If other sessions remain, it still stops this session's live shell or
-  agent and its tabs, which the prompt never mentions. Verified: environment_ui.rs:578–590 text confirmed. SPEC.md
-  "Sandbox sessions" (~1607) fixes this confirmation's content ("states both outcomes") and says nothing about this
-  session's live processes. The general Delete rule (~2144) says the confirmation "says so when anything is still
-  alive". This applies to agent sessions too, not only shells.
-- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix the surface (or add the test) as the Assessment describes, following the shell-naming
-  principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
-
 ## shell-wrapper-help-names-agent.md
 
 - Outcome: `fix code`.
@@ -518,20 +467,6 @@
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## suspended-shell-card-names-agent.md
-
-- Outcome: `fix code`.
-- Assessment: A suspended environment session running Bash or Zsh says its processes are preserved "including the
-  agent's running command". Verified: environment_ui.rs ~693 and ~697 have fixed agent wording for both providers.
-- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix the surface (or add the test) as the Assessment describes, following the shell-naming
-  principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## shell-stop-and-suspend-wording-untested.md
 
@@ -1160,25 +1095,6 @@
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## shell-stop-tab-only-help.md
-
-- Outcome: `fix code`.
-- Assessment: When a session's main program has already ended and only extra tabs remain, the Stop dialog asks "Close N
-  terminal tabs?" but the Confirm button's help still says "Stop this session's shell/agent and close its terminal
-  tabs". This also affects agents, not only shells. Verified: session_list/stop.rs: `consequence` branches on
-  `has_ended()` (~96-105), but the Confirm and Cancel tooltips (~146-165) do not. SPEC.md ~2040 requires the tabs-only
-  question but does not word the button help.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: fix code (branch the tooltips on ended) If the fix turns out not to be
-  straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-sessions.md`.
 
 ## trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md
 

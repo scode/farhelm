@@ -36,7 +36,7 @@
 //!   activity check (SPEC.md, "Topology"). Its contract, which a caller must not loosen: the listing is a fresh
 //!   `GET /api/sessions?host=<id>`, never the pushed list, which the window's query filters and the listing cap cuts
 //!   (a Suspend authorized from it could freeze an agent the list never showed); it counts only when read whole, its
-//!   `truncated` flag clear; the host must read connected in the store after the read answers, not when it was sent;
+//!   `truncated` flag clear; the host must read connected with a successful refresh after the read answers;
 //!   every listed status must be conclusive, so a stale, unknown or running one asks ([`needs_confirmation`]); and a
 //!   read that fails asks too. Stop and suspend also asks when an ordinary Stop of the row would
 //!   ([`super::stop::asks`]), so with confirmations skipped it still asks when the activity says so: SPEC.md keeps the
@@ -80,7 +80,7 @@ use std::collections::HashSet;
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::EnvironmentHostView;
-use farhelm_proto::ui_channel::{HostStateView, HostView, SessionList, SessionRow};
+use farhelm_proto::ui_channel::{HostStateView, HostView, RefreshView, SessionList, SessionRow};
 use farhelm_proto::{SessionStatus, SessionStopRequest};
 use gpui::{AnyWindowHandle, App, BorrowAppContext as _, Global, Window};
 use serde_json::json;
@@ -477,8 +477,8 @@ pub(crate) fn begin_shown(
 
 /// Read host `host`'s activity for a Suspend and tell `then` whether the Suspend asks first: the module docs' activity
 /// rule, whose contract a caller must not loosen. The listing is a fresh `GET /api/sessions?host=<id>`, never the
-/// pushed list; it counts only when read whole; the host must read connected in the store when the read answers; every
-/// listed status must be conclusive; and a read that fails asks. Returns whether the read was sent; when it was not (no
+/// pushed list. It counts only when read whole, with conclusive statuses and a host still connected with a successful
+/// refresh when the read answers. Returns whether the read was sent. When it was not (no
 /// UI session, an id that cannot be a query), `then` is never called, and the caller asks nothing. The Hosts panel's
 /// Suspend reads through this too (`crate::hosts::lifecycle`), so the session's and the host's Suspend ask alike.
 pub(crate) fn read_activity(
@@ -498,16 +498,19 @@ pub(crate) fn read_activity(
 }
 
 /// Whether the activity `listing` of host `host` leaves Suspend to ask first (the module docs' contract): unless the
-/// host reads connected in the store now, after the read, and the listing was read whole with every status conclusive
-/// (the old `suspend_asks`). A failed read (`None`) asks too: a retained snapshot is no evidence.
+/// host reads connected with a successful refresh after the read, and the listing was read whole with every status
+/// conclusive. A failed refresh can leave a complete but old listing, so it must still ask.
 fn activity_asks(listing: Option<&SessionList>, host: i64, cx: &App) -> bool {
-    let connected = session::current_store(cx).is_some_and(|store| {
+    let refreshed = session::current_store(cx).is_some_and(|store| {
         matches!(
             HostLookup::of(store.read(cx).collections(), host),
-            HostLookup::Known(host) if matches!(host.state, HostStateView::Connected { .. })
+            HostLookup::Known(host) if matches!(
+                host.state,
+                HostStateView::Connected { refresh: RefreshView::Ok { .. }, .. }
+            )
         )
     });
-    !connected
+    !refreshed
         || !listing.is_some_and(|listing| {
             !listing.truncated
                 && listing

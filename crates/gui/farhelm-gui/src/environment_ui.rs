@@ -589,19 +589,20 @@ impl ProviderUi {
 
     /// The consequence of a Delete that asks the environment's own Farhelm (`session_list::environment_delete`'s
     /// session lane). Nothing on this side knows whether the session is the environment's last, so it states both
-    /// outcomes, and it is never skipped, since one of them destroys the environment. The old
-    /// `session_delete_consequence`, word for word.
+    /// outcomes, and it is never skipped, since one of them destroys the environment. Both outcomes stop any
+    /// processes and close any terminals in the selected session, even when another session keeps the environment.
     pub(crate) fn session_delete_consequence(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
-                "Delete this session and its checkout? A checkout another session still uses stays. If this is the \
-                 last session in its sandbox, the sandbox goes too, with every process and file in it and its \
-                 snapshots. This cannot be undone."
+                "Delete this session and its checkout? This stops any processes still running in the session and \
+                 closes its terminal tabs. A checkout another session still uses stays. If this is the last session \
+                 in its sandbox, the sandbox goes too, with every process and file in it and its snapshots. This \
+                 cannot be undone."
             }
             ProviderKind::Podman => {
-                "Delete this session and its checkout? A checkout another session still uses stays. If this is the \
-                 last session in its container, the container goes too, with every process and file in it. This \
-                 cannot be undone."
+                "Delete this session and its checkout? This stops any processes still running in the session and \
+                 closes its terminal tabs. A checkout another session still uses stays. If this is the last session \
+                 in its container, the container goes too, with every process and file in it. This cannot be undone."
             }
         }
     }
@@ -706,12 +707,12 @@ impl ProviderUi {
     pub(crate) fn suspended_explanation(self) -> &'static str {
         match self.0 {
             ProviderKind::Tensorlake => {
-                "This session's sandbox is suspended. Its processes are preserved, including the agent's running \
-                 command, and continue when you resume it. Only snapshot storage bills while suspended."
+                "This session's sandbox is suspended. Its processes are preserved and continue when you resume it. \
+                 Only snapshot storage bills while suspended."
             }
             ProviderKind::Podman => {
-                "This session's container is suspended. Its processes are preserved, including the agent's running \
-                 command, and continue when you resume it. Its memory stays in use on the container host."
+                "This session's container is suspended. Its processes are preserved and continue when you resume it. \
+                 Its memory stays in use on the container host."
             }
         }
     }
