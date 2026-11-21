@@ -1213,10 +1213,6 @@ consequences.
   — Recipe summaries render literal container-base formatting characters. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-tensorlake-add-host-inline-container-recipe-compatibility.md`](trailing-tensorlake-add-host-inline-container-recipe-compatibility.md)
-  — Inline container-recipe Save leaves Tensorlake Add host on an unusable choice. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-podman-job-removal-after-last-fleet-invalidation.md`](trailing-podman-job-removal-after-last-fleet-invalidation.md)
   — Container job completion lacks a final fleet invalidation. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.

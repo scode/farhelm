@@ -626,6 +626,41 @@ fn filled_form(
     (helm, cx)
 }
 
+/// A later catalog update can make a previously valid selection unusable. The disabled option explains why, and
+/// neither Continue nor Enter in Name can send a probe. A compatible base stays usable without prepared resources.
+#[gpui::test]
+fn an_incompatible_recipe_stays_visible_and_blocks_continue(cx: &mut TestAppContext) {
+    let (mut helm, cx) = filled_form(cx, false, vec![]);
+    assert_eq!(pressable(cx, "add-tensorlake-continue"), Some(true));
+    let mut incompatible = recipe("rust-dev", "unused");
+    incompatible["base"] = json!({
+        "kind": "container_image", "reference": "ubuntu:24.04", "user": "dev"
+    });
+    push_catalog(&mut helm, &[incompatible], &[]);
+    settle(cx);
+    assert_eq!(pressable(cx, "add-tensorlake-continue"), Some(false));
+
+    let reason = "This recipe's base cannot run as a sandbox";
+    keys(cx, "shift-tab");
+    assert!(focus_in(cx, "add-tensorlake-name"));
+    keys(cx, "enter");
+    assert_eq!(super::tests::error_line(cx).as_deref(), Some(reason));
+    assert!(helm.commands().is_empty(), "no probe was sent");
+    click(cx, "add-tensorlake-recipe");
+    let nodes = frame(cx);
+    let option = nodes
+        .iter()
+        .position(|node| {
+            node.element_id.as_deref() == Some("add-tensorlake-recipe-option-rust-dev")
+        })
+        .expect("the incompatible option stays visible");
+    assert!(!nodes[option].flags.click);
+    assert!(nodes.iter().enumerate().any(|(i, node)| {
+        node.texts.iter().any(|text| text.text.contains(reason))
+            && std::iter::successors(Some(i), |&i| nodes[i].parent).any(|i| i == option)
+    }));
+}
+
 /// Press Continue and take the probe it sends: its envelope id and body.
 fn continue_to_probe(cx: &mut VisualTestContext, helm: &mut FakeHelm) -> (u64, Value) {
     click(cx, "add-tensorlake-continue");

@@ -28987,3 +28987,28 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `yuvnntzvrnuzqkmnvswpxoylmtxnzuzo`, bookmark
   `plan/terminal-exit-and-placeholder-fixes/02-light-placeholder-contrast`,
   [PR #4415](https://github.com/scode/farhelm/pull/4415/changes).
+
+## trailing-tensorlake-add-host-inline-container-recipe-compatibility.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The desktop Add host
+  Tensorlake form lists every recipe in the catalog as an ordinary enabled option, with no provider compatibility check
+  (`crates/gui/farhelm-gui/src/hosts/add/tensorlake.rs:479-545`). Continue needs only a name and a recipe (`:456-458`).
+  The embedded recipe editor offers the "Container image" base ("Runs on Podman hosts",
+  `settings/recipes/editor.rs:94-115`), and a finished Save selects the new recipe (`tensorlake.rs:24-28, 312`). The
+  helm then refuses the plan with "this recipe's base cannot run on Tensorlake"
+  (`crates/farhelm-helm/src/provisioning/tensorlake_add.rs:804`), which contradicts SPEC.md:474 ("Unsupported recipes
+  remain visible but disabled with a reason").
+- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
+  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
+  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
+  of complexity."
+- Completion criteria: Fix within the current spec what the Assessment describes ("Add host offers container-only
+  recipes for a Tensorlake sandbox"), with a test where practical. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity gate:
+  "if any of these spiral into something very complicated, the executor should make a near term todo item to follow up
+  on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the
+  feedback file, and say so in the execution record. Remove the feedback file and its index entry.
+- Execution: change `mmmlprqqnvmwmutrrrlpxnsrwmuwxrpn`, bookmark
+  `plan/hosts-small-fixes/01-tensorlake-recipe-compatibility`,
+  [PR #4411](https://github.com/scode/farhelm/pull/4411/changes).
