@@ -1314,10 +1314,6 @@ consequences.
   — Typed SSH capacity reasons bypass final display escaping. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
 
-- [`trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md`](trailing-podman-unregistered-explicit-cleanup-lacks-retained-operation-reason.md)
-  — Closing Containers loses an unregistered cleanup failure's reason. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-ui-legacy-container-editor-specified-retirement.md`](trailing-ui-legacy-container-editor-specified-retirement.md)
   — Removing the legacy container editor is specified retirement. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.

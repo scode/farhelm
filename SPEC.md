@@ -5204,8 +5204,10 @@ Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu b
 removed after successful replacement once no container uses them. Rebuild at a place and recipe deletion clean up that
 place's owned images. User-owned base images are retained, and a checkpoint image Farhelm manages cannot be used as a
 recipe base. Settings → Containers shows probe status per host and a refreshable **Containers not on this helm** list
-with confirmed Delete and retryable failure, following the sandbox-leftovers pattern. The list asks every container host
-at once, and a listing or Delete that waits on a container host for more than 20 seconds says the host did not answer in
+with confirmed Delete and retryable failure, following the sandbox-leftovers pattern except that a failed Delete's
+reason shows only while Settings stays open: the helm keeps no record of it, so after reopening the leftover is listed
+again with no reason, and a reply that arrives after Settings closed is not shown. The list asks every container host at
+once, and a listing or Delete that waits on a container host for more than 20 seconds says the host did not answer in
 time. Such a Delete carries on, and the list shows whether the container is gone when it is read again. Deleting a
 container's own host (Host-level Delete container, or Containers' Delete of a leftover that has a host row) answers the
 same way: the host leaves Hosts once its container is deleted, and if that deletion fails after the reply, the host
