@@ -2,6 +2,37 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.43.0 - 2026-11-20
+
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- You can now start a plain Bash or Zsh shell as a session, just like you can start agents. Typing "bash" or "zsh" in the launcher text field is the quickest way to do so. (#4333, #4336)
+
+### 🔧 Fixes worth highlighting
+
+- The desktop app now runs ssh and other programs with the PATH your login shell sets, even when you start it from the Dock or Finder. Programs your ssh config runs, such as a `ProxyCommand` in `/usr/local/bin`, are now found; before, signing in to such a host failed with "Connection closed". (#4338, #4340)
+
+<details>
+<summary>All other changes</summary>
+
+#### 🚀 Added
+
+- If Farhelm cannot read your login shell's PATH at startup, a notification explains that it will use the PATH it started with and offers **Send feedback**. (#4339)
+
+#### 🔄 Changed
+
+- Returning to a session now shows the terminal tab you last chose there, instead of always opening Agent, including after the app reconnects to the helm. Farhelm keeps the choice until you quit the app. (#4328)
+
+#### 🔧 Fixed
+
+- Restart on an Antigravity session now returns to the main conversation; before, one of its subagents could take the main conversation's place. A session that already picked up a subagent's conversation switches back the next time the main conversation reports. This was checked against Antigravity CLI 1.5.13. (#4326)
+- After a Tensorlake sandbox resumes outside Farhelm, Hosts and the session card now show its next automatic pause with that pause's own time; before, they could show "Suspended from Farhelm" with the time of an earlier Suspend. (#4329)
+- You can now close Templates after opening an older template without being asked to save changes you did not make. When you have edited a template or a recipe, the question about unsaved changes now appears over the dialog, where you can see it at any scroll position. (#4345, #4346, #4347)
+
+</details>
+
 ## v0.42.0 - 2026-11-19
 
 ### 🚀 Added
