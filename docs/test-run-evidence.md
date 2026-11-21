@@ -116,8 +116,8 @@ The recorder rejects roots equal to or below the tested Git checkout, the conven
 `$XDG_STATE_HOME/farhelm` when XDG state is configured. A newly created root and every run directory use mode `0700`;
 private files use mode `0600` for recorder-created files. Runner-created files may use their own file modes inside the
 private run directory. An existing root must have no group or other permission bits and must belong to the invoking
-user, and the directory holding it must belong to that user or to root, or be sticky like `/tmp`; otherwise another
-account that created the fixed-name directory first could swap or read the evidence. The recorder does not change an
+user. The directory holding it must belong to that user or to root. Even with the sticky bit, another account owning the
+parent can replace the evidence directory. A root-owned `/tmp` meets the ownership rule. The recorder does not change an
 existing root's permissions.
 
 Every invocation gets a full UUID directory. A retry always creates another directory, so a later passing run cannot

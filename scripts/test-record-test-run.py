@@ -1696,31 +1696,26 @@ class RecorderTest(unittest.TestCase):
         self.assertEqual(stat.S_IMODE(root.stat().st_mode), 0o700)
 
     def test_roots_owned_by_another_user_are_refused(self) -> None:
-        """A root, or the directory holding it, that another account controls is refused.
+        """Refuse another account's evidence root or sticky parent.
 
-        The default root has a fixed name in a world-writable directory, so
-        another account could create it, or its `farhelm-tmp` parent, first.
-        A private mode bit proves nothing about who owns the directory. The
-        other account is simulated by reporting a different effective uid,
-        because a test cannot create directories owned by someone else. Root
-        ownership and the sticky bit (as on `/tmp` itself) both make a parent
-        safe, since neither lets an ordinary account replace this user's
-        entries.
+        The sticky bit leaves the parent's owner able to replace entries.
+        Test the same sticky mode with a different owner and with root as
+        owner, so `/tmp` still qualifies through the ownership rule.
         """
 
         root = self.base / "owned-evidence"
         RECORDER.prepare_root(root, self.repo, self.environment())
-        stranger = os.geteuid() + 1
-        with mock.patch.object(os, "geteuid", return_value=stranger):
+        other_uid = os.geteuid() + 1
+        with mock.patch.object(os, "geteuid", return_value=other_uid):
             with self.assertRaisesRegex(RECORDER.UsageRefusal, "belongs to another user"):
                 RECORDER.prepare_root(root, self.repo, self.environment())
 
-            parent = self.base / "shared-parent"
-            parent.mkdir()
+            parent = mock.Mock(spec=pathlib.Path)
+            parent.stat.return_value = mock.Mock(st_uid=other_uid + 1, st_mode=stat.S_IFDIR | 0o1777)
             self.assertFalse(RECORDER.safe_parent(parent))
-            parent.chmod(0o1777)
+            parent.stat.return_value.st_uid = 0
             self.assertTrue(RECORDER.safe_parent(parent))
-        self.assertTrue(RECORDER.safe_parent(parent.parent))
+        self.assertTrue(RECORDER.safe_parent(self.base))
 
     def test_cancellation_cleans_signal_ignoring_descendants_after_eof(self) -> None:
         """Both lifecycle loops owe group cleanup after the leader and its pipes end.

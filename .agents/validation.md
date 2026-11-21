@@ -1013,6 +1013,8 @@ systemd or SSH substrate ran.
   build without `FARHELM_RELEASE_BUILD`. Run it when the script or `install.sh`'s marker line changes; seconds, no
   network. It is bash 3.2-safe, so it also runs under macOS's `/bin/bash`.
 - `dprint check`
+- `python3 -B scripts/test-record-test-run.py` and `python3 -B deflake/test-deflake.py` cover the recorder and deflake
+  tooling, including state-root ownership checks. Changes to the deflake driver also run `deflake/EVAL.md`.
 - `python3 scripts/check-agents-md.py` and `python3 scripts/check-agents-md.py --self-test` — keeps the agent
   instructions loadable: the root `AGENTS.md` within the 28 KiB budget (Codex injects only its first 32 KiB and drops
   the rest silently) and ending with its truncation sentinel, every path an instruction file names and every

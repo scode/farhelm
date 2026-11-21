@@ -336,9 +336,6 @@ consequences.
 - [`spare-test-fifo-write-can-outlive-reader.md`](spare-test-fifo-write-can-outlive-reader.md) — A completion test's
   FIFO release can block after its reader exits; the standard runner supplies only an outer timeout.
 
-- [`sticky-parent-guard-contradicts-own-docs.md`](sticky-parent-guard-contradicts-own-docs.md) — The test recorder's and
-  deflake's docs claim to refuse another account's /tmp/farhelm-tmp, which a sticky one passes.
-
 - [`canonical-folder-history-contract-conflict.md`](canonical-folder-history-contract-conflict.md) — Host canonical-path
   replies become remembered folder text, despite a product rule saying those replies must not choose remembered
   defaults. The implementation specification explicitly carries canonical paths into history; spelling changes are

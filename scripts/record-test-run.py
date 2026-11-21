@@ -296,17 +296,15 @@ def default_output_root(environment: dict[str, str]) -> pathlib.Path:
 
 
 def safe_parent(path: pathlib.Path) -> bool:
-    """Whether another ordinary user cannot replace or rename entries in `path`.
+    """Require the evidence root's parent to belong to this user or root.
 
-    A directory owned by this user or by root is trusted, as is a sticky one
-    (`/tmp` itself), where only an entry's owner may rename or remove it. The
-    point is the default root's fixed name in a shared temporary directory:
-    another account could create `/tmp/farhelm-tmp` first and then swap this
-    user's evidence root for a directory of its own.
+    The owner of a directory can replace entries even when it is sticky.
+    This matters when another account creates the fixed `farhelm-tmp` parent
+    before the recorder does. A root-owned `/tmp` passes the ownership check.
     """
 
     status = path.stat()
-    return status.st_uid in (os.geteuid(), 0) or bool(status.st_mode & stat.S_ISVTX)
+    return status.st_uid in (os.geteuid(), 0)
 
 
 def resolved_future_path(path: pathlib.Path) -> pathlib.Path:
