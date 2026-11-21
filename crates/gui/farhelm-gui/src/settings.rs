@@ -1085,12 +1085,20 @@ impl SettingsDialog {
         if choice == Choice::AutoUpdateRemoteHosts {
             crate::hosts::status::auto_update_chosen(cx);
         }
+        let running = if choice == Choice::ShowWhatsNew {
+            crate::desktop::updates::upgrade_notes(cx).map(|host| host.running.clone())
+        } else {
+            None
+        };
         let index = Self::index(choice);
         self.save_choice(
             choice.id(),
             move |dialog: &mut SettingsDialog| &mut dialog.switches[index].draft,
             on,
-            |on| choice.command(*on),
+            |on| match running {
+                Some(running) => choices::whats_new_command(&running, *on),
+                None => choice.command(*on),
+            },
             cx,
         );
     }
@@ -1414,6 +1422,10 @@ impl SettingsDialog {
                 .into_iter()
                 .flatten()
                 .map(IntoElement::into_any_element)
+                .chain(
+                    crate::desktop::updates::upgrade_notes(cx)
+                        .map(|_| self.switch(Choice::ShowWhatsNew, preferences, cx)),
+                )
                 .collect()
             }
             Section::Credentials => self

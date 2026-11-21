@@ -33,7 +33,8 @@ use crate::focus::{self, Mark};
 use crate::main_view::MainView;
 use crate::operations::{OpKey, Work};
 use crate::test_support::{
-    self, any_open, bounds, click, focused, focused_id, frame, keys, label, meta, settle, started,
+    self, any_open, bounds, click, focused, focused_id, frame, keys, label, meta, one_command,
+    settle, started,
 };
 use crate::{layers, root, session, theme};
 use farhelm_input_mapping::Platform;
@@ -414,6 +415,36 @@ fn app_version_checks_once_and_follows_the_updaters_busy_state(cx: &mut TestAppC
     assert_eq!(seen.checks.get(), 2);
 }
 
+/// The App switch reads the helm choice and writes the running version with it. This lets re-enabling defer
+/// highlights until a later upgrade, even if this build's highlights have never been downloaded.
+#[gpui::test]
+fn enabling_upgrade_highlights_starts_from_the_running_release(cx: &mut TestAppContext) {
+    let preferences = Preferences {
+        show_whats_new: Some(false),
+        ..Preferences::default()
+    };
+    let (mut helm, cx, _gear) = open_rail(cx, &preferences);
+    let host = crate::whats_new::tests::test_host(Box::new(|_, _| {
+        panic!("opening Settings needs no release lookup");
+    }));
+    let version = host.upgrade_notes.as_ref().unwrap().running.clone();
+    cx.update(|_, cx| crate::desktop::updates::keep(Some(host), cx));
+    open_settings(cx);
+    click(cx, section_button(Section::App));
+    let id = Choice::ShowWhatsNew.id();
+    assert_eq!(
+        switch_on(cx, id),
+        Some(false),
+        "premise: the helm opted out"
+    );
+    click(cx, id);
+    let (_, body) = one_command(&mut helm, Method::Put, "/api/preferences");
+    assert_eq!(
+        body,
+        json!({"show_whats_new": true, "last_whats_new_release": version})
+    );
+}
+
 /// SPEC.md: the App switch installs updates automatically, "on by default", and "unlike the host choices it is a
 /// setting of that app installation, kept with the app rather than by the helm"; a refused write must not show as
 /// saved, since the user would then believe updates install on their own (the old switch: "Only a saved choice is shown
@@ -432,7 +463,7 @@ fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
     open_settings(cx);
     click(cx, section_button(Section::App));
     let _ = sent(&mut helm);
-    assert!(painted(cx).contains("This one belongs to this Farhelm app on this Mac."));
+    assert!(painted(cx).contains("Automatic updates apply to this Farhelm app on this Mac."));
     assert_eq!(switch_on(cx, super::app::ID), Some(true));
     assert!(
         painted(cx)
@@ -1001,6 +1032,7 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     for &choice in Choice::ALL.iter().filter(|&&choice| {
         choice != naming
             && choice != updates
+            && choice != Choice::ShowWhatsNew
             && !hints.contains(&choice)
             && !SOUNDS.contains(&choice)
     }) {
@@ -1010,6 +1042,12 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         );
         assert!(choice.stored(Some(&all_on)), "{choice:?} reads true as on");
     }
+    let opted_out = Preferences {
+        show_whats_new: Some(false),
+        ..Preferences::default()
+    };
+    assert!(Choice::ShowWhatsNew.stored(None) && Choice::ShowWhatsNew.stored(Some(&empty)));
+    assert!(!Choice::ShowWhatsNew.stored(Some(&opted_out)));
     // A hint's switch is its dismissal inverted: "Unset and false both allow the hint".
     let dismissed = |value: bool| -> Preferences {
         serde_json::from_value(json!({

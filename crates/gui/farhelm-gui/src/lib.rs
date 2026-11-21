@@ -123,6 +123,7 @@ pub mod ticker;
 pub mod trash;
 pub mod update_readout;
 pub mod welcome;
+mod whats_new;
 
 /// The license notices for the code this crate links from `farhelm-grid-model` and `farhelm-input-mapping`, verbatim.
 ///

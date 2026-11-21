@@ -204,7 +204,8 @@ impl DialogFrame {
     }
 
     /// A note at the footer's left, the answers staying at its right (the old `.host-settings-footer`'s leading span,
-    /// such as Settings' "Most choices save immediately"). A frame has a note or a [`Self::footer_lead`], not both.
+    /// such as Settings' "Most choices save immediately"). It has its own accessible text so it can carry
+    /// information independently of the answers. A frame takes this note or a [`Self::footer_lead`].
     pub fn note(mut self, note: impl Into<SharedString>) -> Self {
         self.note = Some(note.into());
         self
@@ -474,6 +475,9 @@ impl RenderOnce for DialogFrame {
                 .gap(px(12.))
                 .child(
                     div()
+                        .id(ElementId::Name(format!("{}-footer-note", self.id).into()))
+                        .role(Role::Label)
+                        .aria_label(note.clone())
                         .min_w_0()
                         .text_size(px(NOTE_TEXT))
                         .text_color(theme::color(palette.fg_1))

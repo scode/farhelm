@@ -105,7 +105,7 @@ pub fn open_history(
     open(
         shown,
         ReturnTo::Control(opener.clone()),
-        false,
+        None,
         mark,
         window,
         cx,
@@ -119,8 +119,13 @@ pub fn open_history(
 ///
 /// Opens nothing when nothing is pending, and nothing when the store holds no queue, which means the helm could not
 /// read it: SPEC.md has that failure "logged silently and retried only at a later window start or reset". Closing the
-/// batch returns focus home. Returns the dialog's layer.
-pub(crate) fn open_pending(mark: &Mark, window: &mut Window, cx: &mut App) -> Option<LayerId> {
+/// batch returns focus home before running `after`, which can open the next startup dialog.
+pub(crate) fn open_pending(
+    mark: &Mark,
+    after: MainAction,
+    window: &mut Window,
+    cx: &mut App,
+) -> Option<LayerId> {
     let Some(mut pending) = with_queue(cx, |queue| queue.pending.clone()) else {
         tracing::warn!(
             "no announcement queue was read; announcements are checked again at the next window start"
@@ -131,7 +136,7 @@ pub(crate) fn open_pending(mark: &Mark, window: &mut Window, cx: &mut App) -> Op
         return None;
     }
     pending.reverse();
-    open(pending, ReturnTo::Home, true, mark, window, cx)
+    open(pending, ReturnTo::Home, Some(after), mark, window, cx)
 }
 
 /// Record `ids` as shown: one keyless, best-effort `POST /api/announcements/shown` naming exactly those entries, so
@@ -160,12 +165,12 @@ fn record_shown(ids: Vec<String>, cx: &mut App) {
 }
 
 /// Open the dialog over `entries`, in the order given, with closing returning focus as `returns_to` says. With
-/// `records`, the first dismissal records `entries` as shown ([`record_shown`]): the automatic batch. The history
-/// records nothing.
+/// `after`, the first dismissal records the automatic batch and continues the window start after the layer closes.
+/// The history records nothing.
 fn open(
     entries: Vec<Announcement>,
     returns_to: ReturnTo,
-    records: bool,
+    after: Option<MainAction>,
     mark: &Mark,
     window: &mut Window,
     cx: &mut App,
@@ -174,13 +179,13 @@ fn open(
         entries,
         got_it: cx.focus_handle().tab_stop(true),
         layer: None,
-        unrecorded: records,
+        unrecorded: after.is_some(),
     });
     // Every user close (Got it, the ×, Escape, Enter on the dialog itself) is a dismissal and asks this hook; a reset
     // closes the dialog without asking, so it records nothing and the entries stay pending for the next UI session.
-    let on_dismiss: Option<DismissHook> = records.then(|| {
+    let on_dismiss: Option<DismissHook> = after.map(|after| {
         let weak = dialog.downgrade();
-        let hook: DismissHook = Rc::new(move |_, cx| {
+        let hook: DismissHook = Rc::new(move |window, cx| {
             let ids = weak.update(cx, |dialog, _| {
                 // Cleared, so a second dismissal racing the close cannot record twice.
                 std::mem::take(&mut dialog.unrecorded).then(|| {
@@ -193,6 +198,8 @@ fn open(
             });
             if let Ok(Some(ids)) = ids {
                 record_shown(ids, cx);
+                let after = Rc::clone(&after);
+                window.defer(cx, move |window, cx| after(window, cx));
             }
             Dismissal::Close
         });

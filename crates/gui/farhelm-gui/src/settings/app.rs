@@ -2,7 +2,7 @@
 //! belongs to this app installation. The check uses the sidebar readout's updater and leaves its result there.
 //!
 //! SPEC.md, "Session list" (the version row and the app's own setting) and "Installation and updates" (the shared
-//! on-demand check and its progress). The switch keeps the old app's note, label and hover help from its `settings-app`
+//! on-demand check and its progress). The switch keeps the old app's label and hover help from its `settings-app`
 //! section at reference commit `24bc0580`.
 //!
 //! The section exists only while the desktop app's updater runs (`desktop::updates::runs`): the dialog lists App only
@@ -41,7 +41,7 @@ pub(super) const CHECK_HELP: &str = "Check for and install a newer Farhelm relea
 
 /// The note at the start of the section explains which app these controls apply to. The updater
 /// runs only in the installed Mac app, so "this Mac" holds wherever the section is drawn.
-const NOTE: &str = "This one belongs to this Farhelm app on this Mac.";
+const NOTE: &str = "Automatic updates apply to this Farhelm app on this Mac.";
 
 pub(super) const LABEL: &str = "Install updates automatically";
 

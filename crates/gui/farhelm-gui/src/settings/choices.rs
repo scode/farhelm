@@ -86,6 +86,8 @@ pub(super) enum Choice {
     SoundTurnFinished,
     /// Notifications, Sounds: SSH sign-in, on by default.
     SoundSshSignIn,
+    /// App: Show finalized highlights after the next upgrade, shared by windows on this helm.
+    ShowWhatsNew,
 }
 
 impl Choice {
@@ -105,12 +107,14 @@ impl Choice {
         Choice::SoundApproval,
         Choice::SoundTurnFinished,
         Choice::SoundSshSignIn,
+        Choice::ShowWhatsNew,
     ];
 
     /// Search groups these preferences in the section that owns each control.
     pub(super) fn section(self) -> super::Section {
         use super::Section;
         match self {
+            Self::ShowWhatsNew => Section::App,
             Self::SkipSessionConfirmations
             | Self::NameSessionsOnQuickLaunch
             | Self::ColorTerminalFrames => Section::Sessions,
@@ -131,6 +135,7 @@ impl Choice {
     /// The preference row's field this switch saves, as the wire names it.
     fn field(self) -> &'static str {
         match self {
+            Choice::ShowWhatsNew => "show_whats_new",
             Choice::SkipSessionConfirmations => "skip_session_confirmations",
             Choice::NameSessionsOnQuickLaunch => "name_session_on_quick_launch",
             Choice::ColorTerminalFrames => "color_terminal_frames",
@@ -149,13 +154,14 @@ impl Choice {
     }
 
     /// Whether the helm's stored choice is on. An absent row and an unset field both use the default. Quick-launch
-    /// naming and automatic remote-host updates stay on until the user stores `false`.
+    /// naming, automatic remote-host updates and upgrade highlights stay on until the user stores `false`.
     /// A trust hint's switch shows the hint unless its dismissal is stored `true` (the field's doc: "Unset and false
     /// both allow the hint"). A sound's switch reads as the sounds' owner reads it ([`Switches::from_preferences`]),
     /// so what Settings shows is what plays.
     pub(super) fn stored(self, preferences: Option<&Preferences>) -> bool {
         let sound = |sound| Switches::from_preferences(preferences).enabled(sound);
         let field = preferences.and_then(|preferences| match self {
+            Choice::ShowWhatsNew => preferences.show_whats_new,
             Choice::SkipSessionConfirmations => preferences.skip_session_confirmations,
             Choice::NameSessionsOnQuickLaunch => preferences.name_session_on_quick_launch,
             Choice::ColorTerminalFrames => preferences.color_terminal_frames,
@@ -176,9 +182,9 @@ impl Choice {
             Choice::SoundApproval => sound(Sound::Approval),
             Choice::SoundTurnFinished => sound(Sound::TurnFinished),
             Choice::SoundSshSignIn => sound(Sound::SshSignIn),
-            Choice::NameSessionsOnQuickLaunch | Choice::AutoUpdateRemoteHosts => {
-                field != Some(false)
-            }
+            Choice::NameSessionsOnQuickLaunch
+            | Choice::AutoUpdateRemoteHosts
+            | Choice::ShowWhatsNew => field != Some(false),
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
@@ -199,6 +205,7 @@ impl Choice {
             | Choice::ShowMuseTrustHint
             | Choice::ShowAntigravityTrustHint => !on,
             Choice::SkipSessionConfirmations
+            | Choice::ShowWhatsNew
             | Choice::NameSessionsOnQuickLaunch
             | Choice::ColorTerminalFrames
             | Choice::AutoUpdateRemoteHosts
@@ -215,6 +222,7 @@ impl Choice {
     /// The switch's element id, which tests and the test bridge find it by.
     pub(super) fn id(self) -> &'static str {
         match self {
+            Choice::ShowWhatsNew => "settings-show-whats-new",
             Choice::SkipSessionConfirmations => "settings-skip-session-confirmations",
             Choice::NameSessionsOnQuickLaunch => "settings-name-quick-launches",
             Choice::ColorTerminalFrames => "settings-color-terminal-frames",
@@ -239,6 +247,7 @@ impl Choice {
 
     pub(super) fn label(self) -> &'static str {
         match self {
+            Choice::ShowWhatsNew => "Show what's new after updates",
             Choice::SkipSessionConfirmations => "Skip session confirmations",
             Choice::NameSessionsOnQuickLaunch => "Name sessions on quick launch",
             Choice::ColorTerminalFrames => "Color terminal frames by host",
@@ -263,6 +272,7 @@ impl Choice {
     /// The hover help, the old row's `data-tooltip`.
     pub(super) fn tooltip(self) -> &'static str {
         match self {
+            Choice::ShowWhatsNew => "Show release highlights after Farhelm upgrades",
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click"
             }
@@ -309,6 +319,10 @@ impl Choice {
     /// paragraph.
     pub(super) fn help(self, on: bool) -> &'static str {
         match self {
+            Choice::ShowWhatsNew if on => {
+                "Show highlights at the next upgrade. This choice applies to this helm."
+            }
+            Choice::ShowWhatsNew => "Skip upgrade highlights. This choice applies to this helm.",
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash \
                  confirmations still follow their own rules. This choice applies to this helm; changes from the \
@@ -357,6 +371,7 @@ impl Choice {
     /// refusal too (SPEC.md, "Errors and diagnostics"), so those lines are new, worded like the others.
     fn failure(self, sent: bool) -> &'static str {
         match self {
+            Choice::ShowWhatsNew => "Could not save whether to show upgrade highlights. Try again.",
             Choice::SkipSessionConfirmations if !sent => {
                 "Confirmations may still be off for this helm. Try again."
             }
@@ -431,11 +446,20 @@ impl Switch {
 pub(super) fn patch(field: &str, value: serde_json::Value) -> Result<Command, PathError> {
     let mut body = serde_json::Map::new();
     body.insert(field.to_owned(), value);
+    preference_command(serde_json::Value::Object(body))
+}
+
+/// Both upgrade fields travel together so re-enabling starts from the running release.
+pub(super) fn whats_new_command(running: &str, on: bool) -> Result<Command, PathError> {
+    preference_command(crate::whats_new::preferences_patch(running, Some(on)))
+}
+
+fn preference_command(body: serde_json::Value) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::Save,
         Method::Put,
         ApiPath::api(&["preferences"])?,
-        Some(serde_json::Value::Object(body)),
+        Some(body),
         "PUT /api/preferences",
     ))
 }

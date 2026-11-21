@@ -534,7 +534,11 @@ impl Search {
                 .iter()
                 .enumerate()
                 // A section this build hides offers nothing to open, so its settings are not results.
-                .filter(|(_, entry)| entry.section.listed(cx))
+                .filter(|(_, entry)| {
+                    entry.section.listed(cx)
+                        && (entry.target != Target::Choice(Choice::ShowWhatsNew)
+                            || crate::desktop::updates::upgrade_notes(cx).is_some())
+                })
                 .filter_map(|(index, entry)| entry.matches(&self.words).then_some(index))
                 .collect()
         } else {

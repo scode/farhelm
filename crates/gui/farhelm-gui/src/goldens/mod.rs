@@ -853,6 +853,12 @@ static SCENES: &[Scene] = &[
         setup: welcome_dialog_setup,
     },
     Scene {
+        name: "whats-new-dialog",
+        size: (780., 540.),
+        draw: empty,
+        setup: whats_new_dialog_setup,
+    },
+    Scene {
         name: "rename-dialog",
         size: (560., 320.),
         draw: empty,
