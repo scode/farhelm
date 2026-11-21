@@ -307,6 +307,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   "⌘ –" on rows without a number key and "⌘1" or "⌘0" on rows with one; whatever follows the ⌘ looks clipped, and rows
   showing "⌘ –" indent the template name further right than rows with a number.)
 
+- **Show release notes on upgrade.** on upgrades, show the release notes (only the highlighted ones) to the user. offer
+  a "do not show release notes again" option to suppresse (direct click button + separate toggle in settings). also link
+  in that dialog to full release notes. the release notes to contain everything since the last version the user ran, not
+  just the ones for the version they upgraded to
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
