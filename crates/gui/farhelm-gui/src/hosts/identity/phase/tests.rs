@@ -768,9 +768,8 @@ fn credentials_not_delivered_are_said_and_turn_the_host_amber() {
 /// that hangs can be told from one just asked; the old row named the provider ("Asked Tensorlake …", "Asked the
 /// container host …"), which the shared words without a provider cannot.
 ///
-/// Specified: a sandbox asked to resume says "Asked Tensorlake to resume at <time>; waiting for confirmation", and a
-/// container asked to suspend "Asked the container host to suspend at <time>; waiting for confirmation", the time in
-/// the viewer's zone.
+/// A sandbox names Tensorlake. A container names its host and distinguishes starting a stopped container from
+/// resuming a suspended one. Every request time is shown in the viewer's zone.
 #[test]
 fn a_change_names_whom_farhelm_asked() {
     let mut sandbox = sandbox(None);
@@ -785,21 +784,26 @@ fn a_change_names_whom_farhelm_asked() {
         "{:?}",
         lines_for(&sandbox)
     );
-    let container = host(
-        5,
-        "podman",
-        HostStateView::TensorlakeChanging {
-            starting: false,
-            direction: LifecycleDirection::Suspending,
-            requested_at: 1_700_000_000_000,
-        },
-    );
-    assert!(
-        lines_for(&container).iter().any(|(_, line)| line
-            == "Asked the container host to suspend at 2023-11-14 22:13:20; waiting for confirmation"),
-        "{:?}",
-        lines_for(&container)
-    );
+    for (direction, starting, verb) in [
+        (LifecycleDirection::Suspending, false, "suspend"),
+        (LifecycleDirection::Resuming, false, "resume"),
+        (LifecycleDirection::Resuming, true, "start"),
+    ] {
+        let container = host(
+            5,
+            "podman",
+            HostStateView::TensorlakeChanging {
+                starting,
+                direction,
+                requested_at: 1_700_000_000_000,
+            },
+        );
+        let lines = lines_for(&container);
+        let expected = format!(
+            "Asked the container host to {verb} at 2023-11-14 22:13:20; waiting for confirmation"
+        );
+        assert!(lines.iter().any(|(_, line)| line == &expected), "{lines:?}");
+    }
 }
 
 /// Why this matters: the changing row's count is the only sign a slow provider is still being waited on (SPEC.md,

@@ -29036,3 +29036,26 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: change `zxsmnuuvruqopxqnppxmywrvqqnpwzpl`, bookmark
   `plan/hosts-small-fixes/02-host-delete-records-outcome`,
   [PR #4416](https://github.com/scode/farhelm/pull/4416/changes).
+
+## trailing-ui-host-lifecycle-provider-and-start-wording.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): Most of this is fixed. The
+  row's phase words say "Starting…" when a stopped container is starting (`hosts/identity/phase.rs:63`), "asked …" uses
+  the provider's words (`phase.rs:91-107`, `environment_ui.rs:176-181`), and the Hosts Suspend tooltips are
+  provider-aware (`hosts/lifecycle.rs:198,206`). One part remains: the detail line `host_evidence` (`phase.rs:406-433`)
+  ignores the `starting` flag and says "Asked the container host to resume at …" during a container start (the helm sets
+  `starting: verb == "start"` at `crates/farhelm-helm/src/environment/podman.rs:706`). That line shows in the Hosts
+  row's details and on the session's unavailable card (`session_pane/unavailable.rs:263`).
+- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
+  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
+  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
+  of complexity."
+- Completion criteria: Fix within the current spec what the Assessment describes ("A starting container's detail line
+  says it is resuming"), with a test where practical. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity gate: "if any of
+  these spiral into something very complicated, the executor should make a near term todo item to follow up on it
+  instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove the feedback
+  file, and say so in the execution record. Remove the feedback file and its index entry.
+- Execution: change `rqyxptyxlplpvzrxnvyynrvmsotqtozv`, bookmark `plan/hosts-small-fixes/03-container-start-wording`,
+  [PR #4418](https://github.com/scode/farhelm/pull/4418/changes).
