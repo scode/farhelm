@@ -8,7 +8,7 @@
 //!
 //! - **The frame.** The host dialogs' framed header (a gear tile, the title "Settings", the summary, and its own header
 //!   close control, "Close settings") over independently scrolling navigation and page panes, with a pinned page
-//!   heading and a pinned footer with its note and Close. It is
+//!   heading and footer. The footer holds Close and any actions for the current page or editor. It is
 //!   760 pixels wide and 780 tall, capped by the window, whatever section is shown, so switching sections never moves
 //!   the frame or its close controls (`.app-settings-dialog[aria-label="Settings"]`).
 //! - **The sections.** A list of section buttons on the left, each with its icon and full label and the solid selection
@@ -20,10 +20,9 @@
 //! - **Opening and closing.** [`open`] is the gear's entry point. It opens at Sessions with focus on its first switch
 //!   (SPEC.md: "The gear always opens sessions and focuses its first switch"). [`open_at_agent_trust`] is a trust
 //!   hint's: it opens at Agent trust and puts focus on that agent's switch once the switch can take it. Escape, the
-//!   header's close control and the footer's Close all close it, and focus goes back to the gear. Closing discards what
-//!   the dialog holds; a save already sent goes on, since it is the operation store's work, not the dialog's (the
-//!   helm's reply then settles nothing on screen, and the store already shows the result). Every close sets
-//!   [`Closings`], for the trust hint band, which reads trust again then.
+//!   header's close control and the footer's Close check the same drafts. The close question names changes even on
+//!   hidden pages. Saving from it waits for acknowledged writes before closing. Closing returns focus to the gear
+//!   and sets [`Closings`], so the trust hint band can read the current trust setting.
 //! - **Saving a choice.** Every switch here, Appearance's choice and Terminal's link choice save one field of the
 //!   helm's preference row at once, with [`crate::drafts::save`] under [`OpKey::preferences`]; Agent trust's trust
 //!   switches and Checkouts' spare switch save the same way through their own routes ([`configured`]). While the save
@@ -40,8 +39,7 @@
 //!   in both, and saves its create-without-asking switch through the account's route, showing only the choice the helm
 //!   stored ([`tensorlake`]). Recipes lists the helm's recipes, whose snapshot builds are accepted work under each
 //!   recipe's own key, and edits one in place, saving the whole recipe under that key ([`recipes`]); while Recipes
-//!   shows an open editor, the dialog pins the editor's Cancel and Save above its Close row, so they stay in view below
-//!   a long form and go when another section is shown.
+//!   shows an open editor, the dialog pins the editor's actions in the same row as Close, below the editor's status.
 //!   Terminal's tunnel switch saves like a switch only when turned off; turned on, it asks the terminal's tunnel
 //!   warning, whose Allow saves the consent, and shows the stored choice until the helm pushes it ([`terminal`]). App's
 //!   switch is not the helm's at all: it writes the desktop app's own setting through its updater, at once and with a
@@ -49,16 +47,10 @@
 //!   all: it shows what the helm reads from its container hosts, and its Refresh and confirmed Deletes are plain
 //!   commands, not operations on a key ([`containers`]).
 //!
-//! NOTE: Quick flips do not follow the old app's "newest-choice" rule. Its preference queue coalesced a field's clicks,
-//! sent only the newest, and reported a failure only for the newest click. Here the operation store admits one request
-//! on the preference row's key at a time, and every Settings save holds that key, so a press on any control while any
-//! Settings save is in flight sends nothing: the control goes on showing what it showed, with a line beside it saying
-//! that it was not saved because another operation was in progress ([`refused`]), and the next press after the reply
-//! acts. On the radios (Appearance, Terminal's link choice) an arrow press moves focus before it reports the choice, so
-//! a refused arrow press still moves focus while the choice stays where it was. The helm is embedded and answers a
-//! preference write in milliseconds, so the window in which a press is refused this way is that short. The migration's
-//! orchestrator accepted the refusal on 2026-11-14, to be revisited only if a user meets it, and asked the same day
-//! that it say why; closing it would take a key per field or a queue, both changes to the operation store, not here.
+//! **Shared writes.** The operation store admits one request on the preference key at a time. Pressing another
+//! control while that key is held leaves the control as it was and gives the reason beside it ([`refused`]).
+//! Radios still move keyboard focus when the key refuses a choice. The footer's explicit multi-form Save sequences
+//! the form saves, each through its usual key, and stops at the first refusal.
 //!
 //! NOTE: Not ported yet, each recorded in `docs/gpui/parity/settings-and-hosts.md`. The one-pane layout at 620 pixels
 //! wide and below ("‹ Settings" back to the list) is not built, since the window's minimum width is above it. A
@@ -79,6 +71,7 @@ mod containers_tests;
 #[cfg(test)]
 mod credential_tests;
 mod credentials;
+mod editing;
 mod file_types;
 #[cfg(test)]
 mod file_types_tests;
@@ -183,13 +176,11 @@ const SUMMARY_WITH_APP: &str = "For every host on this helm, and for this device
 /// summary, so these are its words cut short rather than words of their own.
 const SUMMARY: &str = "For every host on this helm";
 
-/// The footer's note, the old desktop app's words. It names the dialog's explicit-save editors.
-const FOOTER_NOTE: &str = "Most choices save immediately; credentials, the Tensorlake API key, ntfy alerts, checkout \
-                           fields and file types use Save.";
+/// The footer explains why forms and ordinary switches behave differently.
+const FOOTER_NOTE: &str = "Switches save at once; forms save with Save below.";
 
-/// Both controls use the recipe editor's leave question when it guards a close.
-const CLOSE_HELP: &str =
-    "Close: asks first about unsaved recipe edits and discards other unsaved fields";
+/// Both close buttons and Escape go through the same draft check.
+const CLOSE_HELP: &str = "Close Settings. Unsaved changes ask first.";
 
 const HOST_CHOICES_HELP: &str = "The host choices apply to every host on this helm. Changes from the command line or \
                                  an agent show here right away.";
@@ -263,13 +254,12 @@ fn open_dialog(
             // use, and the old Settings did (`DialogFocus::remembered`, whose gap rule is on).
             keeps_focus_on_empty_click: true,
             returns_to: ReturnTo::Control(opener.clone()),
-            // Asked on Escape and the close controls ([`SettingsDialog::dismissal`]). Otherwise closing never waits: a
-            // save in flight goes on in the operation store after the dialog is gone.
+            // Escape and either close button check every loaded form, including drafts on hidden pages.
             on_dismiss: Some(Rc::new({
                 let dialog = dialog.downgrade();
                 move |window: &mut Window, cx: &mut App| {
                     dialog
-                        .update(cx, |dialog, cx| dialog.dismissal(window, cx))
+                        .update(cx, |dialog, cx| dialog.ask_to_close(window, cx))
                         .unwrap_or(Dismissal::Close)
                 }
             })),
@@ -411,6 +401,54 @@ pub(crate) fn search_for_opened(query: &str, window: &mut Window, cx: &mut App) 
         dialog.search.focus(window, cx);
         cx.notify();
     });
+}
+
+/// The field each draft golden edits. A pending read leaves the input unavailable.
+#[cfg(test)]
+pub(crate) fn draft_input_for_opened(
+    section: Section,
+    cx: &App,
+) -> Option<crate::components::TextInputState> {
+    let dialog = layers::last_opened::<SettingsDialog>(cx)?;
+    let dialog = dialog.read(cx);
+    match section {
+        Section::Terminal => Some(dialog.file_types.as_ref()?.read(cx).input_for_golden()),
+        Section::Checkouts => dialog
+            .checkout_fields
+            .as_ref()?
+            .folder
+            .read(cx)
+            .input_for_golden(),
+        Section::Notifications => {
+            let alerts = dialog.ntfy.as_ref()?.read(cx);
+            alerts.search_focus(ntfy::Switch::Enabled)?;
+            Some(alerts.topic_input())
+        }
+        Section::Recipes => dialog
+            .recipes
+            .as_ref()?
+            .read(cx)
+            .editor()?
+            .read(cx)
+            .field("recipe-name")
+            .cloned(),
+        _ => None,
+    }
+}
+
+/// The edited golden verifies that the real form accepted the staged input before the scene can settle.
+#[cfg(test)]
+pub(crate) fn draft_changed_for_opened(section: Section, cx: &App) -> bool {
+    layers::last_opened::<SettingsDialog>(cx)
+        .is_some_and(|dialog| dialog.read(cx).section_edited(section, cx))
+}
+
+/// Move an open golden to a second form, using the same page transition as its navigation.
+#[cfg(test)]
+pub(crate) fn show_for_opened(section: Section, window: &mut Window, cx: &mut App) {
+    let dialog =
+        layers::last_opened::<SettingsDialog>(cx).expect("Settings is open for its golden");
+    dialog.update(cx, |dialog, cx| dialog.show(section, window, cx));
 }
 
 /// Open a new recipe's editor in the open Settings dialog's Recipes section, as New recipe does, for the golden that
@@ -581,6 +619,11 @@ pub(crate) struct SettingsDialog {
     shown: Section,
     /// Search temporarily replaces the page. Keep its scroll offset in the dialog so clearing the query restores it.
     page_scroll: ScrollHandle,
+    /// The explicit saves still owned by the last footer or close action.
+    batch: Option<editing::Batch>,
+    save_generation: u64,
+    /// A close Save cannot pick one of two different replacement keys for the same account.
+    key_conflict: bool,
     /// The field lives with the dialog. Searching temporarily replaces the right pane and keeps its section state.
     search: Search,
     /// One per [`Choice`], in [`Choice::ALL`]'s order, whichever section draws it.
@@ -687,6 +730,9 @@ impl SettingsDialog {
         SettingsDialog {
             shown,
             page_scroll: ScrollHandle::new(),
+            batch: None,
+            save_generation: 0,
+            key_conflict: false,
             search: Search::new(crate::actions::THIS_PLATFORM, window, cx),
             switches,
             appearance: Draft::load(Preference::System),
@@ -825,8 +871,9 @@ impl SettingsDialog {
             self.checkout_fields = Some(CheckoutFields {
                 folder: cx.new(|cx| {
                     CheckoutField::folder(FolderScope::Default, checkouts::FOLDER_NOTE, window, cx)
+                        .with_pinned_save()
                 }),
-                post_clone: cx.new(|cx| CheckoutField::post_clone(window, cx)),
+                post_clone: cx.new(|cx| CheckoutField::post_clone(window, cx).with_pinned_save()),
             });
             let dialog = cx.weak_entity();
             checkouts::read_spare(cx, move |answer, cx| {
@@ -847,29 +894,6 @@ impl SettingsDialog {
             }
         }
         cx.notify();
-    }
-
-    /// What closing the dialog by Escape or a close control does: close, unless an open recipe editor asks first
-    /// ([`recipes::Editor::dismissal`]), in which case Recipes is shown, if another section was, so the question
-    /// shows where it is asked.
-    fn dismissal(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Dismissal {
-        let Some(editor) = self
-            .recipes
-            .as_ref()
-            .and_then(|recipes| recipes.read(cx).editor())
-        else {
-            return Dismissal::Close;
-        };
-        if editor.read(cx).asks_before_leaving(cx) {
-            if self.shown != Section::Recipes {
-                self.show(Section::Recipes, window, cx);
-            }
-            if self.search.active() {
-                self.search.clear(window, cx);
-                cx.notify();
-            }
-        }
-        editor.update(cx, |editor, cx| editor.dismissal(window, cx))
     }
 
     /// The read of `agent`'s trust answered: the switch shows it, and takes focus, scrolled into view, if
@@ -1426,11 +1450,29 @@ impl SettingsDialog {
                 )
                 .collect()
             }
-            Section::Credentials => self
-                .credentials
-                .iter()
-                .map(|section| section.clone().into_any_element())
-                .collect(),
+            Section::Credentials => {
+                let conflict = self.key_conflict.then(|| {
+                    let message =
+                        "Two different Tensorlake keys are typed. Save the one you want first.";
+                    choices::outcome_line(
+                        "settings-key-conflict",
+                        Role::Alert,
+                        theme::color(theme::palette(cx).danger),
+                    )
+                    .aria_label(message)
+                    .child(message)
+                    .into_any_element()
+                });
+                conflict
+                    .into_iter()
+                    .chain(
+                        self.credentials
+                            .iter()
+                            .cloned()
+                            .map(IntoElement::into_any_element),
+                    )
+                    .collect()
+            }
             Section::Tensorlake => self
                 .tensorlake_section
                 .iter()
@@ -1497,18 +1539,80 @@ impl Render for SettingsDialog {
         )
         .tier(Tier::Neutral)
         .on_click(dismiss(weak.clone()));
-        // The recipe editor's answers, pinned with the footer only while Recipes shows the editor (SPEC.md: "Switching
-        // Settings sections hides those actions with the editor"), ruled off from Close, which they do not belong to.
-        let recipe_actions = self
-            .recipes
+        // An open editor owns the row even if another form on this page is dirty. Delete confirmation replaces
+        // the recipe editor's controls until the question is answered.
+        let editor_footer = match (searching, self.shown) {
+            (false, Section::Recipes) => self
+                .recipes
+                .as_ref()
+                .and_then(|recipes| recipes.read(cx).editor())
+                .map(|editor| recipes::Editor::footer(&editor, true, cx)),
+            (false, Section::Credentials) => self
+                .credentials
+                .as_ref()
+                .and_then(|credentials| credentials.read(cx).visible_editor())
+                .map(|editor| credentials::Editor::footer(&editor, cx)),
+            _ => None,
+        };
+        let pending = (!searching && editor_footer.is_none())
+            .then(|| self.page_answers(cx))
+            .flatten();
+        let confirming = editor_footer
             .as_ref()
-            .filter(|_| self.shown == Section::Recipes && !searching)
-            .and_then(|recipes| recipes.read(cx).editor())
-            .map(|editor| recipes::Editor::actions(&editor, cx));
-        let frame = DialogFrame::new("settings", "Settings", body, vec![close]);
-        let frame = match recipe_actions {
-            Some(actions) => frame.notices(actions).notices_rule(),
+            .is_some_and(|(_, _, confirming)| *confirming);
+        let divided = !confirming && (editor_footer.is_some() || pending.is_some());
+        let (note, mut answers) =
+            pending.map_or((None, Vec::new()), |(note, answers)| (Some(note), answers));
+        let note = note.or_else(|| {
+            if editor_footer.is_some() && !confirming {
+                self.editor_note(cx)
+            } else {
+                None
+            }
+        });
+        if !confirming {
+            answers.push(close);
+        }
+        let frame = DialogFrame::new("settings", "Settings", body, answers);
+        let frame = if let Some(name) = note {
+            frame.footer_lead(
+                div()
+                    .id("settings-unsaved")
+                    .role(Role::Status)
+                    .aria_label(format!("{name} has unsaved changes"))
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(px(11.))
+                    .text_color(theme::color(palette.fg_1))
+                    .child(editing::dot(false, palette))
+                    .child(
+                        div()
+                            .flex()
+                            .gap(px(3.))
+                            .child(
+                                div()
+                                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                                    .text_color(theme::color(palette.fg_0))
+                                    .child(name),
+                            )
+                            .child("has unsaved changes"),
+                    ),
+            )
+        } else if !confirming {
+            frame.note(FOOTER_NOTE)
+        } else {
+            frame
+        };
+        let frame = match editor_footer {
+            Some((actions, Some(notices), _)) => frame.footer_actions(actions).notices(notices),
+            Some((actions, None, _)) => frame.footer_actions(actions),
             None => frame,
+        };
+        let frame = if divided {
+            frame.separate_close()
+        } else {
+            frame
         };
         frame
             .summary(if Section::App.listed(cx) {
@@ -1522,7 +1626,6 @@ impl Render for SettingsDialog {
                     .size(px(28.))
                     .text_color(theme::color(palette.fg_0)),
             )
-            .note(FOOTER_NOTE)
             .width(px(WIDTH))
             .fixed_height(px(HEIGHT))
             .split_body()

@@ -572,7 +572,12 @@ pub(super) fn help(text: impl Into<SharedString>, cx: &App) -> Div {
 /// size over `field`, which is wrapped in an element drawn under `id`'s debug selector, because tests click a field by
 /// where it is drawn and GPUI Kit's field draws no selector of its own. `label` should be the field's accessible name
 /// too, as the old `<label>` made it.
-pub(super) fn labelled(label: &'static str, id: &'static str, field: impl IntoElement) -> Div {
+pub(super) fn labelled(
+    label: &'static str,
+    id: &'static str,
+    field: impl IntoElement,
+    edited: Option<&theme::Palette>,
+) -> Div {
     div()
         .flex()
         .flex_col()
@@ -583,7 +588,7 @@ pub(super) fn labelled(label: &'static str, id: &'static str, field: impl IntoEl
             div()
                 .text_size(px(LABEL_TEXT))
                 .line_height(px(LABEL_LINE_HEIGHT))
-                .child(label),
+                .child(super::editing::caption(label, edited)),
         )
         .child(
             div()

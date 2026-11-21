@@ -30,16 +30,16 @@
 //!   lands after the editor is gone (Settings closed while the save was out) has nowhere else to show, so it stays on
 //!   the key and the row shows it, in the helm's words, until the recipe's next build or save starts.
 //! - **The answers are a separate element.** [`Editor::actions`] builds the error line, the busy line and the buttons
-//!   for whichever dialog hosts the editor to place: Settings passes them to its frame's pinned notices only while
-//!   Recipes shows an open editor, so switching sections hides them, and the Close row stays as it is. Add host's
-//!   Tensorlake sandbox hosts the same editor for its "New recipe…" and pins the answers in place of its own footer.
+//!   for whichever dialog hosts the editor to place. Settings pins the notices above the actions and puts the
+//!   buttons beside Close while the editor is visible. Add host's Tensorlake sandbox uses the same actions as its
+//!   footer for "New recipe…".
 //! - **Two hosts, one editor.** Where the editor is open ([`Host`]) decides the little that differs, as the old
 //!   editor's `in_add_host` did: in Settings → Recipes, Back above the title, where focus starts; in Add host, focus
 //!   starting in Name and no Back, while Add host's Escape and header close ask before closing Add host as Settings'
 //!   do. Each host decides where a departure goes.
-//! - **Leaving asks first, and Delete confirms.** Back, Cancel and closing the hosting dialog ask "Save these changes
-//!   before leaving?" over the hosting dialog while the form has unsaved changes. Delete's confirmation stays
-//!   inline in the footer. [`leaving`] has their rules.
+//! - **Leaving asks first, and Delete confirms.** Back, Cancel and closing Add host ask "Save these changes before
+//!   leaving?" while the form has unsaved changes. Closing Settings asks about all drafts together.
+//!   Delete's confirmation stays inline in the footer. [`leaving`] has the editor's rules.
 
 mod credentials;
 mod leaving;
@@ -291,6 +291,8 @@ pub(crate) struct Editor {
     error: Option<(HostText, Draft)>,
     /// Whether this editor's save is out.
     saving: bool,
+    /// Settings can wait on this editor in a batch. Add host handles departure on its own.
+    pub(in crate::settings) save_receipt: crate::settings::editing::SaveReceipt,
     /// Whether this editor's Delete is out.
     deleting: bool,
     /// The leave question's layer and destination. A save settling while the question is open needs to finish
@@ -363,6 +365,7 @@ impl Editor {
             baseline,
             error: None,
             saving: false,
+            save_receipt: crate::settings::editing::SaveReceipt::default(),
             deleting: false,
             leave_question: None,
             window: window.window_handle(),
@@ -443,6 +446,16 @@ impl Editor {
         self.draft(cx) != self.baseline
     }
 
+    /// A pending delete has already made the user's intention about this draft explicit.
+    pub(in crate::settings) fn edit_state(&self, cx: &App) -> crate::settings::editing::EditState {
+        crate::settings::editing::EditState::of(self.saving, self.asks_before_leaving(cx))
+    }
+
+    /// Return to the editor's Save after a Settings close question disappears on refusal.
+    pub(in crate::settings) fn save_focus(&self) -> FocusHandle {
+        self.save_focus.clone()
+    }
+
     /// The error to show: the last one, while the draft is still what it was when it came.
     fn error(&self, cx: &App) -> Option<&HostText> {
         self.error
@@ -493,7 +506,7 @@ impl Editor {
 
     /// Save (see the module docs): check, then create or update under the recipe's key, and say whether it was sent.
     /// Does nothing while a save or delete is out, when Save is drawn busy.
-    fn save(&mut self, cx: &mut Context<Self>) -> bool {
+    pub(in crate::settings) fn save(&mut self, cx: &mut Context<Self>) -> bool {
         if self.busy() {
             return false;
         }
@@ -543,6 +556,7 @@ impl Editor {
                             // name is never editable.
                             editor.saved = Some(created);
                             editor.set_saving(false, cx);
+                            editor.save_receipt.finish(true, cx);
                             editor.saved(&mark, cx);
                         });
                         return;
@@ -551,6 +565,7 @@ impl Editor {
                 let shown = editor
                     .update(cx, |editor, cx| {
                         editor.set_saving(false, cx);
+                        editor.save_receipt.finish(false, cx);
                         // A refused save keeps the editor open, so a leave its question asked for does not happen. A
                         // question still open was asked while the save was out, without Discard; it goes, and the
                         // ordinary answers come back under the helm's words, as after any refused leave.
@@ -623,6 +638,25 @@ impl Editor {
     /// at the left and Cancel and Save at the right. The inline delete confirmation replaces those buttons.
     /// The centered leave question has its own layer, so the host keeps drawing the ordinary footer under it.
     pub(crate) fn actions(editor: &Entity<Editor>, cx: &App) -> AnyElement {
+        let (row, outcome, _) = Self::footer(editor, false, cx);
+        div()
+            .id("recipe-editor-actions")
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .w_full()
+            .children(outcome)
+            .child(row)
+            .into_any_element()
+    }
+
+    /// Build the same editor controls for Settings and Add host. Settings locates the outcome above the footer
+    /// row and lets the inline delete confirmation replace Close while it is asking.
+    pub(in crate::settings) fn footer(
+        editor: &Entity<Editor>,
+        pinned: bool,
+        cx: &App,
+    ) -> (AnyElement, Option<AnyElement>, bool) {
         let this = editor.read(cx);
         let weak = editor.downgrade();
         let busy = this.busy();
@@ -631,6 +665,7 @@ impl Editor {
             .as_ref()
             .filter(|delete| delete.is_open(cx))
             .map(|delete| delete.clone().into_any_element());
+        let confirming = question.is_some();
         let row = question.unwrap_or_else(|| {
             let delete = this.saved.is_some().then(|| {
                 let weak = weak.clone();
@@ -640,7 +675,8 @@ impl Editor {
                     HoverHelp::tooltip("Delete this recipe").below(),
                     Role::Button,
                 )
-                .tier(Tier::Neutral)
+                .tier(if pinned { Tier::Danger } else { Tier::Neutral })
+                .quiet(pinned)
                 .disabled(this.saving)
                 .busy(this.deleting)
                 .on_click(move |_, window, cx| {
@@ -655,7 +691,7 @@ impl Editor {
                     HoverHelp::tooltip("Go back without saving; unsaved changes ask first").below(),
                     Role::Button,
                 )
-                .tier(Tier::Neutral)
+                .tier(if pinned { Tier::Ghost } else { Tier::Neutral })
                 .disabled(busy)
                 .on_click(move |_, window, cx| {
                     let _ = weak.update(cx, |editor, cx| editor.leave(window, cx));
@@ -696,19 +732,20 @@ impl Editor {
                 .child(save)
                 .into_any_element()
         });
-        div()
-            .id("recipe-editor-actions")
-            .flex()
-            .flex_col()
-            .gap(px(8.))
-            .w_full()
-            .children(
-                this.error(cx)
-                    .map(|reason| choices::failure_outcome("recipe-editor-error", reason, cx)),
-            )
-            .children(choices::busy_line(&this.refused, SAVE, cx))
-            .child(row)
-            .into_any_element()
+        let error = this.error(cx);
+        let busy_line = choices::busy_line(&this.refused, SAVE, cx);
+        let outcome = (error.is_some() || busy_line.is_some()).then(|| {
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(8.))
+                .children(
+                    error.map(|reason| choices::failure_outcome("recipe-editor-error", reason, cx)),
+                )
+                .children(busy_line)
+                .into_any_element()
+        });
+        (row, outcome, confirming)
     }
 }
 
@@ -723,11 +760,11 @@ fn caption(text: &'static str, cx: &App) -> gpui::Div {
 
 /// A field's label (`label.checkout-root-label > span`), at 13 pixels in the secondary ink: smaller than the blocks'
 /// captions, as SPEC.md asks.
-fn label(text: &'static str, cx: &App) -> gpui::Div {
-    div()
+fn label(text: &'static str, edited: bool, cx: &App) -> gpui::Div {
+    let palette = theme::palette(cx);
+    crate::settings::editing::caption(text, edited.then_some(palette))
         .text_size(metrics::TEXT_MD)
-        .text_color(theme::color(theme::palette(cx).fg_1))
-        .child(text)
+        .text_color(theme::color(palette.fg_1))
 }
 
 /// A labelled single-line field, as wide as its column: `text` over `input`, drawn under `id`'s debug selector so tests
@@ -738,6 +775,7 @@ fn field(
     input: &Input,
     help: &'static str,
     mono: bool,
+    edited: bool,
     cx: &App,
 ) -> gpui::Div {
     let id: SharedString = id.into();
@@ -750,7 +788,7 @@ fn field(
         .gap(px(LABEL_GAP))
         .w_full()
         .min_w_0()
-        .child(label(text, cx))
+        .child(label(text, edited, cx))
         .child(
             div()
                 .w_full()
@@ -762,6 +800,21 @@ fn field(
 impl Render for Editor {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
+        // Mark the same text differences the editor uses to decide whether leaving needs an answer. Add host
+        // hosts this editor inside its own form and keeps its original labels.
+        let edited = |input: &Input, saved: &str| self.host.has_back() && input.text(cx) != saved;
+        let caption_with_dot = |text, changed| {
+            let caption = caption(text, cx);
+            if self.host.has_back() && changed {
+                caption
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .child(crate::settings::editing::dot(false, palette))
+            } else {
+                caption
+            }
+        };
         let weak = cx.weak_entity();
         // Every control is unavailable while a save or a delete is out, as the old editor's `locked`.
         let busy = self.busy();
@@ -796,15 +849,27 @@ impl Render for Editor {
             .child(title.clone());
 
         // `.recipe-size`: CPUs, memory and disk side by side, each with its Usage Credits hint under it.
-        let size_field =
-            |text: &'static str, id: &'static str, input: &Input, hint: &'static str| {
-                field(text, id, input, "A whole number", false, cx).child(
-                    div()
-                        .text_size(metrics::TEXT_SM)
-                        .text_color(theme::color(palette.fg_1))
-                        .child(hint),
-                )
-            };
+        let size_field = |text: &'static str,
+                          id: &'static str,
+                          input: &Input,
+                          saved: &str,
+                          hint: &'static str| {
+            field(
+                text,
+                id,
+                input,
+                "A whole number",
+                false,
+                edited(input, saved),
+                cx,
+            )
+            .child(
+                div()
+                    .text_size(metrics::TEXT_SM)
+                    .text_color(theme::color(palette.fg_1))
+                    .child(hint),
+            )
+        };
         let size = div()
             .grid()
             .grid_cols(SIZE_COLUMNS)
@@ -813,18 +878,21 @@ impl Render for Editor {
                 "CPUs",
                 "recipe-cpus",
                 &self.cpus,
+                &self.baseline.cpus,
                 "1–4 on Usage Credits",
             ))
             .child(size_field(
                 "Memory, GB",
                 "recipe-memory",
                 &self.memory_gb,
+                &self.baseline.memory_gb,
                 "1–8 per CPU on Usage Credits",
             ))
             .child(size_field(
                 "Disk, GB",
                 "recipe-disk",
                 &self.disk_gb,
+                &self.baseline.disk_gb,
                 "10–100 on Usage Credits",
             ));
 
@@ -865,6 +933,7 @@ impl Render for Editor {
                     &self.image,
                     "A Tensorlake image's name",
                     true,
+                    edited(&self.image, &self.baseline.image),
                     cx,
                 )
                 .into_any_element(),
@@ -881,6 +950,7 @@ impl Render for Editor {
                     &self.snapshot_id,
                     "A Tensorlake snapshot's ID",
                     true,
+                    edited(&self.snapshot_id, &self.baseline.snapshot_id),
                     cx,
                 )
                 .into_any_element(),
@@ -897,6 +967,10 @@ impl Render for Editor {
                     &self.container_reference,
                     "The container image's full reference",
                     true,
+                    edited(
+                        &self.container_reference,
+                        &self.baseline.container_reference,
+                    ),
                     cx,
                 )
                 .into_any_element(),
@@ -906,6 +980,7 @@ impl Render for Editor {
                     &self.container_user,
                     "The account sessions log in as inside the container",
                     true,
+                    edited(&self.container_user, &self.baseline.container_user),
                     cx,
                 )
                 .into_any_element(),
@@ -928,7 +1003,11 @@ impl Render for Editor {
             .gap(px(LABEL_GAP))
             .w_full()
             .min_w_0()
-            .child(label("Ubuntu packages", cx))
+            .child(label(
+                "Ubuntu packages",
+                edited(&self.packages, &self.baseline.packages),
+                cx,
+            ))
             .child(
                 div()
                     .w_full()
@@ -1052,6 +1131,7 @@ impl Render for Editor {
                 &self.name,
                 "The recipe's name; it can't be changed later",
                 true,
+                edited(&self.name, &self.baseline.name),
                 cx,
             ))
             .child(choices::help(
@@ -1072,7 +1152,7 @@ impl Render for Editor {
                     .flex()
                     .flex_col()
                     .gap(px(LABEL_GAP))
-                    .child(caption("Software", cx))
+                    .child(caption_with_dot("Software", self.base != self.baseline.base))
                     .child(cards),
             )
             .children(base_fields)
@@ -1092,7 +1172,10 @@ impl Render for Editor {
                     .flex()
                     .flex_col()
                     .gap(px(LABEL_GAP))
-                    .child(caption("Tunnels to your side", cx))
+                    .child(caption_with_dot(
+                        "Tunnels to your side",
+                        self.tunnels.iter().map(|row| row.draft(cx)).ne(self.baseline.tunnels.iter().cloned()),
+                    ))
                     .children(tunnels)
                     .child(div().flex().child(add_tunnel)),
             )

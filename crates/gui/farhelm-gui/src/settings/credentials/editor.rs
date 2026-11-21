@@ -5,16 +5,14 @@
 //! Ported from the old app's `CredentialEditor` (`credentials_settings.rs` at reference commit `24bc0580`), with its
 //! words; the rules are in the parent module's docs ([`super`]).
 //!
-//! NOTE: The old editor's answers stuck to the bottom of the dialog's scrolling body (`position: sticky`), so Save
-//! stayed in view over a long Codex login. GPUI has no sticky positioning, so here they follow the editor's content and
-//! scroll with it, as the section list does (`docs/gpui/parity/settings-and-hosts.md`, "Deviations").
+//! The answers and operation outcomes sit in Settings' pinned footer, even when a long login fills the page.
 
 use farhelm_helm_client::Method;
 use farhelm_proto::credentials::{Credential, CredentialKind, check_secret};
 use gpui::{
-    App, Context, EntityId, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, PathPromptOptions, Render, Role, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Task, WeakEntity, Window, div, px,
+    AnyElement, App, Context, Entity, EntityId, FocusHandle, FontWeight, InteractiveElement as _,
+    IntoElement, ParentElement as _, PathPromptOptions, Render, Role,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Task, WeakEntity, Window, div, px,
 };
 
 use super::super::Refused;
@@ -75,6 +73,7 @@ impl ChosenLogin {
 /// One credential's editor (see the parent module's docs). A view of its own, dropped by Back, Cancel, a done save or
 /// delete, or the dialog closing; a save or delete it started goes on in the operation store without it.
 pub(in crate::settings) struct Editor {
+    pub(in crate::settings) save_receipt: crate::settings::editing::SaveReceipt,
     parent: WeakEntity<Credentials>,
     group: Group,
     kind: CredentialKind,
@@ -127,6 +126,7 @@ impl Editor {
             }
         });
         Editor {
+            save_receipt: crate::settings::editing::SaveReceipt::default(),
             parent,
             group,
             kind,
@@ -252,12 +252,27 @@ impl Editor {
         cx.notify();
     }
 
-    /// Save: check the draft, then send it under the credential's key (the parent module's docs). Does nothing while
-    /// busy, or for a new credential with a blank draft, when Save is drawn busy or unavailable.
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The stored secret is write-only. An existing credential's only edit is a replacement paste or selected file.
+    /// A new credential also has an editable name and agent choice.
+    pub(in crate::settings) fn edit_state(&self, cx: &App) -> crate::settings::editing::EditState {
+        let dirty = !self.secret_value().is_empty()
+            || (!self.replacing()
+                && (!self.name(cx).is_empty() || self.kind != self.group.words().new_kind));
+        crate::settings::editing::EditState::of(
+            self.secret.draft().is_saving(),
+            !self.deleting && dirty,
+        )
+    }
+
+    /// Save the named credential and report whether its own operation was admitted.
+    pub(in crate::settings) fn save(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
         let replacing = self.replacing();
-        if self.busy() || (!replacing && self.secret_value().trim().is_empty()) {
-            return;
+        if self.busy() {
+            return false;
         }
         // Save fixes the draft being sent, including while the file picker is still waiting.
         self.choosing = None;
@@ -267,7 +282,7 @@ impl Editor {
         if let Some(problem) = malformed(&name, kind, replacing, &secret) {
             self.fail(HostText::from_host(problem));
             cx.notify();
-            return;
+            return false;
         }
         let mark = Mark::take(cx);
         let group = self.group;
@@ -282,6 +297,7 @@ impl Editor {
             cx,
             move |editor, settled, cx| {
                 editor.name.set_read_only(editor.replacing(), cx);
+                editor.save_receipt.settle(&settled.outcome, cx);
                 match &settled.outcome {
                     Outcome::Done(body) => {
                         let undelivered = delivery_failures(replacing, body.clone());
@@ -298,7 +314,9 @@ impl Editor {
         if started.is_ok() {
             self.name.set_read_only(true, cx);
         }
+        let sent = started.is_ok();
         self.started(started, cx);
+        sent
     }
 
     /// Delete the saved credential under its key. Does nothing for a new one, while busy, or while a recipe uses it
@@ -445,6 +463,95 @@ impl Editor {
         });
     }
 
+    /// Keep the editor's commands and their outcomes in the dialog footer. The overview's hidden key draft
+    /// keeps its state but does not take over these buttons while the editor is open.
+    pub(in crate::settings) fn footer(
+        editor: &Entity<Editor>,
+        cx: &App,
+    ) -> (AnyElement, Option<AnyElement>, bool) {
+        let this = editor.read(cx);
+        let weak = editor.downgrade();
+        let replacing = this.replacing();
+        let busy = this.busy();
+        let in_use = this
+            .existing
+            .as_ref()
+            .is_some_and(|existing| !existing.used_by.is_empty());
+        let delete = replacing.then(|| {
+            let weak = weak.clone();
+            Button::new(
+                "credential-delete",
+                "Delete",
+                HoverHelp::tooltip("Delete this saved credential"),
+                Role::Button,
+            )
+            .tier(Tier::Danger)
+            .quiet(true)
+            .disabled(in_use)
+            .busy(busy)
+            .on_click(move |_, _, cx| {
+                let _ = weak.update(cx, |editor, cx| editor.delete(cx));
+            })
+        });
+        let cancel = {
+            let (parent, id, group) = (this.parent.clone(), editor.entity_id(), this.group);
+            Button::new(
+                "credential-cancel",
+                "Cancel",
+                HoverHelp::tooltip("Discard this unsaved credential draft"),
+                Role::Button,
+            )
+            .tier(Tier::Ghost)
+            .on_click(move |_, window, cx| Self::leave(&parent, id, group, window, cx))
+        };
+        let save = Button::new(
+            "credential-save",
+            "Save",
+            HoverHelp::tooltip("Save this credential in the helm's state"),
+            Role::Button,
+        )
+        .tier(Tier::Primary)
+        .disabled(!replacing && this.secret_value().trim().is_empty())
+        // Busy, not disabled, while saving, so a clicked Save keeps focus (SPEC_impl.md, "Drafts").
+        .busy(busy)
+        .on_click(move |_, window, cx| {
+            let _ = weak.update(cx, |editor, cx| editor.save(window, cx));
+        });
+
+        let row = div()
+            .flex()
+            .justify_end()
+            .gap(px(8.))
+            .children(delete)
+            .child(cancel)
+            .child(save)
+            .into_any_element();
+        let error = this.error();
+        let busy_line = choices::busy_line(&this.refused, REFUSED, cx);
+        let outcome = (error.is_some() || busy_line.is_some() || busy).then(|| {
+            let palette = theme::palette(cx);
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                .children(
+                    error.map(|reason| choices::failure_outcome("credential-error", reason, cx)),
+                )
+                .children(busy_line)
+                .children(busy.then(|| {
+                    choices::outcome_line(
+                        "credential-saving",
+                        Role::Status,
+                        theme::color(palette.fg_0),
+                    )
+                    .aria_label("Saving…")
+                    .child("Saving…")
+                }))
+                .into_any_element()
+        });
+        (row, outcome, false)
+    }
+
     /// A fresh read listed `catalog`: a saved credential's editor takes its row, so the recipe-use line and Delete's
     /// availability follow it; the typed secret is untouched.
     pub(super) fn refresh(&mut self, catalog: &[Credential], cx: &mut Context<Self>) {
@@ -536,6 +643,7 @@ impl Render for Editor {
                 ),
             )
             .height(px(choices::FIELD_HEIGHT)),
+            (!replacing && !self.name.text(cx).is_empty()).then_some(palette),
         );
         let secret = match &self.chosen_login {
             Some(login) => {
@@ -552,6 +660,7 @@ impl Render for Editor {
                     .w_full()
                     .min_w_0()
                     .child(host_text::element(&login.filename).min_w_0().truncate())
+                    .child(crate::settings::editing::dot(false, palette))
                     .child(choices::help(validation, cx))
                     .child(
                         Button::new(
@@ -588,6 +697,7 @@ impl Render for Editor {
                     } else {
                         secret.height(px(choices::FIELD_HEIGHT))
                     },
+                    (!self.secret_value().is_empty()).then_some(palette),
                 )
             }
         };
@@ -626,46 +736,6 @@ impl Render for Editor {
             CredentialKind::GithubToken | CredentialKind::EndpointToken => Vec::new(),
         };
 
-        let delete = replacing.then(|| {
-            let weak = weak.clone();
-            Button::new(
-                "credential-delete",
-                "Delete",
-                HoverHelp::tooltip("Delete this saved credential"),
-                Role::Button,
-            )
-            .tier(Tier::Danger)
-            .disabled(in_use)
-            .busy(busy)
-            .on_click(move |_, _, cx| {
-                let _ = weak.update(cx, |editor, cx| editor.delete(cx));
-            })
-        });
-        let cancel = {
-            let (parent, id, group) = (self.parent.clone(), cx.entity_id(), self.group);
-            Button::new(
-                "credential-cancel",
-                "Cancel",
-                HoverHelp::tooltip("Discard this unsaved credential draft"),
-                Role::Button,
-            )
-            .tier(Tier::Neutral)
-            .on_click(move |_, window, cx| Self::leave(&parent, id, group, window, cx))
-        };
-        let save = Button::new(
-            "credential-save",
-            "Save",
-            HoverHelp::tooltip("Save this credential in the helm's state"),
-            Role::Button,
-        )
-        .tier(Tier::Primary)
-        .disabled(!replacing && self.secret_value().trim().is_empty())
-        // Busy, not disabled, while saving, so a clicked Save keeps focus (SPEC_impl.md, "Drafts").
-        .busy(busy)
-        .on_click(move |_, window, cx| {
-            let _ = weak.update(cx, |editor, cx| editor.save(window, cx));
-        });
-
         div()
             .id("credential-editor")
             .role(Role::Region)
@@ -700,32 +770,11 @@ impl Render for Editor {
                  who can read that folder can read them. Farhelm never shows a saved value again.",
                 cx,
             ))
-            .children(
-                self.error()
-                    .map(|reason| choices::failure_outcome("credential-error", reason, cx)),
-            )
-            .children(choices::busy_line(&self.refused, REFUSED, cx))
             .children(in_use.then(|| {
                 choices::help(
                     "Delete is unavailable while a recipe uses this credential.",
                     cx,
                 )
-            }))
-            // `.dialog-actions`: Delete, Cancel and Save at the editor's end, in the old order.
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.))
-                    .w_full()
-                    .children(delete)
-                    .child(cancel)
-                    .child(save),
-            )
-            .children(busy.then(|| {
-                choices::outcome_line("credential-saving", Role::Status, theme::color(palette.fg_0))
-                    .aria_label("Saving…")
-                    .child("Saving…")
             }))
     }
 }

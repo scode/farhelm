@@ -972,7 +972,7 @@ static SCENES: &[Scene] = &[
     Scene {
         name: "settings-recipe-editor",
         size: (800., 830.),
-        draw: empty,
+        draw: settings_edited,
         setup: settings_recipe_editor_setup,
     },
     Scene {
@@ -1012,6 +1012,12 @@ static SCENES: &[Scene] = &[
         setup: settings_terminal_setup,
     },
     Scene {
+        name: "settings-terminal-edited",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_terminal_edited_setup,
+    },
+    Scene {
         name: "settings-containers",
         size: (800., 830.),
         draw: empty,
@@ -1022,6 +1028,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_checkouts_setup,
+    },
+    Scene {
+        name: "settings-checkouts-edited",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_checkouts_edited_setup,
     },
     Scene {
         name: "settings-agent-trust",
@@ -1040,6 +1052,18 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_notifications_setup,
+    },
+    Scene {
+        name: "settings-notifications-edited",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_notifications_edited_setup,
+    },
+    Scene {
+        name: "settings-unsaved",
+        size: (800., 830.),
+        draw: settings_edited,
+        setup: settings_unsaved_setup,
     },
     Scene {
         name: "settings-app",
@@ -1362,7 +1386,8 @@ fn settle(
         cx.run_until_parked();
         let ready = cx.update_window(window, |_, window, cx| {
             window.draw(cx).clear(cx);
-            view.read(cx).state.after.get().is_none()
+            let state = &view.read(cx).state;
+            state.after.get().is_none() && !settings::draft_pending(state)
         })?;
         if !ready {
             previous = None;
@@ -1374,7 +1399,10 @@ fn settle(
         }
         previous = Some(capture);
     }
-    let pending = cx.update(|cx| view.read(cx).state.after.get().is_some());
+    let pending = cx.update(|cx| {
+        let state = &view.read(cx).state;
+        state.after.get().is_some() || settings::draft_pending(state)
+    });
     anyhow::bail!(
         "{name} never settled after {MAX_SETTLE_FRAMES} frames (after-draw interaction pending: {pending})"
     )

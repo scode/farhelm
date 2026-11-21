@@ -22,7 +22,6 @@ use serde_json::{Value, json};
 use super::Section;
 use super::recipe_place_tests::places_state;
 use super::recipes::{self, BuildAction, SnapshotStatus, Tone, line_texts, summary};
-use super::tensorlake_tests::press;
 use super::tests::{
     available, drawn, fill, label_of, open_rail, open_rail_with, open_settings, painted,
     section_button, sent,
@@ -764,7 +763,7 @@ fn a_key_saved_in_credentials_makes_build_available_with_no_read(cx: &mut TestAp
     helm.reply(reads[0].id, 200, Some(json!([])));
     settle(cx);
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    press(cx, "tensorlake-key-save");
+    click(cx, "settings-footer-save");
     let saves = sent(&mut helm);
     assert_eq!(
         saves

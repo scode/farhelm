@@ -92,7 +92,7 @@ fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppCont
     assert!(!drawn(cx, "tensorlake-sandboxes-heading"));
 
     fill(cx, "tensorlake-key", "fictional-tensorlake-key");
-    press(cx, "tensorlake-key-save");
+    click(cx, "settings-footer-save");
     let save = sent(&mut helm);
     assert_eq!(save.len(), 1, "{save:?}");
     helm.reply(save[0].id, 200, Some(account(true, false)));
@@ -123,7 +123,7 @@ fn a_saved_key_reads_the_list_which_says_when_it_found_none(cx: &mut TestAppCont
     );
 
     fill(cx, "tensorlake-key", "fictional-replacement-key");
-    press(cx, "tensorlake-key-save");
+    click(cx, "settings-footer-save");
     let save = sent(&mut helm);
     assert_eq!(save.len(), 1, "{save:?}");
     helm.reply(save[0].id, 200, Some(account(true, false)));

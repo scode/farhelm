@@ -31,7 +31,7 @@ use gpui::{
 };
 
 use super::{Refused, choices};
-use crate::components::{Button, HoverHelp, TextInput, TextInputState, Tier};
+use crate::components::{HoverHelp, TextInput, TextInputState};
 use crate::drafts::DraftInput;
 use crate::operations::{OpKey, Outcome};
 use crate::session;
@@ -60,7 +60,6 @@ pub(super) fn label(platform: Platform) -> &'static str {
 /// The old words.
 pub(super) const HELP: &str = "Comma-separated final extensions. A leading dot is optional. Save an empty field to stop opening \
                     downloaded files; downloads still save. This choice applies to this helm.";
-const SAVE_HELP: &str = "Save the file types this helm may open";
 const SAVED: &str = "File types saved";
 pub(super) const HTML_HEADING: &str = "An agent-written page may run in your browser";
 pub(super) const HTML_TEXT: &str = "An agent-written page can run scripts in your browser and open web addresses outside \
@@ -111,6 +110,7 @@ pub(super) fn warnings(draft: &str) -> Vec<(String, WarningKind)> {
 /// the dialog closes.
 pub(super) struct FileTypes {
     input: DraftInput,
+    pub(super) save_receipt: super::editing::SaveReceipt,
     /// Which modifier the label names ([`FileTypes::set_platform`]).
     platform: Platform,
     /// Why Save sent nothing, the parser's reason, and the draft it was found in: drawn only while the draft is still
@@ -144,6 +144,7 @@ impl FileTypes {
         });
         FileTypes {
             input,
+            save_receipt: super::editing::SaveReceipt::default(),
             platform,
             invalid: None,
             saved: false,
@@ -166,6 +167,12 @@ impl FileTypes {
         self.input.input().text(cx).to_string()
     }
 
+    /// File types read from the pushed preference row, so a golden can edit as soon as the field exists.
+    #[cfg(test)]
+    pub(super) fn input_for_golden(&self) -> TextInputState {
+        self.input.input().clone()
+    }
+
     /// Whether the text field holds focus in `window`, for tests: the frame's focus names the field's own element.
     #[cfg(test)]
     pub(super) fn focused(&self, window: &Window, cx: &gpui::App) -> bool {
@@ -183,10 +190,26 @@ impl FileTypes {
             .and_then(|preferences| preferences.open_extensions.clone())
     }
 
-    /// Save the draft (the module docs). Does nothing while a save is out, when Save is drawn busy.
-    fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    /// The footer compares against the latest stored list, including edits that restore the original text.
+    pub(super) fn edit_state(&self) -> super::editing::EditState {
+        let draft = self.input.draft();
+        super::editing::EditState::of(
+            draft.is_saving(),
+            draft.is_touched() && draft.value() != self.input.stored().unwrap_or_default(),
+        )
+    }
+
+    /// Restore the last pushed list, including the default spelling when the helm has no explicit setting.
+    pub(super) fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.input.discard(window.window_handle(), cx);
+        self.invalid = None;
+        cx.notify();
+    }
+
+    /// Save the draft and report whether the operation was admitted. An invalid list keeps its draft and error.
+    pub(super) fn save(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
         if self.input.draft().is_saving() {
-            return;
+            return false;
         }
         self.saved = false;
         let list = match OpenExtensions::parse(self.input.draft().value()) {
@@ -194,7 +217,7 @@ impl FileTypes {
             Err(reason) => {
                 self.invalid = Some((reason, self.input.draft().value().clone()));
                 cx.notify();
-                return;
+                return false;
             }
         };
         self.invalid = None;
@@ -218,14 +241,16 @@ impl FileTypes {
                         });
                     });
                 }
+                field.save_receipt.settle(&settled.outcome, cx);
             },
         );
         // Another Settings save may hold the key, which the field then says.
         self.refused.record(ID, &started);
-        if let Err(not_started) = started {
+        if let Err(not_started) = &started {
             tracing::debug!(?not_started, "file types not saved");
         }
         cx.notify();
+        started.is_ok()
     }
 
     /// Follow the stored list where the draft allows.
@@ -236,7 +261,11 @@ impl FileTypes {
     }
 
     /// The field under its label (`.open-extensions-label`: semibold, over the field), as wide as the section.
-    fn labelled(label: &'static str, input: TextInput) -> impl IntoElement {
+    fn labelled(
+        label: &'static str,
+        input: TextInput,
+        edited: Option<&theme::Palette>,
+    ) -> impl IntoElement {
         div()
             .flex()
             .flex_col()
@@ -248,7 +277,7 @@ impl FileTypes {
                     .text_size(px(choices::LABEL_TEXT))
                     .line_height(px(choices::LABEL_LINE_HEIGHT))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(label),
+                    .child(super::editing::caption(label, edited)),
             )
             .child(div().w_full().debug_selector(|| ID.to_owned()).child(input))
     }
@@ -311,23 +340,6 @@ impl Render for FileTypes {
             .into_iter()
             .map(|(extension, kind)| Self::warning(&extension, kind, cx))
             .collect();
-        let weak = cx.weak_entity();
-        let save = Button::new(
-            format!("{ID}-save"),
-            if saving {
-                "Saving…"
-            } else {
-                "Save file types"
-            },
-            HoverHelp::tooltip(SAVE_HELP),
-            Role::Button,
-        )
-        .tier(Tier::Neutral)
-        // Busy, not disabled, so a pressed Save keeps focus through its save.
-        .busy(saving)
-        .on_click(move |_, window, cx| {
-            let _ = weak.update(cx, |field, cx| field.save(window, cx));
-        });
         let invalid = self
             .invalid
             .as_ref()
@@ -362,10 +374,13 @@ impl Render for FileTypes {
             .gap(px(FIELD_GAP))
             .w_full()
             .min_w_0()
-            .child(Self::labelled(label, input))
+            .child(Self::labelled(
+                label,
+                input,
+                (self.edit_state() != super::editing::EditState::Clean).then_some(palette),
+            ))
             .child(choices::help(HELP, cx))
             .children(warnings)
-            .child(save)
             .children(invalid)
             .children(failure)
             .children(refused)

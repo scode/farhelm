@@ -261,8 +261,10 @@ pub(super) struct Credentials {
     catalog: Option<Vec<Credential>>,
     /// Why the last read failed, until a read answers.
     unreadable: Option<HostText>,
-    /// The open editor, in place of the overview.
+    /// The editor's draft stays here even if a key error temporarily brings back the overview.
     editor: Option<Entity<Editor>>,
+    /// A failed key save can bring the overview forward without dropping the credential draft.
+    key_revealed: bool,
     /// The hosts the last done replacement did not reach, until the next editor closes (Back and Cancel included).
     undelivered: Vec<DeliveryFailure>,
     key: Entity<TensorlakeKey>,
@@ -282,6 +284,7 @@ impl Credentials {
             catalog: None,
             unreadable: None,
             editor: None,
+            key_revealed: false,
             undelivered: Vec::new(),
             key,
             add: [(); 3].map(|_| cx.focus_handle().tab_stop(true)),
@@ -291,21 +294,33 @@ impl Credentials {
         credentials
     }
 
-    /// The open editor, for tests that read its secret's text: GPUI Kit's field reports no accessible value.
-    #[cfg(test)]
+    /// The open editor counts for closing even while the overview is showing a key error.
     pub(super) fn editor(&self) -> Option<Entity<Editor>> {
         self.editor.clone()
     }
 
-    /// The Tensorlake API key form, for tests that read its typed key: the field is masked.
-    #[cfg(test)]
+    /// The footer follows the visible editor. Switching to the key hands Save back to the key form.
+    pub(super) fn visible_editor(&self) -> Option<Entity<Editor>> {
+        if self.key_revealed {
+            None
+        } else {
+            self.editor()
+        }
+    }
+
+    pub(super) fn reveal_key(&mut self, cx: &mut Context<Self>) {
+        self.key_revealed = self.editor.is_some();
+        cx.notify();
+    }
+
+    /// The overview's copy of the Tensorlake key has a separate draft over the same account.
     pub(super) fn key(&self) -> Entity<TensorlakeKey> {
         self.key.clone()
     }
 
     /// An open editor replaces the overview and its key field. Preserve the draft when search visits this section.
     pub(super) fn key_focus(&self, cx: &App) -> Option<gpui::FocusHandle> {
-        self.editor
+        self.visible_editor()
             .is_none()
             .then(|| self.key.read(cx).search_focus(cx))
     }
@@ -347,6 +362,9 @@ impl Credentials {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.editor.is_some() {
+            return;
+        }
         let mark = Mark::take(cx);
         let parent = cx.weak_entity();
         let editor = cx.new(|cx| Editor::new(parent, group, existing, window, cx));
@@ -380,6 +398,7 @@ impl Credentials {
             return;
         }
         self.editor = None;
+        self.key_revealed = false;
         // The button is drawn again by the next frame; the coordinator keeps the move until then.
         let target = self.add[group.0].clone();
         match window {
@@ -412,7 +431,7 @@ impl Credentials {
         )
         .tier(Tier::Neutral)
         .focus(&self.add[group.0])
-        .disabled(!loaded)
+        .disabled(!loaded || self.editor.is_some())
         .on_click({
             let weak = weak.clone();
             move |_, window, cx| {
@@ -500,6 +519,7 @@ impl Credentials {
                     )
                     .accessible_name(edit_label)
                     .tier(Tier::Neutral)
+                    .disabled(self.editor.is_some())
                     .on_click(move |_, window, cx| {
                         let existing = existing.clone();
                         let _ = weak.update(cx, |view, cx| {
@@ -565,6 +585,31 @@ impl Credentials {
             })
             .collect();
         parts.push(choices::help(INTRO, cx).into_any_element());
+        if let Some(editor) = self.editor.as_ref().filter(|_| self.key_revealed) {
+            let target = editor.read(cx).start(cx);
+            let weak = cx.weak_entity();
+            parts.push(
+                div()
+                    .flex()
+                    .child(
+                        Button::new(
+                            "credential-resume",
+                            "Resume editing credential",
+                            HoverHelp::tooltip("Return to the credential draft"),
+                            Role::Button,
+                        )
+                        .tier(Tier::Neutral)
+                        .on_click(move |_, window, cx| {
+                            let _ = weak.update(cx, |view, cx| {
+                                view.key_revealed = false;
+                                focus::focus_in_layer(&target, &Mark::take(cx), window, cx);
+                                cx.notify();
+                            });
+                        }),
+                    )
+                    .into_any_element(),
+            );
+        }
         parts.push(storage_warning(STORAGE_ID, STORAGE_HELP, cx).into_any_element());
         parts.push(self.key.clone().into_any_element());
         if self.catalog.is_none() && self.unreadable.is_none() {
@@ -623,8 +668,8 @@ impl Credentials {
 
 impl Render for Credentials {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let shown = match &self.editor {
-            Some(editor) => editor.clone().into_any_element(),
+        let shown = match self.visible_editor() {
+            Some(editor) => editor.into_any_element(),
             None => self.overview(window, cx),
         };
         div()

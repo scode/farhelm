@@ -6454,15 +6454,17 @@ deletion permission does not infer the embedding context. The editor still owns 
 Add host mount focuses Name; its Settings mount aligns the editor's top, including Back, to the existing body's top and
 focuses its heading without a second native scroll. Deferred focus captures the mounted editor and never targets a later
 replacement; both focus and scroll yield when a usable editor field or modal control already owns focus, so opening
-cannot redirect typing that began before its animation frame. Settings keeps normal, leave and delete answers and their
-refusal messages in one opaque bottom-sticky wrapper inside the editor, so hiding the Tensorlake section hides every
-answer while the global Close footer stays unchanged. It uses Tensorlake's acknowledged `create_without_asking` setting,
-never the general setup preference, and refreshes the host list after an accepted or ambiguous submission. An inline
-Settings entry point opens its Tensorlake section. Rerun retains the Tensorlake plan kind, consults only that
-acknowledged setting, and offers no answer that writes the general SSH setup preference. The add dialog binds
-confirmation to a `ConfirmSlot` opening; accepted close retires it synchronously through the recipe close guard, before
-notifying its parent. Automatic submission consumes only the opening it just created, so a cancelled or replaced opening
-cannot authorize a later billed POST.
+cannot redirect typing that began before its animation frame. Settings puts the shown recipe or credential editor's
+actions in the dialog footer and pins refusals and progress just above the actions. The recipe's inline Delete question
+can replace that footer row. Add host keeps the recipe editor's leave handling for its embedded editor. Settings checks
+every loaded draft when asked to close and runs each form's own Save in sequence, waiting for its completion before
+sending the next. A refusal keeps Settings open and returns to the failed form. The add dialog uses Tensorlake's
+acknowledged `create_without_asking` setting, never the general setup preference, and refreshes the host list after an
+accepted or ambiguous submission. An inline Settings entry point opens its Tensorlake section. Rerun retains the
+Tensorlake plan kind, consults only that acknowledged setting, and offers no answer that writes the general SSH setup
+preference. The add dialog binds confirmation to a `ConfirmSlot` opening; accepted close retires it synchronously
+through the recipe close guard, before notifying its parent. Automatic submission consumes only the opening it just
+created, so a cancelled or replaced opening cannot authorize a later billed POST.
 
 The add form reuses the recipe list's summary helper and associates separate Name and Recipe help with their controls,
 keeping both accessible names exact. A displayed creation offer renders `SetupPlanConfirmation` directly as the existing

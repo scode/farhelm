@@ -15,7 +15,7 @@ use serde_json::json;
 use super::Section;
 use super::file_types::{ID, warnings};
 use super::tests::{
-    drawn, fill, into_view, one_save, open_rail, open_settings, painted, push, section_button, sent,
+    drawn, fill, one_save, open_rail, open_settings, painted, push, section_button, sent,
 };
 use crate::layers;
 use crate::test_support::{click, keys, settle};
@@ -79,7 +79,7 @@ fn repeated_safe_types_do_not_hide_a_later_warning() {
 // ---- The field, over the fake helm ---------------------------------------------------------------------------------
 
 /// The field's Save.
-const SAVE: &str = "settings-file-types-save";
+const SAVE: &str = "settings-footer-save";
 
 /// The preference row storing `list` as its file types; `None` never saved.
 fn row(list: Option<&str>) -> Preferences {
@@ -131,7 +131,6 @@ fn field_focused(cx: &mut VisualTestContext) -> bool {
 
 /// Press Save the way a user does, scrolled into view first.
 fn press_save(cx: &mut VisualTestContext) {
-    into_view(cx, SAVE);
     click(cx, SAVE);
 }
 

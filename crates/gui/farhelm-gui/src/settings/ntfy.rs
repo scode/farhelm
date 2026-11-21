@@ -245,6 +245,7 @@ impl Switch {
 /// The ntfy alerts form, a view of its own that Settings makes the first time Notifications shows in an opening and
 /// keeps until the dialog closes (see the module docs).
 pub(super) struct NtfyAlerts {
+    pub(super) save_receipt: super::editing::SaveReceipt,
     enabled_focus: gpui::FocusHandle,
     clear_focus: gpui::FocusHandle,
     /// What the helm last said it stores: the read's answer, then each done save's. `None` until the read answers.
@@ -276,6 +277,7 @@ impl NtfyAlerts {
         let topic = TextInputState::new(window, cx);
         let token = TextInputState::new_masked(window, cx);
         let mut alerts = NtfyAlerts {
+            save_receipt: super::editing::SaveReceipt::default(),
             enabled_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             stored: None,
@@ -449,11 +451,38 @@ impl NtfyAlerts {
         self.token_saved() && (form.clear || (self.server_changed() && form.token.is_empty()))
     }
 
-    /// Save the form. Does nothing while it is locked, when Save is drawn busy or unavailable; a Save the operation store
-    /// refuses because another Settings save holds the key says so under the form ([`Refused`]).
-    fn save(&mut self, cx: &mut Context<Self>) {
+    /// Compare the full form with the last read, including typed credentials and the explicit clear answer.
+    pub(super) fn edit_state(&self) -> super::editing::EditState {
+        super::editing::EditState::of(
+            self.form.is_saving(),
+            self.form.is_touched()
+                && self
+                    .stored
+                    .as_ref()
+                    .is_some_and(|stored| Form::over(stored) != *self.form.value()),
+        )
+    }
+
+    /// Send test uses the saved configuration and holds Save until its reply.
+    pub(super) fn holds_save(&self) -> bool {
+        self.testing
+    }
+
+    /// Restore the stored alert configuration without issuing a request or changing the saved token.
+    pub(super) fn discard(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(stored) = &self.stored {
+            self.form = Draft::load(Form::over(stored));
+            self.fill(window, cx);
+            self.hold(cx);
+            self.sync(window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Save the form and report whether the operation was admitted. A busy preference key is explained under the form.
+    pub(super) fn save(&mut self, cx: &mut Context<Self>) -> bool {
         if self.locked() {
-            return;
+            return false;
         }
         let window = self.window;
         let started = drafts::save(
@@ -465,6 +494,7 @@ impl NtfyAlerts {
             move |alerts, settled, cx| {
                 alerts.hold(cx);
                 let Outcome::Done(body) = &settled.outcome else {
+                    alerts.save_receipt.settle(&settled.outcome, cx);
                     return;
                 };
                 // The answer is what the helm stored, which the form shows as the old one did. The fields need the
@@ -473,21 +503,23 @@ impl NtfyAlerts {
                 // so the form goes on to show what the helm stores.
                 let Some(Ok(stored)) = body.clone().map(serde_json::from_value::<Settings>) else {
                     Self::read(window, cx);
+                    alerts.save_receipt.settle(&settled.outcome, cx);
                     return;
                 };
                 alerts.saved = true;
-                let alerts = cx.weak_entity();
+                let view = cx.weak_entity();
                 cx.defer(move |cx| {
                     let _ = window.update(cx, |_, window, cx| {
                         let _ =
-                            alerts.update(cx, |alerts, cx| alerts.answered(Ok(stored), window, cx));
+                            view.update(cx, |alerts, cx| alerts.answered(Ok(stored), window, cx));
                     });
                 });
+                alerts.save_receipt.settle(&settled.outcome, cx);
             },
         );
         // Another Settings save may hold the key, which the form then says.
         self.refused.record(REFUSED, &started);
-        match started {
+        match &started {
             Ok(()) => {
                 self.saved = false;
                 self.tested = None;
@@ -496,6 +528,7 @@ impl NtfyAlerts {
             Err(not_started) => tracing::debug!(?not_started, "ntfy alert settings not saved"),
         }
         cx.notify();
+        started.is_ok()
     }
 
     /// Send test: ask the helm to send one alert with the settings it stores (the module docs). Does nothing while the
@@ -532,7 +565,12 @@ impl NtfyAlerts {
     }
 
     /// One field with its words above it, as wide as the section (`.checkout-root-label`).
-    fn field(&self, field: Field, help_override: Option<&'static str>) -> Div {
+    fn field(
+        &self,
+        field: Field,
+        help_override: Option<&'static str>,
+        palette: &theme::Palette,
+    ) -> Div {
         let (id, label, help) = field.words();
         let input = TextInput::new(
             id,
@@ -545,15 +583,21 @@ impl NtfyAlerts {
             Field::Server => input.monospace(),
             Field::Topic | Field::Token => input,
         };
-        choices::labelled(label, id, input)
+        let form = self.form.value();
+        let edited = self.stored.as_ref().is_some_and(|stored| match field {
+            Field::Server => form.server_url != stored.server_url,
+            Field::Topic => form.topic != stored.topic,
+            Field::Token => !form.token.is_empty(),
+        });
+        choices::labelled(label, id, input, edited.then_some(palette))
     }
 
     /// A field's or the switches' words, at the old labels' size.
-    fn label(text: &'static str) -> Div {
+    fn label(text: &'static str, edited: Option<&theme::Palette>) -> Div {
         div()
             .text_size(px(LABEL_TEXT))
             .line_height(px(LABEL_LINE_HEIGHT))
-            .child(text)
+            .child(super::editing::caption(text, edited))
     }
 
     /// A switch with its words, toggling through this form.
@@ -566,7 +610,14 @@ impl NtfyAlerts {
     ) -> Div {
         let (id, label, help) = switch.words();
         let weak = cx.weak_entity();
+        let edited = self.stored.as_ref().is_some_and(|stored| match switch {
+            Switch::Enabled => on != stored.enabled,
+            Switch::ClearToken => on,
+        });
         div()
+            .flex()
+            .items_center()
+            .gap(px(6.))
             .text_size(px(LABEL_TEXT))
             .line_height(px(LABEL_LINE_HEIGHT))
             .child(
@@ -583,6 +634,7 @@ impl NtfyAlerts {
                         });
                     }),
             )
+            .children(edited.then(|| super::editing::dot(false, theme::palette(cx))))
     }
 }
 
@@ -621,7 +673,13 @@ impl Render for NtfyAlerts {
             .gap(px(choices::LABEL_GAP))
             .w_full()
             .min_w_0()
-            .child(Self::label(PRIORITY_LABEL))
+            .child(Self::label(
+                PRIORITY_LABEL,
+                self.stored
+                    .as_ref()
+                    .filter(|stored| form.priority != stored.priority)
+                    .map(|_| palette),
+            ))
             .child(
                 PRIORITIES
                     .into_iter()
@@ -664,22 +722,6 @@ impl Render for NtfyAlerts {
                     });
                 },
             )
-        });
-        let save = Button::new(
-            "ntfy-save",
-            "Save",
-            HoverHelp::tooltip("Save ntfy alert settings for this helm"),
-            Role::Button,
-        )
-        .tier(Tier::Primary)
-        .disabled(self.stored.is_none())
-        // Busy, not disabled, while saving or testing, so a clicked Save keeps focus (SPEC_impl.md, "Drafts").
-        .busy(self.form.is_saving() || self.testing)
-        .on_click({
-            let weak = weak.clone();
-            move |_, _, cx| {
-                let _ = weak.update(cx, |alerts, cx| alerts.save(cx));
-            }
         });
         let send_test = Button::new(
             "ntfy-send-test",
@@ -738,10 +780,10 @@ impl Render for NtfyAlerts {
                 |form, on| form.enabled = on,
                 cx,
             ))
-            .child(self.field(Field::Server, None))
-            .child(self.field(Field::Topic, None))
+            .child(self.field(Field::Server, None, palette))
+            .child(self.field(Field::Topic, None, palette))
             .child(choices::help(TOPIC_HELP, cx))
-            .child(self.field(Field::Token, Some(token_help)))
+            .child(self.field(Field::Token, Some(token_help), palette))
             .children(origin_hint)
             .child(self.switch(
                 Switch::ClearToken,
@@ -752,16 +794,14 @@ impl Render for NtfyAlerts {
             .child(priority)
             .children(self.unreadable.as_ref().map(|reason| failure("ntfy-load-error".into(), reason)))
             .children(retry)
-            // `.dialog-actions`: the form's buttons at its end, Send test before Save. They share a row, not a
-            // submission: Send test never sends the form.
+            // Send test stays beside its explanation. It uses the saved configuration while the footer owns Save.
             .child(
                 div()
                     .flex()
                     .justify_end()
                     .gap(px(8.))
                     .w_full()
-                    .child(send_test)
-                    .child(save),
+                    .child(send_test),
             )
             .child(choices::help(
                 "Save before testing. Send test uses the saved settings, not this form's unsaved changes.",

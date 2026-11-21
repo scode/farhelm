@@ -23,6 +23,8 @@ use crate::test_support::{any_open, bounds, center, click, focused_id, frame, ke
 
 /// The leave question's title, the old editor's words.
 const LEAVE: &str = "Save these changes before leaving?";
+/// The Settings-wide question also covers drafts in other sections.
+const CLOSE: &str = "Save changes before closing?";
 
 /// Settings at Recipes over one saved recipe, `rust-dev`, with its editor open on an empty credential catalog.
 fn edit_rust_dev(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) {
@@ -102,10 +104,14 @@ fn every_way_out_asks_first_and_keep_editing_stays(cx: &mut TestAppContext) {
         Leave::Press("settings-footer-close"),
     ] {
         leave_by(cx, how);
+        let title = match how {
+            Leave::Press("recipe-back" | "recipe-cancel") => LEAVE,
+            Leave::Escape | Leave::Press(_) => CLOSE,
+        };
         assert_eq!(
             question(cx),
             Some((
-                LEAVE.to_owned(),
+                title.to_owned(),
                 vec!["Keep editing".into(), "Discard".into(), "Save".into()]
             )),
             "{how:?} asks"
@@ -176,7 +182,7 @@ fn discard_finishes_the_leave_without_saving(cx: &mut TestAppContext) {
     open_editor_with(&mut helm, cx, "recipe-edit-rust-dev", json!([]));
     fill(cx, "recipe-disk", "30");
     leave_by(cx, Leave::Escape);
-    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(CLOSE));
     click(cx, "prompt-alternative-0");
     assert!(!any_open(cx), "Settings closed");
     assert_eq!(sent(&mut helm), [], "nothing was saved");
@@ -246,7 +252,7 @@ fn a_close_from_another_section_shows_recipes_first(cx: &mut TestAppContext) {
     keys(cx, "escape");
     assert!(any_open(cx));
     assert!(drawn(cx, "recipe-editor"), "Recipes is shown again");
-    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(CLOSE));
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
 }
 
@@ -407,7 +413,7 @@ fn a_close_while_the_save_is_out_waits_for_it(cx: &mut TestAppContext) {
     leave_by(cx, Leave::Escape);
     assert_eq!(
         question(cx),
-        Some((LEAVE.to_owned(), vec!["Keep editing".into(), "Save".into()])),
+        Some((CLOSE.to_owned(), vec!["Keep editing".into(), "Save".into()])),
         "no Discard while the save is out"
     );
     click(cx, "prompt-confirm");
@@ -425,7 +431,7 @@ fn a_close_while_the_save_is_out_waits_for_it(cx: &mut TestAppContext) {
     click(cx, "recipe-save");
     let save = one_command(&mut helm);
     leave_by(cx, Leave::Escape);
-    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(LEAVE));
+    assert_eq!(question(cx).map(|(title, _)| title).as_deref(), Some(CLOSE));
     helm.reply(save.id, 200, Some(entry("rust-dev", idle(), Value::Null)));
     settle(cx);
     assert!(
@@ -463,7 +469,7 @@ fn keep_editing_after_an_earlier_save_answer_stays_in_settings(cx: &mut TestAppC
     leave_by(cx, Leave::Escape);
     assert_eq!(
         question(cx).map(|(title, _)| title).as_deref(),
-        Some(LEAVE),
+        Some(CLOSE),
         "asked again"
     );
     click(cx, "prompt-cancel");
@@ -489,7 +495,7 @@ fn a_refused_save_takes_an_open_question_away(cx: &mut TestAppContext) {
     leave_by(cx, Leave::Escape);
     assert_eq!(
         question(cx).map(|(title, _)| title).as_deref(),
-        Some(LEAVE),
+        Some(CLOSE),
         "the premise"
     );
     helm.reply(
