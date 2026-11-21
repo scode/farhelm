@@ -938,13 +938,8 @@ impl Launcher {
 // ---------------------------------------------------------------------------------------------------------------------
 
 impl Launcher {
-    /// The Where row: Folder or Managed checkout ([`destination_choice`]). Not drawn where the mode holds the
-    /// destination.
-    pub(super) fn where_row(
-        &self,
-        palette: &theme::Palette,
-        cx: &mut Context<Self>,
-    ) -> Option<AnyElement> {
+    /// The switch in the Destination card's header. A held destination has no switch.
+    pub(super) fn destination_switch(&self, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.draft.holds(Field::Destination) {
             return None;
         }
@@ -961,7 +956,13 @@ impl Launcher {
                 });
             },
         );
-        Some(row("launcher-where-row", "Where", group, palette).into_any_element())
+        Some(
+            div()
+                .id("launcher-where-row")
+                .debug_selector(|| "launcher-where-row".into())
+                .child(group)
+                .into_any_element(),
+        )
     }
 
     /// Use the live source row, as the Replace with footer does. Its current

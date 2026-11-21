@@ -38,7 +38,7 @@ fn fixture_hosts() -> Vec<HostView> {
 
 /// A recipe as the pushed catalog carries it: `name` on `base` (the wire's `kind`, as `{"kind": "tensorlake_ubuntu"}`
 /// for managed Ubuntu), with no snapshot built.
-pub(super) fn recipe_json(name: &str, base: serde_json::Value) -> serde_json::Value {
+pub(crate) fn recipe_json(name: &str, base: serde_json::Value) -> serde_json::Value {
     json!({
         "name": name,
         "size": { "cpus": 2, "memory_gb": 4, "disk_gb": 20 },

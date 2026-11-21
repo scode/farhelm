@@ -514,12 +514,9 @@ fn tab_follows_the_launch_groups_when_all_placements_are_offered(cx: &mut TestAp
         "launcher-recent-0",
         "launcher-destination-Folder",
         "launcher-destination-Managed checkout",
-        "launcher-runs-on-Existing host",
-        "launcher-runs-on-New container",
-        "launcher-runs-on-New sandbox",
         "launcher-host",
-        "launcher-browse",
         "launcher-folder",
+        "launcher-browse",
         "launcher-name",
         "launcher-tabs-Agent",
         "launcher-harness-Codex",
@@ -2357,36 +2354,26 @@ fn the_host_list_offers_every_host_with_its_phase_and_a_click_picks_one(cx: &mut
     );
 }
 
-/// The host button is as wide as the chosen host's words (at least the old 12em), not the row, and 36 pixels high;
-/// Browse, as high, sits four pixels below the Host row, from the row's left edge; the host list is as wide
-/// as the hosts it offers, not the button. Why: the old launcher drew a compact picker (`min-width: 12em; height:
-/// 36px`) and its block layout put Browse under the row, and the port first stretched the button across the row with
-/// Browse beside it, which the bridge drive caught beside the reference pictures; a list tied to the narrow button
-/// would squeeze longer host names.
+/// The address arranges Host, Folder and Browse within one border, while the menu can widen for longer host names.
 #[gpui::test]
-fn the_host_button_is_as_wide_as_its_host_with_browse_under_it(cx: &mut TestAppContext) {
+fn the_address_joins_host_folder_and_browse_and_the_menu_can_widen(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "/seeded");
-    let (button, browse, row) = (
+    let (button, browse, address, folder) = (
         test_support::bounds(cx, "launcher-host"),
         test_support::bounds(cx, "launcher-browse"),
-        test_support::bounds(cx, "launcher-host-row"),
+        test_support::bounds(cx, "launcher-address"),
+        test_support::bounds(cx, "launcher-folder-row"),
     );
     assert!(
-        button.size.width >= gpui::px(168.) && button.size.width < row.size.width / 2.,
-        "compact, not the row's width: {button:?} in the row {row:?}"
+        button.right() <= folder.left() && folder.right() <= browse.left(),
+        "the order is Host, Folder, Browse"
     );
-    assert_eq!(
-        button.size.height,
-        gpui::px(36.),
-        "the host button's height"
+    assert_eq!(address.size.height, gpui::px(34.), "the outer border");
+    assert_eq!(button.top(), browse.top(), "both buttons align");
+    assert!(
+        browse.right() <= address.right(),
+        "Browse stays inside its border"
     );
-    assert_eq!(browse.size.height, gpui::px(36.), "Browse's height");
-    assert_eq!(
-        browse.top(),
-        row.bottom() + gpui::px(4.),
-        "the gap keeps the Host and Browse borders distinct"
-    );
-    assert_eq!(browse.left(), row.left(), "from the row's left edge");
     assert_eq!(
         name_of(cx, "launcher-host").as_deref(),
         Some("Host: host1"),
@@ -2405,6 +2392,28 @@ fn the_host_button_is_as_wide_as_its_host_with_browse_under_it(cx: &mut TestAppC
     );
 }
 
+/// Take a row from the real picker. Assert it opened so a missing or off-screen row fails at its own premise.
+pub(super) fn pick_host_menu_row(cx: &mut VisualTestContext, id: &'static str) {
+    click_in_body(cx, "launcher-host");
+    assert!(has_node(cx, "launcher-host-list"), "the Host menu opened");
+    assert!(has_node(cx, id), "the Host menu offers {id}");
+    let bounds = test_support::bounds(cx, id);
+    let menu = test_support::frame(cx)
+        .into_iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-host-list"))
+        .expect("the Host menu is drawn")
+        .bounds;
+    assert!(
+        menu.contains(&bounds.center()),
+        "the center of {id} is visible in the menu: {bounds:?} within {menu:?}"
+    );
+    test_support::click(cx, id);
+    assert!(
+        !has_node(cx, "launcher-host-list"),
+        "the pick closed the Host menu"
+    );
+}
+
 /// SPEC.md, "Launch templates": Save as template checks the host "only after a hand pick", and the old picker counted
 /// re-picking the host already shown as one. A picker that skipped the shown host would leave New's prefilled host
 /// unchecked however the user confirmed it. Specified: picking host1, already chosen, marks the host the user's own
@@ -2417,8 +2426,7 @@ fn re_picking_the_shown_host_counts_as_a_hand_pick(cx: &mut TestAppContext) {
         "the premise: New's host is a prefill"
     );
     click_in_body(cx, "launcher-folder");
-    // Browse sits between the folder and the host button in Tab order, as the old app's did.
-    keys(cx, "shift-tab shift-tab");
+    keys(cx, "shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
     // Down opens the list at the chosen host1, and Enter picks the highlighted row.
     keys(cx, "down");
@@ -2442,8 +2450,7 @@ fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     click_in_body(cx, "launcher-folder");
     keys(cx, "x");
-    // Browse sits between the folder and the host button in Tab order, as the old app's did.
-    keys(cx, "shift-tab shift-tab");
+    keys(cx, "shift-tab");
     assert!(
         host_focused(cx),
         "the premise: Shift+Tab from the folder reached the host button"
@@ -2476,8 +2483,7 @@ fn the_host_picker_browses_with_arrows_and_enter(cx: &mut TestAppContext) {
 fn typeahead_finds_a_host_and_escape_cancels(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     click_in_body(cx, "launcher-folder");
-    // Browse sits between the folder and the host button in Tab order, as the old app's did.
-    keys(cx, "shift-tab shift-tab");
+    keys(cx, "shift-tab");
     assert!(host_focused(cx), "the premise: the host button has focus");
     keys(cx, "h o s t 3");
     assert!(has_node(cx, "launcher-host-list"), "typing opened the list");
@@ -2518,7 +2524,7 @@ pub(super) fn selected_state(cx: &mut VisualTestContext, id: &str) -> Option<boo
 /// Cancel and the host button are reached with Tab like every other control: the launcher owns their focus handles (it
 /// starts Restart with on Cancel and watches the host button's focus), and a handle that was not a tab stop would leave
 /// a keyboard user unable to reach them. Specified: Tab from the launch kind's tabs eventually reaches Cancel, and
-/// Shift+Tab from the folder field reaches the host button, past Browse under it.
+/// Shift+Tab from the folder segment reaches the host picker at the start of the address.
 #[gpui::test]
 fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
     let (_helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
@@ -2527,8 +2533,7 @@ fn cancel_and_the_host_button_are_tab_stops(cx: &mut TestAppContext) {
         folder_focused(cx),
         "the premise: the click focused the folder"
     );
-    // Browse sits between the folder and the host button in Tab order, as the old app's did.
-    keys(cx, "shift-tab shift-tab");
+    keys(cx, "shift-tab");
     assert!(
         host_focused(cx),
         "Shift+Tab from the folder reached the host button"
@@ -2652,13 +2657,12 @@ fn a_mac_click_on_the_host_button_from_the_search_box_opens_the_list_and_focuses
 fn a_press_outside_closes_the_host_list_without_picking(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
     click_in_body(cx, "launcher-folder");
-    // Browse is between the folder and host button in Tab order. End opens the list with another host highlighted.
-    keys(cx, "shift-tab shift-tab");
+    keys(cx, "shift-tab");
     assert!(
         host_focused(cx),
         "the premise: the host button owns the keys"
     );
-    keys(cx, "end");
+    keys(cx, "h o s t 3");
     assert_eq!(selected_state(cx, "launcher-host-option-3"), Some(true));
     assert_eq!(
         draft(cx).host,
@@ -2714,8 +2718,50 @@ fn the_host_button_is_empty_before_hosts_arrive(cx: &mut TestAppContext) {
     );
 }
 
-/// The open list's other keys, as the old picker's: End and Home jump to the last and first host, Up moves back and
-/// stops at the first, and Space picks the highlighted host, as Enter does.
+/// An empty menu can stay open through host discovery. Enter chooses its first real highlight even when another
+/// live update changes the row order before the user takes it.
+#[gpui::test]
+fn an_open_host_menu_gets_its_first_highlight_when_hosts_arrive(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[]),
+    );
+    click_in_body(cx, "launcher-host");
+    assert!(
+        has_node(cx, "launcher-host-loading"),
+        "opened before hosts arrived"
+    );
+    let first = fixture_hosts(&[0]);
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: Collection::Hosts,
+        meta: first.meta,
+        upsert: first.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert_eq!(selected_state(cx, "launcher-host-option-1"), Some(true));
+    let added = fixture_hosts(&[1]);
+    helm.push(farhelm_proto::ui_channel::CollectionChanges {
+        collection: Collection::Hosts,
+        meta: meta(&["2", "1"]),
+        upsert: added.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert_eq!(selected_state(cx, "launcher-host-option-2"), Some(false));
+    assert_eq!(selected_state(cx, "launcher-host-option-1"), Some(true));
+    keys(cx, "enter");
+    assert!(
+        draft(cx).host_chosen,
+        "Enter explicitly picked the highlighted host"
+    );
+    assert_eq!(draft(cx).host, Some(1));
+    assert!(!has_node(cx, "launcher-host-list"));
+}
+
+/// End includes the new-environment choices. Home and Up reach and stay on the first host, and Space takes the
+/// highlighted host without involving the group headings.
 #[gpui::test]
 fn home_end_up_and_space_in_the_host_list(cx: &mut TestAppContext) {
     let cx = host_picker_on(cx, "~");
@@ -2723,9 +2769,9 @@ fn home_end_up_and_space_in_the_host_list(cx: &mut TestAppContext) {
     assert!(host_focused(cx), "the premise: the button has focus");
     keys(cx, "end");
     assert_eq!(
-        selected_state(cx, "launcher-host-option-3"),
+        selected_state(cx, "launcher-host-option-New container"),
         Some(true),
-        "End: the last host"
+        "End: the last available environment"
     );
     keys(cx, "home");
     assert_eq!(

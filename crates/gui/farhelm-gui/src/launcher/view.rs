@@ -10,9 +10,9 @@
 //!   press of it has to say pinned under them, as the old footer's column did. Save as template opens its inline panel
 //!   at the end of the body (`crate::templates::save_panel`), which holds the launcher's Launch while it is open.
 //! - **The body**, in reading and Tab order: the composer search box ([`search`]), the recent setups while any match
-//!   ([`recents`]), the Destination card (Where, Runs on, Host, a managed checkout's repository and preview, Folder,
-//!   Name; with a new environment chosen, Runs on's Recipe, Container host and note stand in for Host, a folder
-//!   destination is its fixed home, and a managed checkout is cloned inside it: [`placement`]), the
+//!   ([`recents`]), the Destination card (Folder or Managed checkout, then the Host, Folder and Browse address and
+//!   Name). Host also offers new environments, which put their placement controls beside Host in place of the
+//!   editable folder ([`placement`]). A managed checkout puts Repository and the preview there. Next come the
 //!   Agent and Command tabs, and the chosen tab's fields. The other tab's fields are not drawn, but its draft is kept
 //!   (SPEC.md: "switching tabs keeps each tab's draft"). Where the Agent tab offers model, effort and permissions,
 //!   [`choices`] keeps them together and wraps entire fields to fit the available width.
@@ -32,7 +32,7 @@
 //! - **Reads.** The model catalog is read when the launcher opens (`GET /api/launch-catalog`), including a quick
 //!   launch's prepared out of sight ([`prepare_unseen`]), and again on Retry after a failed read. A template batch that
 //!   arrives while the read is out waits for it ([`Launcher::apply_batch`]). The Tensorlake account is read once beside
-//!   it (`GET /api/tensorlake`, `placement`), for New sandbox's segment and prerequisites, and a quick launch waits for
+//!   it (`GET /api/tensorlake`, `placement`), for New sandbox's menu row and prerequisites, and a quick launch waits for
 //!   both reads before it applies its templates. Hosts, sessions and the remembered permission are read from the store
 //!   while drawing, and the remembered wrapper prefixes when an agent type is chosen.
 //!
@@ -125,6 +125,14 @@ const WIDTH: f32 = 960.;
 /// The gap between form fields. Each label sits close to the field it describes.
 const ROW_GAP: f32 = 12.;
 const LABEL_GAP: f32 = 4.;
+/// Match the Model row height. The Host and Browse segments sit inside the address's one-pixel border.
+const ADDRESS_HEIGHT: gpui::Pixels = choices::MODEL_ROW_CONTROL_HEIGHT;
+/// Reserve room for a host mark and its name while leaving most of the address for a path.
+const ADDRESS_HOST_WIDTH: f32 = 188.;
+/// Leave enough path space for a short folder alongside the host and Browse before Name wraps beneath them.
+const ADDRESS_MIN_WIDTH: f32 = 348.;
+/// The Name column can drop beneath the address as the available form width contracts.
+const DESTINATION_NAME_WIDTH: f32 = 170.;
 /// `.launch-composer-columns`: the destination block and the choices are 20 pixels apart.
 const SECTION_GAP: f32 = 20.;
 /// `.create-session-form .dialog-tile .action-icon`: the header tile's glyph size.
@@ -1490,13 +1498,76 @@ fn row(
         .flex_col()
         .gap(px(LABEL_GAP))
         .min_w_0()
+        .child(field_label(label, palette))
+        .child(div().min_w_0().child(control))
+}
+
+/// Shared label ink for both ordinary fields and the separately aligned parts of the address field.
+fn field_label(label: impl IntoElement, palette: &theme::Palette) -> Div {
+    div()
+        .text_size(metrics::TEXT_SM)
+        .text_color(theme::color(palette.fg_1))
+        .child(label)
+}
+
+/// Draw the controls that share the first destination row under one border. A recipe takes the folder's slot when
+/// launching into an environment. The component IDs still name the same actions and bridge targets.
+fn address_line(
+    host: AnyElement,
+    right: AnyElement,
+    right_label: &'static str,
+    right_id: &'static str,
+    browse: Option<Button>,
+    ink: theme::Token,
+    palette: &theme::Palette,
+) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(LABEL_GAP))
         .child(
             div()
-                .text_size(metrics::TEXT_SM)
-                .text_color(theme::color(palette.fg_1))
-                .child(label),
+                .flex()
+                .child(field_label("Host", palette).w(px(ADDRESS_HOST_WIDTH)))
+                .child(field_label(right_label, palette).px(px(8.))),
         )
-        .child(div().min_w_0().child(control))
+        .child(
+            div()
+                .id("launcher-address")
+                .debug_selector(|| "launcher-address".into())
+                .flex()
+                .items_center()
+                .min_h(ADDRESS_HEIGHT)
+                .border_1()
+                .border_color(theme::color(ink))
+                .rounded(metrics::RADIUS_SM)
+                .bg(theme::color(palette.well))
+                .child(
+                    div()
+                        .id("launcher-host-row")
+                        .debug_selector(|| "launcher-host-row".into())
+                        .w(px(ADDRESS_HOST_WIDTH))
+                        .flex_none()
+                        .border_r_1()
+                        .border_color(theme::color(palette.border_dim))
+                        .child(host),
+                )
+                .child(
+                    div()
+                        .id(right_id)
+                        .debug_selector(move || right_id.into())
+                        .flex_1()
+                        .min_w_0()
+                        .child(right),
+                )
+                .children(browse.map(|browse| {
+                    div()
+                        .flex_none()
+                        .border_l_1()
+                        .border_color(theme::color(palette.border_dim))
+                        .child(browse)
+                })),
+        )
 }
 
 /// Put brief guidance beside the label while the control keeps its width.
@@ -2263,6 +2334,10 @@ impl Render for Launcher {
             self.checkout_folder_field()
         } else if self.draft.holds(Field::Destination) || self.draft.target.is_some() {
             div()
+                .flex()
+                .items_center()
+                .min_h(ADDRESS_HEIGHT - px(2.))
+                .px(px(8.))
                 .font_family(crate::assets::TERMINAL_FONT)
                 .text_size(metrics::TEXT_MD)
                 .child(
@@ -2288,8 +2363,9 @@ impl Render for Launcher {
                             "Folder: an existing directory on the host, absolute or starting with ~",
                         ),
                     )
+                    .embedded()
+                    .height(ADDRESS_HEIGHT - px(2.))
                     .monospace()
-                    .invalid(self.folder_problem(cx).is_some())
                     .on_vertical(move |arrow, window, cx| {
                         let _ = on_arrow
                             .update(cx, |launcher, cx| launcher.folder_arrow(arrow, window, cx));
@@ -2322,14 +2398,14 @@ impl Render for Launcher {
             let taken = template_base
                 .filter(|(_, taken)| *taken)
                 .map(|(base, _)| checkout_name::taken_note(&base, palette, window, cx));
-            let field =
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(px(6.))
-                    // Named for tests, which find the field by where it is drawn: the row is taller than the field while
-                    // the pill wraps under its label.
-                    .child(div().debug_selector(|| "launcher-name".into()).child(
+            let field = div()
+                .flex()
+                .flex_col()
+                .gap(px(6.))
+                // Named for tests, which find the field by where it is drawn: the row is taller than the field while
+                // the pill wraps under its label.
+                .child(
+                    div().debug_selector(|| "launcher-name".into()).child(
                         self.launcher_input(
                             "launcher-name",
                             &self.name,
@@ -2337,25 +2413,150 @@ impl Render for Launcher {
                             HoverHelp::tooltip(
                                 "Name: the session's title; left empty, Farhelm names it",
                             ),
-                        ),
-                    ))
-                    .children(taken);
+                        )
+                        .height(ADDRESS_HEIGHT),
+                    ),
+                )
+                .children(taken);
             Some(row("launcher-name-row", caption, field, palette))
         };
-        // With a new environment chosen, Runs on's rows stand in for the Host row (`placement`); the Where row stays,
-        // a folder destination being the environment's home and a managed checkout cloned inside it.
+        // Host always has a segment. When Recipe or Repository needs more room, its fields replace the right side
+        // of the address and use their own rows. Keep the host picker as the way back to an existing host.
         let environment = self.draft.target.clone();
-        let where_row = self.where_row(palette, cx);
-        let placement = self.placement_rows(palette, cx);
-        let host_row = environment
-            .is_none()
-            .then(|| self.host_row(palette, window, cx));
-        let environment_note = environment.as_ref().map(|target| {
-            help_line(
-                crate::environment_ui::ProviderUi(target.provider()).launch_help(),
+        let destination_switch = self.destination_switch(cx);
+        let host = self.host_control(palette, window, cx);
+        let address = if let Some(target) = &environment {
+            let controls = self.placement_controls(target, cx);
+            let first_line = controls.recipe.map(|recipe| {
+                address_line(
+                    host,
+                    recipe.address_segment().into_any_element(),
+                    "Recipe",
+                    "launcher-recipe-row",
+                    None,
+                    palette.border,
+                    palette,
+                )
+            });
+            let container_host = controls.container_host.map(|control| {
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(LABEL_GAP))
+                    .flex_grow_1()
+                    .flex_basis(px(164.))
+                    .min_w(px(164.))
+                    .child(row(
+                        "launcher-container-host-row",
+                        "Container host",
+                        control,
+                        palette,
+                    ))
+                    .children(self.place_note(target, palette, cx))
+            });
+            let rows = div()
+                .flex()
+                .flex_col()
+                .gap(px(ROW_GAP))
+                .children(first_line);
+            if self.draft.checkout.is_some() {
+                rows.children(container_host)
+                    .children(self.checkout_rows(palette, window, cx))
+                    .child(row("launcher-folder-row", "Folder", folder, palette))
+                    .into_any_element()
+            } else {
+                // A new environment starts at its home. Give the held value the same edge and height as its neighbor.
+                let held = div()
+                    .bg(theme::color(palette.well))
+                    .border_1()
+                    .border_color(theme::color(palette.border))
+                    .rounded(metrics::RADIUS_SM)
+                    .child(folder);
+                let folder = row("launcher-folder-row", "Folder", held, palette)
+                    .w(px(84.))
+                    .flex_none();
+                rows.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_start()
+                        .gap(px(ROW_GAP))
+                        .children(container_host)
+                        .child(folder),
+                )
+                .into_any_element()
+            }
+        } else if self.draft.checkout.is_some() {
+            let checkout = self.checkout_rows(palette, window, cx);
+            let host = div()
+                .flex()
+                .items_center()
+                .min_h(ADDRESS_HEIGHT)
+                .border_1()
+                .border_color(theme::color(palette.border))
+                .rounded(metrics::RADIUS_SM)
+                .bg(theme::color(palette.well))
+                .child(host);
+            div()
+                .flex()
+                .items_start()
+                .gap(px(ROW_GAP))
+                .child(
+                    row("launcher-host-row", "Host", host, palette)
+                        .w(px(ADDRESS_HOST_WIDTH))
+                        .flex_none(),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .gap(px(ROW_GAP))
+                        .children(checkout)
+                        .child(row("launcher-folder-row", "Folder", folder, palette)),
+                )
+                .into_any_element()
+        } else {
+            let invalid = self.folder_problem(cx).is_some();
+            let focused = !self.draft.holds(Field::Destination)
+                && self.folder.focus_handle(cx).is_focused(window);
+            let ink = if invalid {
+                palette.warn
+            } else if focused {
+                palette.accent
+            } else {
+                palette.border
+            };
+            address_line(
+                host,
+                folder,
+                "Folder",
+                "launcher-folder-row",
+                self.browse_button(palette, cx),
+                ink,
                 palette,
             )
-        });
+            .into_any_element()
+        };
+        let address_and_name = div()
+            .flex()
+            .flex_wrap()
+            .items_start()
+            .gap(px(ROW_GAP))
+            .child(
+                div()
+                    .flex_grow_1()
+                    .flex_basis(px(ADDRESS_MIN_WIDTH))
+                    .min_w(px(ADDRESS_MIN_WIDTH))
+                    .max_w_full()
+                    .child(address),
+            )
+            .children(name.map(|name| {
+                name.flex_basis(px(DESTINATION_NAME_WIDTH))
+                    .min_w(px(DESTINATION_NAME_WIDTH))
+                    .flex_grow(0.3)
+            }));
         // Under the host, as the old launcher said it there as well as beside Launch: the folder was taken on the
         // installation this host row named before.
         let installation_moved = self
@@ -2368,7 +2569,6 @@ impl Render for Launcher {
                     palette,
                 )
             });
-        let checkout_rows = self.checkout_rows(palette, window, cx);
         // The id makes the whole Destination block one target for the bridge, labels included, so a docs screenshot
         // can crop to it (the rows' own ids, from `row`, cover it only piecewise).
         let destination = div()
@@ -2381,11 +2581,18 @@ impl Render for Launcher {
             .border_1()
             .border_color(theme::color(palette.border_dim))
             .rounded(px(6.))
-            .child(section_label("DESTINATION", palette))
-            .children(where_row)
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .justify_between()
+                    .items_center()
+                    .gap(px(8.))
+                    .child(section_label("DESTINATION", palette))
+                    .children(destination_switch),
+            )
             .children(self.replacement_checkout_warning(palette, cx))
-            .children(placement)
-            .children(host_row)
+            .child(address_and_name)
             .children(
                 self.host_picker
                     .note
@@ -2395,13 +2602,21 @@ impl Render for Launcher {
                     }),
             )
             .children(installation_moved)
-            .children(checkout_rows)
-            .child(row("launcher-folder-row", "Folder", folder, palette))
             .children(self.replacement_folder_hint(palette, cx))
-            .children(environment_note)
+            .children(environment.as_ref().and_then(|target| {
+                let note = crate::environment_ui::ProviderUi(target.provider()).launch_notice()?;
+                Some(
+                    div()
+                        .id("launcher-environment-notice")
+                        .role(Role::Label)
+                        .aria_label(note)
+                        .text_size(metrics::TEXT_SM)
+                        .text_color(theme::color(palette.fg_2))
+                        .child(note),
+                )
+            }))
             .children(self.registration_note(palette))
-            .children(self.folder_problem_line(palette, cx))
-            .children(name);
+            .children(self.folder_problem_line(palette, cx));
         let (on_tab, on_tab_enter) = (weak.clone(), weak.clone());
         let tabs = (!self.draft.holds(Field::LaunchKind)).then(|| {
             TabStrip::new(

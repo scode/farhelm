@@ -1,5 +1,5 @@
-//! Tests of the launcher's Runs on switch and a new container's rows in the real main view over the helm client's
-//! fake: which segments show, what New container chooses and shows (its note on the recipe's build there included), the
+//! Tests of the launcher's Host menu and a new container's rows in the real main view over the helm client's
+//! fake: which offers show, what New container chooses and shows (its note on the recipe's build there included), the
 //! folder field on the way back to Existing host, the composer search rows New container refuses, and the Podman checks
 //! the launcher asks for as it opens. SPEC.md, "Creation" (the Runs on bullet) and "Container sessions".
 //!
@@ -19,7 +19,7 @@ use super::environment_launch_tests::{
 };
 use super::launch_tests::command_draft;
 use super::recents_view_tests::{answer_history, chosen, history, launched};
-use super::view_tests::{click_in_body, draft, fixture_hosts, name_of, read};
+use super::view_tests::{click_in_body, draft, fixture_hosts, name_of, pick_host_menu_row, read};
 use crate::test_support::{self, keys, meta, settle};
 
 /// [`window_with`] on [`command_draft`], host1 to host3 and [`plain_preferences`].
@@ -37,40 +37,51 @@ fn window(
     )
 }
 
-/// SPEC.md, "Creation": "A segment with no usable place is hidden". A segment offered with nothing to create on would
-/// only lead to a refusal. Specified: with host1's Podman usable, the switch shows Existing host and New container, and
-/// no New sandbox while the Tensorlake account read is still out (`sandbox_view_tests` has the account's own cases).
+/// A new-environment offer needs a usable place. With host1's Podman usable, the picker shows New container after
+/// existing hosts, and omits New sandbox while the account read is still out.
 #[gpui::test]
-fn segments_without_a_usable_place_are_hidden(cx: &mut TestAppContext) {
+fn new_environments_without_a_usable_place_are_hidden(cx: &mut TestAppContext) {
     let (_helm, cx) = window(cx);
-    assert!(name_of(cx, "launcher-runs-on-Existing host").is_some());
-    assert!(name_of(cx, "launcher-runs-on-New container").is_some());
-    assert_eq!(name_of(cx, "launcher-runs-on-New sandbox"), None);
+    click_in_body(cx, "launcher-host");
+    assert_eq!(
+        name_of(cx, "launcher-host-existing").as_deref(),
+        Some("Existing host")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host-new").as_deref(),
+        Some("New environment")
+    );
+    assert_eq!(
+        name_of(cx, "launcher-host-option-New container").as_deref(),
+        Some("New container · experimental")
+    );
+    assert_eq!(name_of(cx, "launcher-host-option-New sandbox"), None);
 }
 
-/// SPEC.md, "Creation": "the switch is hidden when only Existing host remains", so a fleet without a usable container
-/// host keeps the launcher as it was. Specified: with only host2 (Podman not installed), no switch is drawn.
+/// A fleet without a usable container host or account offers only its existing hosts. An empty New environment group
+/// would misleadingly suggest that a launch could provision something there.
 #[gpui::test]
-fn the_switch_is_hidden_when_only_existing_host_remains(cx: &mut TestAppContext) {
+fn the_environment_group_is_hidden_when_only_existing_hosts_remain(cx: &mut TestAppContext) {
     let hosts = fixture_hosts(&[1]);
     let (_helm, cx) = window_with(cx, command_draft(), hosts, plain_preferences());
     assert!(
         name_of(cx, "launcher-destination-Folder").is_some(),
         "the premise: the launcher is drawn"
     );
-    assert_eq!(
-        name_of(cx, "launcher-runs-on-Existing host"),
-        None,
-        "no switch"
+    click_in_body(cx, "launcher-host");
+    assert!(
+        name_of(cx, "launcher-host-option-2").is_some(),
+        "existing hosts are offered"
     );
-    assert_eq!(name_of(cx, "launcher-runs-on-New container"), None);
+    assert_eq!(name_of(cx, "launcher-host-new"), None);
+    assert_eq!(name_of(cx, "launcher-host-option-New container"), None);
 }
 
 /// SPEC.md, "Creation": New container "shows Recipe and Container host, defaulting to the last container host used";
 /// "Hosts with unusable Podman are disabled with their reason, and the note says whether the recipe is ready there or
 /// builds on first launch"; "Container sessions": "Folder destinations use its home, without Browse or recent folders",
 /// and "The footer names the new container and its host". Specified: with host2 the last container host but unusable,
-/// New container chooses `web` on host1, the first usable host; the Host row goes and Folder shows `~` as text, with no
+/// New container chooses `web` on host1, the first usable host. The picker names the environment and Folder shows `~` as text, with no
 /// field; host2's option says why and cannot be chosen; the note says the build status is being checked while the
 /// helm has pushed nothing about `web` there; the footer names "new web container on host1". host3, an SSH host
 /// carrying no Podman check, is listed too, disabled with the helm's words for it. What the note says once the recipe
@@ -84,7 +95,7 @@ fn new_container_shows_its_rows_with_unusable_hosts_disabled(cx: &mut TestAppCon
     };
     let (mut helm, cx) = window_with(cx, command_draft(), fixture_hosts(&[0, 1, 2]), preferences);
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert_eq!(
         read(cx, |launcher, _, _| launcher.draft.target.clone()),
         Some(LaunchTarget::Environment {
@@ -93,7 +104,10 @@ fn new_container_shows_its_rows_with_unusable_hosts_disabled(cx: &mut TestAppCon
         }),
         "the last container host is unusable, so the first usable one"
     );
-    assert_eq!(name_of(cx, "launcher-host"), None, "no Host row");
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: New container")
+    );
     assert_eq!(name_of(cx, "launcher-folder"), None, "no folder field");
     assert_eq!(
         name_of(cx, "launcher-folder-held").as_deref(),
@@ -165,7 +179,7 @@ fn new_container_defaults_to_the_last_container_host(cx: &mut TestAppContext) {
         preferences,
     );
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert_eq!(
         read(cx, |launcher, _, _| launcher
             .draft
@@ -225,20 +239,23 @@ fn opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable(cx: &mut 
 }
 
 /// SPEC.md, "Container sessions": "The managed checkout is cloned inside it. Folder destinations use its home". The
-/// Where row must stay with a recipe chosen, or a managed checkout could not be asked for, while the Host row gives way
-/// to the container's rows. Specified: in New container the Where row shows and the Host row does not; Folder shows
+/// The destination switch stays available with a recipe chosen so the user can ask for a managed checkout. The host
+/// segment names the environment and can take a different target. Folder shows
 /// `~` with no field; choosing Managed checkout shows the repository field, says the checkout is cloned inside the new
 /// environment, and asks the host for no preview.
 #[gpui::test]
 fn a_new_container_keeps_the_where_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx);
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert!(
         name_of(cx, "launcher-destination-Folder").is_some(),
         "the Where row shows"
     );
-    assert_eq!(name_of(cx, "launcher-host"), None, "no Host row");
+    assert_eq!(
+        name_of(cx, "launcher-host").as_deref(),
+        Some("Host: New container")
+    );
     assert_eq!(
         name_of(cx, "launcher-folder"),
         None,
@@ -292,12 +309,12 @@ fn leaving_new_container_shows_the_drafts_folder_in_the_field(cx: &mut TestAppCo
         "the premise: a folder other than home was typed"
     );
     assert_eq!(folder_field(cx), typed, "the premise: the field shows it");
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert!(
         draft(cx).target.is_some(),
         "the premise: New container is chosen"
     );
-    test_support::click(cx, "launcher-runs-on-Existing host");
+    pick_host_menu_row(cx, "launcher-host-option-1");
     let left = draft(cx);
     assert_eq!(left.target, None, "the premise: back on Existing host");
     assert_eq!(left.folder.value(), "~");
@@ -354,7 +371,7 @@ fn the_note_follows_the_recipe_place(cx: &mut TestAppContext) {
         vec![places],
     );
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert_eq!(
         name_of(cx, "launcher-place-note").as_deref(),
         Some("Checking build status…"),
@@ -382,7 +399,7 @@ fn the_note_follows_the_recipe_place(cx: &mut TestAppContext) {
 fn no_note_once_the_container_host_is_gone(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx);
     answer_except(&mut helm, cx, |_| false);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert!(
         name_of(cx, "launcher-place-note").is_some(),
         "the premise: the note is drawn while host1 is listed"
@@ -407,7 +424,7 @@ fn no_note_once_the_container_host_is_gone(cx: &mut TestAppContext) {
 
     test_support::click(cx, "launcher-launch");
     let refusal = name_of(cx, "launcher-refusal").expect("the missing host prevents launch");
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     assert_eq!(name_of(cx, "launcher-refusal"), Some(refusal));
 }
 
@@ -440,7 +457,7 @@ fn new_container_refuses_folder_rows_and_takes_recent_setups_back_to_their_host(
     }]);
     let (mut helm, cx) = window(cx);
     answer_history(&mut helm, cx, &answer);
-    test_support::click(cx, "launcher-runs-on-New container");
+    pick_host_menu_row(cx, "launcher-host-option-New container");
     let before = draft(cx);
     assert!(
         before.target.is_some(),

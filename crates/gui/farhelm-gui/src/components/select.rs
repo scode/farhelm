@@ -145,6 +145,15 @@ pub struct Select {
     on_choose: Option<OnChoose>,
     on_enter: Option<MainAction>,
     focus: Option<FocusHandle>,
+    look: SelectLook,
+}
+
+/// Placement controls line up with the launcher's 34px form fields. The address itself owns a joined segment's edge.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum SelectLook {
+    Standard,
+    Form,
+    AddressSegment,
 }
 
 impl Select {
@@ -171,12 +180,25 @@ impl Select {
             on_choose: None,
             on_enter: None,
             focus: None,
+            look: SelectLook::Standard,
         }
     }
 
     /// The options, in the order the list shows them.
     pub fn options(mut self, options: impl IntoIterator<Item = SelectOption>) -> Self {
         self.options.extend(options);
+        self
+    }
+
+    /// Align a placement select with the other controls on the destination address's line.
+    pub(crate) fn compact(mut self) -> Self {
+        self.look = SelectLook::Form;
+        self
+    }
+
+    /// Use the address's shared well and edge while leaving the choice list and focus behavior on the select.
+    pub(crate) fn address_segment(mut self) -> Self {
+        self.look = SelectLook::AddressSegment;
         self
     }
 
@@ -367,6 +389,11 @@ impl RenderOnce for Select {
             .or_else(|| self.placeholder.clone())
             .unwrap_or_default();
         let ring = enabled && focus::shows_ring(&focus, window, cx);
+        let (height, pad_y, chevron) = match self.look {
+            SelectLook::Standard => (MIN_HEIGHT, PAD.0, 14.),
+            SelectLook::Form => (34., 4., 10.),
+            SelectLook::AddressSegment => (32., 4., 10.),
+        };
         let mut control = div()
             .id(ElementId::Name(self.id.clone()))
             .relative()
@@ -378,16 +405,19 @@ impl RenderOnce for Select {
             .aria_expanded(open.is_some())
             .w_full()
             .min_w_0()
-            .min_h(px(MIN_HEIGHT))
+            .min_h(px(height))
             .flex()
             .items_center()
             .gap(px(8.))
-            .py(px(PAD.0))
+            .py(px(pad_y))
             .px(px(PAD.1))
-            .bg(theme::color(palette.well))
-            .border_1()
-            .border_color(theme::color(palette.border))
-            .rounded(metrics::RADIUS_SM)
+            .when(self.look != SelectLook::AddressSegment, |control| {
+                control
+                    .bg(theme::color(palette.well))
+                    .border_1()
+                    .border_color(theme::color(palette.border))
+                    .rounded(metrics::RADIUS_SM)
+            })
             .text_size(metrics::TEXT_MD)
             .text_color(theme::color(palette.fg_0))
             .when_some(shown_mark, |control, mark| {
@@ -405,9 +435,13 @@ impl RenderOnce for Select {
             .child(
                 svg()
                     .path(Icon::ChevronDown.path())
-                    .size(px(14.))
+                    .size(px(chevron))
                     .flex_none()
-                    .text_color(theme::color(palette.fg_0)),
+                    .text_color(theme::color(if self.look == SelectLook::Standard {
+                        palette.fg_0
+                    } else {
+                        palette.fg_1
+                    })),
             )
             // A native disabled select dimmed as a whole.
             .when(!enabled, |control| control.opacity(0.5));
