@@ -34796,3 +34796,39 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: Fixed at the three task registration sites. Change `olkwzptqlpqsuulprwsylrmmupxqxorq`, bookmark
   `plan/triage-helm/03-provisioning-and-setup`, [PR #4500](https://github.com/scode/farhelm/pull/4500/changes).
+
+## tunnel-listener-stops-on-single-accept-error.md
+
+- Outcome: `fix code`.
+- Assessment: After one error accepting a connection (for example a brief file-descriptor shortage), a tunnel stops
+  listening, while Farhelm keeps showing it until a later list refresh silently removes it. The user has to reopen the
+  link. Verified: `crates/farhelm-helm/src/tunnels.rs:297-298` runs `let Ok((socket, _)) = accepted else { break; };`.
+  Nothing notifies the feed when the loop ends. By contrast the desktop's own second-launch listener sleeps and
+  continues on accept errors. How often accept fails was not measured.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code. Continue after transient accept errors with a short backoff.
+  If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to
+  the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal
+  or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback
+  file and its index entry.
+- Execution: Fixed. Change `ovkvssmpqxkzpsolwxswnzpvmuqzwvpl`, bookmark `plan/triage-helm/04-tunnels-and-credentials`,
+  [PR #4505](https://github.com/scode/farhelm/pull/4505/changes).
+
+## credential-push-misses-retired-lifetime.md
+
+- Outcome: `fix code`.
+- Assessment: credential_delivery.rs ~506–509 still cancels on `active.wait_for(|count| *count == 0)`, which can miss a
+  1→0→1 transition. Basis: SPEC_impl.md "Named credential catalog" (~5963): "Dropping the final lease cancels
+  in-progress pushes before their next transport poll." Fix: latch cancellation per lifetime (a generation in the watch
+  value).
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Change `ovkvssmpqxkzpsolwxswnzpvmuqzwvpl`, bookmark `plan/triage-helm/04-tunnels-and-credentials`,
+  [PR #4505](https://github.com/scode/farhelm/pull/4505/changes).

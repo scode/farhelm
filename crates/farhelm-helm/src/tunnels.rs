@@ -6,15 +6,16 @@
 //! redirecting an existing listener onto a different host or known installation.
 
 use std::collections::BTreeMap;
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::{Arc, Mutex, Weak};
+use std::time::Duration;
 
 use axum::extract::{Path, State};
 use axum::http::StatusCode;
 use axum::response::{IntoResponse, Response};
 use farhelm_proto::ErrorKind;
 use serde::{Deserialize, Serialize};
-use tokio::net::{TcpListener, TcpSocket};
+use tokio::net::{TcpListener, TcpSocket, TcpStream};
 use tokio::sync::oneshot;
 use tokio::task::{JoinHandle, JoinSet};
 
@@ -280,9 +281,14 @@ fn bind_listener(remote_port: u16) -> std::io::Result<TcpListener> {
 }
 
 /// Re-resolve each socket, retaining no application Arc while relay bytes are idle.
+///
+/// A transient accept error (such as descriptor pressure) does not retire the
+/// advertised listener. Retry after a short pause, preserving prompt cancellation
+/// when the tunnel closes or consent is withdrawn. The accept operation owns
+/// the bound listener, so dropping it releases the port before draining relays.
 async fn accept_loop(
     state: Weak<AppState>,
-    listener: TcpListener,
+    mut accept: impl AsyncFnMut() -> std::io::Result<(TcpStream, SocketAddr)>,
     session: SessionKey,
     owner: SessionClaim,
     target: TunnelTarget,
@@ -294,8 +300,19 @@ async fn accept_loop(
             biased;
             _ = &mut cancel => break,
             _ = relays.join_next(), if !relays.is_empty() => {},
-            accepted = listener.accept() => {
-                let Ok((socket, _)) = accepted else { break; };
+            accepted = accept() => {
+                let (socket, _) = match accepted {
+                    Ok(accepted) => accepted,
+                    Err(error) => {
+                        tracing::debug!(%error, "tunnel listener could not accept a connection");
+                        tokio::select! {
+                            biased;
+                            _ = &mut cancel => break,
+                            _ = tokio::time::sleep(Duration::from_millis(100)) => {}
+                        }
+                        continue;
+                    }
+                };
                 let state = state.clone();
                 let session = session.clone();
                 let owner = owner.clone();
@@ -310,7 +327,7 @@ async fn accept_loop(
             }
         }
     }
-    drop(listener);
+    drop(accept);
     relays.shutdown().await;
 }
 
@@ -421,7 +438,7 @@ async fn open_from(
                 let (cancel, cancelled) = oneshot::channel();
                 let task = tokio::spawn(accept_loop(
                     Arc::downgrade(state),
-                    listener,
+                    async move || listener.accept().await,
                     session.clone(),
                     owner.clone(),
                     target,
@@ -623,7 +640,6 @@ mod tests {
     use farhelm_proto::{ControlMsg, Frame};
     use serde_json::json;
     use tokio::io::{AsyncReadExt, DuplexStream, ReadHalf, WriteHalf};
-    use tokio::net::TcpStream;
     use tower::ServiceExt;
 
     type PeerRead = FrameReader<ReadHalf<DuplexStream>>;
@@ -1644,6 +1660,56 @@ mod tests {
         assert_eq!(result, 0, "getsockopt: {}", std::io::Error::last_os_error());
         assert_eq!(length as usize, std::mem::size_of_val(&reuse));
         assert_eq!(reuse, 0, "tunnel listener must keep SO_REUSEADDR off");
+    }
+
+    /// An error returned by accept must leave the advertised port serving relays.
+    /// The fixture injects one error without exhausting the process's descriptors.
+    #[farhelm_testtrace::test]
+    async fn tunnel_retries_accept_on_the_same_port() {
+        let (harness, host, mut reader, _writer) = remote_peer().await;
+        let session = remote_key(&harness);
+        let (owner, _) = crate::sessions::route_active_session(&harness.state, &session)
+            .await
+            .unwrap();
+        assert_eq!(owner.host, host);
+        let listener = bind_listener(8080).unwrap();
+        let address = listener.local_addr().unwrap();
+        let (fault_seen, fault) = oneshot::channel();
+        let mut fault_seen = Some(fault_seen);
+        let (cancel, cancelled) = oneshot::channel();
+        let task = tokio::spawn(accept_loop(
+            Arc::downgrade(&harness.state),
+            async move || {
+                if let Some(seen) = fault_seen.take() {
+                    let _ = seen.send(());
+                    return Err(std::io::ErrorKind::ConnectionAborted.into());
+                }
+                listener.accept().await
+            },
+            session,
+            owner,
+            TunnelTarget {
+                address: None,
+                port: 8080,
+            },
+            cancelled,
+        ));
+        tokio::time::timeout(Duration::from_secs(10), fault)
+            .await
+            .expect("the accept operation was polled")
+            .expect("the fixture returned its single error");
+        let _socket = TcpStream::connect(address)
+            .await
+            .expect("the port stays bound");
+        assert!(matches!(
+            control(&mut reader).await,
+            ControlMsg::BeginTcpRelay { port: 8080, .. }
+        ));
+        cancel.send(()).unwrap();
+        tokio::time::timeout(Duration::from_secs(10), task)
+            .await
+            .expect("tunnel cancelled")
+            .unwrap();
     }
 
     /// A tunnel never listens on the remote port number, even when it is free

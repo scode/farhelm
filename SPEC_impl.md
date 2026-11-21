@@ -5992,8 +5992,9 @@ Suspend/Remove cancellation path drops both before acknowledging parking. Replac
 including hooks that have not published Connected, rather than filtering the manager's public phase. It uses the
 connection's nonsecret selection snapshot; pending recipe edits wait for a later connection. A hook that has not yet
 loaded a binding reads the committed replacement itself or reports its own connection-delivery failure; a skipped push
-does not supersede that warning. Dropping the final lease cancels in-progress pushes before their next transport poll.
-Host removal forgets retained runtime state.
+does not supersede that warning. Dropping the final lease cancels in-progress pushes before their next transport poll. A
+new lifetime gets a new generation, so a push queued or running on the old one stays cancelled even if the next
+connection arrives right away. Host removal forgets retained runtime state.
 
 A nonblank replacement uses the existing owned-handler task around commit and push, so an HTTP disconnect cannot abandon
 delivery after saving. One absolute SSH timeout bounds all candidates, mutex waits and remote operations, with four

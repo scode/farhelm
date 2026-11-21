@@ -150,8 +150,24 @@ struct Live {
 struct Entry {
     entry_uuid: String,
     serial: Arc<tokio::sync::Mutex<()>>,
-    active: watch::Sender<usize>,
+    active: watch::Sender<LeaseState>,
     live: Mutex<Live>,
+}
+
+/// A connected lifetime runs from its first lease to its last. The generation
+/// distinguishes lifetimes even if the receiver misses the zero count.
+#[derive(Clone, Copy, Default)]
+struct LeaseState {
+    count: usize,
+    generation: u64,
+}
+
+impl LeaseState {
+    /// Overlapping leases share one lifetime. A new lifetime cannot
+    /// authorize work that belonged to the previous one.
+    fn is_current(self, generation: u64) -> bool {
+        self.count != 0 && self.generation == generation
+    }
 }
 
 impl Entry {
@@ -160,7 +176,7 @@ impl Entry {
         Self {
             entry_uuid: row.entry_uuid.clone(),
             serial: Arc::default(),
-            active: watch::channel(0).0,
+            active: watch::channel(LeaseState::default()).0,
             live: Mutex::default(),
         }
     }
@@ -174,12 +190,13 @@ impl Entry {
     /// Check a queued candidate again before superseding any warning. A new
     /// connection may have cleared its selections while this host waited for a
     /// push slot; only that connection can report its still-unknown delivery.
-    fn begin_push(&self, name: &str) -> Option<u64> {
+    fn begin_push(&self, name: &str, generation: u64) -> Option<u64> {
         let mut live = self.live.lock().unwrap();
-        if !live
-            .binding
-            .as_ref()
-            .is_some_and(|(_, binding)| binding.uses(name))
+        if !self.active.borrow().is_current(generation)
+            || !live
+                .binding
+                .as_ref()
+                .is_some_and(|(_, binding)| binding.uses(name))
         {
             return None;
         }
@@ -215,7 +232,7 @@ impl Drop for ConnectionLease {
     fn drop(&mut self) {
         self.0
             .active
-            .send_modify(|count| *count = count.saturating_sub(1));
+            .send_modify(|state| state.count = state.count.saturating_sub(1));
     }
 }
 
@@ -300,11 +317,15 @@ impl CredentialDelivery {
         let entry = self.entry(row);
         {
             let mut live = entry.live.lock().unwrap();
-            entry.active.send_modify(|count| {
-                if *count == 0 {
+            entry.active.send_modify(|state| {
+                if state.count == 0 {
                     live.binding = None;
+                    state.generation = state
+                        .generation
+                        .checked_add(1)
+                        .expect("lease generation exhausted");
                 }
-                *count += 1;
+                state.count += 1;
             });
         }
         ConnectionLease(entry)
@@ -324,7 +345,7 @@ impl CredentialDelivery {
     /// still holding the removed entry. Its later lease Drop is harmless.
     pub(super) fn forget(&self, host: HostId) {
         if let Some(entry) = self.entries.lock().unwrap().remove(&host) {
-            entry.active.send_replace(0);
+            entry.active.send_modify(|state| state.count = 0);
         }
     }
 
@@ -412,18 +433,18 @@ impl CredentialDelivery {
             .lock()
             .unwrap()
             .values()
-            .filter(|entry| {
-                let active = *entry.active.borrow() != 0;
-                active
+            .filter_map(|entry| {
+                let lease = *entry.active.borrow();
+                (lease.count != 0
                     && entry
                         .live
                         .lock()
                         .unwrap()
                         .binding
                         .as_ref()
-                        .is_some_and(|(_, bindings)| bindings.uses(name))
+                        .is_some_and(|(_, bindings)| bindings.uses(name)))
+                .then(|| (Arc::clone(entry), lease.generation))
             })
-            .cloned()
             .collect::<Vec<_>>();
         if candidates.is_empty() {
             return Vec::new();
@@ -438,8 +459,12 @@ impl CredentialDelivery {
             tokio::spawn(async move {
                 let (this, name, events) = (&this, name.as_str(), &*events);
                 stream::iter(candidates.into_iter().enumerate())
-                    .map(|(index, entry)| async move {
-                        (index, this.push_one(&entry, name, deadline, events).await)
+                    .map(|(index, (entry, generation))| async move {
+                        (
+                            index,
+                            this.push_one(&entry, generation, name, deadline, events)
+                                .await,
+                        )
                     })
                     .buffer_unordered(PUSH_CONCURRENCY)
                     .for_each(|outcome| {
@@ -481,10 +506,10 @@ impl CredentialDelivery {
             candidates
                 .iter()
                 .zip(finished)
-                .filter(|(entry, done)| !done && *entry.active.borrow() != 0)
-                .filter_map(|(entry, _)| {
+                .filter(|(_, done)| !done)
+                .filter_map(|((entry, generation), _)| {
                     Some(DeliveryFailure {
-                        host: Self::reported_host(entry, name)?,
+                        host: Self::reported_host(entry, name, *generation)?,
                         reason: still_delivering(),
                     })
                 }),
@@ -498,15 +523,16 @@ impl CredentialDelivery {
     async fn push_one(
         &self,
         entry: &Entry,
+        generation: u64,
         name: &str,
         deadline: Instant,
         events: &FleetEvents,
     ) -> Option<DeliveryFailure> {
-        let attempt = entry.begin_push(name)?;
+        let attempt = entry.begin_push(name, generation)?;
         let mut active = entry.active.subscribe();
         let result = tokio::select! {
             biased;
-            _ = active.wait_for(|count| *count == 0) => return None,
+            _ = active.wait_for(|state| !state.is_current(generation)) => return None,
             result = timeout_at(deadline, async {
                 let guard = Arc::clone(&entry.serial).lock_owned().await;
                 let binding = entry.live.lock().unwrap().binding.clone();
@@ -514,16 +540,20 @@ impl CredentialDelivery {
                 self.apply(&row, bindings, None, guard).await
             }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
         };
-        let host = Self::reported_host(entry, name)?;
+        let host = Self::reported_host(entry, name, generation)?;
         entry.warning(attempt, result.clone().err(), events);
         result.err().map(|reason| DeliveryFailure { host, reason })
     }
 
     /// The name a delivery failure gives its host (its alias, else its
-    /// environment's name), or `None` once the host's current connection no
-    /// longer uses `name`: that connection reports its own delivery.
-    fn reported_host(entry: &Entry, name: &str) -> Option<String> {
+    /// environment's name). Only the selected lifetime reports this push.
+    /// A successor or a connection with another selection reports its own
+    /// delivery.
+    fn reported_host(entry: &Entry, name: &str, generation: u64) -> Option<String> {
         let live = entry.live.lock().unwrap();
+        if !entry.active.borrow().is_current(generation) {
+            return None;
+        }
         let (row, _) = live
             .binding
             .as_ref()
