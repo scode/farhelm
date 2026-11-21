@@ -501,6 +501,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   button/something selectable, which is basically what that appearance of the rectangle on hover is showing Plan:
   `plans/queue/status-mark-hover-ring.md`.
 
+- **Managed checkout layout in the launcher explodes.** the layout explodes due to the long message and two controls for
+  managed checkouts (the vertical size of the box towards the top). we need to fix (Screenshot: the launcher's
+  Destination box with Managed checkout selected; under the Repository field, a wrapped "Managed checkout of <repo> on
+  <host>" line with the full checkout path, a paragraph explaining that Farhelm clones into a new folder named after the
+  session and trashes it when the last session using it is deleted, and then a separate Folder field repeating the path,
+  all in the narrow middle column, which makes the Destination box very tall.)
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
