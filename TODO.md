@@ -346,6 +346,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   is off. it needs to be properly vertically centered. (Screenshot: on the Templates page, the ⚡ quick-launch marker to
   the left of each template row sits up near the top of the row, above the ⌘ shortcut, rather than centered on the row.)
 
+- **Something is cut off in the template list's left-hand bar.** wtf is getting cut off in the left hand bar. need to
+  understand what it is and whether to keep showing it and if so how, in a way that it's actually visible. (Screenshot:
+  on the Templates page, the narrow column left of each template's name holds the ⚡ and a ⌘ shortcut label, which reads
+  "⌘ –" on rows without a number key and "⌘1" or "⌘0" on rows with one; whatever follows the ⌘ looks clipped, and rows
+  showing "⌘ –" indent the template name further right than rows with a number.)
+
 ## Mid term
 
 - **Select-all key for Linux text fields.** Since the emacs-text-field-keys plan, Ctrl+A in a Linux text field moves to
