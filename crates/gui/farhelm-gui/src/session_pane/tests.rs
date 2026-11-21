@@ -857,14 +857,19 @@ fn the_delete_shortcut_from_a_focused_terminal_asks_and_never_reaches_the_progra
     );
     assert_eq!(fleet.input(0), [], "the chord never reached the program");
 
-    keys(fleet.cx, "enter");
+    let deletes = |helm: &mut farhelm_helm_client::fake::FakeHelm| {
+        helm.commands()
+            .into_iter()
+            .filter(|command| command.method == Method::Delete)
+            .map(|command| command.path)
+            .collect::<Vec<_>>()
+    };
     assert!(
-        fleet
-            .helm
-            .commands()
-            .iter()
-            .any(|command| command.method == Method::Delete && command.path == "/api/sessions/a")
+        deletes(&mut fleet.helm).is_empty(),
+        "the question waits for consent"
     );
+    keys(fleet.cx, "enter");
+    assert_eq!(deletes(&mut fleet.helm), ["/api/sessions/a"]);
     assert!(
         terminal_focused(fleet.cx),
         "closing the question gave focus back"

@@ -33338,3 +33338,186 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Confirm and Cancel help names only the remaining tabs when the main program has ended. jj change
   `ktwlysusrtrp`, bookmark `plan/triage-gui-sessions/03-environment-cards-and-questions`,
   [draft PR #4481](https://github.com/scode/farhelm/pull/4481/changes).
+
+## shell-stop-and-suspend-wording-untested.md
+
+- Outcome: `fix code`.
+- Assessment: None. Stop and suspend tests would pass if the question went back to calling a shell an agent. Verified: I
+  accepted the file's citations. The production code passes `stopped_program` into the question (environment.rs
+  ~529-541).
+- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix the surface (or add the test) as the Assessment describes, following the shell-naming
+  principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Now checks shell wording in the direct and inline Stop and suspend paths. jj change `tlsxwwsnvunv`,
+  bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## delete-shortcut-test-misses-early-request.md
+
+- Outcome: `other`.
+- Assessment: None directly. The Delete-shortcut test would pass if the shortcut sent the Delete before the user
+  confirmed. Verified: `crates/gui/farhelm-gui/src/session_pane/tests.rs:841-869` drains commands before the chord,
+  checks none between the chord and Enter, and after Enter accepts `any` matching DELETE.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (assert zero DELETEs before Enter and exactly one after).
+- Execution: Now observes the command stream before and after the confirmation and requires exactly one Delete. jj
+  change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## notice-docs-link-test-accepts-plain-text.md
+
+- Outcome: `other`.
+- Assessment: None directly. Notification text can carry a clickable docs link; one test checks escaping only if a link
+  was recognised. Verified: `notices_bell/tests.rs:318-327` still has the `if let DocsLink` guard. The adjacent test
+  `a_docs_link_in_notification_text_is_cut_out` (244-269) already pins query (`?e=1&f=2`), fragment (`#b`) and
+  trailing-period trimming as exact runs, so the regression the finding fears is mostly caught already; only `~`, `+`,
+  `_` characters go unpinned.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard
+- Execution: Now requires a clickable documentation link with the full supported URL, including its punctuation. jj
+  change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## dialog-scroll-focus-loses-regression-check.md
+
+- Outcome: `other`.
+- Assessment: None directly. When the SSH help dialog was retired, its test was the only one that put focus on a
+  dialog's scroll region and checked where focus goes when that region stops being a tab stop; Trash still relies on
+  that handoff. Verified: remaining dialog tests (`components/tests/dialog.rs:327-375,449-495`) cover a stop appearing
+  and Tab reaching it, never a focused stop disappearing.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (one test on the Trash or shared dialog fixture)
+- Execution: Now focuses the Trash scroll stop before it disappears, then verifies the focus destination and next Tab.
+  jj change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## attention-cue-tests-miss-witnesses.md
+
+- Outcome: `other`.
+- Assessment: None directly. Cue tests can pass without proving that an offscreen cue is refused, that a cue plays when
+  the window becomes active, or that reduced motion paints a flash. Verified: `layers/cue.rs` tests: the offscreen
+  refusal reuses an occupied target, activation is called directly (`owner.cues.activate`), and the stationary test
+  checks state and expiry, not paint.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard
+- Execution: Now sees a stationary flash paint after real window activation and proves a fully clipped anchor refuses a
+  fresh request. jj change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## attention-baseline-test-never-cues.md
+
+- Outcome: `other`.
+- Assessment: None directly. The test meant to show reconnects do not re-animate standing warnings starts from a host
+  state that can never cue. Verified: `session_list/attention/tests.rs:50-110` opens with `retrying` (Unreachable),
+  which maps to no cue reason (`attention.rs:302-305`). The docstring claims a standing-problem baseline.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard (or fix the opening state; tiny)
+- Execution: Now tests a cue-eligible reconnect baseline and uses the sign-in-needed state shown by the desktop app. jj
+  change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## sign-in-reveal-test-misses-first-frame.md
+
+- Outcome: `other`.
+- Assessment: None directly. The below-the-fold sign-in test checks only the settled frame, so a popover that opened
+  before its row scrolled into view would pass. Verified: `sign_in/tests.rs:280-322`.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard
+- Execution: No change. The existing assertion observes the settled popover. Establishing the first visible frame
+  requires recording transitions across frames. jj change `tlsxwwsnvunv`, bookmark
+  `plan/triage-gui-sessions/04-gui-test-gaps`, [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## sign-in-focus-test-accepts-either-host.md
+
+- Outcome: `other`.
+- Assessment: None directly. The explicit Sign in test accepts focus in either host's answer field because both share
+  one input ID. Verified: `sign_in/tests.rs:401-427`; `answer_focused` (26-35) matches the shared `ssh-sign-in-answer`.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard
+- Execution: Now identifies the focused host from its distinct prompt while Retry is pending. jj change `tlsxwwsnvunv`,
+  bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## sign-in-handoff-test-uses-connected-fixtures.md
+
+- Outcome: `other`.
+- Assessment: None directly. The startup handoff test keeps both asking hosts Connected, so it never covers a host
+  actually waiting for sign-in. Verified: `sign_in/tests.rs` `open` (105-130) builds hosts as `connected()` / the given
+  state; handoff test at 190.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard
+- Execution: Now starts both hosts in the sign-in waiting state and checks the focus handoff. jj change `tlsxwwsnvunv`,
+  bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## sign-in-notice-test-omits-unrelated-focus-case.md
+
+- Outcome: `other`.
+- Assessment: None. No test checks that when a touch notice ends, an SSH question from a different sign-in attempt does
+  not take focus. Verified: In sign_in/tests.rs,
+  `a_touch_and_answer_only_hand_focus_to_the_same_attempt_or_already_waiting_hosts` uses a same-attempt follow-up at
+  notice removal. Its unrelated "later-drop" case comes only after the post-submit path. SPEC.md "Who may move focus"
+  (~3558) limits the handoff to the same attempt. Production behavior was not traced.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (add an unrelated-attempt question at the notice-removal boundary)
+- Execution: Now proves an unrelated later question for the same host remains in the sidebar when a touch notice
+  completes. jj change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
+  [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).

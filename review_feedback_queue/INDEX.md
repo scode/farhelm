@@ -781,12 +781,6 @@ consequences.
 - [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
   macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
 
-- [`delete-shortcut-test-misses-early-request.md`](delete-shortcut-test-misses-early-request.md) — The test can pass if
-  Delete sends a request before the user answers the question, even though Enter is supposed to authorize that request.
-
-- [`notice-docs-link-test-accepts-plain-text.md`](notice-docs-link-test-accepts-plain-text.md) — The test only checks
-  escaping after the notice recognizes a link, so it can pass if the address is displayed as plain text.
-
 - [`update-restart-failure-test-follows-status-id.md`](update-restart-failure-test-follows-status-id.md) — The updater
   test can pass if a restart failure moves inline under a new element ID instead of staying in the hover help.
 
@@ -824,26 +818,6 @@ consequences.
   can miss that turning on automatic updates failed to wake the helm, because a delayed first host refresh can wake it
   instead.
 
-- [`dialog-scroll-focus-loses-regression-check.md`](dialog-scroll-focus-loses-regression-check.md) — A test no longer
-  checks that keyboard focus moves to a remaining control when a dialog’s focused scroll region stops being a tab stop.
-  Trash still uses that handoff.
-
-- [`attention-cue-tests-miss-witnesses.md`](attention-cue-tests-miss-witnesses.md) — The cue tests can pass without
-  showing that an initially offscreen cue is refused, a visible cue plays when the window becomes active, or reduced
-  motion paints a flash.
-
-- [`attention-baseline-test-never-cues.md`](attention-baseline-test-never-cues.md) — The test can pass if a reconnect
-  incorrectly animates existing warnings. Its first snapshot contains a host state that never produces a cue.
-
-- [`sign-in-reveal-test-misses-first-frame.md`](sign-in-reveal-test-misses-first-frame.md) — The test can pass if the
-  popover opens before its sidebar button scrolls into view.
-
-- [`sign-in-focus-test-accepts-either-host.md`](sign-in-focus-test-accepts-either-host.md) — The explicit sign-in test
-  can pass if the focused popover belongs to the other host in the fixture.
-
-- [`sign-in-handoff-test-uses-connected-fixtures.md`](sign-in-handoff-test-uses-connected-fixtures.md) — The startup
-  handoff test can pass without checking that focus moves to a host actually waiting for sign-in.
-
 - [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
   can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
 
@@ -874,9 +848,6 @@ consequences.
 
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
-
-- [`sign-in-notice-test-omits-unrelated-focus-case.md`](sign-in-notice-test-omits-unrelated-focus-case.md) — The tests
-  can pass if a question from a different sign-in takes focus when an open notice ends.
 
 - [`systemd-isolation-comments-point-to-active-ledger.md`](systemd-isolation-comments-point-to-active-ledger.md) — The
   new test comments send maintainers to the active flake ledger for evidence that has moved to the archive.
@@ -910,9 +881,6 @@ consequences.
 
 - [`shell-template-approval-misstates-permission.md`](shell-template-approval-misstates-permission.md) — Approval cards
   can say a shell template has no permissions while saving a concrete incompatible setting.
-
-- [`shell-stop-and-suspend-wording-untested.md`](shell-stop-and-suspend-wording-untested.md) — Stop and suspend tests
-  can pass if its confirmation goes back to calling Bash or Zsh an agent.
 
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.

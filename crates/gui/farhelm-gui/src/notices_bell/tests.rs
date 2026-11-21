@@ -315,16 +315,10 @@ fn nothing_but_a_plain_docs_link_is_ever_a_link() {
             DocsLink("https://farhelm.io/docs/ok"),
         ]
     );
-    for text in [
-        "https://farhelm.io/docs/a-b_c~d/e.f?g=h&i+j#k",
-        "see https://farhelm.io/docs/using/new-terminals/.",
-    ] {
-        for run in notification_runs(text) {
-            if let DocsLink(url) = run {
-                assert_eq!(farhelm_proto::text::escaped(url), url, "{url}");
-            }
-        }
-    }
+    // Supported URL punctuation must stay in a clickable link and must be unchanged by display escaping.
+    let url = "https://farhelm.io/docs/a-b_c~d/e.f?g=h&i+j#k";
+    assert_eq!(notification_runs(url), vec![DocsLink(url)]);
+    assert_eq!(farhelm_proto::text::escaped(url), url);
 }
 
 // ---- The bell on the row ---------------------------------------------------------------------------------------------

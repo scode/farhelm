@@ -739,16 +739,16 @@ fn stop_and_suspend_keeps_its_verb_and_guards_across_a_push(cx: &mut TestAppCont
 /// SPEC.md: "The row menu always offers Stop and suspend, so it remains reachable when ordinary confirmations are
 /// skipped", and it keeps "the host-wide activity confirmation"; its request carries the Stop guards its click saw,
 /// even when the listing refreshes during the read (the old e2e "Stop and suspend sends the guards its click saw").
-/// Specified: with confirmations skipped and running a listed with no tabs, Stop and suspend reads the host's activity,
-/// which shows a running, and asks "Stop and suspend sandbox?" with the line that names "Every other process freezes";
-/// a push meanwhile giving a a tab and an ended agent changes nothing; the answer sends exactly
+/// Specified: with confirmations skipped and a running shell listed with no tabs, Stop and suspend reads the host's
+/// activity and asks "Stop and suspend sandbox?" The question names the shell and says the other processes freeze.
+/// A push meanwhile giving it a tab and an ended shell changes nothing. The answer sends exactly
 /// `POST /api/sessions/a/stop-and-suspend` with `{refuse_if_tabs_open: true, refuse_if_agent_running: false}` and no
 /// separate Suspend; the helm's 409 shows on a's row as "Stop: <its words>", and the same line below the open
 /// session's header.
 #[gpui::test]
 fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
-    let (mut fake, cx) = open(cx, &[(session("a"), 0)], true, &host);
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 0)], true, &host);
     pending(&mut fake);
     choose(cx, "session-menu-a", "session-menu-stop-and-suspend");
     let (read, _) = one(&mut fake, Method::Get, "/api/sessions?host=2");
@@ -756,23 +756,21 @@ fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut Te
         &mut fake,
         &["a"],
         &[(
-            session("a").status(json!({"state": "exited", "exit_code": 0})),
+            bash_session("a").status(json!({"state": "exited", "exit_code": 0})),
             1,
         )],
         cx,
     );
-    fake.reply(read, 200, Some(listing(&[session("a")], false)));
+    fake.reply(read, 200, Some(listing(&[bash_session("a")], false)));
     test_support::settle(cx);
     assert_eq!(
         label_of(cx, "prompt").as_deref(),
         Some("Stop and suspend sandbox?")
     );
-    assert!(
-        texts(cx)
-            .iter()
-            .any(|text| text.contains("Every other process freezes and continues on Resume.")),
-        "the question says what it freezes"
-    );
+    assert!(texts(cx).iter().any(|text| text.starts_with(
+        "Stop this session's shell and close its terminal tabs, then suspend the whole sandbox? Every other process \
+         freezes and continues on Resume. The stopped shell and closed tabs do not continue."
+    )), "the question names the shell and the processes that can resume");
     assert!(pending(&mut fake).is_empty(), "nothing before the answer");
     test_support::click(cx, "prompt-confirm");
     let (id, body) = one(&mut fake, Method::Post, "/api/sessions/a/stop-and-suspend");
@@ -780,34 +778,34 @@ fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut Te
         body,
         json!({"refuse_if_tabs_open": true, "refuse_if_agent_running": false})
     );
-    fake.reply(id, 409, Some(json!("the agent's tab is still open")));
+    fake.reply(id, 409, Some(json!("this session has terminal tabs open")));
     test_support::settle(cx);
     assert_eq!(
         label_of(cx, "session-outcome-a").as_deref(),
-        Some("Stop: the agent's tab is still open")
+        Some("Stop: this session has terminal tabs open")
     );
     assert_eq!(
         label_of(cx, "session-header-outcome-a").as_deref(),
-        Some("Stop: the agent's tab is still open"),
+        Some("Stop: this session has terminal tabs open"),
         "the open session's header shows the same refusal"
     );
 }
 
 /// The old Stop question of an environment session said what plain Stop leaves running and offered Stop and suspend as
 /// a third answer, so a user who meant to stop billing need not go back to the menu. Specified: Stop of a sandbox
-/// session with one tab asks, its consequence reading "Stop the agent and close 1 terminal tab? The sandbox keeps
+/// shell with one tab asks, its consequence reading "Stop the shell and close 1 terminal tab? The sandbox keeps
 /// running and billing until you suspend or delete it. Stop and suspend freezes the remaining processes; they continue
-/// on Resume. The stopped agent and closed tabs do not continue."; its Stop and suspend answer sends
+/// on Resume. The stopped shell and closed tabs do not continue."; its Stop and suspend answer sends
 /// `POST /api/sessions/a/stop-and-suspend` with the question's guards and reads nothing first.
 #[gpui::test]
 fn an_environment_sessions_stop_question_offers_stop_and_suspend(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
-    let (mut fake, cx) = open(cx, &[(session("a"), 1)], false, &host);
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 1)], false, &host);
     pending(&mut fake);
     choose(cx, "session-menu-a", "session-menu-stop");
     assert!(texts(cx).iter().any(|text| text
-        == "Stop the agent and close 1 terminal tab? The sandbox keeps running and billing until you suspend or \
-            delete it. Stop and suspend freezes the remaining processes; they continue on Resume. The stopped agent \
+        == "Stop the shell and close 1 terminal tab? The sandbox keeps running and billing until you suspend or \
+            delete it. Stop and suspend freezes the remaining processes; they continue on Resume. The stopped shell \
             and closed tabs do not continue."));
     assert_eq!(
         label_of(cx, "prompt-alternative-0").as_deref(),
