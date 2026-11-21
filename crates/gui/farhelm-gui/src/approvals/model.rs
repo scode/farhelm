@@ -939,9 +939,8 @@ enum Detail {
     Plain,
 }
 
-/// The trusted-workspace chip's explanation. Only a managed checkout records trust, and only from Settings.
-pub const TRUSTED_WORKSPACE: &str = "By Settings in a managed checkout; repository hooks, settings and \
-                                      commands can run without asking";
+/// The chip explains what the recorded trust choice allows. Directory scope depends on the harness.
+pub const TRUSTED_WORKSPACE: &str = "Enabled in Agent trust settings. Repository hooks, settings and commands can run without asking.";
 
 impl Chips {
     /// The card has a Permissions row only for launches with a shield.

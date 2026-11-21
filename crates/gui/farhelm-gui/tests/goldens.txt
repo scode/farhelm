@@ -198,6 +198,8 @@ linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-agent-trust--dark.png 75849465238a6360de7985ecf8d5325991639ef2
 linux/settings-agent-trust--light.png ed68179eff362be334c44d90c3569dc205acdc67
+linux/settings-agent-trust-end--dark.png bb2c118e31be40d06634e26700a848fd887155c9
+linux/settings-agent-trust-end--light.png 988080ed2a7a6c0e4ccdcfb629af9ed037a519ff
 linux/settings-app--dark.png 2410172afe779af928ee54eadbbfee54ad155966
 linux/settings-app--light.png 4297d421ec97be1a22d198d86dc8528aa7478bb2
 linux/settings-appearance--dark.png 1e54b36342fb546ed4adfa3ac3e8421aee5d3b24

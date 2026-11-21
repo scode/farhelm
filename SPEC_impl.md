@@ -3509,15 +3509,16 @@ listing and rename read the same sample cell. The UI visibility predicate also r
 tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local × lasts
 until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
-Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings, with nullable per-agent
-hint dismissals in preferences. Each switch defaults off and leaves the path-preview revision unchanged. The protected
-`GET`/`PUT /api/checkout-agent-trust/{harness}` exposes one switch and its dismissal; the original Claude route retains
-its exact body and reply. Configuration writes use the existing save-order funnel, and dismissals use the sparse
-per-field preference queue, including pending-write overlays on fresh reads.
+Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings. Schema 93 adds
+`antigravity_trust` and its nullable hint dismissal alongside the existing per-agent preferences. Each switch defaults
+off and leaves the path-preview revision unchanged. The protected `GET`/`PUT /api/checkout-agent-trust/{harness}`
+exposes one switch and its dismissal; the original Claude route retains its exact body and reply. Configuration writes
+use the existing save-order funnel, and dismissals use the sparse per-field preference queue, including pending-write
+overlays on fresh reads.
 
 The helm resolves these settings into an agent selection before compilation. The compiler remains pure so the YOLO guard
 can still reproduce a launch exactly. Fresh checkout intent already proves managed ownership and freezes the whole
-resolved launch in its existing create fingerprint. For an existing directory, enabled trust uses the pinned target
+resolved launch in its existing create fingerprint. For an existing directory, managed-only trust uses the pinned target
 host's bounded `BrowseDirectory` reply in its default-off `membership_only` mode. Protocol 55 adds that mode and its
 required `managed_checkout` reply boolean: the supervisor canonicalizes the accepted cwd and reads allocated registry
 ancestors using the same component predicate as admission. Each matching ancestor must also pass the existing recorded
@@ -3532,14 +3533,15 @@ lease; ordinary create admission still validates the destination. A missing owne
 behavior, so protocol skew refuses the peer until its ordinary supervisor update rather than treating an old reply as
 unmanaged. The normal skew-aware update path remains unchanged.
 
-`SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads Claude and Codex
-through their integration readers and Muse through its integration reader or the exhaustive launch-harness seam,
-independently of its activity reading. The flag defaults false in older cached snapshots, resets with the run or failed
-capture, and shares the existing activity cell across renames. Codex recognition uses its captured 0.159.0 folder-access
-menu (`waiting-trust`) and the reported Quit variant (`waiting-derived-trust-quit`, derived from that capture): the Back
-choice requires `esc back`, and Quit requires `esc quit`. Muse uses captured 1.4.10-R6427.1 and 1.4.14 startup trust
-menus. Both require the dialog's choices and current footer instead of matching isolated transcript words. Pi has no
-trust recognizer; its setting still supplies its project-resource approval flag.
+`SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads workspace trust
+through the harness integration seam, independently of its activity reading. The flag defaults false in older cached
+snapshots, resets with the run or failed capture, and shares the existing activity cell across renames. Codex
+recognition uses its captured 0.159.0 folder-access menu (`waiting-trust`) and the reported Quit variant
+(`waiting-derived-trust-quit`, derived from that capture): the Back choice requires `esc back`, and Quit requires
+`esc quit`. Muse uses captured 1.4.10-R6427.1 and 1.4.14 startup trust menus. Antigravity uses the captured 1.5.13 trust
+menu and current confirmation footer. These readers require the dialog's choices and current footer. The GUI attributes
+the shared flag to the session's structured launch. Its read and draw paths share the same directory scope check, which
+allows Antigravity outside managed checkouts. Pi uses its project-resource approval flag without a trust recognizer.
 
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not

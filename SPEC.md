@@ -1728,12 +1728,19 @@ Restart and plain Replace keep their stored launch. Settings changes affect newl
 fresh-checkout retry retains its original trust choice, and an ordinary keyed retry whose resolved launch changes may
 refuse the reused key.
 
+Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
+ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument trusts the
+canonical working directory on the session's host. It replaces the saved trust list for that process and leaves the
+settings file alone. Custom permission options supplying `--settings` or `--settings=...` take precedence. Plain Restart
+and Replace reuse the saved launch. Literal Command launches supply their own arguments.
+
 Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
-checkout's agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent,
-offers Settings at its switch in **Agent trust** and Don't show again, and has an occurrence-only ×. Each shared
-dismissal is independent and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a
-switch but no hint band: its project-resource approval is not currently recognized as a trust question. Older stored
-session snapshots default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
+checkout's agent terminal, their switch is off, and their own hint has not been dismissed. Antigravity follows the same
+rule in any directory when the session has an Antigravity agent launch. The hint names the agent, offers Settings at its
+switch in **Agent trust** and Don't show again, and has an occurrence-only ×. Each shared dismissal is independent and
+reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no hint band: its
+project-resource approval is not currently recognized as a trust question. Older stored session snapshots default the
+new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
 When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
 explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed later in
@@ -4123,18 +4130,18 @@ The CLI's contract, since agents will script against it: on success it prints th
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
-asking session's stored launch, which the session's own supervisor supplies, except that workspace trust follows the
-destination's managed-checkout membership and Settings. The launch flags are resolved by the helm, which owns templates
-and composes agent launches. Either is refused with a remedy when no helm is connected. The title is generated when
-omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a timeout or ambiguous
-outcome returns the existing child rather than creating another. Keys are scoped to the asking session on its host and
-live as long as the child session does: the same key from another session is an unrelated request, never a replay of
-someone else's child, and a replay never returns the asking session itself. The same caller scoping and created-session
-lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`, including when they target
-another host. Refusals recorded before any session exists are replayed for 24 hours for all three verbs. Guaranteed
-Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session credential; other
-Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is separately guaranteed;
-see Durability.)
+asking session's stored launch, which the session's own supervisor supplies. The helm recomputes workspace trust for the
+destination using Settings and the selected agent's directory scope. The launch flags are resolved by the helm, which
+owns templates and composes agent launches. Either is refused with a remedy when no helm is connected. The title is
+generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a
+timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking
+session on its host and live as long as the child session does: the same key from another session is an unrelated
+request, never a replay of someone else's child, and a replay never returns the asking session itself. The same caller
+scoping and created-session lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`,
+including when they target another host. Refusals recorded before any session exists are replayed for 24 hours for all
+three verbs. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session
+credential; other Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is
+separately guaranteed; see Durability.)
 
 Session references handed to clients and agents are full IDs: the host entry's helm-assigned UUID in canonical
 36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;

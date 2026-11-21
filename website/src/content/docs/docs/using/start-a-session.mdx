@@ -93,7 +93,7 @@ explains each, including **Custom** for supplying your own permission flags. Swi
 clears any choice it cannot take, and the launcher tells you when it does. You can choose **Guarded** or **YOLO** before
 choosing an agent. If choosing an agent replaces a permission you chose with a riskier mode, a red banner says so and
 offers **Undo**, including on your first agent choice. [Supported agents](/docs/agents/) lists what
-each agent offers. To answer directory-trust questions automatically for directories Farhelm manages, use the
+each agent offers. To answer directory-trust questions automatically, use the
 [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
 of these agents, start [Bash or Zsh under **Shells**](/docs/agents/shells/) or use the **Command**
 tab for a [custom command](/docs/agents/custom-commands/).
@@ -357,8 +357,11 @@ the agent's saved configuration alone. Directories outside managed checkouts kee
 These switches apply to the launcher's **Agent** tab; [custom commands](/docs/agents/custom-commands/) keep their own
 arguments.
 
-The current setting applies when you start a session, use **Clone**, **Restart with** or **Replace with** in a managed
-checkout. Plain **Restart** and **Replace** reuse the trust carried by the saved launch. See
+Antigravity's switch also applies to directories you choose yourself. See [Antigravity workspace
+trust](/docs/agents/antigravity/#workspace-trust).
+
+The current setting applies when you start a session or use **Clone**, **Restart with** or **Replace with** in a
+directory it covers. Plain **Restart** and **Replace** reuse the trust carried by the saved launch. See
 [Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
@@ -372,14 +375,13 @@ a Claude session exiting at the same instant can lose either program's update, a
 how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
 trust allows the repository's own Claude hooks and commands to run.
 
-While Claude, Codex or Muse asks its trust question in a managed checkout and that agent's switch is off, a note above
-the session's terminal says, in that agent's words, that Farhelm can answer it for you. Its button, **Settings and
-caveats** for Claude and **Settings** for Codex and Muse, opens **Agent trust** at that agent's switch. × hides the note
+While Claude, Codex or Muse asks its trust question in a managed checkout, or Antigravity asks in any directory, a
+note appears above the terminal if that agent's switch is off. Its **Settings** button (**Settings and caveats** for
+Claude) opens **Agent trust** at that agent's switch. × hides the note
 until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
-other agents' notes alone. To bring one back, turn on **Show the hint when Claude asks about a managed checkout**, or
-the Codex or Muse one, in **Agent trust**. The note goes away once you turn the agent's switch on. Farhelm answers
-nothing from the note itself; the question waits in the terminal as before. A Codex or Muse session started from the
-**Command** tab shows no note, and neither does Pi.
+other agents' notes alone. To bring one back, turn the agent's hint switch on in **Agent trust**. You still answer
+the current question in the terminal. Pi has a trust switch without a hint. The Codex, Muse and Antigravity hints
+apply to sessions started from the **Agent** tab.
 
 ### Checkout management
 

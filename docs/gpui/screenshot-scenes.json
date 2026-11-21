@@ -2901,6 +2901,11 @@
       "reference": "settings-agent-trust"
     },
     {
+      "golden": "settings-agent-trust-end",
+      "title": "Settings at Agent trust scrolled to Antigravity's switch, its help and its hint switch",
+      "reference": null
+    },
+    {
       "golden": "settings-notifications",
       "title": "Settings at Notifications, the Sounds switches at their defaults above the ntfy alerts form over the helm's defaults",
       "reference": "settings-notifications"

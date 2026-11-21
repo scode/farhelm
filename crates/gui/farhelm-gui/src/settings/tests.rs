@@ -996,6 +996,7 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         Choice::ShowClaudeTrustHint,
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
+        Choice::ShowAntigravityTrustHint,
     ];
     for &choice in Choice::ALL.iter().filter(|&&choice| {
         choice != naming
@@ -1015,6 +1016,7 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
             "claude_trust_hint_dismissed": value,
             "codex_trust_hint_dismissed": value,
             "muse_trust_hint_dismissed": value,
+            "antigravity_trust_hint_dismissed": value,
         }))
         .unwrap()
     };
@@ -2027,12 +2029,13 @@ pub(super) fn sent_reads(helm: &mut FakeHelm) -> Vec<(u64, String)> {
         .collect()
 }
 
-/// The four trust routes, in the section's order.
-const TRUST_PATHS: [&str; 4] = [
+/// The independent trust routes, in the section's order.
+const TRUST_PATHS: [&str; 5] = [
     "/api/checkout-claude-trust",
     "/api/checkout-agent-trust/codex",
     "/api/checkout-agent-trust/muse",
     "/api/checkout-agent-trust/pi",
+    "/api/checkout-agent-trust/antigravity",
 ];
 
 /// Answer `reads` (in the section's order) with each agent's trust as `enabled`, the hint not dismissed.
@@ -2075,12 +2078,21 @@ fn agent_trust_reads_each_agent_once_when_shown_and_waits_for_the_answer(cx: &mu
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "an unknown choice takes no toggle");
 
-    answer_trust(&mut helm, &reads, [true, false, false, false], cx);
+    answer_trust(&mut helm, &reads, [true, false, false, false, false], cx);
     let shown: Vec<Option<bool>> = TrustAgent::ALL
         .iter()
         .map(|agent| switch_on(cx, agent.id()))
         .collect();
-    assert_eq!(shown, [Some(true), Some(false), Some(false), Some(false)]);
+    assert_eq!(
+        shown,
+        [
+            Some(true),
+            Some(false),
+            Some(false),
+            Some(false),
+            Some(false)
+        ]
+    );
     click(cx, "settings-section-hosts");
     click(cx, "settings-section-agent-trust");
     assert_eq!(sent(&mut helm), [], "read once per opening");
@@ -2101,7 +2113,7 @@ fn open_trust_at(
     });
     settle(cx);
     let reads = sent_reads(helm);
-    answer_trust(helm, &reads, [false; 4], cx);
+    answer_trust(helm, &reads, [false; 5], cx);
     assert_eq!(
         focused_id(cx).as_deref(),
         Some(agent.id()),
@@ -2120,8 +2132,8 @@ fn trust_failure(cx: &mut VisualTestContext, agent: TrustAgent) -> Option<String
 /// A trust switch saves at once through its agent's own route, and the helm's done reply makes it the choice shown;
 /// a refusal restores the choice read before with the helm's reason beside it (SPEC.md, "Errors and diagnostics").
 /// Specified: Codex's switch sends `PUT /api/checkout-agent-trust/codex` with `{"enabled": true}` under the preference
-/// row's key and shows on while it is in flight, then stays on once the helm answers; in a later opening Pi's sends
-/// `{"enabled": true}` to its route and, refused, shows off again with "Could not save or read Pi trust settings:" and
+/// row's key and shows on while it is in flight, then stays on once the helm answers. In a later opening Antigravity
+/// sends `{"enabled": true}` to its route and a refusal restores off with "Could not save or read Antigravity trust settings:" and
 /// the helm's words.
 #[gpui::test]
 fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut TestAppContext) {
@@ -2149,19 +2161,23 @@ fn a_trust_switch_saves_through_its_route_and_a_refusal_restores_it(cx: &mut Tes
     assert_eq!(switch_on(cx, TrustAgent::Codex.id()), Some(true), "saved");
 
     keys(cx, "escape");
-    open_trust_at(&mut helm, cx, &gear, TrustAgent::Pi);
+    open_trust_at(&mut helm, cx, &gear, TrustAgent::Antigravity);
     keys(cx, "space");
     let saves = sent(&mut helm);
     assert_eq!(
         (saves[0].path.as_str(), saves[0].body.clone()),
-        (TRUST_PATHS[3], Some(json!({ "enabled": true })))
+        (TRUST_PATHS[4], Some(json!({ "enabled": true })))
     );
     helm.reply(saves[0].id, 503, Some(json!("fixture trust save refused")));
     settle(cx);
-    assert_eq!(switch_on(cx, TrustAgent::Pi.id()), Some(false), "restored");
     assert_eq!(
-        trust_failure(cx, TrustAgent::Pi).as_deref(),
-        Some("Could not save or read Pi trust settings: fixture trust save refused")
+        switch_on(cx, TrustAgent::Antigravity.id()),
+        Some(false),
+        "restored"
+    );
+    assert_eq!(
+        trust_failure(cx, TrustAgent::Antigravity).as_deref(),
+        Some("Could not save or read Antigravity trust settings: fixture trust save refused")
     );
 }
 
@@ -2173,7 +2189,7 @@ fn a_failed_trust_read_leaves_the_switch_unavailable_with_its_reason(cx: &mut Te
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
     let reads = show_agent_trust(&mut helm, cx);
     helm.reply(reads[0].0, 503, Some(json!("fixture trust read refused")));
-    answer_trust(&mut helm, &reads[1..], [true; 3], cx);
+    answer_trust(&mut helm, &reads[1..], [true; 4], cx);
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "no toggle over an unknown choice");
     assert_eq!(
@@ -2194,8 +2210,8 @@ fn a_trust_read_reaches_only_the_opening_it_was_sent_for(cx: &mut TestAppContext
     let first = show_agent_trust(&mut helm, cx);
     keys(cx, "escape");
     let second = show_agent_trust(&mut helm, cx);
-    assert_eq!(second.len(), 4, "the new opening reads again");
-    answer_trust(&mut helm, &first, [true; 4], cx);
+    assert_eq!(second.len(), 5, "the new opening reads again");
+    answer_trust(&mut helm, &first, [true; 5], cx);
     assert_eq!(
         switch_on(cx, TrustAgent::Claude.id()),
         Some(false),
@@ -2203,7 +2219,7 @@ fn a_trust_read_reaches_only_the_opening_it_was_sent_for(cx: &mut TestAppContext
     );
     click(cx, TrustAgent::Claude.id());
     assert_eq!(sent(&mut helm), [], "and the switch is still unknown");
-    answer_trust(&mut helm, &second, [true; 4], cx);
+    answer_trust(&mut helm, &second, [true; 5], cx);
     assert_eq!(switch_on(cx, TrustAgent::Claude.id()), Some(true));
 }
 
@@ -2220,6 +2236,7 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
         Choice::ShowClaudeTrustHint,
         Choice::ShowCodexTrustHint,
         Choice::ShowMuseTrustHint,
+        Choice::ShowAntigravityTrustHint,
     ] {
         assert_eq!(
             switch_on(cx, hint.id()),
@@ -2241,25 +2258,24 @@ fn the_hint_switches_are_the_shared_dismissals_inverted(cx: &mut TestAppContext)
     push(
         &mut helm,
         &Preferences {
-            muse_trust_hint_dismissed: Some(true),
+            antigravity_trust_hint_dismissed: Some(true),
             ..Preferences::default()
         },
         cx,
     );
-    assert_eq!(switch_on(cx, Choice::ShowMuseTrustHint.id()), Some(false));
+    assert_eq!(
+        switch_on(cx, Choice::ShowAntigravityTrustHint.id()),
+        Some(false)
+    );
 }
 
 /// A trust hint's "Settings and caveats" opens Agent trust at its agent's switch and brings it into view (SPEC.md:
 /// "Trust hints instead open agent trust at the relevant switch and scroll its block into view"), but the switch cannot
-/// hold focus until its read answers. Pi is the case that needs both halves: its read is answered last, so a handover
+/// hold focus until its read answers. Antigravity needs both halves: its read is answered last, so a handover
 /// keyed on the wrong agent would focus an earlier switch, and its switch is the last in the section, below the fold
 /// when the dialog opens, so a move that did not scroll would leave focus on a switch the user cannot see, where a
-/// Space meant to scroll would turn Pi's trust on unseen. SPEC.md's block is checked as the switch only (a recorded
-/// deviation). Closing returns focus to the hint's button, which Settings names as its return target, as the gear's
-/// entry point does. Specified: opened for Pi from a button that does not hold focus, Settings shows Agent trust with
-/// the dialog itself holding focus and Pi's switch not wholly inside the visible part of the dialog's body; once the
-/// reads answer, Pi's switch holds focus and lies wholly inside it; Escape then closes Settings and focus goes to the
-/// button.
+/// Space meant to scroll would turn Antigravity's trust on unseen. The test checks the switch lies wholly inside
+/// the dialog body once its read hands over focus. Escape closes Settings and returns focus to the opening button.
 #[gpui::test]
 fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut TestAppContext) {
     let (mut helm, cx, gear) = open_rail(cx, &Preferences::default());
@@ -2269,7 +2285,7 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
     );
     cx.update(|window, cx| {
         let mark = Mark::take(cx);
-        super::open_at_agent_trust(TrustAgent::Pi, &gear, &mark, window, cx);
+        super::open_at_agent_trust(TrustAgent::Antigravity, &gear, &mark, window, cx);
     });
     settle(cx);
     assert_eq!(heading(cx).as_deref(), Some("Agent trust"));
@@ -2278,18 +2294,21 @@ fn the_trust_hint_entry_point_focuses_its_agents_switch_once_known(cx: &mut Test
         "the dialog itself holds focus while the reads are out"
     );
     assert!(
-        !shows_whole(cx, TrustAgent::Pi.id(), DIALOG_BODY),
-        "the premise: Pi's switch starts out of view: {:?} in {:?}",
-        bounds(cx, TrustAgent::Pi.id()),
+        !shows_whole(cx, TrustAgent::Antigravity.id(), DIALOG_BODY),
+        "the premise: Antigravity's switch starts out of view: {:?} in {:?}",
+        bounds(cx, TrustAgent::Antigravity.id()),
         bounds(cx, DIALOG_BODY)
     );
     let reads = sent_reads(&mut helm);
-    answer_trust(&mut helm, &reads, [false; 4], cx);
-    assert_eq!(focused_id(cx).as_deref(), Some(TrustAgent::Pi.id()));
+    answer_trust(&mut helm, &reads, [false; 5], cx);
+    assert_eq!(
+        focused_id(cx).as_deref(),
+        Some(TrustAgent::Antigravity.id())
+    );
     assert!(
-        shows_whole(cx, TrustAgent::Pi.id(), DIALOG_BODY),
-        "the move scrolled Pi's switch into view: {:?} in {:?}",
-        bounds(cx, TrustAgent::Pi.id()),
+        shows_whole(cx, TrustAgent::Antigravity.id(), DIALOG_BODY),
+        "the move scrolled Antigravity's switch into view: {:?} in {:?}",
+        bounds(cx, TrustAgent::Antigravity.id()),
         bounds(cx, DIALOG_BODY)
     );
     keys(cx, "escape");

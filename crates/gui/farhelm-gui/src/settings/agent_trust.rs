@@ -1,6 +1,6 @@
-//! Settings → Agent trust: one all-hosts switch per agent whose "trust this folder?" question Farhelm can answer for
-//! managed checkouts (Claude, Codex, Muse and Pi), each with its help, and for the agents that have a discovery hint,
-//! the switch that shows or hides that hint.
+//! Settings → Agent trust holds the all-hosts opt-ins for answering workspace-trust questions. Claude, Codex, Muse and
+//! Pi are scoped to managed checkouts. Antigravity also covers ordinary directories. Agents with a discovery hint
+//! have a separate switch that restores or dismisses it.
 //!
 //! SPEC.md, "Managed checkouts" (the Agent trust paragraphs). Ported from the old app's `ClaudeTrustSettings`
 //! (`claude_trust.rs`) and `WorkspaceTrustSettings` (`workspace_trust.rs`) at reference commit `24bc0580`, with their
@@ -8,7 +8,7 @@
 //!
 //! - **The trust switches are helm configuration, not preferences.** Each lives behind its own route
 //!   (`/api/checkout-claude-trust` for Claude, the route the old app used, and `/api/checkout-agent-trust/<agent>` for
-//!   the others), which the helm does not push. So the section reads all four once, when it is first shown in an
+//!   the others), which the helm does not push. So the section reads each once, when it is first shown in an
 //!   opening of the dialog (the pattern the migration's orchestrator settled for reads that are not pushed), and a
 //!   reply reaches only the opening it was sent for, since it holds that dialog weakly. A switch whose read has not
 //!   answered, or failed, is unavailable rather than shown off: SPEC.md, "Failed settings reads never count as an off
@@ -68,7 +68,7 @@ pub(super) const CAUTION: [&str; 3] = [
      also best effort.",
 ];
 
-/// An agent with a managed-checkout trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
+/// An agent with a workspace trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
 /// session view's trust hint band do differently per agent, which agent a session's trust question belongs to
 /// included, is an exhaustive method here, so a new trust agent needs a decision at each one (AGENTS.md, "Code rules";
 /// the per-harness map in `crates/farhelm-supervisor/src/agent_kind/mod.rs` names this enum).
@@ -80,15 +80,17 @@ pub enum TrustAgent {
     Codex = 1,
     Muse = 2,
     Pi = 3,
+    Antigravity = 4,
 }
 
 impl TrustAgent {
     /// Every agent, in the section's order.
-    pub(super) const ALL: [TrustAgent; 4] = [
+    pub(super) const ALL: [TrustAgent; 5] = [
         TrustAgent::Claude,
         TrustAgent::Codex,
         TrustAgent::Muse,
         TrustAgent::Pi,
+        TrustAgent::Antigravity,
     ];
 
     /// Its place in [`TrustAgent::ALL`], where the dialog keeps its state.
@@ -103,6 +105,7 @@ impl TrustAgent {
             TrustAgent::Codex => "Codex",
             TrustAgent::Muse => "Muse",
             TrustAgent::Pi => "Pi",
+            TrustAgent::Antigravity => "Antigravity",
         }
     }
 
@@ -114,6 +117,7 @@ impl TrustAgent {
             TrustAgent::Codex => ApiPath::api(&["checkout-agent-trust", "codex"]),
             TrustAgent::Muse => ApiPath::api(&["checkout-agent-trust", "muse"]),
             TrustAgent::Pi => ApiPath::api(&["checkout-agent-trust", "pi"]),
+            TrustAgent::Antigravity => ApiPath::api(&["checkout-agent-trust", "antigravity"]),
         }
     }
 
@@ -124,6 +128,7 @@ impl TrustAgent {
             TrustAgent::Codex => "settings-codex-trust",
             TrustAgent::Muse => "settings-muse-trust",
             TrustAgent::Pi => "settings-pi-trust",
+            TrustAgent::Antigravity => "settings-antigravity-trust",
         }
     }
 
@@ -134,6 +139,7 @@ impl TrustAgent {
             TrustAgent::Codex => "settings-codex-trust-error",
             TrustAgent::Muse => "settings-muse-trust-error",
             TrustAgent::Pi => "settings-pi-trust-error",
+            TrustAgent::Antigravity => "settings-antigravity-trust-error",
         }
     }
 
@@ -145,6 +151,7 @@ impl TrustAgent {
             TrustAgent::Codex => "Answer Codex's folder-trust question for managed checkouts",
             TrustAgent::Muse => "Answer Muse's workspace-trust question for managed checkouts",
             TrustAgent::Pi => "Approve Pi project resources for managed checkouts",
+            TrustAgent::Antigravity => "Skip Antigravity's workspace trust question",
         }
     }
 
@@ -155,11 +162,13 @@ impl TrustAgent {
                 "Mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the \
                  caveats below"
             }
-            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => self.mechanism(),
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
+                self.mechanism()
+            }
         }
     }
 
-    /// What Farhelm does for the agent's managed checkouts, the old `help` for the flag-based agents and the old help
+    /// What Farhelm does for eligible launches, the old `help` for the flag-based agents and the old help
     /// paragraph for Claude.
     fn mechanism(self) -> &'static str {
         match self {
@@ -184,6 +193,10 @@ impl TrustAgent {
                  approve project settings and extensions for that launch. Folders outside managed checkouts keep \
                  Pi's normal resource approval. Pi's saved configuration is unchanged."
             }
+            TrustAgent::Antigravity => {
+                "For plain folders and managed checkouts, Farhelm passes Antigravity's --settings option for that \
+                 launch. Its saved configuration stays as it is."
+            }
         }
     }
 
@@ -193,7 +206,8 @@ impl TrustAgent {
     pub(super) fn help(self) -> Vec<String> {
         match self {
             TrustAgent::Claude => vec![self.mechanism().to_owned()],
-            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => vec![
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
+                let mut paragraphs = vec![
                 format!(
                     "{} New, Clone, Restart with and Replace with use this setting. Restart and Replace keep the \
                      session's saved launch.",
@@ -202,7 +216,16 @@ impl TrustAgent {
                 "As when you approve it yourself, repository hooks, settings and commands are then trusted. This is \
                  why the switch is off by default."
                     .to_owned(),
-            ],
+                ];
+                if let TrustAgent::Antigravity = self {
+                    paragraphs.push(
+                        "For this launch, the option replaces Antigravity's saved list of trusted folders. Custom \
+                         permission flags that include --settings or --settings=… take precedence."
+                            .to_owned(),
+                    );
+                }
+                paragraphs
+            }
         }
     }
 
@@ -212,7 +235,9 @@ impl TrustAgent {
     pub(super) fn has_caution(self) -> bool {
         match self {
             TrustAgent::Claude => true,
-            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => false,
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
+                false
+            }
         }
     }
 
@@ -223,6 +248,7 @@ impl TrustAgent {
             TrustAgent::Claude => Some(Choice::ShowClaudeTrustHint),
             TrustAgent::Codex => Some(Choice::ShowCodexTrustHint),
             TrustAgent::Muse => Some(Choice::ShowMuseTrustHint),
+            TrustAgent::Antigravity => Some(Choice::ShowAntigravityTrustHint),
             TrustAgent::Pi => None,
         }
     }
@@ -231,7 +257,7 @@ impl TrustAgent {
     /// trust hint band (`crate::session_pane::trust_band`); `None` while no agent with a hint asks.
     ///
     /// Claude is named by its own flag, `claude_trust_prompt`, whatever the launch, as the band has read it since it
-    /// was built: the supervisor sets that flag only from Claude's screen reader. Codex and Muse share the
+    /// was built: the supervisor sets that flag only from Claude's screen reader. Codex, Muse and Antigravity share the
     /// harness-neutral `workspace_trust_prompt`, which says that a question is up but not whose, so the session's
     /// structured launch names the agent (`TrustAgent::for_harness`). A command or legacy launch names no harness and
     /// borrows no agent's switch or dismissal, as in the old app (`TrustAgent::for_session` in `workspace_trust.rs` at
@@ -247,7 +273,7 @@ impl TrustAgent {
             .filter(|agent| agent.hint().is_some())
     }
 
-    /// The agent whose managed-checkout trust switch a structured launch of `harness` reads, for the harness-neutral
+    /// The agent whose trust switch a structured launch of `harness` reads, for the harness-neutral
     /// question. Claude is not one here: its question has its own flag ([`TrustAgent::asking`]), so the neutral flag
     /// on a Claude launch adds no second band. The other harnesses have no trust switch.
     #[warn(clippy::wildcard_enum_match_arm)]
@@ -256,15 +282,23 @@ impl TrustAgent {
             LaunchHarness::Codex => Some(TrustAgent::Codex),
             LaunchHarness::Muse => Some(TrustAgent::Muse),
             LaunchHarness::Pi => Some(TrustAgent::Pi),
+            LaunchHarness::Antigravity => Some(TrustAgent::Antigravity),
             LaunchHarness::Claude
             | LaunchHarness::Cursor
             | LaunchHarness::Goose
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
-            | LaunchHarness::Antigravity
             | LaunchHarness::Bash
             | LaunchHarness::Zsh => None,
+        }
+    }
+
+    /// Whether the discovery hint applies only to folders Farhelm checked out.
+    pub(crate) fn managed_checkouts_only(self) -> bool {
+        match self {
+            TrustAgent::Claude | TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => true,
+            TrustAgent::Antigravity => false,
         }
     }
 
@@ -299,6 +333,13 @@ impl TrustAgent {
                 settings: "Settings",
                 settings_help: "Open Settings at the Muse managed-checkout trust switch",
                 dismiss_help: "Stop showing this Muse note for every session; Settings can turn it back on",
+            }),
+            TrustAgent::Antigravity => Some(BandWords {
+                lead: "Antigravity asks whether to trust this folder. ",
+                rest: "Farhelm can skip this question for plain folders and managed checkouts. It's off by default because repository hooks, settings and commands are then trusted.",
+                settings: "Settings",
+                settings_help: "Open Settings at the Antigravity workspace trust switch",
+                dismiss_help: "Stop showing this Antigravity note for every session. Settings can turn it back on.",
             }),
             TrustAgent::Pi => None,
         }

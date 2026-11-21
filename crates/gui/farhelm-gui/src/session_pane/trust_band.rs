@@ -1,6 +1,5 @@
-//! The trust hint band: a note above the open session's agent terminal while its agent (Claude, Codex or Muse) asks
-//! whether to trust a new managed checkout. It says that Farhelm can answer that question, offers Settings at the
-//! agent's switch that does, and answers nothing itself.
+//! The trust hint band above the agent terminal offers Settings while a workspace-trust question is visible. Claude,
+//! Codex and Muse show it in managed checkouts. Antigravity also shows it in ordinary directories.
 //!
 //! SPEC.md, "Managed checkouts" (the paragraphs that start "While Claude's trust question is visible" and "Codex and
 //! Muse show the same nonmodal discovery hint"). Ported from the old app's `ClaudeTrustBand` (`claude_trust.rs`) and
@@ -9,9 +8,10 @@
 //! session view on 2026-11-14, and decided on 2026-11-16 that Codex's and Muse's are built as this one. Here's the TLDR
 //! of its rules:
 //!
-//! - **When it shows** ([`Facts::shows`]): an agent's question is on the open session's agent terminal in a managed
-//!   checkout, that agent's trust is known off, its hint is not dismissed, and × has not hidden this occurrence.
-//! - **Which agent asks** ([`TrustAgent::asking`]): Claude by its own flag, Codex and Muse by the harness-neutral flag
+//! - **When it shows** ([`Facts::shows`]): the agent's question is on the open session's agent terminal in a directory
+//!   eligible for its trust setting, that trust is known off, its hint is not dismissed, and × has not hidden this
+//!   occurrence.
+//! - **Which agent asks** ([`TrustAgent::asking`]): Claude by its own flag, Codex, Muse and Antigravity by the harness-neutral flag
 //!   and the session's structured launch. The band shows one agent's note at a time and takes its read, its Settings
 //!   entry point, its dismissal and its words ([`TrustAgent::band_words`]) from that agent; it never branches on the
 //!   agent itself.
@@ -80,7 +80,7 @@ const RULE: f32 = 3.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Facts {
     pub(crate) question: bool,
-    pub(crate) managed: bool,
+    pub(crate) eligible: bool,
     pub(crate) agent_shown: bool,
     pub(crate) trust: Option<bool>,
     pub(crate) dismissed: bool,
@@ -91,7 +91,7 @@ impl Facts {
     /// The explanation and its buttons: every condition holds, trust read as off (the old `show_hint`).
     pub(crate) fn shows(self) -> bool {
         self.question
-            && self.managed
+            && self.eligible
             && self.agent_shown
             && self.trust == Some(false)
             && !self.dismissed
@@ -104,17 +104,22 @@ impl Facts {
     pub(crate) fn shows_failure(self, failed: bool) -> bool {
         failed
             && self.question
-            && self.managed
+            && self.eligible
             && self.agent_shown
             && !self.hidden
             && self.trust != Some(true)
     }
 }
 
-/// The agent whose question puts the band's read in play for `row`, if any: the question is up, in a managed checkout,
-/// on a host the helm reaches (a stale row's question is its last-known screen, under the unavailable card).
+/// Read the asking agent's setting only for a reachable session in that
+/// agent's supported folder scope. A stale row carries its last known screen.
 fn at_question(row: &SessionRow) -> Option<TrustAgent> {
-    TrustAgent::asking(&row.info).filter(|_| row.info.working_copy.is_some() && !row.stale)
+    TrustAgent::asking(&row.info).filter(|&agent| eligible(agent, row) && !row.stale)
+}
+
+/// The same folder rule governs both the setting read and the painted hint.
+fn eligible(agent: TrustAgent, row: &SessionRow) -> bool {
+    !agent.managed_checkouts_only() || row.info.working_copy.is_some()
 }
 
 // ---- State ----------------------------------------------------------------------------------------------------------
@@ -353,7 +358,7 @@ pub(crate) fn draw(
     let known = state.known.read(cx);
     let facts = Facts {
         question: true,
-        managed: row.info.working_copy.is_some(),
+        eligible: eligible(agent, row),
         agent_shown,
         trust: known.and_then(|known| known.trust),
         dismissed: !settings::trust_hint_shown(agent, cx)

@@ -12,6 +12,18 @@ unavailable on your account or host. See the
 [Antigravity CLI mode requirements](https://antigravity.google/docs/cli/modes#requirements-and-limitations) and
 [supported agents and permission modes](/docs/agents/).
 
+## Workspace trust
+
+Antigravity asks whether to trust a directory it doesn't know. Farhelm shows the session as waiting while the question
+is on screen. To skip the question when starting future Antigravity sessions, turn on **Skip Antigravity's workspace
+trust question** under **Settings → Agent trust**. It applies both to directories you select and to managed checkouts.
+The switch is off by default because trusting a directory lets its hooks, settings and commands run as if you had
+approved them.
+
+For that launch, the session's working directory replaces Antigravity's saved list of trusted directories. Farhelm
+leaves your saved settings file alone. If you already pass `--settings` through **Custom** permission flags, that option
+takes precedence. See [when Farhelm applies trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts).
+
 ## Set up Restart
 
 Install two [Antigravity CLI hooks](https://antigravity.google/docs/hooks#managing-hooks-in-antigravity-cli) as the user
@@ -57,8 +69,8 @@ the session launcher's **Conversation ID** field when you want to open that conv
   unreadable log or a first line over 64 KiB can leave **Restart** on the previous conversation or unavailable. A later
   report can establish the main conversation once its log can be read. A CLI update that changes the format can make
   Farhelm ignore every new report without a notification.
-- Farhelm shows basic running and idle status by watching whether the screen changes. Antigravity's approval requests
-  don't show as waiting in the session list. Read and answer them in the session's terminal.
+- Farhelm shows basic running and idle status by watching whether the screen changes. The workspace trust question shows
+  as waiting in the session list. For approvals during a conversation, read and answer them in the terminal.
 - Remove the `farhelm` entry from the hooks file and start a new Antigravity process to turn off reports. The settings
   that control the hooks Farhelm adds to other agents have no effect on these entries.
 - If you start `agy` through a script, see [Agent wrappers](/docs/agents/agent-wrappers/) for what the script must pass

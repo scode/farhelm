@@ -495,7 +495,7 @@ fn launch_and_restart_cards_explain_stored_workspace_trust() {
             }
         }
     }
-    assert!(TRUSTED_WORKSPACE.starts_with("By Settings in a managed checkout"));
+    assert!(TRUSTED_WORKSPACE.starts_with("Enabled in Agent trust settings."));
 }
 
 // ---- Launch cards ---------------------------------------------------------------------------------------------------
