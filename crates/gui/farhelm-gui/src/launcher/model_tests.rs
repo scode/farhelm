@@ -14,7 +14,6 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "codex-fast".into(),
             family: "codex-fast".into(),
-            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -22,7 +21,6 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "claude-fast".into(),
             family: "claude-fast".into(),
-            family_word: None,
             latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![],
@@ -45,7 +43,6 @@ fn an_older_id_is_recognized_when_typed_without_reserving_its_spelling() {
     let older = LaunchCatalogModel {
         id: "codex-classic".into(),
         family: "codex-fast".into(),
-        family_word: None,
         latest: false,
         harness: LaunchHarness::Codex,
         efforts: vec![],
@@ -155,6 +152,7 @@ fn model_enter_target_distinguishes_navigation_and_draft_semantics() {
         model_enter_target(&options, None, "CLAUDE-FAST", &catalog, codex),
         ModelEnterTarget::OwnedElsewhere {
             id: "CLAUDE-FAST".into(),
+            chosen: LaunchHarness::Codex,
             owners: vec![LaunchHarness::Claude],
         },
         "typing another agent's model does not switch the chosen agent"
@@ -189,13 +187,36 @@ fn model_enter_target_distinguishes_navigation_and_draft_semantics() {
     );
 }
 
-/// The words for a typed model only other agents offer name each of them, so the user knows where to pick it.
+/// Both shorthand and exact IDs name the current agent in the refusal. Only a sole owner is named as the next choice.
 #[test]
-fn owned_elsewhere_names_every_owner() {
-    assert_eq!(
-        owned_elsewhere_message("m", &[LaunchHarness::Claude, LaunchHarness::Codex]),
-        "m is offered by Claude or Codex; choose Claude or Codex to use it"
-    );
+fn wrong_agent_refusal_names_a_sole_owner_without_listing_multiple_owners() {
+    let catalog = [
+        ("claude-fable-5", "fable", LaunchHarness::Claude),
+        ("x-ai/grok-4.6", "grok", LaunchHarness::Pi),
+        ("x-ai/grok-4.6", "grok", LaunchHarness::Goose),
+    ]
+    .map(|(id, family, harness)| LaunchCatalogModel {
+        id: id.into(),
+        family: family.into(),
+        harness,
+        latest: true,
+        efforts: Vec::new(),
+    });
+    for (query, instruction) in [
+        ("fable", "choose Claude to use it."),
+        ("claude-fable-5", "choose Claude to use it."),
+        ("grok", "choose an agent that offers it."),
+        ("x-ai/grok-4.6", "choose an agent that offers it."),
+    ] {
+        let target = model_enter_target(&[], None, query, &catalog, Some(LaunchHarness::Codex));
+        let ModelEnterTarget::OwnedElsewhere { id, chosen, owners } = target else {
+            panic!("expected an ownership refusal for {query}, got {target:?}");
+        };
+        assert_eq!(
+            owned_elsewhere_message(&id, chosen, &owners),
+            format!("Codex has no {query} model; {instruction}")
+        );
+    }
 }
 
 /// OpenCode accepts a bare Zen model name as well as its `opencode/` spelling, and some bare names are also another
@@ -209,7 +230,6 @@ fn bare_opencode_names_stay_opencode_models() {
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
             family: "luna".into(),
-            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![],
@@ -217,7 +237,6 @@ fn bare_opencode_names_stay_opencode_models() {
         LaunchCatalogModel {
             id: "opencode/gpt-6-luna".into(),
             family: "luna".into(),
-            family_word: None,
             latest: true,
             harness: LaunchHarness::OpenCode,
             efforts: vec![],
@@ -252,6 +271,7 @@ fn bare_opencode_names_stay_opencode_models() {
         ),
         ModelEnterTarget::OwnedElsewhere {
             id: "opencode/gpt-6-luna".into(),
+            chosen: LaunchHarness::Codex,
             owners: vec![LaunchHarness::OpenCode],
         },
         "OpenCode's qualified id does not switch a Codex draft"
@@ -266,7 +286,6 @@ fn a_bare_opencode_name_in_another_case_is_its_catalog_row() {
     let catalog = vec![LaunchCatalogModel {
         id: "opencode/gpt-6-luna".into(),
         family: "luna".into(),
-        family_word: None,
         latest: true,
         harness: LaunchHarness::OpenCode,
         efforts: vec![],

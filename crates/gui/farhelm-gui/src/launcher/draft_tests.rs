@@ -22,15 +22,13 @@ fn catalog() -> Vec<LaunchCatalogModel> {
         LaunchCatalogModel {
             id: "gpt-6-luna".into(),
             family: "luna".into(),
-            family_word: None,
             latest: true,
             harness: LaunchHarness::Codex,
             efforts: vec![LaunchEffort::Low, LaunchEffort::High],
         },
         LaunchCatalogModel {
             id: "claude-fable-5".into(),
-            family: "claude-fable-5".into(),
-            family_word: None,
+            family: "fable".into(),
             latest: true,
             harness: LaunchHarness::Claude,
             efforts: vec![LaunchEffort::High],
@@ -188,8 +186,7 @@ fn an_equally_safe_switch_raises_no_banner_but_reports_the_switch() {
 fn a_cross_agent_model_pick_can_raise_the_banner() {
     let catalog = vec![LaunchCatalogModel {
         id: "z-ai/glm-5.3".into(),
-        family: "glm-5.3".into(),
-        family_word: None,
+        family: "glm".into(),
         latest: true,
         harness: LaunchHarness::Goose,
         efforts: vec![],
@@ -323,7 +320,6 @@ fn an_agent_switch_lands_on_a_permission_the_new_agent_offers() {
     let pi_model = |id: &str| LaunchCatalogModel {
         id: id.into(),
         family: id.into(),
-        family_word: None,
         latest: true,
         harness: Pi,
         efforts: vec![LaunchEffort::Minimal, LaunchEffort::Xhigh],
@@ -332,7 +328,6 @@ fn an_agent_switch_lands_on_a_permission_the_new_agent_offers() {
     let goose_model = |id: &str| LaunchCatalogModel {
         id: id.into(),
         family: id.into(),
-        family_word: None,
         latest: true,
         harness: Goose,
         efforts: vec![LaunchEffort::High],
@@ -544,7 +539,6 @@ fn a_history_pick_keeps_its_custom_model_after_an_older_id_becomes_known() {
     let catalog = [LaunchCatalogModel {
         id: "gpt-6.1-sol".into(),
         family: "sol".into(),
-        family_word: None,
         latest: false,
         harness: LaunchHarness::Codex,
         efforts: vec![LaunchEffort::High],
@@ -713,8 +707,7 @@ fn restart_with_refuses_to_switch_agents() {
 fn undo_after_a_cross_agent_model_pick_restores_the_draft_exactly() {
     let catalog = vec![LaunchCatalogModel {
         id: "z-ai/glm-5.3".into(),
-        family: "glm-5.3".into(),
-        family_word: None,
+        family: "glm".into(),
         latest: true,
         harness: LaunchHarness::Goose,
         efforts: vec![],

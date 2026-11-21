@@ -1423,7 +1423,7 @@ fn enter_on_typed_text_applies_a_custom_id_or_says_who_owns_it(cx: &mut TestAppC
     );
     assert_eq!(
         name_of(cx, "launcher-model-error").as_deref(),
-        Some("sonnet is offered by Claude; choose Claude to use it")
+        Some("Codex has no sonnet model; choose Claude to use it.")
     );
     keys(
         cx,
@@ -1931,9 +1931,9 @@ fn a_family_word_highlights_and_applies_only_the_current_model(cx: &mut TestAppC
         cx,
         Some(serde_json::json!([
             {"id":"gpt-6.1-sol", "family":"sol", "latest":false, "harness":"codex", "efforts":["high"]},
-            {"id":"openai/gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"pi", "efforts":["high"]},
-            {"id":"gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"codex", "efforts":["high"]},
-            {"id":"claude-fable-5", "family":"claude-fable-5", "family_word":"fable", "harness":"claude", "efforts":["high"]}
+            {"id":"openai/gpt-6.2-sol", "family":"sol", "harness":"pi", "efforts":["high"]},
+            {"id":"gpt-6.2-sol", "family":"sol", "harness":"codex", "efforts":["high"]},
+            {"id":"claude-fable-5", "family":"fable", "harness":"claude", "efforts":["high"]}
         ])),
     );
     assert_eq!(draft(cx).agent.harness, None);
@@ -1967,6 +1967,57 @@ fn a_family_word_highlights_and_applies_only_the_current_model(cx: &mut TestAppC
     assert_eq!(draft(cx).agent.model.as_deref(), Some("gpt-6.2-sol"));
 }
 
+/// Typing either spelling leaves the chosen agent alone. A named owner gives the user a specific next choice,
+/// while a model offered by several agents keeps the refusal short. Under Pi the same Grok word picks 4.6.
+#[gpui::test]
+fn the_model_field_explains_wrong_agent_choices_and_applies_grok_under_pi(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_on(cx, LaunchDraft::new(Some(1), "~".into(), None));
+    answer_catalog(
+        &mut helm,
+        cx,
+        Some(serde_json::json!([
+            {"id":"claude-fable-5", "family":"fable", "harness":"claude", "efforts":["high"]},
+            {"id":"x-ai/grok-4.5", "family":"grok", "latest":false, "harness":"pi", "efforts":["high"]},
+            {"id":"x-ai/grok-4.6", "family":"grok", "harness":"pi", "efforts":["high"]},
+            {"id":"x-ai/grok-4.6", "family":"grok", "harness":"goose", "efforts":["high"]}
+        ])),
+    );
+    test_support::click(cx, "launcher-harness-Codex");
+    test_support::click(cx, "launcher-model-row");
+    assert!(has_node(cx, "launcher-model-list"));
+    for (query, instruction) in [
+        ("fable", "choose Claude to use it."),
+        ("claude-fable-5", "choose Claude to use it."),
+        ("grok", "choose an agent that offers it."),
+        ("x-ai/grok-4.6", "choose an agent that offers it."),
+    ] {
+        test_support::select_all_text(cx);
+        cx.simulate_input(query);
+        settle(cx);
+        assert_eq!(model_text(cx), query);
+        keys(cx, "enter");
+        let expected = format!("Codex has no {query} model; {instruction}");
+        assert_eq!(
+            name_of(cx, "launcher-model-error").as_deref(),
+            Some(expected.as_str())
+        );
+        assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Codex));
+        assert_eq!(draft(cx).agent.model, None);
+    }
+
+    test_support::click(cx, "launcher-harness-Pi");
+    test_support::click(cx, "launcher-model-row");
+    keys(cx, "g r o k");
+    assert_eq!(model_text(cx), "grok");
+    assert_eq!(
+        selected_state(cx, "launcher-model-option-Pi-x-ai/grok-4.6"),
+        Some(true)
+    );
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Pi));
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("x-ai/grok-4.6"));
+}
+
 /// An Enter before the catalog returns leaves the family word in the field. Its late reply offers the real ID
 /// without committing a choice the user has not yet made. A row chosen with the arrows still acts while waiting.
 #[gpui::test]
@@ -1994,7 +2045,7 @@ fn a_family_word_waits_for_the_release_catalog(cx: &mut TestAppContext) {
         &mut helm,
         cx,
         Some(serde_json::json!([
-            {"id":"gpt-6.2-sol", "family":"sol", "family_word":"sol", "harness":"codex", "efforts":["high"]}
+            {"id":"gpt-6.2-sol", "family":"sol", "harness":"codex", "efforts":["high"]}
         ])),
     );
     assert_eq!(draft(cx).agent.model, None);
