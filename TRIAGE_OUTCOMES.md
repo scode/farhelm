@@ -1526,70 +1526,6 @@
   file and its index entry.
 - Execution: planned in `plans/queue/triage-helm.md`.
 
-## plan-deferral-survives-replacement-question.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow only. A plan block the monitor left for the maintainer is remembered by plan name, so
-  a later ordinary question from the same plan can also be skipped by automatic answering. Verified: Still true.
-  plans/.agents/landing.md ~72, ~98-103 and ~192 record and ignore by slug, with no retirement. This text is agent
-  instructions, which review_feedback_queue/.agents/trailing-review.md "Review scope" lists as excluded workflow
-  metadata ("agent instructions").
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## stale-plan-answer-clears-new-question.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow only. A delayed `queue answer` to an old plan question can be attached to that plan's
-  newer question and send the plan back to pending. Verified: Still true. plans-queue.py `answer` checks only that the
-  plan is blocked (~1063-1076), and landing.md ~207-208 claims "Exit 10 means someone else answered or changed the plan
-  first". No unauthorized protected action is established.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard. Or a small fix: bind the answer to a hash of the question.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## closed-conflicting-pr-does-not-wake-executor.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow only. An idle executor that skipped a plan because another plan's open PR conflicted
-  with it does not wake when that PR is closed without a queue change. Verified: Still true. The plans-queue.py wake
-  docstring (~1259-1268) says "the filter cannot see PRs".
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard (a manual drain or any queue change recovers).
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## old-executor-close-resets-new-holder-bookmarks.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow only. An executor resuming after a crash can, under its prescribed full-close
-  procedure, reset the plan bookmarks of a newer executor that has since claimed the same plan. Verified: This is about
-  instruction text (plans/.agents/executing.md and close-reset.md), which trailing review now excludes as workflow
-  metadata. Not re-traced on main.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
 ## browser-shard-failure-sweeps-running-siblings.md
 
 - Outcome: `other`.
@@ -1742,22 +1678,6 @@
   reference: Discard. It matters only for an unusual diagnostic run mode and leaks nothing.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## landing-tests-import-unregistered-module.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tooling. The documented test command for the plans landing tool crashes on import, so none of
-  its safeguards are tested. Verified: Reproduced with a read-only import, which failed with
-  `AttributeError: 'NoneType' object has no attribute '__dict__'` in dataclasses on Python 3.14. `test-landing.py`
-  L20-22 never puts the module in `sys.modules`.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Fix the code. Two lines, and the documented validation path is broken.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
 ## rust-sandbox-runner-passes-empty-selection.md
 
 - Outcome: `other`.
@@ -1849,64 +1769,6 @@
   turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
   remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
   reference: Fix the code (take the first line). Otherwise discard, since current Rustup is unaffected.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## overdue-plan-protection-ages-out.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow. The plan picker can forget that a long-skipped plan is overdue once old claims fall
-  out of its 300-commit history window. Verified: Still present (`plans-queue.py` `_PASS_HISTORY_PAGES` and the history
-  pager at ~L1370-1450).
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard. The worst case is a plan picked a little early or late.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## plan-pass-count-includes-precreation-claims.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow. A plan with more than 100 edits can be treated as overdue because of claims made
-  before it existed. Verified: Still present (`plans-queue.py` ~L1421-1423 returns None when the history is too long).
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## plan-pass-pagination-follows-moving-main.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow. The plan picker can miscount passes if main moves while it is reading history pages.
-  Verified: Still present (`path_history` pages follow the branch name: `commits?sha={branch}` ~L793).
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard.
-- Execution: planned in `plans/queue/triage-tooling.md`.
-
-## dependency-block-counts-held-plan-time.md
-
-- Outcome: `other`.
-- Assessment: Maintainer workflow. A plan that was on hold can earn overdue passes for that time after a blocked
-  dependency is answered. Verified: Not re-traced line by line. The pass counter has not changed in this area since the
-  review.
-- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
-  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
-  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
-  reference: Discard.
 - Execution: planned in `plans/queue/triage-tooling.md`.
 
 ## trailing-environment-test-responders-heartbeat-control-decode.md

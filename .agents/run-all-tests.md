@@ -130,7 +130,7 @@ second clippy run on floating stable is needed.
   `scripts/plans-watch.sh`, `scripts/test-plans-watch.sh` and `scripts/publish-docs-shots.sh`
 - `python3 -B scripts/plans-landing/test-landing.py`, `deno check` and `deno test -A` on
   `scripts/plans-landing/idle-watch.ts`, and `shellcheck scripts/plans-landing/notify.sh` (the landing monitor's round
-  tooling)
+  tooling, including the Python module import before checking the round safeguards)
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy and terminal host ownership with stand-ins, no
   vendor turns)
