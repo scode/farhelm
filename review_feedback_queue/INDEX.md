@@ -51,10 +51,6 @@ consequences.
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`credential-push-misses-retired-lifetime.md`](credential-push-misses-retired-lifetime.md) — A replacement connection
-  can hide the last lease's zero transition, allowing obsolete credential transport work to delay reconnect. No
-  disclosure, wrong-machine delivery or user-work loss is established.
-
 - [`trailing-new-container-proxy-snapshot-capability-cache.md`](trailing-new-container-proxy-snapshot-capability-cache.md)
   — New containers can permanently inherit a cached host proxy environment. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -609,10 +605,6 @@ consequences.
 
 - [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
   without typing can undo a host rename that just happened through an approved agent request.
-
-- [`tunnel-listener-stops-on-single-accept-error.md`](tunnel-listener-stops-on-single-accept-error.md) — One listener
-  error can leave a tunnel’s port visible in Farhelm after it stopped accepting connections. The next list refresh can
-  remove the mapping without a reason.
 
 - [`late-delete-loses-checkout-archive-notice.md`](late-delete-loses-checkout-archive-notice.md) — If Delete takes long
   enough to time out while the host is still working, Farhelm can remove the session without telling you where its

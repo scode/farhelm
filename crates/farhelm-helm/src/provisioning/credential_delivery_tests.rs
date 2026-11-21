@@ -1357,6 +1357,7 @@ async fn an_early_replacement_does_not_hide_an_unready_connections_timeout() {
 
 /// Suspension cancels a replacement already inside transport work. Opening the
 /// gate afterwards must not resume it and overwrite the host's previous file.
+/// Starting another lease on the same turn also cannot hide the retired lifetime.
 #[farhelm_testtrace::test]
 async fn last_connection_lease_cancels_an_in_progress_push() {
     let f = Fixture::new(false).await;
@@ -1370,7 +1371,13 @@ async fn last_connection_lease_cancels_an_in_progress_push() {
     }
     let stopped_at = f.operations();
     drop(lease);
-    assert!(push.await.is_empty());
+    let _new_lease = f.delivery.enter(&f.row);
+    assert!(
+        tokio::time::timeout(Duration::from_secs(5), push)
+            .await
+            .expect("the new lease must not keep the retired push in its held transport")
+            .is_empty()
+    );
     f.backend.release.notify_one();
     assert_eq!(f.operations(), stopped_at);
     assert!(f.claude().await.contains(FIRST));
@@ -1845,7 +1852,7 @@ async fn the_save_route_answers_at_the_reply_bound_while_a_host_is_held() {
         .await;
     let entry = f.delivery.entry(&f.row);
     assert!(f.claude().await.contains(FIRST));
-    assert_eq!(*entry.active.borrow(), 1);
+    assert_eq!(entry.active.borrow().count, 1);
     let held = entry.serial.clone().lock_owned().await;
     tokio::time::pause();
     let started = Instant::now();
@@ -1876,11 +1883,11 @@ async fn actor_hold_cancels_the_real_hook_before_acknowledging_parking() {
     tokio::time::timeout(Duration::from_secs(5), f.backend.entered.notified())
         .await
         .unwrap();
-    assert_eq!(*f.delivery.entry(&f.row).active.borrow(), 1);
+    assert_eq!(f.delivery.entry(&f.row).active.borrow().count, 1);
     assert!(harness.manager.status(f.row.id).unwrap().client.is_none());
     let shown = harness.manager.state(f.row.id).unwrap();
     assert!(harness.manager.hold_connection(f.row.id, shown).await);
-    assert_eq!(*f.delivery.entry(&f.row).active.borrow(), 0);
+    assert_eq!(f.delivery.entry(&f.row).active.borrow().count, 0);
     let before = f.operations();
     f.backend.release.notify_one();
     assert_eq!(f.operations(), before);
@@ -1892,7 +1899,7 @@ async fn actor_hold_cancels_the_real_hook_before_acknowledging_parking() {
         })
         .await;
     assert!(f.claude().await.contains(FIRST));
-    assert_eq!(*f.delivery.entry(&f.row).active.borrow(), 1);
+    assert_eq!(f.delivery.entry(&f.row).active.borrow().count, 1);
     let before = f.operations();
     let previous_dials = harness.fleet.dials(f.row.id);
     harness.fleet.kill_connection(f.row.id);
