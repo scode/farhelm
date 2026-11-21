@@ -5454,6 +5454,10 @@ Decided 2026-10-26: convenience state in the GUI (labels, marks, remembered fold
 open in) may lag behind a delayed reply from the helm or a change an agent or the command line made. Only what a
 destructive action or a launch is shown and fenced against has to be current.
 
+Decided 2026-11-21: a control the screen still shows after its target changed may be used, as long as the helm refuses
+what is no longer valid or the result is trivially undone. A question left open on a sandbox that has since been
+suspended may still be answered and get the helm's refusal, and a pin drag may land where the release puts it.
+
 ### Remote input, session defaults, and availability
 
 Agents may discover the helm catalog's template names and what each sets. Listing those in lookup suggestions is

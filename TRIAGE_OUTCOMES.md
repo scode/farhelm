@@ -102,28 +102,6 @@
   queue removal or a changelog fragment). Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/gui-launcher-feedback-fixes.md`.
 
-## frozen-sandbox-retains-header-lifecycle-answers.md
-
-- Outcome: `fix spec`.
-- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): The header's Stop, Restart
-  and Replace buttons are disabled while the environment is frozen
-  (`crates/gui/farhelm-gui/src/session_pane/header.rs:1133-1189`), and the frozen check is applied when a question opens
-  (`allows_active` at 795-799, `session_list/menu.rs:659-666`). Two paths miss it: - **Open header question.** A
-  question that is already open stays open when the sandbox is suspended elsewhere: layers close only when their subject
-  is gone (`layers.rs:498-504`). Its Confirm runs `restart::confirm` / `replace::confirm`
-  (`session_list/restart.rs:248-250`, `session_list/replace.rs:270-279`) with no new frozen check. -
-  **Interrupted-session card.** Its Replace button is disabled only by `menu::refused`
-  (`session_pane/card.rs:427,506-523`). `replace_from_card` (about 614-640) checks only that the card still shows, not
-  frozen state, so it asks and sends. The card's Restart click does check frozen (597-601), but the button is drawn
-  enabled. In both cases the helm refuses because the host is not connected.
-- Decision: the maintainer picked "Acceptable, and say so in the spec" for controls that stay answerable after their
-  target changed when nothing harmful follows (2026-11-21 six-question triage page for findings that cited removed UI
-  code, Q2). This entry carries the spec change for the group of five.
-- Completion criteria: SPEC.md's GUI concurrency text (beside the 2026-10-26 convenience-state principle) states the
-  principle: a control the screen still shows after its target changed may be used, as long as the helm refuses what is
-  no longer valid or the result is trivially undone. No code change. Remove the feedback file and its index entry.
-- Execution: `pending`.
-
 ## full-host-tooltip-conflicts-with-line-cap.md
 
 - Outcome: `fix spec`.
