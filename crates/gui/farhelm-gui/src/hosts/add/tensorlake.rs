@@ -20,16 +20,16 @@
 //!   recipe catalog, which it follows while open, and shows the chosen recipe's summary below, the words Settings →
 //!   Recipes shows for it ([`crate::settings::recipe_summary`]). A chosen recipe that leaves the catalog stays chosen
 //!   as "<name> (unavailable)" rather than falling back to another, as the old select kept its draft. Recipe names are
-//!   the user's own words, drawn as Settings → Recipes draws them.
+//!   the user's own words, drawn as Settings → Recipes draws them. Unsupported bases remain visible with their reason.
 //! - **New recipe… opens the recipe editor here.** The Recipe choice's last option opens Settings → Recipes' editor
 //!   ([`crate::settings::RecipeEditor`]) in place of the fields, with focus in its Name, its answers in Add host's
 //!   footer in place of Cancel and Continue (pinned there, so they never scroll away with the editor, which is taller
 //!   than the dialog), and the kind choice hidden until it closes. Its Cancel, or a done Save, brings the fields back
-//!   with focus on Recipe, and a done Save chooses the new recipe. Closing Add host while the editor holds unsaved
-//!   changes asks "Save these changes before leaving?" over Add host, and its Save or Discard then closes Add host.
+//!   with focus on Recipe. A done Save chooses the new recipe when Tensorlake supports its base. Closing Add host while
+//!   the editor holds unsaved changes asks "Save these changes before leaving?" over Add host. Save or Discard closes it.
 //!   The old dialog swapped its body and footer for the editor's the same way (`in_add_host`).
-//! - **Continue asks the helm for a creation plan.** Continue, or Enter in Name, is unavailable until both Name and
-//!   Recipe are set; Enter with either missing says which. It refuses while a session launch is in flight, as Add
+//! - **Continue asks the helm for a creation plan.** Continue needs a name and a compatible recipe. Enter in Name
+//!   checks the same requirements. It refuses while a session launch is in flight, as Add
 //!   does, and otherwise sends `POST /api/hosts/probe` for the name (trimmed) and recipe under Add host's key, reading
 //!   "Checking…" meanwhile with the fields read-only. The helm's plan is free and local: nothing is created yet. A
 //!   refusal, or a reply that is not a Tensorlake plan, shows in Add host's error line with the fields kept.
@@ -44,6 +44,7 @@
 //!   it was read, and focus in Name.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_proto::ProviderKind;
 use farhelm_proto::provisioning::{PlanSteps, ProbeReply};
 use farhelm_proto::recipes::{RecipeSize, RecipeView};
 use farhelm_proto::tensorlake::Settings;
@@ -61,6 +62,7 @@ use gpui::{
 use super::{AddHostDialog, BODY_GAP, FIELD_HEIGHT, Problem, SandboxSeed, error_line, field, help};
 use crate::components::{Button, HoverHelp, Select, SelectOption, TextInput, TextInputState, Tier};
 use crate::drafts::DraftInput;
+use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::{self, setup};
@@ -80,6 +82,11 @@ const NOT_SENT: &str =
 /// The Recipe choice's option that opens the recipe editor rather than choosing a recipe. No recipe can be named this:
 /// the helm's rule allows no underscore in a recipe name (`farhelm_proto::recipes::check_recipe_name`).
 const NEW_RECIPE: &str = "__new__";
+
+/// The provider for this form. Availability here is determined by recipe base alone.
+const TENSORLAKE: ProviderUi = ProviderUi(ProviderKind::Tensorlake);
+/// A retained choice can outlive the catalog entry it came from.
+const MISSING_RECIPE: &str = "This recipe is no longer in the recipe list; choose another";
 
 /// What Continue says on hover: where it leads.
 const CONTINUE_HELP: &str =
@@ -291,8 +298,8 @@ impl TensorlakeForm {
 
     /// The editor `id` left for `departure` (Cancel or a done Save go back, a leave question asked by closing Add host
     /// closes it), at the press `mark`, with the recipe's name when it is saved. Nothing if `id` is no longer the open
-    /// editor, so a late reply never closes an editor opened since. Back chooses the saved recipe and puts focus on
-    /// Recipe, unless the user moved on since `mark`.
+    /// editor, so a late reply never closes an editor opened since. Back chooses a compatible saved recipe and puts
+    /// focus on Recipe, unless the user moved on since `mark`.
     fn editor_left(
         &mut self,
         id: EntityId,
@@ -309,7 +316,10 @@ impl TensorlakeForm {
         cx.notify();
         match departure {
             RecipeDeparture::Back => {
-                if let Some(name) = saved {
+                // The helm projects the catalog before replying. Choose only a compatible entry it supplied.
+                if let Some(name) =
+                    saved.filter(|name| Self::recipe_refusal(Some(name), cx).is_none())
+                {
                     self.recipe = Some(name.into());
                 }
                 // The Recipe choice is drawn again by the next frame; the coordinator keeps the move until then.
@@ -348,8 +358,8 @@ impl TensorlakeForm {
         let name = self.name();
         let refused = if name.is_empty() {
             Some("Enter a name for the host".to_owned())
-        } else if self.recipe.is_none() {
-            Some("Choose a recipe".to_owned())
+        } else if let Some(reason) = Self::recipe_refusal(self.recipe.as_deref(), cx) {
+            Some(reason)
         } else {
             hosts::launch_in_flight(cx).then(|| format!("Add host: {}", hosts::LAUNCH_IN_FLIGHT))
         };
@@ -452,9 +462,24 @@ impl TensorlakeForm {
         self.name.draft().value().clone()
     }
 
-    /// Whether Continue can be pressed: both Name and Recipe are set, as the old Continue required.
-    fn can_continue(&self) -> bool {
-        !self.name().is_empty() && self.recipe.is_some()
+    /// Add host prepares account resources itself. The pushed catalog only needs to establish base compatibility.
+    fn recipe_refusal(name: Option<&str>, cx: &App) -> Option<String> {
+        let Some(name) = name else {
+            return Some("Choose a recipe".to_owned());
+        };
+        let store = session::current_store(cx);
+        match store
+            .as_ref()
+            .and_then(|store| store.read(cx).collections().get::<RecipeView>(name))
+        {
+            Some(recipe) => TENSORLAKE.base_refusal(recipe),
+            None => Some(MISSING_RECIPE.to_owned()),
+        }
+    }
+
+    /// The draft may retain its recipe name while the catalog changes. Continue uses the current recipe.
+    fn can_continue(&self, cx: &App) -> bool {
+        !self.name().is_empty() && Self::recipe_refusal(self.recipe.as_deref(), cx).is_none()
     }
 
     /// Continue, for Add host's footer in the place of Add: "Checking…" and busy while the probe is out.
@@ -468,7 +493,7 @@ impl TensorlakeForm {
         )
         .tier(Tier::Primary)
         .busy(busy)
-        .disabled(!busy && !self.can_continue())
+        .disabled(!busy && !self.can_continue(cx))
         .on_click(move |_, window, cx| {
             let _ = form.update(cx, |form, cx| form.proceed(window, cx));
         })
@@ -513,17 +538,18 @@ impl TensorlakeForm {
                 .as_ref()
                 .map(|name| format!("{name} (unavailable)"))
                 .unwrap_or_default(),
-            HoverHelp::tooltip("This recipe is no longer in the recipe list; choose another"),
+            HoverHelp::tooltip(MISSING_RECIPE),
         )
         .options(recipes.iter().map(|recipe| {
-            SelectOption::new(
+            let option = SelectOption::new(
                 recipe.name.clone(),
                 recipe.name.clone(),
-                HoverHelp::tooltip(format!(
-                    "Create the sandbox from the recipe {}",
-                    recipe.name
-                )),
-            )
+                HoverHelp::tooltip(recipe.name.clone()),
+            );
+            match TENSORLAKE.base_refusal(recipe) {
+                Some(reason) => option.unavailable(reason),
+                None => option,
+            }
         }))
         .options([SelectOption::new(
             NEW_RECIPE,
