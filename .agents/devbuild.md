@@ -45,12 +45,15 @@ supervisor reports its database version; the host then needs a build at least th
 target built before schema reporting was added, still lets that Update strand the host until the newer build is put
 back.
 
-On its own state, a devbuild starts with **Update remote hosts automatically** off unless a choice is already saved.
-This protects shared hosts from receiving an unreleased protocol upgrade as soon as the devbuild starts. To enable
-automatic updates for the devbuild, use Settings → Hosts. The choice survives later launches. A devbuild explicitly
-started on the installed app's state uses that state's ordinary update policy. The separate-state default requires both
-the staged binary and its `--run-only` launcher to include this change. Use the launcher from the staged build's
-revision if you have moved the checkout to an older one.
+A devbuild never updates remote hosts automatically, whatever **Update remote hosts automatically** says:
+`scripts/devbuild-mac.sh` always points its helm at the staged host builds, and automatic updates skip a staged
+directory so that unsigned local builds reach a host only through an update you start. Update, Update all and Re-run in
+Hosts still install the staged builds. A target from before that rule follows the switch instead. On its own state such
+a devbuild starts with the switch off unless a choice is already saved, which protects shared hosts from receiving an
+unreleased protocol upgrade as soon as it starts, and Settings → Hosts turns it on; started on the installed app's
+state, it uses that state's ordinary update policy. That separate-state default requires both the staged binary and its
+`--run-only` launcher to include it. Use the launcher from the staged build's revision if you have moved the checkout to
+an older one.
 
 The devbuild's local supervisor keeps running after the app quits (for targets that contain the detached supervisor; an
 older target's app stops it on quit). Its log is `supervisor.log` in the devbuild state directory, not the terminal the
