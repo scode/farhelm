@@ -470,15 +470,15 @@ pub fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
     }
 }
 
-/// Whether automatic updates are on: the desktop state file's setting, on
-/// when it is absent and when the file cannot be read, since a broken file
-/// is no answer from the user and the setting's default is on.
+/// Whether the desktop state allows background updates. A missing file
+/// or setting uses the installation default. A read failure may hide a
+/// saved opt-out. Background work requires the current read to allow it.
 fn automatic_updates_enabled(state_path: &Path) -> bool {
     match state::read_state(state_path) {
         Ok(state) => state.install_updates_automatically.unwrap_or(true),
         Err(error) => {
             tracing::warn!("updater: reading the automatic-updates setting: {error:#}");
-            true
+            false
         }
     }
 }
@@ -955,9 +955,8 @@ impl Engine {
                 .duration_since(last)
                 .map_or(true, |elapsed| elapsed >= CHECK_INTERVAL),
         };
-        // The clock first, so the setting (a file read, which warns when
-        // the file is broken) is consulted once a day rather than every
-        // minute.
+        // Check the clock first to avoid reading state on every wake while
+        // waiting for the next scheduled check.
         clock_due && (self.deps.automatic_enabled)()
     }
 
@@ -1844,11 +1843,10 @@ mod tests {
         assert_eq!(read_installed_record(&path), None);
     }
 
-    /// Spec: the automatic-updates setting is on when absent, when the
-    /// state file is missing, and when it cannot be read; only an explicit
-    /// `false` turns it off.
+    /// Older and fresh installations default to on. A settings read error
+    /// counts as off because the updater cannot determine the saved choice.
     #[farhelm_testtrace::test]
-    fn automatic_updates_are_on_unless_turned_off() {
+    fn automatic_updates_default_to_on_but_require_readable_state() {
         let dir = tempfile::tempdir().unwrap();
         let path = dir.path().join(state::APP_STATE_FILE);
         assert!(automatic_updates_enabled(&path), "no file");
@@ -1859,7 +1857,7 @@ mod tests {
         std::fs::write(&path, r#"{"install_updates_automatically":true}"#).unwrap();
         assert!(automatic_updates_enabled(&path));
         std::fs::write(&path, "not json").unwrap();
-        assert!(automatic_updates_enabled(&path), "unreadable file");
+        assert!(!automatic_updates_enabled(&path), "malformed state");
     }
 
     // ---- Restart to update ----
@@ -2016,14 +2014,20 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_setting_that_cannot_be_saved_reports_it() {
         let dir = tempfile::tempdir().unwrap();
-        // A directory where the state file should be: every write fails.
+        // Keep the default readable so only the save fails. The staging
+        // file cannot be opened because a directory occupies its path.
         let state_path = dir.path().join(state::APP_STATE_FILE);
-        std::fs::create_dir(&state_path).unwrap();
+        std::fs::write(&state_path, "{}").unwrap();
+        std::fs::create_dir(state_path.with_extension("json.tmp")).unwrap();
         let handle = UpdaterHandle {
             shared: Arc::new(Shared::new("1.0.0")),
             bundle: dir.path().join("Farhelm.app"),
             state_path,
         };
+        assert!(
+            handle.automatic_updates(),
+            "the default before the write attempt"
+        );
         assert!(handle.set_automatic_updates(false).is_err());
         assert!(handle.automatic_updates(), "the default, still in force");
 
@@ -3470,9 +3474,9 @@ mod tests {
         assert_eq!(rig.published().activity, Activity::Idle);
     }
 
-    /// The real file carries exact streak time across new workers. Missing,
-    /// malformed and unreadable files mean no history, and failed writes do
-    /// not panic or prevent the in-memory streak reaching its threshold.
+    /// The file carries exact streak time across new workers. Failed reads
+    /// provide no history and disable automatic probes. If the state reads
+    /// successfully, failed writes still let the in-memory streak qualify.
     #[farhelm_testtrace::test]
     fn probe_failure_persistence_survives_restart_and_file_failures_remain_live() {
         let root = tempfile::tempdir().unwrap();
@@ -3504,7 +3508,13 @@ mod tests {
             None
         );
 
-        for fixture in ["missing", "missing-field", "unreadable", "malformed"] {
+        for fixture in [
+            "missing",
+            "missing-field",
+            "unreadable",
+            "malformed",
+            "unwritable",
+        ] {
             let path = root.path().join(fixture);
             match fixture {
                 "missing-field" => {
@@ -3513,6 +3523,13 @@ mod tests {
                 "unreadable" => std::fs::create_dir(&path).unwrap(),
                 "malformed" => {
                     std::fs::write(&path, r#"{"automatic_probe_failure_since":"bad"}"#).unwrap()
+                }
+                "unwritable" => {
+                    // Keep the choice readable while preventing the writer
+                    // from opening the staging file for a streak update.
+                    std::fs::write(&path, "{}").unwrap();
+                    std::fs::create_dir(path.with_extension("json.tmp")).unwrap();
+                    assert!(state::update_state(&path, |_| {}).is_err());
                 }
                 _ => assert!(!path.exists()),
             }
@@ -3526,6 +3543,11 @@ mod tests {
             assert_eq!(rig.published().activity, Activity::Idle, "{fixture}");
             rig.advance(PROBE_FAILURE_NOTICE_AFTER);
             rig.engine.wake_once();
+            if matches!(fixture, "unreadable" | "malformed") {
+                assert_eq!(rig.probes.load(Ordering::SeqCst), 0, "{fixture}");
+                assert_eq!(rig.published().activity, Activity::Idle, "{fixture}");
+                continue;
+            }
             assert!(
                 matches!(rig.published().activity, Activity::Failed(_)),
                 "{fixture}"

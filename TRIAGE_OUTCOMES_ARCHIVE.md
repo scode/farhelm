@@ -28785,3 +28785,25 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   remove the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
 - Execution: change `srymukzqnwsoqmpwypslsusxxxvwyolq`, bookmark `pr/parked-quickstart-supervisor-survives`,
   [PR #4402](https://github.com/scode/farhelm/pull/4402/changes).
+
+## desktop-updater-read-failure-enables-auto-install.md
+
+- Outcome: `fix code`.
+- Assessment: confirmed by a delegated reader against main 28f177284 (code reading, not run): This is current desktop
+  code. `automatic_updates_enabled` returns `true` when the desktop state file cannot be read
+  (`crates/farhelm-desktop/src/updater.rs:472-483`), and the updater worker asks it at each install gate
+  (`updater.rs:435-438`). If the state file becomes unreadable after a successful startup, a background install can go
+  ahead despite the user's saved opt-out.
+- Decision: the maintainer picked "Fix all" for the batch of small, clearly wrong things (2026-11-21 six-question triage
+  page for findings that cited removed UI code, Q1), adding: "with a complexity gate, if any of these spiral into
+  something very complicated, the executor should make a near term todo item to follow up on it instead of adding tons
+  of complexity."
+- Completion criteria: Fix within the current spec what the Assessment describes ("Automatic app updates can resume if
+  the settings file becomes unreadable"), with a test where practical. Size gate: about 100 lines of diff (code, tests
+  and docs, not counting this ledger, the queue removal or a changelog fragment). The maintainer added a complexity
+  gate: "if any of these spiral into something very complicated, the executor should make a near term todo item to
+  follow up on it instead of adding tons of complexity"; in that case add that TODO.md entry (Near term bucket), remove
+  the feedback file, and say so in the execution record. Remove the feedback file and its index entry.
+- Execution: change `slvzsrymtkmyxqlvlwyplzpunostqrvn`, bookmark
+  `plan/desktop-updater-unreadable-optout/01-unreadable-setting-means-off`,
+  [PR #4407](https://github.com/scode/farhelm/pull/4407/changes).

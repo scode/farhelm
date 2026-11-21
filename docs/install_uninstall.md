@@ -56,10 +56,11 @@ selecting the version number also checks; its hover then says how the check went
 latest, that notice appears only after automatic checks have failed for at least three days; finding the latest release
 successfully ends that streak. Failed automatic work is logged and tried again at the next check, without changing the
 daily schedule. To stop the automatic checks and installs, untick **install updates automatically** in the settings
-dialog (the gear at the top of the sidebar); checking on demand and running the installer yourself keep working. With
-automatic updates on, a version you pinned with `FARHELM_VERSION` that is older than the latest stable release is
-replaced by it at the next automatic check, which includes the one at startup. This applies only to the app installed at
-`~/Applications/Farhelm.app`; a build from main never updates itself.
+dialog (the gear at the top of the sidebar). The running app also pauses automatic checks and installs if it cannot read
+the saved setting. You can still check on demand or run the installer yourself. With automatic updates on, a version you
+pinned with `FARHELM_VERSION` that is older than the latest stable release is replaced by it at the next automatic
+check, which includes the one at startup. This applies only to the app installed at `~/Applications/Farhelm.app`; a
+build from main never updates itself.
 
 You can update while Farhelm is open. The running Farhelm keeps working as it was, on the version it started with:
 sessions keep running, new sessions start, and agents' `farhelm` commands and conversation tracking keep working. Quit
