@@ -68,10 +68,6 @@ consequences.
 - [`omitted-session-row-drops-live-tabs.md`](omitted-session-row-drops-live-tabs.md) — A list update can take away the
   shell tab you’re using and make the agent terminal receive your next typing. The shell on the host can keep running.
 
-- [`interrupted-upload-notice-lost-on-session-removal.md`](interrupted-upload-notice-lost-on-session-removal.md) — When
-  you switch away during an upload and the old session is replaced or deleted, Farhelm can cancel the upload without
-  ever showing you that it stopped.
-
 - [`session-delete-shortcut-ignores-composition.md`](session-delete-shortcut-ignores-composition.md) — Pressing the
   session Delete shortcut while composing text can delete the open session, including its processes, when Skip session
   confirmations is enabled.
@@ -896,9 +892,6 @@ consequences.
 - [`test-summary-partial-test-ignores-usable-run-count.md`](test-summary-partial-test-ignores-usable-run-count.md) — The
   partial-report test can pass if an unavailable flake ledger causes the summary to lose valid test-run counts.
 
-- [`working-attention-row-hides-warning-edge.md`](working-attention-row-hides-warning-edge.md) — Starting work on a host
-  can remove its attention row’s amber warning edge before an earlier setup or update warning is acknowledged.
-
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
 
@@ -944,7 +937,3 @@ consequences.
 
 - [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
   its normal launch path.
-
-- [`retired-terminal-comment-names-agent-recipient.md`](retired-terminal-comment-names-agent-recipient.md) — The
-  terminal retirement comment still sends maintainers looking for notices on Agent even when they follow the selected
-  shell.

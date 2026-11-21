@@ -74,8 +74,8 @@ linux/host-progress-card-preview--dark.png 3a0d12cb1eaccb947084415d6cc5ce525a0bf
 linux/host-progress-card-preview--light.png f96b47bd5845d7cc954480fae09052337fa8f94f
 linux/host-rail-hover-beside--dark.png a3dd2f50f3da01956b51fb675052004c5444a8cb
 linux/host-rail-hover-beside--light.png deacef46616c0eca330b6b5d12a3f81c56a0f0ed
-linux/host-rail-status--dark.png 6317b05f98dcfa0f246d2ddf53ee8cfc67041500
-linux/host-rail-status--light.png 92cc311445ac2ea41959fc4ce4fb1b97be78d763
+linux/host-rail-status--dark.png d2ccedb6f3de069229e07ac08f9b05f79372544e
+linux/host-rail-status--light.png e177f7f14f4f4102b8c4e76ebbe4d9bf64142997
 linux/host-remove-confirmation--dark.png ca207cb5a2e7441009984eb53b9fe399c0a7928c
 linux/host-remove-confirmation--light.png 8ec820c50460c22a711444b524923336fb548fea
 linux/host-settings-dialog--dark.png 490e721a44e154f53f37f4fa6a36e3399c683817

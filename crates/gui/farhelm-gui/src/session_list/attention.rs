@@ -250,7 +250,8 @@ pub(super) fn classify<'a>(
                 words,
                 steps,
                 cue,
-                warning: kind == Kind::Problem && status.warned,
+                // Live progress owns the row's text. The warning keeps its edge until it is acknowledged or resolved.
+                warning: status.warned,
             })
         })
         .collect();
