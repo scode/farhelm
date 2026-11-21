@@ -708,44 +708,6 @@
   brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-terminal-host.md`.
 
-## wide-wrap-placeholder-loses-final-cell-style.md
-
-- Outcome: `fix code`.
-- Assessment: When a wide character (CJK, emoji) wraps from the last column with a colored background, the grid view
-  shows a default-background hole at the end of the previous line where a real terminal shows the color. Verified:
-  grid_output.rs:153-159 skips `LEADING_WIDE_CHAR_SPACER` cells entirely (confirmed). That vendor code gives them the
-  pen's style is taken from the file. The protocol says omitted cells are default blanks.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code: send a leading placeholder as a styled blank. If the fix
-  turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
-  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
-## partial-wide-erasure-loses-second-cell-background.md
-
-- Outcome: `fix code`.
-- Assessment: If a program erases only the right half of a wide character with a different background, the grid view
-  keeps painting the old character's box over that column. Verified: grid_output.rs:195-205 emits width 2 for any
-  WIDE_CHAR cell and skips the next cell without checking it is still a spacer (confirmed). The vendor erase behavior is
-  taken from the file.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code: emit width 2 only when the next cell is still a spacer;
-  otherwise send both cells separately. If the fix turns out not to be straightforward, or needs significant additional
-  complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
-  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
-  to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-terminal-host.md`.
-
 ## successful-suspend-flashes-connecting.md
 
 - Outcome: `fix code`.

@@ -33521,3 +33521,47 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Now proves an unrelated later question for the same host remains in the sidebar when a touch notice
   completes. jj change `tlsxwwsnvunv`, bookmark `plan/triage-gui-sessions/04-gui-test-gaps`,
   [draft PR #4486](https://github.com/scode/farhelm/pull/4486/changes).
+
+## wide-wrap-placeholder-loses-final-cell-style.md
+
+- Outcome: `fix code`.
+- Assessment: When a wide character (CJK, emoji) wraps from the last column with a colored background, the grid view
+  shows a default-background hole at the end of the previous line where a real terminal shows the color. Verified:
+  grid_output.rs:153-159 skips `LEADING_WIDE_CHAR_SPACER` cells entirely (confirmed). That vendor code gives them the
+  pen's style is taken from the file. The protocol says omitted cells are default blanks.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code: send a leading placeholder as a styled blank. If the fix
+  turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
+  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Deferred to the Near term TODO entry 'Keep the terminal’s colored margin when a wide glyph wraps.' The
+  viewer needs to tell the wrap placeholder from a printed space to preserve copy and link behavior. Change
+  `nwyqzynupzwk`, bookmark `plan/triage-terminal-host/01-grid-wide-cells`,
+  [PR #4472](https://github.com/scode/farhelm/pull/4472/changes).
+
+## partial-wide-erasure-loses-second-cell-background.md
+
+- Outcome: `fix code`.
+- Assessment: If a program erases only the right half of a wide character with a different background, the grid view
+  keeps painting the old character's box over that column. Verified: grid_output.rs:195-205 emits width 2 for any
+  WIDE_CHAR cell and skips the next cell without checking it is still a spacer (confirmed). The vendor erase behavior is
+  taken from the file.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Fix code: emit width 2 only when the next cell is still a spacer;
+  otherwise send both cells separately. If the fix turns out not to be straightforward, or needs significant additional
+  complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not
+  counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back
+  to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to the Near term TODO entry 'Show the new background after erasing half of a wide terminal glyph.'
+  A one-column run can make the viewer read the previous row’s wrap padding as text, inserting a space in copied text
+  and breaking link matching. Change `nwyqzynupzwk`, bookmark `plan/triage-terminal-host/01-grid-wide-cells`,
+  [PR #4472](https://github.com/scode/farhelm/pull/4472/changes).
