@@ -32,12 +32,12 @@ use farhelm_helm_client::{ApiPath, PathError};
 use farhelm_proto::{LaunchHarness, SessionInfo};
 use gpui::{
     AnyElement, App, Div, FocusHandle, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Role, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    ParentElement as _, Role, Styled as _, Window, div, px, svg,
 };
 
-use super::Refused;
-use super::choices::{self, Choice, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices::{self, Choice};
 use super::configured::{self, Configured};
+use super::{Refused, card};
 use crate::components::{Checkbox, HoverHelp};
 use crate::host_text::HostText;
 use crate::operations::Command;
@@ -45,8 +45,6 @@ use crate::theme::{self, metrics};
 
 /// `.checkout-claude-trust`'s gap between its rows.
 const BLOCK_GAP: f32 = 8.;
-/// `.checkout-claude-trust + .checkout-claude-trust`: the rule's padding above each block after the first.
-const BLOCK_RULE_PAD: f32 = 16.;
 /// `.claude-trust-caution`: its padding, 12-pixel words at `line-height: 1.5`, and its paragraphs 8 pixels apart.
 const CAUTION_PAD: f32 = 12.;
 const CAUTION_LINE_HEIGHT: f32 = 18.;
@@ -96,6 +94,17 @@ impl TrustAgent {
     /// Its place in [`TrustAgent::ALL`], where the dialog keeps its state.
     pub(super) fn index(self) -> usize {
         self as usize
+    }
+
+    /// A trust card is identified by the same agent mark as its session rows.
+    fn harness(self) -> LaunchHarness {
+        match self {
+            Self::Claude => LaunchHarness::Claude,
+            Self::Codex => LaunchHarness::Codex,
+            Self::Muse => LaunchHarness::Muse,
+            Self::Pi => LaunchHarness::Pi,
+            Self::Antigravity => LaunchHarness::Antigravity,
+        }
     }
 
     /// The agent's name in the failure lines.
@@ -394,7 +403,6 @@ pub(super) struct Trust {
 /// is what a toggle of the trust switch does; `hint` draws the hint switch through the dialog.
 pub(super) fn block(
     trust: &Trust,
-    first: bool,
     refused: &Refused,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     hint: impl FnOnce(Choice) -> AnyElement,
@@ -402,54 +410,66 @@ pub(super) fn block(
 ) -> Div {
     let palette = theme::palette(cx);
     let agent = trust.agent;
-    let switch = div()
-        .text_size(px(LABEL_TEXT))
-        .line_height(px(LABEL_LINE_HEIGHT))
+    let mark = crate::harness::glyph(agent.harness());
+    let contents = div()
+        .flex()
+        .items_start()
+        .gap(px(8.))
         .child(
-            Checkbox::new(
-                agent.id(),
-                agent.label(),
-                HoverHelp::tooltip(agent.tooltip()),
-                Role::Switch,
-            )
-            .switch()
-            .checked(trust.state.shown())
-            .disabled(!trust.state.available())
-            .focus(&trust.focus)
-            .on_toggle(on_toggle),
+            svg()
+                .path(crate::harness::icon(mark).path())
+                .size(px(16.))
+                .flex_none()
+                .text_color(theme::color(
+                    crate::harness::ink(mark, palette).unwrap_or(palette.fg_1),
+                )),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap(px(4.))
+                .child(card::switch_copy(agent.label(), "", cx))
+                .children(
+                    agent
+                        .help()
+                        .into_iter()
+                        .map(|text| super::card::help(text, cx)),
+                ),
         );
+    let switch = Checkbox::new(
+        agent.id(),
+        agent.label(),
+        HoverHelp::tooltip(agent.tooltip()),
+        Role::Switch,
+    )
+    .switch()
+    .content(contents)
+    .checked(trust.state.shown())
+    .disabled(!trust.state.available())
+    .focus(&trust.focus)
+    .on_toggle(on_toggle);
     let failure = configured::failure(
         agent.error_id(),
         format!("Could not save or read {} trust settings: ", agent.name()),
         &trust.state,
         cx,
     );
-    div()
+    let trust_row = div()
         .flex()
         .flex_col()
         .gap(px(BLOCK_GAP))
         .min_w_0()
-        .when(!first, |block| {
-            block
-                .border_t_1()
-                .border_color(theme::color(palette.border_dim))
-                .pt(px(BLOCK_RULE_PAD))
-        })
         .child(switch)
-        .children(
-            agent
-                .help()
-                .into_iter()
-                .map(|text| choices::help(text, cx).into_any_element()),
-        )
-        .children(agent.has_caution().then(|| caution(cx)))
-        .children(
-            agent
-                .hint()
-                .map(|choice| div().mt(px(BLOCK_GAP)).child(hint(choice))),
-        )
         .children(failure)
         .children(choices::busy_line(refused, agent.id(), cx))
+        .children(agent.has_caution().then(|| caution(cx)));
+    card::rows(
+        std::iter::once(trust_row.into_any_element()).chain(agent.hint().map(hint)),
+        cx,
+    )
 }
 
 /// Claude's caution box (`.claude-trust-caution`): why the switch is off by default, in the amber of a warning, with

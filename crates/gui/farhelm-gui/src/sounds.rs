@@ -100,7 +100,7 @@ pub(crate) fn installed_player(cx: &App) -> Option<Rc<dyn Player>> {
 
 /// Hand `sound` to the installed player, rendering its WAV file the first time. Nothing without a player, which also
 /// skips the rendering.
-fn play(sound: Sound, cx: &App) {
+pub(crate) fn play(sound: Sound, cx: &App) {
     if let Some(InstalledPlayer(player)) = cx.try_global::<InstalledPlayer>() {
         player.play(sound, synth::wav(sound));
     }

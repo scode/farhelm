@@ -1,0 +1,114 @@
+//! Settings shows related rows inside one card. Padding and separators live here so a page can build its controls
+//! without handling the card's geometry.
+
+use gpui::{
+    AnyElement, App, Div, FontWeight, IntoElement, ParentElement as _, SharedString, Styled as _,
+    div, prelude::FluentBuilder as _, px,
+};
+
+use crate::theme::{self, metrics};
+
+/// Draw the section's content on the card ground, one line of padding per row and a hairline between rows.
+pub(super) fn rows<T: IntoElement>(rows: impl IntoIterator<Item = T>, cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    surface(cx).children(rows.into_iter().enumerate().map(|(index, row)| {
+        div()
+            .px(px(14.))
+            .py(px(10.))
+            .min_w_0()
+            .when(index != 0, |row| {
+                row.border_t_1()
+                    .border_color(theme::color(palette.border_dim))
+            })
+            .child(row)
+    }))
+}
+
+/// The outline and ground, for controls whose own focus styles determine their padding.
+pub(super) fn surface(cx: &App) -> Div {
+    let palette = theme::palette(cx);
+    div()
+        .w_full()
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .rounded(px(6.))
+        .border_1()
+        .border_color(theme::color(palette.border_dim))
+        .bg(theme::color(palette.card))
+}
+
+/// A card's title, optional note and action share a heading. The action stays at the end as the note wraps.
+pub(super) fn heading(
+    title: &'static str,
+    note: Option<&'static str>,
+    action: Option<AnyElement>,
+    cx: &App,
+) -> Div {
+    let palette = theme::palette(cx);
+    div()
+        .flex()
+        .justify_between()
+        .items_center()
+        .gap(px(10.))
+        .child(
+            div()
+                .min_w_0()
+                .flex()
+                .items_start()
+                .gap_x(px(8.))
+                .child(
+                    div()
+                        .flex_none()
+                        .text_size(metrics::TEXT_MD)
+                        .line_height(px(18.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(title),
+                )
+                .children(note.map(|note| {
+                    div()
+                        .min_w_0()
+                        .text_size(metrics::TEXT_SM)
+                        .line_height(px(18.))
+                        .text_color(theme::color(palette.fg_1))
+                        .child(note)
+                })),
+        )
+        .children(action.map(|action| div().flex_none().child(action)))
+}
+
+/// Keep field captions below the card heading in the type hierarchy. The unsaved dot still belongs to the caption.
+pub(super) fn caption(label: &'static str, edited: bool, palette: &theme::Palette) -> Div {
+    div()
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(17.))
+        .text_color(theme::color(palette.fg_1))
+        .child(super::editing::caption(label, edited.then_some(palette)))
+}
+
+/// Supporting copy for both the ordinary switch rows and longer trust descriptions.
+pub(super) fn help(description: impl Into<SharedString>, cx: &App) -> Div {
+    div()
+        .text_size(metrics::TEXT_SM)
+        .line_height(px(17.))
+        .text_color(theme::color(theme::palette(cx).fg_1))
+        .child(description.into())
+}
+
+/// A switch title and its visible description share a wrapping column. Keep the type scale the same across cards
+/// whether the toggle owns the whole row or stands beside a separate preview control.
+pub(super) fn switch_copy(title: impl IntoElement, description: &'static str, cx: &App) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(3.))
+        .min_w_0()
+        .child(
+            div()
+                .text_size(px(13.))
+                .line_height(px(18.))
+                .font_weight(FontWeight::MEDIUM)
+                .child(title),
+        )
+        .children((!description.is_empty()).then(|| help(description, cx)))
+}

@@ -21,7 +21,7 @@ use gpui::{
     App, Div, FocusHandle, ParentElement as _, Role, SharedString, Styled as _, Window, div, px,
 };
 
-use super::choices::{self, GROUP_GAP, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::{card, choices};
 use crate::components::{Button, Checkbox, HoverHelp, StatusMark, Tier};
 use crate::desktop::updates;
 use crate::update_readout::{InlineStatus, inline_status};
@@ -38,10 +38,6 @@ pub(super) const VERSION_ID: &str = "settings-app-version";
 pub(super) const CHECK_ID: &str = "settings-app-check-for-updates";
 pub(super) const CHECK_LABEL: &str = "Check for updates";
 pub(super) const CHECK_HELP: &str = "Check for and install a newer Farhelm release. The version at the top of the sidebar shows the result.";
-
-/// The note at the start of the section explains which app these controls apply to. The updater
-/// runs only in the installed Mac app, so "this Mac" holds wherever the section is drawn.
-const NOTE: &str = "Automatic updates apply to this Farhelm app on this Mac.";
 
 pub(super) const LABEL: &str = "Install updates automatically";
 
@@ -119,64 +115,51 @@ fn version_group(focus: &FocusHandle, cx: &App) -> Div {
     });
     div()
         .flex()
-        .flex_col()
-        .gap(px(GROUP_GAP))
+        .items_center()
+        .justify_between()
+        .gap(px(8.))
         .min_w_0()
+        .child(card::switch_copy("Version", help, cx))
         .child(
             div()
                 .flex()
                 .items_center()
-                .justify_between()
-                .gap(px(16.))
-                .text_size(px(LABEL_TEXT))
-                .line_height(px(LABEL_LINE_HEIGHT))
-                .child("Version")
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(8.))
-                        .child(version)
-                        .child(check),
-                ),
+                .flex_none()
+                .gap(px(8.))
+                .child(version)
+                .child(check),
         )
-        .child(choices::help(help, cx))
 }
 
-/// The note, version group and automatic-updates group. The last carries the updater's reason after a refused save.
+/// Version and automatic updates are rows of the same card. The switch owns the updater's refusal line.
 /// The App section only exists while the updater runs.
 pub(super) fn section(
     state: &AppUpdates,
     on_toggle: impl Fn(bool, &mut Window, &mut App) + 'static,
     cx: &App,
-) -> Option<[Div; 3]> {
+) -> Option<[Div; 2]> {
     let on = updates::automatic_updates(cx)?;
-    let switch = div()
-        .text_size(px(LABEL_TEXT))
-        .line_height(px(LABEL_LINE_HEIGHT))
-        .child(
-            Checkbox::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::Switch)
-                .switch()
-                .checked(on)
-                .focus(&state.focus)
-                .on_toggle(on_toggle),
-        );
+    let switch = Checkbox::new(ID, LABEL, HoverHelp::tooltip(TOOLTIP), Role::Switch)
+        .switch()
+        .content(card::switch_copy(
+            LABEL,
+            if on { HELP_ON } else { HELP_OFF },
+            cx,
+        ))
+        .checked(on)
+        .focus(&state.focus)
+        .on_toggle(on_toggle);
     let group = div()
         .flex()
         .flex_col()
-        .gap(px(GROUP_GAP))
+        .gap(px(4.))
         .min_w_0()
         .child(switch)
-        .child(choices::help(if on { HELP_ON } else { HELP_OFF }, cx))
         .children(
             state
                 .failure
                 .clone()
                 .map(|reason| choices::failure_line(ERROR_ID.to_owned(), reason, cx)),
         );
-    Some([
-        choices::help(NOTE, cx),
-        version_group(&state.check_focus, cx),
-        group,
-    ])
+    Some([version_group(&state.check_focus, cx), group])
 }

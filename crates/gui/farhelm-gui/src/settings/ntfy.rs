@@ -38,19 +38,18 @@
 //!   save, as a draft's refusal does, where the old form showed one outcome at a time. While it is out the form is
 //!   locked as for a save, as the old one was, so a Save cannot overtake it. It moves no focus and opens nothing.
 //!
-//! NOTE: The Sounds sub-heading above ntfy alerts, with its three switches, is not this form's: they are preference
-//! switches like the other sections', which the dialog draws above this form (`SettingsDialog::sounds`).
+//! The Sounds card above this form has four switches. Each writes its own preference immediately.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ntfy::{Priority, SaveSettings, Settings};
 use gpui::{
-    AnyWindowHandle, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
-    ParentElement as _, Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _,
-    Subscription, Window, div, px,
+    AnyWindowHandle, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
+    Render, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window,
+    div, px,
 };
 
-use super::Refused;
-use super::choices::{self, LABEL_LINE_HEIGHT, LABEL_TEXT};
+use super::choices;
+use super::{Refused, card};
 use crate::components::{
     Button, Checkbox, HoverHelp, RadioGroup, RadioOption, TextInput, TextInputEvent,
     TextInputState, Tier,
@@ -60,8 +59,8 @@ use crate::host_text::HostText;
 use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::theme;
 
-/// `.host-settings-section`'s gap between the form's rows.
-const ROW_GAP: f32 = 14.;
+/// The fields share two columns. Their help and outcomes can grow below them as needed.
+const FIELD_GAP: f32 = 10.;
 /// The form's name for [`Refused`]: its Save is the one control here whose press the key can refuse, and the line saying
 /// so is drawn under the id [`Refused::line`] makes of it, `ntfy-busy`.
 const REFUSED: &str = "ntfy";
@@ -71,8 +70,7 @@ const ROUTE: &str = "/api/ntfy-alerts";
 pub(super) const PRIORITY_HELP: &str =
     "Priority used for session alerts; Save applies the selected priority";
 pub(super) const PRIORITY_LABEL: &str = "Priority";
-pub(super) const INTRO: &str = "Send a session's title and host when it waits for you. Applies to this helm. In the \
-                               desktop app, keep the window open.";
+pub(super) const INTRO: &str = "Send a session's title and host when it waits for you. In the desktop app, keep the window open.";
 pub(super) const TOPIC_HELP: &str =
     "Anyone who knows an ntfy.sh topic can read its alerts. Choose a hard-to-guess topic.";
 pub(super) const TOKEN_HELP: &str =
@@ -589,15 +587,7 @@ impl NtfyAlerts {
             Field::Topic => form.topic != stored.topic,
             Field::Token => !form.token.is_empty(),
         });
-        choices::labelled(label, id, input, edited.then_some(palette))
-    }
-
-    /// A field's or the switches' words, at the old labels' size.
-    fn label(text: &'static str, edited: Option<&theme::Palette>) -> Div {
-        div()
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
-            .child(super::editing::caption(text, edited))
+        choices::field_with_caption(id, input, card::caption(label, edited, palette))
     }
 
     /// A switch with its words, toggling through this form.
@@ -614,27 +604,29 @@ impl NtfyAlerts {
             Switch::Enabled => on != stored.enabled,
             Switch::ClearToken => on,
         });
-        div()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .text_size(px(LABEL_TEXT))
-            .line_height(px(LABEL_LINE_HEIGHT))
-            .child(
-                Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
-                    .switch()
-                    .focus(self.switch_handle(switch))
-                    .checked(on)
-                    .disabled(self.locked())
-                    .on_toggle(move |on, window, cx| {
-                        let _ = weak.update(cx, |alerts, cx| {
-                            let _ = alerts.edit(|form| change(form, on), cx);
-                            alerts.hold(cx);
-                            alerts.sync(window, cx);
-                        });
-                    }),
-            )
-            .children(edited.then(|| super::editing::dot(false, theme::palette(cx))))
+        div().child(
+            Checkbox::new(id, label, HoverHelp::tooltip(help), Role::Switch)
+                .switch()
+                .content(card::switch_copy(
+                    super::editing::caption(label, edited.then(|| theme::palette(cx))),
+                    if switch == Switch::ClearToken {
+                        help
+                    } else {
+                        ""
+                    },
+                    cx,
+                ))
+                .focus(self.switch_handle(switch))
+                .checked(on)
+                .disabled(self.locked())
+                .on_toggle(move |on, window, cx| {
+                    let _ = weak.update(cx, |alerts, cx| {
+                        let _ = alerts.edit(|form| change(form, on), cx);
+                        alerts.hold(cx);
+                        alerts.sync(window, cx);
+                    });
+                }),
+        )
     }
 }
 
@@ -673,38 +665,43 @@ impl Render for NtfyAlerts {
             .gap(px(choices::LABEL_GAP))
             .w_full()
             .min_w_0()
-            .child(Self::label(
+            .child(card::caption(
                 PRIORITY_LABEL,
                 self.stored
                     .as_ref()
-                    .filter(|stored| form.priority != stored.priority)
-                    .map(|_| palette),
+                    .is_some_and(|stored| form.priority != stored.priority),
+                palette,
             ))
+            // Small segments take their basis along a row. Keep that basis horizontal in this field column.
             .child(
-                PRIORITIES
-                    .into_iter()
-                    .fold(
-                        RadioGroup::new(
-                            "ntfy-priority",
-                            PRIORITY_LABEL,
-                            HoverHelp::tooltip(PRIORITY_HELP),
-                            Role::Group,
-                        ),
-                        |group, priority| {
-                            group.option(RadioOption::new(
-                                priority.display_label(),
+                div().flex().min_w_0().child(
+                    PRIORITIES
+                        .into_iter()
+                        .fold(
+                            RadioGroup::new(
+                                "ntfy-priority",
+                                PRIORITY_LABEL,
                                 HoverHelp::tooltip(PRIORITY_HELP),
-                                priority,
-                            ))
-                        },
-                    )
-                    .chosen(Some(form.priority))
-                    .disabled(self.locked())
-                    .on_change(move |&chosen, _, cx| {
-                        let _ = choose.update(cx, |alerts, cx| {
-                            let _ = alerts.edit(|form| form.priority = chosen, cx);
-                        });
-                    }),
+                                Role::Group,
+                            )
+                            .small_segments()
+                            .fit_words(true),
+                            |group, priority| {
+                                group.option(RadioOption::new(
+                                    priority.display_label(),
+                                    HoverHelp::tooltip(PRIORITY_HELP),
+                                    priority,
+                                ))
+                            },
+                        )
+                        .chosen(Some(form.priority))
+                        .disabled(self.locked())
+                        .on_change(move |&chosen, _, cx| {
+                            let _ = choose.update(cx, |alerts, cx| {
+                                let _ = alerts.edit(|form| form.priority = chosen, cx);
+                            });
+                        }),
+                ),
             );
 
         // "Retry loading" while the read has failed, as in the old form.
@@ -753,60 +750,62 @@ impl Render for NtfyAlerts {
                 .child("ntfy alert settings saved")
         });
 
-        div()
-            .id("ntfy-alerts")
-            .role(Role::Region)
-            .aria_label("ntfy alerts")
+        let fields = div()
             .flex()
             .flex_col()
-            .gap(px(ROW_GAP))
-            .w_full()
-            .min_w_0()
+            .gap(px(FIELD_GAP))
             .child(
                 div()
-                    .id("ntfy-heading")
-                    .role(Role::Heading)
-                    .aria_label("ntfy alerts")
-                    .text_size(px(LABEL_TEXT))
-                    .line_height(px(LABEL_LINE_HEIGHT))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(theme::color(palette.fg_0))
-                    .child("ntfy alerts"),
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(FIELD_GAP))
+                    .child(self.field(Field::Server, None, palette))
+                    .child(self.field(Field::Topic, None, palette)),
             )
-            .child(choices::help(INTRO, cx))
-            .child(self.switch(
-                Switch::Enabled,
-                form.enabled,
-                |form, on| form.enabled = on,
-                cx,
-            ))
-            .child(self.field(Field::Server, None, palette))
-            .child(self.field(Field::Topic, None, palette))
-            .child(choices::help(TOPIC_HELP, cx))
-            .child(self.field(Field::Token, Some(token_help), palette))
-            .children(origin_hint)
-            .child(self.switch(
-                Switch::ClearToken,
-                form.clear,
-                |form, on| form.clear = on,
-                cx,
-            ))
-            .child(priority)
-            .children(self.unreadable.as_ref().map(|reason| failure("ntfy-load-error".into(), reason)))
-            .children(retry)
-            // Send test stays beside its explanation. It uses the saved configuration while the footer owns Save.
             .child(
                 div()
                     .flex()
-                    .justify_end()
-                    .gap(px(8.))
-                    .w_full()
-                    .child(send_test),
+                    .gap(px(6.))
+                    .rounded(theme::metrics::RADIUS_SM)
+                    .border_l_2()
+                    .border_color(theme::color(palette.warn))
+                    .bg(theme::color(palette.warn_bg_dim))
+                    .px(px(8.))
+                    .py(px(5.))
+                    .child(
+                        card::help("⚠", cx)
+                            .flex_none()
+                            .text_color(theme::color(palette.warn)),
+                    )
+                    .child(card::help(TOPIC_HELP, cx).min_w_0()),
             )
-            .child(choices::help(
-                "Save before testing. Send test uses the saved settings, not this form's unsaved changes.",
-                cx,
-            ))
+            .child(
+                div()
+                    .grid()
+                    .grid_cols(2)
+                    .gap(px(FIELD_GAP))
+                    .child(self.field(Field::Token, Some(token_help), palette))
+                    .child(priority),
+            )
+            .children(origin_hint)
+            .children(
+                self.unreadable
+                    .as_ref()
+                    .map(|reason| failure("ntfy-load-error".into(), reason)),
+            )
+            .children(retry);
+        let test = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div().flex().items_center().justify_between().gap(px(FIELD_GAP))
+                    .child(choices::help(
+                        "Save before testing. Send test uses the saved settings, not this form's unsaved changes.",
+                        cx,
+                    ).min_w_0())
+                    .child(div().flex_none().child(send_test)),
+            )
             .children((saving || self.testing).then(|| {
                 choices::outcome_line("ntfy-working", Role::Status, theme::color(palette.fg_0))
                     .aria_label("Working…")
@@ -818,7 +817,41 @@ impl Render for NtfyAlerts {
                     .line(REFUSED, |id, text| failure(id.into(), &HostText::from_host(text))),
             )
             .children(saved)
-            .children(tested)
+            .children(tested);
+        div()
+            .id("ntfy-alerts")
+            .role(Role::Region)
+            .aria_label("ntfy alerts")
+            .flex()
+            .flex_col()
+            .gap(px(8.))
+            .w_full()
+            .min_w_0()
+            .child(
+                card::heading("ntfy alerts", Some(INTRO), None, cx)
+                    .id("ntfy-heading")
+                    .role(Role::Heading)
+                    .aria_label("ntfy alerts"),
+            )
+            .child(card::rows(
+                [
+                    self.switch(
+                        Switch::Enabled,
+                        form.enabled,
+                        |form, on| form.enabled = on,
+                        cx,
+                    ),
+                    fields,
+                    self.switch(
+                        Switch::ClearToken,
+                        form.clear,
+                        |form, on| form.clear = on,
+                        cx,
+                    ),
+                    test,
+                ],
+                cx,
+            ))
     }
 }
 

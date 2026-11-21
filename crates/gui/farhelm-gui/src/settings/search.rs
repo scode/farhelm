@@ -14,15 +14,14 @@ use gpui::{
 };
 
 use super::{
-    Choice, HOST_CHOICES_HELP, SOUNDS_HELP, SOUNDS_ID, SOUNDS_LABEL, Section, SettingsDialog,
-    TrustAgent, agent_trust, app, appearance, checkout_field, checkouts, containers, credentials,
-    file_types, ntfy, recipes, tensorlake, tensorlake_key, tensorlake_sandboxes,
-    tensorlake_ssh_key, terminal,
+    Choice, SOUNDS_HELP, SOUNDS_ID, SOUNDS_LABEL, Section, SettingsDialog, TrustAgent, agent_trust,
+    app, appearance, card, checkout_field, checkouts, containers, credentials, file_types, ntfy,
+    recipes, tensorlake, tensorlake_key, tensorlake_sandboxes, tensorlake_ssh_key, terminal,
 };
 use crate::actions::Dismiss;
 use crate::assets::Icon;
 use crate::components::{
-    HoverHelp, OptionRow, TextInput, TextInputEvent, TextInputState, Vertical, option_heading,
+    HoverHelp, OptionRow, TextInput, TextInputEvent, TextInputState, Vertical,
 };
 use crate::focus::{self, Mark};
 use crate::layers;
@@ -74,14 +73,11 @@ impl Entry {
     }
 
     fn choice(choice: Choice) -> Self {
-        let shared_help = (choice.section() == Section::Hosts).then_some(HOST_CHOICES_HELP);
         Self::new(
             choice.section(),
             choice.id(),
             choice.label(),
-            [choice.tooltip(), choice.help(false), choice.help(true)]
-                .into_iter()
-                .chain(shared_help),
+            [choice.tooltip(), choice.help(false), choice.help(true)],
             Target::Choice(choice),
         )
     }
@@ -373,7 +369,6 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         Target::NtfyField(field),
                     ));
                 }
-                entries.push(switch(ntfy::Switch::ClearToken));
                 entries.push(Entry::new(
                     section,
                     "ntfy-priority",
@@ -385,6 +380,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     ),
                     Target::Top,
                 ));
+                entries.push(switch(ntfy::Switch::ClearToken));
             }
             Section::App => entries.extend([
                 add(
@@ -467,7 +463,7 @@ fn marked(text: &str, words: &[String], selected: bool, palette: &Palette) -> St
         } else {
             palette.accent
         })),
-        font_weight: Some(FontWeight::SEMIBOLD),
+        font_weight: Some(FontWeight::BOLD),
         ..Default::default()
     };
     StyledText::new(text.to_owned()).with_highlights(
@@ -675,18 +671,39 @@ impl Search {
             _ => format!("{count} settings match “{}”", query.trim()),
         };
         let mut rows = Vec::new();
-        let mut previous = None;
-        for (position, &index) in self.matches.iter().enumerate() {
-            let entry = &self.catalog[index];
-            if previous != Some(entry.section) {
-                previous = Some(entry.section);
-                rows.push(option_heading(
-                    format!("settings-search-group-{}", entry.section.key()),
-                    entry.section.label().to_uppercase(),
-                    palette,
-                ));
+        let mut position = 0;
+        for group in self
+            .matches
+            .chunk_by(|&left, &right| self.catalog[left].section == self.catalog[right].section)
+        {
+            let section = self.catalog[group[0]].section;
+            let id = format!("settings-search-group-{}", section.key());
+            rows.push(
+                card::heading(section.label(), None, None, cx)
+                    .id(id.clone())
+                    .debug_selector(|| id)
+                    .role(Role::Heading)
+                    .aria_label(section.label())
+                    .pb(px(6.))
+                    .when(position != 0, |heading| heading.pt(px(12.)))
+                    .into_any_element(),
+            );
+            // Keep each row a direct scroll child so selecting it by arrow keys can reveal it even in a tall card.
+            for (offset, &index) in group.iter().enumerate() {
+                let entry = &self.catalog[index];
+                let first = offset == 0;
+                let last = offset + 1 == group.len();
+                rows.push(
+                    card::surface(cx)
+                        .rounded(px(0.))
+                        .when(first, |row| row.rounded_tl(px(6.)).rounded_tr(px(6.)))
+                        .when(last, |row| row.rounded_bl(px(6.)).rounded_br(px(6.)))
+                        .when(!last, |row| row.border_b(px(0.)))
+                        .child(self.row(entry, position == self.selected, palette, cx))
+                        .into_any_element(),
+                );
+                position += 1;
             }
-            rows.push(self.row(entry, position == self.selected, palette, cx));
         }
         div()
             .relative()
@@ -695,32 +712,35 @@ impl Search {
             .h_full()
             .flex()
             .flex_col()
-            .gap(px(8.))
             .child(layers::beside_edge("settings-search-help-edge", window, cx))
             .child(
-                div()
-                    .id("settings-search-heading")
-                    .debug_selector(|| "settings-search-heading".into())
-                    .role(Role::Heading)
-                    .aria_label(heading.clone())
-                    .flex_none()
+                super::frame::heading_band(&self.scroll, palette)
+                    .flex_col()
                     .min_w_0()
-                    .truncate()
-                    .text_size(px(super::HEADING_TEXT))
-                    .font_weight(FontWeight::BOLD)
-                    .child(heading),
-            )
-            .child(
-                div()
-                    .flex_none()
-                    .min_w_0()
-                    .truncate()
-                    .text_color(theme::color(palette.fg_1))
-                    .child(if count == 0 {
-                        "Try a setting name or a word from its description."
-                    } else {
-                        "↑ ↓ to choose · Enter to open"
-                    }),
+                    .child(
+                        div()
+                            .id("settings-search-heading")
+                            .debug_selector(|| "settings-search-heading".into())
+                            .role(Role::Heading)
+                            .aria_label(heading.clone())
+                            .truncate()
+                            .text_size(px(16.))
+                            .line_height(px(20.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child(heading),
+                    )
+                    .child(
+                        div()
+                            .truncate()
+                            .text_size(metrics::TEXT_SM)
+                            .line_height(px(16.))
+                            .text_color(theme::color(palette.fg_1))
+                            .child(if count == 0 {
+                                "Try a setting name or a word from its description."
+                            } else {
+                                "↑ ↓ to choose · Enter to open"
+                            }),
+                    ),
             )
             .child(
                 div()
@@ -732,6 +752,9 @@ impl Search {
                     .flex_col()
                     .flex_shrink_1()
                     .min_h_0()
+                    .px(px(20.))
+                    .pt(px(10.))
+                    .pb(px(16.))
                     .overflow_y_scroll()
                     .children(rows),
             )

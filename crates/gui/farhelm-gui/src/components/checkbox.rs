@@ -43,7 +43,7 @@ use crate::theme::{self, Palette, metrics};
 const BOX: f32 = 14.;
 
 /// `.control-switch`: 34 by 20 pixels with a 12-pixel knob 3 pixels in from the edge, moved 14 pixels when on.
-const SWITCH: (f32, f32) = (34., 20.);
+const SWITCH_HEIGHT: f32 = 20.;
 const KNOB: f32 = 12.;
 const KNOB_INSET: f32 = 3.;
 const KNOB_TRAVEL: f32 = 14.;
@@ -56,6 +56,7 @@ type OnToggle = Rc<dyn Fn(bool, &mut Window, &mut App)>;
 pub struct Checkbox {
     id: SharedString,
     label: SharedString,
+    content: Option<gpui::AnyElement>,
     help: HoverHelp,
     role: Role,
     checked: bool,
@@ -68,6 +69,9 @@ pub struct Checkbox {
 }
 
 impl Checkbox {
+    /// Visible width of the switch. Settings leaves room beside it for a separate sound preview button.
+    pub(crate) const SWITCH_MARK_WIDTH: gpui::Pixels = px(34.);
+
     /// A checkbox labelled `label` (drawn beside it and its accessible name) with hover help `help`. `role` is what
     /// assistive technology and the test bridge see: [`Role::CheckBox`], or [`Role::Switch`] for a Settings switch.
     pub fn new(
@@ -79,6 +83,7 @@ impl Checkbox {
         Checkbox {
             id: id.into(),
             label: label.into(),
+            content: None,
             help,
             role,
             checked: false,
@@ -106,6 +111,13 @@ impl Checkbox {
     /// Draw it as the old Settings switch (`.control-switch`) instead of a checkbox, with its label before it.
     pub fn switch(mut self) -> Self {
         self.switch = true;
+        self
+    }
+
+    /// Replace the visible label while retaining the accessible name. Settings uses this to keep a title and
+    /// description together inside the toggle's click target.
+    pub(crate) fn content(mut self, content: impl IntoElement) -> Self {
+        self.content = Some(content.into_any_element());
         self
     }
 
@@ -177,8 +189,8 @@ impl Checkbox {
         div()
             .flex_none()
             .relative()
-            .w(px(SWITCH.0))
-            .h(px(SWITCH.1))
+            .w(Self::SWITCH_MARK_WIDTH)
+            .h(px(SWITCH_HEIGHT))
             .rounded(metrics::RADIUS_LG)
             .border_1()
             .border_color(theme::color(edge))
@@ -250,11 +262,16 @@ impl RenderOnce for Checkbox {
                         .rounded(ring_radius),
                 )
             });
+        let custom_words = self.content.is_some();
         let words = div()
+            .when(custom_words, |words| words.flex_1().min_w_0())
             .when(self.switch && self.inline, |words| {
                 words.text_color(theme::color(palette.fg_1))
             })
-            .child(self.label.clone());
+            .child(
+                self.content
+                    .unwrap_or_else(|| self.label.clone().into_any_element()),
+            );
         let mut control = div()
             .id(ElementId::Name(self.id.clone()))
             // Tests find a control by its id; this records nothing outside test builds.

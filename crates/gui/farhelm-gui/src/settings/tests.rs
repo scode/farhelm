@@ -454,7 +454,7 @@ fn enabling_upgrade_highlights_starts_from_the_running_release(cx: &mut TestAppC
 /// SPEC.md: the App switch installs updates automatically, "on by default", and "unlike the host choices it is a
 /// setting of that app installation, kept with the app rather than by the helm"; a refused write must not show as
 /// saved, since the user would then believe updates install on their own (the old switch: "Only a saved choice is shown
-/// as the choice"). Specified: over an updater whose setting is on, the section shows the old note and the switch on
+/// as the choice"). Specified: over an updater whose setting is on, the section shows its Mac scope and the switch on
 /// with the on help. A press writes off through the updater, sends the helm nothing and holds no preference save; the
 /// switch shows off with help naming the ways to update by hand. A press the updater refuses shows the switch still
 /// off, with the updater's reason under it, which a section switch keeps. The next press, saved, turns it on and takes
@@ -469,7 +469,7 @@ fn the_app_switch_writes_the_apps_own_setting_and_shows_only_what_was_saved(
     open_settings(cx);
     click(cx, section_button(Section::App));
     let _ = sent(&mut helm);
-    assert!(painted(cx).contains("Automatic updates apply to this Farhelm app on this Mac."));
+    assert!(painted(cx).contains("This Mac"));
     assert_eq!(switch_on(cx, super::app::ID), Some(true));
     assert!(
         painted(cx)
@@ -731,55 +731,43 @@ fn added(before: &[gpui::Hsla], mut now: Vec<gpui::Hsla>) -> Vec<gpui::Hsla> {
     now
 }
 
-/// Why this matters: each switch's help explains that switch, so it must read as belonging to it, closer under its own
-/// label than to the next switch (`.setting-group`, whose 4-pixel gap the port keeps as `choices::GROUP_GAP`); the old
-/// spec `settings.spec.ts`, "settings focus stays on its painted fill and descriptions stay with their labels",
-/// measured exactly that in Sessions. Specified: in Sessions, under each of its three switches some help text is
-/// painted, its first line starting at or below the switch's bottom edge; for the first two, the gap from the switch to
-/// its help is smaller than the gap from the help's last line to the next switch.
+/// Each card row keeps its description beside the toggle it explains. A description that overflows the row can read
+/// as part of the next switch, especially when the copy wraps.
 #[gpui::test]
 fn each_switchs_help_sits_under_it_nearer_than_the_next_switch(cx: &mut TestAppContext) {
     let (_helm, cx, _gear) = open_rail(cx, &Preferences::default());
     open_settings(cx);
-    let switches = [
+    let choices = [
         Choice::SkipSessionConfirmations,
         Choice::NameSessionsOnQuickLaunch,
         Choice::ColorTerminalFrames,
-    ]
-    .map(|choice| bounds(cx, choice.id()));
-    let lines: Vec<gpui::Bounds<gpui::Pixels>> = frame(cx)
-        .iter()
-        .flat_map(|node| node.texts.iter().map(|text| text.bounds))
-        .collect();
-    for (n, switch) in switches.iter().enumerate() {
-        let next = switches.get(n + 1);
-        // The help is the text painted below this switch, in its column, and above the next switch if there is one.
-        let help: Vec<&gpui::Bounds<gpui::Pixels>> = lines
+    ];
+    let lines: Vec<_> = frame(cx).into_iter().flat_map(|node| node.texts).collect();
+    for choice in choices {
+        let row = bounds(cx, choice.id());
+        let title = lines
             .iter()
-            .filter(|line| {
-                line.top() >= switch.bottom()
-                    && line.left() < switch.right()
-                    && line.right() > switch.left()
-                    && next.is_none_or(|next| line.bottom() <= next.top())
+            .find(|line| line.text.as_ref() == choice.label())
+            .expect("the switch's label is painted");
+        let help = lines
+            .iter()
+            .find(|line| {
+                let words = line.text.trim();
+                !words.is_empty() && choice.help(false).starts_with(words)
             })
-            .collect();
-        let (Some(first), Some(last)) = (
-            help.iter().map(|line| line.top()).reduce(|a, b| a.min(b)),
-            help.iter()
-                .map(|line| line.bottom())
-                .reduce(|a, b| a.max(b)),
-        ) else {
-            panic!("switch {n}: no help is painted under it");
-        };
-        let within = first - switch.bottom();
-        assert!(within >= px(0.), "switch {n}: its help starts below it");
-        if let Some(next) = next {
-            let between = next.top() - last;
-            assert!(
-                between > within,
-                "switch {n}: its help is {within:?} under it and {between:?} above the next switch"
-            );
-        }
+            .expect("the switch's description is painted");
+        assert!(
+            row.top() <= title.bounds.top(),
+            "{choice:?} starts with its title"
+        );
+        assert!(
+            title.bounds.top() < help.bounds.top(),
+            "{choice:?} places help under the title"
+        );
+        assert!(
+            help.bounds.bottom() <= row.bottom(),
+            "{choice:?} contains its help"
+        );
     }
 }
 
@@ -1119,6 +1107,30 @@ const SOUNDS: [Choice; 4] = [
     Choice::SoundTurnFinished,
     Choice::SoundSshSignIn,
 ];
+
+/// Each play button calls the existing player once with the row's sound and leaves its preference untouched.
+#[gpui::test]
+fn previewing_a_setting_plays_only_the_chosen_sound(cx: &mut TestAppContext) {
+    use crate::sounds::{self, Sound};
+
+    struct Played(Rc<RefCell<Vec<Sound>>>);
+    impl sounds::Player for Played {
+        fn play(&self, sound: Sound, _: &'static [u8]) {
+            self.0.borrow_mut().push(sound);
+        }
+    }
+
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    let played = Rc::new(RefCell::new(Vec::new()));
+    cx.update(|_, cx| sounds::install_player(Rc::new(Played(played.clone())), cx));
+    let toggle = Choice::SoundTurnFinished.id();
+    assert_eq!(switch_on(cx, toggle), Some(false), "the sound is off");
+    click(cx, "settings-sound-turn-finished-preview");
+    assert_eq!(*played.borrow(), vec![Sound::TurnFinished]);
+    assert_eq!(switch_on(cx, toggle), Some(false));
+    assert!(sent(&mut helm).is_empty());
+}
 
 /// The Sounds sub-heading is how the user turns each status sound on or off, and each switch must write only its own
 /// field of the shared row, so a stale copy of another choice is never written back (the helm's `put_preferences`).
@@ -1468,7 +1480,7 @@ fn the_terminal_section_offers_the_link_choices_with_their_risks(cx: &mut TestAp
     assert!(
         text.contains(
             "Open a remote session's localhost links through this Mac. Turning this off closes every open tunnel. \
-             The next tunnel asks again. This choice applies to this helm."
+             The next tunnel asks again."
         ),
         "the switch's help is on screen: {text}"
     );

@@ -157,6 +157,7 @@ pub struct RadioOption<V> {
     glyph: Option<Glyph>,
     danger: bool,
     description: Option<SharedString>,
+    preview: Option<gpui::AnyElement>,
 }
 
 /// An option's glyph, and whether its words are drawn beside it or only stand behind it as its accessible name.
@@ -178,6 +179,7 @@ impl<V> RadioOption<V> {
             glyph: None,
             danger: false,
             description: None,
+            preview: None,
         }
     }
 
@@ -217,6 +219,12 @@ impl<V> RadioOption<V> {
         self.description = Some(description.into());
         self
     }
+
+    /// Draw an illustration above the native radio and its label in a card. The radio remains the only control.
+    pub fn preview(mut self, preview: impl IntoElement) -> Self {
+        self.preview = Some(preview.into_any_element());
+        self
+    }
 }
 
 /// One choice among a few options. See the module docs.
@@ -242,6 +250,7 @@ enum Look {
     Segments,
     SmallSegments,
     Radios,
+    RadioRows,
     Chips,
     Cards,
 }
@@ -318,6 +327,13 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             "plain radios behave as radios: give the group Role::RadioGroup"
         );
         self.look = Look::Radios;
+        self
+    }
+
+    /// Draw native radios and their visible descriptions as rows of one Settings card.
+    pub(crate) fn radio_rows(mut self) -> Self {
+        debug_assert_eq!(self.role, Role::RadioGroup);
+        self.look = Look::RadioRows;
         self
     }
 
@@ -485,7 +501,7 @@ fn tab_stops(
 }
 
 impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
-    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+    fn render(mut self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let radio = self.role == Role::RadioGroup;
         let ids: Vec<SharedString> = self
@@ -540,7 +556,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             .iter()
             .any(|option| option.description.is_some());
         let mut options = Vec::with_capacity(self.options.len());
-        for (index, option) in self.options.iter().enumerate() {
+        for (index, option) in self.options.iter_mut().enumerate() {
             let state = OptionState {
                 chosen: chosen == Some(index),
                 enabled: enabled[index],
@@ -552,9 +568,32 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 Look::Segments | Look::SmallSegments => {
                     state.segment(&ids[index], option, self.look, palette)
                 }
-                Look::Radios => state.radio(&ids[index], option, palette),
+                Look::Radios | Look::RadioRows => {
+                    let row = self.look == Look::RadioRows;
+                    state
+                        .radio(&ids[index], option, palette)
+                        .when(row, |radio| {
+                            radio
+                                .w_full()
+                                .min_w_0()
+                                .px(px(14.))
+                                .py(px(10.))
+                                .gap(px(10.))
+                                .text_size(metrics::TEXT_MD)
+                                .text_color(theme::color(palette.fg_0))
+                                .font_weight(FontWeight::MEDIUM)
+                                .when(index != 0, |radio| {
+                                    radio
+                                        .border_t_1()
+                                        .border_color(theme::color(palette.border_dim))
+                                })
+                        })
+                }
                 Look::Chips => state.chip(&ids[index], option, palette),
-                Look::Cards => state.card(&ids[index], option, palette),
+                Look::Cards => {
+                    let preview = option.preview.take();
+                    state.card(&ids[index], option, preview, palette)
+                }
             };
             let element = element
                 .role(option_role)
@@ -618,6 +657,13 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             });
         let group = match self.look {
             Look::Radios => group.gap_x(px(16.)).gap_y(px(8.)),
+            Look::RadioRows => group
+                .flex_col()
+                .items_stretch()
+                .rounded(px(6.))
+                .border_1()
+                .border_color(theme::color(palette.border_dim))
+                .bg(theme::color(palette.card)),
             Look::Chips => group.gap(px(CHIP_GAP)),
             // A grid in place of the row or the stack: every card a third of the width, and a row of cards as tall as
             // its tallest, as the old grid's stretched items were.
@@ -861,6 +907,7 @@ impl OptionState {
         self,
         id: &SharedString,
         option: &RadioOption<V>,
+        preview: Option<gpui::AnyElement>,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
         let edge = if self.chosen {
@@ -869,6 +916,7 @@ impl OptionState {
             palette.border
         };
         let inset = -(CHIP_EDGE + 3.);
+        let illustrated = preview.is_some();
         div()
             .id(ElementId::Name(id.clone()))
             .debug_selector(|| id.to_string())
@@ -881,14 +929,29 @@ impl OptionState {
             .border(px(CHIP_EDGE))
             .border_color(theme::color(edge))
             .rounded(metrics::RADIUS_SM)
-            .bg(theme::color(palette.well))
+            .bg(theme::color(if illustrated {
+                palette.card
+            } else {
+                palette.well
+            }))
             .text_color(theme::color(palette.fg_0))
             .when(self.enabled, |card| card.cursor_pointer())
             .when(!self.enabled, |card| card.opacity(0.5))
+            .children(preview)
             .child(
                 div()
+                    .when(illustrated, |label| {
+                        label.flex().items_center().gap(px(RADIO_GAP))
+                    })
                     .text_size(metrics::TEXT_MD)
                     .font_weight(FontWeight::SEMIBOLD)
+                    .children(illustrated.then(|| {
+                        OptionState {
+                            ring: false,
+                            ..self
+                        }
+                        .circle(palette)
+                    }))
                     .child(option.label.clone()),
             )
             .children(option.description.clone().map(|description| {
@@ -923,13 +986,28 @@ impl OptionState {
         option: &RadioOption<V>,
         palette: &Palette,
     ) -> gpui::Stateful<gpui::Div> {
+        let ink = palette.fg_1;
+        div()
+            .id(ElementId::Name(id.clone()))
+            .debug_selector(|| id.to_string())
+            .flex()
+            .items_center()
+            .gap(px(RADIO_GAP))
+            .text_size(metrics::TEXT_SM)
+            .text_color(theme::color(ink))
+            .when(self.enabled, |radio| radio.cursor_pointer())
+            .child(self.circle(palette))
+            .children(contents(option, ink, palette.fg_1))
+    }
+
+    /// The same native mark serves a plain radio, a described row, and an illustrated choice.
+    fn circle(self, palette: &Palette) -> gpui::Div {
         let (fill, edge) = if self.chosen {
             (palette.accent_fill, palette.accent_edge)
         } else {
             (palette.well, palette.border)
         };
-        let ink = palette.fg_1;
-        let circle = div()
+        div()
             .relative()
             .flex_none()
             .size(px(CIRCLE))
@@ -962,18 +1040,7 @@ impl OptionState {
                         .border_color(theme::color(palette.accent))
                         .rounded_full(),
                 )
-            });
-        div()
-            .id(ElementId::Name(id.clone()))
-            .debug_selector(|| id.to_string())
-            .flex()
-            .items_center()
-            .gap(px(RADIO_GAP))
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(ink))
-            .when(self.enabled, |radio| radio.cursor_pointer())
-            .child(circle)
-            .children(contents(option, ink, palette.fg_1))
+            })
     }
 }
 
