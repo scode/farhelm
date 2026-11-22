@@ -1119,9 +1119,9 @@ impl Launcher {
     }
 
     /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
-    /// field over the default folder (SPEC.md: "When the selected host has no checkout folder in effect, the launcher's
-    /// managed-checkout destination offers the same explicit-save field"). Made the first time it
-    /// shows. A successful save or a value found changed after refusal refreshes the suggestions and preview.
+    /// field over the default folder (SPEC.md: "When the selected installed host has no checkout folder in effect, the
+    /// launcher's managed-checkout destination offers the same explicit-save field"). Made the first time it shows.
+    /// A successful save or a value found changed after refusal refreshes the suggestions and preview.
     fn setup_field(&mut self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         if self.needs_root(cx) != Some(true) {
             // Setup just went after a refresh: focus moves on to the repository field (see `focus_after_setup`).
