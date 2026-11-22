@@ -118,8 +118,8 @@ hosts at their next connection or setup. Updating Farhelm on a host does not ind
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
-those recipes first. Replacing a token sends its new value to hosts already using it; disconnected hosts receive it when
-they next connect. Existing agents may also pick up the replacement.
+those recipes first. Replacing a token sends its new value to hosts already using it. Disconnected hosts receive it when
+they next connect.
 
 If a host cannot receive a replacement, the save still succeeds and says **Saved; not delivered to** that host, with a
 reason. The host stays usable, with an amber mark and the reason in its details. Farhelm tries again at its next
@@ -132,10 +132,11 @@ in the recipes.
 
 :::
 
-For Claude Code, choose **Subscription** and select the setup-token you saved in Credentials. Farhelm writes it into
-Claude's usual settings and removes its API endpoint settings. Claude may show its own first-run setup once on a new
-host, which you go through there. Choosing **None** removes the token and endpoint settings Farhelm manages, keeping
-your other Claude settings.
+For Claude Code, choose **Subscription** and select the setup-token you saved in Credentials, or choose **API endpoint**
+to supply your own endpoint. A new Farhelm session or terminal on that host gets the recipe's Claude credentials. Use
+**Restart** on an existing session to pick up a replacement. Claude started outside a Farhelm terminal uses that shell's
+own credentials. Choose **None** to use credentials already set up on the host. Claude may show its own first-run setup
+when you open it on a new host.
 
 For a ChatGPT login, choose Codex **Subscription** and select the login you saved in Credentials. Farhelm writes it to
 the host's usual `~/.codex/auth.json` and leaves Codex's refreshed file alone until you replace that saved login. Recipe

@@ -335,15 +335,14 @@ impl BackendFailure {
 /// production implementation with only linger faked.
 #[async_trait]
 pub(crate) trait ProvisioningBackend: Send + Sync {
-    /// Remove only the Farhelm-owned token path, with absence already clean.
-    /// No other GitHub authentication or user configuration is removed.
-    async fn remove_github_token(
+    /// Remove one Farhelm-owned credential file. Absence is already clean.
+    async fn remove_owned_file(
         &self,
         _target: &ProvisioningTarget,
         _path: &Path,
     ) -> Result<(), BackendFailure> {
         Err(BackendFailure::new(
-            "this backend cannot remove the managed GitHub token",
+            "this backend cannot remove the managed credential file",
             "",
         ))
     }
@@ -1116,7 +1115,7 @@ impl SystemBackend {
     }
 
     /// Remove exactly one Farhelm-owned file on either transport: a run's
-    /// temporary or the managed GitHub file. Callers own the path's authority.
+    /// temporary or a managed credential file. Callers own the path's authority.
     async fn remove_owned_file(
         &self,
         target: &ProvisioningTarget,
@@ -2335,12 +2334,12 @@ fn handshake_io_failure(error: &std::io::Error) -> bool {
 
 #[async_trait]
 impl ProvisioningBackend for SystemBackend {
-    async fn remove_github_token(
+    async fn remove_owned_file(
         &self,
         target: &ProvisioningTarget,
         path: &Path,
     ) -> Result<(), BackendFailure> {
-        self.remove_owned_file(target, path).await
+        SystemBackend::remove_owned_file(self, target, path).await
     }
 
     async fn setup_github_git(&self, target: &ProvisioningTarget) -> Result<bool, BackendFailure> {

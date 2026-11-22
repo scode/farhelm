@@ -67,18 +67,28 @@ impl Bindings {
     /// A replacement must not activate another recipe's pending selection edit.
     fn uses(&self, name: &str) -> bool {
         self.github_token_credential.as_deref() == Some(name)
-            || self.claude_login_credential.as_deref() == Some(name)
+            || self.uses_claude(name)
             || self.codex_login_credential.as_deref() == Some(name)
-            || [&self.claude, &self.codex]
-                .into_iter()
-                .flatten()
-                .any(|endpoint| endpoint.token_credential.as_deref() == Some(name))
+            || self
+                .codex
+                .as_ref()
+                .and_then(|endpoint| endpoint.token_credential.as_deref())
+                == Some(name)
+    }
+
+    /// Pending Claude cleanup affects a push only if Claude needs that value.
+    fn uses_claude(&self, name: &str) -> bool {
+        self.claude_login_credential.as_deref() == Some(name)
+            || self
+                .claude
+                .as_ref()
+                .and_then(|endpoint| endpoint.token_credential.as_deref())
+                == Some(name)
     }
 }
 
 /// Explicit modes distinguish completed cleanup from older no-work records.
-/// Claude's login shares its settings file with endpoint keys, so that file's
-/// fingerprint includes the login identity without retaining its secret.
+/// A stamp identifies the credential revision without retaining its value.
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 enum EndpointStamp {
     Absent,
@@ -112,7 +122,12 @@ enum GithubStamp {
 #[derive(Default, Deserialize, Serialize)]
 struct Record {
     home: Option<PathBuf>,
+    /// Last legacy settings stamp. A cleared stamp settles migration for
+    /// this host, including hosts with no Farhelm-authored settings to clean.
     claude: Option<EndpointStamp>,
+    /// The installed launch environment's own stamp. A failed upload can
+    /// retry without reopening settled legacy settings.
+    claude_environment: Option<EndpointStamp>,
     codex: Option<EndpointStamp>,
     /// Codex refreshes this file itself. Leaving subscription mode must retain
     /// its last successful seed, or returning would overwrite refreshed bytes.
@@ -123,7 +138,7 @@ struct Record {
 /// Secret-bearing values exist only while a serialized operation uses them.
 struct Slot {
     endpoint: Option<ResolvedEndpoint>,
-    /// Only Claude stores its subscription token in the settings file.
+    /// Claude's setup-token supplies the environment in Subscription mode.
     subscription: Option<String>,
     stamp: EndpointStamp,
 }
@@ -371,7 +386,7 @@ impl CredentialDelivery {
         })
         .await
         .unwrap_or_else(|_| Err(TIMED_OUT.into()));
-        entry.warning(attempt, result.err(), events);
+        entry.warning(attempt, result.unwrap_or_else(Some), events);
     }
 
     /// Use the confirmed setup choices, after install coordinates are admitted.
@@ -393,7 +408,8 @@ impl CredentialDelivery {
                 Some(home.to_path_buf()),
                 guard,
             )
-            .await
+            .await?
+            .map_or(Ok(()), Err)
         })
         .await
         .unwrap_or_else(|_| Err(TIMED_OUT.into()));
@@ -536,13 +552,20 @@ impl CredentialDelivery {
             result = timeout_at(deadline, async {
                 let guard = Arc::clone(&entry.serial).lock_owned().await;
                 let binding = entry.live.lock().unwrap().binding.clone();
-                let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else { return Ok(()); };
-                self.apply(&row, bindings, None, guard).await
+                let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else {
+                    return Ok((None, false));
+                };
+                let uses_claude = bindings.uses_claude(name);
+                self.apply(&row, bindings, None, guard)
+                    .await
+                    .map(|pending| (pending, uses_claude))
             }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
         };
         let host = Self::reported_host(entry, name, generation)?;
-        entry.warning(attempt, result.clone().err(), events);
-        result.err().map(|reason| DeliveryFailure { host, reason })
+        let (warning, affects_replacement) = result.unwrap_or_else(|reason| (Some(reason), true));
+        let failure = warning.clone().filter(|_| affects_replacement);
+        entry.warning(attempt, warning, events);
+        failure.map(|reason| DeliveryFailure { host, reason })
     }
 
     /// The name a delivery failure gives its host (its alias, else its
@@ -571,13 +594,15 @@ impl CredentialDelivery {
 
     /// Resolve revisions under the host lock and record each successful file
     /// before attempting the next. Equal fingerprints perform no SSH at all.
+    /// A returned warning means the legacy Claude cleanup is still pending.
+    /// The other delivery slots can finish while those settings are untouched.
     async fn apply(
         &self,
         row: &HostRow,
         bindings: Bindings,
         home: Option<PathBuf>,
         mut guard: OwnedMutexGuard<()>,
-    ) -> Result<(), String> {
+    ) -> Result<Option<String>, String> {
         let mut record = self.read_record(row).await?;
         if let Some(home) = home
             && record.home.as_ref() != Some(&home)
@@ -596,120 +621,32 @@ impl CredentialDelivery {
                 return Err("environment credentials require a remote route".into());
             }
         };
-        for (is_claude, folder, file, endpoint, login) in [
-            (
-                true,
-                ".claude",
-                "settings.json",
-                bindings.claude,
-                bindings.claude_login_credential,
-            ),
-            (false, ".codex", "config.toml", bindings.codex, None),
-        ] {
-            // Resolve at this slot: a missing retained name in a later slot
-            // must not withhold an earlier replacement or its durable success.
-            let slot = if let Some(login) = login {
-                self.resolve_claude_login(login).await?
-            } else {
-                self.resolve_endpoint(endpoint).await?
-            };
-            let previous_stamp = if is_claude {
-                &record.claude
-            } else {
-                &record.codex
-            };
-            if previous_stamp.as_ref() == Some(&slot.stamp) {
-                continue;
-            }
-            // Retry only this file, merging the editor's newest bytes once. A second
-            // conflict returns before the success stamp, so reconnect can retry later.
-            for attempt in 0..2 {
-                if slot.endpoint.is_none()
-                    && slot.subscription.is_none()
-                    && slot.stamp != EndpointStamp::Cleared
-                {
-                    break;
-                }
-                let backend = self
-                    .backend
-                    .as_ref()
-                    .ok_or("credential delivery is unavailable")?;
-                if record.home.is_none() {
-                    record.home = Some(backend.host_home(&target).await.map_err(|error| {
-                        error.redacted_reason("could not read the sandbox's home directory")
-                    })?);
-                    guard = self.write_record(row, &record, guard).await?;
-                }
-                let directory = record.home.as_ref().unwrap().join(folder);
-                let path = directory.join(file);
-                let previous = backend
-                    .read_small_file(&target, &path)
-                    .await
-                    .map_err(|error| error.redacted_reason("could not read the agent settings"))?;
-                let expected = previous.as_deref().map(super::backend::hex_sha256);
-                let bytes = if let Some(endpoint) = &slot.endpoint {
-                    Some(if is_claude {
-                        super::agent_endpoints::claude(previous.as_deref(), endpoint)
-                    } else {
-                        super::agent_endpoints::codex(previous.as_deref(), endpoint)
-                    }?)
-                } else if let Some(token) = &slot.subscription {
-                    Some(super::agent_endpoints::claude_subscription(
-                        previous.as_deref(),
-                        token,
-                    )?)
-                } else if is_claude {
-                    super::agent_endpoints::clear_claude(previous.as_deref())?
+        // Resolve each slot only at delivery, so an unavailable later value
+        // does not prevent recording an earlier successful replacement.
+        let claude = if let Some(login) = bindings.claude_login_credential {
+            self.resolve_claude_login(login).await?
+        } else {
+            self.resolve_endpoint(bindings.claude).await?
+        };
+        let (next_guard, pending_cleanup) = self
+            .apply_claude(row, &target, &mut record, claude, guard)
+            .await?;
+        guard = next_guard;
+        let codex = self.resolve_endpoint(bindings.codex).await?;
+        if record.codex.as_ref() != Some(&codex.stamp) {
+            guard = self
+                .ensure_settings_home(row, &target, &mut record, guard)
+                .await?;
+            let directory = record.home.as_ref().expect("settings home").join(".codex");
+            self.merge_settings(&target, &directory, "config.toml", |previous| {
+                if let Some(endpoint) = &codex.endpoint {
+                    super::agent_endpoints::codex(previous, endpoint).map(Some)
                 } else {
-                    super::agent_endpoints::clear_codex(previous.as_deref())?
-                };
-                if let Some(bytes) = bytes {
-                    backend
-                        .ensure_directories(
-                            &target,
-                            &[DirectorySpec {
-                                path: directory,
-                                mode: 0o700,
-                                shared: true,
-                            }],
-                        )
-                        .await
-                        .map_err(|error| {
-                            error.redacted_reason("could not prepare the agent settings directory")
-                        })?;
-                    let temporary = path
-                        .with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
-                    match backend
-                        .install_bytes_checked(
-                            &target,
-                            &bytes,
-                            &path,
-                            &temporary,
-                            0o600,
-                            Some(expected.as_deref()),
-                        )
-                        .await
-                    {
-                        Err(error)
-                            if error.context == super::backend::DESTINATION_CHANGED
-                                && attempt == 0 =>
-                        {
-                            continue;
-                        }
-                        result => {
-                            result.map_err(|error| {
-                                error.redacted_reason("could not install the agent settings")
-                            })?;
-                        }
-                    }
+                    super::agent_endpoints::clear_codex(previous)
                 }
-                break;
-            }
-            if is_claude {
-                record.claude = Some(slot.stamp);
-            } else {
-                record.codex = Some(slot.stamp);
-            }
+            })
+            .await?;
+            record.codex = Some(codex.stamp);
             guard = self.write_record(row, &record, guard).await?;
         }
         if let Some(name) = bindings.codex_login_credential {
@@ -816,7 +753,7 @@ impl CredentialDelivery {
                 }
             } else {
                 backend
-                    .remove_github_token(&target, &path)
+                    .remove_owned_file(&target, &path)
                     .await
                     .map_err(|error| {
                         error.redacted_reason("could not remove the managed GitHub token")
@@ -825,7 +762,207 @@ impl CredentialDelivery {
             record.github = Some(github.stamp);
             self.write_record(row, &record, guard).await?;
         }
-        Ok(())
+        Ok(pending_cleanup)
+    }
+
+    /// Retire stamped legacy keys before publishing the launch environment.
+    /// Claude can prefer a settings URL over its environment. Withhold the
+    /// entire snapshot until cleanup succeeds so a new token cannot follow
+    /// that URL. Stamp cleanup separately so an upload retry leaves it alone.
+    async fn apply_claude(
+        &self,
+        row: &HostRow,
+        target: &ProvisioningTarget,
+        record: &mut Record,
+        slot: Slot,
+        mut guard: OwnedMutexGuard<()>,
+    ) -> Result<(OwnedMutexGuard<()>, Option<String>), String> {
+        let needs_delivery = record.claude_environment.as_ref() != Some(&slot.stamp);
+        let credentials =
+            super::agent_endpoints::claude_environment(slot.endpoint, slot.subscription);
+        let bytes = if needs_delivery && !credentials.env.is_empty() {
+            // Check that the next snapshot fits before removing legacy values.
+            let bytes = serde_json::to_vec(&credentials)
+                .map_err(|_| "could not encode the managed Claude launch credentials")?;
+            if bytes.len() > farhelm_supervisor::recipe_credentials::MAX_FILE_BYTES {
+                return Err("the managed Claude launch credentials are too large".into());
+            }
+            Some(bytes)
+        } else {
+            None
+        };
+
+        if record.claude != Some(EndpointStamp::Cleared) {
+            // A missing stamp can describe a fresh image with its own
+            // Claude settings. Only earlier Farhelm writes grant cleanup.
+            if record.claude.is_some() {
+                guard = self
+                    .ensure_settings_home(row, target, record, guard)
+                    .await?;
+                let directory = record.home.as_ref().expect("settings home").join(".claude");
+                if let Err(reason) = self
+                    .merge_settings(
+                        target,
+                        &directory,
+                        "settings.json",
+                        super::agent_endpoints::clear_claude,
+                    )
+                    .await
+                {
+                    return Ok((
+                        guard,
+                        Some(format!(
+                            "Claude recipe credential cleanup is pending ({reason})"
+                        )),
+                    ));
+                }
+            }
+            record.claude = Some(EndpointStamp::Cleared);
+            guard = self.write_record(row, record, guard).await?;
+        }
+
+        if needs_delivery {
+            let state_dir = row
+                .remote_state_dir
+                .as_deref()
+                .map(Path::new)
+                .filter(|path| path.is_absolute())
+                .ok_or("the host has no absolute supervisor state directory")?;
+            let path = farhelm_supervisor::recipe_credentials::host_file(state_dir);
+            let backend = self
+                .backend
+                .as_ref()
+                .ok_or("credential delivery is unavailable")?;
+            if let Some(bytes) = bytes {
+                backend
+                    .ensure_directories(
+                        target,
+                        &[DirectorySpec {
+                            path: state_dir.to_path_buf(),
+                            mode: 0o700,
+                            shared: true,
+                        }],
+                    )
+                    .await
+                    .map_err(|error| {
+                        error.redacted_reason(
+                            "could not prepare the managed Claude credentials directory",
+                        )
+                    })?;
+                let temporary = path.with_file_name(format!(
+                    ".agent-credentials.farhelm-tmp-{}",
+                    uuid::Uuid::new_v4()
+                ));
+                backend
+                    .install_bytes(target, &bytes, &path, &temporary, 0o600)
+                    .await
+                    .map_err(|error| {
+                        error.redacted_reason(
+                            "could not install the managed Claude launch credentials",
+                        )
+                    })?;
+            } else {
+                backend
+                    .remove_owned_file(target, &path)
+                    .await
+                    .map_err(|error| {
+                        error.redacted_reason(
+                            "could not remove the managed Claude launch credentials",
+                        )
+                    })?;
+            }
+            record.claude_environment = Some(slot.stamp);
+            guard = self.write_record(row, record, guard).await?;
+        }
+
+        Ok((guard, None))
+    }
+
+    /// Learn the host's home only for work that needs its settings. Persist
+    /// the exact home before using it so the next retry lands on the same file.
+    async fn ensure_settings_home(
+        &self,
+        row: &HostRow,
+        target: &ProvisioningTarget,
+        record: &mut Record,
+        guard: OwnedMutexGuard<()>,
+    ) -> Result<OwnedMutexGuard<()>, String> {
+        if record.home.is_some() {
+            return Ok(guard);
+        }
+        let backend = self
+            .backend
+            .as_ref()
+            .ok_or("credential delivery is unavailable")?;
+        record.home = Some(backend.host_home(target).await.map_err(|error| {
+            error.redacted_reason("could not read the sandbox's home directory")
+        })?);
+        self.write_record(row, record, guard).await
+    }
+
+    /// Retry a concurrent settings save once with the editor's latest bytes.
+    /// The caller records its stamp only after the checked install succeeds
+    /// or the merged settings already satisfy the request.
+    async fn merge_settings(
+        &self,
+        target: &ProvisioningTarget,
+        directory: &Path,
+        file: &str,
+        merge: impl Fn(Option<&[u8]>) -> Result<Option<Vec<u8>>, String>,
+    ) -> Result<(), String> {
+        let backend = self
+            .backend
+            .as_ref()
+            .ok_or("credential delivery is unavailable")?;
+        let path = directory.join(file);
+        for attempt in 0..2 {
+            let previous = backend
+                .read_small_file(target, &path)
+                .await
+                .map_err(|error| error.redacted_reason("could not read the agent settings"))?;
+            let Some(bytes) = merge(previous.as_deref())? else {
+                return Ok(());
+            };
+            let expected = previous.as_deref().map(super::backend::hex_sha256);
+            backend
+                .ensure_directories(
+                    target,
+                    &[DirectorySpec {
+                        path: directory.to_path_buf(),
+                        mode: 0o700,
+                        shared: true,
+                    }],
+                )
+                .await
+                .map_err(|error| {
+                    error.redacted_reason("could not prepare the agent settings directory")
+                })?;
+            let temporary =
+                path.with_file_name(format!(".{file}.farhelm-tmp-{}", uuid::Uuid::new_v4()));
+            match backend
+                .install_bytes_checked(
+                    target,
+                    &bytes,
+                    &path,
+                    &temporary,
+                    0o600,
+                    Some(expected.as_deref()),
+                )
+                .await
+            {
+                Err(error)
+                    if error.context == super::backend::DESTINATION_CHANGED && attempt == 0 =>
+                {
+                    continue;
+                }
+                result => {
+                    return result.map(|_| ()).map_err(|error| {
+                        error.redacted_reason("could not install the agent settings")
+                    });
+                }
+            }
+        }
+        unreachable!("the second attempt always settles the settings merge")
     }
 
     /// Load only credential selections, without build state or vendor auth.

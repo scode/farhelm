@@ -12,6 +12,7 @@
 use crate::harness::*;
 use anyhow::{Context as _, bail, ensure};
 use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
 use std::path::PathBuf;
 use std::process::{Output, Stdio};
 use tokio::io::AsyncReadExt as _;
@@ -26,7 +27,7 @@ const COMMAND_BUDGET: Duration = Duration::from_secs(120);
 /// A small public repository keeps managed-checkout verification independent
 /// of private credentials. Its remote, HEAD and inside path are asserted live.
 const PUBLIC_REPO: &str = "octocat/Hello-World";
-/// Credential delivery writes real agent settings, without issuing an auth
+/// Credential delivery reaches the real agent child without issuing an auth
 /// request to an actual endpoint or consuming a vendor turn.
 const ENDPOINT: &str = "https://podman-e2e.invalid/v1";
 /// Network bootstrap owns most of this allowance. Cleanup gets its own bound
@@ -41,7 +42,7 @@ const CLEANUP_BUDGET: Duration = Duration::from_secs(5 * 60);
 /// The heartbeat's cadence is fixture workload, not a readiness delay: every
 /// Rust wait observes the identity file, progress, engine state or public API.
 const AGENT: &str = r#"
-import datetime, http.server, json, os, pathlib, subprocess, sys, threading, time, uuid
+import datetime, hashlib, http.server, json, os, pathlib, subprocess, sys, threading, time, uuid
 args = sys.argv[1:]
 conversation = args[args.index('--resume') + 1] if '--resume' in args else str(uuid.uuid4())
 settings = json.loads(args[args.index('--settings') + 1])
@@ -61,7 +62,9 @@ if result.returncode:
 state = pathlib.Path.home() / '.farhelm-podman-e2e'
 state.mkdir(exist_ok=True)
 identity = {'nonce':str(uuid.uuid4()), 'pid':os.getpid(), 'conversation':conversation,
-    'start':pathlib.Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19], 'cwd':cwd}
+    'start':pathlib.Path('/proc/self/stat').read_text().rsplit(')',1)[1].split()[19], 'cwd':cwd,
+    'recipe_endpoint':os.environ.get('ANTHROPIC_BASE_URL'),
+    'recipe_token_digest':hashlib.sha256(os.environ.get('ANTHROPIC_AUTH_TOKEN', '').encode()).hexdigest()}
 # A loopback-only service in the agent's own process exercises the ordinary
 # TCP relay, and the process nonce ties the response to this exact container.
 class Handler(http.server.BaseHTTPRequestHandler):
@@ -567,12 +570,39 @@ impl Fixture {
                 .await
                 .unwrap();
         assert_eq!(actual.as_slice(), independent.as_bytes());
-        let settings = read_inside_file(&client, bare, "/home/ubuntu/.claude/settings.json").await;
-        let settings: Value = serde_json::from_slice(&settings).unwrap();
-        assert_eq!(settings["env"]["ANTHROPIC_BASE_URL"], ENDPOINT);
+        // Verify the producer's private file and independently observe the
+        // child that read it. Only the fixture's digest appears in the witness.
+        let credentials_path =
+            farhelm_supervisor::recipe_credentials::host_file(std::path::Path::new(state));
+        let credentials_path = credentials_path.to_str().unwrap();
+        let bytes = read_inside_file(&client, bare, credentials_path).await;
+        let credentials: Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(credentials["env"]["ANTHROPIC_BASE_URL"], ENDPOINT);
         assert!(
-            settings["env"]["ANTHROPIC_AUTH_TOKEN"] == token,
-            "the selected fictional endpoint token must reach ordinary Claude settings"
+            credentials["env"]["ANTHROPIC_AUTH_TOKEN"] == token,
+            "the selected fictional endpoint token must reach the private state file"
+        );
+        let permissions = require_engine(&[
+            "exec",
+            "--user",
+            "ubuntu",
+            container,
+            "stat",
+            "-c",
+            "%a",
+            credentials_path,
+        ])
+        .await
+        .unwrap();
+        assert_eq!(permissions.trim(), "600");
+        assert_eq!(agent["recipe_endpoint"], ENDPOINT);
+        let token_digest: String = Sha256::digest(token)
+            .iter()
+            .map(|byte| format!("{byte:02x}"))
+            .collect();
+        assert!(
+            agent["recipe_token_digest"].as_str() == Some(token_digest.as_str()),
+            "the running child must receive the selected endpoint token"
         );
 
         let bytes: Vec<u8> = (0..8192).map(|index| (index % 251) as u8).collect();

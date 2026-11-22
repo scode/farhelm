@@ -247,12 +247,17 @@ impl E2eProvisioningBackend {
 
 #[async_trait]
 impl ProvisioningBackend for E2eProvisioningBackend {
-    async fn remove_github_token(
+    async fn remove_owned_file(
         &self,
         target: &ProvisioningTarget,
-        _path: &Path,
+        path: &Path,
     ) -> Result<(), BackendFailure> {
-        self.action(target, "remove-github-token").await?;
+        let event = if path.ends_with("agent-credentials") {
+            "remove-agent-credentials"
+        } else {
+            "remove-github-token"
+        };
+        self.action(target, event).await?;
         Ok(())
     }
 
@@ -386,13 +391,13 @@ impl ProvisioningBackend for E2eProvisioningBackend {
         // after proxy inheritance has succeeded on the same helper.
         let event = if destination.ends_with("90-farhelm-proxy.conf") {
             "write-proxy"
+        } else if destination.ends_with("agent-credentials") {
+            "wrote-agent-credentials"
         } else {
             "write-unit"
         };
         let outcome = self.action(target, event).await?;
-        // Generic uploads also include the supervisor unit. A fixed completion
-        // marker lets setup tests prove this particular credential file was
-        // delivered before enablement, without recording its path or contents.
+        // Retain the legacy cleanup marker without recording path or contents.
         if destination.ends_with(".claude/settings.json") {
             self.record(target, "wrote-claude-settings").await?;
         }

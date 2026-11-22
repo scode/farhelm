@@ -290,10 +290,10 @@ linux/settings-recipe-editor-delete--dark.png e6d2af07e6fd1e61b3c3ea761ab2f5a08c
 linux/settings-recipe-editor-delete--light.png fc84e5303437512392a61e2bdd87922838e623d1
 linux/settings-recipe-editor-delete-anyway--dark.png 49fd170d0d7c9220715d5b51bb55afe4df5befce
 linux/settings-recipe-editor-delete-anyway--light.png c52b464676bdac42ad9f337060510f6147d2f433
-linux/settings-recipe-editor-end--dark.png c8728de17951a06db20ab09c6d5126ff19e9039a
-linux/settings-recipe-editor-end--light.png e6656a58a5d33e7d580de0fcb1b7e58c0a7c490e
-linux/settings-recipe-editor-middle--dark.png 6e9ea65cfb2462f376c3f0bd5f756f0dc9c827b3
-linux/settings-recipe-editor-middle--light.png 416bfaddbb35e740a6101b6be1c52907a40246e3
+linux/settings-recipe-editor-end--dark.png 9555de601d0ad0093439788a75a5ac611d0c2c6b
+linux/settings-recipe-editor-end--light.png d7c83de97213bc41d35855540ab0deef099d95c8
+linux/settings-recipe-editor-middle--dark.png bf56c2bc337ab94a55f051ac33c9e4129b02ab58
+linux/settings-recipe-editor-middle--light.png ba7e73cce90336c7726bf9b8ea53d54ef96bf230
 linux/settings-recipes--dark.png de74c03e80549387ae835b8612dcbffb36c4daad
 linux/settings-recipes--light.png 483aa6c1cb9753599ce88ffa00e4c8425212f780
 linux/settings-recipes-places--dark.png 2478e00297f88b89cce0483e8c038f4275e0d360

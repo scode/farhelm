@@ -406,6 +406,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   distinguish a discovery failure from an individual cleanup error in Settings. Cover refresh, cleanup completion during
   the outage, and recovery.
 
+- **Move Codex recipe endpoint credentials out of its settings.** Farhelm can overwrite a concurrent save to
+  `~/.codex/config.toml` when it delivers a recipe endpoint. Keep the `farhelm` provider ID so existing sessions can
+  restart and the launcher can open saved conversations by ID. In an isolated Codex 0.171.0 loopback probe, a launch
+  override that omitted the token field sent the stale settings bearer to the new endpoint (recorder
+  `c235a277-a9fb-497d-a323-ebb0538a8976`). Explicitly clearing the field sent an empty Authorization header (recorder
+  `59601200-f69b-4179-99a6-a94f4a685ec5`). Find an override or compatible isolation mechanism that preserves saved
+  conversations, user settings and requests to tokenless endpoints without an Authorization header.
+
 - **Explain stale launcher choices.** In the empty command field, Enter on a recent setup that has disappeared can do
   nothing without saying why. Clicking a search result for a host that just vanished can also clear the query without
   selecting anything. In `launcher/view/search.rs` and `search/start.rs`, use the existing stale-result warning before
@@ -505,21 +513,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `plans/queue/drift-verify-resume.md`.
 
 ### Tensorlake
-
-- **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
-  merges a recipe's credentials into Claude Code's `~/.claude/settings.json` and Codex's `~/.codex/config.toml` on the
-  host, at setup, on each connection whose delivery is out of date, and when a named token is replaced, so it can race
-  the agent or the user saving the same file (SPEC_impl.md, "Adding Tensorlake hosts", accepts the last few milliseconds
-  of that race). Most of it could move into the environment Farhelm launches agents and tabs with instead: Claude's
-  `ANTHROPIC_BASE_URL`, `ANTHROPIC_AUTH_TOKEN` and `CLAUDE_CODE_OAUTH_TOKEN` are plain environment variables, and
-  Codex's provider can be selected with `-c` overrides at launch and read its token from an environment variable
-  (`env_key`), never from the command line. Codex Subscription stays in `~/.codex/auth.json`, which Codex owns and
-  refreshes. Costs to weigh: a `claude` or `codex` started in a shell Farhelm did not start no longer gets the
-  credentials; a token rotation reaches agents only when they next launch; keys earlier releases wrote into the settings
-  files need a one-time cleanup; and the recipe, delivery and Settings help text in the specs is rewritten. Container
-  hosts share recipes once `plans/queue/podman-environments.md` lands, so the same design should cover them. From the
-  2026-11-10 triage of `settings-save-races-final-replacement.md`. Plan:
-  `plans/queue/recipe-credentials-in-launch-env.md`.
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
   approval.

@@ -491,6 +491,8 @@ impl Fixture {
                     Some(
                         "read-agent-settings"
                             | "wrote-claude-settings"
+                            | "wrote-agent-credentials"
+                            | "remove-agent-credentials"
                             | "remove-github-token"
                             | "configure-github-helper"
                     )
@@ -1201,7 +1203,7 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     }
 }
 
-/// Claude subscription setup must finish its private settings write before
+/// Claude subscription setup must finish its private file delivery before
 /// making the host connection usable, even without API endpoints. A
 /// nonsecret durable stamp witnesses completion without logging the token.
 #[farhelm_testtrace::test]
@@ -1239,9 +1241,13 @@ async fn claude_subscription_setup_delivers_only_to_the_host_before_attach() {
     assert_eq!(step.status, StepStatus::Completed);
     assert!(step.message.is_none());
     let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-    f.assert_host_delivery(accepted.host_id, "wrote-claude-settings")
+    f.assert_host_delivery(accepted.host_id, "wrote-agent-credentials")
         .await;
     assert!(!events.contains("sk-ant-oat01-fictional-setup-claude"));
+    assert!(
+        !events.contains("wrote-claude-settings"),
+        "a newly prepared host has no legacy Claude delivery stamp"
+    );
     let host = accepted.host_id;
     let json: String = f
         .harness
@@ -1257,8 +1263,11 @@ async fn claude_subscription_setup_delivers_only_to_the_host_before_attach() {
         .await
         .unwrap();
     let record: serde_json::Value = serde_json::from_str(&json).unwrap();
-    assert_eq!(record["claude"]["Subscription"]["name"], "claude");
-    assert_eq!(record["claude"]["Subscription"]["revision"], 1);
+    assert_eq!(
+        record["claude_environment"]["Subscription"]["name"],
+        "claude"
+    );
+    assert_eq!(record["claude_environment"]["Subscription"]["revision"], 1);
     assert!(!json.contains("sk-ant-oat01-fictional-setup-claude"));
 }
 
@@ -1909,7 +1918,7 @@ async fn prepared_clone_waits_for_ssh_before_admission_and_delivery() {
         .unwrap();
     let delivery = events
         .iter()
-        .position(|event| event["event"] == "read-agent-settings")
+        .position(|event| event["event"] == "remove-agent-credentials")
         .unwrap();
     assert!(ready < delivery);
     assert!(
@@ -1983,6 +1992,8 @@ async fn preparation_refusal_never_checkpoints_or_creates_a_host_clone() {
                 Some(
                     "read-agent-settings"
                         | "wrote-claude-settings"
+                        | "wrote-agent-credentials"
+                        | "remove-agent-credentials"
                         | "configure-github-helper"
                         | "remove-github-token"
                 )
