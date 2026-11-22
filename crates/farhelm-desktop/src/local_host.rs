@@ -7,7 +7,7 @@
 //! app receives over the UI channel, so there is no second description of a host to drift. Strict decoding is safe
 //! here because the desktop binary and the helm it embeds are always the same build.
 
-use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
+use farhelm_proto::text::notation;
 use farhelm_proto::ui_channel::HostView;
 use serde::Deserialize;
 
@@ -30,27 +30,6 @@ pub(crate) async fn decode_hosts(resp: reqwest::Response) -> Result<Vec<HostView
         .map_err(|e| e.to_string())
 }
 
-/// Show a host-supplied value (a peer's build string, say) the way the desktop app shows all host text,
-/// `farhelm_proto::text::escaped`: every presentation-unsafe character written as `<U+XXXX>` and a literal `<U+` the
-/// peer wrote escaped so it cannot pose as one. An empty or whitespace-only value is named rather than shown as
-/// nothing. The GUI crate's `update_readout` keeps a copy (`shown_build`), since it cannot call into this crate; change
-/// the two together. Ported from the old UI's `peer.rs`, which did not escape a literal `<U+`.
-pub(crate) fn display_peer(raw: &str) -> String {
-    if raw.is_empty() {
-        return "(empty)".to_string();
-    }
-    // Whether anything the user can actually SEE survives. An escaped
-    // character counts (it prints as `<U+202E>`); an ordinary space does not.
-    if raw
-        .chars()
-        .any(|ch| is_presentation_unsafe(ch) || !ch.is_whitespace())
-    {
-        escaped(raw)
-    } else {
-        format!("(whitespace only: {} characters)", raw.chars().count())
-    }
-}
-
 /// Show an identity so that two different ones can never look alike: everything but printable ASCII is escaped, and
 /// so are `<` (which starts an escape) and the parentheses of the `(empty)` placeholder, so neither can be imitated.
 /// Comparisons must still use the raw bytes. Ported from the old UI's `peer.rs`.
@@ -60,8 +39,7 @@ pub(crate) fn display_peer(raw: &str) -> String {
 /// alert, while `HostText` deliberately hands its spelling only to its own elements and accessible names; change the
 /// two together.
 ///
-/// It escapes the raw value once, on its own, rather than going through [`display_peer`]: its output already holds
-/// escapes, which `display_peer` would escape a second time.
+/// It takes the raw identity so the generated escapes go directly to the alert.
 pub(crate) fn display_identity(raw: &str) -> String {
     // Only an empty identity needs the placeholder: every space gains a
     // visible spelling, so an otherwise blank identity is never blank.
@@ -82,6 +60,7 @@ pub(crate) fn display_identity(raw: &str) -> String {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+    use farhelm_proto::text::{escaped_or_placeholder, is_presentation_unsafe};
 
     /// A host row as tests need it: only the kind and connection phase matter to startup, so every other field takes a
     /// fixed placeholder.
@@ -151,7 +130,7 @@ pub(crate) mod tests {
         let recorded = "8f1c2a7e-0000-4000-8000-000000000001";
         let reported = format!("{recorded}\u{FE0F}");
         // Premise: the ordinary peer escaping leaves the selector alone.
-        assert_eq!(display_peer(&reported), reported);
+        assert_eq!(escaped_or_placeholder(&reported), reported);
         assert_eq!(display_identity(recorded), recorded);
         assert_ne!(display_identity(recorded), display_identity(&reported));
         assert!(display_identity(&reported).ends_with("<U+FE0F>"));
@@ -205,10 +184,13 @@ pub(crate) mod tests {
     /// selector still renders as itself. Ported from the old GUI's `peer.rs`.
     #[farhelm_testtrace::test]
     fn newly_listed_invisibles_are_escaped_and_emoji_are_not() {
-        assert_eq!(display_peer("\u{3164}"), "<U+3164>");
-        assert_eq!(display_peer("a\u{034F}b\u{E0041}"), "a<U+034F>b<U+E0041>");
+        assert_eq!(escaped_or_placeholder("\u{3164}"), "<U+3164>");
         assert_eq!(
-            display_peer("ship it \u{2764}\u{FE0F}"),
+            escaped_or_placeholder("a\u{034F}b\u{E0041}"),
+            "a<U+034F>b<U+E0041>"
+        );
+        assert_eq!(
+            escaped_or_placeholder("ship it \u{2764}\u{FE0F}"),
             "ship it \u{2764}\u{FE0F}"
         );
     }
@@ -227,7 +209,7 @@ pub(crate) mod tests {
             "id\u{0007}bell",
             "id\u{2028}line-separator",
         ] {
-            let shown = display_peer(hostile);
+            let shown = escaped_or_placeholder(hostile);
             for ch in hostile.chars().filter(|ch| is_presentation_unsafe(*ch)) {
                 assert!(
                     !shown.contains(ch),
@@ -240,11 +222,11 @@ pub(crate) mod tests {
             }
         }
         assert_eq!(
-            display_peer("d1444cac-789f-4264-879c-38010250630a"),
+            escaped_or_placeholder("d1444cac-789f-4264-879c-38010250630a"),
             "d1444cac-789f-4264-879c-38010250630a"
         );
         assert_eq!(
-            display_peer("\u{05e9}\u{05dc}\u{05d5}\u{05dd}"),
+            escaped_or_placeholder("\u{05e9}\u{05dc}\u{05d5}\u{05dd}"),
             "\u{05e9}\u{05dc}\u{05d5}\u{05dd}"
         );
     }
@@ -254,30 +236,34 @@ pub(crate) mod tests {
     /// escape. Ported from the old GUI's `peer.rs`.
     #[farhelm_testtrace::test]
     fn empty_and_blank_identities_get_an_unambiguous_display_form() {
-        assert_eq!(display_peer(""), "(empty)");
-        assert_eq!(display_peer("   "), "(whitespace only: 3 characters)");
+        assert_eq!(escaped_or_placeholder(""), "(empty)");
         assert_eq!(
-            display_peer("\u{00A0}"),
+            escaped_or_placeholder("   "),
+            "(whitespace only: 3 characters)"
+        );
+        assert_eq!(
+            escaped_or_placeholder("\u{00A0}"),
             "(whitespace only: 1 characters)",
             "a non-breaking space is still invisible, and is still whitespace"
         );
-        assert_eq!(display_peer("\u{202E}"), "<U+202E>");
+        assert_eq!(escaped_or_placeholder("\u{202E}"), "<U+202E>");
     }
 
-    /// Why this matters: a peer's build string reaches the startup alert through this function (and the update readout
-    /// through its copy, `farhelm_gui::update_readout`'s `shown_build`), so a literal
-    /// `<U+202E>` in it would read as an escape the app made, hiding whether the value held a real override; and an
-    /// identity's display, which escapes its own `<`, must not escape its escapes a second time.
+    /// The startup alert and version readout share the same peer formatter. An escape written by the peer must
+    /// differ from a generated escape so a user can distinguish a literal `<U+202E>` from a real override.
     ///
     /// Specification: a peer value's literal `<U+` has its `<` escaped, so a literal and a real override show
     /// differently; an identity holding the same literal shows it the same way, and a real override in an identity is a
     /// single escape.
     #[farhelm_testtrace::test]
     fn literal_escape_notation_from_a_peer_cannot_pose_as_an_escape() {
-        assert_eq!(display_peer("<U+202E>"), "<U+003C>U+202E>");
-        assert_eq!(display_peer("v1<U+202E>2"), "v1<U+003C>U+202E>2");
-        assert_ne!(display_peer("v1<U+202E>2"), display_peer("v1\u{202E}2"));
-        assert_eq!(display_peer("a < b"), "a < b");
+        assert_eq!(escaped_or_placeholder("<U+202E>"), "<U+003C>U+202E>");
+        assert_eq!(escaped_or_placeholder("v1<U+202E>2"), "v1<U+003C>U+202E>2");
+        assert_ne!(
+            escaped_or_placeholder("v1<U+202E>2"),
+            escaped_or_placeholder("v1\u{202E}2")
+        );
+        assert_eq!(escaped_or_placeholder("a < b"), "a < b");
         assert_eq!(display_identity("<U+202E>"), "<U+003C>U+202E>");
         assert_eq!(display_identity("\u{202E}"), "<U+202E>");
         assert_ne!(display_identity("<U+202E>"), display_identity("\u{202E}"));
@@ -287,9 +273,12 @@ pub(crate) mod tests {
     /// must not hide its spaces.
     #[farhelm_testtrace::test]
     fn host_text_is_shown_with_hidden_characters_escaped() {
-        assert_eq!(display_peer("v1\u{202e}2"), "v1<U+202E>2");
-        assert_eq!(display_peer(""), "(empty)");
-        assert_eq!(display_peer("  "), "(whitespace only: 2 characters)");
+        assert_eq!(escaped_or_placeholder("v1\u{202e}2"), "v1<U+202E>2");
+        assert_eq!(escaped_or_placeholder(""), "(empty)");
+        assert_eq!(
+            escaped_or_placeholder("  "),
+            "(whitespace only: 2 characters)"
+        );
         assert_eq!(display_identity("a b"), "a<U+0020>b");
     }
 }

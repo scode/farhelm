@@ -8,6 +8,12 @@
 //! never the other way round, so a type defined there would need a copy here (the migration's coordinator approved the
 //! move on 2026-11-14).
 
+use farhelm_proto::text::escaped_or_placeholder;
+
+/// The installer command in the readout's recovery advice. It works for an
+/// installation too old to verify current automatic updates itself.
+pub const REINSTALL_COMMAND: &str = "curl -fsSL https://get.farhelm.io/install.sh | sh";
+
 /// The updater activity exposed to presentation, without a renderer dependency.
 ///
 /// The native worker publishes non-idle check states only for a run the user
@@ -261,12 +267,12 @@ pub fn idle_tooltip(running: &str, has_updater: bool) -> String {
     if farhelm_proto::is_development_build(running) {
         "This is a development build of Farhelm, not a release.".to_owned()
     } else if has_updater {
-        let running = shown_build(running);
+        let running = escaped_or_placeholder(running);
         format!(
             "This is Farhelm {running}. When a newer version is installed, this turns red and opens the Restart to update / What's new menu."
         )
     } else {
-        let running = shown_build(running);
+        let running = escaped_or_placeholder(running);
         format!("This is Farhelm {running}.")
     }
 }
@@ -280,13 +286,13 @@ pub fn idle_tooltip(running: &str, has_updater: bool) -> String {
 /// through the same display boundary as the visible version number.
 pub fn version_tooltip(running: &str, reported: Option<&str>, updater: Option<&Readout>) -> String {
     if let Some(reported) = reported.filter(|reported| *reported != running) {
-        let helm = shown_build(reported);
+        let helm = escaped_or_placeholder(reported);
         if farhelm_proto::is_development_build(running) {
             return format!(
                 "The helm runs Farhelm {helm}; this window is a development build of Farhelm."
             );
         }
-        let window = shown_build(running);
+        let window = escaped_or_placeholder(running);
         return format!("The helm runs Farhelm {helm}; this window was built as Farhelm {window}.");
     }
     if farhelm_proto::is_development_build(running) {
@@ -298,22 +304,15 @@ pub fn version_tooltip(running: &str, reported: Option<&str>, updater: Option<&R
     )
 }
 
-/// A build stamp as the readout's words show it: escaped with the shared table (`farhelm_proto::text::escaped`), and an
-/// empty or whitespace-only stamp named rather than shown as nothing. The same rule as the desktop crate's
-/// `local_host::display_peer`, which this crate cannot call (the desktop crate depends on this one); a stamp may come
-/// from a peer (the helm's), so it is never shown raw.
-fn shown_build(raw: &str) -> String {
-    if raw.is_empty() {
-        return "(empty)".to_string();
-    }
-    if raw
-        .chars()
-        .any(|ch| farhelm_proto::text::is_presentation_unsafe(ch) || !ch.is_whitespace())
-    {
-        farhelm_proto::text::escaped(raw)
-    } else {
-        format!("(whitespace only: {} characters)", raw.chars().count())
-    }
+/// Lead with the recovery required after an upgrade-floor refusal while
+/// keeping the current activity's hover text. The command comes last for
+/// someone reading it from the hover and typing it into a terminal.
+pub fn upgrade_floor_reinstall_tooltip(activity: &str) -> String {
+    format!(
+        "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit \
+         Farhelm, and run farhelm uninstall first; your data stays on disk but may not carry over cleanly. {activity} \
+         Reinstall it by running this in a terminal: {REINSTALL_COMMAND}"
+    )
 }
 
 pub mod view;
@@ -761,9 +760,12 @@ mod tests {
     /// whitespace-only one names its length.
     #[test]
     fn a_build_stamp_is_escaped_and_never_shown_as_nothing() {
-        assert_eq!(shown_build("1.2.3"), "1.2.3");
-        assert_eq!(shown_build("1.2\u{202E}3"), "1.2<U+202E>3");
-        assert_eq!(shown_build(""), "(empty)");
-        assert_eq!(shown_build("  "), "(whitespace only: 2 characters)");
+        assert_eq!(escaped_or_placeholder("1.2.3"), "1.2.3");
+        assert_eq!(escaped_or_placeholder("1.2\u{202E}3"), "1.2<U+202E>3");
+        assert_eq!(escaped_or_placeholder(""), "(empty)");
+        assert_eq!(
+            escaped_or_placeholder("  "),
+            "(whitespace only: 2 characters)"
+        );
     }
 }

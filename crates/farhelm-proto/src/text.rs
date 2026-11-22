@@ -131,6 +131,24 @@ pub fn escaped(text: &str) -> String {
     out
 }
 
+/// Give an empty value or one made entirely of ordinary blanks a visible label.
+/// A line break or other escaped character will show its spelling
+/// and therefore needs no placeholder. The count is in Unicode characters.
+pub fn blank_placeholder(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return Some("(empty)".to_owned());
+    }
+    text.chars()
+        .all(|ch| ch.is_whitespace() && !is_presentation_unsafe(ch))
+        .then(|| format!("(whitespace only: {} characters)", text.chars().count()))
+}
+
+/// Give a peer value a visible spelling for a native alert or build readout.
+/// Other text uses the same escaping as [`escaped`], including literal `<U+`.
+pub fn escaped_or_placeholder(text: &str) -> String {
+    blank_placeholder(text).unwrap_or_else(|| escaped(text))
+}
+
 /// Quote one word so a POSIX-family shell reads it back byte for byte, with
 /// no expansion of any kind.
 ///
