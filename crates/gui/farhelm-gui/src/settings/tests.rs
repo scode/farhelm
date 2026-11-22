@@ -1170,7 +1170,7 @@ fn previewing_a_setting_plays_only_the_chosen_sound(cx: &mut TestAppContext) {
 /// `the_preference_row_reads_unset_fields_as_the_defaults`). Specified: Notifications shows the heading "Sounds" above
 /// ntfy alerts and the four switches by name, SSH sign-in, waiting and approval on and turn finished off by default. A
 /// click on each sends `PUT /api/preferences` with only its field, set to the opposite of what it showed, under the
-/// preference row's key; once the helm pushes the row and answers, the switch shows the stored value.
+/// preference row's key. After settlement the switch follows a later stored value that differs from the saved draft.
 #[gpui::test]
 fn each_sound_switch_saves_its_own_preference_field(cx: &mut TestAppContext) {
     let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
@@ -1242,6 +1242,15 @@ fn each_sound_switch_saves_its_own_preference_field(cx: &mut TestAppContext) {
             switch_on(cx, choice.id()),
             Some(!shown),
             "{field}: the stored value shows"
+        );
+        let mut stored = serde_json::to_value(&row).unwrap();
+        stored[field] = json!(shown);
+        row = serde_json::from_value(stored).unwrap();
+        push(&mut helm, &row, cx);
+        assert_eq!(
+            switch_on(cx, choice.id()),
+            Some(shown),
+            "{field}: follows a later push"
         );
     }
 }

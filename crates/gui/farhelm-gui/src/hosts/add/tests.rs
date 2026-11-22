@@ -319,7 +319,7 @@ fn add_sends_the_probe_with_its_new_entry_under_the_dialogs_key(cx: &mut TestApp
 
 /// Planning can push a question before its 202. Only the attempt named in that reply belongs to this dialog.
 /// Collection changes can carry Ready ahead of Send's receipt. Replay waits for both, so the accepted answer's
-/// input mark still lets the setup confirmation open.
+/// input mark still lets the setup confirmation open. Send addresses the question, while completion names the attempt.
 #[gpui::test]
 fn ssh_add_resumes_its_unchanged_probe_after_the_setup_master_answers(cx: &mut TestAppContext) {
     let (mut helm, cx, _add) = open_rail_for_setup(cx);
@@ -344,12 +344,16 @@ fn ssh_add_resumes_its_unchanged_probe_after_the_setup_master_answers(cx: &mut T
 
     type_text(cx, "123456");
     keys(cx, "enter");
-    let (answer, sent) = one_command(&mut helm, Method::Post, "/api/ssh-questions/this-check");
+    let (answer, sent) = one_command(
+        &mut helm,
+        Method::Post,
+        "/api/ssh-questions/question-this-check",
+    );
     assert_eq!(sent, json!({"action": "send", "answer": "123456"}));
     push_questions(
         &mut helm,
         &[inline_question("other-check")],
-        &["this-check"],
+        &["question-this-check"],
     );
     setup_completed(
         &mut helm,
@@ -404,9 +408,13 @@ fn cancel_inline_ssh_sign_in_keeps_the_destination_and_alias(cx: &mut TestAppCon
         "the draft owns the visible question"
     );
     keys(cx, "escape");
-    let (answer, sent) = one_command(&mut helm, Method::Post, "/api/ssh-questions/this-check");
+    let (answer, sent) = one_command(
+        &mut helm,
+        Method::Post,
+        "/api/ssh-questions/question-this-check",
+    );
     assert_eq!(sent, json!({"action": "cancel"}));
-    push_questions(&mut helm, &[], &["this-check"]);
+    push_questions(&mut helm, &[], &["question-this-check"]);
     helm.reply(answer, 204, None);
     setup_completed(
         &mut helm,
@@ -482,9 +490,10 @@ fn open_rail_for_setup(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestCon
     )
 }
 
+/// Give the question its own address so the answer route cannot pass with the attempt ID.
 fn inline_question(attempt: &str) -> SshQuestion {
     SshQuestion {
-        id: attempt.into(),
+        id: format!("question-{attempt}"),
         attempt: attempt.into(),
         target: SshQuestionTarget::Draft {
             draft: attempt.into(),

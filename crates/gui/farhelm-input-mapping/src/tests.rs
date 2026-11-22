@@ -194,6 +194,8 @@ fn complete_dom_client_policy_matches_pinned_table() {
         "DOM policy: {} rows, {checked} modifier/platform/state cases",
         checked / (3 * 64)
     );
+    // Pin the case records, since the pattern dictionary alone would run no assertions.
+    assert_eq!(checked, 1_730 * 3 * 64);
 }
 
 /// Independent US-layout projection of fixture shapes into actual GPUI fields.
@@ -940,6 +942,8 @@ fn mouse_table_admission_and_actual_supervisor_bytes() {
         "../../../farhelm-supervisor/tests/fixtures/grid-mouse.jsonl"
     ));
     let count = rows.len();
+    // An empty or truncated fixture must fail instead of replaying only the surviving records.
+    assert_eq!(count, 768);
     for row in rows {
         let kind = match row[0].as_str().unwrap() {
             "down" => MouseEventKind::Down,

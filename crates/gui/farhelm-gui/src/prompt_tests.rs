@@ -1363,9 +1363,10 @@ impl Render for Launcher {
     }
 }
 
-/// An open [`Launcher`]: its layer, its buttons' focus handles (focus starts on Launch) and the question's cell.
+/// An open [`Launcher`]: its layer, its own focus handle, its buttons' handles and the question's cell.
 struct OpenLauncher {
     layer: LayerId,
+    container: FocusHandle,
     launch: FocusHandle,
     reset: FocusHandle,
     question: InlineCell,
@@ -1388,6 +1389,7 @@ fn open_launcher_with(
     let (launch, reset, container) = (handle(cx), handle(cx), handle(cx));
     let question: InlineCell = Rc::default();
     let (start, drawn, lower) = (launch.clone(), question.clone(), reset.clone());
+    let dialog = container.clone();
     let layer = cx.update(move |window, cx| {
         let view = cx.new(|_| Launcher {
             launch: start.clone(),
@@ -1398,7 +1400,7 @@ fn open_launcher_with(
         layers::open_dialog(
             Dialog {
                 view: view.into(),
-                container,
+                container: dialog,
                 start,
                 subject: None,
                 main_action: None,
@@ -1425,6 +1427,7 @@ fn open_launcher_with(
         cx,
         OpenLauncher {
             layer,
+            container,
             launch,
             reset,
             question,
@@ -1978,22 +1981,18 @@ fn a_pointer_answer_returns_focus_under_the_macos_click_rule(
         "{rule}: the premise: an attempt is in flight"
     );
     click(cx, "reset");
-    let moved_to = cx.update(|window, cx| window.focused(cx));
-    // The last assertion tells "the moved-on click no longer counts" from "the click still returns focus" only because
-    // the press left focus somewhere other than Launch (the dialog, under the macOS rule).
     assert!(
-        !focused(cx, &launcher.launch),
-        "{rule}: the premise: the press on Reset left focus off Launch"
+        focused(cx, &launcher.container),
+        "{rule}: the premise: the press on Reset focused the dialog"
     );
     settle_attempt(cx, &attempts, None);
     assert!(
         !cx.update(|_, cx| inline.is_open(cx)),
         "{rule}: success closed the question"
     );
-    assert_eq!(
-        cx.update(|window, cx| window.focused(cx)),
-        moved_to,
-        "{rule}: success after the user pressed elsewhere left focus where that press put it"
+    assert!(
+        focused(cx, &launcher.container),
+        "{rule}: success after the user pressed elsewhere left focus on the dialog"
     );
 }
 
