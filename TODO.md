@@ -35,7 +35,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings keys it wrote. Codex 0.171.0 saves the provider ID with each conversation and would not resume one under a
   different ID, so keeping it preserves Restart and opening a saved conversation by ID. The alternative was a fresh
   provider ID, which keeps stale settings from ever applying but needs a separate way to configure the saved provider
-  for both forms of resume, including conversation IDs typed by hand.
+  for both forms of resume, including conversation IDs typed by hand. The same plan's next block deferred the whole
+  Codex migration (the next entry), so this choice now applies to the follow-up that takes it up.
+
+- **Revisit deferring the Codex credential migration.** On 2026-11-22 the landing monitor answered
+  `recipe-credentials-in-launch-env`'s second block on the maintainer's behalf: the plan moves Claude's recipe
+  credentials into the launch environment now and leaves Codex's delivery as it is, settings writes included, with the
+  Codex migration recorded as a Plan follow-up. The executor found that Codex 0.171.0 launch overrides cannot keep a
+  leftover settings bearer away from a tokenless endpoint: leaving the token out keeps the stale bearer, and an empty
+  one sends an empty Authorization header. The alternative was to widen the plan to find and verify a way to isolate
+  Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working.
 
 ## Near term
 
