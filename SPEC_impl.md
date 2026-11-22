@@ -1269,9 +1269,9 @@ auto-repeat of a held key, so a keystroke interceptor drops a held repeat before
 binding GPUI would try first, where focus is, runs a listed action. The repeat then neither runs the action again nor
 reaches anything behind the binding, a focused terminal's program included. The interceptor goes by that binding's
 action rather than by the chord, so where a deeper binding takes the same chord (a text field's, say), its repeats keep
-coming. A listed action's handler must take every key that reaches it, even when it does nothing. Composition is not
-covered: GPUI's key events do not say whether an input method is composing, so refusing a shortcut typed mid-composition
-falls to the element that owns the input handler.
+coming. A listed action's handler must take every key that reaches it, even when it does nothing. GPUI's key events do
+not say whether an input method is composing. The session Delete and Rename handlers ask the shown terminal whether it
+holds focus and has marked text before acting.
 
 The shortcuts SPEC.md matches by key position rather than printed character (the template number keys, Keyboard
 shortcuts, terminal text size) are rows of one physical-key table in the same module, because a binding matches only the
@@ -1292,9 +1292,9 @@ the focused element, a terminal included, and held repeats with them. The handle
 or cancel, which disarms the slot and lets the key go on as if nothing had been armed. Modifiers pressed alone never
 reach it. Arming an armed slot is refused, so no mode silently takes the keys from another; the holder disarms the slot
 explicitly, and a reset disarms it too, telling the holder through a callback given when it armed. Input-method text is
-not covered: committed text from a composition, a CJK input source or a dead key (and on Wayland a commit of several
-characters) reaches the focused element's input handler without a key-down, so the slot never sees it, and refusing it
-while armed falls to the text receiver (a terminal's input handler, a text field), which can ask whether the slot is
+not covered by the slot: committed text from a composition, a CJK input source or a dead key (and on Wayland a commit of
+several characters) reaches the focused element's input handler without a key-down, so the slot never sees it, and
+refusing it while armed falls to the text receiver. The terminal's input handler drops those commits while the slot is
 armed.
 
 Enforced by a test that walks the keymap and fails on a chord prefix in any context containing a terminal, by a test
@@ -8826,16 +8826,16 @@ the character it prints, the number and ⚡ chords, Space, Tab and Backspace fee
 cancel and are consumed; anything else, including a keypad digit and a key that types nothing (a dead key, a key
 mid-composition), cancels and goes on to its normal target. Held repeats of a sequence key are taken and add nothing. A
 press anywhere in the window (one window-wide listener), the window going inactive, a reset (the slot's reset callback)
-and, at the next key, a dialog that opened since the prefix also cancel. Input-method text that arrives without a
-key-down is not refused yet; that falls to the terminal's input handler. The pill is the layer manager's display-only
-pill, anchored to the main pane in every connected state and drawn by the component layer's sequence pill from the old
-stylesheet's amber tokens and halo, 9 pixels lower in the Mac window while a session is open. Its candidates read the
-store's template names on every draw; Tab and the candidates have none while the templates collection is unavailable,
-and Enter resolves against whatever the store holds. The old 200 ms entrance is not drawn, because GPUI's one-shot
-animations are banned in the GUI crates without a lint exception. Enter queues the word, ends the capture and resolves
-the model: an empty sequence opens nothing, an unbound reference outside the launcher opens Templates with its binding
-hint, any other refusal opens New with its sentence, and resolved names go to the dispatcher with the sequence origin;
-in the launcher every refusal, an unbound key's included, is shown there with its launcher wording.
+and, at the next key, a dialog that opened since the prefix also cancel. The terminal's input handler drops commits that
+arrive without a key-down while the slot is armed. The pill is the layer manager's display-only pill, anchored to the
+main pane in every connected state and drawn by the component layer's sequence pill from the old stylesheet's amber
+tokens and halo, 9 pixels lower in the Mac window while a session is open. Its candidates read the store's template
+names on every draw; Tab and the candidates have none while the templates collection is unavailable, and Enter resolves
+against whatever the store holds. The old 200 ms entrance is not drawn, because GPUI's one-shot animations are banned in
+the GUI crates without a lint exception. Enter queues the word, ends the capture and resolves the model: an empty
+sequence opens nothing, an unbound reference outside the launcher opens Templates with its binding hint, any other
+refusal opens New with its sentence, and resolved names go to the dispatcher with the sequence origin; in the launcher
+every refusal, an unbound key's included, is shown there with its launcher wording.
 
 Number bindings accept partial templates; the bolt keeps its runnable-template affordance. A single partial-template key
 passes a number-key banner to New for a prominent alert explaining the prefix. Dispatch carries an explicit origin:

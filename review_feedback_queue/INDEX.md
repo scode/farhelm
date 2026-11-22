@@ -84,10 +84,6 @@ consequences.
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`session-delete-shortcut-ignores-composition.md`](session-delete-shortcut-ignores-composition.md) — Pressing the
-  session Delete shortcut while composing text can delete the open session, including its processes, when Skip session
-  confirmations is enabled.
-
 - [`wayland-terminal-paste-ignores-file-list.md`](wayland-terminal-paste-ignores-file-list.md) — Copying a file in a
   Wayland file manager and pasting into Farhelm can paste its text representation or do nothing instead of attaching the
   file.
@@ -262,9 +258,6 @@ consequences.
 - [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
-  typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
 
 - [`checkout-status-bypasses-host-text.md`](checkout-status-bypasses-host-text.md) — A launcher status line can show
   repository-search errors without Farhelm’s usual treatment of invisible or right-to-left characters.

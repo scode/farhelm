@@ -508,6 +508,17 @@ impl SessionPane {
         self.act_on_choice(window, cx);
     }
 
+    /// The session shortcuts can reach the main view before the terminal sees their keys. Ask the shown terminal
+    /// directly whether the focused input method still has marked text.
+    pub(crate) fn terminal_is_composing(&self, window: &Window, cx: &App) -> bool {
+        self.mounted
+            .read(cx)
+            .and_then(Option::as_ref)
+            .and_then(|mounted| mounted.set.as_ref())
+            .and_then(|set| set.read(cx).shown())
+            .is_some_and(|terminal| terminal.read(cx).is_composing(window))
+    }
+
     /// The open session's terminals under the current UI session, for tests.
     #[cfg(test)]
     pub(crate) fn terminal_set(&mut self, cx: &App) -> Option<Entity<TerminalSet>> {

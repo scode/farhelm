@@ -332,6 +332,33 @@ fn the_prefix_from_a_terminal_arms_a_sequence_that_takes_every_key(cx: &mut Test
     );
 }
 
+/// Composed text can reach the focused input handler without any key-down for the capture to intercept.
+/// While the pill is open that text reaches neither the program nor the sequence. Escape restores typing.
+#[gpui::test]
+fn a_composed_commit_during_quick_launch_stays_out_of_the_terminal(cx: &mut TestAppContext) {
+    let mut main = open_main(cx, true);
+    main.arm();
+    assert!(main.pill_drawn());
+    assert!(
+        main.cx
+            .update(|window, cx| window.driver_insert_text("日本語", cx))
+    );
+    settle(main.cx);
+    assert_eq!(main.program_input(), 0);
+    assert_eq!(main.state(), (Vec::new(), String::new()));
+    assert!(main.pill_drawn());
+
+    keys(main.cx, "escape");
+    assert_ended(&mut main, "after Escape");
+    assert_eq!(main.program_input(), 0);
+    assert!(
+        main.cx
+            .update(|window, cx| window.driver_insert_text("日本語", cx))
+    );
+    settle(main.cx);
+    assert_eq!(main.program_input(), 1);
+}
+
 /// With no session open the pill sits over the main area, and the prefix must work from there too (SPEC.md: "the main
 /// area with no session open"). Specified: over an empty fleet the prefix arms a sequence whose pill is centered on
 /// the main pane, within a pixel.

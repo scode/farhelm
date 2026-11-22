@@ -15,22 +15,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## session-delete-shortcut-ignores-composition.md
-
-- Outcome: `fix code`.
-- Assessment: actions.rs module docs (~93–101) say the composition guard "is not built here", and on macOS "a listed
-  shortcut typed mid-composition still runs". The handler checks no marked text. The terminal tracks marked text
-  (attached.rs ~558). Basis: SPEC.md "Keyboard shortcuts" (~3738): "Both session shortcuts work from terminal focus
-  without sending their chord to the program and ignore repeat and composition." SPEC_impl.md (~1285): refusing
-  mid-composition "falls to the action's handler, which can ask the focused input whether it is composing." Fix: the
-  Delete and Rename handlers refuse while the focused input has marked text.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
 ## wayland-terminal-paste-ignores-file-list.md
 
 - Outcome: `fix code`.
@@ -180,23 +164,6 @@
   lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## ime-commit-bypasses-quick-launch-capture.md
-
-- Outcome: `fix code`.
-- Assessment: `AttachedTerminal::replace_text_in_range` calls `commit_text`
-  (`crates/gui/farhelm-gui/src/terminal/attached.rs:4272-4277`), which sends unconditionally and never consults the
-  armed slot. SPEC_impl.md ~8769 admits "Input-method text that arrives without a key-down is not refused yet".
-  SPEC_impl.md ~1297-1300 assigns the fix: "refusing it while armed falls to the text receiver ... which can ask whether
-  the slot is armed". Basis: SPEC.md ~1364 (Quick-launch sequences): "While armed, typed characters never reach the
-  terminal's program." The fix is that the terminal's commit path refuses (drops) committed text while
-  `key_capture_armed` is set.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## checkout-status-bypasses-host-text.md
 
