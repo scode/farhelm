@@ -265,7 +265,7 @@ and the host's state in the hosts and session lists then shows how it ended, a l
 log. Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account key) are
 local and answer as before; a container host checks its container over SSH first, inside the bound. Stop and suspend is
 one command with one reply, so one bound covers its Stop and its Suspend together; its reply at the bound says only that
-the environment is suspended once the agent has stopped cleanly, which holds whichever half is still running, and a Stop
+the environment is suspended once Stop has finished cleanly, which holds whichever half is still running, and a Stop
 that fails or leaves cleanup undone after the reply leaves the environment running. A session's environment Delete
 (`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned whole-environment Delete
 (`?delete_sandbox=true`) and the Retry of a failed destruction (`POST /api/hosts/{id}/retry-delete`) answer within the
