@@ -13,9 +13,6 @@ consequences.
 
 ## Highest priority: security or data loss
 
-- [`folder-suggestion-enter-can-submit-launcher.md`](folder-suggestion-enter-can-submit-launcher.md) — Enter on a
-  visible folder suggestion can submit the launcher. A successful Replace with can retire the source session.
-
 - [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
   different template from the one shown. The old button can also suppress Undo.
 
@@ -83,9 +80,6 @@ consequences.
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
-
-- [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
-  agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
   cause the remaining answer to save or discard a different template draft.
@@ -288,9 +282,6 @@ consequences.
 
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.
-
-- [`shell-picker-split-by-model.md`](shell-picker-split-by-model.md) — The model field can split the agent and shell
-  choices, moving the Shells group as the selection changes.
 
 - [`shell-template-hides-incompatible-permissions.md`](shell-template-hides-incompatible-permissions.md) — The template
   editor says a shell has no approvals while retaining incompatible approvals that block saving.

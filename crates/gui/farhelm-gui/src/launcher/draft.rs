@@ -586,8 +586,12 @@ impl LaunchDraft {
     }
 
     /// An agent launch's stored choices, verbatim, as deliberate ones (a restored launch is the user's explicit
-    /// selection, so its permission is never treated as a passive default).
+    /// selection, so its permission is never treated as a passive default). A recent setup can change the harness,
+    /// so an entered conversation selector belongs only to the harness it was entered for.
     fn restore_selection(&mut self, selection: &LaunchSelection) {
+        if self.agent.harness != Some(selection.harness) {
+            self.conversation.clear();
+        }
         self.tab = Tab::Agent;
         self.agent = AgentChoices {
             harness: Some(selection.harness),
@@ -676,7 +680,7 @@ impl LaunchDraft {
 
     /// Choose `harness` as the agent type: the choices made for another type are reconciled (incompatible ones
     /// cleared, with a notice for any the user had chosen deliberately), the new type's remembered wrapper prefix
-    /// loads, Custom flags never cross agents, and the tab becomes Agent. `remembered_wrapper` is the prefix the helm
+    /// loads, the old conversation selector and Custom flags are cleared, and the tab becomes Agent. `remembered_wrapper` is the prefix the helm
     /// remembers for `harness` (`Preferences::remembered_wrapper_prefixes`), as shell words. In Restart with, which
     /// holds the agent type and the launch kind, anything but the same agent on the Agent tab is refused.
     pub fn choose_harness(
@@ -743,6 +747,7 @@ impl LaunchDraft {
         let notice = self.reconcile(selection, model_owner, harness, catalog);
         let switched_agent = before.agent.harness != Some(harness);
         if switched_agent {
+            self.conversation.clear();
             self.agent.wrapper = joined(remembered_wrapper);
             self.agent.wrapper_explicit = false;
             self.agent.permission_flags = String::new();

@@ -167,26 +167,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
-## folder-suggestion-enter-can-submit-launcher.md
-
-- Outcome: `fix spec+code`.
-- Assessment: In the launcher, the user arrows to a folder suggestion and presses Enter; if the folder history reply
-  lands in the same frame, Enter launches instead of picking the folder. In Replace with, that launch also deletes the
-  source session. Verified: Confirmed on main: history reply calls `drop_folder_highlight` (launcher/view/history.rs
-  ~135), then `folder_enter` finds no highlight and Enter falls through to `press` (view.rs ~829). The window runs from
-  the reply being processed to the next paint, about one frame. History is read when the launcher is first drawn or the
-  host changes.
-- Decision: Q1, the maintainer picked "Accept these races, but guard Replace with". (2026-11-21 fewest-questions triage
-  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
-  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Add one spec sentence: a key or click handled before the frame showing a just-arrived background
-  update is accepted, except for destructive confirmations and launches that retire a session (Replace with). Make the
-  launcher's Enter safe in Replace with so it cannot launch (and retire the source session) when the folder highlight
-  was dropped in the same frame. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the
-  queue removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove
-  the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
 ## shell-stop-suspend-error-names-agent.md
 
 - Outcome: `fix code`.
@@ -221,27 +201,6 @@
   docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
   item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## shell-switch-can-submit-hidden-conversation-id.md
-
-- Outcome: `fix spec+code`.
-- Assessment: In New, a conversation ID typed for one agent stays in the draft while you switch to a shell (where the
-  field is hidden). Pressing Enter on a different agent's choice then launches immediately with that hidden ID, so the
-  launch tries to continue an unintended conversation or fails. Verified: Confirmed. draft.rs keeps one `conversation`
-  string across agent changes, request.rs ~520-526 includes it for any agent that supports a selector, and Enter on a
-  choice applies and launches (SPEC.md ~1147-1148). SPEC.md ~1160-1168 describes a one-time selector whose label differs
-  per agent, and says nothing about it surviving an agent change.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Fix code (clear the selector when the agent changes) and add a sentence
-  to SPEC. If the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it
-  back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
-  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
-  feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## successful-suspend-flashes-connecting.md
 
@@ -409,24 +368,6 @@
   maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## shell-picker-split-by-model.md
-
-- Outcome: `fix code`.
-- Assessment: In the launcher's Agent tab, the model row sits between the agent chips and the Shells group, so Shells
-  moves down whenever a model-capable agent is selected. Verified: view.rs `agent_fields` (~1812-1818) splices the model
-  and catalog error at index 1, between the two `harness_row` rows. The choices.rs ~162 comment says Shells go
-  "immediately after the agent chips". SPEC.md ~1055 says only "after the agent chips", so this is not clearly settled.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: fix code (splice after both harness rows) If the fix turns out not to
-  be straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## shell-template-hides-incompatible-permissions.md

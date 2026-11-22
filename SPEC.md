@@ -1160,6 +1160,9 @@ agent choice is independent of that destination:
   In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without launching; with no highlighted
   entry it launches as before. A held Enter never launches.
 
+  A key or click may act before a frame shows an arriving background update, with destructive confirmations and launches
+  that retire a session (Replace with) limited to the action and consent already shown.
+
   An exact family word in launcher search preselects its latest model, using the first matching harness when none is
   chosen. When a word names both an agent and a model family, such as `grok`, typing it alone chooses that agent if none
   is selected, even while models are loading. With an agent selected, the word searches for models on that agent.
@@ -1167,13 +1170,14 @@ agent choice is independent of that destination:
 
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector under **More options** for
   agent launches. Claude, Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id;
-  Cursor chat id; Pi and OMP session file. Empty preserves an ordinary fresh start. The selector is not saved in
-  templates, history, defaults or the session's reusable launch, so a later Clone starts fresh. It is passed literally
-  as one argument, without a shell or checking that the conversation exists. Leading dashes, reserved locator tokens and
-  Farhelm placeholders, spaces, quotes, backslashes, control characters and oversized values are refused by the existing
-  conversation-id checks. Session-file paths may be absolute or relative to the session directory; a leading tilde is
-  refused because it does not expand. New managed-checkout destinations and command launches refuse a selector. Goose,
-  Cursor and OpenCode show that Farhelm will not capture the named conversation and later Restart will be unavailable.
+  Cursor chat id; Pi and OMP session file. Empty preserves an ordinary fresh start. Selecting a different harness clears
+  the selector. The selector is not saved in templates, history, defaults or the session's reusable launch, so a later
+  Clone starts fresh. It is passed literally as one argument, without a shell or checking that the conversation exists.
+  Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes, backslashes, control characters and
+  oversized values are refused by the existing conversation-id checks. Session-file paths may be absolute or relative to
+  the session directory; a leading tilde is refused because it does not expand. New managed-checkout destinations and
+  command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm will not capture the named
+  conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
   scrolls, above **More options** for supported agents. The label note says it sends once as the agent's first message.
   Hover help says that Restart, Clone and Replace do not send it again. Enter edits the message without launching.

@@ -32,8 +32,9 @@ use gpui::{
 use super::Launcher;
 use super::field_list::{Drawn, FieldList};
 use crate::components::{HoverHelp, OptionRow, Role, Vertical, option_heading};
-use crate::launcher::draft::Field;
+use crate::launcher::draft::{Field, Mode};
 use crate::launcher::entry::local_host;
+use crate::prompt::ActionFrame;
 use crate::theme::{self, metrics};
 
 /// `folder_suggestions`: at most eight recent folders.
@@ -61,6 +62,8 @@ pub(super) struct FolderList {
     /// the rows can change under it (typing, a history answer, the list closing), so Enter never takes a row the arrow
     /// did not reach. The launcher's draw notes where the field is for it to open under.
     pub(super) list: FieldList,
+    /// The folder field can submit Replace with only once a frame without a highlighted choice has been shown.
+    enter_can_replace: ActionFrame<bool>,
     /// Whether the user has typed in the field since the folder was last seeded or picked: only then do the recent
     /// folders filter by its text (SPEC.md: "Untouched prefilled fields show the newest eight; typing filters"). A picked
     /// folder is the user's own choice for a later host change, but picking is not typing, so it does not filter.
@@ -166,9 +169,23 @@ impl Launcher {
     }
 
     /// The rows may have changed under the highlight (a history answer, or the host or its connection changing), so
-    /// Enter must not take whatever row now sits at its index.
+    /// Enter must not take whatever row now sits at its index. In Replace with, the last shown submit intent is also
+    /// stale, even if the highlight came and went between two draws.
     pub(super) fn drop_folder_highlight(&mut self) {
-        self.folder_list.list.highlighted = None;
+        if self.folder_list.list.highlighted.take().is_some() {
+            self.folder_list.enter_can_replace.clear();
+        }
+    }
+
+    /// Record which meaning of Enter the user can see. GPUI can draw a changed list to dispatch a key before
+    /// presenting it, so a redraw alone cannot authorize the source session's replacement.
+    pub(super) fn follow_folder_list(&mut self, window: &Window, cx: &App) {
+        let list = &mut self.folder_list;
+        list.list.follow(window, cx);
+        if matches!(self.draft.mode, Mode::ReplaceWith { .. }) {
+            list.enter_can_replace
+                .capture(list.list.highlighted.is_none(), (), window);
+        }
     }
 
     /// The folder field lost focus: close the list.
@@ -206,9 +223,19 @@ impl Launcher {
 
     /// Enter in the folder field: take the highlighted row, returning whether it did. With nothing highlighted (or the
     /// list closed) it takes nothing and Enter launches as from any field; the list closes first, so a refused launch's
-    /// controls below the field are not left under it (SPEC.md: "Enter that submits a launch also closes the list,
-    /// whether the launch is accepted or refused").
+    /// controls below the field are not left under it. With Replace with, an Enter before the current no-highlight
+    /// state is presented is consumed as well, so it cannot retire the source session.
     pub(super) fn folder_enter(&mut self, window: &mut Window, cx: &mut Context<Self>) -> bool {
+        if matches!(self.draft.mode, Mode::ReplaceWith { .. })
+            && self.folder_list.list.highlighted.is_none()
+            && !self
+                .folder_list
+                .enter_can_replace
+                .current()
+                .is_some_and(|action| action.shown() == Some(&true))
+        {
+            return true;
+        }
         if !self.folder_list.list.is_open(window, cx) {
             return false;
         }

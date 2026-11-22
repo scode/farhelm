@@ -2139,7 +2139,7 @@ impl Render for Launcher {
         if self.settle_folder_default(cx) {
             self.sync_fields(window, cx);
         }
-        self.folder_list.list.follow(window, cx);
+        self.follow_folder_list(window, cx);
         self.reflow_search(window, cx);
         let palette = theme::palette(cx);
         let weak = cx.weak_entity();
