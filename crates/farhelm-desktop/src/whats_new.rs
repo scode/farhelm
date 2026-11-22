@@ -172,7 +172,7 @@ mod tests {
                     "screenshotUrl": screenshot,
                 }],
             }],
-            "additionalChanges": 3,
+            "totalChanges": 3,
         })
     }
 

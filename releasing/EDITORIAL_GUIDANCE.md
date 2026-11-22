@@ -66,8 +66,8 @@ with in place.
 - Highlight changes likely to matter to a typical user and critical changes that affect a small group of users, such as
   lost or corrupted sessions, killed agents, a helm or host that will not start or connect, or a security problem. That
   is the bar for proposing a highlight, and for a planner recommending a plan's release note; routine fixes and niche
-  changes go in the folded full list instead. The maintainer removed the long tail of fixes in the v0.40.0 review on
-  2026-11-17, and brought it back as the folded full list on 2026-11-18.
+  changes go only in the folded full list, which lists every change. The maintainer removed the long tail of fixes in
+  the v0.40.0 review on 2026-11-17, and brought it back as the folded full list on 2026-11-18.
 - Remote hosts need to match the desktop app's protocol as part of an ordinary upgrade. Report a protocol change to the
   maintainer for release testing and omit the standard remote-hosts entry from public notes. (Stated by the maintainer
   during the v0.40.0 curation, 2026-11-17.)

@@ -39,7 +39,10 @@ pub struct ReleaseHighlights {
     pub version: String,
     pub date: String,
     pub highlights: Vec<HighlightCategory>,
-    pub additional_changes: u64,
+    /// How many changes the release made in all, highlighted or not, as its full release notes list them. The
+    /// website counts this from the changelog because highlights can merge or reword entries, so no count of the
+    /// highlights says how many changes they cover.
+    pub total_changes: u64,
 }
 
 /// One changelog category from the published release section.

@@ -79,19 +79,20 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
 2. Read `releasing/EDITORIAL_GUIDANCE.md`, then draft the section from the fragments, the plans' release notes, and
    whatever the user and the agent agree on in conversation, following that guidance and
    `releasing/.agents/changelog.md`, "Highlights and the full list": the plans' entries and the maintainer's own as the
-   highlights, and everything else in the full list, proposed highlights included until the maintainer promotes them. A
-   plan's entry goes in word for word, and its possible inaccuracies are called out on the review page and in the
-   handover message rather than fixed, per `releasing/.agents/changelog.md`, "Plans' release notes". Keep the whole
-   proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch directory, written exactly as it will go
-   into `CHANGELOG.md`, the full list's `<details>` frame included, and show it using the `interactive-artifact` skill.
-   Load and follow that skill by name. Do not publish the page as a snippet or anywhere else unless the maintainer asks.
+   highlights, and every change in the full list, highlighted or not, with proposed highlights there alone until the
+   maintainer promotes them. A plan's entry goes in word for word, and its possible inaccuracies are called out on the
+   review page and in the handover message rather than fixed, per `releasing/.agents/changelog.md`, "Plans' release
+   notes". Keep the whole proposed `## vX.Y.Z - YYYY-MM-DD` section in a Markdown file in your scratch directory,
+   written exactly as it will go into `CHANGELOG.md`, the full list's `<details>` frame included, and show it using the
+   `interactive-artifact` skill. Load and follow that skill by name. Do not publish the page as a snippet or anywhere
+   else unless the maintainer asks.
 
    Write a body fragment as `page.html` in a private directory inside your scratch directory (`AGENTS.md`, "Agent
    scratch space"), rendering the scratch section faithfully with its categories, entries and PR diff links. Show the
    full list as its own part of the page below the highlights, open, so the maintainer can comment on it without
    unfolding anything. Mark every proposed highlight with the reason for proposing it and a picker to promote it, and
-   every deferred plan's draft (which sits in the full list until the maintainer answers) with a picker to approve it as
-   a highlight and a field for their own text. Do not use the legacy notes-review page generator: it emits a full
+   every deferred plan's draft (which sits in the full list alone until the maintainer answers) with a picker to approve
+   it as a highlight and a field for their own text. Do not use the legacy notes-review page generator: it emits a full
    document with its own scripts, which the skill does not accept. The Markdown scratch file stays authoritative; page
    markup is only its presentation. Follow the skill for styling, serving, sharing the URL and any tunnel instructions,
    waiting for submissions, status, replies and shutdown. Use its chosen port and tokenized URL. If the skill is
@@ -100,10 +101,12 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
 
    The maintainer comments on entries, suggests replacements, or submits general notes through the skill. Match feedback
    to the quoted text and section, rather than positional entry ids that shift between rounds. Apply the feedback to the
-   scratch file, update the same page in place, and reply to and resolve handled threads as the skill describes. Ask for
-   explicit approval of the current text, using a picker whose id changes with each draft revision so approval of an
-   earlier draft cannot carry over. An edit request is not approval, and an approval submitted with edits approves only
-   the wording those edits unambiguously settle; ask if that is unclear. Iterate until the maintainer approves the text,
+   scratch file, update the same page in place, and reply to and resolve handled threads as the skill describes.
+   Removing, rewording or merging highlights leaves the full list as it is, and a merged highlight cites every PR the
+   highlights it replaces cited (`releasing/.agents/changelog.md`, "Highlights and the full list"). Ask for explicit
+   approval of the current text, using a picker whose id changes with each draft revision so approval of an earlier
+   draft cannot carry over. An edit request is not approval, and an approval submitted with edits approves only the
+   wording those edits unambiguously settle; ask if that is unclear. Iterate until the maintainer approves the text,
    then finish the page using the skill's completion procedure. The scratch file and the page hold the section as it
    will read once approved, without the draft notice; `CHANGELOG.md` gets the notice added in step 4.
 
@@ -152,8 +155,8 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
      what dist wrote. Run it again when in doubt; once finalized, it reports so and changes nothing. A GitHub release
      that is deleted and recreated (the recovery procedure in `dist-workspace.toml`) comes back with the tag's draft, so
      run it again after that.
-   - If the approval changed which entries exist, which PRs they cite, or which entries are highlights (a promotion or a
-     move to the full list), bring the screenshot work from step 4 up to date the way `releasing/.agents/stable.md`,
+   - If the approval changed which entries exist, which PRs they cite, or which entries are highlights (a promotion, a
+     removal or a merge), bring the screenshot work from step 4 up to date the way `releasing/.agents/stable.md`,
      "Re-cutting a stable release", describes.
 
    If the maintainer approves before the changelog PR in step 4 merges, that PR carries the approved section without the
@@ -178,9 +181,9 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
      `jjstack init` there; a linked workspace whose Git directory differs from jj's store fails its colocation guard. Do
      not run `cargo clean` or touch tags, the release branch, or anything on get.farhelm.io.
    - Read the approved scratch section supplied by the release agent, or the `## vX.Y.Z` section of `CHANGELOG.md` once
-     it has landed, and decide which of its highlights (the entries above the folded "All other changes" list, which
-     gets no screenshots) change something a reader would see: a new dialog or control, or a redesign. Most entries do
-     not, and a release with none gets no PR; say so and stop.
+     it has landed, and decide which of its highlights (the entries above the folded "All changes" list, which gets no
+     screenshots) change something a reader would see: a new dialog or control, or a redesign. Most entries do not, and
+     a release with none gets no PR; say so and stop.
    - For each that does, add a shot to `scripts/docs-shots/release-notes.py` and an item to
      `website/src/release-notes/vX.Y.Z.json`. Run the full capture on Linux (`scripts/docs-screenshots.sh --local`, no
      `--only`), look at every image it prints and fix placement, then run `scripts/publish-docs-shots.sh` and confirm
@@ -294,10 +297,10 @@ note used as a highlight and checked as step 2 does, and sort them into categori
 reconcile what it lists with the carried-over section by PR number: a plan whose PRs the section already cites in the
 highlights keeps its entry as it stands, and only a plan with PRs the section does not cite yet gets a new entry. A plan
 whose PRs the section cites only in the full list (its PRs merged before its landing was recorded, so the earlier
-attempt curated them from their fragments) now has its note: its entry becomes the highlight and replaces those
-full-list entries for the same work, unless the maintainer approved them as they stand, in which case keep them and put
-the plan's entry on the page with a callout. When the failed attempt pushed its tag, the mode's range starts at that
-attempt's changelog commit, so "merged before this range" there means the failed attempt covered it, not that it
+attempt curated them from their fragments) now has its note: its entry becomes a highlight and the full-list entries
+stay, unless the maintainer already approved the section without that work highlighted, in which case put the plan's
+entry on the page with a callout instead of adding it. When the failed attempt pushed its tag, the mode's range starts
+at that attempt's changelog commit, so "merged before this range" there means the failed attempt covered it, not that it
 shipped. The maintainer chose this on 2026-10-11, over stopping for wording review and over cutting from the old base
 with only the fix cherry-picked.
 
