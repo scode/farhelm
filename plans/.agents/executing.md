@@ -20,18 +20,35 @@ eligible, and neither is a plan that runs after one.
 Unlanded work is every listed plan that is in flight, or that has open `plan/<slug>/*` PRs whatever its state (including
 a pending plan that has PRs from an earlier round). When judging a candidate, its own PRs do not count.
 
-The judgment: take the oldest eligible plan unless it is particularly likely to conflict with unlanded work. That means
-it would change the same functions, the same spec sections, or substantially the same parts of a file. Touching the same
-crate or the same file is not enough on its own, and these shared bookkeeping files never count: `TODO.md`,
-`TRIAGE_OUTCOMES.md`, `TRIAGE_OUTCOMES_ARCHIVE.md`, `review_feedback_queue/` (its index and the feedback files PRs
-delete), `releasing/changelog.d/`, and `plans/`. Adding a schema version to the helm's or the supervisor's database
-never counts either: two plans that each append the next migration step (with its fresh-schema statements, version stamp
-and historical-schema fixtures) only collide at the end of the ladder, and whichever lands second renumbers its step at
-rebase (`.agents/careful-rebase.md`). Two plans that change the same table or column still conflict on that ground.
-Bumping the wire protocol version (`PROTOCOL_VERSION` in `farhelm-proto`) never counts for the same reason: two plans
-that each take the next number only collide on the constant, the test that pins it and the comments and spec sentences
-that cite the number, and whichever lands second moves past main's number at rebase (`.agents/careful-rebase.md`). Two
-plans that change the same message variant, struct or field still conflict on that ground.
+The judgment: take the oldest eligible plan unless it conflicts with unlanded work. A conflict means that whichever of
+the two lands second would have to redo design work, not just merge text. That is the case when:
+
+- both change what the same user action, state transition or rule does;
+- one changes an interface, invariant, data format or wire message that the other's new code relies on (a shared test
+  helper's guarantees included);
+- one moves, splits or renames code the other edits;
+- both amend the same SPEC.md or SPEC_impl.md rule in different directions.
+
+The following kinds of overlap are not conflicts on their own: edits to different concerns in the same function;
+neighboring lines, or a comment next to the other plan's code; comments or docs describing behavior the other plan
+changes; adjacent spec paragraphs; each plan adding its own entries to an exhaustive match, a list, a registry, a
+manifest, a screenshot or golden set, or a shared test callback; renaming a local name inside a shared test helper that
+the other plan does not edit, where no caller or test can see a difference (no path, name or value they read changes);
+and a guess at which functions or files a plan with no PR yet will edit (what its goal file says it will change, in
+whatever terms, still counts under the cases above). The landing monitor's careful rebase absorbs overlap of those
+kinds, and skipping plans over it left executors idle beside eligible work.
+
+Touching the same crate or the same file is not enough on its own either, and these shared bookkeeping files never
+count: `TODO.md`, `TRIAGE_OUTCOMES.md`, `TRIAGE_OUTCOMES_ARCHIVE.md`, `review_feedback_queue/` (its index and the
+feedback files PRs delete), `releasing/changelog.d/`, and `plans/`. Adding a schema version to the helm's or the
+supervisor's database never counts either: two plans that each append the next migration step (with its fresh-schema
+statements, version stamp and historical-schema fixtures) only collide at the end of the ladder, and whichever lands
+second renumbers its step at rebase (`.agents/careful-rebase.md`). Two plans that change the same table or column still
+conflict on that ground. Bumping the wire protocol version (`PROTOCOL_VERSION` in `farhelm-proto`) never counts for the
+same reason: two plans that each take the next number only collide on the constant, the test that pins it and the
+comments and spec sentences that cite the number, and whichever lands second moves past main's number at rebase
+(`.agents/careful-rebase.md`). Two plans that change the same message variant, struct or field still conflict on that
+ground.
 
 Skipping a plan for a conflict does not, on its own, hold back newer candidates that conflict with it: a burst of small
 plans may go ahead of a big one that touches what they touch. What bounds the big one's wait is its pass count, which
@@ -75,10 +92,12 @@ its open PRs. Record the pick and its reasoning in the executor log.
    clear the entry from the executor log and pick again. Never move on with a claim still uncertain: the executor log
    records one claim, so a second pick would lose track of the first, and a first claim that landed late would then sit
    in flight with nobody working on it.
-4. Re-check. Run `queue status` again. If a plan claimed since your pick is a strong conflict with this one, give the
-   claim back (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the
-   unclaim just moved. The exception is a plan that was overdue when you picked it, racing one that was not: keep the
-   overdue one, and the other plan's executor gives way.
+4. Re-check. Run `queue status` again. If a plan claimed since your pick conflicts with this one (the judgment under
+   `plans/.agents/executing.md`, "Picking: "pick a plan to execute", "execute the next plan""), give the claim back
+   (`queue unclaim`) and pick again from step 2, whose boundary brings the checkout up to the `main` the unclaim just
+   moved. The exception is a plan that was overdue when you picked it, racing one that was not: keep the overdue one,
+   and the other plan's executor gives way. When neither or both were overdue, only the plan listed later in `INDEX.md`
+   gives way, so that two executors that claimed conflicting plans at the same moment do not both give theirs back.
 5. Run `jj git fetch`, then read the plan file from the freshly fetched `main@origin`, including any `## Decisions`. The
    fetch in step 2 came before the pick and the claim, so the local `main@origin` can predate a revision or an answer to
    this plan that landed in between; the claim itself goes through GitHub and does not update it.
