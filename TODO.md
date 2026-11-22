@@ -394,6 +394,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Keep all sandbox leftovers visible when Tensorlake discovery fails.** During unfinished cleanup, a failed refresh
+  can replace the previously listed sandboxes with the cleanup rows alone. Have the helm report the discovery failure
+  alongside the current cleanup snapshot, and keep the last discovered rows in Settings. Use the sandbox ID to show one
+  row when cleanup supersedes discovery. A known empty cleanup snapshot after the last cleanup finishes should remove
+  its old **Cleaning up…** or **Retry cleanup** row even during the outage. Keep the existing reply bound, and
+  distinguish a discovery failure from an individual cleanup error in Settings. Cover refresh, cleanup completion during
+  the outage, and recovery.
+
 - **Explain stale launcher choices.** In the empty command field, Enter on a recent setup that has disappeared can do
   nothing without saying why. Clicking a search result for a host that just vanished can also clear the query without
   selecting anything. In `launcher/view/search.rs` and `search/start.rs`, use the existing stale-result warning before

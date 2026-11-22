@@ -148,7 +148,7 @@ impl Tensorlake {
             }
             orphans.push(OrphanSandbox {
                 id: sandbox.id,
-                from_another_helm: creator(&name) != Some(tag.as_str()),
+                from_another_helm: creator(&name).is_some_and(|other| other != tag.as_str()),
                 name,
                 created_at: sandbox.created_at,
                 state: status(sandbox.status).into(),
@@ -207,7 +207,7 @@ impl Tensorlake {
                 let tag = helm_tag(&self.0.store.registry_namespace().await?);
                 OrphanSandbox {
                     id: sandbox.id,
-                    from_another_helm: creator(&name) != Some(tag.as_str()),
+                    from_another_helm: creator(&name).is_some_and(|other| other != tag.as_str()),
                     name,
                     created_at: sandbox.created_at,
                     state: status(sandbox.status).into(),
@@ -428,9 +428,9 @@ mod tests {
     }
 
     /// A local host and every saved recipe reserve their names, including
-    /// an unsettled host create and a builder with no recorded ID. Another
-    /// helm is visible but marked;
-    /// the Tensorlake test harness's sandboxes and unrelated ones are never offered.
+    /// an unsettled host create and a builder with no recorded ID. Only a
+    /// known foreign tag marks another helm. The test harness's sandboxes
+    /// and unrelated ones are never offered.
     #[farhelm_testtrace::test]
     async fn list_excludes_local_owners_and_harness_and_marks_other_helms() {
         let (_dir, store, service, fake) = fixture().await;
@@ -439,10 +439,12 @@ mod tests {
         let orphan = format!("farhelm-host-{tag}-orphan-abcd");
         let other_tag = if tag == "zzzz" { "yyyy" } else { "zzzz" };
         let other = format!("farhelm-build-{other_tag}-orphan");
+        let untagged = "farhelm-host-untagged";
         for name in [
             &owned,
             &orphan,
             &other,
+            untagged,
             &builder_name(&tag, "saved"),
             &preparer_name(&tag, "saved"),
             "farhelm-sbx-test-1",
@@ -498,7 +500,7 @@ mod tests {
             .unwrap()
             .unwrap();
         let list = service.orphan_sandboxes().await.unwrap();
-        assert_eq!(list.len(), 2, "{list:?}");
+        assert_eq!(list.len(), 3, "{list:?}");
         assert!(
             !list
                 .iter()
@@ -509,6 +511,13 @@ mod tests {
         assert!(
             list.iter()
                 .find(|s| s.name == other)
+                .unwrap()
+                .from_another_helm
+        );
+        assert!(
+            !list
+                .iter()
+                .find(|s| s.name == untagged)
                 .unwrap()
                 .from_another_helm
         );
@@ -584,7 +593,7 @@ mod tests {
     async fn unfinished_cleanup_is_listed_and_retried_after_the_sandbox_is_gone() {
         let (dir, _store, service, fake) = fixture().await;
         let key = ApiKey::new("test-key".into());
-        let id = create(&fake, "farhelm-host-k7q2-orphan-abcd").await;
+        let id = create(&fake, "farhelm-host-untagged").await;
         fake.create_snapshot(&key, &id, SnapshotType::Filesystem)
             .await
             .unwrap();
@@ -605,6 +614,10 @@ mod tests {
         );
         let listed = service.orphan_sandboxes().await.unwrap();
         assert_eq!(listed.len(), 1);
+        assert!(
+            !listed[0].from_another_helm,
+            "cleanup admission uses the same label rule as discovery"
+        );
         assert!(
             matches!(&listed[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused"))
         );
