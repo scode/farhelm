@@ -517,7 +517,11 @@ stat() {
                 .pop_front()
                 .expect("expected command");
             let mut child = tokio::process::Command::new("sh");
-            child.args(["-c", script]);
+            child
+                .arg("-c")
+                .arg(crate::provisioning::ssh_stand_in::replacement_script(
+                    command, script,
+                ));
             crate::provisioning::ssh_stand_in::spawn_remote(command, child)
         }
     }
@@ -586,10 +590,10 @@ stat() {
             let command = backend
                 .ssh_command("user@host", access, "printf 'a b'".into())
                 .unwrap();
-            let args: Vec<_> = command.as_std().get_args().collect();
-            let words = shell_words::split(args.last().unwrap().to_str().unwrap()).unwrap();
-            assert_eq!(words[0..2], ["sh", "-c"]);
-            assert_eq!(words[2], format!("{REMOTE_RUNTIME_PREFIX}printf 'a b'"));
+            assert_eq!(
+                crate::provisioning::ssh_stand_in::provisioning_script(&command),
+                format!("{REMOTE_RUNTIME_PREFIX}printf 'a b'")
+            );
         }
         assert!(
             std::process::Command::new("sh")

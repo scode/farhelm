@@ -116,6 +116,59 @@ pub(super) fn control_root() -> tempfile::TempDir {
         .expect("create a short control directory")
 }
 
+/// Read the original sh script of a direct SSH provisioning command when a
+/// fixture needs to recognize or edit it. The command crosses both the SSH
+/// login shell's quoting and the status wrapper's quoting.
+pub(super) fn provisioning_script(command: &Command) -> String {
+    let remote = command
+        .as_std()
+        .get_args()
+        .last()
+        .unwrap()
+        .to_str()
+        .unwrap();
+    let words = shell_words::split(remote).unwrap();
+    assert_eq!(words[..2], ["sh", "-c"]);
+    let wrapper = shell_words::split(&words[2]).unwrap();
+    assert_eq!(wrapper[..2], ["sh", "-c"]);
+    wrapper[2].clone()
+}
+
+/// Substitute a fixture body while preserving the launch's status tag. Local
+/// commands and tests that bypass the provisioning funnel have no wrapper.
+pub(super) fn replacement_script(command: &Command, body: &str) -> String {
+    super::command_status::Tag::in_command(command)
+        .map_or_else(|| body.to_owned(), |tag| tag.wrap(body))
+}
+
+/// Run the actual provisioning command like sshd and have the client report
+/// zero regardless of its result. Omitting the wrapper models a lost record
+/// while still letting the underlying command produce its ordinary output.
+pub(super) struct LyingSsh {
+    pub(super) omit_record: bool,
+}
+
+impl super::backend::CommandLauncher for LyingSsh {
+    fn spawn(&self, command: &mut Command) -> io::Result<Child> {
+        assert_eq!(command.as_std().get_program(), "ssh");
+        let script = if self.omit_record {
+            provisioning_script(command)
+        } else {
+            command
+                .as_std()
+                .get_args()
+                .last()
+                .unwrap()
+                .to_str()
+                .unwrap()
+                .to_owned()
+        };
+        let mut remote = Command::new("sh");
+        remote.args(["-c", "sh -c \"$1\"; exit 0", "lying-ssh", &script]);
+        spawn_remote(command, remote)
+    }
+}
+
 /// Start `remote` as the command sshd would run for the helm's `command`, and
 /// return the child the helm should hold in place of its `ssh` process.
 ///

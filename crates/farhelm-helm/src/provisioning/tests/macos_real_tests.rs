@@ -905,7 +905,7 @@ async fn mac_reboot_shell(
     let ProvisioningTarget::Remote(route) = &fixture.target else {
         unreachable!()
     };
-    let mut command = fixture
+    let (mut command, _) = fixture
         .backend
         .remote_command(route, script.into())
         .unwrap_or_else(|_| panic!("could not construct the reboot observation"));

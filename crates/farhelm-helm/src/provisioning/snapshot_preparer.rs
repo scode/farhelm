@@ -221,7 +221,12 @@ mod tests {
             assert!(args.iter().any(|arg| arg == "ControlPath=none"));
             self.0.store(true, Ordering::SeqCst);
             let mut child = tokio::process::Command::new("sh");
-            child.args(["-c", "printf 'retained supervisor state' >&2; exit 42"]);
+            child
+                .arg("-c")
+                .arg(super::super::ssh_stand_in::replacement_script(
+                    command,
+                    "printf 'retained supervisor state' >&2; exit 42",
+                ));
             super::super::ssh_stand_in::spawn_remote(command, child)
         }
     }
