@@ -59,9 +59,12 @@ impl Commands {
 #[async_trait::async_trait]
 impl PlaceCommands for Commands {
     async fn run(&self, _: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
+        use crate::environment::podman_probe::{PLACE_IDENTITY_READ, TEST_PLACE_IDENTITY};
+
         Ok(match argv[0].as_str() {
             "uname" if argv[1] == "-s" => "Linux".into(),
             "uname" => "x86_64".into(),
+            "sh" if argv[2] == PLACE_IDENTITY_READ => TEST_PLACE_IDENTITY.into(),
             "sh" => "/usr/bin/podman".into(),
             "/usr/bin/podman" => serde_json::json!({"version":{"Version":"4.9.3"},
                 "host":{"security":{"rootless":true},"cgroupVersion":"v2","cgroupManager":"systemd"}}).to_string(),
@@ -130,6 +133,11 @@ impl PlaceCommands for Commands {
             argv[0], "/usr/bin/podman",
             "private absolute probe path is the only executable"
         );
+        if argv[1] == "pull" {
+            let (_, state) = self.store.tensorlake_recipe_row("dev").await?.unwrap();
+            assert!(state.podman[&self.place].builder_container_id.is_some());
+            return Ok(output(125, ""));
+        }
         let (held, slow) = {
             let model = self.model.lock().unwrap();
             (model.hold, model.slow_listing)
@@ -257,10 +265,17 @@ async fn interrupted_helper_send_retains_name_and_revalidates_collision_labels()
         model.helper_oracle = true;
         model.lost_run = true;
     }
-    let (expected, _, _) = provider.place(place).await.unwrap();
+    let (expected, _, ready) = provider.place(place).await.unwrap();
+    let identity = ready.identity.as_ref().unwrap();
     assert!(
         provider
-            .helper("dev", &expected, "build", "user/base", false)
+            .helper(
+                "dev",
+                &expected,
+                identity,
+                "build",
+                HelperBase::Built("user/base")
+            )
             .await
             .is_err()
     );
@@ -783,7 +798,14 @@ async fn a_second_ssh_route_cannot_list_or_delete_a_recorded_container_as_an_orp
         .add_ssh_host("second.example", None, None)
         .await
         .unwrap();
-    provider.0.places.fresh(store, second).await.unwrap();
+    let refusal = provider
+        .0
+        .places
+        .fresh(store, second)
+        .await
+        .err()
+        .expect("a twin refuses new work");
+    assert!(refusal.to_string().contains("same machine and account"));
     let host = store
         .register_session_container(crate::store::NewPodmanHost {
             name: "farhelm-sess-original".into(),
@@ -949,12 +971,14 @@ async fn recipe_artifacts_keep_their_place_reachable_until_cleanup() {
 
 /// Before a first helper exists, a place edit may legitimately win. The
 /// ownership transaction must then reject the exact row paired with the
-/// earlier probe, including replacement at the same destination, before run.
+/// earlier probe, including replacement at the same destination or a twin
+/// taking an unused claim, before run.
 #[farhelm_testtrace::test]
 async fn first_helper_write_refuses_removed_retargeted_or_replaced_probe_place() {
-    for boundary in ["removed", "retargeted", "replaced"] {
+    for boundary in ["removed", "retargeted", "replaced", "claim transferred"] {
         let (_directory, provider, commands, place) = fixture().await;
-        let (expected, _, _) = provider.place(place).await.unwrap();
+        let (expected, _, ready) = provider.place(place).await.unwrap();
+        let identity = ready.identity.as_ref().unwrap();
         assert!(
             provider
                 .state("dev", place)
@@ -991,11 +1015,52 @@ async fn first_helper_write_refuses_removed_retargeted_or_replaced_probe_place()
                     .await
                     .unwrap();
             }
+            "claim transferred" => {
+                use crate::store::{DialedAs, PlaceClaim};
+
+                let store = &provider.0.store;
+                let twin = store
+                    .add_ssh_host("twin.example", None, None)
+                    .await
+                    .unwrap();
+                let row = store
+                    .list_hosts()
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .find(|row| row.id == twin)
+                    .unwrap();
+                store
+                    .record_first_contact(twin, &DialedAs::of(&row), "accepted-supervisor")
+                    .await
+                    .unwrap();
+                let moved = store
+                    .claim_podman_place(
+                        &row,
+                        identity.clone(),
+                        Some("accepted-supervisor".into()),
+                        None,
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    moved,
+                    Some(PlaceClaim::Owned {
+                        displaced: Some(place)
+                    })
+                );
+            }
             _ => unreachable!(),
         }
         assert!(
             provider
-                .helper("dev", &expected, "build", "user/base", false)
+                .helper(
+                    "dev",
+                    &expected,
+                    identity,
+                    "build",
+                    HelperBase::Pull("user/base")
+                )
                 .await
                 .is_err(),
             "{boundary}"
@@ -1016,10 +1081,35 @@ async fn first_helper_write_refuses_removed_retargeted_or_replaced_probe_place()
                 .unwrap()
                 .commands
                 .iter()
-                .any(|argv| argv[0] == "systemd-run"),
+                .any(|argv| argv[0] == "systemd-run" || argv[1] == "pull"),
             "{boundary}"
         );
     }
+}
+
+/// A rejected base pull has reached Podman under a durable reservation.
+/// Releasing the unsent helper keeps a known failure from blocking retries.
+#[farhelm_testtrace::test]
+async fn failed_base_pull_releases_unsent_helper() {
+    let (_directory, provider, commands, place) = fixture().await;
+    let (expected, _, ready) = provider.place(place).await.unwrap();
+    assert!(
+        provider
+            .helper(
+                "dev",
+                &expected,
+                ready.identity.as_ref().unwrap(),
+                "build",
+                HelperBase::Pull("user/base"),
+            )
+            .await
+            .is_err()
+    );
+    let saved = provider.state("dev", place).await.unwrap();
+    assert!(saved.builder_container_id.is_none() && saved.build_started_at.is_none());
+    let model = commands.model.lock().unwrap();
+    assert!(model.commands.iter().any(|argv| argv[1] == "pull"));
+    assert!(!model.commands.iter().any(|argv| argv[0] == "systemd-run"));
 }
 
 // ---------------------------------------------------------------------------
@@ -1165,7 +1255,7 @@ async fn the_listing_asks_its_container_hosts_concurrently() {
     provider
         .0
         .places
-        .fresh(&provider.0.store, second)
+        .runtime(&provider.0.store, second)
         .await
         .unwrap();
     let slow = Duration::from_secs(15);

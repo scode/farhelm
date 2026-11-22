@@ -7,6 +7,57 @@
 use super::*;
 use crate::access::ContainerUser;
 
+/// Ordinary hosts claim the machine and account that own their Podman store.
+/// This claim survives a helm restart, even for a place without a supervisor.
+pub(super) const PLACE_CLAIMS_SCHEMA: &str = "
+    CREATE TABLE IF NOT EXISTS podman_place_claims (
+        host_id INTEGER PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE,
+        machine_id TEXT NOT NULL,
+        uid INTEGER NOT NULL CHECK (uid BETWEEN 0 AND 4294967295),
+        UNIQUE (machine_id, uid)
+    ) STRICT;";
+
+/// The endpoint identity is private. It identifies the account whose
+/// rootless Podman store a command can see, independent of its Farhelm install.
+#[derive(Clone, PartialEq, Eq)]
+pub(crate) struct PodmanPlaceIdentity {
+    pub(crate) machine_id: String,
+    pub(crate) uid: u32,
+}
+
+/// Admission for new work. Runtime observations for an existing container
+/// still need a usable command route when the place claim refuses new work.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) enum PlaceClaim {
+    Owned { displaced: Option<HostId> },
+    Twin { owner: HostId, name: String },
+    Changed,
+}
+
+/// Verify a probe's exact place ownership inside the transaction that will
+/// record a new reference, or before serving a cached admission.
+pub(crate) fn has_podman_place_claim(
+    conn: &Connection,
+    row: &HostRow,
+    identity: &PodmanPlaceIdentity,
+) -> anyhow::Result<bool> {
+    Ok(conn.query_row(
+        "SELECT EXISTS(
+            SELECT 1 FROM podman_place_claims AS claim JOIN hosts AS host ON host.id = claim.host_id
+            WHERE host.id = ?1 AND host.entry_uuid = ?2 AND host.destination IS ?3
+              AND claim.machine_id = ?4 AND claim.uid = ?5
+        )",
+        rusqlite::params![
+            row.id,
+            row.entry_uuid,
+            row.destination,
+            identity.machine_id,
+            identity.uid
+        ],
+        |row| row.get(0),
+    )?)
+}
+
 /// The container's immutable place and login identity, with its observed ID.
 /// A reserved name remains available for cleanup before an ID is observed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -213,16 +264,26 @@ fn validate_container_id(id: &str) -> anyhow::Result<()> {
 /// Refuse endpoint loss in the same transaction as the retarget or removal.
 /// Every referring row counts, including an unresolved or stopped environment.
 pub(super) fn refuse_referenced_place(conn: &Connection, host: HostId) -> anyhow::Result<()> {
+    if let Some(reason) = referenced_place_reason(conn, host)? {
+        anyhow::bail!(reason);
+    }
+    Ok(())
+}
+
+/// Inspect the same ownership facts for retargeting and place-identity claims.
+/// An unreadable recipe state is a store failure, so it cannot permit a claim.
+fn referenced_place_reason(conn: &Connection, host: HostId) -> anyhow::Result<Option<String>> {
     let mut statement =
         conn.prepare("SELECT tensorlake_sandbox FROM hosts WHERE place_host = ?1 ORDER BY id")?;
     let names = statement
         .query_map([host], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
-    anyhow::ensure!(
-        names.is_empty(),
-        "this host runs environments that must be deleted first: {}",
-        names.join(", ")
-    );
+    if !names.is_empty() {
+        return Ok(Some(format!(
+            "this host runs environments that must be deleted first: {}",
+            names.join(", ")
+        )));
+    }
     let mut statement =
         conn.prepare("SELECT name, state_json FROM tensorlake_recipes ORDER BY name")?;
     let rows = statement
@@ -242,15 +303,109 @@ pub(super) fn refuse_referenced_place(conn: &Connection, host: HostId) -> anyhow
             recipes.push(name);
         }
     }
-    anyhow::ensure!(
-        recipes.is_empty(),
+    Ok((!recipes.is_empty()).then(|| format!(
         "this host holds recipe images or helpers for {}; clean up those recipes on this host before removing or retargeting it",
         recipes.join(", ")
-    );
-    Ok(())
+    )))
 }
 
 impl HelmStore {
+    /// Settle a probe's claim only for the host entry and destination it dialed.
+    /// A live supervisor identity must agree with its durable claim for a
+    /// twin to take an unused place claim. A prior supervisor identity
+    /// protects the incumbent unless its exact registry configuration has
+    /// a live identity refusal. Checking references and transferring the
+    /// claim are one write.
+    pub(crate) async fn claim_podman_place(
+        &self,
+        row: &HostRow,
+        identity: PodmanPlaceIdentity,
+        verified_supervisor: Option<String>,
+        refused_incumbent: Option<&HostRow>,
+    ) -> anyhow::Result<Option<PlaceClaim>> {
+        let host = row.id;
+        let entry = row.entry_uuid.clone();
+        let dialed_as = DialedAs::of(row);
+        let refused_incumbent = refused_incumbent.cloned();
+        self.conn.call("container place claim task panicked", move |conn| {
+            let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+            let owns_supervisor: Option<bool> = tx.query_row(
+                "SELECT host_identity IS NOT NULL AND host_identity IS ?4
+                        AND remote_farhelm IS ?5 AND remote_state_dir IS ?6 FROM hosts
+                 WHERE id = ?1 AND entry_uuid = ?2 AND destination IS ?3
+                   AND tensorlake_sandbox IS NULL AND environment_provider IS NULL",
+                rusqlite::params![host, entry, dialed_as.destination, verified_supervisor,
+                    dialed_as.remote_farhelm, dialed_as.remote_state_dir],
+                |row| row.get(0),
+            ).optional()?;
+            let Some(owns_supervisor) = owns_supervisor else {
+                return Ok(None);
+            };
+            let previous: Option<PodmanPlaceIdentity> = tx.query_row(
+                "SELECT machine_id, uid FROM podman_place_claims WHERE host_id = ?1",
+                [host],
+                |row| Ok(PodmanPlaceIdentity { machine_id: row.get(0)?, uid: row.get(1)? }),
+            ).optional()?;
+            if previous.is_some_and(|previous| previous != identity)
+                && referenced_place_reason(&tx, host)?.is_some()
+            {
+                return Ok(Some(PlaceClaim::Changed));
+            }
+            let twin = tx.query_row(
+                "SELECT host.id, host.kind, host.destination, host.alias,
+                        host.entry_uuid, host.remote_farhelm, host.remote_state_dir, host.host_identity
+                 FROM podman_place_claims AS claim JOIN hosts AS host ON host.id = claim.host_id
+                 WHERE claim.machine_id = ?1 AND claim.uid = ?2 AND claim.host_id != ?3",
+                rusqlite::params![identity.machine_id, identity.uid, host],
+                |row| Ok((row.get::<_, HostId>(0)?, row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(3)?,
+                    row.get::<_, String>(4)?, DialedAs {
+                        destination: row.get(2)?,
+                        remote_farhelm: row.get(5)?,
+                        remote_state_dir: row.get(6)?,
+                    }, row.get::<_, Option<String>>(7)?)),
+            ).optional()?;
+            let displaced = if let Some((owner, kind, alias, entry, dialed_as, supervisor)) = twin {
+                let refused = refused_incumbent.as_ref().is_some_and(|row| {
+                    row.id == owner && row.entry_uuid == entry && row.host_identity == supervisor
+                        && DialedAs::of(row) == dialed_as
+                });
+                if !owns_supervisor || (supervisor.is_some() && !refused)
+                    || referenced_place_reason(&tx, owner)?.is_some()
+                {
+                    let kind = HostKind::from_columns(&kind, None, None)?;
+                    let name = host_display_name(kind, dialed_as.destination.as_deref(), alias.as_deref());
+                    return Ok(Some(PlaceClaim::Twin { owner, name }));
+                }
+                tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [owner])?;
+                Some(owner)
+            } else {
+                None
+            };
+            tx.execute(
+                "INSERT INTO podman_place_claims (host_id, machine_id, uid) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(host_id) DO UPDATE SET machine_id = excluded.machine_id, uid = excluded.uid",
+                rusqlite::params![host, identity.machine_id, identity.uid],
+            )?;
+            tx.commit()?;
+            Ok(Some(PlaceClaim::Owned { displaced }))
+        }).await
+    }
+
+    /// A cached successful probe is only an observation. An explicit
+    /// destination edit can release its ownership before the cache expires.
+    pub(crate) async fn owns_podman_place(
+        &self,
+        row: HostRow,
+        identity: PodmanPlaceIdentity,
+    ) -> anyhow::Result<bool> {
+        self.conn
+            .call("verify container place claim task panicked", move |conn| {
+                has_podman_place_claim(conn, &row, &identity)
+            })
+            .await
+    }
+
     /// Freeze the installation selected for this exact create before sending
     /// Podman any request. A retry must use these facts even after renewal.
     pub(crate) async fn set_podman_prepared_create(
@@ -470,6 +625,189 @@ impl HelmStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// A place without a supervisor can be first to claim an endpoint. When
+    /// an ordinary supervisor later identifies its entry, give that entry
+    /// the place claim only if there are no containers or artifacts to keep.
+    #[farhelm_testtrace::test]
+    async fn podman_place_claim_follows_the_supervisor_only_when_unused() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let first = store
+            .add_ssh_host("place-first.test", None, None)
+            .await
+            .unwrap();
+        let second = store
+            .add_ssh_host("place-second.test", None, None)
+            .await
+            .unwrap();
+        let rows = store.list_hosts().await.unwrap();
+        let first = rows.iter().find(|row| row.id == first).unwrap();
+        let second = rows.iter().find(|row| row.id == second).unwrap();
+        let endpoint = |uid| PodmanPlaceIdentity {
+            machine_id: "1".repeat(32),
+            uid,
+        };
+        assert_eq!(
+            store
+                .claim_podman_place(first, endpoint(1000), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None }),
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(second, endpoint(1000), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Twin {
+                owner: first.id,
+                name: "place-first.test".into()
+            }),
+        );
+        store
+            .record_first_contact(second.id, &DialedAs::of(second), "supervisor-install")
+            .await
+            .unwrap();
+        assert_eq!(
+            store
+                .claim_podman_place(
+                    second,
+                    endpoint(1000),
+                    Some("supervisor-install".into()),
+                    None
+                )
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned {
+                displaced: Some(first.id)
+            }),
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(first, endpoint(1000), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Twin {
+                owner: second.id,
+                name: "place-second.test".into()
+            }),
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(first, endpoint(1001), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None }),
+            "a different account keeps a separate rootless store"
+        );
+        store
+            .register_pending_session_container(
+                "farhelm-sess-identity".into(),
+                "dev".into(),
+                first.id,
+            )
+            .await
+            .unwrap();
+        let claimed = |machine_id: char| PodmanPlaceIdentity {
+            machine_id: machine_id.to_string().repeat(32),
+            uid: 1001,
+        };
+        assert_eq!(
+            store
+                .claim_podman_place(first, claimed('2'), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Changed),
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(
+                    second,
+                    endpoint(1001),
+                    Some("supervisor-install".into()),
+                    None
+                )
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Twin {
+                owner: first.id,
+                name: "place-first.test".into()
+            }),
+            "even a pending container makes the original place claim in use"
+        );
+    }
+
+    /// Destination edits release an unused claim even if the new route never
+    /// answers. A late probe cannot restore the old claim.
+    #[farhelm_testtrace::test]
+    async fn podman_place_claim_rejects_a_probe_from_before_a_retarget() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let host = store
+            .add_ssh_host("place-before.test", None, None)
+            .await
+            .unwrap();
+        let alternate = store
+            .add_ssh_host("place-alternate.test", None, None)
+            .await
+            .unwrap();
+        let old = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        let identity = PodmanPlaceIdentity {
+            machine_id: "1".repeat(32),
+            uid: 1000,
+        };
+        assert_eq!(
+            store
+                .claim_podman_place(&old, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None }),
+        );
+        store
+            .update_ssh_destination(host, "place-after.test")
+            .await
+            .unwrap();
+        let new = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(new.destination.as_deref(), Some("place-after.test"));
+        assert_eq!(
+            store
+                .claim_podman_place(&old, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            None
+        );
+        let alternate = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == alternate)
+            .unwrap();
+        assert_eq!(
+            store
+                .claim_podman_place(&alternate, identity, None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None }),
+        );
+    }
 
     /// A pending row owns cleanup before a custom image reveals its account.
     /// Neither pending-send nor canonical ID can skip that observation, and

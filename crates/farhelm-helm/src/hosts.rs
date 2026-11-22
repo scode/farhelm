@@ -906,7 +906,11 @@ async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::r
     // which needs nothing from it.
     let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
-    if let Err(e) = state.store.update_ssh_destination(host, &spec.ssh).await {
+    if let Err(e) = state
+        .podman_places
+        .retarget(&state.store, host, &spec.ssh)
+        .await
+    {
         return http_error(e);
     }
     if let Err(reconcile) = state.manager.sync_registry().await {

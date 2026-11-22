@@ -460,9 +460,12 @@ mod tests {
     #[async_trait::async_trait]
     impl crate::environment::podman_probe::PlaceCommands for ProbeCommands {
         async fn run(&self, _: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
+            use crate::environment::podman_probe::{PLACE_IDENTITY_READ, TEST_PLACE_IDENTITY};
+
             Ok(match argv[0].as_str() {
                 "uname" if argv[1] == "-s" => "Linux".into(),
                 "uname" => "x86_64".into(),
+                "sh" if argv[2] == PLACE_IDENTITY_READ => TEST_PLACE_IDENTITY.into(),
                 "sh" => "/usr/bin/podman".into(),
                 "/usr/bin/podman" => r#"{"version":{"Version":"4.9.3"},"host":{"security":{"rootless":true},"cgroupVersion":"v2","cgroupManager":"systemd"}}"#.into(),
                 "busctl" => r#"{"type":"as","data":[]}"#.into(),

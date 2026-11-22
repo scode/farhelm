@@ -314,13 +314,16 @@ impl HelmStore {
     /// leave newly recorded ownership at an already forgotten endpoint. Entry
     /// UUID, kind and destination bind the row paired with its probe/commands;
     /// decorative edits and supervisor install paths do not select Podman I/O.
+    /// New helpers pass the exact identity they need to own. The same write
+    /// records a reference, after which another entry cannot take the claim.
     pub(crate) async fn update_recipe_place_state<T: Send + 'static>(
         &self,
         name: &str,
         place: &HostRow,
+        claim: Option<&crate::store::PodmanPlaceIdentity>,
         change: impl FnOnce(&StoredRecipe, &mut RecipeState) -> T + Send + 'static,
     ) -> anyhow::Result<Option<T>> {
-        self.write_recipe_state(name, Some(place.clone()), change)
+        self.write_recipe_state(name, Some((place.clone(), claim.cloned())), change)
             .await
     }
 
@@ -329,7 +332,7 @@ impl HelmStore {
     async fn write_recipe_state<T: Send + 'static>(
         &self,
         name: &str,
-        place: Option<HostRow>,
+        place: Option<(HostRow, Option<crate::store::PodmanPlaceIdentity>)>,
         change: impl FnOnce(&StoredRecipe, &mut RecipeState) -> T + Send + 'static,
     ) -> anyhow::Result<Option<T>> {
         let name = name.to_string();
@@ -339,7 +342,7 @@ impl HelmStore {
                 let tx = conn
                     .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                     .context("starting the Tensorlake recipe state write")?;
-                if let Some(place) = place {
+                if let Some((place, claim)) = place {
                     let (kind, environment, provider, identity, destination): (String, Option<String>, Option<String>, String, Option<String>) = tx.query_row(
                         "SELECT kind, tensorlake_sandbox, environment_provider, entry_uuid, destination FROM hosts WHERE id = ?1",
                         [place.id], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?)),
@@ -347,6 +350,12 @@ impl HelmStore {
                     let kind = crate::store::HostKind::from_columns(&kind, environment.as_deref(), provider.as_deref())?;
                     anyhow::ensure!(kind.can_host_environments() && kind == place.kind && identity == place.entry_uuid && destination == place.destination,
                         "the container place changed before its ownership could be recorded; retry at the current place");
+                    if let Some(claim) = claim {
+                        anyhow::ensure!(
+                            crate::store::has_podman_place_claim(&tx, &place, &claim)?,
+                            "This container host lost its place claim before the build started. Press Refresh and try again."
+                        );
+                    }
                 }
                 let row: Option<(String, String)> = tx
                     .query_row(

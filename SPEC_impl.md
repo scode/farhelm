@@ -6222,6 +6222,13 @@ no read schedules one. No synchronous probe fan-out gates opening the launcher. 
 entry carries the cached check's readiness as `container_check` (checked time, whether a check is running, usable,
 reason), and a check's start and its end bump the fleet feed, so the hosts collection brings both to a connected GUI.
 
+The probe reads the machine ID and numeric account from one command through that route. A successful identity
+observation claims the machine/account pair in the helm registry in one transaction, fenced to the observed host
+entry and destination. An entry with no containers, image records or helpers can replace its claim. If a twin has
+no references and lacks an ordinary supervisor identity claim, the entry that holds the supervisor claim can take
+its place claim. Fresh preparation requires a current place claim and respects the ordinary host actor's duplicate,
+mismatch and unverified identity refusals. Runtime capabilities for existing containers remain separate from admission.
+
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside
 the helm's cgroup and a remote SSH login's lifetime. Resolve Podman to an absolute path and strip all `FARHELM_*`

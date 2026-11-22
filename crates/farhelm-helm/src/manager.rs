@@ -2442,6 +2442,24 @@ impl ConnectionManager {
         self.status(host).map(|status| status.state)
     }
 
+    /// Use an actor's identity evidence only for the registry entry and
+    /// connection coordinates it still serves. A destination edit can
+    /// commit before the manager is told to retire the previous connection.
+    pub(crate) fn state_for_registry_row(&self, row: &HostRow) -> Option<HostState> {
+        let map = self.actors.lock().expect("actor map mutex poisoned");
+        let handle = map.actors.get(&row.id)?;
+        if handle.row.entry_uuid != row.entry_uuid
+            || handle.row.kind != row.kind
+            || reconfigured(&handle.row, row)
+        {
+            return None;
+        }
+        Some(
+            self.sealed_state(row.id)
+                .unwrap_or_else(|| handle.status.borrow().state.clone()),
+        )
+    }
+
     /// Wait until `host`'s state satisfies `predicate`, and return it.
     ///
     /// Exists because the interesting properties of this module are
