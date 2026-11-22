@@ -27,4 +27,12 @@ Refresh (orphans.rs:250–259; tensorlake_sandboxes.rs:355–373); an admission 
 from the accepted manual refresh after admission (IC-08). The reviewer suggested other, confidence source-confirmed with
 no timing frequency established. Proposed_drop no; identified.
 
+At `66ad3aaa95ef03a2130e2d0194d58353912ae9da`, the provider lookup's own timeout begins after the saved account read.
+That read waits for the store connection on the blocking pool (`crates/farhelm-helm/src/tensorlake/config.rs:114`,
+`crates/farhelm-supervisor/src/db.rs:249`). The provider deadline is therefore insufficient to bound the entire
+pre-admission phase. An unanswered lookup alone can return its own refusal after the outer request has already promised
+continuing cleanup.
+
 Review evidence is retained under run `e551ad05-1866-44a9-b97b-9e47d1d67375` as `implementation-contracts/IC-03`.
+
+Supplementary evidence is retained under run `26a81958-b7bd-4dbd-a275-d09060967ae5` as `tensorlake-inventory/f10`.

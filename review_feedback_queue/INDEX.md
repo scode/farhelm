@@ -76,6 +76,10 @@ consequences.
 - [`trailing-gone-terminal-ended-confirmation.md`](trailing-gone-terminal-ended-confirmation.md) — When a lost terminal
   is shown as ended, Stop or Delete can terminate a main program the confirmation did not say it would stop.
 
+- [`tailscale-uninstall-does-not-bind-verified-host.md`](tailscale-uninstall-does-not-bind-verified-host.md) — A
+  confirmed uninstall can affect a different Tailscale host if the saved name changes after Farhelm verifies the
+  original host.
+
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -1047,3 +1051,59 @@ consequences.
 - [`trailing-trust-hint-save-errors-use-live-selection-instead-of.md`](trailing-trust-hint-save-errors-use-live-selection-instead-of.md)
   — A busy or refused Don't show again click can attach its error to a different session if selection moved after the
   hint was drawn.
+
+- [`deflake-sweep-fixtures-inherit-git-hooks.md`](deflake-sweep-fixtures-inherit-git-hooks.md) — The deflake sweep-base
+  tests can fail before evaluating the base when a developer's configured Git hook refuses a fixture commit.
+
+- [`deflake-base-refusal-test-misses-run-state.md`](deflake-base-refusal-test-misses-run-state.md) — The sweep-base
+  tests can pass even if an unsupported revision creates run state before deflake refuses it.
+
+- [`launcher-preview-path-no-longer-copyable.md`](launcher-preview-path-no-longer-copyable.md) — The compact
+  managed-checkout row shows the exact planned folder without the selection and copy control available before the layout
+  change.
+
+- [`launcher-new-environment-folder-omits-repository-prompt.md`](launcher-new-environment-folder-omits-repository-prompt.md)
+  — When no repository has been selected for a new environment, the Folder row says cloning will happen and omits its
+  invitation to select a repository.
+
+- [`sqlite-planner-test-misses-stale-statistics.md`](sqlite-planner-test-misses-stale-statistics.md) — The startup
+  maintenance test can pass if Farhelm still creates missing SQLite statistics but stops refreshing stale ones.
+
+- [`terminal-selection-paints-wide-wrap-padding.md`](terminal-selection-paints-wide-wrap-padding.md) — Selecting text
+  across a wrapped wide character can highlight the unused cell at the end of the earlier row. That cell is absent from
+  the copied text.
+
+- [`terminal-link-oracle-regeneration-loses-wide-padding.md`](terminal-link-oracle-regeneration-loses-wide-padding.md) —
+  Regenerating the terminal link fixtures can drop the row flag that distinguishes printed spaces from wide-character
+  wrap padding.
+
+- [`remote-probe-absence-test-does-not-witness-proxy.md`](remote-probe-absence-test-does-not-witness-proxy.md) — The
+  remote probe regression test can pass through the missing-program path both times, without checking how it handles the
+  stand-in's exit.
+
+- [`worker-staging-failure-leaves-in-progress-evidence.md`](worker-staging-failure-leaves-in-progress-evidence.md) — A
+  failed worker upload can leave its local evidence directory marked as staging after the command has returned an error.
+
+- [`claude-trust-settings-omit-folder-exemptions.md`](claude-trust-settings-omit-folder-exemptions.md) — The Claude
+  trust setting says it applies to folders the user chooses. Its help omits that Farhelm skips the home directory and
+  filesystem root.
+
+- [`launcher-first-podman-check-hides-known-host-refusal.md`](launcher-first-podman-check-hides-known-host-refusal.md) —
+  While Farhelm runs the first Podman check, the launcher can show a generic check-needed message even when the helm
+  already knows why the host is refused.
+
+- [`host-lifecycle-test-misses-other-host-control.md`](host-lifecycle-test-misses-other-host-control.md) — The test
+  checks that a launch leaves another host available through a helper. It can pass even if the other host’s actual menu
+  is disabled.
+
+- [`inline-resume-test-misses-disabled-control-state.md`](inline-resume-test-misses-disabled-control-state.md) — The
+  inline Resume test can pass when the button looks and announces itself as enabled while its click handler refuses the
+  request.
+
+- [`environment-launch-history-test-bypasses-origin-handoff.md`](environment-launch-history-test-bypasses-origin-handoff.md)
+  — The launch-history regression test can pass if an agent-requested environment starts becoming the desktop’s default
+  host again.
+
+- [`tensorlake-prepared-add-test-misses-pending-snapshot-guard.md`](tensorlake-prepared-add-test-misses-pending-snapshot-guard.md)
+  — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
+  sandbox is still starting.
