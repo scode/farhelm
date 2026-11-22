@@ -12,6 +12,7 @@ use super::{SceneState, fleet, session_list_scene_preferring};
 use crate::launcher::entry;
 use crate::launcher::environment_tests::{account, recipe_json};
 use crate::session_list::SessionList;
+use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{preferences_state, session};
 use crate::test_support::{click_before_redraw, meta};
 
@@ -123,6 +124,7 @@ fn press_wake_launcher(
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum LauncherScene {
     Form,
+    ManagedCheckout,
     HostMenu,
     Container,
     RememberedWrapper,
@@ -140,6 +142,15 @@ enum LauncherScene {
 /// Show New with a chosen agent, so the screenshot covers the model, effort and permission controls and the prompt.
 pub(super) fn launcher_new_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Form, window, cx);
+}
+
+/// Use the same accepted destination in both widths so the capture differs only by the responsive layout.
+pub(super) fn launcher_managed_checkout_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::ManagedCheckout, window, cx);
 }
 
 /// Open the host menu once both new-environment offers can be drawn from the fixture.
@@ -343,6 +354,11 @@ fn open_new_with_claude(
     } else if !remembered {
         draft.choose_harness(LaunchHarness::Claude, None, None);
     }
+    if scene == LauncherScene::ManagedCheckout {
+        draft.choose_host(1, "~".into());
+        draft.choose_repository(farhelm_proto::parse_github_repo("acme/widget").unwrap());
+        draft.edit_name("widget-3".into());
+    }
     assert!(
         entry::open_with(draft, None, window, cx),
         "New opens once the helm is connected"
@@ -376,6 +392,12 @@ fn pick_claude(_: &Entity<SessionList>, state: &SceneState, window: &mut Window,
         state.after.set(Some(pick_claude));
     }
 }
+
+/// The ordinary local host's preview for the exact typed name. Both window widths show this same checkout.
+const CHECKOUT_PATH: &str = "/home/user/src/checkouts/widget-3";
+
+/// Staging can take several frames. The preview's independent reply cannot stand in for the debounced discovery read.
+struct CheckoutDiscoveryAnswered;
 
 /// Reply in send order and wait for the model count from that catalog in the drawn form. A stable empty frame or a
 /// frame drawn before the catalog reply cannot stand in for the launcher this scene means to show.
@@ -411,6 +433,31 @@ fn answer_new_reads(
             Some(json!(account(true, SshKeyStatus::NotCreated)))
         } else if command.path.starts_with("/api/launch-history") {
             Some(launcher_history())
+        } else if scene == LauncherScene::ManagedCheckout
+            && command.path == "/api/github-checkout-preview"
+        {
+            assert_eq!(
+                command.body,
+                Some(
+                    json!({"host": 1, "expected_incarnation": 4, "repo": "acme/widget", "title": "widget-3"})
+                )
+            );
+            Some(json!({
+                "canonical_root": "/home/user/src/checkouts", "basename": "widget-3", "cwd": CHECKOUT_PATH,
+                "config_revision": 3, "host": "1", "incarnation": 4, "installation_identity": "identity1"
+            }))
+        } else if scene == LauncherScene::ManagedCheckout
+            && command.path == "/api/github-repositories"
+        {
+            assert_eq!(
+                command.body,
+                Some(json!({"host": 1, "expected_incarnation": 4, "query": "acme/widget"}))
+            );
+            repository_answered = true;
+            Some(json!({
+                "host": "1", "incarnation": 4, "installation_identity": "identity1",
+                "repos": [{"owner": "acme", "name": "widget"}], "truncated": false, "needs_checkout_root": false,
+            }))
         } else {
             None
         };
@@ -420,6 +467,48 @@ fn answer_new_reads(
         node.element_id.as_deref() == Some("launcher-model-hint")
             && node.label.as_deref() == Some("1 for Claude")
     });
+    if scene == LauncherScene::ManagedCheckout {
+        if repository_answered {
+            keep.push(Box::new(CheckoutDiscoveryAnswered));
+            // Allow a subsequent frame to consume the discovery reply, even if the preview has already drawn.
+            state.after.set(Some(answer_new_reads));
+            return;
+        }
+        let discovery_answered = keep
+            .iter()
+            .any(|item| item.is::<CheckoutDiscoveryAnswered>());
+        if !discovery_answered {
+            state
+                .advance_clock
+                .set(Some(std::time::Duration::from_millis(160)));
+        }
+        let nodes = window.driver_nodes();
+        let preview_drawn = nodes.iter().any(|node| {
+            node.element_id.as_deref() == Some("launcher-preview-path")
+                && node.label.as_deref() == Some(CHECKOUT_PATH)
+                && !node.visible_bounds.is_empty()
+        });
+        if !catalog_drawn || !discovery_answered || !preview_drawn {
+            state.after.set(Some(answer_new_reads));
+        } else {
+            // Kit only exposes the editable value when accessibility is enabled. Check the painted text underneath
+            // each input's wrapper so the screenshot itself proves the exact values are visible.
+            for (id, expected) in [
+                ("launcher-name", "widget-3"),
+                ("launcher-repository", "acme/widget"),
+            ] {
+                let lines = texts_within(nodes, id);
+                assert!(
+                    lines
+                        .iter()
+                        .any(|line| line.text.as_ref() == expected
+                            && !line.visible_bounds.is_empty()),
+                    "{id} shows {expected:?}; recorded lines: {lines:?}"
+                );
+            }
+        }
+        return;
+    }
     let catalog_template = window
         .driver_nodes()
         .iter()

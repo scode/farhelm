@@ -1,14 +1,14 @@
 //! The launcher's managed-checkout destination: the Where row's Folder or Managed checkout choice, the repository field
-//! with its suggestions, and the preview of the exact folder the checkout gets, which the folder field then shows.
+//! with its suggestions, and the Folder line that shows where the checkout will go.
 //!
 //! SPEC.md, "Managed checkouts" (the launcher parts) and SPEC_impl.md, "Checkout configuration and discovery". Ported
 //! from the old launcher's `DestinationTypeControl` (`launch_controls.rs`), `github_checkout.rs` and the destination and
 //! preview parts of `list/create_form.rs`, at reference commit `24bc0580`, with their words. What the user chose lives
 //! in the draft ([`crate::launcher::draft::Checkout`]); what the helm said about it lives here. Here's the TLDR:
 //!
-//! - **The Where row** chooses the destination kind. Managed checkout reveals the repository field, the preview and a
-//!   sentence on the folder's lifetime, and makes the folder field a read-only display of the preview's path; Folder
-//!   brings back the folder as it was. Enter on it only chooses, as the old control's did.
+//! - **The Where row** chooses the destination kind. Managed checkout puts Repository beside Host (or below Recipe
+//!   for a new environment), with a Folder status line and its lifetime note below the address and name. Folder
+//!   brings back the editable folder as it was. Enter on the switch only chooses, as the old control's did.
 //! - **Repository suggestions** (`POST /api/github-repositories`) are read while the user is choosing (no repository
 //!   chosen, or the list open), 150 ms after the field, the host or its connection stops changing (SPEC_impl.md:
 //!   "The launcher's requests debounce for 150 ms and discard stale host/query generations"). The list floats under the
@@ -70,7 +70,10 @@ use gpui::{
 
 use super::field_list::{Drawn, FieldList};
 use super::latest::Latest;
-use super::{Launcher, SourceConsent, choices::status_line, help_line, help_line_container, row};
+use super::{
+    ADDRESS_HEIGHT, Launcher, SourceConsent, choices::status_line, field_label, help_line,
+    help_line_container,
+};
 use crate::assets::Icon;
 use crate::components::{HoverHelp, OptionRow, Role, TextInputEvent, TextInputState, Vertical};
 use crate::focus::Mark;
@@ -95,10 +98,11 @@ const MAX_CHOICES: usize = 100;
 /// The suggestions list's element id (`.launch-composer-repository-options`), which tests find it by.
 const REPOSITORY_LIST: &str = "launcher-repository-list";
 
-/// The sentence under the repository field and preview while a managed checkout is chosen, the old launcher's
-/// `.launch-composer-checkout-explanation` for an installed host.
-const EXPLANATION: &str = "Farhelm clones the repository into a new folder named after the session, under this host's \
-                           checkout folder. When the last session using it is deleted, the folder moves to the trash.";
+/// Host checkouts and checkouts inside disposable environments have different Delete behavior.
+const HOST_CHECKOUT_LIFETIME: &str =
+    "New folder named after the session; it moves to the trash when its last session is deleted.";
+const ENVIRONMENT_CHECKOUT_LIFETIME: &str = "New folder named after the session, inside the new environment; \
+                                            deleting its last session removes it permanently.";
 /// What the field note says for a scan the helm cut short, when it gave no reason.
 const INCOMPLETE: &str =
     "Repository search is incomplete; a valid owner/repo can still be selected";
@@ -196,24 +200,19 @@ type SuggestAnswer = Result<GithubRepositoriesReply, HostText>;
 // The destination's state
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// What the managed-checkout destination holds besides the draft: its two fields, the suggestions list, the reads, and
+/// What the managed-checkout destination holds besides the draft: the repository field, its suggestions, the reads, and
 /// the configuration revision observed. None of it is shared with any other surface (the composer search's `gh:` rows
 /// read the same suggestions, within the launcher), and none of it survives the launcher.
 pub(super) struct CheckoutState {
     /// The repository field: the chosen repository, or what is typed.
     pub(super) repository: TextInputState,
-    /// The read-only folder field shown in place of the folder while a managed checkout is chosen: the preview's
-    /// path, escaped, or empty with a placeholder saying why there is none.
-    path: TextInputState,
     /// The suggestions list under the repository field, with the row moved to with the arrows.
     list: FieldList,
     suggestions: Latest<SuggestKey, SuggestAnswer>,
     preview: Latest<PreviewKey, PreviewAnswer>,
     /// The highest checkout configuration revision observed, which never goes back down; `None` until one is.
     revision: Option<i64>,
-    /// The placeholders last given to the read-only folder field and the name field, so a frame that changes neither
-    /// leaves the fields alone (setting one redraws its field).
-    path_placeholder: &'static str,
+    /// The last placeholder given to the name field. Setting it redraws the field, so only update it on change.
     pub(super) name_placeholder: String,
     /// See [`SuggestKey::reread`] and [`PreviewKey::retry`].
     reread: u64,
@@ -244,15 +243,13 @@ pub(super) struct CheckoutState {
 }
 
 impl CheckoutState {
-    /// The destination's fields for a launcher opening on `field_text` in the repository field, with their own
+    /// The repository field for a launcher opening on `field_text`, with its own
     /// subscriptions: what is typed edits the draft, Enter picks a suggestion and never launches, and focus opens
     /// and closes the list.
     pub(super) fn new(field_text: &str, window: &mut Window, cx: &mut Context<Launcher>) -> Self {
         let repository = TextInputState::new(window, cx);
         repository.set_text(field_text.to_owned(), window, cx);
         repository.set_placeholder("owner/repo", window, cx);
-        let path = TextInputState::new(window, cx);
-        path.set_read_only(true, cx);
         let events =
             repository.subscribe(window, cx, |launcher: &mut Launcher, event, window, cx| {
                 match event {
@@ -280,12 +277,10 @@ impl CheckoutState {
         });
         CheckoutState {
             repository,
-            path,
             list: FieldList::default(),
             suggestions: Latest::default(),
             preview: Latest::default(),
             revision: None,
-            path_placeholder: "",
             name_placeholder: String::new(),
             reread: 0,
             retry: 0,
@@ -466,8 +461,7 @@ impl Launcher {
 
     /// Follow the destination as drawn: ask for suggestions 150 ms after what they would be about last changed, and
     /// for a preview as soon as what it answers for changes, each one at a time (the module docs). Called while drawing,
-    /// since a host's connection changes by a push with no edit of the launcher's; it also keeps the folder field's
-    /// display of the preview in step.
+    /// since a host's connection changes by a push with no edit of the launcher's.
     pub(super) fn follow_checkout(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let key = self.suggest_key(window, cx);
         if let Some(key) = self.checkout.suggestions.follow(key) {
@@ -478,7 +472,6 @@ impl Launcher {
             self.checkout.suggestions.wait(deadline);
         }
         self.follow_preview(cx);
-        self.show_checkout_path(window, cx);
         // The name field follows a name the draft changed on its own: a numbered default moving on, or the copied title
         // ignored or shown again as the destination changes. Typing changes the draft to the field's text, so this
         // never fights the user.
@@ -788,14 +781,16 @@ impl Launcher {
 
     /// The preview as [`super::super::request::Preview`] puts it for the draft as it is now.
     pub(super) fn checkout_preview(&self, cx: &App) -> Preview<'_> {
-        let Some(key) = self.preview_key(cx) else {
-            return Preview::Waiting;
-        };
-        match self.checkout.preview.answer_for(&key) {
+        match self.preview_answer(cx) {
             Some(Ok(preview)) => Preview::Ready(preview),
             Some(Err(_)) => Preview::Failed,
             None => Preview::Waiting,
         }
+    }
+
+    /// Both the destination display and launch use the answer for the current draft and host connection.
+    fn preview_answer(&self, cx: &App) -> Option<&PreviewAnswer> {
+        self.checkout.preview.answer_for(&self.preview_key(cx)?)
     }
 }
 
@@ -915,35 +910,6 @@ impl Launcher {
             "The folder is named after the session when the host is ready"
         })
     }
-
-    /// Put the read-only folder field in step with its destination. Clear it while the allocation notice takes
-    /// its place so a path from an earlier connection cannot survive the change.
-    fn show_checkout_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let Some(checkout) = &self.draft.checkout else {
-            return;
-        };
-        let (text, placeholder) = match (&checkout.repo, self.checkout_preview(cx)) {
-            (None, _) => (String::new(), "Select a repository"),
-            (Some(_), _) if self.draft.target.is_some() => {
-                (String::new(), "Cloned inside the new environment")
-            }
-            (Some(_), _) if self.checkout_allocation_notice(cx).is_some() => (String::new(), ""),
-            (Some(_), Preview::Ready(preview)) => (
-                farhelm_proto::text::escaped(&preview.binding.cwd).to_string(),
-                "",
-            ),
-            (Some(_), Preview::Waiting) => (String::new(), "Waiting for checkout preview"),
-            (Some(_), Preview::Failed) => (String::new(), "Checkout preview unavailable"),
-        };
-        let path = &self.checkout.path;
-        if path.text(cx).as_ref() != text {
-            path.set_text(text, window, cx);
-        }
-        if self.checkout.path_placeholder != placeholder {
-            path.set_placeholder(placeholder, window, cx);
-            self.checkout.path_placeholder = placeholder;
-        }
-    }
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -1062,20 +1028,15 @@ impl Launcher {
         )
     }
 
-    /// The managed checkout's rows, under the host: the repository field, the note on an incomplete scan, the preview
-    /// and the lifetime sentence. Empty for a folder destination.
-    ///
-    /// It also notices a list the layer manager closed on its own (Escape, a press outside), as the model field does.
-    pub(super) fn checkout_rows(
+    /// Anchor suggestions to the width of the repository input, whether it shares the address border or has
+    /// a row of its own. Follow dismissals by the layer manager so Escape leaves it closed until the next input.
+    pub(super) fn repository_control(
         &mut self,
-        palette: &theme::Palette,
+        embedded: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
-    ) -> Vec<AnyElement> {
+    ) -> AnyElement {
         self.checkout.list.follow(window, cx);
-        let Some(checkout) = self.draft.checkout.clone() else {
-            return Vec::new();
-        };
         let tracker = self
             .checkout
             .list
@@ -1096,42 +1057,51 @@ impl Launcher {
                     launcher.repository_arrow(arrow, window, cx)
                 });
             });
-        let control = div().relative().min_w_0().child(field).child(tracker);
-        let mut rows = Vec::new();
-        // The old order: the setup field above the repository field, which it is the precondition for.
+        let field = if embedded {
+            field.embedded().height(ADDRESS_HEIGHT - px(2.))
+        } else {
+            field
+        };
+        div()
+            .relative()
+            .min_w_0()
+            .child(field)
+            .child(tracker)
+            .into_any_element()
+    }
+
+    /// The root setup precedes the address because the repository on an installed host needs it. The discovery
+    /// refresh can remove the field after a save, so leave a refusal in that same place even if the field goes away.
+    pub(super) fn checkout_setup(
+        &mut self,
+        palette: &theme::Palette,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
         let setup = self.setup_field(window, cx);
-        let setup_shown = setup.is_some();
-        rows.extend(setup);
-        if self.draft.target.is_none()
-            && !setup_shown
+        if setup.is_none()
+            && self.draft.target.is_none()
             && let Some((field, _)) = &self.checkout.setup
             && let Some(reason) = field.read(cx).refusal()
         {
-            // The refresh can take away inline setup. Keep its refusal in the same part of the form.
             let id = "launcher-checkout-setup-refused";
             let message = HostSentence::new(id).host(reason);
-            rows.push(super::refusal_alert(id, message, palette));
+            return Some(super::refusal_alert(id, message, palette));
         }
-        rows.push(
-            row("launcher-repository-row", "Repository", control, palette).into_any_element(),
-        );
-        // The setup field says what the note would (no checkout folder), so the note waits while it shows; while the
-        // search holds a `gh:` query the note is about that query, and is drawn under the search box instead.
-        if self.choosing_repository(window, cx)
-            && !setup_shown
-            && !self.search_holds_repository_query(cx)
-            && let Some(note) = self.repository_note("launcher-repository-note", window, cx)
+        setup
+    }
+
+    /// Show the discovery note with the control whose query produced it. Inline setup already explains a missing
+    /// checkout root, and a `gh:` query has its own note under the launcher search.
+    pub(super) fn checkout_repository_note(&self, window: &Window, cx: &App) -> Option<AnyElement> {
+        if !self.choosing_repository(window, cx)
+            || self.needs_root(cx) == Some(true)
+            || self.search_holds_repository_query(cx)
         {
-            rows.push(note.into_any_element());
+            return None;
         }
-        // The folder field already explains how the path will be allocated when there is a connection.
-        if let Some(repo) = &checkout.repo
-            && self.checkout_allocation_notice(cx).is_none()
-        {
-            rows.push(self.preview_block(repo, palette, cx));
-        }
-        rows.push(help_line(EXPLANATION, palette).into_any_element());
-        rows
+        self.repository_note("launcher-repository-note", window, cx)
+            .map(IntoElement::into_any_element)
     }
 
     /// The inline checkout-folder field, while the chosen host needs a checkout folder set up: the shared explicit-save
@@ -1224,82 +1194,113 @@ impl Launcher {
         }
     }
 
-    /// The preview (`.launch-composer-checkout-preview`): which repository on which host, the exact folder once the
-    /// helm has answered, and while it has not, that the launcher waits, or the helm's refusal. A polite live status,
-    /// so a change is announced without interrupting.
-    fn preview_block(&self, repo: &GithubRepo, palette: &theme::Palette, cx: &App) -> AnyElement {
-        if self.draft.target.is_some() {
-            return environment_checkout(repo, palette);
-        }
-        let host = self
-            .chosen_host(cx)
-            .map(super::host_name_with_phase)
-            .unwrap_or_else(|| HostText::from_host("this host"));
-        let heading = HostSentence::new("launcher-preview-heading")
-            .text("Managed checkout of ")
-            .host(&HostText::from_host(repo_identifier(repo)))
-            .text(" on ")
-            .host(&host);
-        let key = self.preview_key(cx);
-        let answer = key
-            .as_ref()
-            .and_then(|key| self.checkout.preview.answer_for(key));
-        let (state, detail): (&str, AnyElement) = match answer {
-            Some(Ok(preview)) => (
-                "ready",
-                div()
-                    .font_family(crate::assets::TERMINAL_FONT)
-                    .child(
-                        HostSentence::new("launcher-preview-path")
-                            .host(&HostText::from_host(preview.binding.cwd.as_str())),
-                    )
-                    .into_any_element(),
-            ),
-            Some(Err(words)) => (
-                "failed",
-                div()
-                    .text_color(theme::color(palette.warn_bright))
-                    .child(HostSentence::new("launcher-preview-error").host(words))
-                    .into_any_element(),
-            ),
-            None => (
-                "pending",
-                div()
-                    .child("Waiting for a current checkout preview")
-                    .into_any_element(),
-            ),
-        };
+    /// Keep the Folder line a single polite live region across selection, allocation, preview and refusal. The
+    /// platform adapters announce the changing detail through its inherited priority. The region keeps its name.
+    pub(super) fn checkout_folder_line(&self, palette: &theme::Palette, cx: &App) -> AnyElement {
+        let (state, detail, ink, size) = self.checkout_folder_detail(palette, cx);
         div()
-            .id("launcher-preview")
-            .debug_selector(move || format!("launcher-preview-{state}"))
-            .role(Role::Status)
-            .aria_label(heading.accessible_name())
-            .flex()
-            .flex_col()
-            .gap(px(2.))
-            .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(palette.fg_1))
-            .child(heading)
-            .child(detail)
+            .id("launcher-folder-row")
+            .debug_selector(|| "launcher-folder-row".into())
+            .child(
+                div()
+                    .id("launcher-preview")
+                    .debug_selector(move || format!("launcher-preview-{state}"))
+                    .role(Role::Status)
+                    .aria_label("Folder")
+                    .a11y_synthetic_children(|builder| {
+                        builder.parent_node().set_live(accesskit::Live::Polite)
+                    })
+                    .flex()
+                    .items_baseline()
+                    .gap(px(6.))
+                    // Center the glyph on the label's first line even when the detail wraps below it.
+                    .child(
+                        div()
+                            .flex_none()
+                            .flex()
+                            .items_center()
+                            .gap(px(6.))
+                            .child(field_label("Folder", palette))
+                            .child(
+                                gpui::svg()
+                                    .path(Icon::Branch.path())
+                                    .size(px(12.))
+                                    .flex_none()
+                                    .text_color(theme::color(palette.fg_1)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .text_size(size)
+                            .text_color(theme::color(ink))
+                            .child(detail.with_live_value()),
+                    ),
+            )
             .into_any_element()
     }
 
-    /// A preview supplies the read-only folder path. Before a wake, show wrapping help in the same place so the
-    /// allocation explanation fits the repository column even when the form is narrow.
-    pub(super) fn checkout_folder_field(&self, cx: &App) -> AnyElement {
-        if let Some(notice) = self.checkout_allocation_notice(cx) {
-            return help_line(notice, theme::palette(cx)).into_any_element();
-        }
-        self.launcher_input(
-            "launcher-checkout-folder",
-            &self.checkout.path,
-            "Folder",
-            HoverHelp::tooltip(
-                "Folder: the new managed checkout's folder on the host, as the helm previews it",
-            ),
+    /// A new environment acquires its path when it connects. A resumable host allocates after wake. In both cases
+    /// configuration or a preview from a previous connection cannot supply a path for this line.
+    fn checkout_folder_detail(
+        &self,
+        palette: &theme::Palette,
+        cx: &App,
+    ) -> (&'static str, HostSentence, theme::Token, gpui::Pixels) {
+        let (state, words) = if self.draft.target.is_some() {
+            (
+                "environment",
+                "Cloned inside the new environment once it starts",
+            )
+        } else if self
+            .draft
+            .checkout
+            .as_ref()
+            .is_none_or(|checkout| checkout.repo.is_none())
+        {
+            ("unselected", "Select a repository")
+        } else if let Some(notice) = self.checkout_allocation_notice(cx) {
+            ("wake", notice)
+        } else {
+            match self.preview_answer(cx) {
+                Some(Ok(preview)) => {
+                    return (
+                        "ready",
+                        HostSentence::new("launcher-preview-path")
+                            .mono(&HostText::from_host(preview.binding.cwd.as_str())),
+                        palette.fg_0,
+                        metrics::TEXT_MD,
+                    );
+                }
+                Some(Err(words)) => {
+                    return (
+                        "failed",
+                        HostSentence::new("launcher-preview-error").host(words),
+                        palette.warn_bright,
+                        metrics::TEXT_SM,
+                    );
+                }
+                None => ("pending", "Waiting for a current checkout preview"),
+            }
+        };
+        (
+            state,
+            HostSentence::new("launcher-preview-message").text(words),
+            palette.fg_1,
+            metrics::TEXT_SM,
         )
-        .monospace()
-        .into_any_element()
+    }
+
+    /// Delete on an installed host can archive the checkout. Inside a new environment the last reference is
+    /// discarded, and the environment may itself go away, so the host's trash wording would be wrong there.
+    pub(super) fn checkout_lifetime_note(&self, palette: &theme::Palette) -> AnyElement {
+        let words = if self.draft.target.is_some() {
+            ENVIRONMENT_CHECKOUT_LIFETIME
+        } else {
+            HOST_CHECKOUT_LIFETIME
+        };
+        help_line(words, palette).into_any_element()
     }
 
     /// The footer's and main action's words for the destination while a managed checkout is chosen, in the old
@@ -1342,16 +1343,6 @@ impl Launcher {
 /// What the tests read of the destination's own state, which nothing outside this module touches otherwise.
 #[cfg(test)]
 impl Launcher {
-    /// The read-only folder field's text while a checkout is chosen.
-    pub(crate) fn checkout_path_text(&self, cx: &App) -> String {
-        self.checkout.path.text(cx).to_string()
-    }
-
-    /// The read-only folder field's placeholder.
-    pub(crate) fn checkout_path_placeholder(&self) -> &'static str {
-        self.checkout.path_placeholder
-    }
-
     /// The repository field's text.
     pub(crate) fn repository_field_text(&self, cx: &App) -> String {
         self.checkout.repository.text(cx).to_string()
@@ -1461,27 +1452,4 @@ fn draw_repository_rows(
         children,
         highlighted: active,
     }
-}
-
-/// The preview line of a managed checkout into a new environment: no folder to preview yet, since the helm obtains the
-/// preview once the environment's Farhelm connects and clones the repository inside it (SPEC_impl.md, "Tensorlake
-/// sandbox sessions": "carry repository and naming intent until the new supervisor connects").
-fn environment_checkout(repo: &GithubRepo, palette: &theme::Palette) -> AnyElement {
-    let heading = HostSentence::new("launcher-preview-heading")
-        .text("Managed checkout of ")
-        .host(&HostText::from_host(repo_identifier(repo)))
-        .text(" in the new environment");
-    div()
-        .id("launcher-preview")
-        .debug_selector(|| "launcher-preview-environment".to_owned())
-        .role(Role::Status)
-        .aria_label(heading.accessible_name())
-        .flex()
-        .flex_col()
-        .gap(px(2.))
-        .text_size(metrics::TEXT_SM)
-        .text_color(theme::color(palette.fg_1))
-        .child(heading)
-        .child(div().child("Cloned inside it once it starts"))
-        .into_any_element()
 }

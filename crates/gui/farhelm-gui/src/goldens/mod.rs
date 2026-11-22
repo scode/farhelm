@@ -1048,6 +1048,18 @@ static SCENES: &[Scene] = &[
         setup: launcher_waking_checkout_setup,
     },
     Scene {
+        name: "launcher-managed-checkout",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_managed_checkout_setup,
+    },
+    Scene {
+        name: "launcher-managed-checkout-narrow",
+        size: (720., 900.),
+        draw: session_lists_then,
+        setup: launcher_managed_checkout_setup,
+    },
+    Scene {
         name: "launcher-host-menu",
         size: (1080., 1160.),
         draw: session_lists_then,

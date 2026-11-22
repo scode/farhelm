@@ -398,9 +398,31 @@ fn edit(cx: &mut VisualTestContext, edit: impl FnOnce(&mut LaunchDraft)) {
     settle(cx);
 }
 
-/// What the read-only folder field shows while a checkout is chosen.
+/// Read the actual Folder line's path. A pending or refused preview must leave no accessible path node behind.
 fn checkout_folder(cx: &mut VisualTestContext) -> String {
-    read(cx, |launcher, _, cx| launcher.checkout_path_text(cx))
+    name_of(cx, "launcher-preview-path").unwrap_or_default()
+}
+
+/// Each Folder state must be distinguishable while keeping the same accessible status region. A stale state could
+/// show an obsolete path or tell a screen reader that the launcher is ready before it actually is.
+fn assert_folder_status(cx: &mut VisualTestContext, selector: &'static str, id: &str, words: &str) {
+    let nodes = test_support::frame(cx);
+    let status = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-preview"))
+        .expect("the Folder line has a status region");
+    assert_eq!(status.role, Some(gpui::Role::Status));
+    assert_eq!(status.label.as_deref(), Some("Folder"));
+    assert!(
+        cx.debug_bounds(selector).is_some(),
+        "Folder state {selector} is drawn"
+    );
+    let detail = nodes
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some(id))
+        .expect("the Folder status words have an accessible name");
+    assert_eq!(detail.label.as_deref(), Some(words));
+    assert_eq!(detail.value.as_deref(), Some(words));
 }
 
 /// The launcher on a complete Command tab draft, with its catalog read answered and Managed checkout chosen from the
@@ -418,10 +440,10 @@ fn checkout_open(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext) 
 }
 
 /// SPEC.md: "Selecting managed checkout reveals a repository field and explains the directory's lifetime", the folder
-/// field shows the preview read-only, and empty repository input cannot launch; Folder restores the prior path. Why:
+/// line shows the preview, and empty repository input cannot launch. Folder restores the prior path. Why:
 /// the old app's case "destination type keeps unselected repositories separate from the folder" guarded against a
 /// launch quietly using the old folder. Specified: after Managed checkout, the repository field and the lifetime
-/// sentence are drawn, the folder field reads "Select a repository" and no folder check goes out; a press says
+/// sentence are drawn, the Folder line reads "Select a repository" and no folder check goes out; a press says
 /// "Select a GitHub repository before launching" and sends nothing; Folder brings back the editable folder field
 /// holding `/tmp/retained-folder`, and Launch then creates there.
 #[gpui::test]
@@ -435,8 +457,11 @@ fn managed_checkout_hides_the_folder_until_a_repository_is_chosen(cx: &mut TestA
         "no folder check for a checkout"
     );
     assert_eq!(checkout_folder(cx), "");
-    assert!(
-        read(cx, |launcher, _, _| launcher.checkout_path_placeholder()) == "Select a repository"
+    assert_folder_status(
+        cx,
+        "launcher-preview-unselected",
+        "launcher-preview-message",
+        "Select a repository",
     );
     test_support::click(cx, "launcher-launch");
     assert_eq!(
@@ -460,6 +485,36 @@ fn managed_checkout_hides_the_folder_until_a_repository_is_chosen(cx: &mut TestA
     assert_eq!(body["github_checkout"], Value::Null);
 }
 
+/// Repository shares Host's address border. The Folder status spans the card beneath the address and Name,
+/// so a long destination gets the full available width and the preview cannot repeat the path elsewhere.
+#[gpui::test]
+fn managed_checkout_shares_the_address_and_places_the_folder_below_it(cx: &mut TestAppContext) {
+    let (_helm, cx) = checkout_open(cx);
+    let address = cx
+        .debug_bounds("launcher-address")
+        .expect("the shared address");
+    let host = cx
+        .debug_bounds("launcher-host-row")
+        .expect("the address's Host segment");
+    let repository = cx
+        .debug_bounds("launcher-repository-row")
+        .expect("the address's Repository segment");
+    let name = cx
+        .debug_bounds("launcher-name-row")
+        .expect("the optional Name row");
+    let folder = cx
+        .debug_bounds("launcher-folder-row")
+        .expect("the full-width Folder line");
+    assert!(address.contains(&host.origin) && address.contains(&repository.origin));
+    assert_eq!(host.right(), repository.left());
+    assert!(repository.right() <= address.right());
+    assert!(folder.top() >= address.bottom().max(name.bottom()));
+    assert_eq!(folder.left(), address.left());
+    assert_eq!(folder.right(), name.right().max(address.right()));
+    assert!(name_of(cx, "launcher-preview-heading").is_none());
+    assert!(name_of(cx, "launcher-checkout-folder").is_none());
+}
+
 /// SPEC_impl.md: repository suggestions "debounce for 150 ms and discard stale host/query generations", and SPEC.md:
 /// "Incomplete discovery is visible and does not prevent selecting a valid manually entered pair". Specified: typing
 /// asks nothing before 150 ms; then one read for host1 on connection 4 with the typed text; a truncated reply with a
@@ -479,6 +534,14 @@ fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext
         cx.debug_bounds("launcher-repository-list").is_some(),
         "focusing the field opened its list"
     );
+    let repository = cx
+        .debug_bounds("launcher-repository-row")
+        .expect("the repository segment");
+    let list = cx
+        .debug_bounds("launcher-repository-list")
+        .expect("the open suggestions list");
+    assert_eq!(list.left(), repository.left());
+    assert_eq!(list.size.width, repository.size.width);
     // Not a valid pair itself, so the list holds only what the host found.
     test_support::keys(cx, "a c m e /");
     test_support::advance(cx, Duration::from_millis(100));
@@ -930,9 +993,11 @@ fn a_chosen_repository_is_previewed_before_it_launches(cx: &mut TestAppContext) 
         asked.body,
         Some(json!({"host": 1, "expected_incarnation": 4, "repo": "acme/bar", "title": ""}))
     );
-    assert_eq!(
-        read(cx, |launcher, _, _| launcher.checkout_path_placeholder()),
-        "Waiting for checkout preview"
+    assert_folder_status(
+        cx,
+        "launcher-preview-pending",
+        "launcher-preview-message",
+        "Waiting for a current checkout preview",
     );
     test_support::click(cx, "launcher-launch");
     assert_eq!(
@@ -946,6 +1011,12 @@ fn a_chosen_repository_is_previewed_before_it_launches(cx: &mut TestAppContext) 
     );
     settle(cx);
     assert_eq!(checkout_folder(cx), "/work/bar-1");
+    assert_folder_status(
+        cx,
+        "launcher-preview-ready",
+        "launcher-preview-path",
+        "/work/bar-1",
+    );
     assert_eq!(
         read(cx, |launcher, _, _| launcher
             .checkout_name_placeholder_shown()),
@@ -1001,8 +1072,8 @@ fn a_refused_checkout_launch_comes_back_with_focus_in_the_search_box(cx: &mut Te
         .is_focused(window)));
 }
 
-/// A refused preview leaves no path and says why: the old "Checkout preview unavailable" in the folder field and the
-/// helm's words beside the preview, with Launch waiting. Specified with the helm's missing-folder refusal.
+/// A refused preview leaves no path and puts the helm's words in the same Folder status. The missing-folder
+/// refusal must remain visible, and Launch still waits for an accepted preview.
 #[gpui::test]
 fn a_refused_preview_says_why_and_shows_no_path(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
@@ -1013,13 +1084,11 @@ fn a_refused_preview_says_why_and_shows_no_path(cx: &mut TestAppContext) {
     helm.reply(previews[0].id, 400, Some(json!(words)));
     settle(cx);
     assert_eq!(checkout_folder(cx), "");
-    assert_eq!(
-        read(cx, |launcher, _, _| launcher.checkout_path_placeholder()),
-        "Checkout preview unavailable"
-    );
-    assert_eq!(
-        name_of(cx, "launcher-preview-error").as_deref(),
-        Some(words)
+    assert_folder_status(
+        cx,
+        "launcher-preview-failed",
+        "launcher-preview-error",
+        words,
     );
     test_support::click(cx, "launcher-launch");
     assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
@@ -2250,7 +2319,12 @@ fn pre_wake_traffic(helm: &mut FakeHelm, cx: &mut VisualTestContext, title: Opti
     } else {
         "The folder is picked automatically when the host is ready"
     };
-    assert_eq!(name_of(cx, expected).as_deref(), Some(expected));
+    assert_folder_status(
+        cx,
+        "launcher-preview-wake",
+        "launcher-preview-message",
+        expected,
+    );
     assert!(checkout_folder(cx).is_empty());
     assert!(name_of(cx, "launcher-checkout-folder").is_none());
     assert!(name_of(cx, "launcher-preview-path").is_none());

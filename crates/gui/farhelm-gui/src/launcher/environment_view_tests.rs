@@ -240,10 +240,9 @@ fn opening_the_launcher_checks_no_host_while_the_hosts_are_unavailable(cx: &mut 
 }
 
 /// SPEC.md, "Container sessions": "The managed checkout is cloned inside it. Folder destinations use its home". The
-/// The destination switch stays available with a recipe chosen so the user can ask for a managed checkout. The host
-/// segment names the environment and can take a different target. Folder shows
-/// `~` with no field; choosing Managed checkout shows the repository field, says the checkout is cloned inside the new
-/// environment, and asks the host for no preview.
+/// The destination switch stays available once a recipe is chosen. The Host segment names the environment and can
+/// take a different target. Folder shows `~` with no field. Managed checkout shows a separate Repository field and
+/// explains the folder's lifetime inside the environment without asking the source host for a preview.
 #[gpui::test]
 fn a_new_container_keeps_the_where_row(cx: &mut TestAppContext) {
     let (mut helm, cx) = window(cx);
@@ -291,6 +290,13 @@ fn a_new_container_keeps_the_where_row(cx: &mut TestAppContext) {
         cx.debug_bounds("launcher-preview-environment").is_some(),
         "the checkout is said to be cloned inside the new environment"
     );
+    assert_eq!(
+        name_of(cx, "launcher-preview-message").as_deref(),
+        Some("Cloned inside the new environment once it starts"),
+    );
+    let lifetime = "New folder named after the session, inside the new environment; deleting its last session removes it permanently.";
+    assert_eq!(name_of(cx, lifetime).as_deref(), Some(lifetime));
+    assert!(name_of(cx, "New folder named after the session; it moves to the trash when its last session is deleted.").is_none());
 }
 
 /// The folder field is its own text input, which follows the draft only when an edit syncs it; a Runs on edit that did

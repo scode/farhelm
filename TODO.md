@@ -621,14 +621,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Managed checkout layout in the launcher explodes.** the layout explodes due to the long message and two controls for
-  managed checkouts (the vertical size of the box towards the top). we need to fix (Screenshot: the launcher's
-  Destination box with Managed checkout selected; under the Repository field, a wrapped "Managed checkout of <repo> on
-  <host>" line with the full checkout path, a paragraph explaining that Farhelm clones into a new folder named after the
-  session and trashes it when the last session using it is deleted, and then a separate Folder field repeating the path,
-  all in the narrow middle column, which makes the Destination box very tall.) Plan:
-  `plans/queue/launcher-managed-checkout-compact.md`.
-
 - **Scrub link-local and tailnet addresses in agent screen-capture privacy guards.** Neither the screen-capture script
   (`scripts/capture-agent-screens.py`) nor the Rust screen-fixture privacy check treats link-local addresses
   (`169.254.0.0/16`) or tailnet/CGNAT addresses (`100.64.0.0/10`) as private, so a captured screen showing one could

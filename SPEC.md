@@ -1915,7 +1915,7 @@ original allocation and configuration, including after a helm restart or configu
 reconciliation can return the accepted result or a refusal that prevents this key from allocating for 24 hours, after
 which the key re-validates as a new request.
 
-In managed-checkout mode, the composer's folder field shows the current preview's effective path read-only, or a pending
+In managed-checkout mode, the composer's Folder line shows the current preview's effective path read-only, or a pending
 or error state while no path is available. The folder segment deliberately leaves checkout mode and restores the prior
 editable path, Browse and recent folders. Typing into the checkout path cannot turn a managed checkout into an
 existing-folder launch.
