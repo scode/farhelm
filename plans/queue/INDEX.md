@@ -4,4 +4,3 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight ca9acb] `podman-place-host-identity.md` — record the machine and account each new container runs on, refuse twin container hosts for one machine and account, and never treat a container as deleted on a host that now reaches somewhere else
 - [pending] `tailscale-ssh-hosts.md` — add an explicit Tailscale host option on SSH hosts (Add host checkbox, Host settings toggle, `--ensure-hosts`) that verifies host keys via a private Farhelm-owned `known_hosts` file from `tailscale status --json` and uses `tailscale nc` in userspace networking
-- [landing 3fbedc] `hook-setup-primary-button.md` — make "Set up and launch" the primary rightmost button on the launcher's Grok and Antigravity hook setup prompt, extending `prompt.rs` for fallible inline confirm and refreshing its golden screenshots
