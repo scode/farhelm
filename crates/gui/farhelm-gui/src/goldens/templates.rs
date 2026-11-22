@@ -5,7 +5,9 @@ use crate::focus::Mark;
 use crate::layers;
 use crate::{session, test_support};
 use farhelm_helm_client::fake::FakeHelm;
+use farhelm_proto::launcher::TemplateFields;
 use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry, PREFERENCES_KEY};
+use farhelm_proto::{LaunchHarness, LaunchPermission};
 use gpui::{AnyElement, App, IntoElement, Window, div};
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
@@ -144,6 +146,22 @@ pub(super) fn template_wrapper_help_setup(state: &SceneState, window: &mut Windo
     state.hover.set(Some("templates-wrapper"));
 }
 
+/// The same stored definition in the editor and the approval card, including a permission a shell cannot use.
+/// Its launch kind is omitted so the compact list has room for the stored approval mode.
+pub(super) fn shell_template_fields() -> TemplateFields {
+    TemplateFields {
+        agent: Some(LaunchHarness::Bash),
+        permissions: Some(Some(LaunchPermission::Custom)),
+        permission_flags: Some(vec!["--profile".into(), "review only".into()]),
+        ..TemplateFields::default()
+    }
+}
+
+/// Open a stored shell template in the ordinary editor so it shows the value and the existing save refusal.
+pub(super) fn shell_template_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    open_template_editor(state, "shell-profile", None, window, cx);
+}
+
 fn open_template_editor(
     state: &SceneState,
     template: &'static str,
@@ -154,6 +172,21 @@ fn open_template_editor(
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
     let mut snapshot = editor_scene_collections();
+    if template == "shell-profile" {
+        let templates = &mut snapshot[0];
+        templates.meta = test_support::meta(&["shell-profile", "shell-direct", "quick-claude"]);
+        templates.entries[0] = KeyedEntry {
+            key: template.into(),
+            value: serde_json::json!({"name": template, "fields": shell_template_fields()}),
+        };
+        // The compact list shows a complete mode on a second template without flag words after it.
+        templates.entries[1] = KeyedEntry {
+            key: "shell-direct".into(),
+            value: serde_json::json!({
+                "name": "shell-direct", "fields": {"agent": "zsh", "permissions": "yolo"}
+            }),
+        };
+    }
     snapshot.extend(hosts);
     helm.connect(snapshot);
     let handle = window.window_handle();

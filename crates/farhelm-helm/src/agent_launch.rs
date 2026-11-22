@@ -313,12 +313,13 @@ fn resolve_with(
         }
     };
     let launch = crate::sessions::resolve_launch_request(request)?;
-    // Switching tabs retains the inactive agent draft, just like its model
-    // and effort. Only the active tab contributes create inputs.
-    let prompt = match state.kind.unwrap_or(LauncherKind::Agent) {
-        LauncherKind::Agent => state.prompt,
-        LauncherKind::Command => None,
-    };
+    // A template switch can leave an earlier prompt dormant. Only the final
+    // program can receive it. The fold already refused an explicit unsupported edit.
+    let prompt = state.prompt.filter(|_| {
+        launch
+            .agent_selection()
+            .is_some_and(|selection| selection.harness.supports_initial_prompt(false))
+    });
     launch
         .validate_initial_prompt(prompt.as_deref(), false)
         .map_err(invalid)?;
@@ -400,7 +401,7 @@ mod tests {
             },
         );
         let resolved = resolve(
-            &[saved],
+            std::slice::from_ref(&saved),
             &["message".into()],
             &TemplateFields {
                 prompt: Some("--literal\nsecond".into()),
@@ -417,6 +418,21 @@ mod tests {
                 .unwrap()
                 .contains("--literal")
         );
+        // The message survives the template fold but is not input to the resulting shell.
+        let shell = resolve(
+            &[saved],
+            &["message".into()],
+            &TemplateFields {
+                agent: Some(LaunchHarness::Bash),
+                ..TemplateFields::default()
+            },
+            &[],
+            false,
+            false,
+        )
+        .unwrap();
+        assert!(shell.launch.is_shell());
+        assert_eq!(shell.prompt, None);
         let refused = resolve(
             &[],
             &[],

@@ -135,23 +135,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## shell-template-approval-misstates-permission.md
-
-- Outcome: `fix code`.
-- Assessment: templates/summary.rs `permission_label` (~181-183) returns "None (shell)" for any shell harness, whatever
-  the permission. approvals/model.rs:806 and the templates list (summary.rs:95) use it. The CLI path can store
-  harness=bash with a concrete permission (cited in the file; I did not re-trace the CLI). Basis: SPEC.md "agent
-  approval cards" ~4418-4419: "template cards keep their stored permission labels and YOLO assertions without
-  interpreting an omitted permission as own setting." Also ~4396-4397: "For a template write it shows the whole
-  resulting template". Fix: in the shell branch, return `permission_display(permission)` when a permission is stored and
-  "None (shell)" only when none is.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
 ## shell-stop-suspend-error-names-agent.md
 
 - Outcome: `fix code`.
@@ -313,47 +296,6 @@
   Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
   fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
   index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## shell-template-clears-dormant-prompt.md
-
-- Outcome: `fix spec+code`.
-- Assessment: Applying a Bash or Zsh template clears an initial prompt the user typed, while picking the same shell by
-  hand keeps it, unused, in the draft. Verified: SPEC.md ~1213 says applying a template has "the same effects as making
-  them by hand", and ~1223 says omitted fields keep whatever the launcher holds. SPEC_impl.md ~8910 deliberately
-  specifies that templates drop "a dormant prompt when a template switches to an agent that cannot take one". This is a
-  real conflict between the two specs.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: fix spec+code (keep the dormant prompt as a hand switch does and remove
-  the SPEC_impl exception). A request already refuses to send a prompt to an agent that cannot take one. If the fix
-  turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
-  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## shell-template-hides-incompatible-permissions.md
-
-- Outcome: `fix code`.
-- Assessment: When a template that sets a permission is switched to Bash or Zsh, the template editor shows "None
-  (shell)" while still keeping the old permission, and Save is refused with no visible reason on that row. Verified:
-  templates/editor/rows.rs ~501-506 returns "None (shell)" without showing the stored value, though the field stays
-  removable. SPEC.md ~1269: "Incompatible fields stay visible and prevent saving until corrected or removed". The row
-  stays visible, but whether its stored value must show is a reading.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: fix code, together with shell-template-approval-misstates-permission.md
-  (show the stored value marked incompatible) If the fix turns out not to be straightforward, or needs significant
-  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
-  item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
 
 ## trailing-sealed-delete-comment-hold-versus-seal-record.md

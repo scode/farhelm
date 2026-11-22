@@ -604,6 +604,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "approval-shell-template",
+        size: (684., 570.),
+        draw: shell_template_approval,
+        setup: no_setup,
+    },
+    Scene {
         name: "terminal-styles",
         size: (380., 200.),
         draw: terminals,
@@ -978,6 +984,12 @@ static SCENES: &[Scene] = &[
         size: (1010., 1140.),
         draw: empty,
         setup: template_wrapper_help_setup,
+    },
+    Scene {
+        name: "template-shell-permissions",
+        size: (1010., 900.),
+        draw: empty,
+        setup: shell_template_setup,
     },
     Scene {
         name: "template-number-menu",

@@ -798,6 +798,25 @@ fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
 
 // ---- Template cards -------------------------------------------------------------------------------------------------
 
+/// Approving a stored shell template covers its actual fields, including permissions the shell cannot use.
+#[test]
+fn a_shell_template_card_names_its_incompatible_stored_permissions() {
+    let action = ApprovalAction::TemplateWrite {
+        name: "shell".into(),
+        replaces_existing: false,
+        fields: TemplateFields {
+            agent: Some(LaunchHarness::Bash),
+            permissions: Some(Some(LaunchPermission::Custom)),
+            permission_flags: Some(vec!["--profile".into(), "test only".into()]),
+            ..TemplateFields::default()
+        },
+        host_name: None,
+    };
+    let rows = facts(&action);
+    assert!(rows.contains(&value("permissions", "Custom")));
+    assert!(rows.contains(&value("permission flags", "--profile 'test only'")));
+}
+
 /// A template write shows the whole resulting template, custom flags as words and command text the agent templates
 /// listing withholds included. Why: an agent can store flags or a command that later runs on any host, possibly by
 /// quick launch with no further question, and the approval covers only what the card showed.

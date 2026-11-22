@@ -1312,6 +1312,54 @@ fn saving_a_base_name_leaves_no_unsaved_changes(cx: &mut TestAppContext) {
     );
 }
 
+/// A shell template can arrive with incompatible stored approvals. Show the actual mode and flag words with the
+/// reason Save is refused, so the user can tell what removing the field would drop.
+#[gpui::test]
+fn a_shell_template_shows_the_permissions_that_keep_it_from_saving(cx: &mut TestAppContext) {
+    let shell = template(
+        "shell",
+        TemplateFields {
+            kind: Some(LauncherKind::Agent),
+            agent: Some(LaunchHarness::Bash),
+            permissions: Some(Some(farhelm_proto::LaunchPermission::Custom)),
+            permission_flags: Some(vec!["--profile".into(), "test only".into()]),
+            ..TemplateFields::default()
+        },
+    );
+    let (mut helm, cx) = open_header(cx, &[shell], None);
+    open_editor(&mut helm, "template-open-shell", cx);
+    assert_eq!(draft(cx).fields.agent, Some(LaunchHarness::Bash));
+    assert!(drawn(cx, "templates-permissions-refusal"));
+    let nodes = frame(cx);
+    for (id, label) in [
+        ("templates-incompatible-permission-mode", "Custom"),
+        (
+            "templates-incompatible-permission-flags",
+            "--profile 'test only'",
+        ),
+    ] {
+        assert!(
+            nodes.iter().any(|node| {
+                node.element_id.as_deref() == Some(id) && node.label.as_deref() == Some(label)
+            }),
+            "the editor shows {label} under {id}"
+        );
+    }
+    click(cx, "templates-name");
+    retype(cx, "shell-renamed");
+    assert_eq!(
+        draft(cx).name,
+        "shell-renamed",
+        "the premise: a real edit to save"
+    );
+    click(cx, "templates-save");
+    assert!(painted(cx).contains("Approvals: does not fit this launcher switch or agent type"));
+    assert!(
+        helm.commands().is_empty(),
+        "the incompatible template cannot save"
+    );
+}
+
 /// The template editor's Custom approvals carry their words (the old shared Custom flags block): choosing Custom shows
 /// the words field, the words are saved parsed, and choosing another approval drops them, so a template never stores
 /// words its choice does not use. Specified: Custom with `--yolo --sandbox off` saves those two words; switching to
