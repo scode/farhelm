@@ -1,14 +1,13 @@
 //! Tests of the operation store and of saving drafts through it, against the helm client's fake.
 //!
-//! The fake answers commands in the order they were sent, as the helm does, so "overlapping" here means both commands
-//! are in flight at once and each settles on its own reply; which reply comes first is the order the helm admitted
-//! them. The fake-helm helpers come from the shared test harness (`test_support.rs`).
+//! The fake keeps ordered replies in order and lets unordered replies pass other work. Each reply settles its own
+//! operation, even when both are in flight. The helpers come from the shared test harness (`test_support.rs`).
 
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_helm_client::{ApiPath, Method};
+use farhelm_helm_client::{ApiPath, Lane, Method};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, SessionRow};
 use gpui::{
@@ -115,6 +114,55 @@ fn connected(keys: &[&str], cx: &mut TestAppContext) -> (FakeHelm, Entity<Connec
 }
 
 // ---- The operation store -------------------------------------------------------------------------------------------
+
+/// Pin the scheduling choice at the fake boundary, where it matters to the helm. Choose work independently of the
+/// placeholder route so an accidental rule based on the HTTP method or path fails these assertions.
+#[gpui::test]
+fn each_work_kind_uses_its_declared_channel_lane(cx: &mut TestAppContext) {
+    let (mut fake, _connection) = connected(&["a"], cx);
+    let operations = operations(cx);
+    let delivered = Delivered::default();
+    let cases = [
+        ("stop", Work::Stop, Lane::Unordered),
+        (
+            "delete",
+            Work::Delete(DeleteGuard::Unconditional),
+            Lane::Unordered,
+        ),
+        (
+            "delete-environment",
+            Work::EnvironmentDelete,
+            Lane::Unordered,
+        ),
+        ("suspend", Work::Suspend, Lane::Unordered),
+        ("resume", Work::Resume, Lane::Unordered),
+        ("stop-and-suspend", Work::StopAndSuspend, Lane::Unordered),
+        ("trash-delete", Work::TrashDelete, Lane::Unordered),
+        ("retry", Work::RetryHost, Lane::Unordered),
+        ("rename", Work::Rename, Lane::Ordered),
+        ("remove-host", Work::RemoveHost, Lane::Ordered),
+    ];
+    assert!(
+        fake.commands().is_empty(),
+        "the fixture sent no other commands"
+    );
+    for (name, work, _) in cases {
+        let command = Command::new(
+            work,
+            Method::Post,
+            ApiPath::api(&["test", name]).unwrap(),
+            None,
+            "test operation",
+        );
+        start(&operations, (name, command), name, &delivered, cx).unwrap();
+    }
+    let sent = fake.commands();
+    assert_eq!(sent.len(), cases.len());
+    for (sent, (name, _, expected)) in sent.iter().zip(cases) {
+        assert_eq!(sent.path, format!("/api/test/{name}"));
+        assert_eq!(sent.lane, expected, "{name}");
+    }
+}
 
 /// SPEC_impl.md, "Work that finishes later", names this test: independent actions on different sessions each keep
 /// their completion handling until they settle. Specified: a Rename on `a` and a Delete on `b` are in flight together;

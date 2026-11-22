@@ -621,10 +621,9 @@ pub(crate) struct DeleteCheckoutTrashReq {
 /// capable answer records shared condition notices before returning it.
 ///
 /// The whole wait, for the host's trash gate and then for the host, ends at
-/// one deadline [`HOST_REPLY_BOUND`] away: a read leaves nothing to finish,
-/// and neither a host that never answers nor a cleanup holding the gate on
-/// such a host may hold every later GUI command behind it on the ordered
-/// channel. The two timeouts say different things, because a listing queued
+/// one deadline [`HOST_REPLY_BOUND`] away. This bounds the wait for each
+/// host's listing, including when cleanup holds that host's gate. The two
+/// timeouts say different things, because a listing queued
 /// behind a cleanup that is stuck on its host never reached the host at all.
 /// Recording the notices afterwards is the helm's own database work and is not
 /// bounded.
@@ -3126,10 +3125,8 @@ pub(crate) async fn stop_session(
             }
         }
     };
-    // Bounded like rename and Delete: the GUI admits one command at a
-    // time, so a Stop waiting on a slow host would hold every later click
-    // (see `HOST_REPLY_BOUND`). The bound runs the Stop on its own task, so
-    // it finishes even when its caller goes away.
+    // Bound how long the caller waits for the host. Stop continues on its
+    // own task beyond that bound or if its caller goes away.
     within_host_reply_bound(async move {
         let key = match resolve_session_ref(&state, &id).await {
             Ok(key) => key,
@@ -3666,8 +3663,7 @@ pub(crate) async fn rename_session(
 /// it has not reached by then as not delivered rather than refusing, since the
 /// value is already saved (`crate::credentials::save`).
 ///
-/// The UI channel admits one command at a time, so this is also the longest
-/// any later click can wait behind a slow host; it has to stay short. Twenty
+/// Each ordered command can hold the next one up to this bound. Twenty
 /// seconds is several times what a responsive host takes for each of these,
 /// even over SSH (a Restart or Replace launches an agent and a Replace then
 /// deletes the source, which normally ends well inside it), and still well

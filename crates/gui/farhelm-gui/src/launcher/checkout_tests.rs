@@ -839,8 +839,8 @@ fn gh_search_offers_discovered_repositories_and_a_valid_typed_pair(cx: &mut Test
     assert_eq!(name_of(cx, "launcher-search-message").as_deref(), loading);
     assert!(to(&sent(&mut helm, cx), REPOSITORIES).is_empty());
     test_support::advance(cx, Duration::from_millis(160));
-    // The fake helm answers strictly in order, so every command taken is answered, in order: the repositories read with
-    // its reply, the rest (the launcher's other reads) as failed reads, which leave the search alone.
+    // Answer the launcher's ordered reads in send order. Only the repositories read succeeds, so the other replies
+    // leave the search alone.
     let taken = sent(&mut helm, cx);
     let reads = to(&taken, REPOSITORIES);
     let [read_] = &reads[..] else {
@@ -1341,8 +1341,7 @@ fn reconnect(helm: &mut FakeHelm, cx: &mut VisualTestContext, incarnation: u64) 
 
 /// Answer the reads a reconnect sends among `commands`: the one checkout-trash read with a timeout, which the Trash
 /// shows as its own failure, and the launcher's reread of the host's launch history with no body, so the launcher
-/// offers no history and observes no new configuration revision. The fake answers commands in the order they were
-/// sent, so both are answered in that order, before anything sent after them.
+/// offers no history and observes no new configuration revision. Settle both reads before the test proceeds.
 fn answer_reconnect_reads(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,
@@ -1547,10 +1546,9 @@ fn a_taken_default_name_moves_on_and_an_exact_one_stays() {
 /// The supervisor's refusal of a taken checkout name, as the helm passes it on.
 const TAKEN: &str = "a directory with that checkout name already exists; choose another title";
 
-/// Answer what the window sent on opening, in the order sent (the fake answers in order): the catalog read with no
-/// models, everything else before the first checkout preview with an empty answer, as the shared `answer_catalog`
-/// does. Returns the commands from that preview on, still unanswered: a draft that opens on a chosen repository asks for
-/// its preview at once, which `answer_catalog` would answer empty.
+/// Answer what the window sent on opening in send order. Give the catalog no models and the other commands before
+/// the first checkout preview an empty answer, as `answer_catalog` does. Leave that preview and everything after it
+/// unanswered. A draft that opens on a chosen repository asks for a preview at once.
 fn answer_catalog_keeping(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> Vec<FakeCommand> {
     let mut sent = sent(helm, cx);
     sent.sort_by_key(|command| command.id);

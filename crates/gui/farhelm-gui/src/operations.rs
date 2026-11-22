@@ -50,8 +50,9 @@
 //! the generic connection-lost notice is the only report (SPEC_impl.md, "One failure path: the reset").
 //!
 //! Extension points (`docs/gpui/foundation-ownership.md`): a [`Work`] variant for a new kind of work, which also
-//! decides whether it creates a session and whether it changes the host registry ([`Work::creates_a_session`],
-//! [`Work::changes_host_registry`]). The commands themselves are built where their feature lives, with
+//! decides its channel lane, whether it creates a session, and whether it changes the host registry
+//! ([`Work::lane`], [`Work::creates_a_session`], [`Work::changes_host_registry`]).
+//! The commands themselves are built where their feature lives, with
 //! [`Command::new`], keeping today's API semantics for their route (the session list builds its Rename and Delete):
 //! this module holds the store, not a catalog of routes. A new kind of key ([`OpKey`]) is a change here.
 //!
@@ -64,7 +65,7 @@
 
 use std::collections::HashMap;
 
-use farhelm_helm_client::{ApiPath, ChannelHandle, CommandError, Method, PathError};
+use farhelm_helm_client::{ApiPath, ChannelHandle, CommandError, Lane, Method, PathError};
 use farhelm_proto::DeleteGuard;
 /// Re-exported so a feature that branches on a refusal names its markers from the module that hands them over.
 pub use farhelm_proto::ui_channel::HelmMarker;
@@ -234,6 +235,45 @@ pub enum Work {
 /// `operations_tests.rs` is not an extension point, and its table covers only the kinds of work that existed when
 /// these methods were added.
 impl Work {
+    /// Use the unordered lane only when this command can run before earlier unanswered commands and after
+    /// later commands. Any effects that need to precede another command, or are needed from an earlier command,
+    /// must be fenced by this operation's own key.
+    fn lane(self) -> Lane {
+        match self {
+            Work::Rename => Lane::Ordered,
+            Work::Delete(_) => Lane::Unordered,
+            Work::Save => Lane::Ordered,
+            Work::Stop => Lane::Unordered,
+            Work::Replace => Lane::Ordered,
+            Work::Seen { .. } => Lane::Ordered,
+            Work::Restart => Lane::Ordered,
+            Work::Probe => Lane::Ordered,
+            Work::Setup => Lane::Ordered,
+            Work::TunnelOpen => Lane::Ordered,
+            Work::TunnelClose => Lane::Ordered,
+            Work::Launch => Lane::Ordered,
+            Work::RemoveHost => Lane::Ordered,
+            Work::Answer => Lane::Ordered,
+            Work::UpdateHost => Lane::Ordered,
+            Work::SendFeedback => Lane::Ordered,
+            Work::TrashDelete => Lane::Unordered,
+            Work::UninstallHost => Lane::Ordered,
+            Work::TabOpen => Lane::Ordered,
+            Work::TabClose => Lane::Ordered,
+            Work::RetryHost => Lane::Unordered,
+            Work::AdoptHost => Lane::Ordered,
+            Work::TakeOverHost { .. } => Lane::Ordered,
+            Work::Pin => Lane::Ordered,
+            Work::Mute => Lane::Ordered,
+            Work::MovePin => Lane::Ordered,
+            Work::SessionGroup => Lane::Ordered,
+            Work::Suspend => Lane::Unordered,
+            Work::Resume => Lane::Unordered,
+            Work::StopAndSuspend => Lane::Unordered,
+            Work::EnvironmentDelete => Lane::Unordered,
+        }
+    }
+
     /// Whether this work creates a session on a host: what "a launch in flight" means to the host registry's side
     /// (`hosts::launch_in_flight`), which refuses Add host, a new host's setup, a host's Re-run, removal, Update and
     /// Uninstall, and a host's destination save while one is out. The launcher's New and Clone create one, and so do
@@ -666,13 +706,39 @@ pub fn send(
     cx: &mut App,
     then: impl FnOnce(Result<Option<Value>, HostText>, &mut App) + 'static,
 ) -> bool {
+    send_in_lane(Lane::Ordered, method, path, body, shown, cx, then)
+}
+
+/// Send a keyless command that can run independently of other requests. The Checkout Trash read uses its
+/// own serial to discard an answer overtaken by a later read. Reset and refusal handling are the same as [`send`].
+pub(crate) fn send_unordered(
+    method: Method,
+    path: ApiPath,
+    body: Option<Value>,
+    shown: impl Into<String>,
+    cx: &mut App,
+    then: impl FnOnce(Result<Option<Value>, HostText>, &mut App) + 'static,
+) -> bool {
+    send_in_lane(Lane::Unordered, method, path, body, shown, cx, then)
+}
+
+/// Keep both lanes' keyless callbacks within the current UI session and out of its reply update.
+fn send_in_lane(
+    lane: Lane,
+    method: Method,
+    path: ApiPath,
+    body: Option<Value>,
+    shown: impl Into<String>,
+    cx: &mut App,
+    then: impl FnOnce(Result<Option<Value>, HostText>, &mut App) + 'static,
+) -> bool {
     let Some(current) = crate::session::connection(cx).and_then(|c| c.read(cx).session().cloned())
     else {
         return false;
     };
     let shown = shown.into();
     current.update(cx, |current, cx| {
-        current.command(method, path, body, cx, move |_, result, cx| {
+        current.command(lane, method, path, body, cx, move |_, result, cx| {
             let answered = answer(result, &shown);
             cx.defer(move |cx| then(answered, cx));
         });
@@ -888,7 +954,7 @@ impl Operations {
             body,
             shown,
         } = command;
-        let reply = self.handle.command(method, path, body);
+        let reply = self.handle.command_in_lane(work.lane(), method, path, body);
         let settling = key.clone();
         let task = cx.spawn(async move |operations, cx| {
             let result = reply.await;

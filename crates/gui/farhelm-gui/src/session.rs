@@ -44,7 +44,7 @@ use farhelm_helm_client::terminal::{
 };
 use farhelm_helm_client::{
     ApiPath, ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, Collections,
-    CommandError, HelmConnection, HelmEndpoint, Method, Transfers,
+    CommandError, HelmConnection, HelmEndpoint, Lane, Method, Transfers,
 };
 use farhelm_proto::ui_channel::{Availability, Collection, Reply, SessionRow};
 use gpui::{
@@ -592,12 +592,13 @@ impl UiSession {
         })
     }
 
-    /// Send one command, and call `on_done` with the helm's reply once it arrives, unless a reset retired this session
+    /// Send one command on the caller's lane and call `on_done` with the helm's reply unless a reset retired this session
     /// first. The reply arrives after the store already shows the command's effects (the channel orders replies after
     /// the changes before them), so `on_done` needs no optimistic update. A command sent from a retired session is
     /// dropped.
     pub fn command(
         &mut self,
+        lane: Lane,
         method: Method,
         path: ApiPath,
         body: Option<Value>,
@@ -610,7 +611,7 @@ impl UiSession {
         }
         let id = self.next_pending;
         self.next_pending += 1;
-        let reply = self.handle.command(method, path, body);
+        let reply = self.handle.command_in_lane(lane, method, path, body);
         let task = cx.spawn(async move |session, cx| {
             let result = reply.await;
             // Retiring the session drops this task with the rest of `pending`, so a task that runs at all belongs to a

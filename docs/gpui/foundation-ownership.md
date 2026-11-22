@@ -382,15 +382,17 @@ Lint exceptions: none.
 
 ### Operation store
 
-Extension points: a `Work` variant for a new kind of work, with one arm in each of `Work::creates_a_session` and
-`Work::changes_host_registry` (the review gate checks both values against the methods' docs) and its own area's tests
-pinning them. The following touch no owned path; each is built in the feature's own module:
+Extension points: a `Work` variant for a new kind of work, with one arm in each of `Work::lane`,
+`Work::creates_a_session` and `Work::changes_host_registry`. The review gate checks the choices against the methods'
+contracts and the feature's own tests pin them. The following touch no owned path, since each is built in the feature's
+own module:
 
 - the commands themselves, built with `Command::new`, keeping today's API semantics for their route, and started under
   the `OpKey` of what they act on;
 - a read of what the helm does not push, sent with `operations::read`;
 - a command that is not work on a key (nothing draws it busy and the store records no refusal for it), sent with
-  `operations::send`.
+  `operations::send`. Checkout Trash listing uses `operations::send_unordered` and checks which read its answer belongs
+  to.
 
 A plain new kind of `OpKey` that only names a distinct resource (a private `Key` variant and its constructor, with no
 supersede rule and no change to how the store starts, refuses or settles work) is an extension point too, added in the

@@ -42,9 +42,8 @@ fn is_lifecycle(command: &FakeCommand) -> bool {
 }
 
 /// The Stops and Replaces the window sent since the last call, as (id, path, body), left unanswered for the test to
-/// answer. Every other command is answered with success at once, as the helm answers a preference write or a seen mark;
-/// the fake answers in order, so that works only while nothing sent before it waits, and a test with a Stop or Replace
-/// waiting reads later commands with `sent` instead.
+/// answer. Every other command is answered with success at once, as the helm answers a preference write or a seen
+/// mark. Tests use `sent` instead when they need to keep later commands unanswered alongside Stop or Replace.
 fn pending(fake: &mut FakeHelm) -> Vec<(u64, String, Value)> {
     let mut found = Vec::new();
     for command in fake.commands() {
@@ -1136,7 +1135,7 @@ fn in_row(cx: &mut VisualTestContext, id: &str, key: &str) -> Option<gpui::Bound
 /// SPEC.md keeps a plain Replace's YOLO question "with the control or surface that started the launch", and a session
 /// has one Replace in flight at most, so two sessions' Replaces may both be refused and wait at once; the replace
 /// module keeps one question per session for that reason. An answer that reached the other question, or a refusal that
-/// replaced or closed it, would replace the wrong session or lose the other's. The fake answers in order, so a's
+/// replaced or closed it, would replace the wrong session or lose the other's. Replace uses the ordered lane, so a's
 /// refusal comes first (the old case released the second source's first). Specified: with a's and then b's Replace
 /// confirmed from their rows' menus and both out, YOLO refusals of both draw a question in each row; b's one-off answer
 /// sends one Replace, of b with consent, takes b's question away and leaves a's; the helm's refusal of that Replace

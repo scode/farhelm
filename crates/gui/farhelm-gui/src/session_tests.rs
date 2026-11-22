@@ -16,7 +16,7 @@ use farhelm_helm_client::fake::{FakeDecision, FakeHelm};
 use farhelm_helm_client::terminal::{
     AttachmentLease, StreamState, TerminalAttach, TerminalEvent, TerminalEvents, TerminalHandle,
 };
-use farhelm_helm_client::{ApiPath, ChannelState, Method};
+use farhelm_helm_client::{ApiPath, ChannelState, Lane, Method};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, ListCounts,
     SessionRow,
@@ -57,6 +57,7 @@ fn a_completion_queued_across_a_reset_never_reaches_the_new_session(cx: &mut Tes
     cx.update(|cx| {
         first.update(cx, |session, cx| {
             session.command(
+                Lane::Ordered,
                 Method::Delete,
                 ApiPath::api(&["sessions", "a"]).unwrap(),
                 None,
@@ -100,6 +101,7 @@ fn a_command_lost_in_a_break_reports_nothing_and_the_notice_covers_it(cx: &mut T
     cx.update(|cx| {
         first.update(cx, |session, cx| {
             session.command(
+                Lane::Ordered,
                 Method::Post,
                 ApiPath::api(&["sessions"]).unwrap(),
                 None,

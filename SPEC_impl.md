@@ -3916,26 +3916,28 @@ channel"): the helm only talks to supervisors of its own protocol, and those ans
 the ordinary mutation deadline is sixty seconds. A capable host's accepted IDs stay in the local listing, count and size
 totals as removing, with any old failure cleared, until a later listing confirms absence. Older hosts keep optimistic
 removal on the receipt. A capable acceptance marks the host as removing, including for an accepted diagnostic-only ID,
-so a failed read right after cannot lose that report. A settled delete reads its host again unless a read has gone out
-since the delete did (`TrashButton::deleted` in `crates/gui/farhelm-gui/src/trash.rs`). A delete the helm answers with a
-host timeout (504) is followed by no read: the helm goes on with the cleanup while holding the host's trash gate, so a
-read would wait out the same bound, and the epoch the helm advances when a late answer accepts a checkout reads the host
-then (decided on 2026-11-15; recorded at `TrashButton::deleted`). The row's Retry uses the same single-ID selection and
-guards as Delete; queued or running rows offer no second action. A change in a row's failure text or time can move other
-rows' Deletes, so it starts the dialog's settle pause on every entry's Delete. Only the persistent trash icon turns
-upside down and bobs while requests are pending or a connected host's last listing reports removal, with stepped timing
-within the looping-indicator cap, the universal inactive-window pause, and no animation under Reduce Motion. Its tooltip
-names hosts freeing space and independently discloses retained cleanup issues. Opening the dialog does not clear issues.
-Later successful removals clear only their IDs' old issues; new per-ID diagnostics replace older diagnostics for those
-same IDs. An answer that is not a cleanup report is one dialog notice naming the IDs its delete sent, and a later report
-shrinks it by the IDs it confirms removed or answers with a per-ID diagnostic; unrelated successes leave it intact. A
-newer unconfirmed result takes its IDs out of earlier unconfirmed notices and leaves refusals alone (`record_outcome` in
-`crates/gui/farhelm-gui/src/trash/listing.rs`). A successful registry read prunes notices only for hosts it no longer
-lists; disconnected hosts and an unreadable registry keep them, and a late answer for a host removed meanwhile leaves
-nothing behind. A lost reply warns that some folders may already be deleted; other hosts continue. Close and Escape stay
-available. The archive cue (`crates/gui/farhelm-gui/src/trash/cue.rs`) wiggles the can when this window's session Delete
-reports that it archived a checkout, through ticker steps, and never under reduced motion; the row outline's flight into
-the can is not built yet, waiting for an overlay above the sidebar that only the layer manager may draw.
+so a failed read right after can retain that report. If a read issued after the delete has already succeeded and no
+refresh is outstanding, that listing supplies the removal state. A settled delete reads its host again unless a read has
+gone out since the delete did (`TrashButton::deleted` in `crates/gui/farhelm-gui/src/trash.rs`). A delete the helm
+answers with a host timeout (504) is followed by no read: the helm goes on with the cleanup while holding the host's
+trash gate, so a read would wait out the same bound, and the epoch the helm advances when a late answer accepts a
+checkout reads the host then (decided on 2026-11-15; recorded at `TrashButton::deleted`). The row's Retry uses the same
+single-ID selection and guards as Delete; queued or running rows offer no second action. A change in a row's failure
+text or time can move other rows' Deletes, so it starts the dialog's settle pause on every entry's Delete. Only the
+persistent trash icon turns upside down and bobs while requests are pending or a connected host's last listing reports
+removal, with stepped timing within the looping-indicator cap, the universal inactive-window pause, and no animation
+under Reduce Motion. Its tooltip names hosts freeing space and independently discloses retained cleanup issues. Opening
+the dialog does not clear issues. Later successful removals clear only their IDs' old issues; new per-ID diagnostics
+replace older diagnostics for those same IDs. An answer that is not a cleanup report is one dialog notice naming the IDs
+its delete sent, and a later report shrinks it by the IDs it confirms removed or answers with a per-ID diagnostic;
+unrelated successes leave it intact. A newer unconfirmed result takes its IDs out of earlier unconfirmed notices and
+leaves refusals alone (`record_outcome` in `crates/gui/farhelm-gui/src/trash/listing.rs`). A successful registry read
+prunes notices only for hosts it no longer lists; disconnected hosts and an unreadable registry keep them, and a late
+answer for a host removed meanwhile leaves nothing behind. A lost reply warns that some folders may already be deleted;
+other hosts continue. Close and Escape stay available. The archive cue (`crates/gui/farhelm-gui/src/trash/cue.rs`)
+wiggles the can when this window's session Delete reports that it archived a checkout, through ticker steps, and never
+under reduced motion; the row outline's flight into the can is not built yet, waiting for an overlay above the sidebar
+that only the layer manager may draw.
 
 The helm keeps shared non-session condition notices in one table. Each notice has a non-reused integer ID, a condition
 key within its kind and optional host, first raise time, read and resolved flags, and a tagged content snapshot. A

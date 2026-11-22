@@ -11,8 +11,8 @@
 //!   /api/credentials` (names, kinds, times and the recipes that use each, never a value) each time it is shown in an
 //!   opening of the dialog, so that coming back from another section (Recipes, once it is built) shows the recipes'
 //!   current use, and again after each of its own saves and deletes, as the old one reloaded after one. Each answer
-//!   replaces the list: the UI channel answers commands in the order they were sent (SPEC_impl.md, "The UI channel":
-//!   each command starts only after the previous one replied), so an earlier read never answers after a later one, and
+//!   replaces the list. Credential reads use the ordered lane (SPEC_impl.md, "The UI channel"), so an earlier read
+//!   always answers before a later one, and
 //!   the old app's generation check has nothing to guard. A failed read keeps the last good list and shows the helm's
 //!   reason with "Retry loading".
 //! - **One editor in place.** Add or Edit replaces the overview with an [`Editor`] (Back, Name, the secret, Delete,

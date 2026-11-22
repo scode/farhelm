@@ -7,8 +7,8 @@
 //! the connected remote `build-box`, and `gpu-1`, which the helm cannot reach), archived checkouts as the supervisor
 //! lists them, and helpers that take the fake's trash reads and answer them.
 
-use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_helm_client::{Lane, Method};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
 };
@@ -233,6 +233,7 @@ fn reads_follow_each_hosts_connection_and_trash_epoch_only(cx: &mut TestAppConte
         "one plain read per connected host"
     );
     assert_eq!(first.len(), 2, "and nothing else: {first:?}");
+    assert!(first.iter().all(|command| command.lane == Lane::Unordered));
     answer(
         &mut helm,
         &first,
@@ -341,8 +342,7 @@ fn only_a_host_freeing_space_is_rechecked_until_it_reports_completion(cx: &mut T
 }
 
 /// Why this matters: SPEC.md: "A failed read retains the last removal report rather than implying that removal
-/// finished", and a failed read means the host or its connection is in trouble; one that timed out held the window's
-/// ordered command stream for the helm's whole 20-second host-wait bound, so the window must not keep sending more
+/// finished". A timeout spends the full host-wait bound, so the app waits for fresh evidence before asking again
 /// (the other-dialogs area's coordinator's decision of 2026-11-15). Specified, with the local host freeing space: its
 /// recheck read answered with a failure keeps the can over, and well past the recheck interval nothing more is read;
 /// once the helm pushes the host's moved trash epoch, the host is read again.
