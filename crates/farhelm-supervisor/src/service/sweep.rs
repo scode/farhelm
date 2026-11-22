@@ -3725,10 +3725,13 @@ mod tests {
         );
     }
 
-    /// Delete must refuse when it cannot check a recorded tab scope, even
-    /// when the main launch had no scope and the portable sweep was clean.
+    /// The reap behind Delete must fail when it cannot check a recorded tab
+    /// scope, even when the main launch had no scope and the portable sweep
+    /// was clean. A real Delete refuses earlier, while preparing its
+    /// teardown, when the scope listing fails; this pins the reap's own
+    /// refusal, which still holds if a scope becomes uncheckable after that.
     #[farhelm_testtrace::test]
-    async fn delete_refuses_a_recorded_tab_scope_the_manager_cannot_check() {
+    async fn a_recorded_tab_scope_the_manager_cannot_check_fails_the_reap() {
         let session = uuid::Uuid::new_v4().to_string();
         let tab = crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()).unwrap();
         let scopes = crate::scope::ScopeManager::fake_reprobing(false, false, Arc::new(|_| {}));

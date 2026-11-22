@@ -2125,12 +2125,12 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   the host's hangup is left to the session's next marker sweep. **The residual**: the earlier host of a restart whose
   replacement started but was never confirmed and is gone by the next start (its launch record names nothing, so the
   fallback above does not apply) stays until the session's Delete, or a later restart is confirmed and a supervisor
-  starts. So does the old host of a restart that failed ambiguously in a running supervisor (host end or process-tree
-  cleanup unconfirmed): the session holds no terminal, so the next Restart from that supervisor starts empty while the
-  old host, with the history, runs on until a later start supersedes it or Delete ends it. And a runtime stopped while
-  it encodes a checkpoint or a seed leaves its emulator away for good; a runtime is stopped only where its host is given
-  up (a stopping supervisor, or a create's, a Restart's or a reload's cleanup, or the end of a superseded host), so
-  nothing reads it afterwards.
+  starts. So does the old host of a restart that failed ambiguously in a running supervisor (host end, scope or
+  process-tree cleanup unconfirmed): the session holds no terminal, so the next Restart from that supervisor starts
+  empty while the old host, with the history, runs on until a later start supersedes it or Delete ends it. And a runtime
+  stopped while it encodes a checkpoint or a seed leaves its emulator away for good; a runtime is stopped only where its
+  host is given up (a stopping supervisor, or a create's, a Restart's or a reload's cleanup, or the end of a superseded
+  host), so nothing reads it afterwards.
 - **Delete ends every terminal host of the session** (`service/session_hosts.rs`), since nothing else would: a host
   outlives its program and carries no session marker. Delete acts only on what the session records, never on a scan of
   the socket directory: the agent's host when its runtime holds one, the session's tab runtimes, and the session's

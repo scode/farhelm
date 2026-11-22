@@ -341,20 +341,48 @@ impl Render for HighlightsDialog {
             .map(|release| release.total_changes)
             .fold(0, u64::saturating_add);
         let changes = if count == 1 { "change" } else { "changes" };
-        DialogFrame::new("whats-new", TITLE, body, vec![
-            Button::new("whats-new-opt-out", "Don't show again", HoverHelp::tooltip("Turn off upgrade highlights"), Role::Button)
+        DialogFrame::new(
+            "whats-new",
+            TITLE,
+            body,
+            vec![
+                Button::new(
+                    "whats-new-opt-out",
+                    "Don't show again",
+                    HoverHelp::tooltip("Turn off upgrade highlights"),
+                    Role::Button,
+                )
                 .on_click(move |_, window, cx| dismiss(&opt_out, true, window, cx)),
-            Button::new("whats-new-all", "All release notes ↗", HoverHelp::tooltip("Open the full release notes in your browser"), Role::Link)
-                .tier(Tier::Link).on_click(|_, _, cx| cx.open_url(RELEASE_NOTES_URL)),
-            Button::new("whats-new-got-it", "Got it", HoverHelp::tooltip("Close these highlights"), Role::Button)
-                .tier(Tier::Primary).focus(&self.got_it)
+                Button::new(
+                    "whats-new-all",
+                    "All release notes ↗",
+                    HoverHelp::tooltip("Open the full release notes in your browser"),
+                    Role::Link,
+                )
+                .tier(Tier::Link)
+                .on_click(|_, _, cx| cx.open_url(RELEASE_NOTES_URL)),
+                Button::new(
+                    "whats-new-got-it",
+                    "Got it",
+                    HoverHelp::tooltip("Close these highlights"),
+                    Role::Button,
+                )
+                .tier(Tier::Primary)
+                .focus(&self.got_it)
                 .on_click(move |_, window, cx| dismiss(&got_it, false, window, cx)),
-        ])
+            ],
+        )
         .summary(subtitle(&self.releases))
-        .note(format!("{count} {changes} in total. See the release notes for the full detail."))
+        .note(format!(
+            "{count} {changes} in total. See the release notes for the full detail."
+        ))
         .width(px(664.))
         .scroll_stop("Release highlights")
-        .close("Close upgrade highlights", HoverHelp::tooltip("Close these highlights"), false,
-            move |_, window, cx| dismiss(&weak, false, window, cx))
+        .close(
+            "Close upgrade highlights",
+            HoverHelp::tooltip("Close these highlights"),
+            false,
+            move |_, window, cx| dismiss(&weak, false, window, cx),
+        )
     }
 }
