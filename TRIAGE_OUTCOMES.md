@@ -16,52 +16,6 @@
   execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md
-
-- Outcome: `fix code`.
-- Assessment: tensorlake_add.rs:1428-1499 holds `source_guard` across `create_host_sandbox`. Inside it,
-  tensorlake/hosts.rs:484 drops only its own (None) guard and then awaits `wait_tensorlake_ssh` (:485-497). Same root
-  cause as trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md, so one fix covers both. Basis:
-  SPEC_impl.md:6644-6645: "One per-recipe async mutex excludes source selection/create through the first observed
-  Running state from snapshot publication and deletion. Installation and supervisor attachment run outside that
-  exclusion." Fix: pass the caller's guard into the create path, or drop it before the SSH wait. Both shapes behave the
-  same.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## trailing-ordinary-tensorlake-add-outer-source-lock-across-ssh-readiness.md
-
-- Outcome: `fix code`.
-- Assessment: Same code (tensorlake_add.rs:1428-1499, tensorlake/hosts.rs:484-497). Basis: SPEC_impl.md:6644-6645
-  (quoted above). Fix both in one change.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## trailing-provisioning-shared-environment-preparation-progress.md
-
-- Outcome: `fix code`.
-- Assessment: tensorlake_add.rs:595 sets step 0 Running. `SessionPreparation::needed` (:58-77) inserts a Running
-  preparation step at index 1, and step 0 is completed only after ensure_prepared returns (:625). The GPUI pill
-  (launcher/pill.rs:110-113) and host summary (hosts/progress.rs:394-398) show the first Running step. The step names
-  are now provider-aware (LaunchStepNames, :423-430), so that half of the original finding is fixed. Basis:
-  SPEC.md:1563-1565: "Existing launch progress names **Preparing <recipe> for sessions…**, when needed with the
-  first-launch/24-hour/update explanation, **Creating a <recipe> sandbox…** ...". Fix: complete step 0 when preparation
-  is found to be needed, before inserting its Running step.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
 ## shell-stop-suspend-error-names-agent.md
 
 - Outcome: `fix code`.
@@ -95,50 +49,6 @@
   and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this
   ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
   maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## package-repair-does-not-wait-for-dpkg-lock.md
-
-- Outcome: `fix code`.
-- Assessment: A snapshot build can fail right after boot if Ubuntu's background apt timers hold the package lock. The
-  `dpkg --configure -a` repair step does not wait for the lock the way the later apt-get steps do (600 s). Verified:
-  Confirmed (`tensorlake/build_script.rs` `packages`: the lock timeout applies only to apt-get, and the bare
-  `dpkg --configure -a` runs first with `|| fail`). The code's own comment gives boot-time apt timers as the reason for
-  the timeout, which is the same premise. Not observed on the Tensorlake image.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: fix code, tiny (give the repair step the same lock wait, for example a
-  bounded retry, or run the repair through apt-get with the timeout). It matches the code's existing rationale. If the
-  fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
-  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
-  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
-  and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## trailing-agent-environment-missing-local-ssh-key-preflight.md
-
-- Outcome: `fix code`.
-- Assessment: If Farhelm's local Tensorlake SSH key is missing or unreadable, an agent can still raise an Allow/Deny
-  card for a new sandbox. Allowing it then fails with "create and register Farhelm's SSH key". The GUI launcher disables
-  the same choice up front. Verified: launch_environment_for_agent (agent_requests.rs:4413 onward) checks only
-  `provider.places()`. Tensorlake's places (tensorlake/hosts.rs:187-192) checks only the API key. The SSH-key check
-  happens after Allow, in ensure_prepared (:209-215), before any billed work. SPEC_impl.md:6272-6274: "the user is never
-  asked to approve a launch that is then refused before anything starts". SPEC.md:1543-1544 disables the launcher choice
-  when the key is missing. Not SETTLED because the fix has a design choice (put the check in places(), which also feeds
-  the GUI, or in the agent path), and because by then a host row and run are already registered.
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Yes. Fix the code: report a missing local key as a Tensorlake
-  place-unavailable reason, or check it in the agent path before the card. If the fix turns out not to be
-  straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size gate:
-  about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment);
-  over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## trailing-sealed-delete-comment-hold-versus-seal-record.md

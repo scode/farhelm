@@ -110,6 +110,18 @@ impl ProviderHandle {
         }
     }
 
+    /// Check launch prerequisites that an agent must satisfy before asking for approval.
+    /// Host-backed places have already reported their cached availability.
+    pub(crate) async fn preflight_agent_launch(
+        place: Place,
+        tensorlake: &crate::tensorlake::Tensorlake,
+    ) -> anyhow::Result<()> {
+        match place {
+            Place::TensorlakeAccount => tensorlake.require_session_ssh_key().await,
+            Place::PodmanHost(_) => Ok(()),
+        }
+    }
+
     /// Register the launch's cleanup owner before preparation or creation.
     /// Host-backed images have no observed account yet; their provider records
     /// it atomically with the selected install facts before sending run.

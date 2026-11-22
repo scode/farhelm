@@ -34,6 +34,9 @@ const LOG_TAIL_BYTES: u32 = 8192;
 /// names so apt and dpkg inherit exact values without putting secrets in argv.
 const PACKAGE_PROXY_ENV: &str = "http_proxy,https_proxy,ftp_proxy,all_proxy,no_proxy,HTTP_PROXY,HTTPS_PROXY,FTP_PROXY,ALL_PROXY,NO_PROXY";
 
+/// A booted base can still have a package timer doing work in the background.
+const PACKAGE_LOCK_WAIT_SECS: u32 = 600;
+
 /// The official installers (goal D12).
 pub(crate) const CLAUDE_INSTALLER: &str = "https://claude.ai/install.sh";
 pub(crate) const CODEX_INSTALLER: &str = "https://chatgpt.com/codex/install.sh";
@@ -135,7 +138,9 @@ fn readiness_script(pid1: &str, os_release: &str) -> String {
 ///   package-manager controls are fixed inputs set on sudo's far side.
 /// - `DPkg::Lock::Timeout`: a systemd-booted Ubuntu runs apt's daily timers,
 ///   which can hold the dpkg lock just after boot.
-/// - `dpkg --configure -a` first is cheap and repairs a half-configured dpkg.
+/// - `dpkg --configure -a` repairs an interrupted install before apt runs.
+///   Only lock contention gets the same wait as apt. Other failures keep the
+///   repair's own diagnostic and end the build immediately.
 /// - `NEEDRESTART_MODE=a` and the `confdef`/`confold` options keep apt from
 ///   asking anything.
 /// - Recommended packages stay on, so a package list behaves as it would in
@@ -148,8 +153,19 @@ pub(crate) fn packages(packages: &[String]) -> String {
     ];
     words.extend(packages.iter().map(|package| shell_quote(package)));
     format!(
-        "{}apt_get() {{ sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600 -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \"$@\" >>\"$log\" 2>&1 || fail; }}\n\
-         sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >>\"$log\" 2>&1 || fail\n\
+        "{}apt_get() {{ sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout={PACKAGE_LOCK_WAIT_SECS} -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold \"$@\" >>\"$log\" 2>&1 || fail; }}\n\
+         repair=\"$log.dpkg\"\n\
+         retries=0\n\
+         while ! sudo -n --preserve-env={PACKAGE_PROXY_ENV} env LC_ALL=C DEBIAN_FRONTEND=noninteractive dpkg --configure -a >\"$repair\" 2>&1; do\n\
+         if [ \"$retries\" -ge {PACKAGE_LOCK_WAIT_SECS} ] || ! grep -Eq '^dpkg: error: dpkg ((frontend|database) lock (is|was) locked by |status database is locked by another process$)' \"$repair\"; then\n\
+         cat \"$repair\" >>\"$log\"\n\
+         fail\n\
+         fi\n\
+         retries=$((retries + 1))\n\
+         sleep 1 || fail\n\
+         done\n\
+         cat \"$repair\" >>\"$log\" || fail\n\
+         rm -f \"$repair\" || fail\n\
          apt_get update\n\
          apt_get install {}\n",
         prelude("packages"),
@@ -391,7 +407,7 @@ mod tests {
             "apt_get update\napt_get install ca-certificates curl gh 'ripgrep' 'g++' 'pkg:amd64=1.0'\n"
         ), "{script}");
         assert!(script.contains(&format!("sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a apt-get -q -y -o DPkg::Lock::Timeout=600")));
-        assert!(script.contains(&format!("sudo -n --preserve-env={PACKAGE_PROXY_ENV} env DEBIAN_FRONTEND=noninteractive dpkg --configure -a")));
+        assert!(script.contains(&format!("sudo -n --preserve-env={PACKAGE_PROXY_ENV} env LC_ALL=C DEBIAN_FRONTEND=noninteractive dpkg --configure -a")));
         let words = shell_words::split(script.lines().last().unwrap()).unwrap();
         assert_eq!(
             words,
@@ -413,6 +429,8 @@ mod tests {
     /// child boundary. The sudo stand-in preserves only explicitly named
     /// proxies, and apt/dpkg record their own environment and argv. Searching
     /// script text alone would miss a proxy silently removed by sudo policy.
+    /// The repair retries the current and historical lock diagnostics under
+    /// the same proxy environment before either apt command begins.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
     async fn package_children_inherit_exact_proxies_through_named_sudo_preservation() {
@@ -456,6 +474,18 @@ entry['unrelated'] = 'UNRELATED_PROXY_TEST' in os.environ
 entry['frontend'] = os.environ.get('DEBIAN_FRONTEND')
 with (root / 'events.jsonl').open('a') as output:
     output.write(json.dumps(entry) + '\n')
+if program == 'dpkg':
+    assert os.environ['LC_ALL'] == 'C'
+    for index, diagnostic in enumerate([
+        'frontend lock was locked by another process',
+        'database lock is locked by another process',
+        'status database is locked by another process',
+    ]):
+        marker = root / f'lock-refused-{index}'
+        if not marker.exists():
+            marker.touch()
+            print(f'dpkg: error: dpkg {diagnostic}', file=sys.stderr)
+            sys.exit(2)
 "#.replace("__ROOT__", &serde_json::to_string(root.path().to_str().unwrap()).unwrap());
         for name in ["sudo", "apt-get", "dpkg"] {
             let path = bin.join(name);
@@ -464,6 +494,16 @@ with (root / 'events.jsonl').open('a') as output:
         }
         symlink("/usr/bin/env", bin.join("env")).unwrap();
         symlink("/usr/bin/tail", bin.join("tail")).unwrap();
+        for (tool, path) in [
+            ("cat", "/bin/cat"),
+            ("grep", "/usr/bin/grep"),
+            ("rm", "/bin/rm"),
+        ] {
+            symlink(path, bin.join(tool)).unwrap();
+        }
+        // The stand-in produces all three refusals before success. No wall-clock
+        // wait is needed to establish the order of the retries.
+        symlink("/usr/bin/true", bin.join("sleep")).unwrap();
         let names = [
             "http_proxy",
             "https_proxy",
@@ -540,8 +580,8 @@ with (root / 'events.jsonl').open('a') as output:
             .collect::<Vec<_>>();
         assert_eq!(
             events.len(),
-            6,
-            "sudo and each of dpkg/update/install must actually run"
+            12,
+            "sudo and each of four dpkg calls, update and install must run"
         );
         for event in &events {
             let argv = event["argv"].as_array().unwrap();
@@ -559,16 +599,19 @@ with (root / 'events.jsonl').open('a') as output:
             }
         }
         assert_eq!(events[1]["program"], "dpkg");
-        assert_eq!(events[3]["program"], "apt-get");
-        assert_eq!(events[5]["program"], "apt-get");
+        assert_eq!(events[3]["program"], "dpkg");
+        assert_eq!(events[5]["program"], "dpkg");
+        assert_eq!(events[7]["program"], "dpkg");
+        assert_eq!(events[9]["program"], "apt-get");
+        assert_eq!(events[11]["program"], "apt-get");
         assert!(
-            events[3]["argv"]
+            events[9]["argv"]
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!("update"))
         );
         assert!(
-            events[5]["argv"]
+            events[11]["argv"]
                 .as_array()
                 .unwrap()
                 .contains(&serde_json::json!("install"))

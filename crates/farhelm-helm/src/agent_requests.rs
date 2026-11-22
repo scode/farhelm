@@ -4487,6 +4487,14 @@ async fn launch_environment_for_agent(
         plan.repo.clone(),
     )?;
     request.validate_sandbox_launch()?;
+    crate::environment::ProviderHandle::preflight_agent_launch(place, &state.tensorlake)
+        .await
+        .map_err(|error| {
+            crate::SupervisorError::helm(
+                ErrorKind::Unavailable,
+                format!("{error}; nothing was started"),
+            )
+        })?;
     let place_name = match place.host() {
         Some(host) => crate::hosts::host_views(state)
             .await?
@@ -15330,6 +15338,66 @@ mod tests {
             containers.builds.load(std::sync::atomic::Ordering::SeqCst),
             0
         );
+    }
+
+    /// A valid Tensorlake recipe and account still need a local SSH key.
+    /// Refuse while approval and host registration are both untouched.
+    #[farhelm_testtrace::test]
+    async fn tensorlake_agent_launch_with_no_local_key_refuses_before_the_card() {
+        let (h, local, _, _) = container_fleet().await;
+        put_recipe(&h, "dev").await;
+        h.store
+            .save_tensorlake_config(farhelm_proto::tensorlake::SaveSettings {
+                api_key: Some("fixture-key".into()),
+                ..Default::default()
+            })
+            .await
+            .ok()
+            .unwrap();
+        h.store
+            .update_tensorlake_recipe_state("dev", |recipe, state| {
+                state.snapshot = Some(crate::tensorlake::build::BuiltSnapshot {
+                    id: "fixture-snapshot".into(),
+                    base: recipe.base.clone(),
+                    disk_gb: recipe.size.disk_gb,
+                    packages: recipe.packages.clone(),
+                    ..Default::default()
+                });
+            })
+            .await
+            .unwrap()
+            .unwrap();
+        let settings = h.state.tensorlake.settings().await.unwrap();
+        assert!(settings.api_key_set);
+        assert!(!matches!(
+            settings.ssh_key,
+            farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+        ));
+
+        let _gui = h.manager.ui_seat().hold();
+        let handler = HelmAgentRequests::for_state(&h.state);
+        let launch = handler.handle(
+            origin_of(&h, local),
+            "local-live",
+            AgentVerb::CreateEnvironment {
+                recipe: "dev".into(),
+                container_host: None,
+                templates: Vec::new(),
+                edits: environment_edits(),
+            },
+        );
+        let (kind, reason) = refused(
+            tokio::time::timeout(std::time::Duration::from_secs(2), launch)
+                .await
+                .expect("local SSH key preflight must answer without approval"),
+        );
+        assert_eq!(kind, ErrorKind::Unavailable);
+        assert!(
+            reason.contains("create and register Farhelm's SSH key"),
+            "{reason}"
+        );
+        assert!(h.state.approvals.list().is_empty());
+        assert!(owned_rows(&h).await.is_empty());
     }
 
     /// Spec: a launch task's session comes back to the agent under the full

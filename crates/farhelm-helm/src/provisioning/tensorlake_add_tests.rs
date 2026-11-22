@@ -654,6 +654,28 @@ async fn recipe_session_progress_names_its_steps_in_sandbox_words() {
     );
 }
 
+/// Once the provider starts preparation, the launcher must headline that
+/// step. Hold the preparer so the test reads progress before it can advance.
+#[farhelm_testtrace::test]
+async fn recipe_session_progress_leaves_selection_when_preparation_begins() {
+    let mut f = fixture(false).await;
+    f.bind_session_launch().await;
+    f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
+    let (host, run) = f.admitted(true).await;
+    f.wait_for_backend("prepare-sandbox").await;
+    let view = f.service.view(host).await.unwrap();
+    assert_eq!(view.steps[0].status, StepStatus::Completed);
+    let running = view
+        .steps
+        .iter()
+        .find(|step| step.status == StepStatus::Running)
+        .unwrap();
+    assert_eq!(running.name, "Preparing test-recipe for sessions…");
+
+    f.backend_config(serde_json::json!({"default": {"fail_action": "prepare-sandbox"}}));
+    assert_eq!(f.launch_outcome(host, &run).await.status, RunStatus::Failed);
+}
+
 /// Recipe launch must refuse before billing when its software has not been
 /// built. The same fixture's ordinary Add path may build, so this distinguishes
 /// the new launch contract from merely reusing Add without a preflight.
@@ -1840,6 +1862,7 @@ async fn lazy_preparation_explains_its_wait_and_fresh_cache_skips_installation()
 /// The API can report Running before SSH accepts a channel. A prepared clone
 /// must stay unadmitted and receive no credential operations until that separate
 /// transport boundary succeeds, without running setup on the clone itself.
+/// The recipe lock ends at Running so snapshot work can proceed while SSH waits.
 #[farhelm_testtrace::test]
 async fn prepared_clone_waits_for_ssh_before_admission_and_delivery() {
     let f = fixture(false).await;
@@ -1847,6 +1870,15 @@ async fn prepared_clone_waits_for_ssh_before_admission_and_delivery() {
     f.backend_config(serde_json::json!({"default": {"hold_actions": true}}));
     let host = f.add().await.host_id;
     f.wait_for_backend("wait-tensorlake-ssh").await;
+    drop(
+        tokio::time::timeout(
+            Duration::from_secs(2),
+            f.tensorlake.builds().lock_snapshot_use("test-recipe"),
+        )
+        .await
+        .expect("the Running clone no longer holds its source")
+        .unwrap(),
+    );
     let row = f
         .harness
         .store
