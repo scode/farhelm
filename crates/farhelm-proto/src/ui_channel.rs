@@ -77,7 +77,7 @@ pub enum ClientMessage {
 /// reaches the router. A segment holding an encoded `/` or `\` does decode
 /// (a host's id may contain one); the helm refuses that command with an
 /// ordinary reply instead, and the channel continues.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, PartialEq, Serialize, Deserialize)]
 pub struct Command {
     /// Chosen by the GUI, echoed in the reply. Unique within one channel.
     pub id: u64,
@@ -86,6 +86,17 @@ pub struct Command {
     /// The JSON request body, if the route takes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
+}
+
+impl std::fmt::Debug for Command {
+    /// Keep the channel ID and route visible in diagnostics while protecting credentials in the HTTP request body.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Command")
+            .field("id", &self.id)
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .finish_non_exhaustive()
+    }
 }
 
 /// A command's HTTP method: the closed set of methods the helm's routes
@@ -1269,6 +1280,25 @@ pub enum SshSignInOutcome {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Debugging the whole channel message must keep the request ID and route without printing a credential body.
+    /// The helm still receives the body through serde.
+    #[test]
+    fn command_debug_omits_the_request_body() {
+        let body = serde_json::json!({ "token": "sample-private-token" });
+        let command = Command {
+            id: 42,
+            method: Method::Post,
+            path: ApiPath::api(&["credentials"]).unwrap(),
+            body: Some(body.clone()),
+        };
+        let serialized = serde_json::to_value(&command).unwrap();
+        assert_eq!(serialized["body"], body);
+
+        let debug = format!("{:?}", ClientMessage::Command(command));
+        assert!(debug.contains("id: 42") && debug.contains("/api/credentials"));
+        assert!(!debug.contains("sample-private-token") && !debug.contains("body:"));
+    }
 
     /// The method's JSON spelling is wire format: the helm shipped before it
     /// was an enum and decoded these exact strings, so a renamed variant or a

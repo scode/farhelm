@@ -242,12 +242,6 @@ consequences.
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`gui-command-debug-includes-secret-body.md`](gui-command-debug-includes-secret-body.md) — A future diagnostic that
-  prints a GUI command could expose a token or login file included in that request.
-
-- [`untouched-host-alias-save-restores-old-value.md`](untouched-host-alias-save-restores-old-value.md) — Clicking Save
-  without typing can undo a host rename that just happened through an approved agent request.
-
 - [`stop-and-suspend-hides-timeout-reason.md`](stop-and-suspend-hides-timeout-reason.md) — When Stop and suspend exceeds
   its reply deadline, Farhelm can leave you without the explanation that it is still working or that Stop already
   failed.

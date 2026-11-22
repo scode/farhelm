@@ -5324,6 +5324,9 @@ installation it is on, so it follows an open session the sidebar's filter hides
   clear reintroduce the exact ambiguous name an alias write had just been refused for. The alias rides the manager's
   host snapshot with the destination and connection state, so session rows, single-session reads, and agent relay views
   derive one coherent name without each joining the registry.
+
+  In host settings, saving an untouched alias closes its editor without writing. An agent's rename may still be waiting
+  for the host's locks.
 - The add host dialog marks its `POST /api/hosts/probe` as a new entry (`new_entry`, carrying the optional alias); no
   other caller sends it. Without the marker the probe keeps converging onto an existing row for the destination, which
   is how a host row's "set up again", path repair, a confirmed add's own second registration and update confirmation
@@ -5947,7 +5950,8 @@ Protected `GET/POST /api/credentials` and `PUT/DELETE /api/credentials/{name}` d
 from replacement (404 after deletion). Read queries select metadata alone. Save acknowledgements read that metadata
 inside the same immediate transaction as the write, so a concurrent replacement cannot change the acknowledged revision.
 JSON decoder and database diagnostics never enter responses or logs. Secret-bearing request types have no Debug
-implementation. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64 KiB,
+implementation. The GUI and UI channel's generic commands omit request bodies from Debug because either can carry a
+credential write. Tokens reuse the visible-ASCII 4096-byte bound; Codex accepts only a JSON object of at most 64 KiB,
 preserving vendor fields. The 512 KiB request cap permits JSON escaping of the bounded pasted file.
 
 Credential metadata includes the names of recipes referring to it. The same reference query protects deletion inside its

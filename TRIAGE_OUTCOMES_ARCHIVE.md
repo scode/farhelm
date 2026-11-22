@@ -37059,3 +37059,51 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. The editor shows the incompatible mode and any flag words beside the existing save refusal. Recorded
   in jj change `lknzynsy`, bookmark `plan/triage-gui-misc/05-templates`,
   [draft PR #4553](https://github.com/scode/farhelm/pull/4553/changes).
+
+## gui-command-debug-includes-secret-body.md
+
+- Outcome: `fix code`.
+- Assessment: None today. A future debug log of a GUI request could print a token or login file carried in its body.
+  Verified: GUI `Command` derives `Debug` over `body: Option<Value>`
+  (`crates/gui/farhelm-gui/src/operations.rs:479-484`), and so does proto `ui_channel::Command`
+  (`crates/farhelm-proto/src/ui_channel.rs:80-87`). The reviewer found no code that formats one. SPEC_impl.md ~5904:
+  "Secret-bearing request types have no Debug implementation." That line sits in the helm's credential section; whether
+  generic envelopes count is a reading.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: yes. Fix code with a hand-written Debug that omits the body (both
+  types). Otherwise the item fits "Harm whose route is not established" (could-be-highest, so it needs a drop check). If
+  the fix turns out not to be straightforward, or needs significant additional complexity, stop and bring it back to the
+  maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: Fixed. The desktop operation and UI channel command envelopes both omit the request body from Debug.
+  Recorded in jj change `kuywoxqs`, bookmark `plan/triage-gui-misc/06-hosts-settings-and-containers`,
+  [draft PR #4556](https://github.com/scode/farhelm/pull/4556/changes).
+
+## untouched-host-alias-save-restores-old-value.md
+
+- Outcome: `fix code`.
+- Assessment: With a host's alias editor open, an approved agent rename can be undone if the user presses Save without
+  typing before the new name shows. This can happen while the agent's edit is still waiting for the host's locks, for
+  example behind a running install. Verified: the alias save sends the held value unconditionally
+  (`hosts/settings.rs:265-275`). The agent edit takes the provisioning and write locks after approval
+  (`farhelm-helm/src/hosts.rs:1080-1084`), so the GUI write can land after it. SPEC.md "One GUI at a time" ~5482: "A GUI
+  write must not undo a change an agent or the command line made while that view was open". Only checkout-folder and
+  post-clone saves carry the loaded value. The sub-second allowance (~5500) does not cover a write queued behind locks.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code. Treat Save on an untouched draft as Cancel. If the fix turns
+  out not to be straightforward, or needs significant additional complexity, stop and bring it back to the maintainer.
+  Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. Save closes an untouched alias field without sending a write that could undo a concurrent rename.
+  Recorded in jj change `kuywoxqs`, bookmark `plan/triage-gui-misc/06-hosts-settings-and-containers`,
+  [draft PR #4556](https://github.com/scode/farhelm/pull/4556/changes).
