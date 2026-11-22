@@ -17082,12 +17082,22 @@ mod tests {
         .expect("read schema")
     }
 
-    /// Historical fixtures rewind the environment columns added in schemas 83 and 89 before removing older host
-    /// columns. Leaving a newer column in place changes its final position when the migration ladder appends the
+    /// Undo schemas 97 and 98 (the container place claims and each container's recorded machine and account), newest
+    /// first. Every fixture that rewinds a fresh database below schema 97 and then compares its schema with a fresh
+    /// one runs this before dropping older host columns: the place columns sit last in a fresh `hosts` table, and left
+    /// in place they would end up ahead of the older columns the migration ladder appends again. Fixtures that do not
+    /// compare schemas can leave them, since the 97 and 98 steps accept a table and columns that already exist.
+    const REWIND_CONTAINER_PLACE_IDENTITY: &str = "ALTER TABLE hosts DROP COLUMN podman_place_uid;
+             ALTER TABLE hosts DROP COLUMN podman_place_machine_id;
+             DROP TABLE podman_place_claims;";
+
+    /// Historical fixtures rewind the environment columns added in schemas 83, 89, 97 and 98 before removing older
+    /// host columns. Leaving a newer column in place changes its final position when the migration ladder appends the
     /// older columns again.
     fn rewind_environment_host_columns(conn: &Connection) {
-        conn.execute_batch(
-            "DROP INDEX hosts_place_host;
+        conn.execute_batch(&format!(
+            "{REWIND_CONTAINER_PLACE_IDENTITY}
+             DROP INDEX hosts_place_host;
              ALTER TABLE hosts DROP COLUMN environment_sealed_at;
              ALTER TABLE hosts DROP COLUMN environment_provider;
              ALTER TABLE hosts DROP COLUMN place_host;
@@ -17096,7 +17106,7 @@ mod tests {
              ALTER TABLE hosts DROP COLUMN podman_home;
              ALTER TABLE hosts DROP COLUMN podman_uid;
              ALTER TABLE hosts DROP COLUMN podman_pending_create_at;",
-        )
+        ))
         .expect("rewind the environment columns before historical migrations");
         assert_eq!(
             conn.query_row(
@@ -17558,9 +17568,10 @@ mod tests {
         store
             .conn
             .lock()
-            .execute_batch(
-                "ALTER TABLE hosts DROP COLUMN environment_sealed_at; PRAGMA user_version = 88;",
-            )
+            .execute_batch(&format!(
+                    "{REWIND_CONTAINER_PLACE_IDENTITY}
+                     ALTER TABLE hosts DROP COLUMN environment_sealed_at; PRAGMA user_version = 88;"
+                ))
             .unwrap();
         assert!(
             store

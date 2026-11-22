@@ -53,6 +53,17 @@ pub(super) const CONTAINER_PLACE_UNVERIFIED: &str = "Farhelm could not verify th
 /// A single place's identity for command fakes that model one Podman store.
 #[cfg(test)]
 pub(crate) const TEST_PLACE_IDENTITY: &str = "fe001122aabbccddeeff001122aabbcc\n1000\n";
+/// Describe a container command that never reached the host's place check,
+/// keeping whatever the transport or the remote shell said about why.
+fn container_host_unanswered(result: &crate::provisioning::CommandResult) -> String {
+    let status = result.failure_status();
+    let detail = result.stderr.trim();
+    if detail.is_empty() {
+        format!("Farhelm could not reach this container host ({status}).")
+    } else {
+        format!("Farhelm could not reach this container host ({status}): {detail}")
+    }
+}
 const IDENTITY_UNREADABLE: &str = "Farhelm could not verify this container host's machine and account. Check its SSH destination and press Refresh.";
 const PROXY_VARIABLES: [&str; 10] = [
     "http_proxy",
@@ -160,10 +171,20 @@ pub(crate) trait PlaceCommands: Send + Sync {
         ];
         wrapped.extend_from_slice(argv);
         let mut result = self.run_bounded(route, &wrapped, timeout).await?;
-        anyhow::ensure!(
-            result.stdout.starts_with(marker.as_bytes()),
-            "{CONTAINER_PLACE_UNVERIFIED}"
-        );
+        if !result.stdout.starts_with(marker.as_bytes()) {
+            // Without the proof line the command did not run. Exit 125 with
+            // nothing printed is the guard itself: it ran and could not prove
+            // the recorded machine and account (a different host, or one that
+            // lacks what the check needs). Anything else, such as SSH failing
+            // to connect to a host that is asleep, never reached the check, so
+            // it is reported as the host not answering, with its own
+            // diagnostic, rather than as a changed destination. Both stay
+            // errors, so neither can be read as Podman's own answer.
+            if result.code == Some(125) && result.stdout.is_empty() {
+                anyhow::bail!("{CONTAINER_PLACE_UNVERIFIED}");
+            }
+            anyhow::bail!("{}", container_host_unanswered(&result));
+        }
         result.stdout.drain(..marker.len());
         Ok(result)
     }
@@ -1743,6 +1764,9 @@ mod tests {
     /// Run the production guard and capture layer with shell functions that
     /// supply a fixture identity. A real command's status 1 counts only
     /// after the guard evaluates and proves the expected account and machine.
+    /// A failure before the guard runs (a shell exiting 1, or 255 standing in
+    /// for SSH failing to connect) is reported as an unreachable host with its
+    /// own stderr; only the guard's 125 reports a changed destination.
     #[cfg(target_os = "linux")]
     #[farhelm_testtrace::test]
     async fn absence_needs_a_same_shell_place_proof() {
@@ -1831,8 +1855,10 @@ mod tests {
         );
         assert_eq!(output.code, Some(125));
 
-        // A shell can exit before any verification. Its 1 is not Podman absence.
-        commands.before_guard = "exit 1";
+        // A shell can exit before any verification. Its 1 is not Podman
+        // absence, and since the check never ran it is not reported as a
+        // changed destination either.
+        commands.before_guard = "echo 'no route to host' >&2; exit 1";
         expected.uid -= 1;
         let error = commands
             .run_verified(
@@ -1843,7 +1869,26 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+        assert_eq!(
+            error.to_string(),
+            "Farhelm could not reach this container host (exit status 1): no route to host"
+        );
+
+        // SSH's own 255 for a host that cannot be reached is the common case.
+        commands.before_guard = "exit 255";
+        let error = commands
+            .run_verified(
+                &BaseRoute::Local,
+                &command,
+                &expected,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(
+            error.to_string(),
+            "Farhelm could not reach this container host (exit status 255)."
+        );
     }
 
     /// A missing busctl must not add a new place prerequisite. systemctl's
