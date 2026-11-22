@@ -132,8 +132,8 @@ linux/launcher-checkout-on-suspended-host--dark.png 314276c2906f93d32daae89ab925
 linux/launcher-checkout-on-suspended-host--light.png 48e20199ab8f2af5c8971bb8024b5d095beef51f
 linux/launcher-command-results--dark.png e32f4391ceacf56d41525e95f0ed6222667fbf12
 linux/launcher-command-results--light.png a8fa7e5ce8b41b040661c13bde16008298f1d625
-linux/launcher-hook-setup--dark.png 918c9878088c665680f1e50bf44b6ac2115e44c3
-linux/launcher-hook-setup--light.png b8ded053cd2a8404195e1c2e802fa3de233e56f9
+linux/launcher-hook-setup--dark.png 0d49f8c97e401b00d028939db020bf8a427b2281
+linux/launcher-hook-setup--light.png d532d7cd90fc606674733f9ebd523a676689c3c8
 linux/launcher-host-menu--dark.png 54333d94c4cf20bb81738410f245f8cf7fe85eb8
 linux/launcher-host-menu--light.png 8908cac59773a90c3cbb1faa9fb192784d0566d8
 linux/launcher-managed-checkout--dark.png 4cd5adb85681073d70623c5bc2162d5be4968ed1

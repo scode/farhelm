@@ -201,8 +201,8 @@ pub(super) fn has_node(cx: &mut VisualTestContext, id: &str) -> bool {
         .any(|node| node.element_id.as_deref() == Some(id))
 }
 
-/// A one-off launch leaves consent off. The persistent answer needs a successful write before sending a create,
-/// even when the normal Launch button is pressed while that write is waiting.
+/// Hook setup is the primary action, but Cancel has initial focus. A one-off launch leaves consent off. The primary
+/// answer needs a successful write before sending a create, even when the normal Launch button is pressed during it.
 #[gpui::test]
 fn hook_setup_launch_waits_for_consent_and_keeps_the_one_off_answer(cx: &mut TestAppContext) {
     use farhelm_helm_client::Method;
@@ -227,8 +227,16 @@ fn hook_setup_launch_waits_for_consent_and_keeps_the_one_off_answer(cx: &mut Tes
     assert!(consent.contains("outside Farhelm"), "{consent}");
     assert!(consent.contains("every machine"), "{consent}");
     assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Set up and launch")
+    );
+    assert_eq!(
+        name_of(cx, "prompt-alternative-1").as_deref(),
+        Some("Launch without")
+    );
 
-    test_support::click(cx, "prompt-alternative-1");
+    test_support::click(cx, "prompt-confirm");
     settle(cx);
     let writes = helm.commands();
     let [write] = writes.as_slice() else {
@@ -247,13 +255,15 @@ fn hook_setup_launch_waits_for_consent_and_keeps_the_one_off_answer(cx: &mut Tes
         "a refusal keeps the decision open"
     );
     assert!(helm.commands().is_empty(), "a failed write starts nothing");
-    test_support::click(cx, "prompt-confirm");
-    let creates = super::launch_tests::creates(&mut helm, cx);
-    assert_eq!(creates.len(), 1, "one launch after the one-off answer");
-    assert_eq!(
-        creates[0].body.as_ref().unwrap()["launch"]["harness"],
-        "grok"
-    );
+    test_support::click(cx, "prompt-alternative-1");
+    settle(cx);
+    let commands = helm.commands();
+    let [create] = commands.as_slice() else {
+        panic!("the one-off answer sends only a create: {commands:?}")
+    };
+    assert_eq!(create.method, Method::Post);
+    assert_eq!(create.path, "/api/sessions");
+    assert_eq!(create.body.as_ref().unwrap()["launch"]["harness"], "grok");
 }
 
 /// Installing hooks from the first-run question uses the same settings route as the switch. A successful save
@@ -274,7 +284,11 @@ fn hook_setup_success_continues_the_launch_once(cx: &mut TestAppContext) {
     assert_eq!(read.path, "/api/agent-hook-setup/grok");
     helm.reply(read.id, 200, Some(json!({ "enabled": false })));
     settle(cx);
-    test_support::click(cx, "prompt-alternative-1");
+    assert_eq!(
+        name_of(cx, "prompt-confirm").as_deref(),
+        Some("Set up and launch")
+    );
+    test_support::click(cx, "prompt-confirm");
     settle(cx);
     let writes = helm.commands();
     let [write] = writes.as_slice() else {

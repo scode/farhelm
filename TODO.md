@@ -464,14 +464,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Decide which button is primary on the launcher's hook setup prompt.** When starting a Grok or Antigravity session
-  with automatic Restart hook setup turned off in Settings → Agents, the launcher shows a prompt asking whether to let
-  Farhelm install its hook files into that agent's configuration so **Restart** can resume conversations. Currently
-  **Launch without** is styled as the primary button and **Set up and launch** is the secondary button (chosen during
-  `agent-hook-setup` because the prompt asks consent to modify the agent's saved configuration). Revisit when planning
-  whether **Set up and launch** should be the primary button instead (or keep **Launch without** primary), and update
-  the prompt and its golden screenshots if changed. Plan: `plans/queue/hook-setup-primary-button.md`.
-
 - **Replace on a guarded Codex session asks to confirm a YOLO launch.** it's a guarded session and i clicked replace and
   got a dialog indicating farhelm wants to replace with a yolo session instead of guarded. codex session. macos
   supervisor. (Screenshot, 0.44.0-rc.4: a Codex session on Local (this machine), shown with the guarded shield mark in

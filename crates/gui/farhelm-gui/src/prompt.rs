@@ -34,8 +34,9 @@
 //! SPEC.md asks has them.
 //!
 //! Every answer closes the question before its action runs, with one exception: an answer whose action can fail, an
-//! extra one ([`Question::fallible_alternative`]) or the confirming one ([`ask_fallible`]). SPEC.md's YOLO question has
-//! an extra one: its "stop asking" answer first changes the host's setting, and "if changing that setting fails,
+//! extra one ([`Question::fallible_alternative`]) or the confirming one ([`ask_fallible`] or [`ask_inline_fallible`]).
+//! SPEC.md's YOLO question has an extra one: its "stop asking" answer first changes the host's setting, and
+//! "if changing that setting fails,
 //! nothing is started and the confirmation stays up with the reason". The host remove confirmation's Remove is a
 //! confirming one, as the old dialog stayed up through its request and showed the helm's refusal inside it. Such an
 //! answer keeps the question open while its action is in flight, with every answer frozen (drawn busy, doing nothing,
@@ -48,9 +49,9 @@
 //! a retry is a press on the answer again. It moves focus only while focus is still on the answer the attempt started
 //! from, so a user who tabbed or clicked elsewhere meanwhile keeps their place (SPEC_impl.md, "Questions: the prompt",
 //! records this narrow departure from SPEC.md's "Who may move focus"). An extra answer that can fail may sit on an
-//! inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]; a confirming answer that
-//! can fail only on the centered one, through [`ask_fallible`] (an inline question's confirming answer runs once).
-//! [`Question::fallible_alternative`] says why.
+//! inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]. Both presentations can
+//! also have a fallible confirmation, through [`ask_inline_fallible`] or [`ask_fallible`].
+//! [`Question::fallible_alternative`] describes what keeps each presentation open during the attempt.
 //!
 //! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
@@ -420,11 +421,10 @@ impl<T: Clone + 'static> Question<T> {
     /// is in flight does. Otherwise Tab out of the question, then Escape or the header Close, would close the launcher,
     /// and the action would run on and start a session the user dismissed.
     ///
-    /// Only an inline question ([`ask_inline`]) and a centered one built with
-    /// [`Question::keeps_focus_on_empty_click`] may carry one; any other question with one refuses to open. A
-    /// confirming answer that can fail exists only on that centered question, through [`ask_fallible`]: an inline
-    /// question's confirming answer runs once. An inline question's owner decides its own dismissal and can refuse
-    /// it while the action runs. A centered question's veil takes a press without dismissing it, and every dismissal
+    /// Only an inline question and a centered one built with [`Question::keeps_focus_on_empty_click`] may carry one.
+    /// The same presentations can have a fallible confirmation through [`ask_inline_fallible`] or [`ask_fallible`].
+    /// An inline question's owner decides its own dismissal and can refuse it while the action runs.
+    /// A centered question's veil takes a press without dismissing it, and every dismissal
     /// (Escape, a control routed through [`layers::dismiss`]) asks the dialog's hook, which the prompt answers with
     /// [`Dismissal::Stay`](crate::layers::Dismissal::Stay) while an attempt is in flight. The empty-click rule keeps
     /// focus on the busy answer the user pressed when they click the question's empty space, which otherwise would
@@ -781,7 +781,8 @@ enum Shown {
     Centered,
     /// On the floating surface beside its anchor ([`ask_anchored`]).
     Anchored,
-    /// Inside its owner's surface, which draws it ([`ask_inline`]). Not a layer, so the prompt itself returns focus.
+    /// Inside its owner's surface, which draws it ([`ask_inline`] and [`ask_inline_fallible`]).
+    /// The prompt itself returns focus because it is part of its owner's surface.
     Inline,
 }
 
@@ -791,7 +792,7 @@ impl Shown {
         match self {
             Shown::Centered => "prompt::ask, prompt::ask_rewordable or prompt::ask_fallible",
             Shown::Anchored => "prompt::ask_anchored",
-            Shown::Inline => "prompt::ask_inline",
+            Shown::Inline => "prompt::ask_inline or prompt::ask_inline_fallible",
         }
     }
 }
@@ -884,7 +885,7 @@ impl<T: Clone + 'static> Prompt<T> {
                 // empty space, an Escape it held) left focus on the re-armed answer, where Enter would resend. The
                 // focus coordinator makes the move and keeps it inside the question's layer. The mark is taken now on
                 // purpose: the focus check stands in for the press's mark, and the coordinator still drops the move on
-                // any press after this. An inline question leaves focus on the pressed answer.
+                // any press after this. An inline refusal leaves focus where the user put it.
                 let stayed = focus_at_attempt
                     .as_ref()
                     .and_then(WeakFocusHandle::upgrade)
@@ -1613,7 +1614,44 @@ pub fn ask_inline<T: Clone + 'static>(
     window: &mut Window,
     cx: &mut App,
 ) -> Inline<T> {
-    let on_confirm = Action::Once(Box::new(on_confirm));
+    ask_inline_inner(
+        question,
+        mark,
+        Action::Once(Box::new(on_confirm)),
+        window,
+        cx,
+    )
+}
+
+/// Ask inline when the primary answer must finish a write before the question can close.
+/// Confirm hands its action an [`Attempt`]. The answers stay frozen until it settles. A refusal appears inside the
+/// question and leaves the current focus alone so the user can retry or choose another. The owner must defer its
+/// own dismissal while [`Inline::in_flight`] is true, as it does for fallible alternatives.
+/// Focus and presentation options follow [`ask_inline`].
+pub fn ask_inline_fallible<T: Clone + 'static>(
+    question: Question<T>,
+    mark: &Mark,
+    on_confirm: impl Fn(T, Attempt, &mut Window, &mut App) + 'static,
+    window: &mut Window,
+    cx: &mut App,
+) -> Inline<T> {
+    ask_inline_inner(
+        question,
+        mark,
+        Action::Fallible(Rc::new(on_confirm)),
+        window,
+        cx,
+    )
+}
+
+/// Both inline variants remember the owner's focused control before moving focus into the question.
+fn ask_inline_inner<T: Clone + 'static>(
+    question: Question<T>,
+    mark: &Mark,
+    on_confirm: Action<T>,
+    window: &mut Window,
+    cx: &mut App,
+) -> Inline<T> {
     let (prompt, start) = build(question, Shown::Inline, on_confirm, window, cx);
     let opener = window.focused(cx);
     prompt.update(cx, |prompt, _| {

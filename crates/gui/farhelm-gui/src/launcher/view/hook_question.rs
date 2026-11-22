@@ -128,7 +128,8 @@ impl Launcher {
     }
 }
 
-/// Keep the one-off answer prominent. Both lasting changes can fail, so each keeps the question open until saved.
+/// Give hook setup the primary slot while keeping initial focus on Cancel. A setting write holds the question
+/// open until the helm accepts it, so a refusal leaves the one-off launch available.
 fn ask(
     agent: HookAgent,
     pick: u64,
@@ -142,8 +143,8 @@ fn ask(
     let question = Question::new(
         format!("Set up Restart for {}?", agent.name()),
         Answer::new(
-            "Launch without",
-            HoverHelp::tooltip("Launch now and ask again next time"),
+            "Set up and launch",
+            HoverHelp::tooltip("Turn on hook setup for this agent on all hosts and launch"),
             Tier::Primary,
         ),
         agent,
@@ -161,22 +162,22 @@ fn ask(
             save(agent, attempt, pick, &dismissing, false, window, cx)
         },
     )
-    .fallible_alternative(
+    .alternative(
         Answer::new(
-            "Set up and launch",
-            HoverHelp::tooltip("Turn on hook setup for this agent on all hosts and launch"),
+            "Launch without",
+            HoverHelp::tooltip("Launch now and ask again next time"),
             Tier::Neutral,
         ),
-        move |agent, attempt, window, cx| save(agent, attempt, pick, &enabling, true, window, cx),
-    )
-    .starts_on_cancel()
-    .wait_until_shown();
-    prompt::ask_inline(
-        question,
-        mark,
         move |_, window, cx| {
             continue_launch(&launcher, pick, Mark::take(cx), window, cx);
         },
+    )
+    .starts_on_cancel()
+    .wait_until_shown();
+    prompt::ask_inline_fallible(
+        question,
+        mark,
+        move |agent, attempt, window, cx| save(agent, attempt, pick, &enabling, true, window, cx),
         window,
         cx,
     )

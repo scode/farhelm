@@ -1062,15 +1062,16 @@ the macOS click rule a click focuses no control, so a click on another control d
 the answer pressed, and the refusal still moves focus to Cancel, for the same reason. The move to Cancel came in on
 2026-11-15 as the port of the old dialog's. The maintainer directed on 2026-11-16 that the refusal not take focus back
 from a user who moved on, with presses on the question itself not counting; the app compares where focus is when the
-refusal arrives rather than taking the press's mark. An extra answer that can fail may sit on an inline question or a
-centered one that keeps focus on an empty-space click; a confirming answer that can fail only on such a centered
-question (an inline question's confirming answer runs once). Any other question with one refuses to open. An inline
-question's owner keeps itself open while the attempt is unsettled through its dismissal hook, as an editor whose save is
-in flight stays, so the owner cannot close under the running action. A centered question's veil takes a press without
-dismissing it, the prompt's own dismissal hook holds Escape and every other dismissal while the attempt is unsettled,
-and the empty-click rule keeps focus on the busy answer. An anchored question closes on a press outside it or its anchor
-going, which nothing can veto. A centered question still closes when its subject goes or the connection resets,
-mid-attempt too; for the host remove confirmation the subject going is the success.
+refusal arrives rather than taking the press's mark. Either an extra answer or Confirm can fail on an inline question or
+a centered one that keeps focus on an empty-space click. The launcher's **Set up and launch** confirmation uses this
+inline contract to wait for the Restart setting to save before starting the session. A question with a fallible answer
+in another presentation refuses to open. An inline question's owner keeps itself open while the attempt is unsettled
+through its dismissal hook, as an editor whose save is in flight stays, so the owner cannot close under the running
+action. A centered question's veil takes a press without dismissing it, the prompt's own dismissal hook holds Escape and
+every other dismissal while the attempt is unsettled, and the empty-click rule keeps focus on the busy answer. An
+anchored question closes on a press outside it or its anchor going, which nothing can veto. A centered question still
+closes when its subject goes or the connection resets, mid-attempt too; for the host remove confirmation the subject
+going is the success.
 
 Enforced by the prompt being the only type that renders answer buttons for a question, and by a generic test, for every
 prompt kind, that changes the confirmation's subject after it opens, then sends its answers (Cancel, Confirm and an

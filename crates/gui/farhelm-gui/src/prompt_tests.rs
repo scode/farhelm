@@ -2124,6 +2124,57 @@ fn a_failing_answer_keeps_its_question_up_with_the_reason(cx: &mut TestAppContex
     );
 }
 
+/// A primary action that saves a setting needs somewhere to show a refusal. Confirm owns one attempt at a time,
+/// keeps its focus and displays the refusal, then a successful retry closes the question and restores the opener.
+#[gpui::test]
+fn an_inline_fallible_confirmation_can_retry_after_a_refusal(cx: &mut TestAppContext) {
+    let (cx, launcher) = open_launcher(cx);
+    let (ran, attempts): (Ran, Attempts) = Default::default();
+    let confirm = attempting("save", &ran, &attempts);
+    let inline = cx.update(|window, cx| {
+        let mark = Mark::take(cx);
+        let inline = prompt::ask_inline_fallible(
+            question("alpha").starts_on_cancel(),
+            &mark,
+            confirm,
+            window,
+            cx,
+        );
+        launcher.question.replace(Some(inline.clone()));
+        inline
+    });
+    redraw(cx);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+
+    keys(cx, "enter enter");
+    assert_eq!(*ran.borrow(), ["save alpha"]);
+    assert!(cx.update(|_, cx| inline.in_flight(cx)));
+    let refusal = "Could not save the setting.";
+    settle_attempt(
+        cx,
+        &attempts,
+        Some(HostSentence::new("save-error").text(refusal)),
+    );
+    assert!(cx.update(|_, cx| inline.is_open(cx) && !inline.in_flight(cx)));
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-confirm"));
+    assert!(
+        painted_in_question(cx)
+            .iter()
+            .any(|text| text.contains(refusal)),
+        "refusal appears inside the question"
+    );
+
+    keys(cx, "enter");
+    assert_eq!(*ran.borrow(), ["save alpha", "save alpha"]);
+    assert!(cx.update(|_, cx| inline.in_flight(cx)));
+    settle_attempt(cx, &attempts, None);
+    assert!(!cx.update(|_, cx| inline.is_open(cx)));
+    assert!(focused(cx, &launcher.launch));
+    assert!(is_open(cx, launcher.layer));
+}
+
 /// Why this matters: the YOLO question carries an answer that can fail without the empty-click rule, and it is drawn
 /// loud, which only the inline question draws. Asked anchored, a press outside it would take it away while its
 /// answer's work runs on, and the work would then finish for a question the user can no longer see; asked centered,
@@ -2663,12 +2714,13 @@ fn an_anchored_question_with_an_option_it_ignores_fails_a_debug_build(cx: &mut T
 /// return to the terminal SPEC.md asks of the header's questions.
 ///
 /// Specified: an inline question carrying every presentation-specific option fails a debug build as it is asked,
-/// naming `prompt::ask_inline` with the empty-click rule, the body, the tile, the note, the width, the scroll stop and
+/// naming the inline constructors with the empty-click rule, the body, the tile, the note, the width, the scroll stop and
 /// the Escape-home rule, and not the loud look, which is the inline question's own.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
-    expected = "a question was asked through prompt::ask_inline with Question::keeps_focus_on_empty_click, \
+    expected = "a question was asked through prompt::ask_inline or prompt::ask_inline_fallible with \
+                Question::keeps_focus_on_empty_click, \
                 Question::body, Question::tile, Question::note, Question::width, Question::scroll_stop, \
                 Question::returns_home_on_escape, which it ignores"
 )]
@@ -3352,11 +3404,12 @@ fn a_reword_waits_out_an_attempt_in_flight(cx: &mut TestAppContext) {
 /// where its feature asked.
 ///
 /// Specified: an inline question built with `returns_to` fails a debug build as it is asked, naming
-/// `prompt::ask_inline` and `Question::returns_to` only.
+/// both inline constructors and `Question::returns_to`.
 #[cfg(debug_assertions)]
 #[gpui::test]
 #[should_panic(
-    expected = "a question was asked through prompt::ask_inline with Question::returns_to, which it ignores"
+    expected = "a question was asked through prompt::ask_inline or prompt::ask_inline_fallible with \
+                Question::returns_to, which it ignores"
 )]
 fn an_inline_question_that_names_a_control_to_return_to_fails_a_debug_build(
     cx: &mut TestAppContext,
