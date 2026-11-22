@@ -76,3 +76,71 @@ Each draft passed the plan's single adversarial source review and a separate col
 reviews led to fair polling across both lanes, a shared completion flush for channel-local query replies, and clearer
 test premises and channel documentation. The additional Opus design consultation kept the existing Removing display
 without adding read-ordering state. The remaining Trash cases are listed above.
+
+### Landing
+
+#### What landed with it
+
+The plan's three PRs (#4623, #4626, #4631) landed first in this round, with one landing fix (#4633), followed by the
+change that makes Set up and launch the primary button of the launcher's hook setup question. Nothing that landed on
+main since the plan was written touches how the desktop app and the helm exchange requests, and the rebase applied
+cleanly.
+
+An independent reviewer read the change closely and found no blocker:
+
+- No protocol version change is needed. The desktop app only ever talks to the helm built into it, so the two are always
+  the same build; even if they differed, an older helm would run everything in order and an older app would accept the
+  replies.
+- Nothing that relied on order lost it. Wherever an action that may now be answered out of order could have raced
+  another, something already waits for the reply first: Stop or Delete on several selected sessions goes out one host at
+  a time, a launch waits for its own wake and a fresh connection, and actions on the same session wait for each other.
+  Everything else still runs in order.
+- No reply can be lost or answered twice, on either side, and the test changes do not weaken anything they checked.
+
+#### Fixes made while landing
+
+- #4633 corrects a comment in the launcher's tests that said the stand-in helm they use answers every request in the
+  order it was sent. That stopped being true for the session row menu's Stop and Delete, which those tests use.
+
+#### Checks
+
+The round made two changes: how the desktop app and its helm exchange requests, and which button of one launcher
+question is highlighted. So the landing ran the Rust workspace suite, the desktop app's tests, the lint runs, the
+end-to-end smoke test (which drives the real app against its helm) and every reference screenshot, once, on the two
+plans stacked together. The worker runs were on a separate arm64 Linux test worker with a systemd user manager and SSH
+to itself; the rest ran locally on x86_64 Linux.
+
+On the two plans as delivered, rebased onto main and stacked:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `f0ba02fa-1ab5-4a65-a5e6-d5c75650ddc8`): all 8363 passed, and none printed a runtime `SKIPPED`. The 86 tests marked
+  ignored did not run, as on every run.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (with and without `--features agent`), on the test worker: passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `86d59245-c004-464c-94dd-3047a8a10644`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `b5ae6ec4-4108-4cda-bc05-714072e01add`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `333b9da3-3dca-4281-bcb8-6bb71cdfcd82`):
+  every reference screenshot matched, including the hook setup question's updated light and dark pictures.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the two landing fixes (#4633 and #4634), which change only comments and the desktop window's design notes:
+`cargo fmt --all -- --check`, `dprint check` and `python -B scripts/check-test-sleeps.py`, locally: passed. Everything
+above still applies.
+
+Skipped: macOS, since nothing in the round builds only on a Mac; CI, since the checks above already cover the round and
+it runs only on demand.
+
+#### Things you should know that the report does not say
+
+- A session's Delete can now be answered while a launch on the same host is still waiting, which used to be impossible.
+  The launcher's existing rules for what to select after a Delete cover it, and the reviewer saw nothing wrong, but no
+  test checks that order; the existing test only covers the old one. A follow-up test would close it.
+- About half a dozen other test comments still say the stand-in helm answers everything in order. It fails loudly if a
+  test relies on the wrong order, so these can only mislead a reader; they can be fixed the next time those tests are
+  touched.
+- SPEC.md still describes the window and the helm as joined by an ordered stream; the exception for these actions is
+  written down only in SPEC_impl.md. You approved that split; this note is the only place that raises whether SPEC.md
+  should mention it, which fits the architecture review this plan added to TODO.md.
