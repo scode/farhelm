@@ -212,9 +212,9 @@ pub use github_checkout::{
 /// protocol would later refuse.
 pub const MAX_SESSION_ID_BYTES: usize = 1024;
 
-/// Protocol version exchanged in the hello. Bumped only for incompatible
-/// frame or message changes; the receiving side refuses a mismatch with a
-/// clear error per SPEC.md's version-skew rule. Build versions travel
+/// Protocol version exchanged in the hello. Bumped for incompatible frames,
+/// messages or host behavior a communicating peer relies on. The receiving
+/// side refuses a mismatch per SPEC.md's version-skew rule. Build versions travel
 /// alongside for diagnostics only and never gate anything.
 ///
 /// There is no compatibility across protocol versions (SPEC.md): a bump
@@ -256,7 +256,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_84` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_85` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -267,7 +267,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 84;
+pub const PROTOCOL_VERSION: u32 = 85;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -6022,10 +6022,12 @@ mod tests {
     /// fill. Version 83 adds consent for persistent hook setup on a create
     /// or restart. Older supervisors would ignore that consent. Version 84
     /// makes a Claude launch's workspace-trust choice a pre-exec config edit.
-    /// Older supervisors would accept the choice without applying it. Pinning the
-    /// value here makes an accidental re-bump (or a forgotten one, if a
-    /// later change needed it) a loud test failure rather than a silent
-    /// drift discovered only by two builds refusing to talk to each other.
+    /// Older supervisors would accept the choice without applying it.
+    /// Version 85 requires the supervisor to read the Claude recipe
+    /// environment file now that the helm retires Claude settings delivery.
+    /// Pinning the value here makes an accidental re-bump (or a forgotten
+    /// one, if a later change needed it) a loud test failure rather than
+    /// a silent drift discovered only by two builds refusing to talk to each other.
     ///
     /// The version-skew tests in the helm and the farhelm e2e suite are
     /// deliberately written against `PROTOCOL_VERSION ± 1` rather than
@@ -6033,8 +6035,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_84() {
-        assert_eq!(PROTOCOL_VERSION, 84);
+    fn protocol_version_is_pinned_at_85() {
+        assert_eq!(PROTOCOL_VERSION, 85);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,

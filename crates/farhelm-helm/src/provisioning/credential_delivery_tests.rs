@@ -74,13 +74,11 @@ async fn container_connections_resolve_shared_recipe_selections_and_delivery_rec
 async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connect() {
     for existing in [false, true] {
         for conflicts in [1, 2] {
-            let f = Fixture::new(false).await;
-            let path = f.home.join(".claude/settings.json");
+            let f = Fixture::new(true).await;
+            let path = f.home.join(".codex/config.toml");
             tokio::fs::create_dir(path.parent().unwrap()).await.unwrap();
             if existing {
-                tokio::fs::write(&path, br#"{"env":{"EDITOR":"old"}}"#)
-                    .await
-                    .unwrap();
+                tokio::fs::write(&path, b"editor = 'old'\n").await.unwrap();
             }
             assert_eq!(path.exists(), existing);
             assert!(
@@ -88,7 +86,7 @@ async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connec
                     .read_record(&f.row)
                     .await
                     .unwrap()
-                    .claude
+                    .codex
                     .is_none()
             );
             let editor_path = path.clone();
@@ -96,13 +94,12 @@ async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connec
             *f.backend.on_operation.lock().unwrap() = Some((
                 "write-unit",
                 Box::new(move || {
-                    std::fs::write(&editor_path, br#"{"env":{"EDITOR":"first"}}"#).unwrap();
+                    std::fs::write(&editor_path, b"editor = 'first'\n").unwrap();
                     if conflicts == 2 {
                         *backend.upgrade().unwrap().on_operation.lock().unwrap() = Some((
                             "write-unit",
                             Box::new(move || {
-                                std::fs::write(editor_path, br#"{"env":{"EDITOR":"second"}}"#)
-                                    .unwrap();
+                                std::fs::write(editor_path, b"editor = 'second'\n").unwrap();
                             }),
                         ));
                     }
@@ -119,29 +116,39 @@ async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connec
             );
             let record = f.delivery.read_record(&f.row).await.unwrap();
             if conflicts == 2 {
-                assert_eq!(f.claude().await, r#"{"env":{"EDITOR":"second"}}"#);
+                assert_eq!(
+                    tokio::fs::read_to_string(&path).await.unwrap(),
+                    "editor = 'second'\n"
+                );
                 assert_eq!(
                     f.delivery.warning(f.row.id).as_deref(),
                     Some("could not install the agent settings")
                 );
-                assert!(record.claude.is_none());
+                assert!(record.codex.is_none());
                 f.delivery.connect(&f.row, &f.events).await;
             } else {
-                assert!(record.claude.is_some());
+                assert!(record.codex.is_some());
             }
             assert_eq!(f.delivery.warning(f.row.id), None);
-            let settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+            let settings: toml_edit::DocumentMut = tokio::fs::read_to_string(&path)
+                .await
+                .unwrap()
+                .parse()
+                .unwrap();
             assert_eq!(
-                settings["env"]["EDITOR"],
-                if conflicts == 2 { "second" } else { "first" }
+                settings["editor"].as_str(),
+                Some(if conflicts == 2 { "second" } else { "first" })
             );
-            assert_eq!(settings["env"]["ANTHROPIC_AUTH_TOKEN"], FIRST);
+            assert_eq!(
+                settings["model_providers"]["farhelm"]["experimental_bearer_token"].as_str(),
+                Some(FIRST)
+            );
             assert!(
                 f.delivery
                     .read_record(&f.row)
                     .await
                     .unwrap()
-                    .claude
+                    .codex
                     .is_some()
             );
         }
@@ -266,9 +273,14 @@ impl Fixture {
     /// Inspect only the fixture-owned destination; no operator configuration
     /// is involved in the byte-level delivery assertions.
     async fn claude(&self) -> String {
-        tokio::fs::read_to_string(self.home.join(".claude/settings.json"))
-            .await
-            .unwrap()
+        tokio::fs::read_to_string(self.claude_path()).await.unwrap()
+    }
+
+    /// Use the consumer's filename contract to observe the exact delivery.
+    fn claude_path(&self) -> PathBuf {
+        farhelm_supervisor::recipe_credentials::host_file(Path::new(
+            self.row.remote_state_dir.as_deref().unwrap(),
+        ))
     }
 
     /// Every transport operation, including reads, participates in this oracle.
@@ -385,23 +397,31 @@ impl Fixture {
 }
 
 /// A mode edit waits for connection, while a saved value replacement reaches
-/// the current connection. Durable settings fingerprints make an unchanged
-/// reconnect do no SSH work, without creating onboarding metadata.
+/// the current connection. Image settings without a legacy stamp survive
+/// every mode, and unchanged reconnects skip remote work.
 #[farhelm_testtrace::test]
 async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
     const LOGIN: &str = "sk-ant-oat01-fictional-claude-first";
     const REPLACED: &str = "sk-ant-oat01-fictional-claude-second";
     let f = Fixture::new(false).await;
     f.claude_credential(LOGIN).await;
+    let settings_path = f.home.join(".claude/settings.json");
+    tokio::fs::create_dir(settings_path.parent().unwrap())
+        .await
+        .unwrap();
+    let image_settings = br#"{"permissions":{"allow":["Read"]},"env":{"KEEP":"personal","CLAUDE_CODE_OAUTH_TOKEN":"image-token"}}"#;
+    tokio::fs::write(&settings_path, image_settings)
+        .await
+        .unwrap();
+    assert!(
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude
+            .is_none()
+    );
     let lease = f.connected().await;
-    let mut settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
-    settings["permissions"] = serde_json::json!({"allow":["Read"]});
-    settings["env"]["KEEP"] = "personal".into();
-    std::fs::write(
-        f.home.join(".claude/settings.json"),
-        serde_json::to_vec(&settings).unwrap(),
-    )
-    .unwrap();
     f.select_claude(Some("claude-work"), false).await;
     let before = f.operations();
     assert!(
@@ -420,14 +440,20 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
     assert_eq!(settings["env"]["CLAUDE_CODE_OAUTH_TOKEN"], LOGIN);
     assert!(settings["env"].get("ANTHROPIC_BASE_URL").is_none());
     assert!(settings["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
-    assert_eq!(settings["env"]["KEEP"], "personal");
-    assert_eq!(settings["permissions"]["allow"][0], "Read");
+    assert_eq!(
+        settings["env"],
+        serde_json::json!({"CLAUDE_CODE_OAUTH_TOKEN": LOGIN})
+    );
+    assert_eq!(
+        tokio::fs::read(&settings_path).await.unwrap(),
+        image_settings
+    );
     assert!(
         !f.home.join(".claude.json").exists(),
         "Farhelm writes no onboarding metadata"
     );
     assert_eq!(
-        std::fs::metadata(f.home.join(".claude/settings.json"))
+        std::fs::metadata(f.claude_path())
             .unwrap()
             .permissions()
             .mode()
@@ -461,19 +487,120 @@ async fn claude_subscription_reconciles_modes_replacements_and_reconnects() {
         let lease = restarted.enter(&f.row);
         restarted.connect(&f.row, &f.events).await;
         assert_eq!(restarted.warning(f.row.id), None);
-        let settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
-        assert!(settings["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none());
+        if endpoint {
+            let credentials: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
+            assert_eq!(
+                credentials["env"],
+                serde_json::json!({
+                    "ANTHROPIC_BASE_URL": "https://first.example/v1",
+                    "ANTHROPIC_AUTH_TOKEN": FIRST,
+                })
+            );
+        } else {
+            assert!(!f.claude_path().exists());
+        }
         assert_eq!(
-            settings["env"].get("ANTHROPIC_BASE_URL").is_some(),
-            endpoint
+            tokio::fs::read(&settings_path).await.unwrap(),
+            image_settings
         );
-        assert_eq!(
-            settings["env"].get("ANTHROPIC_AUTH_TOKEN").is_some(),
-            endpoint
-        );
-        assert_eq!(settings["env"]["KEEP"], "personal");
         drop(lease);
     }
+}
+
+/// A legacy URL can override the launch environment, so a failed cleanup
+/// must withhold the whole Claude snapshot while other deliveries proceed.
+/// Once cleanup succeeds, an upload retry must leave subsequent edits alone.
+#[farhelm_testtrace::test]
+async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
+    const PENDING: &str =
+        "Claude recipe credential cleanup is pending (could not install the agent settings)";
+    let f = Fixture::new(true).await;
+    f.github_credential().await;
+    f.select_codex(false, true, true).await;
+    let settings = f.home.join(".claude/settings.json");
+    tokio::fs::create_dir(settings.parent().unwrap())
+        .await
+        .unwrap();
+    let legacy = br#"{"env":{"KEEP":"old","ANTHROPIC_BASE_URL":"https://old.example"}}"#;
+    tokio::fs::write(&settings, legacy).await.unwrap();
+    let entry = f.delivery.entry(&f.row);
+    let guard = entry.serial.clone().lock_owned().await;
+    let stamped = Record {
+        home: Some(f.home.clone()),
+        claude: Some(EndpointStamp::Absent),
+        ..Record::default()
+    };
+    drop(
+        f.delivery
+            .write_record(&f.row, &stamped, guard)
+            .await
+            .unwrap(),
+    );
+    let _lease = f.delivery.enter(&f.row);
+    *f.backend.fail.lock().unwrap() = Some("write-legacy-claude-settings".into());
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(PENDING));
+    assert!(!f.claude_path().exists());
+    assert_eq!(tokio::fs::read(&settings).await.unwrap(), legacy);
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert!(record.claude_environment.is_none());
+    assert_eq!(record.claude, Some(EndpointStamp::Absent));
+    assert!(record.codex.is_some() && record.github.is_some());
+
+    f.replace("work", SECOND).await;
+    let shared = f
+        .delivery
+        .push("work", past_the_ssh_budget(), &f.events)
+        .await;
+    assert_eq!(shared.len(), 1);
+    assert_eq!(shared[0].reason, PENDING);
+    assert!(!f.claude_path().exists());
+    let codex = tokio::fs::read_to_string(f.home.join(".codex/config.toml"))
+        .await
+        .unwrap();
+    assert!(codex.contains(SECOND) && !codex.contains(FIRST));
+
+    f.replace("git-work", "fictional-github-second").await;
+    assert!(
+        f.delivery
+            .push("git-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+        "fictional-github-second"
+    );
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(PENDING));
+
+    *f.backend.fail.lock().unwrap() = Some("wrote-agent-credentials".into());
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(
+        f.delivery.warning(f.row.id).as_deref(),
+        Some("could not install the managed Claude launch credentials")
+    );
+    assert!(!f.claude_path().exists());
+    let actual: serde_json::Value =
+        serde_json::from_slice(&tokio::fs::read(&settings).await.unwrap()).unwrap();
+    assert_eq!(actual, serde_json::json!({"env":{"KEEP":"old"}}));
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().claude,
+        Some(EndpointStamp::Cleared)
+    );
+
+    let user_edit = br#"{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"personal-edit"}}"#;
+    tokio::fs::write(&settings, user_edit).await.unwrap();
+    *f.backend.fail.lock().unwrap() = None;
+    f.replace("work", THIRD).await;
+    assert!(
+        f.delivery
+            .push("work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty()
+    );
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert!(f.claude().await.contains(THIRD));
+    assert_eq!(tokio::fs::read(&settings).await.unwrap(), user_edit);
 }
 
 /// A deleted name can be recreated at revision1. A completed None mode must
@@ -492,6 +619,7 @@ async fn recreated_claude_login_is_delivered_after_none() {
     let lease = f.delivery.enter(&f.row);
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.delivery.warning(f.row.id), None);
+    assert!(!f.claude_path().exists());
     drop(lease);
     f.store
         .delete_credential("claude-work".into())
@@ -516,7 +644,12 @@ async fn recreated_claude_login_replaces_the_previous_subscription_stamp() {
     f.select_claude(Some("claude-work"), false).await;
     let lease = f.delivery.enter(&f.row);
     f.delivery.connect(&f.row, &f.events).await;
-    let previous = f.delivery.read_record(&f.row).await.unwrap().claude;
+    let previous = f
+        .delivery
+        .read_record(&f.row)
+        .await
+        .unwrap()
+        .claude_environment;
     assert!(matches!(
         &previous,
         Some(EndpointStamp::Subscription { name, revision: 1, .. }) if name == "claude-work"
@@ -531,7 +664,12 @@ async fn recreated_claude_login_replaces_the_previous_subscription_stamp() {
         .unwrap();
     f.claude_credential("fictional-recreated-claude").await;
     f.select_claude(Some("claude-work"), false).await;
-    let carried = f.delivery.read_record(&f.row).await.unwrap().claude;
+    let carried = f
+        .delivery
+        .read_record(&f.row)
+        .await
+        .unwrap()
+        .claude_environment;
     assert_eq!(carried, previous);
 
     let _lease = f.delivery.enter(&f.row);
@@ -790,7 +928,7 @@ async fn recreated_endpoint_names_do_not_match_a_previous_delivery() {
             .contains(SECOND)
     );
     let record = f.delivery.read_record(&f.row).await.unwrap();
-    for stamp in [record.claude, record.codex] {
+    for stamp in [record.claude_environment, record.codex] {
         let Some(EndpointStamp::Endpoint { credential, .. }) = stamp else {
             panic!("endpoint stamp missing")
         };
@@ -973,22 +1111,22 @@ async fn github_without_gh_keeps_the_file_and_retries_only_the_unfinished_slot()
     );
     assert!(f.claude().await.contains(FIRST));
     let record = f.delivery.read_record(&f.row).await.unwrap();
-    assert!(record.claude.is_some() && record.github.is_none());
-    let endpoint = std::fs::read(f.home.join(".claude/settings.json")).unwrap();
+    assert!(record.claude_environment.is_some() && record.github.is_none());
+    let endpoint = std::fs::read(f.claude_path()).unwrap();
     f.backend.github_cli.store(true, Ordering::SeqCst);
     drop(lease);
     let before = f.operations().len();
     let _lease = f.delivery.enter(&f.row);
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.delivery.warning(f.row.id), None);
-    assert_eq!(
-        std::fs::read(f.home.join(".claude/settings.json")).unwrap(),
-        endpoint
-    );
+    assert_eq!(std::fs::read(f.claude_path()).unwrap(), endpoint);
     let retried = &f.operations()[before..];
     assert!(
-        !retried.iter().any(|op| op == "read-agent-settings"),
-        "no endpoint merge repeats: {retried:?}"
+        !retried.iter().any(|op| matches!(
+            op.as_str(),
+            "read-agent-settings" | "wrote-agent-credentials"
+        )),
+        "no completed endpoint delivery repeats: {retried:?}"
     );
     assert_eq!(
         retried
@@ -1022,7 +1160,11 @@ async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
     );
     assert!(f.claude().await.contains(SECOND));
     assert_eq!(
-        f.delivery.read_record(&f.row).await.unwrap().claude,
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_environment,
         Some(EndpointStamp::Endpoint {
             base_url: "https://first.example/v1".into(),
             credential: Some(f.stamp("work", 2).await),
@@ -1060,11 +1202,9 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     let f = Fixture::new(false).await;
     let lease = f.connected().await;
     let path = f.home.join(".claude/settings.json");
-    let mut settings: serde_json::Value = serde_json::from_str(&f.claude().await).unwrap();
-    settings["unrelated"] = serde_json::json!(true);
-    tokio::fs::write(&path, serde_json::to_vec(&settings).unwrap())
-        .await
-        .unwrap();
+    let settings = br#"{"unrelated": true}"#;
+    tokio::fs::create_dir(path.parent().unwrap()).await.unwrap();
+    tokio::fs::write(&path, settings).await.unwrap();
     drop(lease);
     let before = f.operations();
     let restarted = CredentialDelivery::new(f.store.clone(), f.backend.clone());
@@ -1072,15 +1212,16 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     restarted.connect(&f.row, &f.events).await;
     assert_eq!(f.operations(), before);
     assert_eq!(restarted.warning(f.row.id), None);
-    assert_eq!(
-        serde_json::from_str::<serde_json::Value>(&f.claude().await).unwrap(),
-        settings
-    );
+    assert_eq!(tokio::fs::read(path).await.unwrap(), settings);
     let record = restarted.read_record(&f.row).await.unwrap();
     assert_eq!(record.home, Some(f.home.clone()));
     assert_eq!(record.codex, Some(EndpointStamp::Cleared));
     assert_eq!(
-        std::fs::metadata(path).unwrap().permissions().mode() & 0o777,
+        std::fs::metadata(f.claude_path())
+            .unwrap()
+            .permissions()
+            .mode()
+            & 0o777,
         0o600
     );
 }
@@ -1147,7 +1288,7 @@ fn past_the_ssh_budget() -> Instant {
 impl Fixture {
     /// A second connected host on the fixture's recipe, with a home of its
     /// own so that its settings file can be told apart from the first host's.
-    /// Returns its row, home and connection lease; the lease is the premise
+    /// Returns its row, credential file and connection lease; the lease is the premise
     /// that makes a replacement select it.
     async fn second_host(&self) -> (HostRow, PathBuf, ConnectionLease) {
         let id = crate::tensorlake::hosts::test_support::plant(
@@ -1182,14 +1323,14 @@ impl Fixture {
         let lease = self.delivery.enter(&row);
         self.delivery.connect(&row, &self.events).await;
         assert_eq!(self.delivery.warning(row.id), None);
-        let settings = home.join(".claude/settings.json");
+        let credentials = farhelm_supervisor::recipe_credentials::host_file(&state);
         assert!(
-            tokio::fs::read_to_string(&settings)
+            tokio::fs::read_to_string(&credentials)
                 .await
                 .unwrap()
                 .contains(FIRST)
         );
-        (row, home, lease)
+        (row, credentials, lease)
     }
 }
 
@@ -1211,7 +1352,7 @@ impl Fixture {
 async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carries_on() {
     let f = Fixture::new(false).await;
     let _lease = f.connected().await;
-    let (_second, second_home, _second_lease) = f.second_host().await;
+    let (_second, second_credentials, _second_lease) = f.second_host().await;
     f.replace("work", SECOND).await;
     let entry = f.delivery.entry(&f.row);
     let held = entry.serial.clone().lock_owned().await;
@@ -1243,7 +1384,7 @@ async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carrie
             .contains("did not answer within 20 seconds")
     );
     assert!(
-        tokio::fs::read_to_string(second_home.join(".claude/settings.json"))
+        tokio::fs::read_to_string(&second_credentials)
             .await
             .unwrap()
             .contains(SECOND)
@@ -1258,7 +1399,11 @@ async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carrie
     let held = entry.serial.clone().lock_owned().await;
     assert!(f.claude().await.contains(SECOND));
     assert_eq!(
-        f.delivery.read_record(&f.row).await.unwrap().claude,
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_environment,
         Some(EndpointStamp::Endpoint {
             base_url: "https://first.example/v1".into(),
             credential: Some(f.stamp("work", 2).await),
@@ -1288,17 +1433,17 @@ async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carrie
         }]
     );
     assert!(
-        tokio::fs::read_to_string(second_home.join(".claude/settings.json"))
+        tokio::fs::read_to_string(&second_credentials)
             .await
             .unwrap()
             .contains(THIRD)
     );
-    *f.backend.fail.lock().unwrap() = Some("read-agent-settings".into());
+    *f.backend.fail.lock().unwrap() = Some("wrote-agent-credentials".into());
     drop(held);
     let _settled = entry.serial.clone().lock_owned().await;
     assert_eq!(
         f.delivery.warning(f.row.id).as_deref(),
-        Some("could not read the agent settings")
+        Some("could not install the managed Claude launch credentials")
     );
     assert!(f.claude().await.contains(SECOND));
     assert_eq!(f.store.credentials().await.unwrap()[0].revision, 3);
@@ -1382,7 +1527,11 @@ async fn last_connection_lease_cancels_an_in_progress_push() {
     assert_eq!(f.operations(), stopped_at);
     assert!(f.claude().await.contains(FIRST));
     assert_eq!(
-        f.delivery.read_record(&f.row).await.unwrap().claude,
+        f.delivery
+            .read_record(&f.row)
+            .await
+            .unwrap()
+            .claude_environment,
         Some(EndpointStamp::Endpoint {
             base_url: "https://first.example/v1".into(),
             credential: Some(f.stamp("work", 1).await),
@@ -1422,7 +1571,7 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
     f.delivery.connect(&f.row, &f.events).await;
     assert!(f.claude().await.contains(FIRST));
     let record = f.delivery.read_record(&f.row).await.unwrap();
-    assert!(record.claude.is_some() && record.codex.is_none());
+    assert!(record.claude_environment.is_some() && record.codex.is_none());
     let warning = f.delivery.warning(f.row.id).unwrap();
     assert!(!warning.contains("fictional-private-marker"));
     assert_eq!(warning, "~/.codex/config.toml is not valid TOML");
@@ -1466,11 +1615,15 @@ async fn backend_failures_leave_saved_values_and_safe_warnings() {
         ("read-agent-settings", "could not read the agent settings"),
         (
             "create-directories",
-            "could not prepare the agent settings directory",
+            "could not prepare the managed Claude credentials directory",
         ),
         ("write-unit", "could not install the agent settings"),
+        (
+            "wrote-agent-credentials",
+            "could not install the managed Claude launch credentials",
+        ),
     ] {
-        let f = Fixture::new(false).await;
+        let f = Fixture::new(true).await;
         let _lease = f.delivery.enter(&f.row);
         *f.backend.fail.lock().unwrap() = Some(operation.into());
         f.delivery.connect(&f.row, &f.events).await;
@@ -1544,7 +1697,7 @@ async fn a_cancelled_record_write_keeps_serialization_until_sqlite_finishes() {
         .unwrap();
     let record = f.delivery.read_record(&f.row).await.unwrap();
     assert_eq!(record.home, Some(f.home.clone()));
-    assert!(record.claude.is_some());
+    assert!(record.claude_environment.is_some());
     assert!(
         !f.operations()
             .iter()
@@ -1761,13 +1914,13 @@ async fn route_replacement_covers_the_hook_publication_gap_and_reports_failures(
         })
         .await;
     assert!(harness.manager.status(f.row.id).unwrap().client.is_some());
-    *f.backend.fail.lock().unwrap() = Some("read-agent-settings".into());
+    *f.backend.fail.lock().unwrap() = Some("wrote-agent-credentials".into());
     let ack = replace_route(&harness, "fictional-third-token").await;
     assert_eq!(ack.credential.revision, 3);
     assert_eq!(ack.delivery_failures.len(), 1);
     assert_eq!(
         ack.delivery_failures[0].reason,
-        "could not read the agent settings"
+        "could not install the managed Claude launch credentials"
     );
     assert_eq!(f.store.credentials().await.unwrap()[0].revision, 3);
     assert!(harness.manager.status(f.row.id).unwrap().client.is_some());
@@ -1789,7 +1942,7 @@ async fn route_replacement_covers_the_hook_publication_gap_and_reports_failures(
         .unwrap();
     assert_eq!(
         host["tensorlake"]["credential_warning"],
-        "could not read the agent settings"
+        "could not install the managed Claude launch credentials"
     );
     assert!(
         !std::str::from_utf8(&bytes)
@@ -1891,7 +2044,7 @@ async fn actor_hold_cancels_the_real_hook_before_acknowledging_parking() {
     let before = f.operations();
     f.backend.release.notify_one();
     assert_eq!(f.operations(), before);
-    assert!(!f.home.join(".claude/settings.json").exists());
+    assert!(!f.claude_path().exists());
     harness.manager.release_hold(f.row.id, true);
     harness
         .await_state(f.row.id, |state| {

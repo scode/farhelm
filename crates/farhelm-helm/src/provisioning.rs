@@ -573,19 +573,24 @@ mod tests {
 
     #[async_trait]
     impl ProvisioningBackend for FakeBackend {
-        async fn remove_github_token(
+        async fn remove_owned_file(
             &self,
             _target: &ProvisioningTarget,
             path: &Path,
         ) -> Result<(), BackendFailure> {
-            self.record("remove-github-token")?;
+            let event = if path.ends_with("agent-credentials") {
+                "remove-agent-credentials"
+            } else {
+                "remove-github-token"
+            };
+            self.record(event)?;
             if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
                 match tokio::fs::remove_file(path).await {
                     Ok(()) => {}
                     Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
                     Err(_) => {
                         return Err(BackendFailure::new(
-                            "fixture could not remove its GitHub token",
+                            "fixture could not remove its credential file",
                             "",
                         ));
                     }
@@ -745,7 +750,14 @@ mod tests {
         ) -> Result<ActionOutcome, BackendFailure> {
             // A refused install must leave the fixture's previous bytes intact,
             // just as an unsuccessful atomic replacement does on the host.
-            let outcome = self.record("write-unit")?;
+            let event = if destination.ends_with("agent-credentials") {
+                "wrote-agent-credentials"
+            } else if destination.ends_with(".claude/settings.json") {
+                "write-legacy-claude-settings"
+            } else {
+                "write-unit"
+            };
+            let outcome = self.record(event)?;
             if self.stateful.load(std::sync::atomic::Ordering::SeqCst) {
                 if let Some(expected) = expected {
                     let current = match tokio::fs::read(destination).await {

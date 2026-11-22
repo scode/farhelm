@@ -1,63 +1,49 @@
-//! Merge or clear the recipe's agent endpoints without replacing user settings.
+//! Compose Claude launch credentials and preserve the existing Codex settings merge.
 //!
 //! These functions return bytes only. The backend writes them through stdin,
 //! never argv, and parse errors deliberately omit the input and parser detail:
 //! either may contain a token. An incompatible document is refused intact.
 
 use crate::tensorlake::recipes::ResolvedEndpoint;
+use farhelm_supervisor::recipe_credentials::RecipeCredentials;
 
-/// Select an endpoint without carrying image credentials to the selected URL.
-/// Best-effort cleanup removes known conflicting settings; unrelated settings
-/// and environment entries survive, including Claude's first-run choices.
-pub(super) fn claude(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
-    let mut value = claude_document(bytes)?;
-    value
-        .as_object_mut()
-        .expect("validated Claude settings")
-        .remove("apiKeyHelper");
-    let env = claude_env(&mut value)?;
-    env.remove("CLAUDE_CODE_OAUTH_TOKEN");
-    env.remove("ANTHROPIC_CUSTOM_HEADERS");
-    env.remove("ANTHROPIC_API_KEY");
-    env.insert(
-        "ANTHROPIC_BASE_URL".into(),
-        endpoint.base_url.clone().into(),
-    );
-    env.insert(
-        "ANTHROPIC_AUTH_TOKEN".into(),
-        endpoint.token.clone().unwrap_or_default().into(),
-    );
-    serde_json::to_vec_pretty(&value).map_err(|_| "could not encode Claude Code's settings".into())
+/// Each mode owns the entire delivered environment. Switching modes drops
+/// the previous mode's variables from the file. An empty map asks delivery
+/// to remove the file. A tokenless endpoint retains the empty token value
+/// that the earlier settings writer assigned.
+pub(super) fn claude_environment(
+    endpoint: Option<ResolvedEndpoint>,
+    subscription: Option<String>,
+) -> RecipeCredentials {
+    let env = if let Some(token) = subscription {
+        [("CLAUDE_CODE_OAUTH_TOKEN".into(), token)].into()
+    } else if let Some(endpoint) = endpoint {
+        [
+            ("ANTHROPIC_BASE_URL".into(), endpoint.base_url),
+            (
+                "ANTHROPIC_AUTH_TOKEN".into(),
+                endpoint.token.unwrap_or_default(),
+            ),
+        ]
+        .into()
+    } else {
+        Default::default()
+    };
+    RecipeCredentials { env }
 }
 
-/// Install a setup-token in Claude's ordinary settings, without completing
-/// onboarding. Endpoint credentials and helpers can override a subscription;
-/// remove those known conflicts without promising an exhaustive credential scrub.
-pub(super) fn claude_subscription(bytes: Option<&[u8]>, token: &str) -> Result<Vec<u8>, String> {
-    let mut value = claude_document(bytes)?;
-    value
-        .as_object_mut()
-        .expect("validated Claude settings")
-        .remove("apiKeyHelper");
-    let env = claude_env(&mut value)?;
-    env.remove("ANTHROPIC_BASE_URL");
-    env.remove("ANTHROPIC_AUTH_TOKEN");
-    env.remove("ANTHROPIC_CUSTOM_HEADERS");
-    env.remove("ANTHROPIC_API_KEY");
-    env.insert("CLAUDE_CODE_OAUTH_TOKEN".into(), token.into());
-    serde_json::to_vec_pretty(&value).map_err(|_| "could not encode Claude Code's settings".into())
-}
-
-/// None removes the managed authentication keys without inventing a settings
-/// file. A clean file keeps its exact bytes, and malformed input is refused
-/// intact with diagnostics that cannot quote its credentials.
+/// Remove the three keys an earlier Farhelm could write. Callers establish
+/// that Farhelm previously managed this file. A clean file keeps its exact
+/// bytes, and malformed input receives a fixed diagnostic.
 pub(super) fn clear_claude(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, String> {
     let Some(bytes) = bytes else { return Ok(None) };
-    let mut value = claude_document(Some(bytes))?;
-    if value.get("env").is_none() {
+    let mut value = claude_document(bytes)?;
+    let Some(env) = value.get_mut("env") else {
         return Ok(None);
-    }
-    let env = claude_env(&mut value)?;
+    };
+    let env = env
+        .as_object_mut()
+        .ok_or_else(|| "the env in ~/.claude/settings.json must be an object".to_string())?;
     let mut changed = false;
     for key in [
         "ANTHROPIC_BASE_URL",
@@ -74,33 +60,14 @@ pub(super) fn clear_claude(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, Stri
         .transpose()
 }
 
-/// Share Claude's bounded caller-provided document and fixed parse errors
-/// across all modes; no parser diagnostic may disclose the saved token.
-fn claude_document(bytes: Option<&[u8]>) -> Result<serde_json::Value, String> {
-    let value = match bytes {
-        Some(bytes) => serde_json::from_slice(bytes)
-            .map_err(|_| "~/.claude/settings.json is not valid JSON".to_string())?,
-        None => serde_json::json!({}),
-    };
+/// Reject incompatible settings without displaying the parser's input.
+fn claude_document(bytes: &[u8]) -> Result<serde_json::Value, String> {
+    let value: serde_json::Value = serde_json::from_slice(bytes)
+        .map_err(|_| "~/.claude/settings.json is not valid JSON".to_string())?;
     if !value.is_object() {
         return Err("~/.claude/settings.json must be a JSON object".into());
     }
     Ok(value)
-}
-
-/// Validate Claude's environment before changing its managed entries.
-/// Root credential helpers are handled separately; incompatible shapes are
-/// refused without returning partially updated settings.
-fn claude_env(
-    value: &mut serde_json::Value,
-) -> Result<&mut serde_json::Map<String, serde_json::Value>, String> {
-    value
-        .as_object_mut()
-        .expect("validated Claude settings")
-        .entry("env")
-        .or_insert_with(|| serde_json::json!({}))
-        .as_object_mut()
-        .ok_or_else(|| "the env in ~/.claude/settings.json must be an object".into())
 }
 
 /// Replace Farhelm's Codex provider so old credentials cannot follow a new URL.
@@ -212,42 +179,22 @@ fn codex_document(bytes: Option<&[u8]>) -> Result<toml_edit::DocumentMut, String
 mod tests {
     use super::*;
 
-    /// Switching modes must make the new credential authoritative without
-    /// erasing unrelated configuration or inventing onboarding metadata.
-    /// None is idempotent and does not create an otherwise absent file.
+    /// A stamped cleanup removes precisely the old recipe keys. Preserve
+    /// unrelated configuration and avoid creating a file for absent settings.
     #[test]
-    fn claude_modes_replace_managed_authentication_without_onboarding() {
-        let original = br#"{"permissions":{"allow":["Read"]},"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old"},"theme":"dark"}"#;
-        let subscription = claude_subscription(Some(original), "fictional-subscription").unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&subscription).unwrap();
-        assert_eq!(
-            value["env"]["CLAUDE_CODE_OAUTH_TOKEN"],
-            "fictional-subscription"
-        );
-        assert!(value["env"].get("ANTHROPIC_BASE_URL").is_none());
-        assert!(value["env"].get("ANTHROPIC_AUTH_TOKEN").is_none());
-        assert_eq!(value["env"]["KEEP"], "yes");
-        assert_eq!(value["permissions"]["allow"][0], "Read");
-        assert_eq!(value["theme"], "dark");
-        assert_eq!(
-            value.as_object().unwrap().len(),
-            3,
-            "no first-run fields added"
-        );
-        let endpoint = ResolvedEndpoint {
-            base_url: "https://new.test/v1".into(),
-            token: Some("fictional-new".into()),
-            revision: None,
-            incarnation: None,
-        };
-        let endpoint = claude(Some(&subscription), &endpoint).unwrap();
-        let value: serde_json::Value = serde_json::from_slice(&endpoint).unwrap();
-        assert!(value["env"].get("CLAUDE_CODE_OAUTH_TOKEN").is_none());
-        assert_eq!(value["env"]["ANTHROPIC_AUTH_TOKEN"], "fictional-new");
-        let cleared = clear_claude(Some(&endpoint)).unwrap().unwrap();
+    fn claude_cleanup_preserves_unrelated_and_absent_settings() {
+        let original = br#"{"apiKeyHelper":"image-helper","permissions":{"allow":["Read"]},"theme":"dark","env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old","CLAUDE_CODE_OAUTH_TOKEN":"fictional-login","ANTHROPIC_CUSTOM_HEADERS":"image-header","ANTHROPIC_API_KEY":"image-key"}}"#;
+        let cleared = clear_claude(Some(original)).unwrap().unwrap();
         let value: serde_json::Value = serde_json::from_slice(&cleared).unwrap();
-        assert_eq!(value["env"], serde_json::json!({"KEEP":"yes"}));
-        assert_eq!(value["theme"], "dark");
+        assert_eq!(
+            value,
+            serde_json::json!({
+                "apiKeyHelper":"image-helper",
+                "permissions":{"allow":["Read"]},
+                "theme":"dark",
+                "env":{"KEEP":"yes","ANTHROPIC_CUSTOM_HEADERS":"image-header","ANTHROPIC_API_KEY":"image-key"}
+            })
+        );
         assert!(clear_claude(Some(&cleared)).unwrap().is_none());
         assert!(clear_claude(None).unwrap().is_none());
         assert!(
@@ -261,11 +208,6 @@ mod tests {
             b"fictional-private invalid",
         ] {
             assert!(
-                !claude_subscription(Some(invalid), "fictional-private")
-                    .unwrap_err()
-                    .contains("fictional-private")
-            );
-            assert!(
                 !clear_claude(Some(invalid))
                     .unwrap_err()
                     .contains("fictional-private")
@@ -273,39 +215,36 @@ mod tests {
         }
     }
 
-    /// Mixed ownership can send gateway headers to another endpoint or let an
-    /// image's key/helper override a subscription. Both endpoint token states
-    /// and Subscription scrub these settings; None leaves image credentials alone.
+    /// Each mode writes a complete snapshot, so a new launch cannot inherit
+    /// variables from an earlier delivery mode through the managed file.
     #[test]
-    fn claude_delivery_removes_image_credentials_but_none_preserves_them() {
-        let original = br#"{"apiKeyHelper":"image-helper","theme":"dark","env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"https://old.test","ANTHROPIC_AUTH_TOKEN":"fictional-old","ANTHROPIC_CUSTOM_HEADERS":"X-Gateway-Key: fictional-old","ANTHROPIC_API_KEY":"fictional-image-key"}}"#;
-        let mut outputs = vec![claude_subscription(Some(original), "fictional-login").unwrap()];
-        for token in [Some("fictional-new".into()), None] {
+    fn claude_environment_carries_only_the_selected_mode() {
+        let subscription = claude_environment(None, Some("fictional-login".into()));
+        assert_eq!(
+            subscription.env,
+            [("CLAUDE_CODE_OAUTH_TOKEN".into(), "fictional-login".into())].into()
+        );
+        for token in [Some("fictional-new"), None] {
             let endpoint = ResolvedEndpoint {
                 base_url: "https://new.test".into(),
-                token,
+                token: token.map(str::to_owned),
                 revision: None,
                 incarnation: None,
             };
-            outputs.push(claude(Some(original), &endpoint).unwrap());
+            let env = claude_environment(Some(endpoint), None);
+            assert_eq!(
+                env.env,
+                [
+                    ("ANTHROPIC_BASE_URL".into(), "https://new.test".into()),
+                    (
+                        "ANTHROPIC_AUTH_TOKEN".into(),
+                        token.unwrap_or_default().into()
+                    ),
+                ]
+                .into()
+            );
         }
-        for output in outputs {
-            let value: serde_json::Value = serde_json::from_slice(&output).unwrap();
-            assert!(value.get("apiKeyHelper").is_none());
-            for key in ["ANTHROPIC_CUSTOM_HEADERS", "ANTHROPIC_API_KEY"] {
-                assert!(value["env"].get(key).is_none(), "retained {key}");
-            }
-            assert_eq!(value["env"]["KEEP"], "yes");
-            assert_eq!(value["theme"], "dark");
-        }
-        let cleared: serde_json::Value =
-            serde_json::from_slice(&clear_claude(Some(original)).unwrap().unwrap()).unwrap();
-        assert_eq!(cleared["apiKeyHelper"], "image-helper");
-        assert_eq!(
-            cleared["env"]["ANTHROPIC_CUSTOM_HEADERS"],
-            "X-Gateway-Key: fictional-old"
-        );
-        assert_eq!(cleared["env"]["ANTHROPIC_API_KEY"], "fictional-image-key");
+        assert!(claude_environment(None, None).env.is_empty());
     }
 
     /// Cleanup removes only the owned selection and bearer token. It must not
@@ -339,24 +278,13 @@ mod tests {
     /// Recipe setup must preserve personal settings, including other
     /// providers, rather than making an endpoint save a config replacement.
     #[test]
-    fn merges_preserve_unrelated_settings() {
+    fn codex_merge_preserves_unrelated_settings() {
         let endpoint = ResolvedEndpoint {
             base_url: "http://127.0.0.1:8080".into(),
             token: Some("secret".into()),
             revision: None,
             incarnation: None,
         };
-        let json = claude(
-            Some(
-                br#"{"permissions":{"allow":[]},"env":{"KEEP":"yes","ANTHROPIC_BASE_URL":"old"}}"#,
-            ),
-            &endpoint,
-        )
-        .unwrap();
-        let json: serde_json::Value = serde_json::from_slice(&json).unwrap();
-        assert_eq!(json["env"]["KEEP"], "yes");
-        assert_eq!(json["env"]["ANTHROPIC_AUTH_TOKEN"], "secret");
-        assert!(json["permissions"].is_object());
         let toml = codex(Some(b"# keep me\nmodel = 'gpt-test'\n[model_providers.other]\nname = 'other'\n[model_providers.farhelm]\ncustom = true\n"), &endpoint).unwrap();
         let text = String::from_utf8(toml).unwrap();
         assert!(text.contains("# keep me"));
@@ -423,20 +351,13 @@ mod tests {
     /// Malformed or incompatible user files stay untouched, and refusal text
     /// must not repeat the token a parser may have encountered.
     #[test]
-    fn incompatible_documents_fail_without_echoing_contents() {
+    fn incompatible_codex_documents_fail_without_echoing_contents() {
         let endpoint = ResolvedEndpoint {
             base_url: "https://example.test".into(),
             token: None,
             revision: None,
             incarnation: None,
         };
-        for bytes in [b"[]".as_slice(), br#"{"env":[]}"#, b"secret invalid"] {
-            assert!(
-                !claude(Some(bytes), &endpoint)
-                    .unwrap_err()
-                    .contains("secret")
-            );
-        }
         for bytes in [b"model_providers = false".as_slice(), b"secret invalid"] {
             assert!(
                 !codex(Some(bytes), &endpoint)
@@ -450,7 +371,6 @@ mod tests {
                 .unwrap_err()
                 .contains("must be a table")
         );
-        assert!(claude(None, &endpoint).is_ok());
         assert!(codex(None, &endpoint).is_ok());
     }
 }
