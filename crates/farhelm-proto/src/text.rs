@@ -17,6 +17,8 @@
 //! agent parsing `farhelm agent sessions` reads one unambiguous form, and logs
 //! replace with `_`.
 
+use std::borrow::Cow;
+
 /// Whether `ch` must never be shown as itself in peer-supplied text.
 ///
 /// Three families, each with a known presentation attack:
@@ -110,23 +112,31 @@ pub fn notation(ch: char) -> String {
     format!("<U+{:04X}>", ch as u32)
 }
 
-/// `text` with every presentation-unsafe character written in [`notation`],
-/// and every literal `<U+` that a peer wrote escaped as well (its `<` becomes
-/// `<U+003C>`), so text can never pose as an escape this function produced.
-/// Everything else, spaces included, is kept as it is.
+/// Walk the displayed spelling one whole unit at a time. Each unit is one
+/// borrowed Unicode scalar or an owned escape in [`notation`]. A caller that
+/// truncates can count scalars in a unit and drop the whole unit at a cut.
 ///
 /// The literal-notation rule is SPEC.md's for terminal-link disclosures ("make
 /// presentation-unsafe characters visible, distinguish literal escape notation
-/// from escaped characters"); the desktop app applies it to all host-supplied
-/// text it shows, which is never weaker.
+/// from escaped characters"). The `<` of any literal `<U+` becomes its own
+/// `<U+003C>` escape, so a peer cannot pass raw text off as an escape.
+pub fn escaped_units(text: &str) -> impl Iterator<Item = Cow<'_, str>> {
+    text.char_indices().map(move |(index, ch)| {
+        let rest = &text[index..];
+        if is_presentation_unsafe(ch) || (ch == '<' && rest.starts_with("<U+")) {
+            Cow::Owned(notation(ch))
+        } else {
+            Cow::Borrowed(&rest[..ch.len_utf8()])
+        }
+    })
+}
+
+/// Spell all of `text` exactly as the desktop shows it. Join the same units
+/// used by truncating labels so their escape boundaries match this spelling.
 pub fn escaped(text: &str) -> String {
     let mut out = String::with_capacity(text.len());
-    for (index, ch) in text.char_indices() {
-        if is_presentation_unsafe(ch) || (ch == '<' && text[index..].starts_with("<U+")) {
-            out.push_str(&notation(ch));
-        } else {
-            out.push(ch);
-        }
+    for unit in escaped_units(text) {
+        out.push_str(&unit);
     }
     out
 }

@@ -59,6 +59,10 @@ fn labels_keep_the_end_without_splitting_an_escape() {
     let label = tail_label(&literal);
     assert!(!label.contains("003C") && !label.contains('>'), "{label}");
     assert!(label.ends_with(&"e".repeat(30)), "{label}");
+    // The cut crosses a five-digit escape. Keep the Unicode tail by scalar count, even though it uses more bytes.
+    let ending = "é".repeat(33);
+    let multibyte = format!("/{}\u{1d173}{ending}", "f".repeat(30));
+    assert_eq!(tail_label(&multibyte), format!("…{ending}"));
 }
 
 // ---- The launcher --------------------------------------------------------------------------------------------------
