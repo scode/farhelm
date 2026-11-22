@@ -5742,6 +5742,7 @@ impl HelmStore {
             let schema_version = if let Some(build) = creation_build {
                 apply_schema(&mut conn, build)?;
                 ensure_local_row(&conn)?;
+                farhelm_supervisor::db::maintain_on_owning_open(&conn, "helm database");
                 SCHEMA_VERSION
             } else {
                 let version = conn
@@ -5763,6 +5764,11 @@ impl HelmStore {
             conn: farhelm_supervisor::db::Db::new(conn, "helm db"),
             schema_version,
         })
+    }
+
+    /// Finish the serving owner's store after the runtime drains its writers.
+    pub(crate) fn checkpoint_for_stop(self) {
+        self.conn.checkpoint_for_stop();
     }
 
     /// The durable scope that separates this registry's agent retry keys from
@@ -16412,7 +16418,7 @@ mod tests {
     /// Offline readers cannot convert an incumbent's rollback journal. Owning
     /// opens convert; every ordinary WAL connection sets NORMAL, while
     /// checkout-config keeps its explicitly separate FULL-sync opening
-    /// contract.
+    /// contract. A size event is emitted only for each owning open.
     #[farhelm_testtrace::test]
     async fn open_selects_durability_by_ownership_and_preserves_the_cli_exception() {
         let dir = tempfile::tempdir().unwrap();
@@ -16427,8 +16433,11 @@ mod tests {
                 .unwrap();
             (mode, sync)
         };
+        let capture = farhelm_testtrace::current_capture().unwrap();
+        let size_reports = || capture.matching("sqlite store size").unwrap().len();
         let owner = HelmStore::open(&path).await.unwrap();
         assert_eq!(settings(&owner), ("wal".into(), 1));
+        assert_eq!(size_reports(), 1);
         drop(owner);
         {
             let legacy = Connection::open(&path).unwrap();
@@ -16442,9 +16451,11 @@ mod tests {
         }
         let reader = HelmStore::open_without_migration(&path).await.unwrap();
         assert_eq!(settings(&reader), ("delete".into(), 2));
+        assert_eq!(size_reports(), 1);
         drop(reader);
         let owner = HelmStore::open(&path).await.unwrap();
         assert_eq!(settings(&owner), ("wal".into(), 1));
+        assert_eq!(size_reports(), 2);
         let reader = HelmStore::open_without_migration(&path).await.unwrap();
         assert_eq!(settings(&reader), ("wal".into(), 1));
         let cli = HelmStore::open_existing_current_schema(&path)
@@ -16455,6 +16466,7 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(settings(&cli), ("wal".into(), 2));
+        assert_eq!(size_reports(), 2);
     }
 
     /// A fresh database must come up on the current schema with the reserved

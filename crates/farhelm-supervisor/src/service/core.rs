@@ -16201,15 +16201,25 @@ pub fn run(
     startup: SupervisorStartup,
     stop: impl std::future::Future<Output = anyhow::Result<()>>,
 ) -> anyhow::Result<()> {
-    on_owned_runtime(|claim| serve_until_stopped(state_dir, startup, stop, claim))
+    on_owned_runtime(
+        |claim| serve_until_stopped(state_dir, startup, stop, claim),
+        |orderly_stop| {
+            if let Some((db, stopped)) = orderly_stop {
+                db.checkpoint_for_stop();
+                stopped
+            } else {
+                Ok(())
+            }
+        },
+    )
 }
 
 /// Where [`on_owned_runtime`] keeps the state-folder claim while its runtime
 /// drains.
 type ClaimSlot = std::sync::OnceLock<Arc<StateDirOwnership>>;
 
-/// Drive `serving` on a runtime this call creates, and release whatever claim
-/// `serving` publishes into the slot only after that runtime has dropped.
+/// Drive `serving` on an owned runtime and retain its state-directory claim
+/// through both runtime drain and the final synchronous store operation.
 ///
 /// Blocking work (the startup cache and prepared-checkout sweep, a failed
 /// create's file unlink) keeps running after serving stops, and a runtime's
@@ -16217,24 +16227,32 @@ type ClaimSlot = std::sync::OnceLock<Arc<StateDirOwnership>>;
 /// supervisor drops, before that wait, and a successor could then claim the
 /// folder and accept a launch whose fresh checkout or launch input the old
 /// work deletes. The helm holds its claim the same way (SPEC_impl.md).
-fn on_owned_runtime<F>(serving: impl FnOnce(Arc<ClaimSlot>) -> F) -> anyhow::Result<()>
+fn on_owned_runtime<F, T>(
+    serving: impl FnOnce(Arc<ClaimSlot>) -> F,
+    after_drain: impl FnOnce(T) -> anyhow::Result<()>,
+) -> anyhow::Result<()>
 where
-    F: std::future::Future<Output = anyhow::Result<()>>,
+    F: std::future::Future<Output = anyhow::Result<T>>,
 {
     // Reverse declaration order is the release order, on unwind too: the
     // runtime (and its blocking work) goes first, then the slot's claim.
     let claim = Arc::new(ClaimSlot::new());
     let runtime = tokio::runtime::Runtime::new().context("starting the supervisor runtime")?;
-    runtime.block_on(serving(Arc::clone(&claim)))
+    let served = runtime.block_on(serving(Arc::clone(&claim)));
+    drop(runtime);
+    after_drain(served?)
 }
 
 /// [`run`]'s serving lifetime, inside the runtime [`on_owned_runtime`] owns.
+/// Return the owning connection only after an orderly stop, alongside any
+/// error reported by the stop tether. The caller checkpoints after other
+/// tasks using the connection have drained.
 async fn serve_until_stopped(
     state_dir: &Path,
     startup: SupervisorStartup,
     stop: impl std::future::Future<Output = anyhow::Result<()>>,
     claim: Arc<ClaimSlot>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<(crate::db::Db, anyhow::Result<()>)>> {
     use tokio::signal::unix::{SignalKind, signal};
 
     // The stop is watched from the start, not only once serving: building a
@@ -16245,7 +16263,7 @@ async fn serve_until_stopped(
     tokio::pin!(stop);
     let sup = tokio::select! {
         built = Supervisor::new_for_startup_claiming(state_dir, startup, Some(&claim)) => built?,
-        result = &mut stop => return result,
+        result = &mut stop => return result.map(|()| None),
     };
     // Installed before serving starts, so there is no window in which a
     // stop request takes the default (immediate) action.
@@ -16267,7 +16285,7 @@ async fn serve_until_stopped(
         }
     };
     let (reason, stopped) = tokio::select! {
-        result = sup.serve() => return result,
+        result = sup.serve() => return result.map(|()| None),
         _ = terminate.recv() => ("SIGTERM", Ok(())),
         _ = interrupt.recv() => ("SIGINT", Ok(())),
         _ = hangup_received => ("SIGHUP", Ok(())),
@@ -16281,7 +16299,12 @@ async fn serve_until_stopped(
         "stopping: closing terminal-output clients in order before exit"
     );
     sup.stop_in_order().await;
-    stopped
+    // A stop signal can win the select before a claimless supervisor's
+    // serve future refuses. Its connection still belongs to the incumbent.
+    if sup.ownership.is_none() {
+        return stopped.map(|()| None);
+    }
+    Ok(Some((sup.store.conn.clone(), stopped)))
 }
 
 impl Supervisor {
@@ -25442,7 +25465,7 @@ exit 1
         let old = {
             let state_dir = state_dir.clone();
             std::thread::spawn(move || {
-                on_owned_runtime(|claim| async move {
+                let serving = |claim: Arc<ClaimSlot>| async move {
                     // A waiting claim makes construction re-check its
                     // program right after claiming, and `dummy_exe` does not
                     // exist, so construction gives up at that point.
@@ -25480,7 +25503,8 @@ exit 1
                     });
                     started.await.expect("the blocking job started");
                     Ok(())
-                })
+                };
+                on_owned_runtime(serving, Ok)
             })
         };
 

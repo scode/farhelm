@@ -1352,14 +1352,20 @@ pub fn run_embedded(
     // This entry point owns the runtime; callers cannot drop it later.
     let mut ownership = None;
     let runtime = tokio::runtime::Runtime::new().context("starting helm runtime")?;
-    runtime.block_on(serve_with_ready(
+    let serving = runtime.block_on(serve_with_ready(
         args,
         link_opener,
         downloads,
         ready,
         shutdown,
         &mut ownership,
-    ))
+    ));
+    // A serving future can return while an accepted request or an owned
+    // blocking job still holds a store clone. Checkpoint after those writers
+    // have stopped, while this thread still owns the state directory.
+    drop(runtime);
+    serving?.checkpoint_for_stop();
+    Ok(())
 }
 
 #[cfg(test)]
@@ -1370,7 +1376,8 @@ thread_local! {
 }
 
 /// Serve inside the owning runtime, publishing the claim to its outer scope.
-/// Ownership outlives serving and also covers runtime drain.
+/// Ownership outlives serving and also covers runtime drain. A completed
+/// orderly stop returns the connection for its final WAL checkpoint.
 async fn serve_with_ready(
     args: HelmArgs,
     link_opener: Option<LinkOpener>,
@@ -1378,7 +1385,7 @@ async fn serve_with_ready(
     ready: std::sync::mpsc::Sender<EmbeddedReady>,
     shutdown: tokio::sync::oneshot::Receiver<()>,
     ownership: &mut Option<ownership::OwnershipLock>,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<store::HelmStore> {
     let state_dir = args.state_dir.clone();
     // 0700: this directory holds helm.db, the ownership lock, and ssh
     // ControlMaster sockets. Each grants the user's authority when reached.
@@ -1544,7 +1551,8 @@ async fn serve_with_ready(
     state._automatic_updates.stop();
     state.tunnels.shutdown().await;
     state.manager.shutdown_and_wait().await;
-    serving
+    serving?;
+    Ok(state.store.clone())
 }
 
 /// The response header carrying this helm's build version to its client
@@ -2149,8 +2157,9 @@ mod tests {
     /// A successor must stay excluded after serving ends while the old runtime
     /// joins blocking work. A refused connection to the helm's address proves
     /// serving ended; the worker's entered/release channels prove that runtime
-    /// drain still has work to join.
-    /// Releasing it then permits a new claim, so a leaked lock cannot pass.
+    /// drain still has work to join. Releasing it commits one last write.
+    /// The final checkpoint must include that write even while an idle
+    /// connection keeps SQLite's last-close cleanup from running.
     #[farhelm_testtrace::test]
     async fn helm_ownership_outlives_runtime_drain() {
         use std::sync::{
@@ -2168,6 +2177,8 @@ mod tests {
         let (shutdown_tx, shutdown_rx) = tokio::sync::oneshot::channel();
         let parked = Arc::new(AtomicBool::new(false));
         let worker_parked = parked.clone();
+        let database = dir.path().join("helm.db");
+        let worker_database = database.clone();
         let helm = std::thread::spawn(move || {
             // Keep fixture state alive through runtime drop even if the test
             // unwinds before its explicit release and join.
@@ -2179,6 +2190,12 @@ mod tests {
                         entered_tx.send(()).unwrap();
                         // Timeout and sender drop both release cleanup on assertion failure.
                         let result = release_rx.recv_timeout(Duration::from_secs(30));
+                        if result.is_ok() {
+                            rusqlite::Connection::open(worker_database)
+                                .unwrap()
+                                .execute_batch("CREATE TABLE stop_probe(value); INSERT INTO stop_probe VALUES (7)")
+                                .unwrap();
+                        }
                         worker_parked.store(false, Ordering::SeqCst);
                         assert!(
                             !matches!(result, Err(mpsc::RecvTimeoutError::Timeout)),
@@ -2210,6 +2227,13 @@ mod tests {
         tokio::net::TcpStream::connect(ready.addr)
             .await
             .expect("fixture premise: the serving helm accepts connections");
+        let conn = rusqlite::Connection::open(database).unwrap();
+        let journal_mode: String = conn
+            .query_row("PRAGMA journal_mode", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(journal_mode, "wal");
+        let wal = dir.path().join("helm.db-wal");
+        assert!(std::fs::metadata(&wal).unwrap().len() > 0);
         shutdown_tx.send(()).unwrap();
         wait_for_serving_to_end(ready.addr).await;
         assert!(
@@ -2234,6 +2258,11 @@ mod tests {
             "{message}"
         );
         assert!(!parked.load(Ordering::SeqCst));
+        assert_eq!(std::fs::metadata(wal).unwrap().len(), 0);
+        let late_write: i64 = conn
+            .query_row("SELECT value FROM stop_probe", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(late_write, 7);
         let _successor = crate::ownership::acquire_ownership(dir.path().to_path_buf())
             .await
             .expect("ownership is released after runtime drain finishes");
