@@ -174,6 +174,37 @@ fn no_setup(_: &SceneState, _: &mut Window, _: &mut App) {}
 
 // ---- Helpers the scenes of more than one area use -------------------------------------------------------------------
 
+/// Run a scene's setup once the connection installs its UI session. The store receives the snapshot after the
+/// scene's setup returns, so opening a dialog inline could read an empty store. Keep the fake helm, connection and
+/// subscription for the scene's lifetime, including while its dialog answers further reads.
+fn once_ui_session(
+    state: &SceneState,
+    helm: impl std::any::Any,
+    connection: Entity<session::Connection>,
+    cx: &mut App,
+    mut setup: impl FnMut(&mut App) + 'static,
+) {
+    let mut opened = false;
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if opened || connection.read(cx).session().is_none() {
+            return;
+        }
+        opened = true;
+        setup(cx);
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
+/// Give a golden session the same last activity and last seen time on the frozen scene clock. A scene pinning unread
+/// output can override the seen time after setting the age.
+fn session_at_age(key: &'static str, title: &str, ago: i64) -> Fixture {
+    let at = TEST_NOW - ago;
+    session(key).title(title).activity(at).seen(Some(at))
+}
+
 /// One press of Tab, dispatched as the platform would: the focus coordinator moves focus to the next tab stop, and the
 /// keyboard becomes the window's last input, which is what makes a focused control draw its ring.
 fn press_tab(window: &mut Window, cx: &mut App) {
@@ -326,13 +357,7 @@ fn fleet() -> [Fixture; 6] {
             "resume": null,
         })
     };
-    let row = |key, title, state, ago: i64| {
-        session(key)
-            .title(title)
-            .status(status(state))
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
-    };
+    let row = |key, title, state, ago| session_at_age(key, title, ago).status(status(state));
     const MINUTE: i64 = 60;
     const HOUR: i64 = 60 * MINUTE;
     const DAY: i64 = 24 * HOUR;

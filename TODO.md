@@ -245,45 +245,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
-- **Consolidate the helpers duplicated across Farhelm.** Work through the repeated helpers from the 2026-11-21 review.
-  Reuse the existing shared module where one fits and keep each helper scoped to its actual callers. Locations below are
-  from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
-  `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
-
-  - `launcher-repeats-choices-and-summary-formatting.md`. Recheck these call sites against the landed
-    `launcher-command-field` plan's redesign. Share the lowercase effort spelling and `default` fallback for search and
-    the change notice beside the labels in `permission/words.rs:16–27`, used from `launcher/search.rs:413–419` and
-    `launcher/view/changed.rs:104–110`. Share default-effort help across the select, radio group and search at
-    `launcher/view/choices.rs:231–235,260–265` and `launcher/search.rs:361–362`. Share `gh:owner/name` on top of
-    `repo_identifier` for `launcher/recents.rs:244–250`, `launcher/view/checkout.rs:1184–1191` and
-    `launcher/draft.rs:194–197`, adding preview status where applicable. In `launcher/entry.rs:348–361,371–379`, share
-    the harness-specific unsupported-resume formatter and uncaptured-conversation text, keeping the Agent and Command
-    conditions. In `launcher/view/folder_list.rs:89–106` and `crates/farhelm-proto/src/text.rs:113–132`, use one
-    iterator over whole escaped display units so truncation splits only between units. In
-    `launcher/view/recents.rs:354–383` and `launcher/view/search.rs:654–655,683–694`, the two recent-setup surfaces
-    repeated resolved permission rendering, including danger ink for YOLO. The old strip omitted the default. In the
-    redesigned launcher, look at `recent_choice` in `launcher/view/search/start.rs` and `recent_lines` in
-    `launcher/view/search.rs`. Share the permission projection and keep the Start column's chip and default omission,
-    search's inline text, and each surface's summary local.
-  - `gui-screenshot-scenes-repeat-fixture-wiring.md`. The landed `goldens-fast-and-targeted` plan changed the runner.
-    The scene fixtures still need consolidation. Share one-shot dialog setup when a fake connection first has a UI
-    session. Give the helper each scene's setup callback and retain the connection, fake helm and subscription. See
-    `goldens/hosts.rs:55–85,125–146,154–176,188–209,795–817,960–988`,
-    `goldens/other_dialogs.rs:235–253,282–299,332–350`, `goldens/templates.rs:52–69,129–167,208–228` and
-    `goldens/settings.rs:122–183`. Share the session fixture's title and `TEST_NOW` activity/seen timestamps while
-    scenes supply their status (`goldens/session_list.rs:42–47,114–119,154–160`, `goldens/other_dialogs.rs:112–117`,
-    `goldens/mod.rs:301–307`).
-  - `templates-repeat-lookup-and-control-wiring.md`. In `templates/dispatch.rs:221–243,295–313`, share launcher and
-    switcher template lookup and unavailable/missing-name wording, with each surface supplying its sentence ID. Share
-    the available-name read in helm order in `templates/armed.rs:475–499` and `templates/editor.rs:1494–1507`. The
-    sequence's Enter lookup still uses retained names. Share the Base name/Fixed name radio and help in
-    `templates/editor/rows.rs:652–678` and `templates/save_panel.rs:308–340`, passing each control's ID, selection and
-    handler. Share the typed `GET /api/launch-catalog` request and decode in `templates/dialog.rs:766–789` and
-    `launcher/view.rs:477–500`, keeping retries, failure display and quick-launch continuation local.
-
-  Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
-  Plan: `plans/queue/helpers-launcher-and-templates.md`.
-
 - **Report remote command status in-band, not through ssh's exit status.** Tailscale SSH on a Mac reports exit status 0
   for every command (tailscale/tailscale#18256, still open on 2026-11-17), so adding such a Mac fails at the first probe
   ("the supervisor probe closed before hello completion with exit status exit status: 0"), and past that a failed
