@@ -25,3 +25,17 @@ coverage: IC-04, consolidate these IDs into one review item.
 
 Review evidence is retained under run `e551ad05-1866-44a9-b97b-9e47d1d67375` as `contract-corrections/CC-07`, with
 `implementation-contracts/IC-04`.
+
+## Late Delete warnings
+
+The same presentation boundary affects the new late Delete notices. Escape can acknowledge and resolve a warning before
+the panel presents it, which quiets the bell and makes the warning clearable. Its checkout path and reason remain in
+history until a separate clear. Clear resolved can then clear one of those warnings using a drawn list the panel has yet
+to present. The supervisor diagnostic remains available.
+
+At `df6199142d6495a95b2d008400ba2686efb775c6`, see `crates/gui/farhelm-gui/src/rail_notices.rs:351–373,457–466`,
+`crates/farhelm-helm/src/notices.rs:588–596`, and `vendor/gpui-pre/src/window.rs:6509–6515`. The pinned product contract
+at `SPEC.md:3201–3212` bounds both actions to the displayed list. Source inspection establishes the relevant draw and
+input ordering.
+
+Trailing review evidence is retained under run `4d6e9e3b-26c2-4fd0-aeb6-997bfc824377` as `notices/f2` and `notices/c2`.

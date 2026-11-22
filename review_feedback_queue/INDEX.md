@@ -67,6 +67,15 @@ consequences.
   Farhelm can grant saved Claude trust to a replacement directory after a configured checkout step changes the path that
   was originally checked.
 
+- [`trailing-printed-terminal-link-stale-frame.md`](trailing-printed-terminal-link-stale-frame.md) — A click on a
+  printed link can open an address from a newer terminal screen than the one the user clicked.
+
+- [`trailing-implicit-home-spare-ownership.md`](trailing-implicit-home-spare-ownership.md) — The first managed checkout
+  in an existing environment can claim and remove files already stored under the reserved spare directory in its home.
+
+- [`trailing-gone-terminal-ended-confirmation.md`](trailing-gone-terminal-ended-confirmation.md) — When a lost terminal
+  is shown as ended, Stop or Delete can terminate a main program the confirmation did not say it would stop.
+
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -124,6 +133,33 @@ consequences.
 
 - [`wayland-ssh-paste-blocks-window.md`](wayland-ssh-paste-blocks-window.md) — Pasting an SSH answer on Wayland can
   block the GUI while another application supplies clipboard data.
+
+- [`trailing-automatic-update-fresh-dev-build.md`](trailing-automatic-update-fresh-dev-build.md) — Automatic Update can
+  replace a development supervisor even after a fresh probe identifies it as a development build.
+
+- [`trailing-credential-delivery-holds-disconnected-environment.md`](trailing-credential-delivery-holds-disconnected-environment.md)
+  — When an environment disconnects during initial credential delivery, reconnect and launch can stall while Farhelm
+  still treats the old connection as eligible for replacements.
+
+- [`trailing-replace-drops-late-checkout-warning.md`](trailing-replace-drops-late-checkout-warning.md) — A replacement
+  session can start while the warning explaining where the original checkout was left disappears after the reply
+  deadline.
+
+- [`trailing-container-inherits-removed-proxy-setting.md`](trailing-container-inherits-removed-proxy-setting.md) — A new
+  container session can still use a proxy removed from its host if the running systemd user manager retains the earlier
+  setting.
+
+- [`trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md`](trailing-sandbox-confirmation-does-not-bind-billed-size-it-displays.md)
+  — A Tensorlake checkout launch can admit a newer recipe size than the one shown when the user confirms, if the same
+  named recipe is edited before admission.
+
+- [`trailing-lifecycle-loses-held-child-after-terminal-loss.md`](trailing-lifecycle-loses-held-child-after-terminal-loss.md)
+  — Stop can report success or Restart can start another run while the prior program survives after its terminal host
+  disappears.
+
+- [`trailing-authorized-stop-report-completion-without-settling-recorded-launch.md`](trailing-authorized-stop-report-completion-without-settling-recorded-launch.md)
+  — Stop can acknowledge completion of a retained unconfirmed launch without establishing what its recorded
+  terminal-host start left running.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -405,7 +441,7 @@ consequences.
   failed scenes without telling its reviewer that the run was incomplete.
 
 - [`notifications-act-on-unshown-list.md`](notifications-act-on-unshown-list.md) — Closing Notifications or clearing
-  resolved entries can act on notices the window has drawn but has yet to show.
+  resolved entries can act on notices the window has drawn but has yet to show. This also affects late Delete warnings.
 
 - [`orphan-delete-promises-unadmitted-cleanup.md`](orphan-delete-promises-unadmitted-cleanup.md) — Sandbox Delete can
   report cleanup in progress before the helm has accepted it, so a later admission failure never appears when Settings
@@ -622,3 +658,392 @@ consequences.
 - [`hook-consent-summary-has-limited-keyboard-scroll.md`](hook-consent-summary-has-limited-keyboard-scroll.md) —
   Keyboard focus reveals the hook setup buttons without providing a separate way to scroll the notices. Whether this can
   hide the hook’s lasting effects in a supported window remains unverified.
+
+- [`trailing-hosts-delete-just-registered-environment-from-approved-agent-launch.md`](trailing-hosts-delete-just-registered-environment-from-approved-agent-launch.md)
+  — A user-approved agent launch can expose its new environment to the Hosts delete control before provisioning takes
+  the host lock. A deletion that wins can leave a stale launch task and a misleading cleanup failure.
+
+- [`trailing-mac-update-miss-app-installed-before-run-admission.md`](trailing-mac-update-miss-app-installed-before-run-admission.md)
+  — Installing the desktop app after Update's reach check but before the run is accepted can leave a separately
+  installed launchd service where Update should refuse.
+
+- [`trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md`](trailing-busy-claim-retry-test-bypasses-fleet-wake-it-depends.md)
+  — The new test proves the planner can try again when explicitly called, while regressions that leave a host idle
+  without waking automatic Update can pass this test.
+
+- [`trailing-setup-and-takeover-offer-binding-remains-unverified.md`](trailing-setup-and-takeover-offer-binding-remains-unverified.md)
+  — It remains unclear whether a setup answer always consumes the offer shown when the user confirmed, especially if the
+  draft changes while the offer is pending.
+
+- [`trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md`](trailing-linux-add-writes-frozen-install-before-rechecking-systemd-availability.md)
+  — An approved Linux setup can install the binary and unit, then fail on reload, when the user service manager became
+  unavailable while the setup question was open.
+
+- [`trailing-retired-lease-still-admit-local-provisioning-command-before-next.md`](trailing-retired-lease-still-admit-local-provisioning-command-before-next.md)
+  — An outgoing credential replacement can locally start another provisioning operation during retirement. The remote
+  credential outcome is unverified.
+
+- [`trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md`](trailing-reconnect-regression-test-does-not-exercise-push-waiting-for.md)
+  — Tests can keep passing if a replacement already queued for a host resumes under the wrong connection lifetime.
+
+- [`trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md`](trailing-retired-yolo-flag-refusal-overstates-when-farhelm-asks.md)
+  — The retired --confirm-yolo flag tells agents that every launch requires the user to answer even though host command
+  permissions can waive ordinary cards.
+
+- [`trailing-retained-environment-queue-checkout-removal-without-waking-trash.md`](trailing-retained-environment-queue-checkout-removal-without-waking-trash.md)
+  — After deleting the only session using a checkout in a still-running Farhelm environment, an idle Trash view misses
+  the automatic cleanup and can delay showing a background failure.
+
+- [`trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md`](trailing-archive-wake-regression-test-covers-delete-but-leaves-replace.md)
+  — The new test would still pass if a future edit broke automatic Trash refresh after Replace removes its source.
+
+- [`trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md`](trailing-environment-delete-implementation-spec-still-describes-desktop-port-as.md)
+  — The implementation spec says the desktop does not yet send the environment Delete request, but it is already the
+  shipped GUI path.
+
+- [`trailing-agent-create-host-help-omits-supported-hostless-launches.md`](trailing-agent-create-host-help-omits-supported-hostless-launches.md)
+  — Agent create's Host help can send callers looking for an unnecessary flag when a template launches a recipe or their
+  session is already inside a Farhelm environment.
+
+- [`trailing-timed-out-agent-delete-lose-late-checkout-warning.md`](trailing-timed-out-agent-delete-lose-late-checkout-warning.md)
+  — An approved agent Delete can leave a checkout behind after its relay has timed out, with no warning in the app's
+  notice history.
+
+- [`trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md`](trailing-environment-delete-drops-checkout-warning-received-after-inner-reply.md)
+  — A non-final environment Delete can complete on its host and explain why it left a checkout behind, yet the warning
+  never reaches the rail if the reply arrives after the inner supervisor deadline.
+
+- [`trailing-proxy-probe-failure-handling-remains-partly-unverified.md`](trailing-proxy-probe-failure-handling-remains-partly-unverified.md)
+  — The inspected paths refuse a failed proxy read. Whether every failed read stays distinct from an empty result,
+  including redaction of the refusal, remains unverified.
+
+- [`trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md`](trailing-recipe-images-retain-proxy-configuration-used-by-their-helpers.md)
+  — For ordinary image-backed login configuration, changing the place manager’s proxy or deleting one session does not
+  remove earlier credential-bearing settings from the shared recipe images.
+
+- [`trailing-fresh-proxy-regression-overlooks-installed-boot-file.md`](trailing-fresh-proxy-regression-overlooks-installed-boot-file.md)
+  — A regression could send the right values in the first import while writing the wrong bytes for later container
+  boots.
+
+- [`trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md`](trailing-podman-diagnostic-tests-bypass-connection-stage-fixed-by-patch.md)
+  — A regression could again hide the cause of an early container connection failure while the route-specific diagnostic
+  checks pass.
+
+- [`trailing-unrelated-manager-settings-block-container-launch-and-cleanup.md`](trailing-unrelated-manager-settings-block-container-launch-and-cleanup.md)
+  — A place or custom image can be refused even when its proxy and path settings are small and readable. A failed place
+  refresh can also prevent Farhelm from removing an existing container.
+
+- [`trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md`](trailing-full-podman-inspection-strand-container-farhelm-needs-to-remove.md)
+  — A container with enough otherwise valid metadata can fail Farhelm's ownership inspection and remain undeletable from
+  Farhelm.
+
+- [`trailing-cleanup-report-failure-when-verified-container-has-already-disappeared.md`](trailing-cleanup-report-failure-when-verified-container-has-already-disappeared.md)
+  — Delete can report a failure and leave a host or helper record for retry even though the requested container is
+  already absent.
+
+- [`trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md`](trailing-delete-anyway-forget-second-tag-whose-absence-was-never.md)
+  — One Delete anyway warning can let Farhelm forget multiple unfinished saves, including a tag whose first absence
+  check occurs during confirmed Delete.
+
+- [`trailing-saved-absence-replaces-different-places-or-providers-cleanup-error.md`](trailing-saved-absence-replaces-different-places-or-providers-cleanup-error.md)
+  — After a Delete has found a missing capture, ordinary retry shows Delete anyway while a separate cleanup blocker
+  stays hidden.
+
+- [`trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md`](trailing-confirmed-delete-does-not-have-regression-assertion-for-capture.md)
+  — The regression assertions would miss a change that forgets a capture when the confirmed request finds its image.
+
+- [`trailing-new-launch-reservation-make-confirmed-delete-refuse-after-changing.md`](trailing-new-launch-reservation-make-confirmed-delete-refuse-after-changing.md)
+  — When an approved new container launch overlaps Delete anyway for the same recipe, Delete can report that a host uses
+  the recipe after already removing its prepared images.
+
+- [`trailing-delete-anyway-omits-host-needed-to-locate-late-image.md`](trailing-delete-anyway-omits-host-needed-to-locate-late-image.md)
+  — With several container hosts, even a warning for exactly one capture gives the user no location for the cleanup it
+  says might be needed.
+
+- [`trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md`](trailing-first-deletes-live-confirmation-reply-lacks-regression-assertion.md)
+  — Existing assertions would miss a regression where prompt absence on a first Delete results in an ordinary error
+  instead of opening Delete anyway.
+
+- [`trailing-post-exit-alt-release-clears-short-selection-and-queues.md`](trailing-post-exit-alt-release-clears-short-selection-and-queues.md)
+  — A quick Alt/Option release over the final screen can clear the highlight for a just-copied character and dispatch
+  cursor keys.
+
+- [`trailing-losing-terminal-host-hide-history-already-exposed-after-exit.md`](trailing-losing-terminal-host-hide-history-already-exposed-after-exit.md)
+  — During recovery from loss of an already exited terminal host, the retained screen can lose its exit line and stop
+  showing primary history even though recovery has kept the same grid.
+
+- [`trailing-final-frame-boundary-test-leaves-osc-8-and-file.md`](trailing-final-frame-boundary-test-leaves-osc-8-and-file.md)
+  — Existing exit tests would miss a regression that joins a file path or combines OSC 8 labels across the
+  retained-history/final-frame boundary.
+
+- [`trailing-osc-52-copy-rule-omits-primary-selection-distinction.md`](trailing-osc-52-copy-rule-omits-primary-selection-distinction.md)
+  — The wording can lead readers to expect a primary-selection write to replace the system clipboard.
+
+- [`trailing-multi-clicking-exit-message-copies-different-row.md`](trailing-multi-clicking-exit-message-copies-different-row.md)
+  — A double or triple click on the exit message can replace the clipboard with terminal text from the row above it.
+
+- [`trailing-page-keys-skip-rows-in-lifted-terminal.md`](trailing-page-keys-skip-rows-in-lifted-terminal.md) — Keyboard
+  paging loses its shared edge row when the terminal is lifted by one row and skips retained output between pages when
+  two or more rows are lifted.
+
+- [`trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md`](trailing-recovery-warning-is-cut-off-in-supported-narrow-terminal.md)
+  — Scrolling to the recovery warning after a full-screen program exits can reveal only the beginning of its message.
+
+- [`trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md`](trailing-lifted-viewport-makes-scrollbar-overstate-visible-share.md)
+  — The scrollback thumb can appear larger than the portion of output actually visible when a status or exit line lifts
+  grid rows.
+
+- [`trailing-late-replay-history-displace-already-browsed-final-screen.md`](trailing-late-replay-history-displace-already-browsed-final-screen.md)
+  — If a replay reveals the exit frame before its history is delivered, the viewer can browse that frame and then jump
+  to old history without a scroll request. An already stored selection may be dropped or name different rows.
+
+- [`trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md`](trailing-registered-all-numeric-ssh-names-bypass-first-label-shortening.md)
+  — A multi-label numeric SSH name with too many components to be IPv4 can be saved in a host's Destination field. The
+  collapsed rail then uses the whole spelling in its short caption and can truncate it. Hover help still has the full
+  name.
+
+- [`trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md`](trailing-all-phase-fixture-does-not-compare-managers-phase-strings.md)
+  — The strengthened fixture catches client/wire phase drift. A manager-only rename for a phase can still pass this
+  fixture.
+
+- [`trailing-status-mark-tests-lost-their-per-target-geometry-check.md`](trailing-status-mark-tests-lost-their-per-target-geometry-check.md)
+  — The row status tests verify that each mark's help appears with a notch and no ring. They can pass if placement uses
+  the bounds of a different element in the same sidebar.
+
+- [`trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md`](trailing-shift-click-mixes-live-range-anchor-with-displayed-row.md)
+  — A Shift-click on a surviving row can mark a different range when the open session changes before the list redraws.
+  The click can add or omit local marks relative to the range displayed.
+
+- [`trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md`](trailing-muted-waiting-dots-bypass-ringless-status-tooltip-path.md)
+  — On a muted session waiting on a connected host, hovering the waiting dot shows the row summary. If the summary fits
+  beside the sidebar, its notch and ring identify the row's open control. The separate Unmute bell still has its own
+  action help.
+
+- [`trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md`](trailing-maximized-relaunch-contract-has-no-first-frame-or-subsequent.md)
+  — The checked cases could pass if a maximized Mac relaunch still flashed the ordinary frame or if the next Zoom
+  returned to a different rectangle.
+
+- [`trailing-one-create-test-skip-already-readable-duplicate.md`](trailing-one-create-test-skip-already-readable-duplicate.md)
+  — The test can pass with a duplicate request already waiting on the scripted supervisor stream when the successful
+  launch returns.
+
+- [`trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md`](trailing-recipe-fixture-omits-create-time-collision-and-provisioning-cleanup.md)
+  — The no-default fixture checks numbering after a preview conflict and a successful create, leaving the specific
+  create-time lost-race cleanup unasserted.
+
+- [`trailing-completed-setup-save-steal-focus-from-newer-input.md`](trailing-completed-setup-save-steal-focus-from-newer-input.md)
+  — When a default checkout-folder save finishes after the user changes to a new environment and starts editing another
+  field, the launcher can move focus back to Repository.
+
+- [`trailing-replace-with-button-does-not-carry-own-rendered-delete.md`](trailing-replace-with-button-does-not-carry-own-rendered-delete.md)
+  — The main Replace with button reads the most recently presented source warning when its callback runs, so the button
+  itself carries no guard from the frame that made it available.
+
+- [`trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md`](trailing-locally-invalid-checkout-names-start-recipe-environment-before-refusal.md)
+  — The desktop can offer a sandbox launch for a checkout name that cannot produce a valid directory. The helm can
+  create the environment and attempt cleanup before telling the user to fix the name.
+
+- [`trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md`](trailing-indented-blank-lines-defeat-release-note-pr-coverage-checks.md)
+  — A separator containing only spaces can make the gate overlook a highlighted PR missing from All changes, or reject a
+  list that already cites it.
+
+- [`trailing-empty-highlights-release-path-lacks-consumer-test.md`](trailing-empty-highlights-release-path-lacks-consumer-test.md)
+  — The release checker accepts a version with every entry in All changes. The generator, desktop reader and dialog lack
+  an assertion that this release remains usable.
+
+- [`trailing-delete-scope-comment-describes-old-stop-behavior.md`](trailing-delete-scope-comment-describes-old-stop-behavior.md)
+  — The cleanup source misstates what happens to terminal tabs when a session is stopped.
+
+- [`trailing-exited-session-skips-portable-sweep.md`](trailing-exited-session-skips-portable-sweep.md) — After a program
+  exits and its scope disappears, Stop, Restart and Delete can skip the fallback search for its remaining jobs.
+
+- [`trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md`](trailing-shell-teardown-coverage-stops-at-signal-and-delete-reply.md)
+  — The tests can pass without showing that a command typed in Bash or Zsh is saved when Farhelm stops the session.
+
+- [`trailing-scoped-shell-teardown-suppresses-failed-history-saving-hangup.md`](trailing-scoped-shell-teardown-suppresses-failed-history-saving-hangup.md)
+  — If the scope's hangup request fails to start, a first-class shell can be forcibly stopped with no chance to save
+  history through that signal and the operation can still report success.
+
+- [`trailing-portable-teardown-first-find-pinned-shell-when-it-is.md`](trailing-portable-teardown-first-find-pinned-shell-when-it-is.md)
+  — One partial process-table read can cause a running unscoped shell to be stopped forcibly without a chance to handle
+  the history-saving hangup.
+
+- [`trailing-delete-skips-hangup-for-live-tab-it-knows-only.md`](trailing-delete-skips-hangup-for-live-tab-it-knows-only.md)
+  — Deleting a non-shell session can forcibly terminate a known terminal tab without giving its shell the tab's graceful
+  hangup.
+
+- [`trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md`](trailing-recorded-tab-scope-test-omits-deletes-discovery-and-refusal.md)
+  — The existing assertions can miss a regression where Delete skips an inaccessible scope belonging to a terminal tab.
+
+- [`trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md`](trailing-no-existing-assertion-covers-terminal-loss-between-publication-and.md)
+  — An assertion can pass after this patch's late recovery-status sample is removed, despite a Restart acknowledgement
+  again being able to hide the recovery card.
+
+- [`trailing-restart-with-samples-terminal-availability-before-final-database-work.md`](trailing-restart-with-samples-terminal-availability-before-final-database-work.md)
+  — Restart with can return and cache a terminal-present acknowledgement after the replacement terminal is gone.
+
+- [`trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md`](trailing-agent-re-adoption-discard-cleanup-identities-without-confirming-host.md)
+  — Recovery can drop the main terminal's saved host and child identities while the recorded host may still run,
+  weakening later Delete cleanup.
+
+- [`trailing-tab-close-discards-retry-state-when-final-process-sweep.md`](trailing-tab-close-discards-retry-state-when-final-process-sweep.md)
+  — A terminal tab can disappear after Close reports incomplete process cleanup, leaving no tab to retry, even while its
+  session remains.
+
+- [`trailing-delete-level-tests-miss-retained-gone-host-refusal.md`](trailing-delete-level-tests-miss-retained-gone-host-refusal.md)
+  — The existing assertions do not show that Delete keeps a session and its launch record if a terminal classified Gone
+  still has a live adopted process.
+
+- [`trailing-create-and-create-replay-sample-terminal-availability-before-projecting.md`](trailing-create-and-create-replay-sample-terminal-availability-before-projecting.md)
+  — A create or a keyed replay can answer that its session has a terminal after that host has disappeared.
+
+- [`trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md`](trailing-retry-delete-ambiguous-restart-record-before-scope-is-confirmed.md)
+  — If a failed Restart leaves an unresolved scope, another refused Restart can erase the evidence that blocks startup
+  from reopening the older terminal.
+
+- [`trailing-re-adoption-publish-missing-terminal-without-invalidating-session-list.md`](trailing-re-adoption-publish-missing-terminal-without-invalidating-session-list.md)
+  — If re-adoption finds that an unreadable main terminal has gone, the recovery card can wait for a later refresh.
+
+- [`trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md`](trailing-attach-admits-retained-gone-main-terminal-listings-report-missing.md)
+  — A request to attach can be admitted after the supervisor already knows the main terminal is gone.
+
+- [`trailing-tab-resume-pass-without-receiving-flood-output.md`](trailing-tab-resume-pass-without-receiving-flood-output.md)
+  — The terminal-tab regression can pass while the paused tab fails to deliver the output produced during its pause.
+
+- [`trailing-paused-tab-test-pass-without-exercising-pause.md`](trailing-paused-tab-test-pass-without-exercising-pause.md)
+  — The tab-isolation test can pass without showing that the tab ever stopped receiving output.
+
+- [`trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md`](trailing-landing-removed-ambiguous-create-refusal-marker-assertion.md)
+  — The regression still checks that the session and its retry key are retained, but it stopped checking whether the
+  client is wrongly told to discard that key.
+
+- [`trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md`](trailing-alternate-screen-stop-diagnostics-overstate-replay-oracle.md)
+  — If the Stop replay test fails, it can point a maintainer at a screen capture even when replay selected the wrong
+  emulator buffer.
+
+- [`trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md`](trailing-tab-cleanup-test-leave-first-two-fixture-jobs-running.md)
+  — A failure in the regression can leave the test's own background work running for the fixture's remaining sleep
+  interval.
+
+- [`trailing-alternate-screen-stop-waits-on-output-written-before-term.md`](trailing-alternate-screen-stop-waits-on-output-written-before-term.md)
+  — The test can fail even when Farhelm correctly keeps the frame of a program killed before it restored the primary
+  screen.
+
+- [`trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md`](trailing-failed-restart-annotation-test-accepts-errors-before-restoration-is.md)
+  — The regression can pass without proving a failed relaunch restores the user's stopped status.
+
+- [`trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md`](trailing-real-supervisor-restart-assertions-leave-recovered-socket-identity-unchecked.md)
+  — The executable-path restart tests show that the original host stays alive and the reattached session works. They can
+  miss a changed durable socket address because the two observations are never tied together after reattach.
+
+- [`trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md`](trailing-strengthened-stop-tree-test-permits-cleanup-after-success-reply.md)
+  — The test can pass even if Stop tells the user it finished while the host's child or descendant is still running.
+
+- [`trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md`](trailing-restart-gap-open-tab-checks-survivors-but-never-witnesses.md)
+  — The test can pass if a refused Open Tab launches a shell and cleans it up before replying.
+
+- [`trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md`](trailing-restart-ordering-witness-record-gone-without-reading-old-pid.md)
+  — The test can accept a failed fixture PID read as evidence that the previous agent tree had already stopped before
+  the replacement host ran.
+
+- [`trailing-list-admission-test-observes-reply-timing-instead-of-list.md`](trailing-list-admission-test-observes-reply-timing-instead-of-list.md)
+  — A regression could let a busy supervisor build lists outside its concurrency limit while this test still passes.
+
+- [`trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md`](trailing-stop-classification-test-pass-without-stop-waiting-for-exit.md)
+  — A regression that stops waiting for a dead agent's final error output could escape the Stop test.
+
+- [`trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md`](trailing-seal-delete-test-cannot-show-delete-reached-directory-admission.md)
+  — A regression could let Delete decide to destroy an environment during a concurrent launch without reliably failing
+  the existing regression test.
+
+- [`trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md`](trailing-borrower-reload-lacks-completed-origin-runtime-handoff-witness.md)
+  — The borrower test compares status across reload, but can pass without showing the origin terminal was released and
+  successfully recovered.
+
+- [`trailing-delete-verifies-stale-records-host-identity-after-requesting-takeover.md`](trailing-delete-verifies-stale-records-host-identity-after-requesting-takeover.md)
+  — If a retained launch record names a socket serving another session whose host already has a client, Delete can close
+  that owning connection before refusing.
+
+- [`trailing-live-route-conformance-pass-when-terminal-control-skips-target.md`](trailing-live-route-conformance-pass-when-terminal-control-skips-target.md)
+  — Keeping the target terminal alive improves setup, but the reader-progress test can still pass without proving that
+  the target control ran under contention.
+
+- [`trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md`](trailing-omp-owner-exit-test-overstates-evidence-behind-resume-offer.md)
+  — The strengthened test establishes that a saved Resume offer survives process exit and supervisor reload. Its
+  docstring additionally claims the offer stands on a verified file, which the test does not check.
+
+- [`trailing-borrower-classification-test-does-not-establish-checkout-membership.md`](trailing-borrower-classification-test-does-not-establish-checkout-membership.md)
+  — This borrower classification case can pass if its second session never joins the managed checkout.
+
+- [`trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md`](trailing-ready-and-borrower-cases-do-not-assert-vanished-terminal.md)
+  — The test documents ordinary exit for a stopped Ready or borrower session, but can pass if the observer proposes
+  nothing and reload keeps the old Running outcome.
+
+- [`trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md`](trailing-running-seed-cancellation-checks-readability-without-observing-returned-screen.md)
+  — The strengthened assertion detects a stranded or lost emulator after the seed caller cancels. It can still pass if
+  an empty emulator takes the old one's place and loses the screen.
+
+- [`trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md`](trailing-product-spec-still-promises-no-decision-after-unanswered-environment.md)
+  — The product spec groups a request that was never sent with one that went unanswered, even though an unanswered
+  Delete may proceed.
+
+- [`trailing-interrupted-card-guide-still-names-only-host-restart.md`](trailing-interrupted-card-guide-still-names-only-host-restart.md)
+  — The implementation guide describes recovery-card copy that covers one of the two interruption causes.
+
+- [`trailing-work-start-spec-still-says-rename-replaces-sampling-state.md`](trailing-work-start-spec-still-says-rename-replaces-sampling-state.md)
+  — The implementation spec gives conflicting directions about whether a title-only change should preserve the current
+  screen reading.
+
+- [`trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md`](trailing-interrupted-recovery-guide-still-assumes-no-prior-process-remains.md)
+  — The implementation guide justifies Restart without a confirmation by asserting the prior process is gone, although
+  legacy retirement may leave it running.
+
+- [`trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md`](trailing-corrected-clone-doorway-test-still-omits-valid-absent-host.md)
+  — The test whose contract #4529 repairs would still pass if the supervisor reinstated a blanket host requirement for
+  Clone.
+
+- [`trailing-clone-cli-reference-still-omits-environment-exception.md`](trailing-clone-cli-reference-still-omits-environment-exception.md)
+  — The CLI reference tells agents to supply a host for a Clone that the environment contract requires to omit it.
+
+- [`trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md`](trailing-held-start-fixture-coverage-of-launch-publication-remains-unverified.md)
+  — The fixture checks publication after first-stage entry. Its coverage of the ordering relied on by startup recovery
+  remains unverified.
+
+- [`trailing-migration-comments-reboot-classification-remains-disputed.md`](trailing-migration-comments-reboot-classification-remains-disputed.md)
+  — The migration wording may imply that a Launching row avoids the interruption assigned to Running rows. The ensuing
+  reboot classification gap remains unverified.
+
+- [`trailing-restart-republish-tab-exited-during-relaunch.md`](trailing-restart-republish-tab-exited-during-relaunch.md)
+  — A tab that exits during a slow Restart can still appear in the Restart result and be published by the helm before a
+  fresh listing corrects it.
+
+- [`trailing-restart-disposition-documentation-still-promises-no-external-change.md`](trailing-restart-disposition-documentation-still-promises-no-external-change.md)
+  — The implementation has contradictory descriptions of whether a failed Restart may have run a replacement.
+
+- [`trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md`](trailing-work-start-guide-omits-deferral-while-lifecycle-claim-is.md)
+  — A newly sampled question or work burst can update the badge before the recency key changes, and an observation
+  deferred during relaunch can lose its chance to update the key.
+
+- [`trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md`](trailing-recent-activity-product-spec-still-promises-retired-capture-recovery.md)
+  — The recent-activity contract tells readers that a recovered screen always starts a fresh ordering baseline after
+  capture failure.
+
+- [`trailing-sampler-date-retained-final-screen-after-agent-exited.md`](trailing-sampler-date-retained-final-screen-after-agent-exited.md)
+  — If an agent exits during another session's sample processing, its retained work screen can refresh its age and
+  unseen marker after the exit.
+
+- [`trailing-interrupted-be-superseded-by-inferred-preparation-failure.md`](trailing-interrupted-be-superseded-by-inferred-preparation-failure.md)
+  — The protocol docs promise a definitive launch error before Interrupted changes, while the supervisor can reclassify
+  from missing or unreadable preparation evidence.
+
+- [`trailing-legacy-interrupted-settles-launch-reads-without-proving-writer-stopped.md`](trailing-legacy-interrupted-settles-launch-reads-without-proving-writer-stopped.md)
+  — After same-boot legacy retirement, the ticker can stop checking for a later launch failure without proving the
+  writer ended.
+
+- [`trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md`](trailing-restricted-connection-refusal-of-whole-environment-delete-remains-unverified.md)
+  — The product requires restricted sessions to be denied this operation. The independent inspection did not establish
+  the exact denial path from the supplied source excerpts.
+
+- [`trailing-trust-hint-save-errors-use-live-selection-instead-of.md`](trailing-trust-hint-save-errors-use-live-selection-instead-of.md)
+  — A busy or refused Don't show again click can attach its error to a different session if selection moved after the
+  hint was drawn.
