@@ -43,10 +43,8 @@
 //!   <name>") through the mark of the press, as the old app showed it, and is then dropped from the store's record
 //!   under the host's key; one that opened no dialog (the user moved on) stays under the row, which opens for it.
 //!
-//! NOTE: Waiting on the launcher's environment work, as the session's Suspend and Resume are: refusing them while this
-//! window's own launch targets or is waking the same host (SPEC.md, "Creation"; the old `LAUNCH_ON_THIS_HOST`), since
-//! the launcher exposes no predicate for its pending target yet. A launch elsewhere never holds them, and the helm's
-//! lifecycle lock answers a collision on the same host as busy, which the refusal dialog shows.
+//! A launch targeting this host in this window holds its lifecycle controls. The helm's lifecycle lock still
+//! arbitrates requests from other windows and the CLI.
 
 use farhelm_proto::ui_channel::{HostStateView, HostView};
 use gpui::{AnyElement, AnyWindowHandle, App, FocusHandle, IntoElement as _, SharedString, Window};
@@ -58,6 +56,7 @@ use crate::components::{Button, HoverHelp, Role, Tier};
 use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
+use crate::launcher::launch::host_lifecycle_refusal;
 use crate::layers::Subject;
 use crate::operations::{OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
@@ -99,11 +98,12 @@ pub(super) fn button(
     host: &HostView,
     offered: Option<(Lifecycle, bool)>,
     toggle: Option<FocusHandle>,
+    launch_refusal: Option<&'static str>,
 ) -> Option<AnyElement> {
     let (Lifecycle::Resume, enabled) = offered? else {
         return None;
     };
-    let help = help(host, Lifecycle::Resume)?;
+    let help = launch_refusal.or_else(|| help(host, Lifecycle::Resume))?;
     let id = host.id;
     let name = HostSentence::new("host-resume-name")
         .text("Resume ")
@@ -117,7 +117,7 @@ pub(super) fn button(
     )
     .tier(Tier::Neutral)
     .accessible_name(name)
-    .disabled(!enabled)
+    .disabled(!enabled || launch_refusal.is_some())
     .on_click(move |_, window, cx| {
         let mark = Mark::take(cx);
         resume(id, mark, window, cx);
@@ -158,7 +158,10 @@ pub(super) fn suspend(host: i64, mark: Mark, window: &mut Window, cx: &mut App) 
 /// `host` as the registry lists it, while it still offers Suspend ([`super::offers::lifecycle_of`]): what the press,
 /// the question and its answer check again, since the phase can change while the read or the question is out.
 fn offering_suspend(host: i64, cx: &App) -> Option<HostView> {
-    listed(host, cx).filter(|view| offers::lifecycle_of(view) == Some(Lifecycle::Suspend))
+    listed(host, cx).filter(|view| {
+        offers::lifecycle_of(view) == Some(Lifecycle::Suspend)
+            && host_lifecycle_refusal(host, cx).is_none()
+    })
 }
 
 /// What [`ask`] did.
@@ -197,7 +200,8 @@ fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> Asked {
             "Suspend",
             HoverHelp::tooltip(ui.host_suspend_help()),
             Tier::Primary,
-        ),
+        )
+        .disabled_while(move |cx| host_lifecycle_refusal(host, cx)),
         host,
     )
     .line(line)
@@ -255,7 +259,9 @@ fn moved_on(host: i64, cx: &mut App) {
 fn send(host: i64, verb: Lifecycle, mark: Mark, window: AnyWindowHandle, cx: &mut App) {
     let current = match verb {
         Lifecycle::Suspend => offering_suspend(host, cx),
-        Lifecycle::Resume => listed(host, cx),
+        Lifecycle::Resume => {
+            listed(host, cx).filter(|_| host_lifecycle_refusal(host, cx).is_none())
+        }
     };
     if current.is_none() {
         return;

@@ -819,6 +819,54 @@ fn an_environment_sessions_stop_question_offers_stop_and_suspend(cx: &mut TestAp
     );
 }
 
+/// A launch can target the same machine that runs a session about to stop. Keep ordinary Stop available while
+/// withholding the extra answer that would freeze the launch's host.
+#[gpui::test]
+fn a_launch_holds_its_hosts_stop_and_suspend_answer(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 1)], false, &host);
+    pending(&mut fake);
+    let create = crate::launcher::launch_tests::launch_to(&mut fake, cx, host.id);
+    assert_eq!(
+        create.body.unwrap()["host"],
+        host.id,
+        "the create targets this session's host"
+    );
+    choose(cx, "session-menu-a", "session-menu-stop");
+    assert_eq!(
+        hover_help(cx, "prompt-alternative-0").as_deref(),
+        Some("A launch on this host is in progress; try again once it finishes")
+    );
+    test_support::click(cx, "prompt-alternative-0");
+    assert_eq!(
+        label_of(cx, "prompt-confirm").as_deref(),
+        Some("Confirm stop")
+    );
+    // The create is still first in the fake's reply queue. Set aside any unrelated requests until it answers.
+    let before_stop = fake.commands();
+    assert!(
+        before_stop
+            .iter()
+            .all(|command| !is_environment(&command.path)),
+        "the disabled answer sent nothing"
+    );
+    test_support::click(cx, "prompt-confirm");
+    let after_stop = fake.commands();
+    assert_eq!(
+        after_stop
+            .iter()
+            .filter(|command| is_environment(&command.path))
+            .map(|command| (command.method, command.path.as_str()))
+            .collect::<Vec<_>>(),
+        [(Method::Post, "/api/sessions/a/stop")],
+    );
+    fake.reply(create.id, 409, Some(json!("The host refused the launch")));
+    for command in before_stop.into_iter().chain(after_stop) {
+        fake.reply(command.id, 200, None);
+    }
+    test_support::settle(cx);
+}
+
 // ---- Pending and refused --------------------------------------------------------------------------------------------
 
 /// The helm answers Resume within 20 seconds and a Tensorlake Resume routinely takes longer, so the 504 that says it

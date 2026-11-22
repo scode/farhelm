@@ -28,6 +28,20 @@ pub(crate) fn command_draft() -> LaunchDraft {
     draft
 }
 
+/// Submit a real launch to an existing host so other surfaces see the same destination hold as in the app.
+/// Leave the create unanswered to exercise controls while the window still owns that launch.
+pub(crate) fn launch_to(helm: &mut FakeHelm, cx: &mut VisualTestContext, host: i64) -> FakeCommand {
+    let mut draft = command_draft();
+    draft.choose_host(host, "~".into());
+    draft.edit_folder("/home/user/work".into());
+    cx.update(|window, cx| {
+        let mark = crate::focus::Mark::take(cx);
+        assert!(super::view::open(draft, &mark, window, cx).is_some());
+    });
+    crate::test_support::settle(cx);
+    press(helm, cx, "/api/sessions")
+}
+
 /// The creates (`POST /api/sessions`) the window sent since the last call. Every other command (the catalog read, the
 /// selection remembered) is answered at once, so the fake's in-order replies stay possible while a create waits; the
 /// catalog read is answered with an empty catalog ([`creates_answering`]).

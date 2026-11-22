@@ -3403,6 +3403,11 @@
       "reference": null
     },
     {
+      "golden": "stop-while-launching-confirmation",
+      "title": "Stop and suspend unavailable while a launch targets the same host",
+      "reference": null
+    },
+    {
       "golden": "settings-recipe-editor-delete-anyway",
       "title": "Recipe Delete after an unconfirmed image save, asking to delete anyway",
       "reference": null

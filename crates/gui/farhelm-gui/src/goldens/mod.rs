@@ -142,6 +142,8 @@ struct SceneState {
     hover: Rc<Cell<Option<&'static str>>>,
     /// Advancing the clock can run tasks that borrow the app. Request this from staging and advance outside its draw.
     advance_clock: Rc<Cell<Option<std::time::Duration>>>,
+    /// Ends deliberately pending fixture work after its frame has been captured.
+    after_capture: Rc<Cell<Option<fn(&SceneState)>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -881,6 +883,12 @@ static SCENES: &[Scene] = &[
         size: (1000., 418.),
         draw: session_lists_then,
         setup: tab_only_stop_confirmation_setup,
+    },
+    Scene {
+        name: "stop-while-launching-confirmation",
+        size: (1000., 418.),
+        draw: session_lists_then,
+        setup: stop_while_launching_setup,
     },
     Scene {
         name: "session-list-deleting",
@@ -1772,6 +1780,7 @@ fn render_capture(
             after: Rc::new(Cell::new(None)),
             hover: Rc::new(Cell::new(None)),
             advance_clock: Rc::new(Cell::new(None)),
+            after_capture: Rc::new(Cell::new(None)),
         };
         let scene_view = cx.new(|cx| SceneView {
             scene,
@@ -1789,7 +1798,15 @@ fn render_capture(
         let staged = view.read(cx).state.clone();
         (scene.setup)(&staged, window, cx);
     })?;
-    settle(cx, window.into(), &view)
+    let result = catch_render_panic(|| settle(cx, window.into(), &view));
+    cx.update(|cx| {
+        let state = &view.read(cx).state;
+        if let Some(after) = state.after_capture.take() {
+            after(state);
+        }
+    });
+    cx.run_until_parked();
+    result
 }
 
 /// Give a fixture panic the same scene-level context as an ordinary render error. The panic hook still reports

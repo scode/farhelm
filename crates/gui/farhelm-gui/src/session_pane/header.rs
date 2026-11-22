@@ -509,6 +509,8 @@ struct EnvironmentShown {
     stopped: bool,
     pending: Option<environment::Pending>,
     unavailable: bool,
+    /// The reason this window's launch holds the chosen environment's lifecycle controls.
+    launch_refusal: Option<&'static str>,
     /// Why every action is unavailable while the environment is being deleted, `None` otherwise
     /// (`environment::Environment::deleting`): Stop's, Clone's and Delete's help.
     deleting: Option<&'static str>,
@@ -528,6 +530,7 @@ impl EnvironmentShown {
             stopped: shown.stopped(),
             pending: environment::pending(key, shown, cx),
             unavailable: environment::unavailable(key, shown, cx),
+            launch_refusal: crate::launcher::launch::host_lifecycle_refusal(shown.host.id, cx),
             deleting: shown.deleting().map(|deleting| deleting.help),
             delete_help: environment_delete::help(shown, collections),
         })
@@ -1219,11 +1222,13 @@ fn environment_button(
     } else {
         ("Suspend", Icon::Pause, Tier::Neutral)
     };
-    let help = match environment.pending {
-        Some(pending) => pending.label(),
-        None if environment.resume => environment.ui.resume_help(environment.stopped),
-        None => environment.ui.suspend_help(),
-    };
+    let help = environment
+        .launch_refusal
+        .unwrap_or_else(|| match environment.pending {
+            Some(pending) => pending.label(),
+            None if environment.resume => environment.ui.resume_help(environment.stopped),
+            None => environment.ui.suspend_help(),
+        });
     let pane = pane.clone();
     let captured = captured.clone();
     let button = Button::new(

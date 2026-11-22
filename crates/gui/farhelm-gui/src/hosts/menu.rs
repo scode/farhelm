@@ -341,7 +341,8 @@ impl Render for HostMenu {
         // Suspend or Resume, on a sandbox or container: after Retry, in the old order. `help` is `Some` wherever the
         // offer is, since both need the host's provider.
         let lifecycle = offered.lifecycle.and_then(|(verb, enabled)| {
-            let help = super::lifecycle::help(&view, verb)?;
+            let launch_refusal = crate::launcher::launch::host_lifecycle_refusal(self.host, cx);
+            let help = launch_refusal.or_else(|| super::lifecycle::help(&view, verb))?;
             let (menu, host) = (cx.weak_entity(), self.host);
             // The old menu drew Suspend with the stop glyph; here Pause's two bars name it (a recorded deviation).
             let (id, icon, label) = match verb {
@@ -349,7 +350,7 @@ impl Render for HostMenu {
                 Lifecycle::Resume => ("host-menu-resume", Icon::Restart, "Resume"),
             };
             let item = MenuItem::new(id, icon, label, HoverHelp::tooltip(help), Role::MenuItem)
-                .disabled(!enabled)
+                .disabled(!enabled || launch_refusal.is_some())
                 .on_click(move |_, window, cx| {
                     let mark = Mark::take(cx);
                     close(&menu, window, cx);

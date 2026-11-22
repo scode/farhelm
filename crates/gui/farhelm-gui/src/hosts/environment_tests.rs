@@ -24,6 +24,7 @@ use crate::hosts::tests::{
     connected, connecting, host, hosts, open_panel_in_column, progress, reference_hosts, run,
     start_work,
 };
+use crate::launcher::launch_tests::launch_to;
 use crate::operations::{OpKey, Work};
 use crate::session;
 use crate::session_list::environment_tests::{bash_session, idle, listing};
@@ -1161,4 +1162,64 @@ fn a_launch_elsewhere_does_not_hold_suspend(cx: &mut TestAppContext) {
     suspend_read(cx, &mut helm, 200, listing(&on_gpubox([idle("a")]), false));
     one_command(&mut helm, Method::Post, "/api/hosts/4/suspend");
     assert_eq!(work(cx, "4"), Some(Work::Suspend));
+}
+
+/// A host-level Suspend could freeze the supervisor before it answers a create already sent to that host.
+/// The open launch protects its destination, and both lifecycle verbs show why they are unavailable.
+#[gpui::test]
+fn a_pending_launch_holds_its_hosts_lifecycle_controls(cx: &mut TestAppContext) {
+    let (mut helm, cx) = panel(cx, connected(), Vec::new());
+    let create = launch_to(&mut helm, cx, 4);
+    assert_eq!(
+        create.body.unwrap()["host"],
+        4,
+        "the unanswered launch targets gpubox"
+    );
+    assert!(
+        cx.update(|_, cx| { crate::launcher::launch::host_lifecycle_refusal(5, cx).is_none() }),
+        "the same launch leaves the other host available"
+    );
+    click(cx, "host-menu-toggle-4");
+    assert_eq!(
+        hover_help(cx, "host-menu-suspend").as_deref(),
+        Some("A launch on this host is in progress; try again once it finishes")
+    );
+    click(cx, "host-menu-suspend");
+    assert!(
+        label(cx, "host-menu-suspend").is_some(),
+        "the disabled item left its menu open"
+    );
+    assert!(
+        helm.commands()
+            .iter()
+            .all(|command| command.path != "/api/sessions?host=4"),
+        "Suspend did not start its activity read"
+    );
+    keys(cx, "escape");
+    // The helm pushes a command's changes before its reply. Exercise the interval in which the host row has
+    // changed but the launcher still owns the destination.
+    push_sandbox(&mut helm, suspended());
+    settle(cx);
+    assert_eq!(
+        hover_help(cx, "host-resume-4").as_deref(),
+        Some("A launch on this host is in progress; try again once it finishes")
+    );
+    click(cx, "host-resume-4");
+    assert!(
+        helm.commands()
+            .iter()
+            .all(|command| !command.path.ends_with("/resume"))
+    );
+    helm.reply(
+        create.id,
+        409,
+        Some(json!({"error": "The host was suspended"})),
+    );
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| crate::launcher::launch::host_lifecycle_refusal(4, cx).is_none()),
+        "a launch refusal releases the host even while the draft has a notice"
+    );
+    click(cx, "host-resume-4");
+    one_command(&mut helm, Method::Post, "/api/hosts/4/resume");
 }
