@@ -78,3 +78,63 @@ inaccurate comment, a borrowed Hosts reply, preference route ownership and focus
 lookup, the pane's badge documentation, and the newer test drain and its helper documentation. The row rendering review
 found no issues. The final test-helper review verified both plans' TODO removals. Commit wording passed separate cold
 reads.
+
+### Landing
+
+#### What landed with it
+
+The plan's seven PRs (#4597, #4601, #4605, #4610, #4612, #4614, #4619) landed first in this round, followed by the
+launcher and templates helpers and the host command status change. Since the plan was written, main had gained the
+terminal and controls helpers (landed in the previous round), one of the four plans that work through TODO.md's
+"Consolidate the helpers duplicated across Farhelm" entry. This plan uses some of what that one made shared but changes
+none of the same code, so the only conflict was in that TODO entry, which the landing settled by applying this plan's
+own edits to main's version.
+
+An independent reviewer read the plan line by line against its plan file and found nothing to fix: the errors and
+warnings the hosts panel and session list show, their order, and the look of a session row's progress title are
+unchanged.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+The round landed two refactors of the desktop window's code and a change to how the helm learns whether a host setup
+command succeeded, so the landing ran the whole Rust workspace, the desktop app's tests, the lint runs, the end-to-end
+smoke test and every reference screenshot, once, on the three plans stacked together. The worker runs were on a separate
+arm64 Linux test worker with a systemd user manager and SSH to itself; the rest ran locally.
+
+On the three plans as delivered, rebased onto main and stacked:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `068b2cdd-019d-458c-8d42-853d8baa039b`): all 8342 passed, and none printed a runtime `SKIPPED`, so the tests that need
+  the systemd user manager, Podman or SSH ran rather than returning early. The 86 tests marked ignored (benchmarks and
+  opt-in real-host and real-Mac tests among them) did not run, as on every run.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (with and without `--features agent`), on the test worker: passed. Lints are not runtime tests, so they
+  have no recorder run.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `d7399edb-dd5b-4c27-bdff-c8afce3a87d9`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `dbfad242-d312-4bbc-8951-85c55a6a19f7`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `87d4fc87-f934-4921-977d-06508c7234bb`):
+  every reference screenshot matched.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot
+  comparison page's own tests), locally: passed.
+
+After the changelog fix on the host command status plan (#4629), which touches only a release-notes draft:
+`python3 releasing/check-changelog.py format` and `dprint check`, locally: passed. Everything above still applies.
+
+Skipped: macOS, since nothing in the round builds only on a Mac; for the host command status plan, a real Tailscale SSH
+Mac and the real Tensorlake gateway, which its report names as post-landing checks; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- Moving several marked sessions into a group still sends each move its own way rather than through the shared helper
+  the single-session move now uses. That is correct (the batch has to stay tied to the list view it was started from),
+  and the report says so, but the plan also asked for each such deliberate exception to be listed, and the report only
+  describes this one in passing. Nothing to do unless you want the report's list completed.
+- A debug-level log line written when a closed session list refuses a request is gone. Nothing visible changes, and
+  nobody is likely to miss it.
