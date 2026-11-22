@@ -25,7 +25,7 @@ struct Feed {
 /// A capability for the stable release notes feed, attached only to a running updater's installed app.
 pub(crate) fn host(running: &str) -> Option<UpgradeNotesHost> {
     let version = Version::parse(running).ok()?;
-    if !cfg!(target_os = "macos") || !version.pre.is_empty() || !version.build.is_empty() {
+    if !cfg!(target_os = "macos") || !crate::updater::is_stable_release(&version) {
         return None;
     }
     Some(UpgradeNotesHost {
@@ -107,10 +107,7 @@ fn select(
     for mut release in feed.releases {
         let version = Version::parse(&release.version)
             .context("invalid release version in upgrade highlights")?;
-        if !version.pre.is_empty()
-            || !version.build.is_empty()
-            || version.cmp_precedence(running).is_gt()
-        {
+        if !crate::updater::is_stable_release(&version) || version.cmp_precedence(running).is_gt() {
             continue;
         }
         if &version != running

@@ -86,7 +86,7 @@ fn revocation(line: &str) -> anyhow::Result<(String, String)> {
         .strip_prefix('v')
         .context("missing release tag prefix")?;
     let parsed = semver::Version::parse(version).context("invalid release tag")?;
-    if !parsed.pre.is_empty() || !parsed.build.is_empty() {
+    if !super::is_stable_release(&parsed) {
         bail!("revocation must name a stable release");
     }
     let reason: String = reason

@@ -1358,6 +1358,12 @@ fn fetch_advisories(allowed: &dyn Fn() -> bool) -> anyhow::Result<Option<Advisor
     })
 }
 
+/// Published stable versions use only SemVer's major, minor and patch.
+/// The update check, signed advisories and release notes share that rule.
+pub(super) fn is_stable_release(version: &semver::Version) -> bool {
+    version.pre.is_empty() && version.build.is_empty()
+}
+
 /// The latest release's version from `/latest`'s answer: exactly one line
 /// (a final newline allowed) holding `v` and a stable release version.
 ///
@@ -1373,7 +1379,7 @@ fn latest_from_site(body: &[u8]) -> anyhow::Result<String> {
         .with_context(|| format!("get.farhelm.io's /latest {tag:?} is not a release tag"))?;
     let parsed = semver::Version::parse(version)
         .with_context(|| format!("get.farhelm.io's /latest {tag:?} is not a release version"))?;
-    if !parsed.pre.is_empty() || !parsed.build.is_empty() {
+    if !is_stable_release(&parsed) {
         bail!("get.farhelm.io's /latest {tag:?} is not a stable release");
     }
     Ok(version.to_string())
@@ -1716,6 +1722,20 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
     use std::sync::atomic::AtomicUsize;
+
+    /// A valid SemVer string can still fall outside the stable release feed.
+    /// Keep prerelease and build metadata exclusions independent.
+    #[farhelm_testtrace::test]
+    fn a_stable_release_version_has_no_prerelease_or_build_metadata() {
+        for (text, stable) in [
+            ("1.2.3", true),
+            ("1.2.3-rc.1", false),
+            ("1.2.3+build", false),
+        ] {
+            let version = semver::Version::parse(text).unwrap();
+            assert_eq!(is_stable_release(&version), stable, "{text}");
+        }
+    }
 
     // ---- activation ----
 
