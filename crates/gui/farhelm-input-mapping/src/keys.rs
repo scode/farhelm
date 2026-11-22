@@ -213,23 +213,32 @@ pub fn map_key(
     }
 }
 
-/// Only printable keypad labels use numeric keypad keyCodes. NumLock-off End,
-/// Home and arrows keep their named-key route despite sharing a keypad position.
-fn keypad(identity: NativeIdentity<'_>, logical: &str) -> Option<(u32, String)> {
-    let digit = match identity {
-        NativeIdentity::Xkb(name) => name
-            .strip_prefix("KP")
-            .filter(|s| s.len() == 1)
-            .and_then(|s| s.parse::<u32>().ok()),
+/// Return the digit (0 through 9) identified by a native keypad key position.
+/// The terminal also checks what the key types, while a template sequence uses
+/// the position alone. Keypad operators and main-row digits return `None`.
+pub fn physical_keypad_digit(identity: NativeIdentity<'_>) -> Option<u32> {
+    match identity {
+        NativeIdentity::Xkb(name) => match name.as_bytes() {
+            [b'K', b'P', digit @ b'0'..=b'9'] => Some(u32::from(*digit - b'0')),
+            _ => None,
+        },
         NativeIdentity::Mac(code) => match code {
             0x52 => Some(0),
             0x53..=0x59 => Some(u32::from(code - 0x52)),
+            // The virtual keycodes skip 0x5a between keypad 7 and 8.
             0x5b => Some(8),
             0x5c => Some(9),
             _ => None,
         },
-    };
-    if let Some(digit) = digit.filter(|digit| *digit < 10 && logical == digit.to_string()) {
+    }
+}
+
+/// Only printable keypad labels use numeric keypad keyCodes. NumLock-off End,
+/// Home and arrows keep their named-key route despite sharing a keypad position.
+fn keypad(identity: NativeIdentity<'_>, logical: &str) -> Option<(u32, String)> {
+    if let Some(digit) = physical_keypad_digit(identity)
+        && logical == digit.to_string()
+    {
         return Some((96 + digit, format!("Numpad{digit}")));
     }
     let (symbol, kc, code) = match identity {

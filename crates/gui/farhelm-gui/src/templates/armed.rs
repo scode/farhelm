@@ -42,7 +42,7 @@
 //! native identity can be told apart: a keypad digit an input method commits, or one the test bridge injects, has none
 //! and reads as the main row's digit (`actions::PhysicalKeyId::typed_in`).
 
-use farhelm_input_mapping::Platform;
+use farhelm_input_mapping::{NativeIdentity, Platform, physical_keypad_digit};
 use farhelm_proto::launcher::LaunchTemplate;
 use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::{
@@ -75,10 +75,6 @@ const APPLY_HINT: &str = "Type names or number keys · Tab complete · Enter app
 /// 48-pixel title band and the web's 30-pixel bars, so the pill stayed centered on the terminal (`app.css`, `top:
 /// calc(50% + 9px)` under `.macos-window`).
 const MAC_LOWERED: f32 = 9.;
-
-/// The macOS virtual keycodes of the keypad's digits, 0 to 9 (`kVK_ANSI_Keypad0` to `kVK_ANSI_Keypad9`; 8 and 9 skip
-/// 0x5A).
-const MAC_KEYPAD_DIGITS: [u16; 10] = [0x52, 0x53, 0x54, 0x55, 0x56, 0x57, 0x58, 0x59, 0x5B, 0x5C];
 
 // ---- Sorting keys ----------------------------------------------------------------------------------------------------
 
@@ -181,13 +177,13 @@ fn is_chord(keystroke: &Keystroke, chord: &'static str) -> bool {
 
 /// Whether `event` was typed on one of the keypad's digits, by its native identity (the module docs' NOTE).
 fn keypad_digit(event: &KeyDownEvent) -> bool {
-    match event.native_key.as_ref().map(|native| &native.identity) {
-        Some(NativeKeyIdentity::Xkb(name)) => name
-            .strip_prefix("KP")
-            .is_some_and(|rest| rest.len() == 1 && rest.as_bytes()[0].is_ascii_digit()),
-        Some(NativeKeyIdentity::Mac(code)) => MAC_KEYPAD_DIGITS.contains(code),
-        None => false,
-    }
+    event.native_key.as_ref().is_some_and(|native| {
+        let identity = match &native.identity {
+            NativeKeyIdentity::Xkb(name) => NativeIdentity::Xkb(name.as_ref()),
+            NativeKeyIdentity::Mac(code) => NativeIdentity::Mac(*code),
+        };
+        physical_keypad_digit(identity).is_some()
+    })
 }
 
 // ---- Arming and ending -----------------------------------------------------------------------------------------------

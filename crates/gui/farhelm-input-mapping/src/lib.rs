@@ -16,6 +16,7 @@ pub mod pointer;
 
 pub use keys::{
     Composition, Decision, KeyDown, Modifiers, NativeIdentity, NativeKey, Platform, Route, map_key,
+    physical_keypad_digit,
 };
 
 use farhelm_proto::grid::{
