@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`hosts-small-fixes`](reports/hosts-small-fixes.report.md) landed 2026-11-21 in #4411, #4416, #4418, #4422, #4430: disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
 - [`templates-list-bolt-and-key`](reports/templates-list-bolt-and-key.report.md) landed 2026-11-21 in #4424: center the ⚡ in the Templates list and show each template's number key in a fixed-width cap, with an empty cap for templates without one
 - [`menu-shortcut-hints`](reports/menu-shortcut-hints.report.md) landed 2026-11-21 in #4427: show keyboard shortcuts as key chips in menus: ⌘L and ⌘W in the open session's menu, ⌘/ in Help
 - [`whats-new-on-upgrade`](reports/whats-new-on-upgrade.report.md) landed 2026-11-21 in #4419, #4421, #4423, #4426, #4431, #4432: after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
