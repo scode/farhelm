@@ -68,9 +68,19 @@ pub(crate) struct NewEntryRequest {
 #[serde(tag = "kind", rename_all = "kebab-case", deny_unknown_fields)]
 pub(super) enum ProbeDestination {
     Local,
-    Ssh { destination: String },
-    Tensorlake { name: String, recipe: String },
-    TensorlakeHost { host: HostId },
+    Ssh {
+        destination: String,
+        /// A legacy request omits this field and inherits the stored mode.
+        #[serde(default)]
+        tailscale: Option<bool>,
+    },
+    Tensorlake {
+        name: String,
+        recipe: String,
+    },
+    TensorlakeHost {
+        host: HostId,
+    },
 }
 
 /// The opaque reference returned with a confirmed provisioning plan.
@@ -388,7 +398,7 @@ where
         .remove::<super::setup_sign_in::Pending>()
         && let Some(setup) = &state.provisioning.setup_sign_in
     {
-        setup.start(start, Arc::clone(state.manager.events()));
+        setup.start(start, Arc::clone(&state));
     }
     reply
 }

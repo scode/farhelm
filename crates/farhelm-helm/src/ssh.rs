@@ -187,7 +187,7 @@ impl SharedConnection {
     }
 }
 
-mod tailscale;
+pub(crate) mod tailscale;
 
 /// How ssh authenticates to a host and checks its host key, as a plain
 /// choice that can travel in a plan or a registry decision
@@ -528,6 +528,21 @@ pub(crate) fn ssh_control_exit_args(
         ["-O".to_string(), "exit".to_string()],
     );
     Ok(Some(args))
+}
+
+/// Exit an already identified Tailscale master. The operation talks only
+/// to that Unix socket, even if local Tailscale is stopped or the peer moved.
+pub(crate) fn ssh_exact_control_exit_args(
+    dest: &str,
+    socket: &std::path::Path,
+) -> anyhow::Result<Vec<String>> {
+    let socket = socket
+        .to_str()
+        .context("SSH control socket path is not UTF-8")?;
+    let path = ssh_config_path_option("ControlPath", socket).map_err(anyhow::Error::msg)?;
+    let mut args = options_with_overrides(&[&path]);
+    args.extend(["-F", "/dev/null", "-O", "exit", "--", dest].map(str::to_string));
+    Ok(args)
 }
 
 /// The ssh argv for reaching a remote supervisor, as a pure function so

@@ -274,6 +274,7 @@ pub(crate) async fn host_views(state: &AppState) -> anyhow::Result<Vec<HostView>
                     HostKind::Podman => "podman",
                 }
                 .to_string(),
+                tailscale: registry.is_some_and(|row| row.tailscale),
                 is_session_owned: snapshot.is_session_owned,
                 environment: registry.and_then(|row| row.kind.environment_view(row)).map(
                     |mut view| {
@@ -374,10 +375,6 @@ pub(crate) async fn list_hosts(State(state): State<Arc<AppState>>) -> impl IntoR
 /// paths registering hosts by two different spellings of the same field
 /// would be a needless second vocabulary for one concept.
 ///
-/// The two optional fields are meaningful only on add. A retarget carries
-/// just `ssh` — the remote binary and state directory are properties of the
-/// INSTALL, not of the address it is reached at, so retargeting a host to a
-/// new address deliberately keeps them (see `set_destination`).
 /// `deny_unknown_fields` for the same reason the ensure file's entries have
 /// it: every field here decides how a host is REACHED, so a typo that is
 /// silently ignored produces a registry row that dials the wrong thing (or
@@ -388,9 +385,30 @@ pub(crate) async fn list_hosts(State(state): State<Arc<AppState>>) -> impl IntoR
 pub(crate) struct HostSpec {
     pub(crate) ssh: String,
     #[serde(default)]
+    pub(crate) tailscale: bool,
+    #[serde(default)]
     pub(crate) remote_farhelm: Option<String>,
     #[serde(default)]
     pub(crate) remote_state_dir: Option<String>,
+}
+
+/// Retargeting only writes the address. Older clients can still send back
+/// the install fields. The Tailscale policy has its own explicit verb.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct DestinationSpec {
+    ssh: String,
+    #[serde(default, rename = "remote_farhelm")]
+    _remote_farhelm: Option<String>,
+    #[serde(default, rename = "remote_state_dir")]
+    _remote_state_dir: Option<String>,
+}
+
+/// The replacement SSH policy is required, including when switching it off.
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct TailscaleSpec {
+    tailscale: bool,
 }
 
 /// The body of `POST /api/hosts/{id}/yolo-without-asking`: the new setting, required.
@@ -764,10 +782,11 @@ pub(crate) async fn add_host(
     // leaving between them cannot leave a registered host with no actor.
     let added = state
         .store
-        .add_ssh_host(
+        .add_ssh_host_with_mode(
             &spec.ssh,
             spec.remote_farhelm.as_deref(),
             spec.remote_state_dir.as_deref(),
+            spec.tailscale,
         )
         .await;
     let host = match added {
@@ -809,9 +828,7 @@ pub(crate) async fn add_host(
 /// A verb-shaped route over the field being changed, following the same
 /// reasoning `POST /api/sessions/{id}/rename` records: there is exactly one
 /// field to change, and a partial-PATCH shape would invent an update
-/// vocabulary this API has nowhere else. The body is [`HostSpec`], of which
-/// only `ssh` is read — the remote binary and state directory describe the
-/// INSTALL, not the address it is reached at, so retargeting keeps them.
+/// vocabulary this API has nowhere else. The body is [`DestinationSpec`].
 ///
 /// The reconcile that follows is what makes the edit TAKE: it tears down
 /// the connection to the old address and hands the actor a fresh
@@ -869,7 +886,7 @@ pub(crate) async fn add_host(
 pub(crate) async fn set_destination(
     State(state): State<Arc<AppState>>,
     AxPath(host): AxPath<HostId>,
-    axum::Json(spec): axum::Json<HostSpec>,
+    axum::Json(spec): axum::Json<DestinationSpec>,
 ) -> axum::response::Response {
     // What the write would refuse now is refused at once, so the reply that
     // says the change is waiting is never given for a change that cannot land.
@@ -897,7 +914,11 @@ fn waiting_for_run_message(what: &str) -> String {
 }
 
 /// The body of [`set_destination`]: the retarget itself, unbounded.
-async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::response::Response {
+async fn retarget(
+    state: Arc<AppState>,
+    host: HostId,
+    spec: DestinationSpec,
+) -> axum::response::Response {
     // The HTTP router owns the commit through reconciliation, so a client
     // leaving cannot cancel the live connection's convergence on its new address.
     //
@@ -906,6 +927,10 @@ async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::r
     // which needs nothing from it.
     let provisioning = state.manager.host_provision_lock(host).await;
     let serialized = state.manager.host_write_lock(host).await;
+    let old = match registry_row(&state, host).await {
+        Ok(row) => row,
+        Err(error) => return http_error(error),
+    };
     if let Err(e) = state
         .podman_places
         .retarget(&state.store, host, &spec.ssh)
@@ -935,6 +960,9 @@ async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::r
              the next successful reconcile"
         )));
     }
+    if old.destination.as_deref() != Some(spec.ssh.as_str()) {
+        state.provisioning.forget_tailscale_keys(&old).await;
+    }
     // Released here rather than at the end of the function: the reply is
     // built from the registry and the actor set, both already settled, and
     // holding a host's write lock across a read would stall its next refresh
@@ -945,6 +973,79 @@ async fn retarget(state: Arc<AppState>, host: HostId, spec: HostSpec) -> axum::r
     match host_view(&state, host).await {
         Ok(view) => axum::Json(view).into_response(),
         Err(e) => http_error(e),
+    }
+}
+
+/// Park dials before closing shared masters, then replace the policy and restart the actor.
+/// Holding the provisioning lock also keeps setup, update and removal from using the old mode during the change.
+pub(crate) async fn set_tailscale(
+    State(state): State<Arc<AppState>>,
+    AxPath(host): AxPath<HostId>,
+    axum::Json(spec): axum::Json<TailscaleSpec>,
+) -> axum::response::Response {
+    let result = async {
+        let _provisioning = provision_lock_or_busy(&state, host)?;
+        let old = registry_row(&state, host).await?;
+        if old.kind != HostKind::Ssh {
+            return Err(HostStoreError::SshModeManaged.into());
+        }
+        if old.tailscale != spec.tailscale {
+            let _routing = state
+                .manager
+                .ssh_route_lock(host)
+                .try_write_owned()
+                .map_err(|_| crate::environment::lifecycle::HostBusy)?;
+            if spec.tailscale
+                && let Some(destination) = &old.destination
+                && crate::ssh::tailscale::destination_host(destination).is_err()
+            {
+                return Err(HostStoreError::InvalidDestination(destination.clone()).into());
+            }
+            state.store.check_ssh_tailscale_edit(host).await?;
+            state
+                .manager
+                .hold_connection(
+                    host,
+                    crate::manager::HostState::Connecting {
+                        attempt: 0,
+                        stage: crate::manager::ConnectionStage::WaitingToConnect,
+                        last_error: None,
+                    },
+                )
+                .await;
+            state
+                .manager
+                .transport()
+                .release_shared_connections(&old)
+                .await;
+            // The actor can finish a cache write on its way to parking.
+            // Hold this lock for the registry commit and reconcile.
+            let _serialized = state.manager.host_write_lock(host).await;
+            let changed = state
+                .podman_places
+                .set_ssh_tailscale(&state.store, &old, spec.tailscale)
+                .await;
+            if changed.is_ok() {
+                state.provisioning.forget_tailscale_keys(&old).await;
+            }
+            let reconciled = match changed {
+                Ok(()) => state.manager.sync_registry().await.context(
+                    "Tailscale SSH mode was saved, but the connection could not be reconciled",
+                ),
+                Err(error) => Err(error),
+            };
+            state.manager.release_hold(host, true);
+            reconciled?;
+        } else {
+            // A retry can finish reconciliation of a mode the first request saved.
+            state.manager.sync_registry().await?;
+        }
+        host_view(&state, host).await
+    }
+    .await;
+    match result {
+        Ok(view) => axum::Json(view).into_response(),
+        Err(error) => http_error(error),
     }
 }
 
@@ -1580,7 +1681,7 @@ pub(crate) async fn refresh_podman_probe(
 
 #[cfg(test)]
 mod tests {
-    use super::{HostStateView, RefreshView};
+    use super::{HostStateView, RefreshView, registry_row};
 
     /// Hosts uses the actor's observation, diagnosis and attribution so an
     /// older registry read cannot credit a later pause to Farhelm.
@@ -2300,6 +2401,91 @@ mod tests {
         })
         .await
         .expect("both changes carried on after their replies and landed once the run ended");
+    }
+
+    /// The old master has to exit while its route is still the registered
+    /// route. Only the replacement connection can use the new policy.
+    #[farhelm_testtrace::test]
+    async fn tailscale_toggle_releases_the_old_route_before_writing() {
+        let harness = lone_local_helm().await;
+        let destination = "user@tailnode.example";
+        let (status, added, text) = call(
+            &harness,
+            "POST",
+            "/api/hosts",
+            Some(serde_json::json!({ "ssh": destination, "tailscale": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(added["tailscale"], true);
+        let host = added["id"].as_i64().unwrap();
+        harness.await_refreshed(host).await;
+        let previous = harness.manager.status(host).unwrap().incarnation;
+        let before = registry_row(&harness.state, host).await.unwrap();
+        assert!(before.tailscale);
+        assert!(harness.fleet.dialed_rows(host).last().unwrap().tailscale);
+        let key_dir = crate::ssh::tailscale::known_hosts_dir(
+            harness.state.provisioning.helm_state_dir(),
+            destination,
+        )
+        .unwrap();
+        tokio::fs::create_dir_all(&key_dir).await.unwrap();
+        tokio::fs::write(key_dir.join("pin"), b"fixture")
+            .await
+            .unwrap();
+
+        let route = format!("/api/hosts/{host}/tailscale");
+        let held = harness.manager.ssh_route_lock(host).read_owned().await;
+        let (status, _, text) = call(
+            &harness,
+            "POST",
+            &route,
+            Some(serde_json::json!({ "tailscale": false })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::CONFLICT, "{text}");
+        assert!(registry_row(&harness.state, host).await.unwrap().tailscale);
+        assert_eq!(harness.manager.status(host).unwrap().incarnation, previous);
+        drop(held);
+
+        let (release_started, finish_release) = harness.fleet.hold_next_release(host);
+        let ((status, body, text), ()) = tokio::join!(
+            call(
+                &harness,
+                "POST",
+                &route,
+                Some(serde_json::json!({ "tailscale": false }))
+            ),
+            async {
+                let old_mode =
+                    tokio::time::timeout(std::time::Duration::from_secs(5), release_started)
+                        .await
+                        .expect("the old connection reached release")
+                        .unwrap();
+                assert!(old_mode);
+                assert!(registry_row(&harness.state, host).await.unwrap().tailscale);
+                assert!(key_dir.is_dir());
+                finish_release.send(()).unwrap();
+            },
+        );
+        assert_eq!(status, StatusCode::OK, "{text}");
+        assert_eq!(body["tailscale"], false);
+        assert!(!key_dir.exists());
+        harness.await_refreshed_after(host, previous).await;
+        assert!(!harness.fleet.dialed_rows(host).last().unwrap().tailscale);
+        let after = registry_row(&harness.state, host).await.unwrap();
+        assert_eq!(before.host_identity, after.host_identity);
+        assert_eq!(before.entry_uuid, after.entry_uuid);
+
+        let (status, _, _) = call(
+            &harness,
+            "POST",
+            &format!("/api/hosts/{host}/destination"),
+            Some(serde_json::json!({ "ssh": destination, "tailscale": true })),
+        )
+        .await;
+        assert_eq!(status, StatusCode::UNPROCESSABLE_ENTITY);
+        assert!(!registry_row(&harness.state, host).await.unwrap().tailscale);
     }
 
     /// Retargeting a host must take effect on the CONNECTION, not just in

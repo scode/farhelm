@@ -127,6 +127,7 @@ fn host_list_body() -> serde_json::Value {
         environment: None,
         container_check: None,
         id,
+        tailscale: id == 2,
         entry_uuid: "11111111-1111-4111-8111-111111111111".to_string(),
         kind: kind.to_string(),
         tensorlake: None,

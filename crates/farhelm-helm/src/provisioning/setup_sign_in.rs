@@ -20,9 +20,9 @@ use super::backend::BackendFailure;
 use super::plan::ProvisioningTarget;
 use crate::AppState;
 use crate::access::RemoteRoute;
-use crate::feed::FleetEvents;
-use crate::ssh::SharedConnection;
+use crate::ssh::{SharedConnection, SshAccessKind};
 use crate::ssh_sign_in::{Attempt, BeforeQuestion, SignIn, SignInNeeded};
+use crate::store::HostRow;
 
 const CONNECT: Duration = Duration::from_secs(15);
 const RETAIN: Duration = Duration::from_secs(180);
@@ -35,6 +35,8 @@ const MAX_COMPLETIONS: usize = 128;
 pub(super) struct Pending {
     pub(super) attempt: Attempt,
     destination: String,
+    access: SshAccessKind,
+    entry: Option<(i64, String)>,
 }
 
 struct Completion {
@@ -69,14 +71,13 @@ impl SetupSignIn {
         self
     }
 
-    /// The ordinary SSH case asks before the first batch command. Local, Tensorlake and container execution
-    /// have their own transport policies and keep their existing execution paths.
-    pub(super) fn destination(transport: &ProvisioningTarget) -> Option<&str> {
+    /// Setup sign-in uses the same SSH access policy as the first batch command, including its master.
+    pub(super) fn destination(transport: &ProvisioningTarget) -> Option<(&str, SshAccessKind)> {
         match transport {
             ProvisioningTarget::Remote(RemoteRoute::Ssh {
                 destination,
                 access,
-            }) => access.asks_user().then_some(destination),
+            }) => access.asks_user().then_some((destination, *access)),
             ProvisioningTarget::Remote(RemoteRoute::PodmanExec { .. })
             | ProvisioningTarget::Local => None,
         }
@@ -87,9 +88,9 @@ impl SetupSignIn {
     pub(super) async fn prepare(
         &self,
         transport: &ProvisioningTarget,
-        host: Option<i64>,
+        host: Option<&HostRow>,
     ) -> anyhow::Result<()> {
-        let Some(destination) = Self::destination(transport) else {
+        let Some((destination, access)) = Self::destination(transport) else {
             return Ok(());
         };
         if self
@@ -97,6 +98,7 @@ impl SetupSignIn {
             .setup_ready(
                 &self.program,
                 destination,
+                access,
                 Instant::now() + self.connect_timeout,
             )
             .await?
@@ -104,19 +106,21 @@ impl SetupSignIn {
             return Ok(());
         }
         let attempt = match host {
-            Some(host) => Attempt::for_host(host, SharedConnection::Provisioning),
+            Some(host) => Attempt::for_host(host.id, SharedConnection::Provisioning),
             None => Attempt::for_draft(),
         };
         Err(Pending {
             attempt,
             destination: destination.to_owned(),
+            access,
+            entry: host.map(|row| (row.id, row.entry_uuid.clone())),
         }
         .into())
     }
 
     /// Start the preflight after sending its correlation in the command reply path. The result remains readable
     /// whether it finished before or after the channel next projects its collections.
-    pub(super) fn start(self: &Arc<Self>, pending: Pending, events: Arc<FleetEvents>) {
+    pub(super) fn start(self: &Arc<Self>, pending: Pending, state: Arc<AppState>) {
         let setup = Arc::clone(self);
         let cancel = pending.attempt.is_draft().then(|| {
             let (send, recv) = oneshot::channel();
@@ -127,7 +131,38 @@ impl SetupSignIn {
             recv
         });
         tokio::spawn(async move {
-            let wait = setup.wait(&pending.destination, &pending.attempt);
+            let wait = async {
+                // Registered preflights have no draft cancellation request.
+                // The host lock keeps a mode edit from overtaking their SSH process.
+                let _guard = if let Some((host, entry)) = &pending.entry {
+                    let lookup = || async {
+                        state.provisioning.host_row(*host).await.map_err(|error| {
+                            BackendFailure::new(
+                                "Could not read the host for SSH sign-in",
+                                error.to_string(),
+                            )
+                        })
+                    };
+                    lookup().await?;
+                    let guard = state.manager.ssh_route_lock(*host).read_owned().await;
+                    let row = lookup().await?;
+                    if row.entry_uuid != *entry
+                        || row.destination.as_deref() != Some(pending.destination.as_str())
+                        || row.ssh_access() != Some(pending.access)
+                    {
+                        return Err(BackendFailure::new(
+                            "The SSH connection settings changed. Start the check again.",
+                            "",
+                        ));
+                    }
+                    Some(guard)
+                } else {
+                    None
+                };
+                setup
+                    .wait(&pending.destination, pending.access, &pending.attempt)
+                    .await
+            };
             let result = if let Some(cancel) = cancel {
                 let result = tokio::select! {
                     biased;
@@ -164,7 +199,7 @@ impl SetupSignIn {
                     },
                 });
             }
-            events.bump();
+            state.manager.events().bump();
         });
     }
 
@@ -187,21 +222,28 @@ impl SetupSignIn {
         transport: &ProvisioningTarget,
         host: i64,
     ) -> Result<(), BackendFailure> {
-        let Some(destination) = Self::destination(transport) else {
+        let Some((destination, access)) = Self::destination(transport) else {
             return Ok(());
         };
         self.wait(
             destination,
+            access,
             &Attempt::for_host(host, SharedConnection::Provisioning),
         )
         .await
     }
 
-    async fn wait(&self, destination: &str, attempt: &Attempt) -> Result<(), BackendFailure> {
+    async fn wait(
+        &self,
+        destination: &str,
+        access: SshAccessKind,
+        attempt: &Attempt,
+    ) -> Result<(), BackendFailure> {
         self.relay
             .establish(
                 self.program.as_path(),
                 destination,
+                access,
                 attempt,
                 self.connect_timeout,
                 &mut |_| {},

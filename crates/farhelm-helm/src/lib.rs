@@ -663,6 +663,10 @@ fn api_router(state: Arc<AppState>) -> Router {
             axum::routing::post(hosts::set_destination),
         )
         .route(
+            "/api/hosts/{id}/tailscale",
+            axum::routing::post(hosts::set_tailscale),
+        )
+        .route(
             "/api/hosts/{id}/alias",
             axum::routing::post(hosts::set_alias),
         )
@@ -1627,6 +1631,8 @@ fn error_kind(e: &anyhow::Error) -> ErrorKind {
             | store::HostStoreError::AlreadyAdded(_)
             | store::HostStoreError::LocalHostImmutable
             | store::HostStoreError::DestinationManaged
+            | store::HostStoreError::SshModeChanged(_)
+            | store::HostStoreError::SshModeManaged
             | store::HostStoreError::TensorlakeSetupRequired(_)
             | store::HostStoreError::SandboxNotDeleted(_)
             | store::HostStoreError::IdentityMismatch { .. }

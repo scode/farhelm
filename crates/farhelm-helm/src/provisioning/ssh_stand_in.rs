@@ -595,7 +595,7 @@ mod tests {
     /// production builds for a provisioning command from a [`control_root`]
     /// is shared.
     #[farhelm_testtrace::test]
-    fn sharing_follows_the_production_argv() {
+    async fn sharing_follows_the_production_argv() {
         assert!(shares_connection(&ssh("auto")));
         assert!(!shares_connection(&ssh("no")));
         assert!(!shares_connection(&Command::new("sh")));
@@ -607,6 +607,7 @@ mod tests {
                 crate::ssh::SshAccessKind::UserConfig,
                 "true".to_string(),
             )
+            .await
             .expect("build a provisioning ssh command");
         assert!(
             shares_connection(&production),

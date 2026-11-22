@@ -1025,6 +1025,7 @@ mod tests {
                 entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
                 kind: HostKind::Ssh,
                 destination: Some("user@host".to_string()),
+                tailscale: false,
                 alias: None,
                 remote_farhelm: Some(value.to_string()),
                 remote_state_dir: None,
@@ -1082,6 +1083,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("user@host".to_string()),
+            tailscale: false,
             alias: None,
             remote_farhelm: Some(binary.to_string_lossy().into_owned()),
             remote_state_dir: None,
@@ -1335,6 +1337,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("user@host".to_string()),
+            tailscale: false,
             alias: None,
             remote_farhelm: Some("farhelm".to_string()),
             remote_state_dir: None,
@@ -2312,6 +2315,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -2374,6 +2378,7 @@ mod tests {
         ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: destination.to_string(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: None,
@@ -2399,6 +2404,98 @@ mod tests {
     /// tests prove a request never contacted the destination over ssh.
     fn probe_unused(backend: &FakeBackend) -> bool {
         backend.probe.lock().unwrap().is_some()
+    }
+
+    /// Discovery of a running supervisor must retain the policy which authenticated the peer.
+    #[farhelm_testtrace::test]
+    async fn tailscale_discovery_registers_the_route_that_authenticated() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().to_path_buf());
+        assert!(probe_unused(&backend));
+        let service = service(&harness, backend.clone(), root.path());
+        let mut request = new_entry_probe("user@tailnode.example", Some("Build box"));
+        request.target = ProbeDestination::Ssh {
+            destination: "user@tailnode.example".into(),
+            tailscale: Some(true),
+        };
+        let response = service.probe(request).await.unwrap();
+        let ProbeResponse::Discovered { host_id, .. } = response else {
+            panic!("an answering supervisor must be registered: {response:?}");
+        };
+        assert!(!probe_unused(&backend));
+        let row = stored_row(&harness.store, host_id).await;
+        assert!(row.tailscale);
+        assert_eq!(row.alias.as_deref(), Some("Build box"));
+        assert_eq!(row.host_identity.as_deref(), Some("test-identity"));
+        // The host's containers must reach the same peer as its supervisor.
+        assert!(matches!(
+            crate::access::base_route(&row).unwrap(),
+            crate::access::BaseRoute::Ssh {
+                access: crate::ssh::SshAccessKind::Tailscale,
+                ..
+            }
+        ));
+    }
+
+    /// A legacy caller setting up an existing host inherits its registered
+    /// route. If that mode changes before confirmation, the old plan cannot
+    /// run against its frozen destination.
+    #[farhelm_testtrace::test]
+    async fn tailscale_setup_plan_keeps_the_mode_and_refuses_a_stale_confirmation() {
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().to_path_buf());
+        let service = service(&harness, backend.clone(), root.path());
+        let destination = "user@tailnode.example";
+        let host = harness
+            .store
+            .add_ssh_host_with_mode(destination, None, None, true)
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        let row = stored_row(&harness.store, host).await;
+        assert!(row.tailscale);
+        let response = service
+            .probe(ProbeRequest {
+                target: ProbeDestination::Ssh {
+                    destination: destination.into(),
+                    tailscale: None,
+                },
+                remote_farhelm: None,
+                remote_state_dir: None,
+                new_entry: None,
+            })
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { plan, probe_id, .. } = response else {
+            panic!("an absent supervisor must be offered setup: {response:?}");
+        };
+        assert!(matches!(
+            &plan.target,
+            ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+                access: crate::ssh::SshAccessKind::Tailscale,
+                ..
+            })
+        ));
+        assert_eq!(
+            serde_json::to_value(&plan.target).unwrap()["tailscale"],
+            true
+        );
+        assert!(harness.store.set_ssh_tailscale(&row, false).await.unwrap());
+        let error = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .unwrap_err();
+        assert!(
+            matches!(
+                error.downcast_ref::<crate::store::HostStoreError>(),
+                Some(crate::store::HostStoreError::SshModeChanged(id)) if *id == host
+            ),
+            "{error:#}"
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert_eq!(stored_row(&harness.store, host).await.remote_farhelm, None);
     }
 
     /// Adding, from the add host dialog, a destination that is already a host
@@ -2604,6 +2701,7 @@ mod tests {
                     .probe(ProbeRequest {
                         target: ProbeDestination::Ssh {
                             destination: "user@dropped".to_string(),
+                            tailscale: None,
                         },
                         remote_farhelm: None,
                         remote_state_dir: None,
@@ -2671,6 +2769,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@absent".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -2775,6 +2874,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "manual.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -2819,6 +2919,7 @@ mod tests {
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: "tilde.example".to_string(),
+                        tailscale: None,
                     },
                     remote_farhelm: farhelm.map(str::to_string),
                     remote_state_dir: state_dir.map(str::to_string),
@@ -2887,6 +2988,7 @@ mod tests {
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: "old-tilde.example".to_string(),
+                        tailscale: None,
                     },
                     remote_farhelm,
                     remote_state_dir,
@@ -2928,6 +3030,7 @@ mod tests {
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: "payloads.example".to_string(),
+                        tailscale: None,
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
@@ -2968,6 +3071,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "rollback.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -3005,6 +3109,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "rollback.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -3037,6 +3142,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "stale.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -3079,6 +3185,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "local".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -4053,6 +4160,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@skewed.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -4104,6 +4212,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "turned-skewed.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -4527,7 +4636,10 @@ mod tests {
             async move {
                 ordinary_service
                     .probe(ProbeRequest {
-                        target: ProbeDestination::Ssh { destination },
+                        target: ProbeDestination::Ssh {
+                            destination,
+                            tailscale: None,
+                        },
                         remote_farhelm: Some("/copied/farhelm".into()),
                         remote_state_dir: Some("/copied/state".into()),
                         new_entry: None,
@@ -4668,6 +4780,7 @@ mod tests {
         let setup = service
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
+                    tailscale: None,
                     destination: crate::tensorlake::hosts::test_support::destination(
                         "farhelm-host-k7q2-gpu-dev-m3x9",
                     ),
@@ -4735,6 +4848,7 @@ mod tests {
             let setup = service
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
+                        tailscale: None,
                         destination: crate::tensorlake::hosts::test_support::destination(
                             "farhelm-host-k7q2-gpu-dev-m3x9",
                         ),
@@ -4773,6 +4887,7 @@ mod tests {
         let planned = service
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
+                    tailscale: None,
                     destination: crate::tensorlake::hosts::test_support::destination(
                         "farhelm-host-k7q2-gpu-dev-m3x9",
                     ),
@@ -4981,6 +5096,7 @@ mod tests {
         let request = ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: destination.into(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: None,
@@ -5060,6 +5176,7 @@ mod tests {
         let setup = ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: "owner.example".into(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: None,
@@ -5162,6 +5279,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "race.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5221,6 +5339,7 @@ mod tests {
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: "mac.example".into(),
+                        tailscale: None,
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
@@ -5264,6 +5383,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@denied".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5297,6 +5417,7 @@ mod tests {
         let request = || ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: "user@resolved".to_string(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: None,
@@ -5378,6 +5499,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@ordered".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5397,6 +5519,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "user@ordered".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5445,6 +5568,7 @@ mod tests {
         let probe = |state_dir: Option<String>| ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: "user@busy".to_string(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: state_dir,
@@ -5523,6 +5647,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "failing-step.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5574,6 +5699,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "failing-step.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -5693,6 +5819,7 @@ mod tests {
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: "linger.example".to_string(),
+                        tailscale: None,
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
@@ -5745,6 +5872,7 @@ mod tests {
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "tmux-left-add.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -8907,6 +9035,7 @@ master.touch()
                 crate::ssh::SshAccessKind::UserConfig,
                 "true".to_string(),
             )
+            .await
             .unwrap();
         assert!(
             super::ssh_stand_in::shares_connection(&ssh),
@@ -11387,6 +11516,7 @@ master.touch()
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: format!("host-{index}.example"),
+                        tailscale: None,
                     },
                     remote_farhelm: None,
                     remote_state_dir: None,
@@ -12766,6 +12896,7 @@ master.touch()
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "per-step.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -12818,6 +12949,7 @@ master.touch()
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "per-step-failing.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,
@@ -13931,6 +14063,7 @@ master.touch()
                 .probe(ProbeRequest {
                     target: ProbeDestination::Ssh {
                         destination: destination.clone(),
+                        tailscale: None,
                     },
                     remote_farhelm: probe_remote_farhelm,
                     remote_state_dir: probe_remote_state_dir,
@@ -14044,6 +14177,7 @@ master.touch()
                 target: if use_ssh {
                     ProbeDestination::Ssh {
                         destination: destination.clone(),
+                        tailscale: None,
                     }
                 } else {
                     ProbeDestination::Local
@@ -15502,6 +15636,7 @@ master.touch()
             .probe(ProbeRequest {
                 target: ProbeDestination::Ssh {
                     destination: "downloads.example".to_string(),
+                    tailscale: None,
                 },
                 remote_farhelm: None,
                 remote_state_dir: None,

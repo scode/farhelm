@@ -169,6 +169,7 @@ pub(crate) struct ScriptedFleet {
     /// opens the connection rather than just recorded beside it. Both look
     /// identical in every API response if they are wrong.
     dials: Mutex<Vec<HostRow>>,
+    release_gates: Mutex<HashMap<HostId, ReleaseGate>>,
     /// One kill channel PER HOST, not one for the whole fleet.
     ///
     /// Per-host because taking one host down must be observable as one host
@@ -182,6 +183,12 @@ pub(crate) struct ScriptedFleet {
     /// Shared with every running peer: the list barrier and the request
     /// counter (see [`ListGate`]).
     gate: Arc<ListGate>,
+}
+
+/// Pause one master release at the point where the caller must still expose the old registry route.
+struct ReleaseGate {
+    reached: tokio::sync::oneshot::Sender<bool>,
+    proceed: tokio::sync::oneshot::Receiver<()>,
 }
 
 /// What a test can do to a scripted host's LIST replies from outside.
@@ -240,6 +247,7 @@ impl ScriptedFleet {
         Arc::new(ScriptedFleet {
             scripts: Mutex::new(HashMap::new()),
             dials: Mutex::new(Vec::new()),
+            release_gates: Mutex::new(HashMap::new()),
             kills: Mutex::new(HashMap::new()),
             unknown_hosts_are_down: std::sync::atomic::AtomicBool::new(false),
             gate: Arc::new(ListGate {
@@ -323,6 +331,23 @@ impl ScriptedFleet {
             .collect()
     }
 
+    /// Receive the prior route's Tailscale bit when release begins, then let it complete.
+    pub(crate) fn hold_next_release(
+        &self,
+        host: HostId,
+    ) -> (
+        tokio::sync::oneshot::Receiver<bool>,
+        tokio::sync::oneshot::Sender<()>,
+    ) {
+        let (reached, observation) = tokio::sync::oneshot::channel();
+        let (release, proceed) = tokio::sync::oneshot::channel();
+        self.release_gates
+            .lock()
+            .unwrap()
+            .insert(host, ReleaseGate { reached, proceed });
+        (observation, release)
+    }
+
     /// Change a host's script in place — what the far side "becoming"
     /// something else looks like: a supervisor upgraded past this helm's
     /// protocol, a machine reinstalled under a new identity, a host
@@ -377,6 +402,19 @@ impl ScriptedFleet {
 }
 
 impl HostTransport for ScriptedFleet {
+    fn release_shared_connections<'a>(
+        &'a self,
+        host: &'a HostRow,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
+        let gate = self.release_gates.lock().unwrap().remove(&host.id);
+        Box::pin(async move {
+            if let Some(gate) = gate {
+                let _ = gate.reached.send(host.tailscale);
+                let _ = gate.proceed.await;
+            }
+        })
+    }
+
     fn connect<'a>(
         &'a self,
         host: &'a HostRow,

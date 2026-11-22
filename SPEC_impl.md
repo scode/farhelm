@@ -6140,6 +6140,20 @@ routes are resolved from the store on each attempt, joining the current place ro
 route from the provider, since those machines have no registered host row. Credential delivery, installation, builder
 shells and preparation all use the same remote-command constructor.
 
+An ordinary SSH row stores a false-by-default `tailscale` bit. It travels with the destination, through the
+supervisor handshake's identity write guard, the container place check, and confirmation of a provisioning plan.
+Enabling it makes each SSH boundary prepare its access from a bounded local `tailscale status --json` request.
+OpenSSH receives the resolved address and verifies its key against an immutable, private known-hosts snapshot
+under the helm state directory. OpenSSH still reads its config for credentials and ports. In userspace networking
+mode it reaches the peer through `tailscale nc`. A missing peer or key stops the attempt before SSH runs.
+
+Tailscale supervisor and provisioning ControlMasters use distinct names incorporating the address, advertised
+keys, and network path. A short private socket directory keeps those names within both platforms' Unix socket
+limits. This allows a prepared command to keep its exact trust snapshot through a refresh, and prevents a key or
+route change from joining an earlier master. An explicit mode edit parks the host actor and releases the masters
+for its old route before committing. The write invalidates any unused Podman place claim and in-flight probe for
+that route. Turning the mode off or forgetting the host clears its private key snapshots on a best-effort basis.
+
 The constructor builds argv layers with quoting once per parsing shell. Podman exec uses `-i`, the recorded login user,
 home working directory, explicit HOME/USER/LOGNAME and `XDG_RUNTIME_DIR=/run/user/<uid>`, then `sh -c` for the script. A
 remote base wraps that invocation in the ordinary SSH command. The protocol's innermost command is

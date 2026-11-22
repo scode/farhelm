@@ -14,7 +14,7 @@ use std::{
     net::IpAddr,
     os::unix::{
         ffi::OsStrExt as _,
-        fs::{DirBuilderExt, MetadataExt, PermissionsExt},
+        fs::{DirBuilderExt, FileTypeExt as _, MetadataExt, PermissionsExt},
     },
     path::{Path, PathBuf},
     process::Stdio,
@@ -94,10 +94,11 @@ impl TailscaleSshAccess {
         // A shared connection also fixes its network path. A change between direct and userspace modes
         // needs a new master even if the peer's keys and address stay the same.
         let socket_scope = short_digest([contents.as_bytes(), proxy.as_bytes()]);
-        let (state, runtime) = (state.to_owned(), runtime.to_owned());
+        let (state, runtime, destination) =
+            (state.to_owned(), runtime.to_owned(), destination.to_owned());
         let control_dir = tokio::task::spawn_blocking(move || {
             write_known_hosts(&path, &contents)?;
-            control_directory(&state, &runtime)
+            control_directory(&state, &runtime, &destination)
         })
         .await
         .context("Preparing the Tailscale host keys did not complete")??;
@@ -152,17 +153,29 @@ fn short_digest<'a>(fields: impl IntoIterator<Item = &'a [u8]>) -> String {
     URL_SAFE_NO_PAD.encode(&hash.finalize()[..12])
 }
 
-/// A stable, short directory keeps the fingerprint and OpenSSH's temporary bind suffix within sun_path on
-/// both platforms. One directory per helm state also preserves master reuse across helm restarts. A foreign
-/// directory or symlink in the shared temporary directory never gets to supply its sockets.
-fn control_directory(state: &Path, runtime: &Path) -> anyhow::Result<PathBuf> {
+/// Each destination owns its generations in one short directory. Use a
+/// stable name so retirement can find every generation across helm restarts.
+fn control_directory_path(
+    state: &Path,
+    runtime: &Path,
+    destination: &str,
+) -> anyhow::Result<PathBuf> {
     let state = state
         .canonicalize()
         .context("Could not resolve Farhelm's state directory")?;
     // SAFETY: geteuid takes no arguments and reports the effective Unix uid of this process.
     let uid = unsafe { libc::geteuid() };
-    let scope = short_digest([&uid.to_be_bytes()[..], state.as_os_str().as_bytes()]);
-    let path = runtime.join(format!("fhs-{scope}"));
+    let scope = short_digest([
+        &uid.to_be_bytes()[..],
+        state.as_os_str().as_bytes(),
+        destination.as_bytes(),
+    ]);
+    Ok(runtime.join(format!("fhs-{scope}")))
+}
+
+/// The shared temporary directory cannot introduce a foreign socket or directory symlink.
+fn control_directory(state: &Path, runtime: &Path, destination: &str) -> anyhow::Result<PathBuf> {
+    let path = control_directory_path(state, runtime, destination)?;
     match std::fs::DirBuilder::new().mode(0o700).create(&path) {
         Ok(()) => {}
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => {}
@@ -181,12 +194,59 @@ fn control_directory(state: &Path, runtime: &Path) -> anyhow::Result<PathBuf> {
             path.display()
         )
     })?;
+    require_private_control_directory(&path, &metadata)?;
+    Ok(path)
+}
+
+fn require_private_control_directory(
+    path: &Path,
+    metadata: &std::fs::Metadata,
+) -> anyhow::Result<()> {
+    // SAFETY: geteuid takes no arguments and reports the effective Unix uid of this process.
+    let uid = unsafe { libc::geteuid() };
     ensure!(
         metadata.is_dir() && metadata.uid() == uid && metadata.mode() & 0o777 == 0o700,
         "Farhelm's Tailscale socket directory at {} must be private and owned by this account.",
         path.display(),
     );
-    Ok(path)
+    Ok(())
+}
+
+/// Enumerate published mux sockets without resolving current Tailscale status.
+/// A fresh lookup could select different keys, address or proxy and miss the active master.
+pub(crate) fn shared_sockets(state: &Path, destination: &str) -> anyhow::Result<Vec<PathBuf>> {
+    sockets_in(&control_directory_path(
+        state,
+        Path::new("/tmp"),
+        destination,
+    )?)
+}
+
+fn sockets_in(directory: &Path) -> anyhow::Result<Vec<PathBuf>> {
+    let metadata = match directory.symlink_metadata() {
+        Ok(metadata) => metadata,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error).context("inspecting the Tailscale socket directory"),
+    };
+    require_private_control_directory(directory, &metadata)?;
+    let mut sockets = Vec::new();
+    for entry in std::fs::read_dir(directory)? {
+        let entry = entry?;
+        let name = entry.file_name();
+        // One purpose byte, a 96-bit base64url pin scope and OpenSSH's
+        // 40-character %C digest. The longer temporary bind names stay out.
+        if let [b't' | b'q', rest @ ..] = name.as_bytes()
+            && rest.len() == 16 + super::EXPANDED_TOKEN
+            && rest[..16]
+                .iter()
+                .all(|byte| byte.is_ascii_alphanumeric() || b"_-".contains(byte))
+            && rest[16..].iter().all(u8::is_ascii_hexdigit)
+            && entry.file_type()?.is_socket()
+        {
+            sockets.push(entry.path());
+        }
+    }
+    Ok(sockets)
 }
 
 /// PATH wins over the app-bundle fallback, and the resulting absolute executable also supplies the proxy command.
@@ -205,7 +265,7 @@ fn find_program(path: Option<&OsStr>, fallback: Option<&Path>) -> anyhow::Result
 }
 
 /// The destination can be a Tailscale IP or a DNS name, optionally prefixed by a login. A port comes from ssh config.
-fn destination_host(destination: &str) -> anyhow::Result<&str> {
+pub(crate) fn destination_host(destination: &str) -> anyhow::Result<&str> {
     let (user, host) = destination
         .split_once('@')
         .map_or((None, destination), |(user, host)| (Some(user), host));
@@ -335,9 +395,18 @@ impl Peer {
 }
 
 /// Keep the private key files for a single destination together, including earlier prepared snapshots.
-pub(super) fn known_hosts_dir(state: &Path, destination: &str) -> anyhow::Result<PathBuf> {
+pub(crate) fn known_hosts_dir(state: &Path, destination: &str) -> anyhow::Result<PathBuf> {
     let digest = URL_SAFE_NO_PAD.encode(Sha256::digest(destination.as_bytes()));
     Ok(std::path::absolute(state)?.join("tailscale").join(digest))
+}
+
+/// Discard private pin generations after the registry can no longer start new dials for this destination.
+pub(crate) async fn forget_keys(state: &Path, destination: &str) -> anyhow::Result<()> {
+    match tokio::fs::remove_dir_all(known_hosts_dir(state, destination)?).await {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error).context("removing private Tailscale SSH keys"),
+    }
 }
 
 /// Freeze the lookup's IP and keys in the name before any caller can launch ssh with this file. Concurrent
@@ -524,7 +593,7 @@ mod tests {
     /// A later lookup must leave the earlier prepared command pointing at its own complete pin file.
     #[farhelm_testtrace::test]
     async fn prepares_private_key_snapshots() {
-        let dir = tempfile::tempdir().unwrap();
+        let dir = tempfile::tempdir_in("/tmp").unwrap();
         let program = dir.path().join("tailscale % app");
         let state = dir.path().join("state");
         let install_fixture = |json: &str| {
@@ -592,17 +661,42 @@ mod tests {
     fn refuses_an_unsafe_shared_socket_directory() {
         let state = tempfile::tempdir().unwrap();
         let runtime = tempfile::tempdir().unwrap();
-        let control_dir = control_directory(state.path(), runtime.path()).unwrap();
+        let control_dir = control_directory(state.path(), runtime.path(), "peer").unwrap();
         assert_eq!(
-            control_directory(state.path(), runtime.path()).unwrap(),
+            control_directory(state.path(), runtime.path(), "peer").unwrap(),
             control_dir
         );
         std::fs::set_permissions(&control_dir, std::fs::Permissions::from_mode(0o755)).unwrap();
-        let error = control_directory(state.path(), runtime.path()).unwrap_err();
+        let error = control_directory(state.path(), runtime.path(), "peer").unwrap_err();
         assert!(error.to_string().contains(control_dir.to_str().unwrap()));
         std::fs::remove_dir(&control_dir).unwrap();
         std::os::unix::fs::symlink(state.path(), &control_dir).unwrap();
-        assert!(control_directory(state.path(), runtime.path()).is_err());
+        assert!(control_directory(state.path(), runtime.path(), "peer").is_err());
+    }
+
+    /// Teardown finds prior key and network generations without asking the
+    /// daemon for status. Another destination's socket and an unpublished
+    /// temporary bind name must not be returned.
+    #[farhelm_testtrace::test]
+    fn tailscale_teardown_finds_only_published_generations_for_the_destination() {
+        let state = tempfile::tempdir().unwrap();
+        let runtime = tempfile::tempdir_in("/tmp").unwrap();
+        let owned = control_directory(state.path(), runtime.path(), "peer").unwrap();
+        let other = control_directory(state.path(), runtime.path(), "other").unwrap();
+        let digest = "0".repeat(super::super::EXPANDED_TOKEN);
+        let socket = |root: &Path, scope: &str| root.join(format!("{scope}{digest}"));
+        let first = socket(&owned, "taaaaaaaaaaaaaaaa");
+        let second = socket(&owned, "qbbbbbbbbbbbbbbbb");
+        let unrelated = socket(&other, "taaaaaaaaaaaaaaaa");
+        let _listeners = [&first, &second, &unrelated]
+            .map(|path| std::os::unix::net::UnixListener::bind(path).unwrap());
+        let not_a_socket = socket(&owned, "tcccccccccccccccc");
+        std::fs::write(&not_a_socket, b"not a mux socket").unwrap();
+        let temporary = socket(&owned, "tdddddddddddddddd").with_extension("tmp");
+        let _temporary = std::os::unix::net::UnixListener::bind(&temporary).unwrap();
+        let mut observed = sockets_in(&owned).unwrap();
+        observed.sort();
+        assert_eq!(observed, [second, first]);
     }
 
     /// Batch, sign-in and exit commands must select the same Tailscale master and keep every SSH override.

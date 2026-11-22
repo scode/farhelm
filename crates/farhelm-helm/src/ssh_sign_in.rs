@@ -120,16 +120,26 @@ impl SignIn {
         &self,
         program: &Path,
         destination: &str,
+        kind: ssh::SshAccessKind,
         deadline: Instant,
     ) -> anyhow::Result<bool> {
-        if ssh::control_socket(&self.state_dir, SharedConnection::Provisioning).is_none() {
+        let access = timeout_at(
+            deadline,
+            SshAccess::prepare(kind, &self.state_dir, destination),
+        )
+        .await
+        .context("preparing SSH sign-in timed out")??;
+        if access
+            .control_socket(&self.state_dir, SharedConnection::Provisioning)
+            .is_none()
+        {
             return Ok(true);
         }
         let args = ssh::ssh_base_args(
             destination,
             &self.state_dir,
             SharedConnection::Provisioning,
-            &SshAccess::UserConfig,
+            &access,
         )?;
         control_is_live(program, &args, deadline).await
     }
@@ -140,21 +150,23 @@ impl SignIn {
         &self,
         program: &Path,
         destination: &str,
+        kind: ssh::SshAccessKind,
         attempt: &Attempt,
         connect_timeout: Duration,
         on_question: &mut (dyn FnMut(bool) + Send),
     ) -> anyhow::Result<()> {
         let connection = attempt.connection;
-        let Some(_) = ssh::control_socket(&self.state_dir, connection) else {
+        let deadline = Instant::now() + connect_timeout;
+        let access = timeout_at(
+            deadline,
+            SshAccess::prepare(kind, &self.state_dir, destination),
+        )
+        .await
+        .context("preparing SSH sign-in timed out")??;
+        let Some(control_socket) = access.control_socket(&self.state_dir, connection) else {
             return Ok(());
         };
-        let args = ssh::ssh_base_args(
-            destination,
-            &self.state_dir,
-            connection,
-            &SshAccess::UserConfig,
-        )?;
-        let deadline = Instant::now() + connect_timeout;
+        let args = ssh::ssh_base_args(destination, &self.state_dir, connection, &access)?;
         if control_is_live(program, &args, deadline).await? {
             return Ok(());
         }
@@ -167,11 +179,14 @@ impl SignIn {
             return Ok(());
         }
 
-        // The directory is private before ssh sees it. Its name is short enough for the same state directories
-        // where ControlMaster can bind its much longer socket name and temporary suffix.
+        // Use the master's parent so Tailscale sign-in also fits when the
+        // helm state directory is longer than a Unix socket address allows.
+        let runtime = control_socket
+            .parent()
+            .context("SSH control socket has no parent")?;
         let private = tempfile::Builder::new()
             .prefix("ask-")
-            .tempdir_in(&self.state_dir)?;
+            .tempdir_in(runtime)?;
         let socket = private.path().join("sock");
         let helper = private.path().join(askpass::ASKPASS_PROGRAM_NAME);
         let cli = std::path::absolute(&self.cli)?;
@@ -184,12 +199,7 @@ impl SignIn {
         let listener = UnixListener::bind(&socket).context("opening the SSH sign-in socket")?;
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
 
-        let interactive = ssh::ssh_sign_in_args(
-            destination,
-            &self.state_dir,
-            connection,
-            &SshAccess::UserConfig,
-        )?;
+        let interactive = ssh::ssh_sign_in_args(destination, &self.state_dir, connection, &access)?;
         // OpenSSH generates ProxyJump using argv[0]. A unique name resolved by this client's PATH avoids inserting
         // a user path into a shell command. The directory has no `ssh` entry to shadow the original program.
         let path = std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());

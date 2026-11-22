@@ -813,7 +813,7 @@ impl SystemBackend {
     /// defined by the route. They never open a provisioning master there.
     /// The wrapper's tag lets the caller recover the real script status even
     /// when the transport reports a different one.
-    pub(super) fn remote_command(
+    pub(super) async fn remote_command(
         &self,
         route: &crate::access::RemoteRoute,
         remote_command: String,
@@ -830,7 +830,8 @@ impl SystemBackend {
                 &self.control_dir,
                 policy,
                 crate::access::RemoteCommand::Script(&script),
-            )?
+            )
+            .await?
             .command();
         Ok((command, tag))
     }
@@ -838,7 +839,7 @@ impl SystemBackend {
     /// Existing SSH-focused fixtures exercise the same route lowering while
     /// keeping their authentication and destination inputs explicit.
     #[cfg(test)]
-    pub(super) fn ssh_command(
+    pub(super) async fn ssh_command(
         &self,
         destination: &str,
         access: crate::ssh::SshAccessKind,
@@ -851,6 +852,7 @@ impl SystemBackend {
             },
             script,
         )
+        .await
         .map(|(command, _)| command)
     }
 
@@ -925,6 +927,7 @@ impl SystemBackend {
             }
             ProvisioningTarget::Remote(route) => self
                 .remote_command(route, script.to_string())
+                .await
                 .map(|(command, tag)| (command, Some((route, tag))))
                 .map_err(|error| {
                     BackendFailure::new("building the remote command", error.to_string())
@@ -1515,6 +1518,7 @@ impl SystemBackend {
             .len();
         let (mut command, status_tag) = self
             .remote_command(route, upload_script(remote)?)
+            .await
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
             })?;
@@ -1643,6 +1647,7 @@ impl SystemBackend {
                     .transpose()?;
                 let script = Self::probe_script(&farhelm, state.as_deref(), route);
                 self.remote_command(route, script)
+                    .await
                     .map(|(command, tag)| (command, Some(tag)))
                     .map_err(|error| {
                         BackendFailure::new("building the remote probe", error.to_string())

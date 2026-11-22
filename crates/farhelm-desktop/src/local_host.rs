@@ -67,6 +67,7 @@ pub(crate) mod tests {
     pub(crate) fn host(kind: &str, state: farhelm_proto::ui_channel::HostStateView) -> HostView {
         HostView {
             id: 1,
+            tailscale: false,
             entry_uuid: String::new(),
             kind: kind.to_string(),
             is_session_owned: false,

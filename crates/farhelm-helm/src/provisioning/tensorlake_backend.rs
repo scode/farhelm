@@ -579,8 +579,8 @@ stat() {
     /// Every remote script inherits the runtime fallback, while the script
     /// remains one quoted shell word. This covers ordinary SSH too, which
     /// can lack PAM's runtime setting just like Tensorlake's gateway.
-    #[test]
-    fn remote_scripts_have_the_runtime_fallback_and_prepare_parses() {
+    #[farhelm_testtrace::test]
+    async fn remote_scripts_have_the_runtime_fallback_and_prepare_parses() {
         let root = tempfile::tempdir().unwrap();
         let backend = SystemBackend::new(root.path().to_path_buf());
         for access in [
@@ -589,6 +589,7 @@ stat() {
         ] {
             let command = backend
                 .ssh_command("user@host", access, "printf 'a b'".into())
+                .await
                 .unwrap();
             assert_eq!(
                 crate::provisioning::ssh_stand_in::provisioning_script(&command),
