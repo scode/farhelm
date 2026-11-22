@@ -150,9 +150,10 @@ consent record uses `format: 1`, `approved: true`, `scope: "disposable-test-clon
 and `auth_source` matching the profile's normalized path. Record the maintainer's actual response and scope privately;
 this is authorization metadata, never an authentication file.
 
-Full/P1-only runs also need separately recorded `feedback_send_approved: true` in that authorization record, covering
-only RECIPE's fixed message through the disposable candidate app to `farhelm.io` and its private inbox with blank
-contact. Obtain it during setup when that scope is wanted. P0-only validation needs no feedback approval and sends none.
+Full and stop-after-P2 runs also need separately recorded `feedback_send_approved: true` in that authorization record,
+covering only RECIPE's fixed message through the disposable candidate app to `farhelm.io` and its private inbox with
+blank contact. Obtain it during setup when that scope is wanted. Stop-after-P0 and stop-after-P1 validation needs no
+feedback approval and sends none.
 
 The fixture record uses `format: 1`, `bases` containing the exact `mac` and `linux` name/MAC bindings, and `settings`
 with the profile's Codex, Python and desktop-app paths. Each run exercises its configured model and effort in native

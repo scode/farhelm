@@ -291,12 +291,12 @@ Before creating, editing or deleting anything under these paths, read the file n
 
 Each entry: trigger phrases, the file to read in full before the first action, and its fence.
 
-- **Release brick test** ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "did P0 checks
-  succeed?", "did P1 checks succeed?"): `releasing/mac-vm-test/BRICK-TEST.md`. Fence: no publication or promotion.
-  Repair safe harness/setup issues and continue ("Repair and continue" there). OS/CUA/authentication blocks end that
-  attempt: retain it and repair authorized setup separately, without manual approval or host UI rescue. Do not interrupt
-  an operator, delete retained data, force-stop guests or touch unrelated VMs. `/latest` naming the preceding stable is
-  expected.
+- **Release brick test** ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "stop after P2
+  checks", "did P0 checks succeed?", "did P1 checks succeed?", "did P2 checks succeed?"):
+  `releasing/mac-vm-test/BRICK-TEST.md`. Fence: no publication or promotion. Repair safe harness/setup issues and
+  continue ("Repair and continue" there). OS/CUA/authentication blocks end that attempt: retain it and repair authorized
+  setup separately, without manual approval or host UI rescue. Do not interrupt an operator, delete retained data,
+  force-stop guests or touch unrelated VMs. `/latest` naming the preceding stable is expected.
 - **Releases** (stable, RC or dev releases, fixing forward, advisories, changelog curation): `releasing/AGENTS.md`.
   Fence: no release tag before its base and version are settled with the maintainer, which happens when the release is
   requested, never by stopping later; never reuse or delete a tag; agents never author, run or replace the signing and

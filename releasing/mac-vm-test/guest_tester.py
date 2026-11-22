@@ -20,7 +20,7 @@ import shutil
 import subprocess
 import time
 
-from checkpoint_contract import (old_session_side, require_old_session,
+from checkpoint_contract import (EffectFailure, old_session_side, require_old_session, relaunch_checks_app_only,
                                  fixed_operations, required_operations, require_remote_host_effect)
 from window_geometry import require_drag_delivery, require_window_trace
 
@@ -279,6 +279,10 @@ Nor can it pass an old session that did not survive the upgrade (a new
 launch generation, or a replaced terminal host or child), or one whose
 Restart left no new generation and new terminal host behind.
 Its original final reply remains separate from the enriched evidence record.
+A failed or unavailable observation needs no fixed operation at all: the old
+app failing to start an old session, say, is seen in the UI before any
+receipt exists, and must import as that observation rather than as a harness
+failure that would stop the pair's remaining P0 checks.
 """
     failure = root / 'managed-failure.json'
     if failure.exists():
@@ -286,9 +290,12 @@ Its original final reply remains separate from the enriched evidence record.
     if not isinstance(value, dict) or set(value) != {'status', 'detail'}:
         raise TesterError('managed tester final observation has the wrong shape')
     operations = root / 'managed-operations.json'
-    if not operations.is_file():
+    if operations.is_file():
+        record = json.loads(operations.read_text())
+    elif value['status'] in ('fail', 'could-not-run'):
+        record = {'completed': [], 'receipts': [], 'observations': {}, 'continuity': None}
+    else:
         raise TesterError('managed tester retained no operation receipts')
-    record = json.loads(operations.read_text())
     expected = required_operations(task['check_id'], task['pass_id'], task['context'].get('update_path'))
     if value['status'] == 'pass':
         missing = expected - set(record['completed'])
@@ -298,6 +305,12 @@ Its original final reply remains separate from the enriched evidence record.
             try:
                 require_remote_host_effect(task['check_id'], record['observations']['remote_host_before'],
                                            record['observations']['remote_host_after'])
+            except EffectFailure as error:
+                # From a valid start the snapshots show what the menu action
+                # did to the host, so a contradiction is the product's failure,
+                # whatever the UI looked like; the reply stays in final.txt.
+                value = {'status': 'fail', 'detail': ('The independent SSH snapshots contradict the claimed pass: '
+                                                      + str(error) + '. ' + value['detail'])[:4000]}
             except (RuntimeError, KeyError, TypeError, ValueError) as error:
                 raise TesterError('managed remote host effect premise failed: ' + str(error)) from error
         if task['check_id'] in ('install', 'update-discovery'):
@@ -307,21 +320,42 @@ Its original final reply remains separate from the enriched evidence record.
             if (versions['installed'] != version or versions['bundle'] != version
                     or versions.get('cli', {}).get('stdout', '').strip() != 'farhelm ' + version):
                 raise TesterError('managed installation-version premise was not established')
-        if task['check_id'] in ('app-start', 'old-fixture', 'seed-state', 'update-relaunch', 'local-supervisor-agent', 'reopen'):
+        if task['check_id'] in ('app-start', 'old-fixture', 'old-sessions', 'seed-state', 'update-relaunch',
+                                'local-supervisor-upgrade', 'local-supervisor-agent', 'reopen'):
             versions = record['observations']['versions']
-            tag = task['context']['previous'] if task['check_id'] in ('old-fixture', 'seed-state') else task['context']['candidate']
+            tag = (task['context']['previous'] if task['check_id'] in ('old-fixture', 'old-sessions', 'seed-state')
+                   else task['context']['candidate'])
             version = tag.removeprefix('v')
+            # The P0 relaunches leave the supervisor's version to the
+            # installer pair's own checkpoint (`relaunch_checks_app_only`).
+            supervisor = not (task['check_id'] == 'update-relaunch' and relaunch_checks_app_only(task))
             if (versions['installed'] != version or versions['bundle'] != version
-                    or not versions['desktop_running'] or version not in versions['running_versions']
+                    or not versions['desktop_running']
+                    or (supervisor and version not in versions['running_versions'])
                     or versions.get('cli', {}).get('stdout', '').strip() != 'farhelm ' + version):
                 raise TesterError('managed running-version premise was not established')
+            if not supervisor:
+                # Without the candidate supervisor as a stand-in, only the owned
+                # restart's own receipt shows the app restarted: installed
+                # candidate files beside the old, still-running app would
+                # otherwise pass. The final observation must be that new app.
+                try:
+                    name = next(item for item in record['receipts'] if item.endswith('-restart-transition.json'))
+                    transition = json.loads((root / 'work' / name).read_text())
+                    before = set(transition['before']['desktop_pids'])
+                    after = set(transition['after']['desktop_pids'])
+                except (StopIteration, OSError, ValueError, KeyError, TypeError) as error:
+                    raise TesterError('managed relaunch premise needs the owned restart transition') from error
+                final = set(versions.get('desktop_pids', []))
+                if not after or after & before or not final or not final <= after:
+                    raise TesterError('managed relaunch premise was not established by a new app process')
         if task['check_id'] in ('codex-conversation', 'seed-state', 'codex-resume'):
             state = record['observations']['inspect_state']
             sessions = state.get('supervisor.db', {}).get('sessions', [])
             captured = [row for row in sessions if row.get('captured_conversation')]
             if len(captured) < len(task['context'].get('agents', ['codex'])):
                 raise TesterError('managed conversation capture premise was not established')
-        if task['check_id'] == 'old-fixture' and task['pass_id'] == 'p0-updater-upgrade':
+        if task['check_id'] == 'old-sessions':
             # One old session per host, captured (the old app offers Restart
             # only then): the later old-session checks compare against it.
             for operation in ('inspect_state', 'remote_inspect_state'):

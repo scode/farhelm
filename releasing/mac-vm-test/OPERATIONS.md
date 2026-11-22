@@ -111,11 +111,11 @@ proof that the provisioned service failed.
 
 ## Guest commands and app launch
 
-On an RC or dev build's verified manual path, discovery stays unavailable. The coordinator continues native relaunch,
-agent execution, old-session survival, remote menu checks and approved feedback on the same pair. Every runnable P0
-check must pass before feedback or bonus work, and cleanup rechecks that evidence; only the unsupported, unattempted
-discovery is excluded from scheduling. P0's reported verdict remains incomplete. An observed failure, missing
-prerequisite or damaged receipt still stops dependent checks. A stable release requires discovery.
+An RC or dev build plans no updater pair, so discovery stays unavailable. Its installer pair still runs native relaunch,
+both supervisor upgrades, agent execution, old-session survival, remote menu checks and approved feedback. Every
+runnable P0 check must pass before feedback or bonus work, and cleanup rechecks that evidence. P0's reported verdict
+remains incomplete. An observed failure, missing prerequisite or damaged receipt still stops dependent checks. A stable
+release requires discovery.
 
 Actual release checks use `brick_test.py test`, which stages an independent guest executor and checkpoint envelope
 through this journaled channel. Signature verification, fixture cleanliness and fresh installation use fixed
@@ -135,16 +135,21 @@ separate restart checkpoint. An image of the brief installing state is optional:
 observations, so missing that progress image does not invalidate completed installation evidence.
 
 The candidate may finish updating the remote host before the remote checkpoint starts. Observe the connected candidate
-host, retain independent service and version evidence, and run the checkpoint's agent response or continuity check.
-Leave the manual Update actions untouched so the result establishes the automatic path.
+host, retain independent service and version evidence, and run the checkpoint's own check: the supervisor upgrade on its
+own in P0's `remote-supervisor-upgrade`, or continuity in a bonus upgrade's `remote-update`. Leave the manual Update
+actions untouched so the result establishes the automatic path.
 
-P0's final remote menu checks run after the genuine remote-agent reply and before feedback. `remote_host_before` and
+P1's remote menu checks run after the old-session checks and before feedback. `remote_host_before` and
 `remote_host_after` are fixed read-only probes over the pinned SSH connection, independent of Farhelm's registration.
-They establish user-manager readiness, service state/PID, binary and unit hashes, lib/unit presence and retained data
-and database presence. Remove must preserve the snapshot before the host is re-added through native UI; Uninstall must
-remove the service/unit and lib while retaining data, after the remote session is stopped through Farhelm. A probe never
-uninstalls, stops a service or repairs state. Native captures still establish the actual menu, disappearance, recovered
-session, uninstall plan and kept-data completion notice.
+They establish user-manager readiness, service state/PID, binary and unit hashes, lib/unit presence, retained data and
+database presence, and the pids of every process running Farhelm's private binary (found from each process's `exe` link,
+so a terminal host whose binary was already deleted still counts, and matched against the resolved lib path too; links
+the SSH user cannot read are skipped, since Farhelm's own processes run as that user), plus the session ids in the kept
+database, read read-only. Remove must preserve the snapshot before the host is re-added through native UI; Uninstall
+must remove the service/unit and lib, and leave no Farhelm process running, while retaining the data with the same
+session ids, after the remote session is stopped through Farhelm. A probe never uninstalls, stops a service or repairs
+state. Native captures still establish the actual menu, disappearance, recovered session, uninstall plan and kept-data
+completion notice.
 
 After an override update, the candidate's own native update control must name the exact public latest release after a
 fresh Check for updates. Its accessibility text is sufficient when the provider cannot expose the tooltip in an image;
@@ -154,7 +159,7 @@ insufficient, and an endpoint that now names the candidate cannot distinguish ov
 Provider HTTP 429 refusal can recover only when both event and protocol traces prove that no test command, native action
 or approval was attempted, no product observation was made, and stopped cleanup was acknowledged. The coordinator keeps
 the owner lease, retains each failed attempt with hashes, and backs off before a new attempt, at most three times within
-the original checkpoint deadline. Any uncertain action stops instead. P1 feedback is never automatically retried. Status
+the original checkpoint deadline. Any uncertain action stops instead. P2 feedback is never automatically retried. Status
 reports recovered provider interruptions separately rather than calling the run uninterrupted.
 
 The executor persists native image bytes directly from the private tool event stream, retaining up to ten recent
@@ -174,10 +179,12 @@ cannot authorize an arbitrary shell command. This is an accidental-failure bound
 native tester.
 
 Launch logs and digest-bound receipt references live in the private pass directory. A later checkpoint requests
-`prior_receipts`; it never infers a previous model working directory or recreates a missing observation. Repeated
-observations retain their files while the handoff contains the latest receipt for each checkpoint/operation pair. The
-fixed operations check each subprocess result before another action. Expected absence, such as a launch log that has not
-appeared, is returned explicitly; unexpected command or transport failures close the gate and retain diagnostics.
+`prior_receipts`, which hands over the receipts of the checkpoints it depends on, by the same tier rule the coordinator
+sequences with (P0 and P2 read earlier P0 receipts, P1 earlier P0 and P1 ones, bonus checks everything earlier); it
+never infers a previous model working directory or recreates a missing observation. Repeated observations retain their
+files while the handoff contains the latest receipt for each checkpoint/operation pair. The fixed operations check each
+subprocess result before another action. Expected absence, such as a launch log that has not appeared, is returned
+explicitly; unexpected command or transport failures close the gate and retain diagnostics.
 
 The old-session Restart follows the product's status-dependent confirmation rule: a working agent asks, while an idle
 agent restarts directly. Handle a confirmation when offered; its absence after a completed answer is expected. Never
@@ -197,19 +204,21 @@ supervisor record (`desktop-supervisor.json` in the state directory) names, when
 pid, program path and start second. An app that starts its supervisor detached reuses it on a later launch, when it is
 no longer the app's child; terminal hosts and session reporters running a versioned `farhelm` are never counted.
 
-P0's old sessions use read-only observations and two samples that only the old-session checks may take. `inspect_state`
+P1's old sessions use read-only observations and two samples that only the old-session checks may take. `inspect_state`
 and `remote_inspect_state` read only the session identity columns of each side's `supervisor.db` (`remote_` runs over
 the pinned SSH alias). `terminal_hosts` and `remote_terminal_hosts` list the terminal hosts, recognized by their last
 two arguments, `--socket` and a socket directly inside the state directory's `hosts/`, with each host's children;
 identities are pid plus start identity (`ps` `lstart` under the C locale on the Mac, kernel start ticks and boot ID on
 Linux). Only a host's socket path is kept: no child's or other process's command line reaches a receipt, and a failed
 process scan keeps its exit status, byte count and bounded stderr, never its output. A process-table line that does not
-parse is skipped and counted. At the updater pair's `old-fixture` the sample is refused until that attempt has observed
-the side's one captured session, and requires exactly one host with one live child; elsewhere it is a plain diagnostic.
-`host_survival` and `remote_host_survival` run once per attempt, before the old session is touched, and take their own
-samples: they report whether the session, its host and that host's child survived. `old_session_after` and
-`remote_old_session_after` take the final sample and are refused until the comparison ran. The tester's import refuses
-an old-session pass that contradicts them; see BRICK-TEST.md, "Perform the product checks".
+parse is skipped and counted. At the installer pair's `old-sessions` the sample is refused until that attempt has
+observed the side's one captured session, and requires exactly one host with one live child; anything else closes the
+gate. Elsewhere the sample is a plain diagnostic. A comparison that depends on a receipt (the old-session checks'
+baseline, a bonus continuity milestone) refuses a missing or changed one, so it cannot pass. `host_survival` and
+`remote_host_survival` run once per attempt, before the old session is touched, and take their own samples: they report
+whether the session, its host and that host's child survived. `old_session_after` and `remote_old_session_after` take
+the final sample and are refused until the comparison ran. The tester's import refuses an old-session pass that
+contradicts them; see BRICK-TEST.md, "Perform the product checks".
 
 `guest_ui.py` exposes single structured app actions through the official native provider; executable JavaScript is not
 offered to the model. Restart is a separate lifecycle action: one native click, independent observation of the running
@@ -217,9 +226,9 @@ candidate process, then native rebinding. It never combines the click with a rea
 the click, or binds Farhelm while its process is absent. Returned UI state and images are unchanged provider output.
 
 Exact text uses the native provider's `paste`, which restores the guest clipboard afterward. Native `typeText` dropped
-characters in the P1 message during validation, so the structured tool does not offer it. Verify the complete reactive
-field value before submitting; successful input delivery is not inferred from the tool's exit. Host clipboard sharing
-stays disabled.
+characters in the feedback message during validation, so the structured tool does not offer it. Verify the complete
+reactive field value before submitting; successful input delivery is not inferred from the tool's exit. Host clipboard
+sharing stays disabled.
 
 The GPUI launcher's AX tree can include Initial prompt while that field is below its visible viewport. One RC test
 clicked that AX index and the provider refused with `cannotClickOffscreenElement`, ending the attempt after the remote
@@ -232,9 +241,9 @@ only Desktop exists, and dismiss any menu with its actual Cancel secondary actio
 left Help open in one retained readiness failure, and opening Go to Folder over that menu made the native provider
 refuse its screenshot. This is a fixture failure before Farhelm installation, not a product result.
 
-Each task includes its complete acceptance contract, including P1's literal message and the selected bonus stage. The
-tester does not browse staged recipes or evidence directories through Finder to discover its instructions. Bonus
-conversation passes require an independently recorded captured conversation identity as well as the actual reply.
+Each task includes its complete acceptance contract, including P2's literal feedback message and the selected bonus
+stage. The tester does not browse staged recipes or evidence directories through Finder to discover its instructions.
+Bonus conversation passes require an independently recorded captured conversation identity as well as the actual reply.
 
 Window-drag also uses `window_geometry.swift`, a read-only query of the guest's public window-server API. The installed
 guest Swift toolchain runs it for explicit owned process IDs; it exports frame, window identity and display geometry

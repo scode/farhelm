@@ -34,7 +34,7 @@ from verify_release import require_comment
 from guest_tester import execution_calls, native_events, native_image_digests, request as tester_request, RESULT_STATES
 from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
                             source_url, task_for, Unavailable, CheckStopped, CleanupPending)
-from checkpoint_contract import turn_timeout
+from checkpoint_contract import prerequisite_checks, turn_timeout
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -44,6 +44,24 @@ ORIGIN = 'https://get.farhelm.io'
 # test_upgrade_floor_agrees_with_the_installer_and_helm catches a one-sided raise.
 UPGRADE_FLOOR = 'v0.23.0'
 PROVIDER_BACKOFF = (60, 120, 240)
+# Bonus upgrade pairs start from at most this many of the newest eligible
+# stables, whatever the upgrade floor still admits. The maintainer set this cap;
+# each older source would cost another whole pair of guests.
+HISTORICAL_UPGRADE_LIMIT = 3
+
+# Priority tiers, most important first. P0 asks whether an install or upgrade
+# bricks: installing, upgrading through the installer and the in-app updater,
+# both supervisors upgrading, and a new agent working on each. P1 asks whether
+# the user keeps what they had: old sessions surviving and resuming, and the
+# remote host's Remove/re-add and Uninstall. P2 is the live feedback send.
+TIERS = ('P0', 'P1', 'P2')
+# What each requested scope runs. Only `full` also runs bonus fixtures.
+SCOPE_TIERS = {'p0-only': ('P0',), 'p1-only': ('P0', 'P1'), 'p2-only': TIERS, 'full': TIERS}
+# Plans carry this marker from the P0/P1/P2 layout on. Runs planned earlier
+# (P0 included old sessions and the remote menu, P1 was feedback) keep their
+# saved reports, but this coordinator refuses to continue them: their
+# checkpoints and fences follow the earlier contract.
+PRIORITY_LAYOUT = 2
 
 
 def rate_limited_without_actions(execution, events, protocol):
@@ -164,12 +182,15 @@ def update_path(candidate, latest, supports_override):
 
 
 def plan(candidate, latest, source, floor=UPGRADE_FLOOR):
-    """Cover every source-known eligible stable through the promoted stable.
+    """Plan the P0 fixtures, then bonus upgrades from the newest eligible stables.
 
 A standard gate cannot silently test a downgrade or choose the candidate as its
-own previous release. Three independent P0 fixtures exercise fresh install,
-installer upgrade and updater upgrade before the broader acceptance passes.
-The filled release addendum must identify any historical availability gap.
+own previous release. Independent P0 fixtures exercise fresh install, in-app
+updater discovery (stable candidates only: the updater never offers an RC or
+dev build, so a prerelease plans no such pair) and installer upgrade, whose
+pair also carries the supervisor upgrades, P1 and P2. Bonus upgrade pairs cover
+at most HISTORICAL_UPGRADE_LIMIT previous stables, newest first; older sources
+inside the floor are deliberately omitted, not a coverage gap.
 The caller must establish that the supplied floor matches the candidate's
 source before planning; BRICK-TEST.md requires this manual comparison for real
 runs. Tests supply a fixed floor so later policy raises cannot change their
@@ -197,18 +218,22 @@ fictional releases.
     supported = source.override(previous)
     old = {'previous': previous, 'previous_commit': source.commit(previous),
            'old_supports_override': supported, 'priority': 'P0'}
-    p0 = [dict(old, id='p0-fresh', update_path=None),
-          dict(old, id='p0-installer-upgrade', update_path='manual'),
-          dict(old, id='p0-updater-upgrade', update_path=update_path(candidate, latest, supported))]
+    # Discovery runs before the installer pair so that pair, the last P0 one,
+    # can go on to P1 and P2 with its candidate still running.
+    p0 = [dict(old, id='p0-fresh', update_path=None)]
+    if target[3] == 1:
+        p0.append(dict(old, id='p0-updater-upgrade', update_path=update_path(candidate, latest, supported)))
+    p0.append(dict(old, id='p0-installer-upgrade', update_path='manual'))
     passes = p0 + [{'id': 'fresh', 'previous': previous, 'update_path': None, 'priority': 'bonus'}]
-    for previous in eligible:
+    for previous in eligible[:HISTORICAL_UPGRADE_LIMIT]:
         supported = source.override(previous)
         path = update_path(candidate, latest, supported)
         passes.append({'id': 'upgrade-' + previous, 'previous': previous,
                        'previous_commit': source.commit(previous), 'old_supports_override': supported,
                        'update_path': path, 'priority': 'bonus'})
     return {'candidate': candidate, 'candidate_commit': source.commit(candidate),
-            'latest_at_plan': latest, 'p0_sequence': [v['id'] for v in p0], 'passes': passes}
+            'latest_at_plan': latest, 'p0_sequence': [v['id'] for v in p0], 'passes': passes,
+            'priority_layout': PRIORITY_LAYOUT}
 
 
 def metadata(candidate, fetch=download):
@@ -243,30 +268,38 @@ Continuity checkpoints require independent before/after receipts as well.
         return {'commands': {'gui': False, 'continuity': False}}
     if pass_id.startswith('p0-'):
         # Separate upgrade fixtures keep installer success from standing in for
-        # discovery by the old updater. P0 deliberately has no template,
-        # settings or continuity workload prerequisites; those remain bonus
-        # coverage. Its one exception, at the maintainer's request, is the old
-        # agent session per host, which shows that an upgrading user's running
-        # sessions survive the upgrade and resume after Restart: each
-        # old-session check follows its host's new-session check, which
-        # establishes that host's candidate supervisor, so the remote one
-        # follows observation of the candidate's automatic update on that host.
-        items = ({'artifact-verification': False, 'fixture-clean': False,
-                  'install': False, 'app-start': True} if pass_id == 'p0-fresh' else
-                 {'artifact-verification': False, 'old-fixture': True,
-                  **({'update-discovery': True} if pass_id == 'p0-updater-upgrade' else {}),
-                  'update-relaunch': True,
-                  **({'local-supervisor-agent': True, 'local-old-session': True,
-                      'remote-supervisor-agent': True, 'remote-old-session': True,
-                      'remote-host-remove': True, 'remote-host-uninstall': True}
-                     if pass_id == 'p0-updater-upgrade' else {})})
-        required = {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': 'P0'}
-                    for key, gui in items.items()}
-        if pass_id == 'p0-updater-upgrade':
+        # discovery by the old updater, and keep a failed discovery from hiding
+        # whether the supervisors upgrade: the installer pair carries those.
+        # Each supervisor's upgrade is its own checkpoint, before any new agent
+        # runs on it, so a flaky agent turn cannot obscure a bricked supervisor.
+        # P0 deliberately has no template, settings or continuity workload
+        # prerequisites; those remain bonus coverage.
+        #
+        # The installer pair then goes on to P1 and P2 while its candidate still
+        # runs. The old sessions P1 compares against can only be started on the
+        # previous release, so `old-sessions` is a P1 checkpoint placed before
+        # the upgrade: its failure (an old-version agent turn, say) makes the
+        # old-session checks unavailable without touching P0.
+        if pass_id == 'p0-fresh':
+            items = {'artifact-verification': ('P0', False), 'fixture-clean': ('P0', False),
+                     'install': ('P0', False), 'app-start': ('P0', True)}
+        elif pass_id == 'p0-updater-upgrade':
+            items = {'artifact-verification': ('P0', False), 'old-fixture': ('P0', True),
+                     'update-discovery': ('P0', True), 'update-relaunch': ('P0', True)}
+        else:
+            items = {'artifact-verification': ('P0', False), 'old-fixture': ('P0', True),
+                     'old-sessions': ('P1', True), 'update-relaunch': ('P0', True),
+                     'local-supervisor-upgrade': ('P0', True), 'remote-supervisor-upgrade': ('P0', True),
+                     'local-supervisor-agent': ('P0', True), 'remote-supervisor-agent': ('P0', True),
+                     'local-old-session': ('P1', True), 'remote-old-session': ('P1', True),
+                     'remote-host-remove': ('P1', True), 'remote-host-uninstall': ('P1', True)}
+        required = {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': priority}
+                    for key, (priority, gui) in items.items()}
+        if pass_id == 'p0-installer-upgrade':
             # Feedback uses the candidate already running on this pair. Its
-            # result is separate from P0 and must not prevent ordinary cleanup.
-            required['p1-feedback-send'] = {'gui': True, 'command': False,
-                                             'continuity': False, 'priority': 'P1'}
+            # result is separate from P0 and P1 and must not prevent cleanup.
+            required['p2-feedback-send'] = {'gui': True, 'command': False,
+                                             'continuity': False, 'priority': 'P2'}
         return required
     # Dict order is the tester's checkpoint order. `window-drag` follows the
     # session checks rather than `app-start` for two reasons: a fresh install
@@ -294,10 +327,27 @@ Older manifests declare priority only on the pass, so their existing checks
 keep that classification. An empty projection is not proof that the priority
 was planned; report callers must check its required set before calling verdict.
 """
-    required = {key: spec for key, spec in entry['required'].items()
-                if spec.get('priority', entry.get('priority', 'bonus')) == priority}
-    return dict(entry, required=required,
-                results={key: entry['results'][key] for key in required if key in entry['results']})
+    return subset(entry, [key for key in entry['required'] if tier(entry, key) == priority])
+
+
+def tier(entry, check_id):
+    """Name a declared checkpoint's priority: its own label, else its pass's, else bonus."""
+    return entry['required'][check_id].get('priority', entry.get('priority', 'bonus'))
+
+
+def subset(entry, keys):
+    """Project a pass onto some of its declared checks, keeping pass-level facts.
+
+Retries, preflight and automation failures stay on the projection, so a
+verdict over it still sees everything that can invalidate those checks.
+"""
+    return dict(entry, required={key: entry['required'][key] for key in keys},
+                results={key: entry['results'][key] for key in keys if key in entry['results']})
+
+
+def combine(verdicts):
+    """Fold several verdicts: any failure fails, all passes pass, anything else could not run."""
+    return 'fail' if 'fail' in verdicts else 'pass' if all(v == 'pass' for v in verdicts) else 'could not run'
 
 
 def artifact(root, reference, limit=16 * 1024 * 1024):
@@ -476,22 +526,22 @@ consume space too, so growth is conservative, and no continuous quota is claimed
             raise Refused('observed run disk growth exceeds the configured budget')
         return free
 
-    def create(self, release_plan=None, inputs=None, smoke=False, p0_only=False, p1_only=False):
+    def create(self, release_plan=None, inputs=None, smoke=False, scope='full'):
         """Bind scope and evidence obligations before any clone can be claimed.
 
 Limited scope retains the bonus plan for honest coverage reporting, while
 preventing its fixtures from starting. It cannot be attached to a legacy plan
 that never declared the independent P0 installation paths.
 """
-        if p0_only and p1_only:
-            raise Refused('choose one stop scope, P0 or P1')
-        if (p0_only or p1_only) and (smoke or not release_plan or not release_plan.get('p0_sequence')):
+        if scope not in SCOPE_TIERS:
+            raise Refused('unknown run scope')
+        if scope != 'full' and (smoke or not release_plan or not release_plan.get('p0_sequence')):
             raise Refused('limited scope requires a plan with explicit P0 fixtures')
         self.data = {'format': 1, 'run_id': str(uuid.uuid4()), 'kind': 'fixture-smoke' if smoke else 'release',
                      'profile': self.profile.values, 'plan': release_plan, 'passes': {},
                      'gui_backend': ('fixture-command' if smoke else
                                      'guest-native' if 'guest_tester' in self.profile.values else 'historical-host'),
-                     'scope': 'p0-only' if p0_only else 'p1-only' if p1_only else 'full'}
+                     'scope': scope}
         self.data['initial_free_bytes'] = self.budget()
         specifications = [{'id': 'smoke', 'previous': None, 'update_path': None}] if smoke else release_plan['passes']
         for spec in specifications:
@@ -515,7 +565,13 @@ that never declared the independent P0 installation paths.
 
     @contextlib.contextmanager
     def locked(self):
-        """Keep transitions atomic and bind resumed operations to the original profile."""
+        """Keep transitions atomic and bind resumed operations to the original profile.
+
+A run planned under the earlier P0/P1 layout (P0 held the old sessions and
+the remote menu, P1 the feedback send) is refused here, for every command:
+its checkpoints and fences follow that contract, so the checkout that started
+it finishes it. Its own saved `report.json` stays as it was written.
+"""
         if not self.path.is_file():
             raise Refused('workflow state is missing')
         with (self.directory / '.workflow.lock').open('a') as stream:
@@ -524,6 +580,10 @@ that never declared the independent P0 installation paths.
             if self.data.get('format') != 1 or self.data['profile'] != self.profile.values:
                 raise Refused('workflow/profile mismatch; inspect the original bindings')
             uuid.UUID(self.data['run_id'])
+            plan = self.data['plan']
+            if plan and plan.get('p0_sequence') and plan.get('priority_layout') != PRIORITY_LAYOUT:
+                raise Refused('this run was planned under the earlier P0/P1 layout; read its saved report.json or '
+                              'use the coordinator checkout that started it')
             yield
 
     def save(self):
@@ -555,7 +615,6 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             raise Refused('guest-native product fixtures require the normal Mac desktop start')
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
             self.require_priority(pass_id)
-            self.require_current_contract(pass_id)
         if entry['phase'] != 'pending':
             raise Refused('pass already attempted; inspect its state instead of replaying preparation')
         if any(v['phase'] in ('preparing', 'ready', 'failed') for v in self.data['passes'].values()):
@@ -608,21 +667,23 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             processes.extend(c.processes)
 
     def record(self, pass_id, check_id, status, references, detail, before=None, after=None, native=None,
-               p1_in_flight=False):
+               in_flight=False):
         """Accept explicit observations only when required evidence is present.
 
 Image presence does not interpret its contents: the agent's detail is the GUI
 attestation. Verification and continuity receipts receive additional structural
 checks, and later report generation revalidates retained artifact references.
-New P0 plans additionally fence check order and stop accepting observations
-after a failed or unavailable check outside P1. P1 failures are retained but
-do not stop bonus coverage; historical manifests retain their declared rules.
+New P0 plans additionally fence a hand-made record on its own chain
+(`chain_block`); the owning guest import was fenced the same way when its
+checkpoint was dispatched. Historical manifests without P0 fixtures retain
+their declared rules.
 Every guest-native pass binds its observation to the current checkpoint and
 runtime, including command-only checks. GUI passes additionally require actual
 native capture bytes; a matching task file cannot lend a stale result its identity.
-Only the owning guest import can retain an already-dispatched P1 observation
-after scope narrows. A stop request fences future actions; it cannot recall a
-live send or erase its independently retained outcome.
+Only the owning guest import (`in_flight`) can retain an observation whose
+checkpoint was dispatched before the scope narrowed past it. A stop request
+fences future actions; it cannot recall a live send or erase its independently
+retained outcome.
 """
         entry = self.selected(pass_id)
         if entry['phase'] != 'ready' or check_id not in entry['required']:
@@ -631,36 +692,44 @@ live send or erase its independently retained outcome.
             raise Refused('a result already exists; preserve it rather than overwriting history')
         if status not in ('pass', 'fail', 'could-not-run') or not detail.strip():
             raise Refused('provide a supported result and an actual observation')
+        if check_id == 'old-sessions' and status == 'fail':
+            # It runs on the previous release before any candidate code, so
+            # whatever broke there is no candidate failure.
+            status = 'could-not-run'
+            detail = ('Reported as fail; old-sessions runs on the previous release, so it could not run: '
+                      + detail)[:4000]
         if len(detail) > 4000 or len(references) > 20:
             raise Refused('observation or evidence list exceeds its bound')
         spec = entry['required'][check_id]
+        priority = tier(entry, check_id)
+        # While a guest tester holds the pass, only its own import of the
+        # claimed checkpoint may record: a hand-made observation could take the
+        # slot of a result already on its way back, or stop a chain under it.
+        claim = entry.get('tester', {})
+        owning = bool(in_flight and claim.get('phase') == 'running' and claim.get('check_id') == check_id
+                      and claim.get('termination_observed') is True)
+        if claim.get('phase') in ('running', 'reconciliation-required') and not owning:
+            raise Refused('a guest tester owns this pass; wait for it or reconcile it before recording by hand')
+        dispatched = False
         if self.data['plan'] and self.data['plan'].get('p0_sequence'):
             self.require_no_failure()
-            if spec.get('priority', entry.get('priority')) == 'P1':
-                claim = entry.get('tester', {})
-                dispatched = (p1_in_flight and self.data.get('gui_backend') == 'guest-native' and native
-                              and claim.get('phase') == 'running' and claim.get('check_id') == check_id
-                              and claim.get('termination_observed') is True)
-                if self.data.get('scope') == 'p0-only' and not dispatched:
-                    raise Refused('stop after P0 checks: P1 is outside this run scope')
-                # Manual observations must prove their ordering here. Native
-                # dispatch already established that premise before Send; later
-                # evidence loss changes P0's verdict, but cannot erase the send.
-                if not dispatched and any(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) != 'pass'
-                                          for key in self.data['plan']['p0_sequence']):
-                    raise Refused('complete all P0 checks with valid evidence before P1')
-            elif entry.get('priority') == 'P0' and status == 'pass':
-                preceding = list(entry['required'])[:list(entry['required']).index(check_id)]
-                prefix = dict(entry, required={key: entry['required'][key] for key in preceding},
-                              results={key: entry['results'][key] for key in preceding if key in entry['results']})
-                if self.verdict(self.executable_checks(prefix)) != 'pass':
-                    raise Refused('complete preceding P0 checks with valid evidence first')
+            dispatched = owning and self.data.get('gui_backend') == 'guest-native' and bool(native)
+            if not self.in_scope(priority) and not dispatched:
+                raise Refused(f'{self.scope_label()}: {priority} is outside this run scope')
+            # Hand-made observations must prove their ordering here; the
+            # owning import's checkpoint proved it before dispatch.
+            if not owning:
+                reason = self.chain_block(pass_id, check_id, status)
+                if reason:
+                    raise Refused(reason)
         native = {} if native is None else native
         if status == 'pass' and self.data.get('gui_backend') == 'guest-native' and set(native) != {'execution', 'events', 'task'}:
             raise Refused('guest-native passes require the independent executor; manual record is for failures/history')
         bound = set(references) | {ref for ref in (before, after) if ref is not None} | set(native.values())
         validated = {ref: artifact(self.directory, ref, limit=96 * 1024 * 1024)
                      if ref == native.get('events') else artifact(self.directory, ref) for ref in bound}
+        if owning and native and json.loads(validated[native['task']]).get('attempt') != claim.get('attempt'):
+            raise Refused('imported observation belongs to another attempt than the claimed one')
         contents = [validated[ref] for ref in references]
         if status == 'pass':
             image_digests = set()
@@ -681,7 +750,7 @@ live send or erase its independently retained outcome.
                 if spec['gui'] and (not calls or not any(hashlib.sha256(v).hexdigest() in native_image_digests(events)
                                                         for v in contents if is_image(v))):
                     raise Refused('GUI image was not returned by actual guest-native CUA')
-                if check_id in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall'):
+                if check_id in ('p2-feedback-send', 'remote-host-remove', 'remote-host-uninstall'):
                     captures = {hashlib.sha256(v).hexdigest() for v in contents if is_image(v)}
                     if len(captures & native_image_digests(events)) < 2:
                         raise Refused(f'{check_id} needs two distinct native images; review their action/result meaning')
@@ -723,7 +792,7 @@ live send or erase its independently retained outcome.
                 if not valid:
                     raise Refused('old-ring verification receipt does not match this pass and candidate')
         value = {'status': status, 'evidence': references, 'detail': detail}
-        if p1_in_flight and self.data.get('scope') == 'p0-only':
+        if dispatched and not self.in_scope(priority):
             value['dispatched_before_scope_stop'] = True
         if native:
             value['native'] = native
@@ -735,6 +804,7 @@ live send or erase its independently retained outcome.
         entry['results'][check_id] = value
         self.save()
         self.note('decision', f'Pass `{pass_id}`, check `{check_id}` recorded `{status}`; private evidence retained.')
+        self.settle()
 
     def test(self, pass_id, source=None, timeout=1200):
         """Own the host tester lease through execution and guest termination import.
@@ -760,18 +830,21 @@ racing a live coordinator without guessing numeric PID ownership.
 
 The workflow lock protects the attempt claim and each imported result, but is
 released while the guest works so status remains queryable. Cleanup and another
-tester refuse the active claim. Every checkpoint gets a fresh bounded turn;
-        failures retain their artifacts and stop the sequence. Only a proven
-pre-action provider 429 can back off into a separately retained fresh attempt;
-it never retries feedback, uncertain actions or failed cleanup.
+tester refuse the active claim. Every checkpoint gets a fresh bounded turn and
+retains its artifacts. A failed or unavailable P0 or bonus checkpoint stops the
+sequence. A P1 one, a harness failure at P1 included, stops only the later P1
+checkpoints, which are recorded as skipped while P2 still runs; a P2 one is
+the last checkpoint anyway. Only a proven pre-action provider 429 can back off
+into a separately retained fresh attempt; it never retries feedback, uncertain
+actions or failed cleanup.
 """
         source = Source() if source is None else source
         if type(timeout) is not int or not 30 <= timeout <= 3600:
             raise Refused('guest tester deadline must be 30..3600 seconds')
         check_id = 'native-preflight'
         with self.locked():
-            feedback = (self.data.get('scope') != 'p0-only' and any(
-                priority_entry(value, 'P1')['required'] for value in self.data['passes'].values()))
+            feedback = 'P2' in self.scope_tiers() and any(
+                priority_entry(value, 'P2')['required'] for value in self.data['passes'].values())
             config = require_setup(self.profile, feedback=feedback)
             entry = self.selected(pass_id)
             if entry['phase'] != 'ready' or entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
@@ -781,7 +854,6 @@ it never retries feedback, uncertain actions or failed cleanup.
             if entry.get('automation_failure'):
                 raise Refused('failed automation is retained; fix the fixture and use a new run')
             self.require_priority(pass_id)
-            self.require_current_contract(pass_id)
             # Resolve read-only source inputs before claiming the test. Once the
             # claim is saved, every mutation failure must leave a terminal state.
             context = {'candidate': self.data['plan']['candidate'], 'previous': entry['previous'],
@@ -825,32 +897,40 @@ it never retries feedback, uncertain actions or failed cleanup.
             with self.locked():
                 entry = self.selected(pass_id)
                 sequence = ([] if entry.get('native_preflight') else ['native-preflight']) + [
-                    key for key, spec in entry['required'].items() if key not in entry['results']
-                    and not (spec.get('priority') == 'P1' and self.data.get('scope') == 'p0-only')]
+                    key for key in entry['required'] if key not in entry['results']]
             for check_id in sequence:
                 with self.locked():
                     entry = self.selected(pass_id)
-                    is_p1 = entry['required'].get(check_id, {}).get('priority') == 'P1'
-                    if is_p1 and self.data.get('scope') == 'p0-only':
+                    priority = (entry.get('priority', 'bonus') if check_id == 'native-preflight'
+                                else tier(entry, check_id))
+                    # Scope is reread before every checkpoint: a stop request
+                    # made while an earlier turn ran fences the later ones.
+                    if not self.in_scope(priority):
                         continue
+                    is_feedback = priority == 'P2'
+                    if check_id != 'native-preflight':
+                        # A checkpoint that can never run is already recorded
+                        # as skipped; the independent ones after it still run.
+                        self.settle()
+                        if check_id in entry['results']:
+                            print(json.dumps({'pass': pass_id, 'check': check_id, 'status': 'skipped',
+                                              'reason': entry['results'][check_id]['detail']}), flush=True)
+                            continue
+                        reason = self.chain_block(pass_id, check_id, 'pass')
+                        if reason:
+                            raise Refused(reason)
                     context.pop('feedback_authorized', None)
-                    if is_p1:
+                    if is_feedback:
                         # Recheck the separate live-send consent at its action
                         # boundary; earlier credential consent cannot stand in.
                         require_setup(self.profile, feedback=True)
-                        p0 = self.report()['p0']
-                        if not self.p0_executable_complete():
-                            raise Refused('complete all P0 checks with valid evidence before P1 dispatch')
                         context['feedback_authorized'] = True
-                        print(json.dumps({'p0': p0}), flush=True)
+                        report = self.report()
+                        print(json.dumps({'p0': report['p0'], 'p1': report['p1']}), flush=True)
                     if check_id in ('update-discovery', 'update-relaunch') and 'latest_at_selection' not in entry:
                         self.select_update(pass_id, download(ORIGIN + '/latest').decode().strip())
                     context['update_path'] = entry['update_path']
                     if check_id == 'update-discovery' and entry['update_path'] == 'manual':
-                        discovery = self.discovery_skip(entry)
-                        if discovery:
-                            self.note('decision', discovery + ' Continue with the manual install and relaunch.')
-                            continue
                         latest = self.manual_discovery_selection(entry)
                         if latest is None:
                             raise Refused('manual discovery path requires a valid update selection receipt')
@@ -859,7 +939,8 @@ it never retries feedback, uncertain actions or failed cleanup.
                                   'cannot select a stable release before it becomes the public default.')
                         # This failure is established by the selection receipt before a guest turn starts.
                         entry['tester'] = {'phase': 'running', 'check_id': check_id, 'termination_observed': True}
-                        self.record(pass_id, check_id, 'fail', [f'{pass_id}/latest-at-selection.json'], detail)
+                        self.record(pass_id, check_id, 'fail', [f'{pass_id}/latest-at-selection.json'], detail,
+                                    in_flight=True)
                         raise CheckStopped(detail)
                     context['latest_at_selection'] = entry.get('latest_at_selection')
                     context['prior_results'] = entry['results']
@@ -883,7 +964,7 @@ it never retries feedback, uncertain actions or failed cleanup.
                     retained_task = json.loads(artifact(self.directory, native['task']))
                     if retained_task != task:
                         raise Refused('retained guest envelope differs from the claimed attempt')
-                    if (execution.get('status') != 'automation-failure' or is_p1
+                    if (execution.get('status') != 'automation-failure' or is_feedback
                             or provider_attempt == len(PROVIDER_BACKOFF)):
                         break
                     try:
@@ -925,6 +1006,25 @@ it never retries feedback, uncertain actions or failed cleanup.
                 identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
                 if observation is not None and observation.get('identity') != identity:
                     raise Refused('guest observation identity differs from the claimed attempt')
+                if priority == 'P1' and execution.get('status') == 'automation-failure':
+                    # A harness failure at an optional P1 check makes that check
+                    # unavailable and stops the P1 chain like any P1 nonpass; it
+                    # must not keep the pair's P0 checks (after `old-sessions`)
+                    # or the send from running. The guest stopped (termination
+                    # was acknowledged to get here) and nothing is replayed. A
+                    # permission block still stops the pair below, and a failure
+                    # the tester claimed stays visible for review.
+                    with self.locked():
+                        entry = self.selected(pass_id)
+                        if (observation or {}).get('status') == 'fail' and check_id != 'old-sessions':
+                            entry.setdefault('unverified_failures', []).append(
+                                {key: observation[key] for key in ('identity', 'status', 'detail')})
+                        self.record(pass_id, check_id, 'could-not-run', [],
+                                    ('Guest automation failed at this P1 check: '
+                                     + str(execution.get('error') or (observation or {}).get('detail', '')))[:4000],
+                                    native=native, in_flight=True)
+                    print(json.dumps({'pass': pass_id, 'check': check_id, 'status': 'could-not-run'}), flush=True)
+                    continue
                 if execution.get('status') not in ('pass', 'fail', 'could-not-run'):
                     with self.locked():
                         claim = self.selected(pass_id)['tester']
@@ -959,11 +1059,21 @@ it never retries feedback, uncertain actions or failed cleanup.
                         self.save()
                     else:
                         continuity = result['continuity'] or {}
+                        if result['status'] == 'fail':
+                            # Saved before the import, so a failure claim the
+                            # guest reported stays visible for review even if
+                            # its evidence then fails import (an unverified
+                            # product failure); a successful import clears it.
+                            entry['tester']['observation'] = {key: result[key]
+                                                              for key in ('identity', 'status', 'detail')}
+                            self.save()
                         self.record(pass_id, check_id, result['status'], [prefix + ref for ref in result['evidence']],
                                     result['detail'], prefix + continuity['before'] if continuity else None,
                                     prefix + continuity['after'] if continuity else None, native=native,
-                                    p1_in_flight=is_p1)
-                        if result['status'] != 'pass' and not is_p1:
+                                    in_flight=True)
+                        entry['tester'].pop('observation', None)
+                        self.save()
+                        if result['status'] != 'pass' and priority not in ('P1', 'P2'):
                             raise CheckStopped(result['detail'])
                 print(json.dumps({'pass': pass_id, 'check': check_id, 'status': result['status']}), flush=True)
         except BaseException as error:
@@ -989,8 +1099,9 @@ it never retries feedback, uncertain actions or failed cleanup.
 
 The host must inspect retained native actions and explain why repeating this
 checkpoint is safe after repair. This transition never clears a product fail,
-an automation error, a pending action or any feedback attempt. It records the
-operator's judgment beside the unchanged original result and its byte hashes.
+an automation error, a pending action, a P1 continuity check (its sequence
+already went on past it) or any feedback attempt. It records the operator's
+judgment beside the unchanged original result and its byte hashes.
 """
         if not isinstance(reason, str) or not 20 <= len(reason.strip()) <= 2000:
             raise Refused('explain the fixture repair and why this checkpoint can be repeated safely')
@@ -1002,10 +1113,10 @@ operator's judgment beside the unchanged original result and its byte hashes.
             if (entry['phase'] != 'ready' or claim.get('phase') != 'failed'
                     or claim.get('termination_observed') is not True or entry.get('automation_failure')
                     or result.get('status') != 'could-not-run'
-                    or entry['required'][check].get('priority', entry.get('priority')) == 'P1'
+                    or tier(entry, check) in ('P1', 'P2')
                     or len(entry.get('checkpoint_retries', [])) >= 3
                     or not self.result_evidence_retained(result)):
-                raise Refused('retry only a stopped unavailable checkpoint with intact evidence, never feedback')
+                raise Refused('retry only a stopped unavailable P0 or bonus checkpoint with intact evidence, never feedback')
             ordered = list(entry['required'])
             if any(key in entry['results'] for key in ordered[ordered.index(check) + 1:]):
                 raise Refused('later checkpoint observations prevent replaying this fixture boundary')
@@ -1099,8 +1210,10 @@ uncertain-action failure is cleared by this transition.
                 refused += bool(error)
             if refused != 1 or started - completed:
                 raise Refused('readiness retry needs one completed sampling refusal and no uncertain call')
-            if any(result['status'] != 'pass' or not self.result_evidence_retained(result)
-                   for result in entry['results'].values()):
+            # Only the retried check's own prerequisites count: an unavailable
+            # P1 result before it (`old-sessions`) does not hold back P0.
+            if any(entry['results'][key]['status'] != 'pass' or not self.result_evidence_retained(entry['results'][key])
+                   for key in self.prerequisites(entry, check) if key in entry['results']):
                 raise Refused('earlier checkpoint evidence is not intact')
             c = self.pair(pass_id)
             with c.locked():
@@ -1227,17 +1340,6 @@ discovery observation takes precedence over the selected path.
             return None
         return latest
 
-    def discovery_skip(self, entry):
-        """Explain the one discovery skip that can let dependent checks proceed."""
-        candidate = self.data['plan']['candidate']
-        kind = version(candidate)[4]
-        latest = self.manual_discovery_selection(entry) if kind else None
-        if latest is None:
-            return None
-        label = {'rc': 'release candidate', 'dev': 'development prerelease'}[kind]
-        return (f'In-app update discovery was skipped as expected. {candidate} is a {label}. '
-                f'The in-app updater only discovers stable releases. The public update channel pointed to {latest}.')
-
     def add_check(self, pass_id, check_id, gui=False):
         """Keep release-specific obligations in bonus coverage without expanding P0."""
         entry = self.selected(pass_id)
@@ -1251,45 +1353,174 @@ discovery observation takes precedence over the selected path.
         self.save()
         self.note('decision', f'Added required addendum check `{check_id}` to `{pass_id}`.')
 
-    def limit_to_p0(self):
-        """Persist a mid-session P0 stop without changing recorded results.
+    def limit_scope(self, scope):
+        """Persist a mid-session stop after P0, P1 or P2 without changing recorded results.
 
-This fences future bonus preparation; the supervising agent still owns any
-in-flight GUI work and clean guest shutdown. Historical plans cannot acquire
-missing P0 coverage through a scope edit.
+This fences checkpoints and fixtures not yet dispatched; the supervising agent
+still owns any in-flight GUI work and clean guest shutdown. Stopping after P2
+keeps the live feedback send in scope, so it rechecks that consent, as widening
+back to full coverage does. Historical plans cannot acquire missing P0
+coverage through a scope edit.
 """
+        if scope not in SCOPE_TIERS or scope == 'full':
+            raise Refused('choose a stop after P0, P1 or P2')
         if not self.data['plan'] or not self.data['plan'].get('p0_sequence'):
             raise Refused('this historical run has no explicit P0 fixtures; start a new P0 plan')
-        self.data['scope'] = 'p0-only'
-        self.save()
-        self.note('decision', 'Stop after P0 checks requested; future bonus fixtures are outside scope.')
-
-    def limit_to_p1(self):
-        """Stop after the declared P1 check without inventing it in an old run.
-
-Scope changes fence future fixtures, not GUI activity or guest shutdown; the
-operator still finishes evidence collection and cleans up the last P0 pair.
-"""
-        if not any(priority_entry(entry, 'P1')['required'] for entry in self.data['passes'].values()):
-            raise Refused('this historical run has no planned P1 check; start a new plan')
-        if self.data.get('gui_backend') == 'guest-native':
+        if 'P2' in SCOPE_TIERS[scope] and self.data.get('gui_backend') == 'guest-native':
             require_setup(self.profile, feedback=True)
-        self.data['scope'] = 'p1-only'
+        self.data['scope'] = scope
         self.save()
-        self.note('decision', 'Stop after P1 checks requested; future bonus fixtures are outside scope.')
+        self.note('decision', f'{self.scope_label().capitalize()} requested; later tiers and bonus fixtures are outside scope.')
+        self.settle()
+
+    def scope_tiers(self):
+        """Name the priority tiers this run's requested scope includes."""
+        return SCOPE_TIERS[self.data.get('scope', 'full')]
+
+    def in_scope(self, priority):
+        """Say whether a checkpoint of this priority may still be dispatched; bonus work needs full scope."""
+        return priority in self.scope_tiers() if priority in TIERS else self.data.get('scope', 'full') == 'full'
+
+    def scope_label(self):
+        """Describe the requested scope in the maintainer's words, for refusals and notes."""
+        scope = self.data.get('scope', 'full')
+        return 'full coverage' if scope == 'full' else 'stop after ' + scope.split('-')[0].upper() + ' checks'
 
     def require_no_failure(self):
-        """Retain the stop-on-failure fence, with P1's deliberate exception.
+        """Stop the whole run after a harness failure or a failed bonus check.
 
-Preparation or automation errors and product failures of any other priority still stop progress.
-Ignoring P1 here never changes its separate or full-run verdict.
+A preparation or automation error means the harness is unreliable, so nothing
+else runs until a new run, with one exception: a P0 pair the maintainer has
+already released (`cleanup --discard-failed` after deciding its retention).
+P0 fixtures are independent, and a relaunch that never brought the candidate
+back ends as an automation error too, so a broken updater must not keep the
+installer pair from showing whether the supervisors brick. A failed bonus
+check stops bonus coverage, the only work left by then. Product failures in P0,
+P1 and P2 fence their own chains instead (`chain_block`).
 """
         for entry in self.data['passes'].values():
-            if entry.get('preparation_error') or entry.get('automation_failure') or any(
-                    result['status'] != 'pass'
-                    for key, result in entry['results'].items()
-                    if entry['required'][key].get('priority', entry.get('priority')) != 'P1'):
+            released = entry.get('priority') == 'P0' and entry['phase'] == 'deleted'
+            if (not released and (entry.get('preparation_error') or entry.get('automation_failure'))) or (
+                    entry.get('priority') != 'P0'
+                    and any(result['status'] != 'pass' for result in entry['results'].values())):
                 raise Refused('stop after the first failed or unavailable check; preserve this run')
+
+    def prerequisites(self, entry, check_id):
+        """List the earlier checkpoints of this pass that a P0 or P1 checkpoint depends on (`prerequisite_checks`)."""
+        return prerequisite_checks(entry['required'], check_id)
+
+    def skip(self, pass_id, check_id, reason):
+        """Record that a P1 or P2 checkpoint can never run, and why (`dead_end`).
+
+The skip is a terminal result like any other: it counts as could not run,
+needs no evidence, and lets the send and cleanup proceed without waiting on a
+check that cannot run.
+"""
+        entry = self.selected(pass_id)
+        entry['results'][check_id] = {'status': 'skipped', 'evidence': [], 'detail': reason, 'sha256': {}}
+        self.save()
+        self.note('decision', f'Skipped `{pass_id}/{check_id}`: {reason}')
+
+    def settle(self):
+        """Skip every pending in-scope P1 or P2 checkpoint of a ready pass that can never run.
+
+Runs after every recorded result, when the scope widens, before cleanup and
+before the scheduler dispatches a checkpoint, so the manual `record` path and
+the guest scheduler settle the same way. Checkpoints outside the requested
+scope stay unrecorded until the scope reaches them. Checkpoints are visited in
+pair order, so a skip that stops a later P1 checkpoint's chain is seen in the
+same sweep. A checkpoint a guest tester has claimed is left to that tester.
+"""
+        if not (self.data['plan'] and self.data['plan'].get('p0_sequence')):
+            return
+        for pass_id, entry in self.data['passes'].items():
+            if entry['phase'] != 'ready':
+                continue
+            claim = entry.get('tester', {})
+            for check_id in entry['required']:
+                if (check_id in entry['results'] or tier(entry, check_id) not in ('P1', 'P2')
+                        or not self.in_scope(tier(entry, check_id))):
+                    continue
+                if claim.get('phase') in ('running', 'reconciliation-required') and claim.get('check_id') == check_id:
+                    continue
+                reason = self.dead_end(pass_id, check_id)
+                if reason:
+                    self.skip(pass_id, check_id, reason)
+
+    def order_block(self, entry, check_id, stopping):
+        """Say why a pair's order forbids `check_id` for good, or None.
+
+A failed, unavailable or skipped result in one of the `stopping` tiers stops
+the rest of that chain. A checkpoint whose place in the pair's order has
+passed (a later one ran; a skip did not) cannot run any more: `old-sessions` skipped
+under a stop after P0 must not start its "previous release" sessions on the
+candidate once the run is widened again.
+"""
+        stopped = [key for key, result in entry['results'].items()
+                   if key != check_id and result['status'] != 'pass' and tier(entry, key) in stopping]
+        if stopped:
+            return f'stop after the first failed or unavailable check: {stopped[0]} stopped its chain'
+        ordered = list(entry['required'])
+        later = [key for key in ordered[ordered.index(check_id) + 1:]
+                 if entry['results'].get(key, {}).get('status', 'skipped') != 'skipped']
+        if later:
+            return f'{check_id} can no longer run: {later[0]}, later in the pair, already ran'
+        return None
+
+    def dead_end(self, pass_id, check_id):
+        """Say why a pending P1 or P2 checkpoint can never be recorded, or None while it still might be.
+
+P1 follows its pair's order (`order_block`). P2 is dead once a P0 check
+anywhere in the run did not pass, or a P0 pair was released before its P0
+checks finished: P0 can then never complete, and a live send from a release
+that failed P0 adds nothing. Lost P0 evidence is not a dead end; it refuses
+the send instead (`chain_block`), since it calls for the maintainer.
+"""
+        entry = self.selected(pass_id)
+        priority = tier(entry, check_id)
+        if priority == 'P1':
+            return self.order_block(entry, check_id, ('P0', 'P1'))
+        if priority != 'P2':
+            return None
+        for key in self.data['plan']['p0_sequence']:
+            pair = self.selected(key)
+            part = priority_entry(pair, 'P0')
+            if any(result['status'] != 'pass' for result in part['results'].values()):
+                return f'a P0 check of {key} did not pass'
+            if pair['phase'] == 'deleted' and set(part['results']) != set(part['required']):
+                return f'{key} was released before its P0 checks finished'
+        return None
+
+    def chain_block(self, pass_id, check_id, status):
+        """Say why a P0, P1 or P2 checkpoint cannot be recorded now, or None when it can.
+
+P2 waits for every P0 check of the run to pass with retained evidence, and for
+the pair's P1 sequence to be over. P0 and P1 follow their pair's order
+(`order_block`), where a P0 result stops only P0 and a P1 one stops P1. A pass
+needs every prerequisite passed; a P0 failure may still be recorded out of
+order, while P1 always needs its prerequisites. Bonus checks are fenced by
+their pass instead.
+"""
+        entry = self.selected(pass_id)
+        priority = tier(entry, check_id)
+        if priority == 'P2':
+            if not self.p0_executable_complete():
+                return 'complete all P0 checks with valid evidence before P2'
+            pending = [key for key in priority_entry(entry, 'P1')['required'] if key not in entry['results']]
+            if 'P1' in self.scope_tiers() and pending:
+                return f'finish the P1 sequence before P2: {pending[0]} has no result yet'
+            return None
+        if priority not in ('P0', 'P1'):
+            return None
+        reason = self.order_block(entry, check_id, ('P0',) if priority == 'P0' else ('P0', 'P1'))
+        if reason:
+            return reason
+        earlier = self.prerequisites(entry, check_id)
+        if (status == 'pass' or priority == 'P1') and any(
+                entry['results'].get(key, {}).get('status') != 'pass' for key in earlier):
+            return ('complete preceding P0 checks first' if priority == 'P0'
+                    else 'complete preceding P0 and P1 checks of this pair first')
+        return None
 
     def continue_full(self):
         """Restore requested full coverage after a temporary scope stop.
@@ -1298,72 +1529,66 @@ The caller must have authorization to widen scope, including live feedback.
 Recheck setup consent and keep every observation and active-attempt fence;
 this transition neither retries a send nor recreates a cleaned fixture.
 """
-        if not self.data['plan'].get('p0_sequence'):
+        if not self.data['plan'] or not self.data['plan'].get('p0_sequence'):
             raise Refused('this historical run has no explicit P0 plan')
         if self.data.get('gui_backend') == 'guest-native':
             require_setup(self.profile, feedback=True)
         self.data['scope'] = 'full'
         self.save()
         self.note('decision', 'Full coverage requested again; retained observations and send boundaries unchanged.')
-
-    def executable_checks(self, entry):
-        """Exclude only unattempted discovery on the verified manual RC or dev path.
-
-Use this projection to schedule later checks. The formal P0 verdict uses the
-complete check set. An observed discovery result or missing selection evidence
-keeps discovery required for scheduling too.
-"""
-        if not self.discovery_skip(entry):
-            return entry
-        return dict(entry, required={key: spec for key, spec in entry['required'].items()
-                                     if key != 'update-discovery'})
+        self.settle()
 
     def p0_executable_complete(self):
-        """Require every runnable P0 boundary before feedback or bonus coverage.
-
-An unsupported discovery path remains unavailable in the report. It does not
-prevent evidence-backed agent, session-survival, remote-menu or feedback tests.
-"""
-        return all(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) == 'pass'
+        """Require every P0 check of the run passed with retained evidence, before feedback or bonus coverage."""
+        return all(self.verdict(priority_entry(self.selected(key), 'P0')) == 'pass'
                    for key in self.data['plan']['p0_sequence'])
 
-    def require_current_contract(self, pass_id):
-        """Refuse to start or test an updater pair planned before P0 carried old sessions.
+    def planned_discovery_skip(self):
+        """Explain why a prerelease run planned no in-app updater pair, or return None.
 
-Its manifest lacks the old-session checks, while this coordinator's old fixture
-and agent checks now assume them; continuing would hold an in-flight run to
-obligations it never planned, or half of them. Its retained observations keep
-their verdicts; a new run gets the current contract.
+The updater only discovers stable releases, so the plan leaves that pair out
+of an RC or dev run instead of cloning one only to skip its check. The formal
+P0 verdict still counts discovery as unavailable.
 """
-        entry = self.selected(pass_id)
-        if pass_id == 'p0-updater-upgrade' and 'local-old-session' not in entry['required']:
-            raise Refused('this run was planned before P0 carried old sessions across the upgrade; '
-                          'start a new run with init for this pair')
+        if not self.data['plan'].get('p0_sequence') or 'p0-updater-upgrade' in self.data['plan']['p0_sequence']:
+            return None
+        candidate = self.data['plan']['candidate']
+        kind = version(candidate)[4]
+        if not kind:
+            return None
+        label = {'rc': 'release candidate', 'dev': 'development prerelease'}[kind]
+        return (f'In-app update discovery was skipped as expected. {candidate} is a {label}. '
+                'The in-app updater only discovers stable releases, so this run planned no updater pair. '
+                f'The public update channel pointed to {self.data["plan"]["latest_at_plan"]} when it was planned.')
 
     def require_priority(self, pass_id):
         """Fence bonus work and later P0 fixtures before any guest is cloned.
 
-Revalidate preceding evidence instead of treating an old pass label as proof.
-Historical runs without an explicit P0 plan keep their original obligations;
-their observations are never retroactively relabeled as P0 coverage.
+P0 fixtures run in their planned order but do not depend on each other: a
+failed fresh install or discovery says nothing about whether the supervisors
+upgrade, so the next P0 pair may still run once the failed one is released
+(which needs the maintainer's retention decision). Bonus work needs every P0
+check passed with retained evidence, revalidated rather than trusted from a
+label. Historical runs without an explicit P0 plan keep their original
+obligations; their observations are never retroactively relabeled as P0.
 """
         entry = self.selected(pass_id)
         self.require_no_failure()
         sequence = self.data['plan']['p0_sequence']
         if entry.get('priority') == 'P0':
-            preceding = sequence[:sequence.index(pass_id)]
-        else:
-            if self.data.get('scope') in ('p0-only', 'p1-only'):
-                raise Refused('stop after P0 or P1 checks: bonus fixtures are outside this run scope')
-            preceding = sequence
-        if any(self.verdict(self.executable_checks(priority_entry(self.selected(key), 'P0'))) != 'pass' for key in preceding):
-            raise Refused('complete P0 fixtures in order before later checks')
+            if any(self.selected(key)['phase'] == 'pending' for key in sequence[:sequence.index(pass_id)]):
+                raise Refused('run the P0 fixtures in their planned order')
+            return
+        if self.data.get('scope', 'full') != 'full':
+            raise Refused(f'{self.scope_label()}: bonus fixtures are outside this run scope')
+        if not self.p0_executable_complete():
+            raise Refused('complete P0 fixtures with valid evidence before bonus work')
 
     def result_evidence_retained(self, result):
         """Recheck accepted bytes independently of the observation's status.
 
-A failed or unavailable P1 observation still needs its exported evidence before
-cleanup can delete the guests. Keep the same artifact limits as verdict checks,
+A failed or unavailable P1 or P2 observation still needs its exported evidence
+before cleanup can delete the guests. Keep the same artifact limits as verdict checks,
 including the larger bound for the guest-native event stream.
 """
         try:
@@ -1377,19 +1602,29 @@ including the larger bound for the guest-native event stream.
         return True
 
     def verdict(self, entry):
-        """Missing, invalidated or skipped checks cannot become a release pass."""
+        """Missing, invalidated or skipped checks cannot become a release pass.
+
+A recorded product failure decides first: a later harness failure or lost
+retry evidence must not turn a confirmed break into could not run. Retry
+history counts only for the checks being judged (and the pass-wide native
+preflight), so a projection is not invalidated by another tier's lost retry.
+"""
         results = entry['results']
-        if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])):
+        if any(v['status'] == 'fail' for v in results.values()):
+            return 'fail'
+        judged = set(entry['required']) | {'native-preflight'}
+        if any(not self.result_evidence_retained(row) for row in entry.get('provider_retries', [])
+               if row.get('check_id') in judged):
             return 'could not run'
-        if any(not self.result_evidence_retained(row) for row in entry.get('readiness_retries', [])):
+        if any(not self.result_evidence_retained(row) for row in entry.get('readiness_retries', [])
+               if row.get('tester', {}).get('check_id') in judged):
             return 'could not run'
-        if any(not self.result_evidence_retained(row['result']) for row in entry.get('checkpoint_retries', [])):
+        if any(not self.result_evidence_retained(row['result']) for row in entry.get('checkpoint_retries', [])
+               if row.get('tester', {}).get('check_id') in judged):
             return 'could not run'
         failure = entry.get('automation_failure', {})
         if failure.get('check_id') == 'native-preflight' or failure.get('check_id') in entry['required']:
             return 'could not run' if failure.get('status') == 'could-not-run' else 'fail'
-        if any(v['status'] == 'fail' for v in results.values()):
-            return 'fail'
         if entry.get('preparation_error') or set(results) != set(entry['required']):
             return 'could not run'
         if self.data.get('gui_backend') == 'guest-native':
@@ -1416,13 +1651,49 @@ including the larger bound for the guest-native event stream.
                 return 'could not run'
         return 'pass'
 
+    def status(self):
+        """Report the run and save it privately as `report.json`."""
+        report = self.report()
+        atomic_json(self.directory / 'report.json', report)
+        return report
+
+    def named_checks(self):
+        """Map each tier's named results, in report order, onto the checkpoints answering them.
+
+Each entry is (label, pass, checkpoints), where None means all of that pass's
+checkpoints in the tier. The installer pair answers the installer upgrade,
+both supervisor upgrades and both new agents for P0, its old sessions and
+remote menu for P1 (each old-session result folds in `old-sessions`, which
+started that session), and feedback for P2. A planned pass that is absent
+reports as skipped: a prerelease plans no updater pair. A historical run
+without P0 fixtures names only the P1 checks it declared.
+"""
+        if not (self.data['plan'] and self.data['plan'].get('p0_sequence')):
+            return {'P0': [], 'P1': [(check, pass_id, [check]) for pass_id, entry in self.data['passes'].items()
+                                     for check in priority_entry(entry, 'P1')['required']], 'P2': []}
+        installer = 'p0-installer-upgrade'
+        return {
+            'P0': [('fresh-install-start', 'p0-fresh', None),
+                   ('click-to-upgrade', 'p0-updater-upgrade', None),
+                   ('installer-upgrade', installer, ['artifact-verification', 'old-fixture', 'update-relaunch']),
+                   ('local-supervisor-upgrade', installer, ['local-supervisor-upgrade']),
+                   ('remote-supervisor-upgrade', installer, ['remote-supervisor-upgrade']),
+                   ('local-agent', installer, ['local-supervisor-agent']),
+                   ('remote-agent', installer, ['remote-supervisor-agent'])],
+            'P1': [('local-old-session', installer, ['old-sessions', 'local-old-session']),
+                   ('remote-old-session', installer, ['old-sessions', 'remote-old-session']),
+                   ('remote-host-remove', installer, ['remote-host-remove']),
+                   ('remote-host-uninstall', installer, ['remote-host-uninstall'])],
+            'P2': [('feedback-send', installer, ['p2-feedback-send'])]}
+
     def report(self):
-        """Report P0, P1, requested scope and full coverage independently.
+        """Report P0, P1, P2, requested scope and full coverage independently.
 
 Every answer rechecks retained bytes. Legacy observations and fixture smoke
 remain distinguishable from the declared P0 product checks; unfinished
-bonus work cannot erase a P0 pass or become a full acceptance pass. P1 is part
-of its fixture's full verdict but excluded from P0's projections.
+bonus work cannot erase a P0 pass or become a full acceptance pass. Each tier
+is part of its fixture's full verdict but excluded from the other tiers'
+projections.
 """
         output = {'kind': self.data['kind'], 'run_dir': str(self.directory),
                   'operator_policy': self.profile.values['operator_policy'], 'plan': self.data['plan'], 'passes': {}}
@@ -1458,84 +1729,66 @@ of its fixture's full verdict but excluded from P0's projections.
                                     'checkpoint_retries': repaired}
             # An aborted turn cannot prove a product failure, but losing turn
             # completion must not relabel its observed break as harmless setup.
-            claims = [{ 'pass_id': key, 'check_id': entry['tester']['check_id'],
-                        'detail': entry['tester']['observation']['detail']}
+            # A P1 harness failure the pair went on from keeps its claim in
+            # `unverified_failures`. `old-sessions` runs on the previous
+            # release before any candidate code, so a failure claimed there is
+            # never a candidate failure.
+            claims = [{'pass_id': key, 'check_id': entry['tester']['check_id'],
+                       'detail': entry['tester']['observation']['detail']}
                       for key, entry in self.data['passes'].items()
-                      if entry.get('tester', {}).get('check_id') != 'native-preflight'
+                      if entry.get('tester', {}).get('check_id') not in ('native-preflight', 'old-sessions')
                       and (entry.get('tester', {}).get('observation') or {}).get('status') == 'fail']
+            claims += [{'pass_id': key, 'check_id': claim['identity']['check_id'], 'detail': claim['detail']}
+                       for key, entry in self.data['passes'].items() for claim in entry.get('unverified_failures', [])]
             output['unverified_product_failures'] = claims
             output['promotion_blocked_pending_review'] = bool(claims)
         if self.data['kind'] == 'release':
             p0_ids = self.data['plan'].get('p0_sequence', [])
-            p0_verdicts = [self.verdict(priority_entry(self.selected(key), 'P0')) for key in p0_ids]
             output['scope'] = self.data.get('scope', 'full')
-            output['p0'] = {'verdict': ('not planned' if not p0_ids else
-                                       'fail' if 'fail' in p0_verdicts else
-                                       'pass' if all(v == 'pass' for v in p0_verdicts) else 'could not run'),
-                            'passes': p0_ids}
-            if p0_ids:
-                updater = self.selected('p0-updater-upgrade')
-                discovery = self.discovery_skip(updater)
-                if discovery:
-                    output['p0']['unavailable_checks'] = {'update-discovery': discovery}
-                    if self.p0_executable_complete():
-                        output['p0']['summary'] = f'All runnable P0 checks passed. {discovery}'
-            if self.data.get('gui_backend') == 'guest-native':
-                output['p0']['unverified_product_failures'] = [
-                    value for value in output['unverified_product_failures'] if value['pass_id'] in p0_ids
-                    and self.selected(value['pass_id'])['required'][value['check_id']].get('priority', 'P0') == 'P0']
-            if p0_ids:
-                # Publish each product boundary, including separate local
-                # and remote agent results, without weakening prerequisite or
-                # retained-evidence validation of the complete P0 verdict. Each
-                # host's old-session check answers part of that host's
-                # supervisor-upgrade question: did its sessions survive it.
-                # Manifests from before those checks keep their declared set.
-                questions = [('fresh-install-start', 'p0-fresh', None),
-                             ('installer-upgrade', 'p0-installer-upgrade', None),
-                             ('click-to-upgrade', 'p0-updater-upgrade',
-                              ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch']),
-                             ('local-supervisor-agent', 'p0-updater-upgrade',
-                              ['local-supervisor-agent', 'local-old-session']),
-                             ('remote-supervisor-agent', 'p0-updater-upgrade',
-                              ['remote-supervisor-agent', 'remote-old-session'])]
-                # Saved runs retain the menu coverage they actually declared.
-                for check in ('remote-host-remove', 'remote-host-uninstall'):
-                    if check in self.selected('p0-updater-upgrade')['required']:
-                        questions.append((check, 'p0-updater-upgrade', [check]))
-                output['p0']['checks'] = {}
-                for label, pass_id, keys in questions:
-                    entry = priority_entry(self.selected(pass_id), 'P0')
-                    if keys is not None:
-                        keys = [key for key in keys if key in entry['required']]
-                        entry = dict(entry, required={key: entry['required'][key] for key in keys},
-                                     results={key: entry['results'][key] for key in keys if key in entry['results']})
-                    output['p0']['checks'][label] = self.verdict(entry)
-            # P1's verdict is never borrowed from its enclosing P0 fixture:
-            # otherwise a feedback failure would erase successful upgrades.
-            p1_entries = {key: priority_entry(entry, 'P1') for key, entry in self.data['passes'].items()
-                          if priority_entry(entry, 'P1')['required']}
-            p1_checks = {check: self.verdict(dict(entry, required={check: entry['required'][check]},
-                                                results={check: entry['results'][check]}
-                                                if check in entry['results'] else {}))
-                         for entry in p1_entries.values() for check in entry['required']}
-            p1_verdicts = [self.verdict(entry) for entry in p1_entries.values()]
-            output['p1'] = {'verdict': ('not planned' if not p1_entries else
-                                       'fail' if 'fail' in p1_verdicts else
-                                       'pass' if all(v == 'pass' for v in p1_verdicts) else 'could not run'),
-                            'checks': p1_checks}
-            if self.data.get('gui_backend') == 'guest-native':
-                output['p1']['unverified_product_failures'] = [
-                    value for value in output['unverified_product_failures']
-                    if self.selected(value['pass_id'])['required'][value['check_id']].get('priority') == 'P1']
-            requested = [output['p0']['verdict'], output['p1']['verdict']]
-            if output['scope'] == 'p0-only':
-                output['requested_verdict'] = output['p0']['verdict']
-            elif output['scope'] == 'p1-only':
-                output['requested_verdict'] = ('fail' if 'fail' in requested else
-                                               'pass' if all(v == 'pass' for v in requested) else 'could not run')
-            else:
+            questions = self.named_checks()
+            # Each tier's verdict is its own projection of the saved checks, so
+            # a failed feedback send or lost session never erases a passing
+            # upgrade, and a passing tier never borrows another tier's result.
+            for priority in TIERS:
+                entries = [part for part in (priority_entry(entry, priority) for entry in self.data['passes'].values())
+                           if part['required']]
+                block = {'verdict': combine([self.verdict(part) for part in entries]) if entries else 'not planned'}
+                if priority == 'P0':
+                    block['passes'] = p0_ids
+                if questions[priority]:
+                    block['checks'] = {}
+                    for label, pass_id, keys in questions[priority]:
+                        if pass_id not in self.data['passes']:
+                            block['checks'][label] = 'skipped'
+                            continue
+                        part = priority_entry(self.selected(pass_id), priority)
+                        if keys is not None:
+                            part = subset(part, [key for key in keys if key in part['required']])
+                        block['checks'][label] = self.verdict(part) if part['required'] else 'not planned'
+                elif priority != 'P0':
+                    block['checks'] = {}
+                if self.data.get('gui_backend') == 'guest-native':
+                    block['unverified_product_failures'] = [
+                        value for value in output['unverified_product_failures']
+                        if value['check_id'] in self.selected(value['pass_id'])['required']
+                        and tier(self.selected(value['pass_id']), value['check_id']) == priority]
+                output[priority.lower()] = block
+            # A skipped discovery leaves the formal P0 verdict incomplete even
+            # when every planned P0 check passed; the summary says so instead.
+            discovery = self.planned_discovery_skip()
+            if discovery:
+                output['p0']['unavailable_checks'] = {'update-discovery': discovery}
+                if output['p0']['verdict'] == 'pass':
+                    output['p0']['verdict'] = 'could not run'
+                if self.p0_executable_complete():
+                    output['p0']['summary'] = f'All runnable P0 checks passed. {discovery}'
+                if outcome == 'pass':
+                    outcome = 'could not run'
+                    output['verdict'] = outcome
+            if output['scope'] == 'full':
                 output['requested_verdict'] = outcome
+            else:
+                output['requested_verdict'] = combine([output[t.lower()]['verdict'] for t in SCOPE_TIERS[output['scope']]])
             candidate = self.data['plan']['candidate']
             observations = [self.data['plan']['latest_at_plan']] + [v.get('latest_at_selection')
                             for key, v in self.data['passes'].items() if key.startswith('upgrade-') or
@@ -1545,34 +1798,31 @@ of its fixture's full verdict but excluded from P0's projections.
         return output
 
     def cleanup(self, pass_id, discard_failed=False):
-        """Clean a validated pair while preserving P1's nonblocking result.
+        """Clean a validated pair while preserving P1's and P2's nonblocking results.
 
 Evidence is rechecked first. Clean guest shutdown remains mandatory, and each
 role's low-level manifest must prove unchanged ownership and observed absence.
-The final P0 pair needs an in-scope P1 observation, but a failed P1 does not
-require keeping clones alive. Other incomplete/failed pairs need explicit
-discard approval as before; none of these paths delete retained evidence.
+A P0 pair needs its P0 checks passed, no automation failure, and a result for
+every in-scope P1 and P2 checkpoint (a recorded skip counts). Every P1 and P2
+result keeps its exported evidence, and a failed or unavailable one has some:
+its exported observation is what the maintainer reviews, so it needs no live
+disposable pair, and holding the pair would stall the bonus work the failure
+does not fence. Other incomplete or failed pairs need explicit discard
+approval as before; none of these paths delete retained evidence.
 """
         entry = self.selected(pass_id)
         if entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
             raise Refused('cannot clean up while the independent guest tester is active')
-        p1 = priority_entry(entry, 'P1')
-        if p1['required']:
-            successful = self.verdict(self.executable_checks(priority_entry(entry, 'P0'))) == 'pass'
-            observed = set(p1['results']) == set(p1['required'])
-            retained = self.verdict(p1) == 'pass' or all(
-                result['status'] != 'pass' and self.result_evidence_retained(result)
-                for result in p1['results'].values())
-            # A P0-only stop needs no P1 result, but once any P1 result is
-            # recorded (a full run narrowed to P0 late, say) the retention
-            # check below still applies: a scope edit must not let cleanup
-            # delete the guests behind a P1 observation whose export was lost.
-            finished = ((self.data.get('scope') == 'p0-only' and not p1['results'])
-                        or (observed and retained))
-            # P1 failed sends need evidence retention, not a live disposable
-            # pair. Any recorded observation whose export was lost is different:
-            # keep the guests so its evidence can still be recovered.
-            complete = successful and finished
+        self.settle()
+        if entry.get('priority') == 'P0' and self.data['plan'].get('p0_sequence'):
+            empty = hashlib.sha256(b'').hexdigest()
+            later = [(key, tier(entry, key)) for key in entry['required'] if tier(entry, key) in ('P1', 'P2')]
+            results = [entry['results'][key] for key, _ in later if key in entry['results']]
+            complete = (self.verdict(priority_entry(entry, 'P0')) == 'pass' and not entry.get('automation_failure')
+                        and all(key in entry['results'] for key, priority in later if priority in self.scope_tiers())
+                        and all(self.result_evidence_retained(result) for result in results)
+                        and all(result['status'] in ('pass', 'skipped')
+                                or any(digest != empty for digest in result['sha256'].values()) for result in results))
         else:
             complete = self.verdict(entry) == 'pass'
         if not complete and not discard_failed:
@@ -1652,14 +1902,18 @@ def main():
         if name == 'init':
             scope = child.add_mutually_exclusive_group()
             scope.add_argument('--stop-after-p0', action='store_true',
-                               help='complete the seven P0 checks and refuse bonus fixtures')
+                               help='complete the P0 checks only: no old sessions, feedback or bonus fixtures')
             scope.add_argument('--stop-after-p1', action='store_true',
-                               help='complete P0 and the feedback P1 check, then stop')
+                               help='complete P0 and the P1 continuity checks, without the feedback send')
+            scope.add_argument('--stop-after-p2', action='store_true',
+                               help='complete P0, P1 and the P2 feedback send, then refuse bonus fixtures')
     sub.add_parser('smoke')
-    for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update', 'record', 'add-check', 'cleanup', 'stop-after-p0', 'stop-after-p1', 'continue-full'):
+    scope_commands = ('stop-after-p0', 'stop-after-p1', 'stop-after-p2')
+    for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update',
+                 'record', 'add-check', 'cleanup', *scope_commands, 'continue-full'):
         child = sub.add_parser(name)
         child.add_argument('run_dir', type=Path)
-        if name not in ('status', 'stop-after-p0', 'stop-after-p1', 'continue-full'):
+        if name not in ('status', *scope_commands, 'continue-full'):
             child.add_argument('pass_id')
         if name == 'serve':
             child.add_argument('--headless', action='store_true')
@@ -1692,15 +1946,17 @@ def main():
             print(json.dumps(release, indent=2))
             return
     if args.action in ('init', 'smoke'):
+        scope = 'full'
         if args.action == 'init':
-            require_setup(profile, feedback=not args.stop_after_p0)
+            scope = ('p0-only' if args.stop_after_p0 else 'p1-only' if args.stop_after_p1
+                     else 'p2-only' if args.stop_after_p2 else 'full')
+            # Only scopes that reach P2 include the live feedback send.
+            require_setup(profile, feedback='P2' in SCOPE_TIERS[scope])
         root = Path(profile.values['evidence_root'])
         root.mkdir(mode=0o700, parents=True, exist_ok=True)
         run = Run(root / ('brick-' + str(uuid.uuid4())), profile)
         run.create(release if args.action == 'init' else None,
-                   inputs if args.action == 'init' else None, smoke=args.action == 'smoke',
-                   p0_only=args.action == 'init' and args.stop_after_p0,
-                   p1_only=args.action == 'init' and args.stop_after_p1)
+                   inputs if args.action == 'init' else None, smoke=args.action == 'smoke', scope=scope)
         if args.action == 'smoke':
             smoke(run)
         else:
@@ -1749,15 +2005,11 @@ def main():
             run.cleanup(args.pass_id, args.discard_failed)
         elif args.action == 'select-update':
             run.select_update(args.pass_id, download(ORIGIN + '/latest').decode().strip())
-        elif args.action == 'stop-after-p0':
-            run.limit_to_p0()
-        elif args.action == 'stop-after-p1':
-            run.limit_to_p1()
+        elif args.action in scope_commands:
+            run.limit_scope(args.action.removeprefix('stop-after-') + '-only')
         elif args.action == 'continue-full':
             run.continue_full()
-        report = run.report()
-        if args.action == 'status':
-            atomic_json(run.directory / 'report.json', report)
+        report = run.status() if args.action == 'status' else run.report()
         print(json.dumps(report, indent=2))
 
 

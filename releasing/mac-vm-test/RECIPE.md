@@ -38,8 +38,10 @@ previous stable; SPEC.md requires clean upgrades from **every** stable release a
 floor. `UPGRADE_FLOOR` in `brick_test.py` defines that baseline and the portable unit suite checks its agreement with
 the shared Rust constant. For this pre-promotion gate, the range ends at the promoted stable named by `/latest`; an
 intervening unpromoted tag is not another installed stable baseline merely because it exists. A passing previous-stable
-pair does not prove that entire range. Name older-version risks and extra pairs in the addendum, and report the versions
-actually covered.
+pair does not prove that entire range. The bonus upgrade pairs cover at most the three newest previous stables
+(`HISTORICAL_UPGRADE_LIMIT` in `brick_test.py`), however far back the floor reaches: the maintainer chose that cap, so
+older sources are a deliberate omission to name in the report, not a coverage gap to chase. Name older-version risks in
+the addendum, and report the versions actually covered.
 
 Record the genuine agent CLIs selected with the maintainer in the addendum; Codex is the bring-up baseline. Additional
 agents expand coverage and need their own authentication and conversation checks. Name omitted agents in the result.
@@ -56,119 +58,146 @@ confirmation and per-run workspace trust, are authorized product actions handled
 confirmation preferences to suppress them. Use the actual native tool-returned image as GUI evidence; `screencapture`
 can capture a different foreground app and cannot replace that image.
 
-## P0 checks: install, upgrade and basic agent execution
+## The priority tiers
 
-Run these seven checks immediately after environment readiness and basic coverage planning, in order. P0 is a named
-group: report all seven results and a separate P0 verdict. Preserve a failed or unavailable attempt and pause its
-dependent checks; the host diagnoses, repairs and continues under BRICK-TEST.md's "Repair and continue". A successful
-step never substitutes for a later step. A request to **stop after P0 checks** ends after P0 evidence is recorded and
-its successful fixtures are cleaned up, without sending feedback. Otherwise, report P0 promptly, run P1 on the last
-pair, and only then continue bonus work.
+The checks come in three named tiers, ordered by what a failure costs a user. **P0** asks whether an install or upgrade
+bricks Farhelm: a fresh install, both upgrade paths, and both supervisors upgrading with a new agent working on each.
+**P1** asks whether an upgrading user keeps what they had: old sessions surviving and resuming, and the remote host's
+Remove/re-add and Uninstall. **P2** is the live feedback send. A release that cannot resume old sessions but still
+installs, upgrades and starts new ones is a P1 failure; one whose supervisor never comes back is a P0 failure. Report
+each tier's named results and verdict separately. Bonus coverage follows P2.
 
-Use three independent guest pairs: `p0-fresh` for step 1, `p0-installer-upgrade` for step 2, and `p0-updater-upgrade`
-for steps 3–7. Both upgrades start from the previous promoted stable and use its actual installed state. For each pair,
-verify the candidate's published bytes against that stable's compiled trust ring as described in BRICK-TEST.md.
-Export/record evidence and clean up each successful pair before starting the next. Unless scope is P0-only, keep the
-last pair's candidate app running for P1 before that pair's final export and cleanup.
+## P0 checks: install, upgrade and the supervisors
+
+Run these checks immediately after environment readiness and basic coverage planning, in order. P0 is a named group:
+report its seven results and a separate P0 verdict. Preserve a failed or unavailable attempt and pause its dependent
+checks; the host diagnoses, repairs and continues under BRICK-TEST.md's "Repair and continue". A successful step never
+substitutes for a later step. A request to **stop after P0 checks** ends after P0 evidence is recorded and its
+successful fixtures are cleaned up, without old sessions, the remote menu or feedback. Otherwise, report P0 promptly and
+go on to P1 and P2 on the last pair before any bonus work.
+
+Use independent guest pairs: `p0-fresh` for step 1, `p0-updater-upgrade` for step 2 (stable candidates only) and
+`p0-installer-upgrade` for steps 3–5, then P1 and P2. Both upgrades start from the previous promoted stable and use its
+actual installed state. For each pair, verify the candidate's published bytes against that stable's compiled trust ring
+as described in BRICK-TEST.md. Export/record evidence and clean up each successful pair before starting the next. Unless
+scope is P0-only, keep the installer pair's candidate app running for P1 and P2 before its final export and cleanup. The
+pairs do not depend on each other's results: once a failed pair is released (which needs the maintainer's retention
+decision), the next P0 pair still runs, so a broken updater cannot hide a bricked supervisor.
 
 Identify genuine agent CLI/authentication prerequisites for the Mac and Linux hosts during environment readiness; Codex
 is the baseline. Follow BRICK-TEST.md's permission preflight and obtain missing approvals together before product
 checks, including any needed credential refresh on Mac and CLI/authentication setup on Linux. Prepare them when needed
-for steps 4–5; do not delay available install/start checks while doing broader agent setup. Resolve missing fixtures
-under the private operator policy. Authorization to copy a credential into Mac clones does not authorize copying it into
-Linux clones. Keep credentials out of evidence. Agent version output or login status establishes only a prerequisite,
-not successful agent execution.
+for step 5 and P1's old sessions; do not delay available install/start checks while doing broader agent setup. Resolve
+missing fixtures under the private operator policy. Authorization to copy a credential into Mac clones does not
+authorize copying it into Linux clones. Keep credentials out of evidence. Agent version output or login status
+establishes only a prerequisite, not successful agent execution.
 
 1. **Fresh install and start.** Confirm both guests have no Farhelm binaries or state (`fixture-clean`). Install the
    candidate through its public version-path installer (`install`), open the installed Mac app, and require the
    candidate app version, a usable session list and a connected local supervisor at the candidate version (`app-start`).
    Save installer output, CLI version, GUI and supervisor evidence. End this fixture here: remote provisioning,
-   conversations, templates, settings and feature checks wait until their designated P0 step or bonus coverage.
-2. **Installer upgrade.** On a new pair, install and launch the previous stable with automatic updates disabled before
-   first startup. Verify the old app and local supervisor versions (`old-fixture`); no old conversation, template,
-   changed setting or remote workload is needed. Reobserve `/latest` with `select-update`, then run the verified
-   candidate installer while the old app runs, with both `FARHELM_VERSION` and `FARHELM_INSTALL_SUMS_FILE` set as in the
-   manual branch below. Require the old app to offer **Restart to update**, use that action, and require a usable
-   candidate app and connected candidate local supervisor (`update-relaunch`). Do not manually open the candidate to
-   hide a failed relaunch. This proves installer upgrade, not updater discovery. The local supervisor handover depends
-   on the old app: one that starts its supervisor detached leaves it running when it quits to update, and the candidate
-   replaces it on its first launch (an orderly stop, then its own); an older app's supervisor stops when the app quits.
-   Either way, require the connected candidate supervisor; never stop a supervisor by hand to get there.
-3. **Click-to-upgrade discovery and relaunch.** On another new pair, install the previous stable with automatic updates
-   disabled and provision Linux through that old app. Verify old app/local/remote versions. Then, still on the old app,
-   start one genuine Codex session on the local host and one on the remote host, send each one prompt that also asks it
-   to remember a word, require a meaningful reply and the conversation captured in Farhelm (Restart is offered only
-   after capture), and record each session's and conversation's identities and its terminal host's and that host's
-   child's process identities (`old-fixture`). Leave both sessions running. No saved template, changed preference or
-   counter command is needed. Reobserve `/latest`, select the ordinary or stable-override path below, and explicitly
-   click **Check for updates** in the old app. Require it to discover and install the candidate (`update-discovery`),
-   then use the actual **Restart to update** action and require the candidate app to return, with the same supervisor
-   handover as step 2 (`update-relaunch`). Verify override forwarding and removal when applicable. For an RC or dev
-   candidate on the verified manual path, report discovery as an expected skip and P0 as could not run. Install manually
-   while the old app and both seeded sessions run, use Restart to update, then perform steps 4–7. That exception permits
-   authorized P1, bonus coverage and normal cleanup after every runnable P0 check passes. For a stable candidate whose
-   old app cannot discover it, fail the required discovery check and stop. Any observed failure, other unavailable check
-   or damaged evidence still blocks dependent work.
-4. **Local supervisor upgrade, one successful agent and the old session.** On the step 3 fixture, require the local
-   supervisor to connect at the candidate version. The Mac app normally upgrades its managed local supervisor when it
-   relaunches; observe that transition rather than requiring an extra Update click. If the product offers a local Update
-   action, exercise it and verify the result. A stranded local host with an unusable Update action is a failure. Launch
-   one genuine authenticated agent through Farhelm on the local host, send a small prompt, and require a meaningful
-   reply and responsive terminal (`local-supervisor-agent`). Then check the old local session from step 3
-   (`local-old-session`). First, before the session is touched, the fixed survival comparison checks that it survived
-   the upgrade: same session, same launch generation, and its terminal host and that host's child the same processes as
-   at step 3 (pid and start identity). The rediscovered terminal still shows its earlier screen and answers a new typed
-   question whose answer (48) differs from the earlier turn's 42 still on screen. Only then the session's Restart (only
-   Clone or Replace would be a failure for a captured conversation), which must land on a new terminal host with the old
-   host gone, and the resumed agent names the word from the earlier turn, which proves the resumed conversation rather
-   than just any reply. The check ends with a fixed final sample of the session and its terminals, which the import
-   compares with the survival comparison.
+   conversations, templates, settings and feature checks wait until their designated step or bonus coverage.
+2. **Click-to-upgrade discovery and relaunch** (stable candidates). On a new pair, install and launch the previous
+   stable with automatic updates disabled before first startup, and verify the old app and local supervisor versions
+   (`old-fixture`); no remote host, conversation, template or changed setting is needed. Reobserve `/latest`, select the
+   ordinary or stable-override path below, and explicitly click **Check for updates** in the old app. Require it to
+   discover and install the candidate (`update-discovery`), then use the actual **Restart to update** action and require
+   the candidate app to return (`update-relaunch`). Verify override forwarding and removal when applicable. The local
+   supervisor handover depends on the old app: one that starts its supervisor detached leaves it running when it quits
+   to update, and the candidate replaces it on its first launch (an orderly stop, then its own); an older app's
+   supervisor stops when the app quits. Either way, the relaunch judges the candidate app: the owned restart must show a
+   new app process. Whether the local supervisor upgraded is step 4's question, so neither wait for it nor use a local
+   Update action here, and never stop a supervisor by hand. For a stable candidate whose old app cannot discover it,
+   fail the required discovery check and stop this pair. An RC or dev candidate plans no such pair, because the updater
+   only discovers stable releases: report discovery as an expected skip and the formal P0 verdict as could not run, and
+   run everything else.
+3. **Installer upgrade.** On another new pair, install the previous stable with automatic updates disabled and provision
+   Linux through that old app. Verify old app/local/remote versions (`old-fixture`). When P1 is in scope, start the old
+   sessions it needs (`old-sessions`, P1's first step below), still on the old app; whether or not they start, continue
+   with the upgrade. In a stop-after-P0 run start none. Reobserve `/latest` with `select-update`, then run the verified
+   candidate installer while the old app (and any old sessions) run, with both `FARHELM_VERSION` and
+   `FARHELM_INSTALL_SUMS_FILE` set as in the manual branch below. Require the old app to offer **Restart to update**,
+   use that action, and require a usable candidate app (`update-relaunch`): the owned restart must show a new app
+   process, and the final observation must be that app. This pair leaves the local supervisor's version, and any local
+   Update action, to step 4. Do not manually open the candidate to hide a failed relaunch. This proves installer
+   upgrade, not updater discovery.
+4. **Both supervisors upgrade.** On the step 3 fixture, require the local supervisor to connect at the candidate version
+   (`local-supervisor-upgrade`). The Mac app normally upgrades its managed local supervisor when it relaunches; observe
+   that transition rather than requiring an extra Update click. If the product offers a local Update action, exercise it
+   and verify the result. A stranded local host with an unusable Update action is a failure. Then observe the
+   candidate's automatic remote update, which can finish during relaunch, and require the formerly old remote supervisor
+   connected at the candidate version with its service independently verified running (`remote-supervisor-upgrade`).
+   Start no session in either check, and leave the old sessions untouched. Keep version, service and GUI evidence.
+5. **A new agent on each supervisor.** Launch one genuine authenticated agent through Farhelm on the local host, send a
+   small prompt, and require a meaningful reply and responsive terminal (`local-supervisor-agent`). Do the same on the
+   remote host (`remote-supervisor-agent`) and leave that session running for the remote menu checks. A plain shell
+   command does not count as an agent. Keep version, GUI and command evidence.
 
-   Keep version, GUI and command evidence. Preference preservation and other bonus conversations stay bonus checks.
-5. **Remote supervisor upgrade, one successful agent and the old session.** Observe the candidate's automatic remote
-   update on that same fixture. It can finish during relaunch or the local checks. Require the formerly old remote
-   supervisor to return connected at the candidate version and independently verify its running service. Launch one
-   genuine authenticated agent through Farhelm on that remote host, send a small prompt, require a meaningful reply and
-   responsive terminal, and leave that session running for steps 6 and 7 (`remote-supervisor-agent`). A plain shell
-   command does not count as an agent. Then check the old remote session from step 3 as in step 4
-   (`remote-old-session`). Compare with the old fixture's identities, sampled before relaunch, to prove survival across
-   the automatic update. Save version, service and GUI/command evidence. The counter workload's process survival and
-   final quit/reopen belong to bonus coverage.
-
-6. **Remove and re-add the remote host.** Keep both remote sessions from step 5 alive and record their identities. Call
-   `remote_host_before`, then select the remote host menu's **Remove**, handling its ordinary confirmation if offered.
-   Require the host and cached sessions to disappear; capture that native state. Call `remote_host_after` before
-   re-adding: the original supervisor PID, binary, unit and data/database must remain. Re-add the same pinned SSH
-   destination through Farhelm. Require discovery of the existing candidate supervisor and both original sessions with
-   their conversations, without provisioning or creating replacements. Retain native images and `remote_version`
-   evidence (`remote-host-remove`). Remove must not uninstall or end the sessions.
-7. **Uninstall from the remote host.** Through Farhelm Stop both remote sessions, handle any ordinary confirmations,
-   require all remote sessions ended and close any remote terminal tabs. Keep their data. Call `remote_host_before`
-   while the connected supervisor still runs. Select the remote host menu's **Uninstall**, inspect and capture its
-   actual removal plan and kept-data note, then confirm once. Require completion, disappearance of the host/cached
-   sessions and the removal notice. Call `remote_host_after`: the lib directory/binary and unit file must be absent, the
-   supervisor unloaded and stopped, and the data directory/database retained (`remote-host-uninstall`). Retain native
-   completion evidence with the candidate app/local host still usable. Never use command-line uninstall or direct
-   file/service changes to manufacture this result.
-
-P0 deliberately carries no template, changed setting or counter workload. The old sessions in steps 3–5 are its one
-exception, made at the maintainer's request: an upgrading user's running sessions are what an upgrade can break. The old
-session must run in a terminal host on the previous stable; a previous stable that runs it anywhere else cannot be
-tested this way.
+The seven named P0 results are fresh install and start, click-to-upgrade, installer upgrade, each supervisor's upgrade
+and each new agent. P0 deliberately carries no old conversation, template, changed setting or counter workload: those
+are P1 or bonus coverage, and a failure among them does not brick an install.
 
 Keep setup, signature verification and bounded evidence capture alongside the P0 step they support. Do not expand P0
-with release-specific feature checks or wait for historical-version investigations. Once all seven checks pass, answer
+with release-specific feature checks or wait for historical-version investigations. Once all P0 checks pass, answer
 **did P0 checks succeed?** with that P0 result, candidate and previous stable, and the evidence references. Do not imply
 that broader checks ran. Older manifests without these separate fixtures have no P0 verdict; retain their observations
 as historical coverage rather than rewriting them.
 
-## P1 check: send feedback from the candidate
+## P1 checks: old sessions and the remote host menu
 
-Run only after every runnable P0 check passed with valid retained evidence (step 3's RC and dev discovery exception does
-not waive any other prerequisite). Use the Mac guest of `p0-updater-upgrade`, on the candidate app those steps left
-running; do not create a new clone or install another app. Permission preflight must already cover the live send to
+These run on the installer pair. A failed or unavailable P1 check stops the later P1 checks on that pair, since they
+share the same sessions, but it does not change P0's verdict, block P2 or fence bonus passes. Every P1 check except the
+first needs the pair's P0 checks passed. A request to **stop after P1 checks** ends after P0 and P1 and the last pair's
+cleanup, without sending feedback.
+
+1. **Start the old sessions** (`old-sessions`), between the installer pair's old fixture and its upgrade. Still on the
+   old app, start one genuine Codex session on the local host and one on the remote host, send each one prompt that also
+   asks it to remember a word, require a meaningful reply and the conversation captured in Farhelm (Restart is offered
+   only after capture), and record each session's and conversation's identities and its terminal host's and that host's
+   child's process identities. Leave both sessions running. This runs on the previous release, before any candidate
+   code, so a session that cannot be started or captured is could not run, never a product failure, and the P0 checks
+   after it still run. The old session must run in a terminal host on the previous stable; a previous stable that runs
+   it anywhere else cannot be tested this way.
+2. **The old local session survives and resumes** (`local-old-session`), after P0. First, before the session is touched,
+   the fixed survival comparison checks that it survived the upgrade: same session, same launch generation, and its
+   terminal host and that host's child the same processes as at step 1 (pid and start identity). The rediscovered
+   terminal still shows its earlier screen and answers a new typed question whose answer (48) differs from the earlier
+   turn's 42 still on screen. Only then the session's Restart (only Clone or Replace would be a failure for a captured
+   conversation), which must land on a new terminal host with the old host gone, and the resumed agent names the word
+   from the earlier turn, which proves the resumed conversation rather than just any reply. The check ends with a fixed
+   final sample of the session and its terminals, which the import compares with the survival comparison.
+3. **The old remote session survives and resumes** (`remote-old-session`), as in step 2, against step 1's identities,
+   sampled before relaunch, which proves survival across the automatic remote update. The counter workload's process
+   survival and final quit/reopen belong to bonus coverage.
+4. **Remove and re-add the remote host** (`remote-host-remove`). Keep both remote sessions (the resumed old one and the
+   new agent from P0 step 5) alive and record their identities. Call `remote_host_before`, then select the remote host
+   menu's **Remove**, handling its ordinary confirmation if offered. Require the host and cached sessions to disappear;
+   capture that native state. Call `remote_host_after` before re-adding: the original supervisor PID, binary, unit and
+   data/database must remain. Re-add the same pinned SSH destination through Farhelm. Require discovery of the existing
+   candidate supervisor and both original sessions with their conversations, without provisioning or creating
+   replacements. Retain native images and `remote_version` evidence. Remove must not uninstall or end the sessions.
+5. **Uninstall from the remote host** (`remote-host-uninstall`). Through Farhelm Stop both remote sessions, handle any
+   ordinary confirmations, require all remote sessions ended and close any remote terminal tabs. Keep their data. Call
+   `remote_host_before` while the connected supervisor still runs. Select the remote host menu's **Uninstall**, inspect
+   and capture its actual removal plan and kept-data note, then confirm once. Require completion, disappearance of the
+   host/cached sessions and the removal notice. Call `remote_host_after`: the lib directory/binary and unit file must be
+   absent, the supervisor unloaded and stopped, no Farhelm process (supervisor or terminal host) left running, and the
+   data directory/database retained. This is the complete uninstall of a remote Linux host; a remote Mac is not covered
+   yet, since it needs a second Mac guest without the desktop app. Retain native completion evidence with the candidate
+   app/local host still usable. Never use command-line uninstall or direct file/service changes to manufacture this
+   result.
+
+The four named P1 results are each old session (each folding in `old-sessions`, which started it) and the two remote
+menu checks.
+
+## P2 check: send feedback from the candidate
+
+Run only after every runnable P0 check of the run passed with valid retained evidence (an RC or dev build's skipped
+discovery does not waive any other prerequisite). P1's results are not a prerequisite, but the P1 sequence must be over:
+every P1 check recorded or unable to run. Use the Mac guest of `p0-installer-upgrade`, on the candidate app those steps
+left running; do not create a new clone or install another app. Permission preflight must already cover the live send to
 `farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This check does not run in
-stop-after-P0 scope.
+stop-after-P0 or stop-after-P1 scope.
 
 1. Through computer use bound to this exact guest, open **?** and choose **send feedback**. Enter this exact message,
    replacing only `vX.Y.Z` with the candidate's full tag:
@@ -190,16 +219,18 @@ stop-after-P0 scope.
    Save another native image showing the closed dialog (or the thanks, if caught); on failure capture the visible
    failure state. Retain the agent's actual observation as the result detail. No command success receipt is required:
    the helm logs only failed sends, and the GUI closing is the success oracle.
-4. The guest executor exports its native captures and imports `p1-feedback-send` automatically on `p0-updater-upgrade`,
-   with GUI evidence and status pass, fail or could-not-run. Inspect `status` and report P1's named result and
-   `p1.verdict` promptly, separate from P0. Retain failure evidence before cleanup; a P1 failure does not change a valid
-   P0 verdict, does not prevent ordinary cleanup of this pair, and does not fence bonus passes.
-5. Clean up this pair and wait for its foreground owner to exit. End here for **stop after P1 checks**; otherwise
-   continue the bonus passes below. Whether a failed P1 should prevent promotion is the maintainer's decision for that
-   release, not a rule this recipe chooses.
+4. The guest executor exports its native captures and imports `p2-feedback-send` automatically on
+   `p0-installer-upgrade`, with GUI evidence and status pass, fail or could-not-run. Inspect `status` and report P2's
+   named result (`feedback-send`) and `p2.verdict` promptly, separate from P0 and P1. Retain failure evidence before
+   cleanup; a P2 failure does not change a valid P0 or P1 verdict, does not prevent ordinary cleanup of this pair, and
+   does not fence bonus passes.
+5. Clean up this pair and wait for its foreground owner to exit. End here for **stop after P2 checks**; otherwise
+   continue the bonus passes below. Whether a failed P1 or P2 should prevent promotion is the maintainer's decision for
+   that release, not a rule this recipe chooses.
 
-The full verdict includes P1. P0-only requested verdict follows P0; P1-only requested verdict follows P0 and P1
-together. Historical manifests with no declared P1 check report it as not planned; do not retrofit a send into them.
+The full verdict includes P1 and P2. Each stop scope's requested verdict follows the tiers it includes. Historical
+manifests report under the tiers they were planned with (feedback was P1 before this layout); do not retrofit a send or
+a tier into them.
 
 ## Bonus: full fresh install
 
@@ -343,11 +374,12 @@ authority or rebuild a specially versioned app to make the test pass.
 ## Per-release addendum template
 
 Keep the filled addendum with that run's private host-side report, not as a new committed release document. It may add
-checks or older-version pairs; it cannot silently omit a baseline check. Mark a required check that could not run.
+checks to the planned bonus pairs and name risks for older versions past the three-stable cap, which the coordinator
+does not plan pairs for; it cannot silently omit a baseline check. Mark a required check that could not run.
 
 ```text
 Candidate tag, tag's commit and SHA-256 of SHA256SUMS:
-Previous stable and any extra upgrade pairs:
+Previous stable and the planned bonus upgrade pairs (at most three):
 Latest endpoint observation and intended update path:
 Changes from changelog fragments/release notes:
 Protocol/schema changes and upgrade risks:
@@ -371,11 +403,12 @@ hostnames, usernames or private paths. `window-drag` instead keeps exactly the t
 
 ```text
 Verdict: pass | fail | could not run
-Scope: full | stop after P0 | stop after P1
+Scope: full | stop after P0 | stop after P1 | stop after P2
 P0 verdict and seven named results:
-P1 verdict and p1-feedback-send result: pass | fail | could not run | not planned
+P1 verdict and four named results:
+P2 verdict and feedback-send result: pass | fail | could not run | not planned
 Requested-scope verdict:
-Candidate / previous stable / extra pairs:
+Candidate / previous stable / bonus upgrade pairs / older stables omitted by the cap:
 Tag's commit; SHA-256 of SHA256SUMS; guest OS versions (portable summary):
 /latest observation; selected update path; actual trigger:
 Addendum summary:
@@ -386,8 +419,10 @@ Coverage gaps: unrun checks, manual-verification omissions, untested version pai
 Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
-“P0 pass” requires all seven P0 checks to run and pass. “P1 pass” requires the feedback send after every runnable P0
-check passes. Discovery on the RC or dev manual path stays unavailable. “Full pass” additionally requires P1 and every
-planned bonus check to run and pass. A product failure makes the relevant verdict fail; a missing test environment with
-no demonstrated product failure makes it could not run. Never treat a skipped check or a clean process exit as a pass.
-This result covers the actual versions, artifacts and paths exercised, not zero risk for every supported installation.
+“P0 pass” requires all seven P0 checks to run and pass; discovery on an RC or dev build stays unavailable, so its P0
+verdict is could not run even when every runnable check passed. “P1 pass” requires the old sessions and both remote menu
+checks to pass. “P2 pass” requires the feedback send after every runnable P0 check passes. “Full pass” additionally
+requires P1, P2 and every planned bonus check to run and pass. A product failure makes the relevant verdict fail; a
+missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped check or a
+clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero risk for
+every supported installation.

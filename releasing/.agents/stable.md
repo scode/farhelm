@@ -233,13 +233,14 @@ changelog PR. Stable re-cuts carry over the settled list without asking again.
 8. Stop for the brick test. The release is now staged: anyone can install it by naming its version, and nothing installs
    it by default. Tell the maintainer it is ready to brick test, and give them the line to hand the agent on the Mac
    test host: `brick test release vX.Y.Z` (`releasing/mac-vm-test/BRICK-TEST.md`). That test runs on the maintainer's
-   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades previous stable
-   releases at or above its upgrade floor, which is the check that supported updates do not brick existing installations
-   (SPEC.md, "Upgrade compatibility and client scale"). Give the maintainer the risk report's ranked risks and manual
-   checks as material for the test's per-release addendum. The result names P0's install/upgrade/agent checks, P1's live
-   feedback send and bonus coverage separately; bring those results to the maintainer without deciding whether a P1
-   failure blocks promotion. Say whether the notes are finalized when you hand over the test. Wait for the maintainer's
-   verdict. An unavailable test requires the maintainer's decision below.
+   Mac, in Tart VMs, so this session does not run it; it installs the staged release and upgrades from the newest
+   previous stable releases at or above its upgrade floor (at most three), which is the check that supported updates do
+   not brick existing installations (SPEC.md, "Upgrade compatibility and client scale"). Give the maintainer the risk
+   report's ranked risks and manual checks as material for the test's per-release addendum. The result names P0's
+   install, upgrade, supervisor and agent checks, P1's old-session and remote host menu checks, P2's live feedback send
+   and bonus coverage separately; bring those results to the maintainer without deciding whether a P1 or P2 failure
+   blocks promotion. Say whether the notes are finalized when you hand over the test. Wait for the maintainer's verdict.
+   An unavailable test requires the maintainer's decision below.
    - Pass: finish step 3. If the release has screenshots and the verdict left it unclear whether the release is going
      out, notify the maintainer and ask for that confirmation. Once confirmed, finish any remaining screenshot work and
      land its PR using the normal validation and landing rules. That confirmation authorizes the merge. Land it before
