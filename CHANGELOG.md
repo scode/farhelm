@@ -2,6 +2,115 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.44.0 - 2026-11-22
+
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- Farhelm can now enable conversation tracking (e.g. so 'restart' works and allows you to resume a conversation) for Antigravity and Grok. Previously this was a manual installation step because it requires modifying the agent configuration globally - they don't support enabling the necessary hooks just for the purpose of a single agent invocation. Now, it will prompt you to enable this when you launch a session unless you've turned it off (and you can shut it up forever with one click if you don't want it). (#4483, #4495, #4513)
+- Tailscale hosts are now explicitly supported - when adding a host you can mark it as a tailscale host, in which case Farhelm uses tailscale to avoid known_hosts prompts. (#4638, #4639)
+- Antigravity agents now support automatically suppressing the "trust this directory?" question. Enable it in Settings -> Agent Trust. (#4349, #4350, #4356)
+
+### 🔄 Changed
+
+- Session launcher dialog has been significantly revamped (hopefully for the better!). (#4433, #4436, #4438, #4442, #4460, #4461)
+- Settings dialog has been improved somewhat. Still needs work, but should be a bit more pleasant. (#4434, #4435, #4437, #4439)
+- The setting to automatically cause agents to "trust" the folders you launch sessions in (to avoid the annoying "trust this folder?" prompts), are now more widely applied across agent types - and all agent launches, not just those using managed GitHub checkouts. Note that for some agents, this will cause an accumulation of settings entries as the set of unique project directories you launch into with farhelm over time increases. (#4567, #4572, #4583)
+
+### 🔧 Fixes worth highlighting
+
+- Adding remote hosts that are running tailscale ssh should now work, as well as other ssh servers that don't properly respect and propagate the exit code of the program that got run. This does not mean we directly integrate with Tailscale yet (Farhelm does not run "tailscale ssh"), but it means that regular ssh to a tailscale hostname should now work. (#4617)
+
+<details>
+<summary>All changes</summary>
+
+#### 🚀 Added
+
+- Farhelm can now set up the conversation hooks that let Restart resume a Grok or Antigravity conversation. The session launcher offers **Set up and launch** and **Don't ask again**, and Settings → Agents can set up hooks across all hosts. Setup changes the agent's own configuration, so the hooks also run when you use that agent outside Farhelm. (#4483, #4495, #4513, #4630)
+- Add host and Host settings now have a **Tailscale host** option that finds the machine on your tailnet and verifies the SSH key it advertises. The option requires Tailscale on the computer running Farhelm and an advertised host key, and connects directly to the peer, bypassing any jump host or proxy command in your SSH config. (#4638, #4639)
+- **Skip Antigravity's workspace trust question** under Settings → Agents → Antigravity answers the question for you on new launches in any directory. The default is off because trusting a directory lets its hooks, settings and commands run without asking. The session shows Waiting while the question is on screen. (#4349, #4350, #4356)
+- After an update, the installed Mac app now shows **What's new in Farhelm**, with the highlights of the stable releases since the one you last saw and links to their screenshots and full release notes. **Don't show again** turns it off, and **Show what's new after updates** in Settings → App turns it back on. (#4431, #4432)
+- Release notes on the Farhelm website now link directly to the entries that have screenshots. (#4419)
+- Every agent now has its own page under Settings → Agents for its trust settings and hints. Credentials moved under General. (#4468)
+- The open session's menu now shows the Rename shortcut, and the Delete shortcut when the menu and the shortcut confirm the same way, and the Help menu shows the shortcut for Keyboard shortcuts. (#4427)
+- Screen readers now announce a session's group as part of its row, even after the group header has scrolled out of view. (#4469)
+
+#### 🔄 Changed
+
+- The session launcher now puts the command field at the top with examples of what to type and shows recent setups, templates and search results beside the form. Host and Folder share one line, with containers and sandboxes in the Host menu. Conversation IDs and wrapper prefixes are under **More options**, and Enter on an empty command field launches what the form shows. (#4433, #4436, #4438, #4442, #4460, #4461, #4603)
+- Settings groups related controls and keeps the heading, search and Save and Discard buttons in view as you scroll. Appearance previews light and dark side by side, Notifications can play each sound, and closing Settings asks about unsaved changes on any page. (#4434, #4435, #4437, #4439)
+- The Claude Code, Codex, Muse and Pi trust switches now apply to new launches in any directory, including when the switches were already on. Claude's list of trusted directories grows as you launch in more places. Farhelm leaves your home directory and the filesystem root out of that list. (#4567, #4572, #4583)
+- Launching a session from the desktop app now wakes a suspended sandbox or stopped container and shows connection progress while you keep working. This works for fresh GitHub checkouts too. (#4568, #4573)
+- Sessions and terminals that Farhelm starts on a recipe host pick up the recipe's Claude Code credentials at launch, and Restart picks up rotated credentials. A Claude process you start outside Farhelm no longer receives them. A base image can override the recipe's endpoint in Claude's settings, so **None** is the credential choice for images configured to send requests elsewhere. (#4593)
+- Every model family now has a launcher shorthand, including `composer`, `glm-flash` and `grok`. When the chosen agent does not offer the model you typed, the explanation is shorter and names the alternative when there is only one. (#4353)
+- Hover outlines now mark controls you can press. Status icons and timestamps show their tooltips without the outline. (#4517)
+
+#### 🔧 Fixed
+
+- Adding or updating a remote host now works when its SSH server reports success for commands that failed, as Tailscale SSH on a Mac can do. Farhelm uses your system SSH client and can now tell whether a setup step failed or whether it needs to offer to install Farhelm. (#4617)
+- Host and session status in the desktop app now keeps updating while a command waits for a slow host, and you can stop or delete sessions, suspend or resume environments, and use Checkout Trash while another host action is still waiting. (#4623, #4626, #4631)
+- After a full-screen program exits on its final screen, you can now scroll back to and copy the output from before it, and after a program that used the mouse exits, a plain drag selects text and the wheel scrolls again. The oldest retained output also stays reachable when a status or exit line takes up room in the pane. (#4512, #4516)
+- Farhelm checks the machine and account before creating containers or building images, and offers one container host per machine and account. If an SSH destination moves, Farhelm explains why new work is blocked or a Delete must be retried. Container hosts now need `sha256sum` and `tr`. (#4632, #4635, #4636)
+- When **Rebuild** fails for a container recipe, Farhelm keeps the previous images on that host, so new sessions can still use them while they are fresh, and a launch waiting for the Rebuild reports the error and can be retried. (#4624)
+- On Linux, if a session is deleted during Restart and the replacement agent's processes could not be confirmed stopped, the supervisor retries the cleanup at its next start. (#4625)
+- Restart no longer gets stuck waiting for terminal history when the old terminal ends during the restart. (#4480)
+- A session whose terminal host is gone now shows its recovery card, and a terminal host that is only briefly unreachable can still be reconnected. Delete and a failed Restart now say when a session's processes could not be confirmed gone, so a partial cleanup no longer looks complete. (#4527)
+- Bash and Zsh sessions now get a chance to save their command history when Farhelm stops them, including during Delete and Replace. (#4520)
+- When a wide character wraps in a terminal, background colors now reach the right edge, and copying wrapped text keeps spaces the program printed while skipping the padding at the edge. Erasing the right half of a wide character with another background color now shows that color. (#4588, #4592, #4598)
+- Pinning, muting, or marking a large selection of sessions read or unread no longer makes the window reconnect partway through. (#4579)
+- Stop and Delete for marked sessions now act on the sessions and the confirmation setting shown when you clicked, so a change arriving just before your click can no longer skip an expected confirmation. (#4578)
+- If you leave a session while files are still uploading, Farhelm now tells you which uploads were interrupted, and the notice stays until you dismiss it, even if the session was deleted or replaced. (#4589)
+- The desktop app now disables Suspend, Resume and Stop and suspend for a host while that window is launching a session on it, since suspending the host then could leave its supervisor stuck. (#4564)
+- A managed checkout in a session's own sandbox or container can now use the environment's home directory by default. (#4519)
+- The Suspend confirmation now asks when a connected host could not refresh its session list, even if the last list showed only idle sessions, and describes working sessions, including shells, whose processes continue when you resume the host. (#4481, #4537)
+- Delete in a shared sandbox or container now warns that it stops the session's processes and closes its terminal tabs even though the environment stays for other sessions. An open session now says when its sandbox or container is being deleted, a suspended session's card fits shells as well as agents, and Stop's help describes only the remaining terminal tabs once the main program has ended. (#4481)
+- When Stop and suspend cannot finish cleaning up a sandbox or container session, its message no longer calls a shell an agent, and a sandbox whose suspension was confirmed no longer briefly shows Connecting. Sessions that agents launch in new environments no longer change your launcher suggestions or default container host. (#4554)
+- Building a recipe now waits for the package manager when an update is already running on a fresh sandbox or container, and you can rebuild a Tensorlake recipe while a running sandbox from it is still waiting for SSH. The launcher shows preparation as soon as the recipe source is chosen, and an agent's request for a Tensorlake session reports a missing or unreadable SSH key before asking you to approve it. (#4549)
+- Tensorlake status messages no longer show an echoed API key, Settings now says when the helm cannot open the SSH key it uses for sandboxes, and removing a sandbox waits at most 30 seconds for Tensorlake to confirm before asking you to retry. (#4544)
+- In Tensorlake settings, leftover sandboxes are labeled "from another helm" only when their name carries another helm's tag. (#4536)
+- When you add a Tensorlake host, recipes that only run in containers are now listed as unavailable, with the reason. (#4411, #4430)
+- When deleting a sandbox or container fails again, Hosts now shows the latest reason beside Retry. (#4416)
+- Hosts and a session's unavailable card now say when Farhelm has asked a container host to start a stopped container. (#4418)
+- Hosts no longer offers Suspend for a stopped container while its container host is unavailable, and when Refresh fails in Settings → Containers, the error shows beside the last list of leftover containers. (#4563)
+- New session containers now use the container host's current proxy settings even if the session launcher was already open when they changed, and a connection that fails because the container host reached its SSH session limit now says so. (#4482)
+- Removing a session container now also removes its unused anonymous volumes, which could keep using disk space on the container host, and Farhelm can now find the login account in a custom image that has no `/root` folder. (#4490)
+- You can now delete a container recipe after an interrupted image save left Farhelm waiting for an image Podman cannot find. Farhelm asks before forgetting the unfinished save. (#4501)
+- A local port tunnel now stays open through a brief error accepting a connection, and when a disposable environment disconnects and reconnects at once, a credential delivery from the old connection stops. (#4505)
+- Setting up a remote Mac now checks for Farhelm.app again when you confirm, so installing the app while the question is open no longer leads to a second supervisor, and setup asks you to confirm again if the SSH name now reaches a different login. Checks when setting up or updating disposable environments now end after two minutes even if the helm stops responding. (#4500)
+- When manual work holds a host while automatic updates are being planned, Farhelm now updates that host once the work finishes. (#4497)
+- If Delete takes longer than its reply can wait and leaves a checkout behind, the bell now tells you where the folder is, and Trash refreshes when Delete archives a checkout after its session has left the list. (#4507)
+- The instructions Farhelm gives agents for launching sessions now name the YOLO switch as host settings shows it, and explain how to launch a saved recipe template and when a recipe launch starts in the new environment's home folder. (#4508)
+- Short host names now keep the full spelling of abbreviated IPv4 addresses and leave out the port and trailing slash of SSH URIs. (#4493)
+- Saving a host alias without editing it no longer undoes a rename that arrived while the field was open, and the desktop app's debug output no longer includes the contents of its requests to the helm, which can hold credentials. (#4556)
+- A host that is retrying setup or an update now keeps its amber warning mark next to the progress in the sidebar. (#4477)
+- Screen readers now say which host each sidebar Update button affects. (#4422)
+- Releasing a Shift-drag outside the session list now applies any pending reordering at once and keeps the marked sessions. (#4469)
+- An open shell tab now stays selected when its session drops out of a shortened session list. (#4526)
+- Text composed with an input method no longer reaches the terminal while quick launch is armed, and the session's Delete and Rename shortcuts are ignored while the terminal still holds an unfinished composition. (#4528)
+- Farhelm no longer shows drag-to-copy guidance when the terminal program handles the drag by copying to the primary selection. (#4484)
+- Terminals no longer let stored links use more memory than their usual limit allows. (#4474)
+- Terminal connection debug logs now quote session IDs and show hidden characters as readable escapes. (#4478)
+- The terminal's "Connecting" text is now easier to read in light appearance. (#4415)
+- On macOS, a window that was maximized when Farhelm quit now opens at its zoomed size. (#4547)
+- On Linux, Ctrl+F now keeps the focus in a Settings text field when its caret is already at the end. (#4531)
+- Choosing another agent or a shell in the session launcher now clears the previous agent's conversation ID, so a new launch no longer tries to open that conversation. In Replace with, pressing Enter on a folder suggestion that disappears just before the keypress no longer replaces the session. (#4545)
+- Recent setups in the session launcher now show their wrapper prefix, so you can distinguish otherwise identical setups. Hovering a row shows the full prefix. (#4406)
+- The Wrapper prefix help in the launcher and the template editor now covers shell launches as well as agents. (#4537)
+- The session launcher now shows "Loading repositories…" while it searches the selected host, in the Repository field and for a `gh:` query, and repository search errors now spell out hidden characters, also for screen readers. (#4388, #4548)
+- The session launcher now shows the folder problem the host reported even when the folder's name itself contains error wording. (#4387)
+- Applying a template for Bash, Zsh or another program that cannot take an initial prompt now keeps your prompt text in the draft, for when you switch to an agent that accepts one. When a shell template has a stored approval setting it cannot use, the approval card and Templates show that setting, and the editor says what to remove before it can save. (#4553)
+- Farhelm now flags quoted or joined placeholders such as `"{cwd}"` or `--dir={cwd}` when you save a launch template, so you can fix the command before using it. (#4355)
+- In Templates, the ⚡ and number shortcut now line up with each template's name and summary, and a dashed + button lets you give a number to a template that has none. (#4424)
+- Restart now explains that an older Muse session has no stored resume command and that Replace starts it over. (#4409)
+- The feedback dialog's Chat on Discord link now has an arrow showing that it opens in your browser. (#4410)
+- When an agent asks to add a host that another Farhelm manages, the refusal now points you to Add host, where you can confirm the takeover, and explains why takeover is unavailable when the host reports no install identity. (#4354)
+- When the helm starts with a relative remote path in its ensure-hosts file, the warning now describes the recovery steps to correct the file, remove the host and restart the helm. (#4371)
+- The installed Mac app now pauses automatic app updates when it cannot read your saved update setting. You can still check for updates yourself. (#4407)
+- The installer no longer fails when the installed Mac app updates an older Farhelm installation that has no installation ID. (#4385)
+
+</details>
+
 ## v0.43.0 - 2026-11-20
 
 ### 🚀 Added
