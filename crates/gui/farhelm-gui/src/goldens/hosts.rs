@@ -232,6 +232,34 @@ pub(super) fn host_add_takeover_setup(_: &SceneState, window: &mut Window, cx: &
     crate::hosts::add::ask_takeover("devbox", &owner, &Mark::take(cx), |_, _| {}, window, cx);
 }
 
+/// Show the actual host-wide Suspend question for a connected sandbox.
+pub(super) fn host_suspend_confirmation_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let (mut helm, client, events) = FakeHelm::new();
+    let connection = session::start(client, events, None, cx);
+    let mut host = crate::hosts::tests::host(4, "tensorlake", crate::hosts::tests::connected());
+    host.name = "Build sandbox".into();
+    helm.connect(vec![crate::hosts::tests::hosts(&[host])]);
+    let window = window.window_handle();
+    let opened = Cell::new(false);
+    let watch = cx.observe(&connection, move |connection, cx| {
+        if connection.read(cx).session().is_some() && !opened.replace(true) {
+            window
+                .update(cx, |_, window, cx| {
+                    crate::hosts::show_suspend_question_for_golden(4, window, cx);
+                })
+                .unwrap();
+        }
+    });
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    keep.push(Box::new(watch));
+}
+
 /// The removal confirmation for the reference screens' `build-box` (reference `host-remove-confirmation`), as its menu's
 /// Remove opens it: the host's mark, name, phase and build, its destination and what removal keeps, the footer note and
 /// the three answers, focus on Remove. The question opens once the connection has a UI session, whose store the

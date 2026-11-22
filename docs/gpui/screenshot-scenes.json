@@ -2839,6 +2839,16 @@
       "reference": null
     },
     {
+      "golden": "launcher-shell-wrapper",
+      "title": "A Bash launch with its Wrapper prefix field and help open",
+      "reference": null
+    },
+    {
+      "golden": "launcher-shell-wrapper-note",
+      "title": "A Bash launch showing the note above the Wrapper prefix field",
+      "reference": null
+    },
+    {
       "golden": "launcher-command-results",
       "title": "New session showing grouped command results and the source label on the form",
       "reference": null
@@ -2876,6 +2886,11 @@
     {
       "golden": "template-destination-editor",
       "title": "A template with its own Host and Destination fields and the shared placement controls",
+      "reference": null
+    },
+    {
+      "golden": "template-wrapper-help",
+      "title": "The Wrapper prefix help in a launch template",
       "reference": null
     },
     {
@@ -3156,6 +3171,11 @@
       "golden": "host-remove-confirmation",
       "title": "The removal confirmation a host menu's Remove opens: the host's mark, name, phase and build, its destination, what removal keeps, the footer note and the three answers",
       "reference": "host-remove-confirmation"
+    },
+    {
+      "golden": "host-suspend-confirmation",
+      "title": "The confirmation before suspending a host whose sessions may be working",
+      "reference": null
     },
     {
       "golden": "linux-title-bar",

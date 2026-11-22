@@ -137,6 +137,13 @@ pub(super) fn template_destination_editor_setup(
     open_template_editor(state, "api-repo", Some(hosts), window, cx);
 }
 
+/// Use the same partial template, and rest on its real wrapper field to show the help from the editor.
+pub(super) fn template_wrapper_help_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    template_destination_editor_setup(state, window, cx);
+    window.set_driver_enabled(true);
+    state.hover.set(Some("templates-wrapper"));
+}
+
 fn open_template_editor(
     state: &SceneState,
     template: &'static str,

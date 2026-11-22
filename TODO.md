@@ -394,6 +394,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Name the program a Stop or Delete approval would end.** An agent can request Stop or Delete of a Bash or Zsh
+  session, but the approval card says it would stop an agent. The card in `approvals/model.rs` needs the resolved
+  target's launch kind from `ApprovalSession`. Carry that fact compatibly and use program-neutral wording if an older
+  helm cannot supply it. Say which processes the action would stop, including terminal tabs where the deletion guard
+  permits it. Keep the approved deletion tied to the same target and guard. Test shell targets in both actions and check
+  the approval wording with and without live processes.
+
 - **Attach files pasted from a Wayland file manager.** A terminal paste can ignore copied files or type their displayed
   paths. In the vendored Wayland `clipboard.rs`, read `text/uri-list` before image or text, as SPEC.md's “Attachments”
   requires. Accept only local `file:` URLs. Keep ordinary paste working when the list has only web links or invalid

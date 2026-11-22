@@ -138,6 +138,8 @@ struct SceneState {
     lists: Rc<RefCell<Vec<Entity<SessionList>>>>,
     keep: Rc<RefCell<Vec<Box<dyn std::any::Any>>>>,
     after: Rc<Cell<Option<AfterDrawn>>>,
+    /// Some controls only draw after a dialog opens. Keep settling until this hover can use its real bounds.
+    hover: Rc<Cell<Option<&'static str>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -970,6 +972,12 @@ static SCENES: &[Scene] = &[
         setup: template_destination_editor_setup,
     },
     Scene {
+        name: "template-wrapper-help",
+        size: (1010., 1140.),
+        draw: empty,
+        setup: template_wrapper_help_setup,
+    },
+    Scene {
         name: "template-number-menu",
         size: (1010., 940.),
         draw: template_number_menu_scene,
@@ -1000,6 +1008,18 @@ static SCENES: &[Scene] = &[
         size: (1080., 1160.),
         draw: session_lists_then,
         setup: launcher_more_options_setup,
+    },
+    Scene {
+        name: "launcher-shell-wrapper",
+        size: (1080., 1040.),
+        draw: session_lists_then,
+        setup: launcher_shell_wrapper_setup,
+    },
+    Scene {
+        name: "launcher-shell-wrapper-note",
+        size: (1080., 1040.),
+        draw: session_lists_then,
+        setup: launcher_shell_wrapper_note_setup,
     },
     Scene {
         name: "launcher-command-results",
@@ -1389,6 +1409,12 @@ static SCENES: &[Scene] = &[
         setup: host_remove_confirmation_setup,
     },
     Scene {
+        name: "host-suspend-confirmation",
+        size: (600., 440.),
+        draw: empty,
+        setup: host_suspend_confirmation_setup,
+    },
+    Scene {
         name: "linux-title-bar",
         size: (924., 104.),
         draw: linux_title_bars,
@@ -1558,12 +1584,33 @@ fn settle(
     for _ in 0..MAX_SETTLE_FRAMES {
         loop {
             cx.run_until_parked();
-            cx.update_window(window, |_, window, cx| window.draw(cx).clear(cx))?;
+            cx.update_window(window, |_, window, cx| {
+                window.draw(cx).clear(cx);
+                let state = &view.read(cx).state;
+                if let Some(id) = state.hover.get()
+                    && let Some(bounds) = window
+                        .driver_nodes()
+                        .iter()
+                        .find(|node| {
+                            node.element_id.as_deref() == Some(id)
+                                && !node.visible_bounds.is_empty()
+                        })
+                        .map(|node| node.visible_bounds)
+                {
+                    let state = state.clone();
+                    state.hover.set(None);
+                    // Rest near the field's right edge so the tooltip leaves its inline note visible.
+                    let edge = point(bounds.right() - bounds.size.width / 8., bounds.center().y);
+                    rest_pointer_at(&state, edge, window, cx);
+                }
+            })?;
             // The draw takes the after-draw callback out of the slot. Check after its deferred effect has had
             // a chance to put the next step back, or a partly staged scene can appear ready.
             let ready = cx.update(|cx| {
                 let state = &view.read(cx).state;
-                state.after.get().is_none() && !settings::settings_scene_pending(state)
+                state.after.get().is_none()
+                    && !settings::settings_scene_pending(state)
+                    && state.hover.get().is_none()
             });
             if ready {
                 break;
@@ -1693,6 +1740,7 @@ fn render_capture(
             lists: Rc::new(RefCell::new(Vec::new())),
             keep: Rc::new(RefCell::new(Vec::new())),
             after: Rc::new(Cell::new(None)),
+            hover: Rc::new(Cell::new(None)),
         };
         let scene_view = cx.new(|cx| SceneView {
             scene,

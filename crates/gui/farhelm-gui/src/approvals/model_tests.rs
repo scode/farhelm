@@ -500,6 +500,27 @@ fn launch_and_restart_cards_explain_stored_workspace_trust() {
 
 // ---- Launch cards ---------------------------------------------------------------------------------------------------
 
+/// An approval for Bash or Zsh tells the user which shell would start and shows its full wrapped command.
+/// A shell lacks an agent permission mode, so the same card must omit its permissions row.
+#[test]
+fn a_shell_launch_card_names_the_shell_and_its_full_command() {
+    for (harness, program, label) in [
+        (LaunchHarness::Bash, "bash", "Bash"),
+        (LaunchHarness::Zsh, "zsh", "Zsh"),
+    ] {
+        let selection = LaunchSelection {
+            wrapper_prefix: Some(vec!["env".into(), "PROFILE=work".into()]),
+            ..selection(harness)
+        };
+        let placeholder = farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER;
+        let launch = agent(selection, &["env", "PROFILE=work", program, placeholder]);
+        let facts = facts(&create(launch));
+        assert!(facts.contains(&value("shell", label)));
+        assert!(facts.contains(&boxed("command", &format!("env PROFILE=work {program}"))));
+        assert!(chips(&facts).is_empty());
+    }
+}
+
 /// A command launch's card shows the command and the resume command in full and calls the YOLO assertion the agent's
 /// unchecked claim, never the app's verdict. Why: a later plain Restart runs the resume command without another YOLO
 /// check, on the grounds that the user approved it here.

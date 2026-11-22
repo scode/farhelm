@@ -88,6 +88,8 @@ linux/host-setup-failed-hosts-panel--dark.png 14f6e61302a0738c53c2dfca8602b74ed0
 linux/host-setup-failed-hosts-panel--light.png 10f27bdff3c4fd9126d19ae24ec9639cd9c7a3b3
 linux/host-setup-running-hosts-panel--dark.png ac5708b573ef11daa0bfd01d0ae39199a4706875
 linux/host-setup-running-hosts-panel--light.png a0f94ba6fcf757ebe9025de66fa40f42d0f5daa4
+linux/host-suspend-confirmation--dark.png a08ba12bd9995776ed50105c0930dc5d35891350
+linux/host-suspend-confirmation--light.png c23f58e5590ce2a0a977907324ce488b0167dded
 linux/host-text--dark.png af7fa4209ae4458e9d684517bad101ffe36ad55b
 linux/host-text--light.png ba38a91aa30802f8c2c56fc93ebb53d8c2b744b6
 linux/host-uninstall-confirmation--dark.png e96b8020365d64fa64bf78fad6044344286a4921
@@ -138,6 +140,10 @@ linux/launcher-replace-with--dark.png e221c4ae679dd1e560193f08d108b05da9b1e891
 linux/launcher-replace-with--light.png 1910f962733a8caf8260305a5e328e8b8463ac7a
 linux/launcher-restart-with--dark.png 9c9e64b4c1ab4adc2ed1abdf15a038c1d601c5c5
 linux/launcher-restart-with--light.png c478210f6325a38c0153405a069ed51aaee69b2b
+linux/launcher-shell-wrapper--dark.png 4d989293e8857e9009ac598fe4de3afe747a0fbb
+linux/launcher-shell-wrapper--light.png 72e6db731fa7d4c9d32cd956bd6c4c9b463aa10e
+linux/launcher-shell-wrapper-note--dark.png 6b1e452c690e865b2f60166270655a7ac6106cea
+linux/launcher-shell-wrapper-note--light.png 83545ec4bc8b1b518fa27e979fed4086a959fa3c
 linux/launcher-yolo-question--dark.png 26774603424bd2e9cd368515be43e9aa8d4a3b65
 linux/launcher-yolo-question--light.png 178b785ddbc950733d4f874179141e66a82d44ba
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947
@@ -308,8 +314,8 @@ linux/tab-only-stop-confirmation--dark.png cd852d4eb4d22ec450bae85325c5281553550
 linux/tab-only-stop-confirmation--light.png e6880a2d278f242edce85925895c01378c2e7398
 linux/tab-strip--dark.png e17eedac340fe529a9b41dbdc0ea4695ea7c7a4e
 linux/tab-strip--light.png 3646e8f9c7dff120d426435c698ff01563d55764
-linux/template-destination-editor--dark.png 387bedac880d8fbb765c3ad504ef685530b427ea
-linux/template-destination-editor--light.png a013e77c5a6afc350a8e9c781d4b9ba983dc42f4
+linux/template-destination-editor--dark.png ea061e361ef887ca2a19829bafeea41fda651257
+linux/template-destination-editor--light.png e345ca33cf9ee2b6149f4c73687ae5ff750dbb4e
 linux/template-editor--dark.png e0ddaadb21e0e9dbd5e3d841cc5f49e720abdb18
 linux/template-editor--light.png a85e85f765e998b81fe01392fc3fe31db0521c39
 linux/template-launcher--dark.png a3bf5786ea99bd8641940771b24f170406d49bed
@@ -318,6 +324,8 @@ linux/template-leave-question--dark.png f3080076945370faef126cf54fe54eff70da1761
 linux/template-leave-question--light.png c13070c6e984629a2fc195dfa07e35754d9bb17e
 linux/template-number-menu--dark.png f8f56631065eb646a945ef65068da1bc3b723294
 linux/template-number-menu--light.png 6d590d5d603bfb1650df480d1e9475b8a797abb1
+linux/template-wrapper-help--dark.png b9868c394e91ceba6aed64b1717a33c5a35e260d
+linux/template-wrapper-help--light.png e83c1de9988b0e729cab003d92e4d6f6c595350e
 linux/templates-dialog--dark.png 6a015f53a2387ec4cb6f297840923946a66cfad6
 linux/templates-dialog--light.png 3139bed192ca4890f6c65bf88e225244dc6365d9
 linux/terminal-covered-link--dark.png f4f8d6746094ec5b19ed65f0b1b796b42e5bbf7a

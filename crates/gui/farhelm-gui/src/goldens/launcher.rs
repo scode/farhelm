@@ -22,6 +22,8 @@ enum LauncherScene {
     HostMenu,
     Container,
     RememberedWrapper,
+    ShellWrapper,
+    ShellWrapperNote,
     Results,
     Restart,
     Replace,
@@ -48,6 +50,20 @@ pub(super) fn launcher_container_setup(state: &SceneState, window: &mut Window, 
 /// Show a wrapper brought in by the actual harness choice, without opening More options to see it.
 pub(super) fn launcher_more_options_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::RememberedWrapper, window, cx);
+}
+
+/// Open a Bash launch with the wrapper row expanded and its help visible.
+pub(super) fn launcher_shell_wrapper_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::ShellWrapper, window, cx);
+}
+
+/// The ordinary field label is readable before its tooltip opens above the input.
+pub(super) fn launcher_shell_wrapper_note_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::ShellWrapperNote, window, cx);
 }
 
 /// Capture a typed query against the open host catalog and file history, with a source already applied to the form.
@@ -205,18 +221,37 @@ fn open_new_with_claude(
     }
     let remembered = scene == LauncherScene::RememberedWrapper;
     draft.edit_folder("/home/user/src/api".into());
-    if !remembered {
+    if matches!(
+        scene,
+        LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote
+    ) {
+        draft.choose_harness(LaunchHarness::Bash, None, None);
+    } else if !remembered {
         draft.choose_harness(LaunchHarness::Claude, None, None);
     }
     assert!(
         entry::open_with(draft, None, window, cx),
         "New opens once the helm is connected"
     );
-    state.after.set(Some(if remembered {
-        pick_claude
-    } else {
-        answer_new_reads
+    state.after.set(Some(match scene {
+        LauncherScene::RememberedWrapper => pick_claude,
+        LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote => open_shell_wrapper,
+        _ => answer_new_reads,
     }));
+}
+
+/// The wrapper's text and hover help belong to the rendered field, so open More options before resting the pointer.
+fn open_shell_wrapper(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if !click_control(window, cx, "launcher-more-options") {
+        state.after.set(Some(open_shell_wrapper));
+    } else if launcher_scene(state) == LauncherScene::ShellWrapper {
+        state.hover.set(Some("launcher-wrapper"));
+    }
 }
 
 /// Pick Claude through the same control a user would press, so the summary depends on the helm's saved preference.

@@ -1402,8 +1402,8 @@ pub(super) fn spec(which: Text, fields: &TemplateFields) -> TextSpec {
         Text::Field(Field::Wrapper) => (
             "templates-wrapper",
             "Wrapper prefix",
-            "Wrapper prefix: Bash text before Farhelm's agent command; quotes and expansions keep their shell \
-             meaning; no placeholders",
+            "Wrapper prefix: Bash text before the launch command. Quotes and expansions keep their shell meaning. \
+             There are no placeholders.",
             Some("with-endpoint --profile work --"),
             true,
         ),

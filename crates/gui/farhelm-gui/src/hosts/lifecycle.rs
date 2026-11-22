@@ -64,9 +64,9 @@ use crate::prompt::{self, Answer, Question};
 use crate::session;
 use crate::session_list::environment::{self, CARRIES_ON};
 
-/// What the Suspend question says under its title, after "An agent on <name>": why it asks, the old question's words.
-const SUSPEND_ASKS: &str = " is working, or its status could not be checked. Suspend keeps it as it is and it \
-                            continues when you resume the host.";
+/// Suspend checks the host's activity, including shell sessions, and preserves its processes for Resume.
+const SUSPEND_ASKS: &str = " is working, or its status could not be checked. Suspend preserves running processes. \
+                            They continue when you resume the host.";
 
 /// What a host's row says when its Suspend's activity read answered after the user moved on, so no question opened
 /// (the module docs), in the words of Uninstall's late plan (`super::uninstall::MOVED_ON`).
@@ -188,7 +188,7 @@ fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> Asked {
         .host(&name)
         .text("?");
     let line = HostSentence::new("host-suspend-line")
-        .text("An agent on ")
+        .text("A session on ")
         .host(&name)
         .text(SUSPEND_ASKS);
     let question = Question::new(
@@ -226,6 +226,12 @@ fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> Asked {
         Some(_) => Asked::Open,
         None => Asked::MovedOn,
     }
+}
+
+/// Put up the real question after the activity check has found a reason to ask.
+#[cfg(test)]
+pub(crate) fn show_suspend_question_for_golden(host: i64, window: &mut Window, cx: &mut App) {
+    assert_eq!(ask(host, &Mark::take(cx), window, cx), Asked::Open);
 }
 
 /// Say under `host`'s row that its Suspend's read answered after the user moved on ([`MOVED_ON`]), unless other work
