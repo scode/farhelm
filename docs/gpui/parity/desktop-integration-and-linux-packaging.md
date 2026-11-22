@@ -418,8 +418,9 @@ superseded: the bridge drives the app by its controls rather than by pixels; typ
   window positions relative to the window's own display, and the app's startup names no display, so only positions on
   the primary display are saved; the old app saved global positions and reopened on the display the window was last on.
 - **A window sized by hand to fill a Mac display counts as zoomed.** A window within 2 points of its display's visible
-  area is saved as zoomed, because GPUI's own check wants an exact match and a window GPUI zoomed as it opened comes out
-  a point short; so a window dragged by hand to fill the screen reopens zoomed rather than at that frame.
+  area is saved as zoomed, because GPUI's own check wants an exact match and a window GPUI zoomed after showing it came
+  out a point short on 2026-11-14 (GPUI now zooms before showing the window, which has not been checked on a Mac); so a
+  window dragged by hand to fill the screen reopens zoomed rather than at that frame.
 - **A change in the last second before a crash can be lost.** The frame is saved a second after the window stops
   changing and at quit, where the old app saved once, when its window closed.
 - **A notice banner sits below a strip of the title band.** While the connection-lost notice (new in this app, so with
