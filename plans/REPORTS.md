@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`container-delete-and-link-group-tests`](reports/container-delete-and-link-group-tests.report.md) landed 2026-11-21 in #4412, #4413: add regression tests for legacy container Delete's removal and snapshot link grouping, closing two triage outcomes
 - [`gui-launcher-feedback-fixes`](reports/gui-launcher-feedback-fixes.report.md) landed 2026-11-21 in #4406, #4408, #4409, #4410, #4420: show recent setups' wrapper prefix, the inline default-folder field for a new sandbox checkout, a correct Restart explanation for older Muse sessions and the Discord link's ↗, closing four triage outcomes
 - [`terminal-exit-and-placeholder-fixes`](reports/terminal-exit-and-placeholder-fixes.report.md) landed 2026-11-21 in #4414, #4415: let an exited agent's oldest line scroll into view and make the connecting placeholder readable in light appearance, closing two triage outcomes
 - [`hosts-small-fixes`](reports/hosts-small-fixes.report.md) landed 2026-11-21 in #4411, #4416, #4418, #4422, #4430: disable container-only recipes in Add host's Tensorlake form, record a repeat host deletion's failure, say "start" for a starting container and name attention-list Update buttons, closing four triage outcomes
