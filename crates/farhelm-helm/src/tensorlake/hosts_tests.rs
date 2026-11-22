@@ -84,6 +84,8 @@ struct FakeState {
     /// `Terminated`, standing in for a termination Tensorlake has not
     /// finished.
     terminate_leaves: Option<SandboxStatus>,
+    /// Delay status lookups to exercise the remaining phase budget on a late poll.
+    get_delay: Option<Duration>,
     /// When set, terminate announces itself and waits for the test before
     /// doing anything, so a test can look at the helm mid-removal.
     terminate_gate: Option<Arc<Gate>>,
@@ -294,6 +296,11 @@ impl TensorlakeApi for FakeApi {
         sandbox: &str,
     ) -> Result<SandboxInfo, TensorlakeError> {
         self.enter("get", sandbox, key)?;
+        let delay = self.0.lock().unwrap().get_delay;
+        if let Some(delay) = delay {
+            // sleep-ok: provider latency drives the termination test's last lookup past the phase deadline
+            tokio::time::sleep(delay).await;
+        }
         let state = self.0.lock().unwrap();
         let (id, name, status) = state
             .sandboxes
@@ -836,6 +843,22 @@ async fn removal_waits_for_termination_before_sweeping() {
         "{calls:?}"
     );
     assert_eq!(api.snapshot_ids(), ["snap-a"]);
+}
+
+/// A second lookup can start inside the termination phase with less than one API call's budget left. The phase must
+/// end at its own deadline even though the scripted provider has yet to answer that lookup.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn termination_deadline_cuts_off_a_late_status_poll() {
+    let name = "farhelm-host-k7q2-dev-m3x9";
+    let api = FakeApi::default().with_sandbox("sbx-1", name, SandboxStatus::Suspending);
+    api.0.lock().unwrap().get_delay = Some(Duration::from_secs(18));
+    let started = tokio::time::Instant::now();
+    let error = wait_until_terminated(&api, &ApiKey::new(KEY.into()), name, "sbx-1")
+        .await
+        .unwrap_err();
+    assert_eq!(api.calls(), ["get sbx-1", "get sbx-1"]);
+    assert_eq!(started.elapsed(), TERMINATION_WAIT);
+    assert!(error.to_string().contains("has not finished terminating"));
 }
 
 /// Why: the connection actor decides Suspended versus dialing from this

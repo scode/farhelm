@@ -446,6 +446,32 @@ async fn an_echoed_key_is_redacted() {
         }
     );
     assert_eq!(clean_message("a b", &ApiKey::new(String::new())), "a b");
+    // The display cutoff falls inside the echoed key. Its prefix must be redacted too.
+    let prefix = "界".repeat(298);
+    assert_eq!(
+        clean_message(&format!("{prefix}{KEY}"), &key()),
+        format!("{prefix}[A")
+    );
+}
+
+/// A successful status reply can still explain a provider failure. Those diagnoses can reach Settings, a launch
+/// progress message, or a refused lifecycle operation, so they carry the same redaction as an HTTP error.
+#[farhelm_testtrace::test]
+async fn successful_sandbox_status_diagnostics_are_cleaned() {
+    let mut info = sandbox_json("sb-1", "one", "resume_failed");
+    let raw = format!("  provider echoed\n{KEY} \u{202e}detail ");
+    for field in ["error_details", "termination_reason", "pending_reason"] {
+        info[field] = serde_json::json!(raw);
+    }
+    let stub = Stub::start(vec![json(info)]).await;
+    let status = stub.client().get_sandbox(&key(), "sb-1").await.unwrap();
+    for message in [
+        status.error_details,
+        status.termination_reason,
+        status.pending_reason,
+    ] {
+        assert_eq!(message.as_deref(), Some("provider echoed [API key] detail"));
+    }
 }
 
 /// Why: a connection that never gets an HTTP answer must not look like a
@@ -750,6 +776,43 @@ async fn a_damaged_key_is_reported_not_replaced() {
     let reason = keys.ensure("farhelm-test").await.unwrap_err();
     assert!(reason.contains("incomplete or unreadable"), "{reason}");
     assert!(!dir.path().join("tensorlake/ssh-key/id_ed25519").exists());
+}
+
+/// A regular file can satisfy the metadata check even when the helm account cannot open it. Settings must report
+/// that the existing pair needs attention, and the key generation path must preserve it.
+#[farhelm_testtrace::test]
+async fn an_unreadable_private_ssh_key_is_unavailable() {
+    let dir = tempfile::tempdir().unwrap();
+    let tensorlake = dir.path().join("tensorlake");
+    let keys = SshKeyStore::new(tensorlake.clone());
+    let private = super::ssh_key::private_key_path(&tensorlake);
+    std::fs::create_dir_all(private.parent().unwrap()).unwrap();
+    std::fs::write(&private, "private fixture").unwrap();
+    std::fs::write(private.with_extension("pub"), "ssh-ed25519 AAAA x").unwrap();
+    assert!(
+        keys.read().await.unwrap().is_some(),
+        "the pair is initially available"
+    );
+    std::fs::set_permissions(&private, std::fs::Permissions::from_mode(0o000)).unwrap();
+    match std::fs::File::open(&private) {
+        Ok(_) => {
+            eprintln!("SKIPPED: the test process can open a file with no read permissions");
+            return;
+        }
+        Err(error) => assert_eq!(error.kind(), std::io::ErrorKind::PermissionDenied),
+    }
+    assert!(
+        keys.read()
+            .await
+            .unwrap_err()
+            .contains("incomplete or unreadable")
+    );
+    let reason = keys.ensure("farhelm-test").await.unwrap_err();
+    assert!(reason.contains("incomplete or unreadable"), "{reason}");
+    assert_eq!(
+        std::fs::metadata(private).unwrap().permissions().mode() & 0o777,
+        0
+    );
 }
 
 /// Why: Settings must still load (key, toggle, tag) on a helm that cannot
