@@ -24,7 +24,8 @@ import sys
 import time
 from urllib.request import urlopen
 
-from checkpoint_contract import SIDES, available_operations, fixed_operations, host_identity, require_applicable_operation
+from checkpoint_contract import (SIDES, available_operations, fixed_operations, host_identity, prerequisite_checks,
+                                 require_applicable_operation)
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
 
@@ -153,15 +154,32 @@ as found; whether exactly one live child is required is the caller's premise.
     return sorted(hosts, key=lambda host: host['pid'])
 
 
-def remote_host_snapshot(home=None):
+def remote_host_snapshot(home=None, proc=None):
     """Observe installed resources without depending on a registered Farhelm host.
 
 The same read-only probe runs over pinned SSH before and after the GUI action.
 Check the user manager first: an absent unit is evidence only when its manager
 answered, not when SSH or the session bus failed. No database contents or
 authentication files enter this receipt.
+
+`farhelm_pids` lists every process whose executable link points into
+Farhelm's private lib directory (the supervisor and its terminal hosts alike,
+a deleted binary included), matched against the path both as spelled and
+resolved, since procfs reports the resolved one. Uninstall must leave none: a
+removed unit with a supervisor or terminal host still running is not a
+complete uninstall. Only pids are kept, so no command line or environment
+leaves the host. Links this user cannot read are skipped: Farhelm's own
+processes run as this user.
+
+`session_ids` are the kept database's session ids, read read-only, so an
+uninstall that emptied or replaced the database cannot pass as one that kept
+the data; an unreadable database reads as None.
 """
+    import contextlib
+    import os
+    import sqlite3
     home = Path.home() if home is None else Path(home)
+    proc = Path('/proc') if proc is None else Path(proc)
     manager = subprocess.run(['systemctl', '--user', 'show', '--property=Version', '--value'],
                              capture_output=True, text=True, timeout=20)
     if manager.returncode or not manager.stdout.strip():
@@ -178,10 +196,40 @@ authentication files enter this receipt.
     unit = home / '.config/systemd/user/farhelm-supervisor.service'
     binary = lib / 'farhelm'
     data = home / '.local/state/farhelm'
+    prefixes = (str(lib) + '/', os.path.realpath(lib) + '/')
+    running = []
+    for entry in proc.iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            target = os.readlink(entry / 'exe')
+        except OSError:
+            continue  # Another user's process, a kernel thread, or one that exited mid-scan.
+        if target.startswith(prefixes):
+            running.append(int(entry.name))
+    database = data / 'supervisor.db'
+    session_ids = None
+    if database.is_file():
+        try:
+            with contextlib.closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True,
+                                                    timeout=10)) as connection:
+                session_ids = sorted(row[0] for row in connection.execute('SELECT id FROM sessions'))
+        except sqlite3.Error:
+            session_ids = None
     return {'service': fields, 'lib_present': lib.exists(), 'unit_present': unit.exists(),
             'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest() if binary.is_file() else None,
             'unit_sha256': hashlib.sha256(unit.read_bytes()).hexdigest() if unit.is_file() else None,
-            'data_present': data.is_dir(), 'database_present': (data / 'supervisor.db').is_file()}
+            'data_present': data.is_dir(), 'database_present': database.is_file(),
+            'farhelm_pids': sorted(running), 'session_ids': session_ids}
+
+
+def remote_host_payload():
+    """Return the self-contained source the pinned SSH peer runs to define `remote_host_snapshot`.
+
+The function travels as its own source text, so it may use only the imports
+given here and the ones it makes itself; tests execute this exact text.
+"""
+    return 'from pathlib import Path\nimport subprocess,hashlib,json\n' + inspect.getsource(remote_host_snapshot)
 
 
 def installer_environment(environment, version, sums, *, update):
@@ -457,8 +505,14 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                 result['native_geometry_toolchain'] = self.command(['/usr/bin/swift', '--version'])
             return result
         if operation == 'prior_receipts':
+            # Only the receipts of the checkpoints this one depends on, by the
+            # same tier rule the coordinator sequences with. A P0 or P2 check
+            # must not read, and so cannot be stopped by, a receipt that an
+            # earlier P1 check left behind; an unreadable prerequisite receipt
+            # still fails the read.
+            needed = set(prerequisite_checks(self.context.get('check_contracts', {}), check))
             return [dict(check_id=row['check_id'], operation=row['operation'], value=self.read_receipt(row))
-                    for row in self.state['receipts'] if row['check_id'] != check]
+                    for row in self.state['receipts'] if row['check_id'] in needed]
         if operation in ('verify_candidate', 'verify_previous'):
             if check not in ('artifact-verification', 'old-fixture'):
                 raise RuntimeError('signature verification belongs to artifact or old-fixture setup')
@@ -557,7 +611,8 @@ print(json.dumps(rows))
 raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
 ''')
             rows = json.loads(value['stdout'])
-            if check in ('old-fixture', 'remote-update', 'remote-supervisor-agent', 'remote-host-remove'):
+            if check in ('old-fixture', 'remote-update', 'remote-supervisor-upgrade', 'remote-supervisor-agent',
+                         'remote-host-remove'):
                 expected = previous if check == 'old-fixture' else candidate
                 if rows[0]['stdout'].strip() != 'farhelm ' + expected.removeprefix('v'):
                     raise RuntimeError('remote binary is not the expected release')
@@ -571,8 +626,7 @@ raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
                 raise RuntimeError('remote host starting snapshot is already retained')
             if operation == 'remote_host_after' and 'remote_host_before' not in self.completed:
                 raise RuntimeError('remote host starting snapshot is required first')
-            script = ('from pathlib import Path\nimport subprocess,hashlib,json\n'
-                      + inspect.getsource(remote_host_snapshot) + '\nprint(json.dumps(remote_host_snapshot()))\n')
+            script = remote_host_payload() + '\nprint(json.dumps(remote_host_snapshot()))\n'
             return json.loads(self.ssh(script)['stdout'])
         if operation == 'public_latest':
             with urlopen('https://get.farhelm.io/latest', timeout=30) as response:
@@ -657,9 +711,11 @@ twenty-reference evidence budget alongside the ten required native images.
     def prior_value(self, check, operation):
         """Read the latest retained value of one earlier checkpoint's operation in this pass.
 
-This is how a fresh tester turn's machine-owned comparison reaches the old
-fixture's observations, without the model relaying them: the pass's managed
-state outlives each attempt, and the digest binding refuses a changed file.
+This is how a fresh tester turn's machine-owned comparison reaches the
+observations of `old-sessions`, without the model relaying them: the pass's managed
+state outlives each attempt, and the digest binding refuses a changed file. A
+missing or changed receipt fails the operation, so the comparison it feeds
+cannot pass.
 """
         name = operation.replace('_', '-')
         rows = [row for row in self.state['receipts'] if row['check_id'] == check and row['operation'] == name]
@@ -693,27 +749,28 @@ hosts and how many process-table lines could not be parsed.
         return observed.get('supervisor.db', {}).get('sessions', [])
 
     def old_session(self, side):
-        """Return the old fixture's one captured session row for this side, from its digest-bound receipt."""
-        rows = [row for row in self.prior_value('old-fixture', SIDES[side]['state']).get(
+        """Return the one captured session row `old-sessions` retained for this side, from its digest-bound receipt."""
+        rows = [row for row in self.prior_value('old-sessions', SIDES[side]['state']).get(
             'supervisor.db', {}).get('sessions', []) if row.get('captured_conversation')]
         if len(rows) != 1:
-            raise RuntimeError('the old fixture retained no single captured session to compare')
+            raise RuntimeError('old-sessions retained no single captured session to compare')
         return {key: rows[0][key] for key in SESSION_COLUMNS if key in rows[0]}
 
     def terminal_hosts(self, side):
-        """Record the side's terminal hosts; at the updater pair's old fixture, the old session's one host.
+        """Record the side's terminal hosts; at `old-sessions`, the old session's one host.
 
-At that old fixture this is the baseline the old-session check compares
-against, so it is refused until this attempt has observed the side's one
-captured session (sampled earlier, it could miss the session's host), and it
-requires exactly one host with one live child: none means the previous release
-did not run the old session in a terminal host, which this test no longer
-supports, and more would make the survival comparison ambiguous. Everywhere
+At that checkpoint, which starts the old sessions on the previous release, this
+is the baseline the old-session check compares against, so it is deferred
+until this attempt has observed the side's one captured session (sampled
+earlier, it could miss the session's host), and it requires exactly one host
+with one live child: none means the previous release did not run the old
+session in a terminal host, which this test no longer supports, and more would
+make the survival comparison ambiguous. Either fails the operation. Everywhere
 else the sample is a plain diagnostic that no decision depends on; the
 old-session check takes its own samples.
 """
         names = SIDES[side]
-        if self.task['check_id'] != 'old-fixture' or self.task['pass_id'] != 'p0-updater-upgrade':
+        if self.task['check_id'] != 'old-sessions':
             hosts, unparsed = self.sample_hosts(side)
             return {'hosts': hosts, 'unparsed_lines': unparsed}
         rows = self.observations.get(names['state'], {}).get('supervisor.db', {}).get('sessions', [])
@@ -722,15 +779,15 @@ old-session check takes its own samples.
                                       'remote_inspect_state first, then request the terminal-host sample.')
         hosts, unparsed = self.sample_hosts(side)
         if len(hosts) != 1 or len(hosts[0]['children']) != 1:
-            raise RuntimeError('the old fixture needs exactly one terminal host, with one live child, '
+            raise RuntimeError('old-sessions needs exactly one terminal host, with one live child, '
                                'for its old session')
         return {'hosts': hosts, 'unparsed_lines': unparsed}
 
     def host_survival(self, side):
-        """Compare the old session and its terminal host with the old fixture, from samples this operation takes, once.
+        """Compare the old session and its terminal host with `old-sessions`, from samples this operation takes, once.
 
 Every input is taken here, before the old session is touched, or read from the
-old fixture's digest-bound receipts; none depends on when the tester called an
+digest-bound receipts of `old-sessions`; none depends on when the tester called an
 earlier observation. The old session survived only if its row keeps its id and
 launch generation and still has a captured conversation, and its terminal host
 and that host's child are the same processes (pid and start identity), so a
@@ -739,11 +796,11 @@ as not survived. Called after the session's Restart it reads as not survived
 too: a late call can only be refused, never pass.
 """
         names = SIDES[side]
-        old_hosts = self.prior_value('old-fixture', names['hosts'])['hosts']
+        old_hosts = self.prior_value('old-sessions', names['hosts'])['hosts']
         if len(old_hosts) != 1:
             # The baseline sample enforces this; a receipt retained under an
             # earlier contract, which allowed none, must not pass here.
-            raise RuntimeError('the old fixture retained no single terminal host for the old session')
+            raise RuntimeError('old-sessions retained no single terminal host for the old session')
         old = self.old_session(side)
         current, unparsed = self.sample_hosts(side)
         rows = [row for row in self.sample_sessions(side) if row.get('id') == old['id']]

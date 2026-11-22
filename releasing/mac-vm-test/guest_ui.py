@@ -9,6 +9,7 @@ import json
 import math
 import time
 
+from checkpoint_contract import relaunch_checks_app_only
 from window_geometry import image_metadata
 
 
@@ -18,14 +19,24 @@ METHODS = {'getAXState': (0, 1), 'getScreenshot': (0, 1), 'getAXStateAndScreensh
            'pressKey': (1, 2)}
 
 
-def wait_running(operations, expected, *, label, previous_pids=None, clock=time.monotonic, pause=time.sleep):
-    """Establish process readiness after an owned launch or restart without another UI action."""
+def wait_running(operations, expected, *, label, previous_pids=None, clock=time.monotonic, pause=time.sleep,
+                 supervisor=True):
+    """Establish process readiness after an owned launch or restart without another UI action.
+
+By default the app's local supervisor must run the expected version too. With
+`supervisor=False` a new app process with the expected installed bundle is
+enough: a pass that checks the supervisor's upgrade in a checkpoint of its own
+must be able to reach it, Update action included, when the relaunched app came
+back with its supervisor still on the old version.
+"""
     deadline = clock() + 60
     while True:
         observed = operations.version()
         changed = previous_pids is None or (observed.get('desktop_pids')
                     and set(observed['desktop_pids']).isdisjoint(previous_pids))
-        if observed['desktop_running'] and observed['running_versions'] == [expected] and changed:
+        ready = (observed['running_versions'] == [expected] if supervisor
+                 else observed['installed'] == expected and observed['bundle'] == expected)
+        if observed['desktop_running'] and ready and changed:
             return observed
         if clock() >= deadline:
             operations.receipt(label + '-timeout', observed)
@@ -158,7 +169,8 @@ the acceptance requirement that the updater itself brought the app back.
 """
         candidate = self.operations.context['candidate'].removeprefix('v')
         after = wait_running(self.operations, candidate, label='restart',
-                             previous_pids=self.before_restart['desktop_pids'], clock=self.clock, pause=self.pause)
+                             previous_pids=self.before_restart['desktop_pids'], clock=self.clock, pause=self.pause,
+                             supervisor=not relaunch_checks_app_only(self.operations.task))
         self.operations.receipt('restart-transition', {'before': self.before_restart, 'after': after})
         return dict(message, params={'name': 'js', 'arguments': {
             'code': self.bind_code('farhelm'), 'title': 'Bind the observed running candidate after Restart'}})

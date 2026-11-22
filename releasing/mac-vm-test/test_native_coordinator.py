@@ -27,7 +27,7 @@ from fixture_probe import probe, ProbeError
 
 
 def after_capture():
-    """Provide a distinct valid synthetic PNG for the two-observation P1 receipt contract.
+    """Provide a distinct valid synthetic PNG for the two-observation feedback and remote menu receipt contracts.
 
 This pixel is deliberately unrelated to Farhelm. Its role is to prove capture
 linkage and distinguish two retained observations, never a real dialog outcome.
@@ -82,7 +82,7 @@ class NativeCoordinatorTests(unittest.TestCase):
                 return subprocess.CompletedProcess(argv, 0, b'/Users/fixture\n')
             return original(argv, **kwargs)
         f.model.runner = runner
-        f.enable_p0(p0_only=True)
+        f.enable_p0(scope='p0-only')
         self.run = f.run
         self.seen = []
         source = FakeSource(['v0.24.0'])
@@ -104,7 +104,7 @@ class NativeCoordinatorTests(unittest.TestCase):
             observation['evidence'] = ['native.png', 'native.bin']
             native_rows[0]['item']['result']['content'].append(
                 {'type': 'image', 'data': base64.b64encode(b'unknown-native-image-format').decode()})
-        if envelope['check_id'] in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
+        if envelope['check_id'] in ('p2-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
             observation['evidence'].append('native-after.png')
             native_rows[0]['item']['result']['content'].append(
                 {'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(after_capture()).decode()})
@@ -138,7 +138,7 @@ class NativeCoordinatorTests(unittest.TestCase):
             files['execution.json'] = json.dumps(summary).encode()
         if image_only:
             files['native.bin'] = b'unknown-native-image-format'
-        if envelope['check_id'] in ('p1-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
+        if envelope['check_id'] in ('p2-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
             files['native-after.png'] = after_capture()
         with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
             for name, content in files.items():
@@ -257,7 +257,7 @@ class NativeCoordinatorTests(unittest.TestCase):
                 self.assertEqual(len(set(attempts)), expected)
                 self.assertEqual(delays, [60, 120, 240] if expected == 4 else [])
 
-    def test_p1_provider_failure_never_schedules_an_automatic_send_retry(self):
+    def test_p2_provider_failure_never_schedules_an_automatic_send_retry(self):
         """The live feedback boundary stays conservative even if a provider refusal looks pre-action."""
         self.finish_preceding_pairs()
         with self.run.locked():
@@ -267,27 +267,29 @@ class NativeCoordinatorTests(unittest.TestCase):
         self.approve_feedback()
         with self.run.locked():
             self.run.continue_full()
-        self.fixture.prepare('p0-updater-upgrade')
+        self.fixture.prepare('p0-installer-upgrade')
         delays = []
         self.run.pause = delays.append
 
         def execute(controller, envelope, files):
-            """Complete P0, then fail before the first P1 action without adding another send attempt."""
+            """Complete P0 and P1, then fail before the first P2 action without adding another send attempt."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'p1-feedback-send':
+            if envelope['check_id'] == 'p2-feedback-send':
                 return self.provider_archive(controller, envelope)
             return self.archive(controller, envelope)
 
         self.run.tester = execute
         with mock.patch('brick_test.download', return_value=b'v0.24.0'), self.assertRaises(Refused):
-            self.run.test('p0-updater-upgrade', source=self.source)
+            self.run.test('p0-installer-upgrade', source=self.source)
         self.assertEqual(delays, [])
-        self.assertEqual(sum(row['check_id'] == 'p1-feedback-send' for row in self.seen), 1)
+        self.assertEqual(sum(row['check_id'] == 'p2-feedback-send' for row in self.seen), 1)
 
-    def test_provider_retry_keeps_the_effective_old_fixture_budget(self):
+    def test_provider_retry_keeps_the_effective_old_sessions_budget(self):
         """A safe retry uses the checkpoint floor minus elapsed time and backoff."""
         self.finish_preceding_pairs()
-        self.fixture.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            self.run.limit_scope('p1-only')
+        self.fixture.prepare('p0-installer-upgrade')
         now = 100.0
         self.run.clock = lambda: now
         budgets = []
@@ -300,9 +302,9 @@ class NativeCoordinatorTests(unittest.TestCase):
         self.run.pause = pause
 
         def execute(controller, envelope, files):
-            """Refuse the old-fixture turn before it acts, after consuming ten seconds."""
+            """Refuse the old-sessions turn before it acts, after consuming ten seconds."""
             nonlocal now
-            if envelope['check_id'] == 'old-fixture':
+            if envelope['check_id'] == 'old-sessions':
                 budgets.append(envelope['timeout_seconds'])
                 if len(budgets) == 1:
                     now += 10
@@ -311,8 +313,8 @@ class NativeCoordinatorTests(unittest.TestCase):
 
         self.run.tester = execute
         with mock.patch('brick_test.download', return_value=b'v0.24.0'):
-            self.run.test('p0-updater-upgrade', source=self.source, timeout=30)
-        self.assertEqual(budgets, [2400, 2330])
+            self.run.test('p0-installer-upgrade', source=self.source, timeout=30)
+        self.assertEqual(budgets, [1800, 1730])
 
     def test_unknown_native_image_cannot_supply_command_evidence(self):
         """Native bytes in an unfamiliar format cannot impersonate an independent command receipt."""
@@ -386,8 +388,8 @@ neither the update endpoint nor the native capture is a live product oracle.
             self.run.test(pass_id, source=self.source)
 
     def finish_preceding_pairs(self):
-        """Retain valid native P0 evidence before exercising the final pair's P1 boundary."""
-        for pass_id in ('p0-fresh', 'p0-installer-upgrade'):
+        """Retain valid native P0 evidence before the installer pair, the last one, runs its P0, P1 and P2."""
+        for pass_id in self.run.data['plan']['p0_sequence'][:-1]:
             self.drive_pair(pass_id)
             with self.run.locked():
                 self.run.cleanup(pass_id)
@@ -399,112 +401,160 @@ neither the update endpoint nor the native capture is a live product oracle.
         value['feedback_send_approved'] = True
         path.write_text(json.dumps(value))
 
-    def test_p0_only_never_dispatches_feedback_and_cleans_final_pair(self):
+    def widen(self, scope):
+        """Set a run scope directly, standing in for an `init` that already resolved its consent."""
+        with self.run.locked():
+            self.run.data['scope'] = scope
+            self.run.save()
+
+    def test_p0_only_never_dispatches_continuity_or_feedback_and_cleans_final_pair(self):
         """The action fence must precede guest execution, since record-time refusal is too late."""
         self.finish_preceding_pairs()
-        self.drive_pair('p0-updater-upgrade')
-        self.assertNotIn('p1-feedback-send', [value['check_id'] for value in self.seen])
+        self.drive_pair('p0-installer-upgrade')
+        dispatched = [value['check_id'] for value in self.seen]
+        for check in ('old-sessions', 'local-old-session', 'remote-host-remove', 'p2-feedback-send'):
+            self.assertNotIn(check, dispatched)
         self.assertTrue(all('feedback_authorized' not in value['context'] for value in self.seen))
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
             self.assertEqual(self.run.report()['requested_verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_updater_pair_schedules_each_old_session_after_its_hosts_agent_check(self):
-        """The dispatched guest turns, not only the declared manifest, carry the old sessions in order.
+    def test_installer_pair_dispatches_supervisor_upgrades_before_agents_and_p1_after_p0(self):
+        """The dispatched guest turns, not only the declared manifest, follow the priority order.
 
-Each old-session turn must follow its host's new-session turn, which
-establishes that host's candidate supervisor, so the remote one follows the
-remote Update.
+The old sessions start before the relaunch, both supervisors' upgrades are
+observed before either new agent, and the old-session and remote menu turns
+follow every P0 turn. The long-turn floors apply to the agent conversations.
 """
         self.finish_preceding_pairs()
+        self.widen('p1-only')
         self.seen.clear()
-        self.drive_pair('p0-updater-upgrade')
+        self.drive_pair('p0-installer-upgrade')
         self.assertEqual([value['check_id'] for value in self.seen],
-                         ['native-preflight', 'artifact-verification', 'old-fixture', 'update-discovery',
-                          'update-relaunch', 'local-supervisor-agent', 'local-old-session',
-                          'remote-supervisor-agent', 'remote-old-session', 'remote-host-remove', 'remote-host-uninstall'])
+                         ['native-preflight', 'artifact-verification', 'old-fixture', 'old-sessions', 'update-relaunch',
+                          'local-supervisor-upgrade', 'remote-supervisor-upgrade', 'local-supervisor-agent',
+                          'remote-supervisor-agent', 'local-old-session', 'remote-old-session', 'remote-host-remove',
+                          'remote-host-uninstall'])
         remote = next(value for value in self.seen if value['check_id'] == 'remote-old-session')
         self.assertIn('remote_host_survival', remote['instructions'])
         budgets = {value['check_id']: value['timeout_seconds'] for value in self.seen}
-        self.assertEqual((budgets['old-fixture'], budgets['local-old-session'], budgets['update-relaunch']),
-                         (2400, 1800, 1200))
+        self.assertEqual((budgets['old-sessions'], budgets['local-old-session'], budgets['update-relaunch']),
+                         (1800, 1800, 1200))
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
 
-    def test_updater_pair_planned_before_old_sessions_dispatches_nothing(self):
-        """A pair prepared under the earlier contract cannot be tested under the new one, half old and half new.
+    def test_a_failed_p1_turn_skips_the_later_p1_turns_and_still_sends_feedback(self):
+        """A lost session stops the checks that share it, but not the independent feedback send.
 
-The refusal names its cause and comes before credentials or any guest turn.
+The skipped turns are never dispatched, the run ends without an automation
+failure, and the pair cleans up normally with the failure's evidence retained.
 """
         self.finish_preceding_pairs()
-        self.fixture.prepare('p0-updater-upgrade')
-        with self.run.locked():
-            for check in ('local-old-session', 'remote-old-session'):
-                self.run.selected('p0-updater-upgrade')['required'].pop(check)
-            self.run.save()
+        self.approve_feedback()
+        self.widen('full')
         self.seen.clear()
-        self.run.tester = self.execute_fixture
-        with self.assertRaisesRegex(Refused, 'planned before P0 carried old sessions'):
-            self.run.test('p0-updater-upgrade', source=self.source)
-        self.assertEqual(self.seen, [])
-        with self.run.locked():
-            self.assertNotIn('credentials_injected', self.run.selected('p0-updater-upgrade'))
 
-    def test_full_and_p1_setup_refuse_without_send_consent_before_mutation(self):
-        """Known missing send authority must not first pause an otherwise completed P0 run."""
+        def lost_session(controller, envelope, files):
+            """Fail only the local old session; every other turn passes."""
+            self.seen.append(envelope)
+            return self.archive(controller, envelope, 'fail' if envelope['check_id'] == 'local-old-session' else 'pass')
+
+        self.drive_pair('p0-installer-upgrade', lost_session)
+        dispatched = [value['check_id'] for value in self.seen]
+        self.assertEqual(dispatched[-2:], ['local-old-session', 'p2-feedback-send'])
+        for check in ('remote-old-session', 'remote-host-remove', 'remote-host-uninstall'):
+            self.assertNotIn(check, dispatched)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'fail')
+            self.assertEqual(report['p2']['verdict'], 'pass')
+            self.assertEqual(report['automation']['verdict'], 'no failure observed')
+            self.assertEqual(self.run.selected('p0-installer-upgrade')['tester']['phase'], 'complete')
+            self.run.cleanup('p0-installer-upgrade')
+            self.run.require_priority('fresh')
+
+    def test_unavailable_old_sessions_still_dispatch_every_p0_turn(self):
+        """The previous release failing to start its sessions must not cost the supervisor checks."""
+        self.finish_preceding_pairs()
+        self.widen('p1-only')
+        self.seen.clear()
+
+        def no_baseline(controller, envelope, files):
+            """Report the old sessions unavailable; every other turn passes."""
+            self.seen.append(envelope)
+            return self.archive(controller, envelope,
+                                'could-not-run' if envelope['check_id'] == 'old-sessions' else 'pass')
+
+        self.drive_pair('p0-installer-upgrade', no_baseline)
+        dispatched = [value['check_id'] for value in self.seen]
+        self.assertEqual(dispatched[-1], 'remote-supervisor-agent')
+        self.assertIn('local-supervisor-upgrade', dispatched)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade')
+
+    def test_full_and_p2_setup_refuse_without_send_consent_before_mutation(self):
+        """Known missing send authority must not first pause an otherwise completed P0 run.
+
+A stop after P1 includes no send, so it needs no such consent.
+"""
         self.prepare()
         self.assertEqual(self.run.data['passes']['p0-fresh']['phase'], 'ready')
         with self.run.locked():
             controller = self.run.pair('p0-fresh')
         with controller.locked():
             self.assertTrue(all(controller.state(role)['State'] == 'running' for role in ('mac', 'linux')))
-        for scope in ('full', 'p1-only'):
-            with self.subTest(scope=scope), self.run.locked():
-                self.run.data['scope'] = scope
-                self.run.save()
-            calls = len(self.fixture.model.calls)
-            with self.assertRaisesRegex(Refused, 'live P1 feedback'):
-                self.run.test('p0-fresh', source=self.source)
-            self.assertEqual(len(self.fixture.model.calls), calls)
-            self.assertEqual(self.seen, [])
-            with self.run.locked():
-                self.assertNotIn('credentials_injected', self.run.selected('p0-fresh'))
+        for scope in ('full', 'p2-only'):
+            with self.subTest(scope=scope):
+                self.widen(scope)
+                calls = len(self.fixture.model.calls)
+                with self.assertRaisesRegex(Refused, 'live P2 feedback'):
+                    self.run.test('p0-fresh', source=self.source)
+                self.assertEqual(len(self.fixture.model.calls), calls)
+                self.assertEqual(self.seen, [])
+                with self.run.locked():
+                    self.assertNotIn('credentials_injected', self.run.selected('p0-fresh'))
+        self.widen('p1-only')
+        self.run.test('p0-fresh', source=self.source)
+        with self.run.locked():
+            self.assertEqual(self.run.verdict(self.run.selected('p0-fresh')), 'pass')
 
-    def test_valid_failed_p1_keeps_p0_and_allows_cleanup_and_bonus(self):
+    def test_valid_failed_p2_keeps_p0_and_p1_and_allows_cleanup_and_bonus(self):
         """A completed feedback failure cannot erase valid upgrades or become an automation fault."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
+        self.widen('full')
         def failed_send(controller, envelope, files):
             """Return a valid product failure only at the separately authorized send boundary."""
             self.seen.append(envelope)
-            return self.archive(controller, envelope, 'fail' if envelope['check_id'] == 'p1-feedback-send' else 'pass')
-        self.drive_pair('p0-updater-upgrade', failed_send)
-        feedback = [value for value in self.seen if value['check_id'] == 'p1-feedback-send']
+            return self.archive(controller, envelope, 'fail' if envelope['check_id'] == 'p2-feedback-send' else 'pass')
+        self.drive_pair('p0-installer-upgrade', failed_send)
+        feedback = [value for value in self.seen if value['check_id'] == 'p2-feedback-send']
         self.assertEqual(len(feedback), 1)
         self.assertIs(feedback[0]['context']['feedback_authorized'], True)
         self.assertNotIn('addendum.md', feedback[0]['instructions'])
         with self.run.locked():
             report = self.run.report()
             self.assertEqual(report['p0']['verdict'], 'pass')
-            self.assertEqual(report['p1']['verdict'], 'fail')
+            self.assertEqual(report['p1']['verdict'], 'pass')
+            self.assertEqual(report['p2']['verdict'], 'fail')
             self.assertEqual(report['automation']['verdict'], 'no failure observed')
-            self.assertNotIn('automation_failure', self.run.selected('p0-updater-upgrade'))
-            self.run.cleanup('p0-updater-upgrade')
+            self.assertNotIn('automation_failure', self.run.selected('p0-installer-upgrade'))
+            self.run.cleanup('p0-installer-upgrade')
             self.run.require_priority('fresh')
 
-    def test_removed_feedback_consent_stops_before_p1_dispatch(self):
-        """Setup approval must still exist at the action boundary, after the final P0 observation."""
+    def test_removed_feedback_consent_stops_before_p2_dispatch(self):
+        """Setup approval must still exist at the action boundary, after the final P0 and P1 observations."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
+        self.widen('full')
         def removed_consent(controller, envelope, files):
-            """Withdraw only fictional send consent as the modeled last P0 task completes."""
+            """Withdraw only fictional send consent while an earlier task of the pair runs."""
             self.seen.append(envelope)
             if envelope['check_id'] == 'remote-old-session':
                 path = self.fixture.root / 'consent.json'
@@ -512,103 +562,129 @@ The refusal names its cause and comes before credentials or any guest turn.
                 value.pop('feedback_send_approved')
                 path.write_text(json.dumps(value))
             return self.archive(controller, envelope)
-        with self.assertRaisesRegex(Refused, 'live P1 feedback'):
-            self.drive_pair('p0-updater-upgrade', removed_consent)
-        self.assertNotIn('p1-feedback-send', [value['check_id'] for value in self.seen])
+        with self.assertRaisesRegex(Refused, 'live P2 feedback'):
+            self.drive_pair('p0-installer-upgrade', removed_consent)
+        self.assertNotIn('p2-feedback-send', [value['check_id'] for value in self.seen])
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
-            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
-            self.assertEqual(self.run.selected('p0-updater-upgrade')['automation_failure']['kind'], 'unavailable')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'could not run')
+            self.assertEqual(self.run.selected('p0-installer-upgrade')['automation_failure']['kind'], 'unavailable')
             self.assertEqual(self.run.report()['automation']['verdict'], 'no failure observed')
 
-    def test_mid_turn_p0_stop_fences_the_not_yet_dispatched_feedback(self):
-        """A late P0-only request must be honored before the queued P1 task can send anything."""
-        self.finish_preceding_pairs()
-        self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
-        def narrowed(controller, envelope, files):
-            """Persist the user's scope change while the modeled last P0 task is outside the workflow lock."""
-            self.seen.append(envelope)
-            if envelope['check_id'] == 'remote-old-session':
-                with self.run.locked():
-                    self.run.limit_to_p0()
-            return self.archive(controller, envelope)
-        self.drive_pair('p0-updater-upgrade', narrowed)
-        self.assertNotIn('p1-feedback-send', [value['check_id'] for value in self.seen])
-        with self.run.locked():
-            self.assertEqual(self.run.report()['requested_verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+    def test_mid_turn_stop_fences_the_tiers_not_yet_dispatched(self):
+        """A late stop request must be honored before any queued task of a narrower-excluded tier runs.
+
+A stop after P0 made during the last P0 turn leaves every P1 and P2 turn
+undispatched; a stop after P1 made during the last P1 turn leaves the send.
+"""
+        for scope, during, excluded in (('p0-only', 'remote-supervisor-agent', ('local-old-session', 'p2-feedback-send')),
+                                        ('p1-only', 'remote-host-uninstall', ('p2-feedback-send',))):
+            with self.subTest(scope=scope):
+                case = NativeCoordinatorTests()
+                case.setUp()
+                self.addCleanup(case.doCleanups)
+                case.finish_preceding_pairs()
+                case.approve_feedback()
+                case.widen('full')
+
+                def narrowed(controller, envelope, files):
+                    """Persist the user's scope change while the modeled task is outside the workflow lock."""
+                    case.seen.append(envelope)
+                    if envelope['check_id'] == during:
+                        with case.run.locked():
+                            case.run.limit_scope(scope)
+                    return case.archive(controller, envelope)
+
+                case.drive_pair('p0-installer-upgrade', narrowed)
+                dispatched = [value['check_id'] for value in case.seen]
+                self.assertEqual(dispatched[-1], during)
+                for check in excluded:
+                    self.assertNotIn(check, dispatched)
+                with case.run.locked():
+                    self.assertEqual(case.run.report()['requested_verdict'], 'pass')
+                    case.run.cleanup('p0-installer-upgrade')
 
     def test_changed_p0_evidence_fences_feedback_before_guest_dispatch(self):
-        """Record-time refusal cannot undo a live send after an earlier P0 premise was invalidated."""
+        """Record-time refusal cannot undo a live send after an earlier P0 premise was invalidated.
+
+Lost P0 evidence is not a dead end that a skip could settle: it stops the
+scheduler before the send and leaves the pair live for the maintainer.
+"""
         self.finish_preceding_pairs()
         self.approve_feedback()
+        self.widen('full')
         with self.run.locked():
-            self.run.data['scope'] = 'full'
             archive = self.run.selected('p0-fresh')['results']['app-start']['evidence'][0].split('::', 1)[0]
-            self.run.save()
         def changed_prior(controller, envelope, files):
-            """Damage independently retained earlier evidence as the final P0 task completes."""
+            """Damage independently retained earlier evidence while a later task of the pair runs."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'remote-old-session':
+            if envelope['check_id'] == 'remote-host-uninstall':
                 (self.run.directory / archive).write_bytes(b'changed earlier archive')
             return self.archive(controller, envelope)
-        with self.assertRaisesRegex(Refused, 'valid evidence before P1 dispatch'):
-            self.drive_pair('p0-updater-upgrade', changed_prior)
-        self.assertNotIn('p1-feedback-send', [value['check_id'] for value in self.seen])
+        with self.assertRaisesRegex(Refused, 'valid evidence before P2'):
+            self.drive_pair('p0-installer-upgrade', changed_prior)
+        self.assertNotIn('p2-feedback-send', [value['check_id'] for value in self.seen])
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            self.assertNotIn('p2-feedback-send', self.run.selected('p0-installer-upgrade')['results'])
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup('p0-installer-upgrade')
 
-    def test_native_p1_pass_satisfies_its_requested_scope(self):
-        """A genuine native receipt path must preserve the successful P1-only verdict and ordinary cleanup."""
+    def test_native_p2_pass_satisfies_its_requested_scope(self):
+        """A genuine native receipt path must preserve the successful stop-after-P2 verdict and ordinary cleanup."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'p1-only'
-            self.run.save()
-        self.drive_pair('p0-updater-upgrade')
+        self.widen('p2-only')
+        self.drive_pair('p0-installer-upgrade')
         with self.run.locked():
             report = self.run.report()
             self.assertEqual(report['p0']['verdict'], 'pass')
             self.assertEqual(report['p1']['verdict'], 'pass')
+            self.assertEqual(report['p2']['verdict'], 'pass')
             self.assertEqual(report['requested_verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_rc_native_dispatch_skips_only_discovery_and_runs_feedback(self):
-        """Exercise the real serial dispatcher on a manual RC, not just record-shaped fixtures.
+    def test_rc_native_dispatch_runs_every_planned_check_and_reports_discovery_skipped(self):
+        """Exercise the real serial dispatcher on an RC, whose plan has no updater pair.
 
-Discovery gets no guest turn or passing receipt. The same pair still runs the
-manual relaunch, both old-session checks, remote menu checks and approved P1.
-Its retained captures permit normal cleanup while P0 stays incomplete.
+The installer pair runs the manual relaunch, both supervisor upgrades, the
+agents, both old-session checks, the remote menu and the approved send. P0
+stays formally incomplete, with a summary saying every runnable check passed.
 """
-        self.fixture.enable_p0(candidate='v0.25.0-rc.1', p0_only=True)
+        self.fixture.enable_p0(candidate='v0.25.0-rc.1', scope='p0-only')
         self.run = self.fixture.run
         self.finish_preceding_pairs()
         self.approve_feedback()
         with self.run.locked():
             self.run.continue_full()
         self.seen.clear()
-        self.drive_pair('p0-updater-upgrade')
+        self.drive_pair('p0-installer-upgrade')
         dispatched = [value['check_id'] for value in self.seen]
         self.assertNotIn('update-discovery', dispatched)
-        self.assertIn('local-old-session', dispatched)
-        self.assertIn('remote-old-session', dispatched)
-        self.assertIn('remote-host-uninstall', dispatched)
-        self.assertEqual(dispatched[-1], 'p1-feedback-send')
+        for check in ('remote-supervisor-upgrade', 'local-old-session', 'remote-old-session', 'remote-host-uninstall'):
+            self.assertIn(check, dispatched)
+        self.assertEqual(dispatched[-1], 'p2-feedback-send')
         relaunch = next(value for value in self.seen if value['check_id'] == 'update-relaunch')
         self.assertEqual(relaunch['context']['update_path'], 'manual')
         with self.run.locked():
-            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
-            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'could not run')
+            self.assertIn('All runnable P0 checks passed.', report['p0']['summary'])
+            self.assertEqual(report['p2']['verdict'], 'pass')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_stable_manual_path_fails_required_discovery(self):
-        """A stable release requires discovery even when its old app lacks the override."""
-        self.fixture.enable_p0(candidate='v0.25.0', supported=False, p0_only=True)
+    def test_stable_manual_path_fails_required_discovery_without_hiding_the_supervisors(self):
+        """A stable release requires discovery even when its old app lacks the override.
+
+The failed updater pair keeps its guests until the maintainer decides; once
+released, the installer pair still checks the supervisors and P1, and skips
+the send, which can no longer follow a passing P0.
+"""
+        self.fixture.enable_p0(candidate='v0.25.0', supported=False, scope='p0-only')
         self.run = self.fixture.run
-        self.finish_preceding_pairs()
+        self.drive_pair('p0-fresh')
+        with self.run.locked():
+            self.run.cleanup('p0-fresh')
         self.approve_feedback()
         with self.run.locked():
             self.run.continue_full()
@@ -629,70 +705,78 @@ Its retained captures permit normal cleanup while P0 stays incomplete.
             self.assertTrue(self.run.result_evidence_retained(result))
             with self.assertRaises(Refused):
                 self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+        self.seen.clear()
+        self.drive_pair('p0-installer-upgrade')
+        dispatched = [value['check_id'] for value in self.seen]
+        self.assertIn('remote-supervisor-upgrade', dispatched)
+        self.assertEqual(dispatched[-1], 'remote-host-uninstall')
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p0']['checks']['remote-supervisor-upgrade'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'pass')
+            self.assertEqual(report['p2']['verdict'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_in_flight_p1_outcome_survives_late_scope_narrowing(self):
+    def test_in_flight_p2_outcome_survives_late_scope_narrowing(self):
         """A scope request cannot recall a dispatched send or erase its actual retained result."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
+        self.widen('full')
         def in_flight(controller, envelope, files):
-            """Narrow scope only after the modeled P1 task is already dispatched."""
+            """Narrow scope only after the modeled P2 task is already dispatched."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'p1-feedback-send':
+            if envelope['check_id'] == 'p2-feedback-send':
                 with self.run.locked():
-                    self.run.limit_to_p0()
+                    self.run.limit_scope('p0-only')
             return self.archive(controller, envelope)
-        self.drive_pair('p0-updater-upgrade', in_flight)
+        self.drive_pair('p0-installer-upgrade', in_flight)
         with self.run.locked():
-            entry = self.run.selected('p0-updater-upgrade')
-            self.assertTrue(entry['results']['p1-feedback-send']['dispatched_before_scope_stop'])
+            entry = self.run.selected('p0-installer-upgrade')
+            self.assertTrue(entry['results']['p2-feedback-send']['dispatched_before_scope_stop'])
+            self.assertNotIn('dispatched_before_scope_stop', entry['results']['remote-host-uninstall'])
             self.assertNotIn('automation_failure', entry)
-            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
             self.assertEqual(self.run.report()['requested_verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_native_p1_fault_keeps_p0_but_fences_bonus_and_cleanup(self):
-        """P1's nonblocking product exception must never hide an aborted native tester or an unverified break."""
+    def test_native_p2_fault_keeps_p0_but_fences_bonus_and_cleanup(self):
+        """P2's nonblocking product exception must never hide an aborted native tester or an unverified break."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'full'
-            self.run.save()
+        self.widen('full')
         def fault(controller, envelope, files):
-            """Supply an aborted-turn observation only at P1, after independently passed P0."""
+            """Supply an aborted-turn observation only at P2, after independently passed P0 and P1."""
             self.seen.append(envelope)
-            if envelope['check_id'] == 'p1-feedback-send':
+            if envelope['check_id'] == 'p2-feedback-send':
                 return self.archive(controller, envelope, 'automation-failure', unverified='fail')
             return self.archive(controller, envelope)
         with self.assertRaises(Refused):
-            self.drive_pair('p0-updater-upgrade', fault)
+            self.drive_pair('p0-installer-upgrade', fault)
         with self.run.locked():
             report = self.run.report()
             self.assertEqual(report['p0']['verdict'], 'pass')
-            self.assertEqual(report['p1']['verdict'], 'could not run')
+            self.assertEqual(report['p2']['verdict'], 'could not run')
             self.assertEqual(report['automation']['verdict'], 'fail')
             self.assertEqual(report['p0']['unverified_product_failures'], [])
-            self.assertEqual(len(report['p1']['unverified_product_failures']), 1)
+            self.assertEqual(report['p1']['unverified_product_failures'], [])
+            self.assertEqual(len(report['p2']['unverified_product_failures']), 1)
             with self.assertRaisesRegex(Refused, 'first failed'):
                 self.run.require_priority('fresh')
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
-                self.run.cleanup('p0-updater-upgrade')
+                self.run.cleanup('p0-installer-upgrade')
 
-    def test_p1_pass_requires_two_distinct_native_captures(self):
+    def test_p2_pass_requires_two_distinct_native_captures(self):
         """The structural gate requires two captures; their before/after meaning still needs independent review."""
         self.finish_preceding_pairs()
         self.approve_feedback()
-        with self.run.locked():
-            self.run.data['scope'] = 'p1-only'
-            self.run.save()
+        self.widen('p2-only')
         def one_capture(controller, envelope, files):
-            """Keep an otherwise valid P1 receipt with only one real modeled native capture."""
+            """Keep an otherwise valid P2 receipt with only one real modeled native capture."""
             self.seen.append(envelope)
-            return self.archive(controller, envelope, two_captures=envelope['check_id'] != 'p1-feedback-send')
+            return self.archive(controller, envelope, two_captures=envelope['check_id'] != 'p2-feedback-send')
         with self.assertRaisesRegex(Refused, 'two distinct native'):
-            self.drive_pair('p0-updater-upgrade', one_capture)
+            self.drive_pair('p0-installer-upgrade', one_capture)
 
     def test_remote_menu_pass_requires_action_and_result_native_captures(self):
         """Neither a menu-only image nor a result-only image establishes the requested remote action.
@@ -707,13 +791,95 @@ setup, the agent reply or a different menu check.
                 case.setUp()
                 self.addCleanup(case.doCleanups)
                 case.finish_preceding_pairs()
+                case.widen('p1-only')
                 def one_capture(controller, envelope, files):
                     """Withhold only the selected menu result's second native capture."""
                     case.seen.append(envelope)
                     return case.archive(controller, envelope, two_captures=envelope['check_id'] != check)
                 with case.assertRaisesRegex(Refused, check + ' needs two distinct native'):
-                    case.drive_pair('p0-updater-upgrade', one_capture)
+                    case.drive_pair('p0-installer-upgrade', one_capture)
                 self.assertEqual(case.seen[-1]['check_id'], check)
+
+    def harness_failure_archive(self, controller, envelope):
+        """Retain a stopped automation-failure attempt whose one tool call completed with an error."""
+        call = {'id': 'read', 'type': 'mcp_tool_call', 'server': 'cua_repl', 'tool': 'brick_action',
+                'arguments': {'operation': 'remote_inspect_state'}, 'status': 'failed'}
+        rows = [{'type': 'thread.started'}, {'type': 'turn.started'}, {'type': 'item.started', 'item': call},
+                {'type': 'item.completed', 'item': call},
+                {'type': 'turn.failed', 'error': {'message': 'managed action failed: fixture read error'}}]
+        execution = {'format': 1, 'status': 'automation-failure', 'exit_code': 1, 'cleanup_error': None,
+                     'error': 'managed action failed: OperationalError: database is locked'}
+        label = 'tester-' + envelope['attempt']
+        with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
+            for name, value in {'task.json': json.dumps(envelope), 'execution.json': json.dumps(execution),
+                                'events.jsonl': '\n'.join(map(json.dumps, rows))}.items():
+                raw = value.encode()
+                member = tarfile.TarInfo('./' + name)
+                member.size = len(raw)
+                archive.addfile(member, io.BytesIO(raw))
+        return label
+
+    def test_a_harness_failure_at_p1_makes_it_unavailable_and_the_pair_goes_on(self):
+        """A harness failure at an optional P1 checkpoint must not keep the pair's P0 checks or the send from running.
+
+`old-sessions` runs before the upgrade, so stopping the pair there would hide
+whether the supervisors brick. The failed attempt is retained and the check
+imports as could-not-run, which stops the later P1 checks (recorded as
+skipped) while the P0 checks after it and P2 still run.
+"""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        self.widen('full')
+        self.fixture.prepare('p0-installer-upgrade')
+
+        def execute(controller, envelope, files):
+            """Fail only the baseline turn in the harness; pass everything else."""
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'old-sessions':
+                return self.harness_failure_archive(controller, envelope)
+            return self.archive(controller, envelope)
+
+        self.run.tester = execute
+        self.seen.clear()
+        with mock.patch('brick_test.download', return_value=b'v0.24.0'):
+            self.run.test('p0-installer-upgrade', source=self.source)
+        dispatched = [value['check_id'] for value in self.seen]
+        self.assertIn('remote-supervisor-agent', dispatched)
+        self.assertEqual(dispatched[-1], 'p2-feedback-send')
+        self.assertNotIn('local-old-session', dispatched)
+        with self.run.locked():
+            entry = self.run.selected('p0-installer-upgrade')
+            self.assertNotIn('automation_failure', entry)
+            self.assertEqual(entry['results']['old-sessions']['status'], 'could-not-run')
+            self.assertIn('Guest automation failed', entry['results']['old-sessions']['detail'])
+            self.assertEqual(entry['results']['local-old-session']['status'], 'skipped')
+            report = self.run.report()
+            self.assertEqual((report['p0']['verdict'], report['p1']['verdict']), ('pass', 'could not run'))
+
+    def test_a_stop_during_bonus_work_fences_the_remaining_bonus_turns(self):
+        """Bonus checkpoints obey a mid-run stop like every tier: only the in-flight one finishes."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        self.widen('full')
+        self.drive_pair('p0-installer-upgrade')
+        with self.run.locked():
+            self.run.cleanup('p0-installer-upgrade')
+        (self.run.directory / 'addendum.md').write_text('Fictional addendum for scheduling only.\n')
+
+        def narrowed(controller, envelope, files):
+            """Ask to stop after P2 while the first bonus product checkpoint runs."""
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'artifact-verification':
+                with self.run.locked():
+                    self.run.limit_scope('p2-only')
+            return self.archive(controller, envelope)
+
+        self.seen.clear()
+        self.drive_pair('fresh', narrowed)
+        self.assertEqual([value['check_id'] for value in self.seen], ['native-preflight', 'artifact-verification'])
+        with self.run.locked():
+            result = self.run.selected('fresh')['results']['artifact-verification']
+            self.assertTrue(result['dispatched_before_scope_stop'])
 
     def assert_stopped_outcome(self, status, expected):
         """Drive a distinct owned run through readiness to one nonpass observation."""
@@ -817,6 +983,19 @@ No native product action occurs unless the caller asks for the unsafe case.
         path.unlink()
         self.assertEqual(self.run.verdict(entry), 'could not run', 'lost failure evidence must invalidate recovery')
 
+    def test_readiness_retry_ignores_an_unavailable_p1_result_before_it(self):
+        """An unavailable old-session baseline earlier in the pair must not hold back a supported P0 recovery."""
+        self.readiness_failure()
+        entry = self.run.selected('p0-fresh')
+        check = next(iter(entry['required']))
+        entry['required'] = {'old-sessions': {'gui': True, 'command': True, 'continuity': False, 'priority': 'P1'},
+                             check: entry['required'][check]}
+        entry['results']['old-sessions'] = {'status': 'could-not-run', 'evidence': [], 'sha256': {},
+                                            'detail': 'Synthetic unavailable baseline.'}
+        self.run.save()
+        self.run.retry_readiness('p0-fresh')
+        self.assertEqual(self.run.selected('p0-fresh')['tester']['phase'], 'retry-ready')
+
     def test_readiness_retry_refuses_actions_or_uncertain_termination(self):
         """A click or missing stopped acknowledgement cannot be waved through as a harmless read."""
         for unsafe, stopped in ((True, True), (False, False)):
@@ -869,11 +1048,15 @@ No native product action occurs unless the caller asks for the unsafe case.
         entry = self.run.selected('p0-fresh')
         self.assertEqual(entry['results']['app-start']['status'], 'fail')
         entry['results']['app-start']['status'] = 'could-not-run'
-        entry['required']['app-start']['priority'] = 'P1'
-        self.run.save()
-        with self.assertRaises(Refused):
-            self.run.retry_unavailable('p0-fresh', 'Inspected fixture and repaired a prerequisite before retrying.')
-        self.assertNotIn('checkpoint_retries', self.run.selected('p0-fresh'))
+        # Neither a continuity check, whose sequence went on past it, nor the
+        # feedback send can be replayed through this transition.
+        for priority in ('P1', 'P2'):
+            with self.subTest(priority=priority):
+                entry['required']['app-start']['priority'] = priority
+                self.run.save()
+                with self.assertRaises(Refused):
+                    self.run.retry_unavailable('p0-fresh', 'Inspected fixture and repaired a prerequisite before retrying.')
+                self.assertNotIn('checkpoint_retries', self.run.selected('p0-fresh'))
 
     def test_harness_failure_is_separate_from_product_failure(self):
         """Permission bugs block the gate without condemning the published release bytes."""
@@ -984,6 +1167,37 @@ No native product action occurs unless the caller asks for the unsafe case.
         with self.run.locked():
             self.assertNotIn('artifact-verification', self.run.selected('p0-fresh')['results'])
             self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+
+    def test_a_failure_claim_survives_a_failed_evidence_import(self):
+        """A product failure the guest reported must stay visible for review when its evidence cannot be imported.
+
+The import fails as a harness error, so nothing is accepted, but the claim is
+kept as an unverified product failure that blocks promotion pending review.
+"""
+        self.prepare()
+        def broken_evidence(controller, envelope, files):
+            """Report a fail for app-start whose command receipt is missing from the export."""
+            self.seen.append(envelope)
+            label = self.archive(controller, envelope, 'fail' if envelope['check_id'] == 'app-start' else 'pass')
+            if envelope['check_id'] == 'app-start':
+                path = controller.directory / (label + '.tar')
+                with tarfile.open(path) as original:
+                    contents = {member.name: original.extractfile(member).read() for member in original.getmembers()
+                                if member.name != './commands.txt'}
+                with tarfile.open(path, 'w') as replaced:
+                    for name, content in contents.items():
+                        member = tarfile.TarInfo(name)
+                        member.size = len(content)
+                        replaced.addfile(member, io.BytesIO(content))
+            return label
+        self.run.tester = broken_evidence
+        with self.assertRaises(KeyError):
+            self.run.test('p0-fresh', source=self.source)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertNotIn('app-start', self.run.selected('p0-fresh')['results'])
+            self.assertEqual([claim['check_id'] for claim in report['p0']['unverified_product_failures']], ['app-start'])
+            self.assertTrue(report['promotion_blocked_pending_review'])
 
     def test_reconciliation_cannot_take_a_live_coordinator_lease(self):
         """An operator inspecting stale-looking state must not interfere with a live tester."""

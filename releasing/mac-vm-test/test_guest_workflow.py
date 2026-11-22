@@ -58,11 +58,11 @@ independent updater check. These assertions cover instructions, not live UI.
 
     def test_session_launches_use_the_same_model_as_the_guest_tester(self):
         """A model change must carry through the CLI envelope and both releases' native launch instructions."""
-        for check_id in ('old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent',
+        for check_id in ('old-sessions', 'local-supervisor-agent', 'remote-supervisor-agent',
                          'codex-conversation', 'seed-state'):
             for managed in (False, True):
                 with self.subTest(check=check_id, managed=managed):
-                    envelope = self.envelope('p0-updater-upgrade', check_id, 'manual', managed=managed)
+                    envelope = self.envelope('p0-installer-upgrade', check_id, 'manual', managed=managed)
                     model = envelope['settings']['model']
                     self.assertIn('exact model ' + model, envelope['instructions'])
                     self.assertIn('custom model ID', envelope['instructions'])
@@ -75,16 +75,30 @@ independent updater check. These assertions cover instructions, not live UI.
         self.assertLess(text.index('keep observing'), text.index('clicking the readout itself'))
         self.assertLess(text.index('Capture the visible menu'), text.index('brick_ui method restart'))
 
+    def test_p0_relaunches_leave_the_local_supervisor_to_its_own_checkpoint(self):
+        """Neither P0 relaunch may wait on, or Update, the supervisor the installer pair judges separately.
+
+Bonus upgrades still wait for the connected candidate supervisor.
+"""
+        for pass_id, path in (('p0-installer-upgrade', 'manual'), ('p0-updater-upgrade', 'ordinary')):
+            with self.subTest(pass_id=pass_id):
+                text = self.envelope(pass_id, 'update-relaunch', path, managed=True)['instructions']
+                self.assertIn("checked by P0's local-supervisor-upgrade checkpoint (on the installer pair): "
+                              'do not wait for it or use Update here', ' '.join(text.split()))
+                self.assertNotIn('wait for the connected candidate', text)
+        text = self.envelope('upgrade-v0.24.0', 'update-relaunch', 'manual', managed=True)['instructions']
+        self.assertIn('wait for the connected candidate\nlocal supervisor', text)
+
     def test_remote_agent_prompt_is_entered_in_the_visible_terminal(self):
         """Keep the tester away from the launcher field that may be offscreen after remote Update."""
-        text = self.envelope('p0-updater-upgrade', 'remote-supervisor-agent', 'manual', managed=True)['instructions']
+        text = self.envelope('p0-installer-upgrade', 'remote-supervisor-agent', 'manual', managed=True)['instructions']
         self.assertIn("Leave the launcher's optional Initial prompt blank", text)
         self.assertIn('prompt in the visible agent terminal', text)
         self.assertLess(text.index('Launch first'), text.index('Send: What is 17 + 25?'))
 
 
 class OldSessionInstructionsTests(unittest.TestCase):
-    """Pin what P0's old-session turns are told, in both the managed and the plain envelope.
+    """Pin what P1's old-session turns are told, in both the managed and the plain envelope.
 
 The receipts gate what the tester cannot fake, the survival of the old
 session's terminal host included; these instructions carry what only the UI
@@ -92,23 +106,27 @@ can show: the Restart offer and the resumed agent remembering the earlier
 turn. These assertions cover the delivered text, not live product behavior.
 """
 
-    def test_only_the_updater_old_fixture_starts_old_sessions(self):
-        """The installer fixture and bonus upgrades keep their old-fixture contract; P0's updater pair seeds the old sessions."""
+    def test_only_old_sessions_starts_the_old_sessions(self):
+        """Old sessions have their own P1 checkpoint, so no old fixture's P0 contract starts them.
+
+Starting them happens on the previous release, before any candidate code, so
+the tester is told a failure there is unavailable rather than a product fail.
+"""
         for build in (managed_instructions, instructions):
             with self.subTest(builder=build.__name__):
-                updater = build('old-fixture', 'p0-updater-upgrade', 'ordinary')
+                text = build('old-sessions', 'p0-installer-upgrade', 'manual')
                 for phrase in ('ONE genuine Codex', 'ONE on the remote host', 'Remember the word bluebird',
                                'Restart\nonly after capture' if build is managed_instructions else 'captured in Farhelm',
-                               'do not restart, stop or delete them'):
-                    self.assertIn(phrase, updater)
-                self.assertNotIn('No session or feedback yet', updater)
-        managed = managed_instructions('old-fixture', 'p0-updater-upgrade', 'ordinary')
+                               'do not restart, stop or delete them', 'report could-not-run, never fail',
+                               'Do not update yet'):
+                    self.assertIn(phrase, text)
+                for pass_id in ('p0-installer-upgrade', 'p0-updater-upgrade', 'upgrade-v0.24.0'):
+                    self.assertNotIn('bluebird', build('old-fixture', pass_id, 'manual'))
+        managed = managed_instructions('old-sessions', 'p0-installer-upgrade', 'manual')
         for operation in ('inspect_state', 'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'):
             self.assertIn(operation, managed)
-        for pass_id in ('p0-installer-upgrade', 'upgrade-v0.24.0'):
-            text = managed_instructions('old-fixture', pass_id, 'manual')
-            self.assertIn('No session or feedback yet', text)
-            self.assertNotIn('bluebird', text)
+        for pass_id in ('p0-installer-upgrade', 'p0-updater-upgrade', 'upgrade-v0.24.0'):
+            self.assertIn('No session or feedback yet', managed_instructions('old-fixture', pass_id, 'manual'))
 
     def test_old_session_turns_compare_before_touching_and_ask_about_the_earlier_turn(self):
         """A host restart replaces the host, so the survival comparison must come first; any reply is not a resume.
@@ -123,7 +141,7 @@ restarts directly, without a working-agent confirmation.
         for side, survival, final in (('local', 'host_survival', 'old_session_after'),
                                       ('remote', 'remote_host_survival', 'remote_old_session_after')):
             with self.subTest(side=side):
-                text = managed_instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
+                text = managed_instructions(side + '-old-session', 'p0-installer-upgrade', 'manual')
                 self.assertLess(text.index(f'call {survival} exactly'), text.index(f'Select the old {side} session'))
                 restart = "use the session's ordinary Restart"
                 self.assertLess(text.index('What is 6 times 8?'), text.index(restart))
@@ -138,7 +156,7 @@ restarts directly, without a working-agent confirmation.
                 for phrase in ('confirmation only if offered', 'An idle agent\nrestarts directly',
                                'repeat a completed Restart to obtain a dialog'):
                     self.assertIn(phrase, text)
-                plain = instructions(side + '-old-session', 'p0-updater-upgrade', 'ordinary')
+                plain = instructions(side + '-old-session', 'p0-installer-upgrade', 'manual')
                 for envelope in (text, plain):
                     for phrase in ('band', 'details', 'terminal kind', 'branch', 'do not restart'):
                         self.assertNotIn(phrase, envelope)
@@ -161,10 +179,10 @@ leave those checks without their premise.
         for check, operation in (('local-supervisor-agent', 'terminal_hosts'),
                                  ('remote-supervisor-agent', 'remote_terminal_hosts')):
             with self.subTest(check=check):
-                text = managed_instructions(check, 'p0-updater-upgrade', 'ordinary')
+                text = managed_instructions(check, 'p0-installer-upgrade', 'manual')
                 self.assertNotIn('call ' + operation, text)
                 self.assertIn('untouched', text)
-                for envelope in (text, instructions(check, 'p0-updater-upgrade', 'ordinary')):
+                for envelope in (text, instructions(check, 'p0-installer-upgrade', 'manual')):
                     self.assertNotIn('terminal host', envelope)
                     self.assertEqual('Leave this new session running' in envelope, check.startswith('remote-'))
 
@@ -264,16 +282,17 @@ class SetupTests(unittest.TestCase):
     def test_feedback_consent_is_separate_from_credential_destinations(self):
         """Credential injection cannot authorize an external feedback issue.
 
-P0 remains runnable without feedback consent. Full/P1 setup must refuse before
-starting unless the operator separately recorded that exact live-send scope.
+P0 and P1 remain runnable without feedback consent. Full and stop-after-P2
+setup must refuse before starting unless the operator separately recorded that
+exact live-send scope.
 """
         self.assertEqual(require_setup(self.profile), self.config)
-        with self.assertRaisesRegex(Refused, 'live P1 feedback'):
+        with self.assertRaisesRegex(Refused, 'live P2 feedback'):
             require_setup(self.profile, feedback=True)
         self.write('consent.json', dict(self.authorization, feedback_send_approved=True))
         self.assertEqual(require_setup(self.profile, feedback=True), self.config)
         self.write('consent.json', dict(self.authorization, feedback_send_approved='yes'))
-        with self.assertRaisesRegex(Refused, 'live P1 feedback'):
+        with self.assertRaisesRegex(Refused, 'live P2 feedback'):
             require_setup(self.profile, feedback=True)
 
     def test_credentials_use_stdin_and_owned_destinations_only(self):

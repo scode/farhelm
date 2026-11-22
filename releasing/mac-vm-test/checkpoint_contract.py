@@ -4,11 +4,12 @@ The host selects an update path from release facts. The UI model must not have
 to decide which conditional recipe paragraphs apply, and the command gate and
 result validator must agree on that decision.
 
-P0's old-session checkpoints accept only on process samples taken during the
+P1's old-session checkpoints accept only on process samples taken during the
 run: whether the old session and its terminal host survived the upgrade, and
 whether its Restart moved it onto one new terminal host. Samples the fixed
 operations take themselves at moments they can check (`host_survival` before the old session is touched, `old_session_after`
-after it), compared with the old fixture's digest-bound receipts, decide that.
+after it), compared with the digest-bound receipts of `old-sessions`, which
+started those sessions on the previous release, decide that.
 The UI model's observations are further checks, never the decision, and the
 order in which it calls observations can turn a pass into a refusal but never
 a refusal into a pass.
@@ -19,7 +20,7 @@ import json
 
 # Each side of the pair has its own fixed observation of terminal hosts and of
 # session rows; the old-session checkpoint for that side compares against the
-# old fixture's receipts of the same operations.
+# `old-sessions` receipts of the same operations.
 SIDES = {
     'local': {'hosts': 'terminal_hosts', 'survival': 'host_survival', 'after': 'old_session_after',
               'state': 'inspect_state', 'old_check': 'local-old-session'},
@@ -30,17 +31,48 @@ SIDES = {
 
 # Checkpoints known to need longer than the ordinary default turn, as a floor
 # under the operator's `--timeout` (capped at the tester's 3600 s maximum).
-# The updater pair's old fixture installs, launches and provisions as before and
-# now also waits two genuine Codex conversations through capture; each
-# old-session check runs two agent turns around an agent Restart.
-TURN_FLOORS = {('old-fixture', 'p0-updater-upgrade'): 2400,
-               ('local-old-session', 'p0-updater-upgrade'): 1800,
-               ('remote-old-session', 'p0-updater-upgrade'): 1800}
+# The installer pair's `old-sessions` waits two genuine Codex conversations on
+# the previous release through capture; each old-session check runs two agent
+# turns around an agent Restart.
+TURN_FLOORS = {('old-sessions', 'p0-installer-upgrade'): 1800,
+               ('local-old-session', 'p0-installer-upgrade'): 1800,
+               ('remote-old-session', 'p0-installer-upgrade'): 1800}
 
 
 def turn_timeout(check, pass_id, requested):
     """Give a checkpoint at least its known floor, never more than the tester's maximum."""
     return min(3600, max(requested, TURN_FLOORS.get((check, pass_id), 0)))
+
+
+def relaunch_checks_app_only(task):
+    """Say whether this pass's relaunch judges the app alone: true for both P0 upgrade pairs.
+
+Their local supervisor's upgrade, and any local Update action, belong to the
+installer pair's `local-supervisor-upgrade`, so the relaunch proves a new app
+process instead (the owned restart's transition receipt). Bonus upgrades keep
+requiring the candidate supervisor at relaunch.
+"""
+    return task['pass_id'] in ('p0-installer-upgrade', 'p0-updater-upgrade')
+
+
+def prerequisite_checks(contracts, check):
+    """List the earlier checkpoints of a pass, in order, that `check` depends on.
+
+`contracts` is the pass's declared checkpoint map, in order, each with its
+priority. A P0 checkpoint depends on the earlier P0 ones only, so a failed
+`old-sessions` (P1) cannot keep the candidate's supervisors from being tested;
+P1 on every earlier P0 and P1 one, since the old sessions and the remote menu
+need upgraded supervisors and share the same sessions; P2 on the earlier P0
+ones; a bonus checkpoint on everything before it. An undeclared checkpoint
+(native preflight) has none.
+"""
+    if check not in contracts:
+        return []
+    ordered = list(contracts)
+    earlier = ordered[:ordered.index(check)]
+    allowed = {'P0': ('P0',), 'P1': ('P0', 'P1'), 'P2': ('P0',)}.get(contracts[check].get('priority', 'bonus'))
+    return earlier if allowed is None else [key for key in earlier
+                                            if contracts[key].get('priority', 'bonus') in allowed]
 
 
 def old_session_side(check):
@@ -109,8 +141,16 @@ def required_operations(check, pass_id, update_path):
         'app-start': {'launch', 'versions'},
         'old-fixture': {'fixture_clean', 'verify_previous', 'install_previous', 'launch', 'versions'},
         'update-discovery': {'update_logs', 'versions'}, 'update-relaunch': {'versions'},
+        # Each supervisor's upgrade is observed on its own before an agent runs
+        # on it; the agent checks repeat the version observation they rely on.
+        'local-supervisor-upgrade': {'versions'}, 'remote-supervisor-upgrade': {'remote_version'},
         'local-supervisor-agent': {'versions'},
         'remote-supervisor-agent': {'remote_version'},
+        # One old session per host on the previous release: its session row,
+        # captured conversation and terminal identities are the baseline the
+        # later old-session checks compare against.
+        'old-sessions': {'versions', 'inspect_state', 'remote_inspect_state', 'terminal_hosts',
+                         'remote_terminal_hosts'},
         # The survival comparison samples before the session is touched and runs
         # once; the final sample is refused unless the comparison ran first.
         'local-old-session': {'prior_receipts', 'host_survival', 'old_session_after'},
@@ -127,12 +167,10 @@ def required_operations(check, pass_id, update_path):
     result = set(requirements.get(check, {'prior_receipts'}))
     if check == 'native-preflight' and not pass_id.startswith('p0-'):
         result.add('finder_frame')
-    if check == 'old-fixture' and pass_id != 'p0-installer-upgrade':
+    # The updater pair checks discovery and relaunch only; every other old
+    # fixture provisions the remote host its later checks upgrade.
+    if check == 'old-fixture' and pass_id != 'p0-updater-upgrade':
         result.add('remote_version')
-    if check == 'old-fixture' and pass_id == 'p0-updater-upgrade':
-        # P0's one deliberate old session per host: its session row, captured
-        # conversation and terminal identities are the later checks' baseline.
-        result |= {'inspect_state', 'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'}
     if check == 'update-relaunch' and update_path == 'manual':
         result.add('install_candidate')
     if check == 'update-relaunch' and update_path == 'override':
@@ -143,32 +181,47 @@ def required_operations(check, pass_id, update_path):
     return result
 
 
+class EffectFailure(RuntimeError):
+    """The machine-owned snapshots contradict a remote menu action that started from a valid premise.
+
+Unlike a failed premise (no provisioned host to start from), this is the
+product's own result: data lost, an uninstall that left things running, or a
+Remove that changed the host. The import records it as a product failure.
+"""
+
+
 def require_remote_host_effect(check, before, after):
     """Distinguish forgetting a host from uninstalling its managed resources.
 
-Both menu checks must start with a real provisioned host and retained data.
-Remove must leave the original service and files alone; uninstall must remove
-them while keeping the data. Native images separately prove the registry and
-session behavior, which these independent SSH observations cannot establish.
+Both menu checks must start with a real provisioned host and readable retained
+data, with the process scan seeing its running supervisor; otherwise the
+premise failed (RuntimeError). Remove must leave the host exactly as it was.
+Uninstall must remove the service and files completely, with no supervisor
+or terminal host left running, while keeping the data: the same session ids in
+its database. A contradiction after a valid start is an `EffectFailure`.
+Native images separately prove the registry and session behavior, which these
+independent SSH observations cannot establish.
 """
+    if check not in ('remote-host-remove', 'remote-host-uninstall'):
+        raise ValueError('not a remote host menu checkpoint')
     service = before['service']
     if (service['ActiveState'] != 'active' or service['SubState'] != 'running'
             or not service['MainPID'].isdigit() or int(service['MainPID']) <= 0
+            or int(service['MainPID']) not in before['farhelm_pids'] or before['session_ids'] is None
             or not all(before[key] for key in ('lib_present', 'unit_present', 'binary_sha256',
                                               'unit_sha256', 'data_present', 'database_present'))):
-        raise RuntimeError('remote menu check did not start from a provisioned running host with data')
-    if not after['data_present'] or not after['database_present']:
-        raise RuntimeError('remote menu action lost the retained data directory or database')
-    if check == 'remote-host-remove':
-        if before != after:
-            raise RuntimeError('Remove changed remote resources or the running supervisor')
-    elif check == 'remote-host-uninstall':
-        if (after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']
-                or after['service']['MainPID'] != '0' or after['service']['ActiveState'] != 'inactive'
-                or after['service']['LoadState'] != 'not-found'):
-            raise RuntimeError('Uninstall left remote binaries, unit or supervisor running')
-    else:
-        raise ValueError('not a remote host menu checkpoint')
+        raise RuntimeError('remote menu check did not start from a provisioned running host with readable data')
+    # Kept data means the same data: an emptied, replaced or unreadable
+    # database keeps the file but loses the sessions it held.
+    if not after['data_present'] or not after['database_present'] or after['session_ids'] != before['session_ids']:
+        raise EffectFailure('remote menu action lost the retained data directory or database')
+    if check == 'remote-host-remove' and before != after:
+        raise EffectFailure('Remove changed remote resources or the running supervisor')
+    if check == 'remote-host-uninstall' and (
+            after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']
+            or after['service']['MainPID'] != '0' or after['service']['ActiveState'] != 'inactive'
+            or after['service']['LoadState'] != 'not-found' or after['farhelm_pids']):
+        raise EffectFailure('Uninstall left remote binaries, unit, supervisor or terminal hosts running')
 
 
 def available_operations(check, pass_id, update_path):
@@ -219,17 +272,30 @@ transient progress image or fail when installation finishes before capture.'''
     if update_path == 'override':
         discovery = '''Quit the old app normally through native CUA, then call launch_override.
 Call update_logs and require the startup override announcement.\n''' + discovery
-    restart = '''Wait for the actual Restart to update offer. Use brick_ui method restart with
+    click = '''Wait for the actual Restart to update offer. Use brick_ui method restart with
 coordinates from a fresh native image of that menu: args [[x,y]]. The harness
 owns the single native click and process handoff.
-Require the candidate returns usable, dismiss welcome with got it if present
-and observe local connection. An old app that runs its supervisor detached
-leaves it running when it quits, and the candidate replaces it on first launch,
-so a brief connecting state is the handover: wait for the connected candidate
-local supervisor, never stop one yourself. Never manually launch or use getApp to rescue a
-missing restart. Call versions after the candidate returns. Capture the final
-native acceptance state. The candidate may update the remote supervisor during
-relaunch. Its later checkpoint verifies the outcome.'''
+Require the candidate returns usable and dismiss welcome with got it if present.
+'''
+    end = '''Never manually launch or use getApp to rescue a missing restart. Call versions
+after the candidate returns. Capture the final native acceptance state. The
+candidate may update the remote supervisor during relaunch. Its later
+checkpoint verifies the outcome.'''
+    if relaunch_checks_app_only({'pass_id': pass_id}):
+        # P0 judges the app here; the local supervisor's upgrade is a P0
+        # checkpoint of its own on the installer pair.
+        supervisor = '''This relaunch judges the app alone. Whether the local supervisor upgraded, and
+any local Update action, are checked by P0's local-supervisor-upgrade
+checkpoint (on the installer pair): do not wait for it or use Update here, and
+never stop a supervisor yourself.
+'''
+    else:
+        supervisor = '''Observe local connection. An old app that runs its supervisor detached leaves
+it running when it quits, and the candidate replaces it on first launch, so a
+brief connecting state is the handover: wait for the connected candidate
+local supervisor, never stop one yourself.
+'''
+    restart = click + supervisor + end
     if check == 'update-discovery':
         if update_path == 'manual':
             raise ValueError('manual installation cannot satisfy updater discovery')
@@ -261,7 +327,7 @@ override-removal observation as a gap.'''
 
 
 def remote_host_instructions(check):
-    """Exercise the remote menu before feedback, using the agent fixture already proved by P0.
+    """Exercise the remote menu before feedback, using the agent sessions P0 and the old-session checks left running.
 
 Remove runs first while both genuine remote sessions are still alive. Uninstall
 then ends those sessions through the product before confirming the destructive
@@ -301,10 +367,11 @@ image of that plan. Confirm once through its ordinary Uninstall action, without
 changing confirmation preferences. Wait for completion and require the remote
 host/cached sessions disappear and the kept-data removal notice appears.
 Call remote_host_after; require no remote lib/binary or unit file, no loaded or
-running supervisor, and the original data directory/database still present.
+running supervisor, no Farhelm process left at all (farhelm_pids empty: no
+terminal host either), and the original data directory/database still present.
 Retain a final native image of completion and the usable candidate app/local
 host. Do not re-add, reinstall, retry an uncertain uninstall or remove files to
-manufacture success. P1 feedback follows on this still-running Mac candidate.'''
+manufacture success. P2 feedback follows on this still-running Mac candidate.'''
     raise ValueError('not a remote host menu checkpoint')
 
 

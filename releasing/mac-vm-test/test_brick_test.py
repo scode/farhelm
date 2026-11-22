@@ -22,7 +22,7 @@ import uuid
 from unittest import mock
 
 from brick_test import (REPO, UPGRADE_FLOOR, Run, Source, artifact, checks, metadata, plan, priority_entry, smoke,
-                        version)
+                        tier, version)
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -73,20 +73,77 @@ raise, and a floor beyond every previous stable must fail before guest setup.
 """
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.24.0')
         self.assertEqual([v['id'] for v in result['passes']],
-                         ['p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade',
+                         ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
                           'fresh', 'upgrade-v0.24.0'])
         self.assertTrue(all(v['previous'] == 'v0.24.0' for v in result['passes']))
         with self.assertRaisesRegex(Refused, 'from v0.25.0 onward'):
             plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.25.0')
 
     def test_previous_stable_leads_and_older_supported_pairs_remain_required(self):
-        """Testing only the latest old stable must not silently waive older upgrade contracts."""
+        """Testing only the latest old stable must not silently waive the older upgrade contracts within the cap.
+
+Discovery is planned before the installer pair, because the installer pair
+goes on to P1 and P2 while its candidate still runs. The plan carries the
+layout marker that lets this coordinator continue it.
+"""
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertEqual([v['id'] for v in result['passes']],
-                         ['p0-fresh', 'p0-installer-upgrade', 'p0-updater-upgrade',
+                         ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
                           'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
         self.assertEqual(result['p0_sequence'], [v['id'] for v in result['passes'][:3]])
         self.assertEqual(result['passes'][4]['update_path'], 'manual')
+        self.assertEqual(result['priority_layout'], 2)
+
+    def test_bonus_upgrades_cover_at_most_the_three_newest_previous_stables(self):
+        """Historical coverage stops at three sources however far back the upgrade floor reaches.
+
+The maintainer capped it: each older source costs a whole pair. The newest
+stable still leads P0 and the bonus list, and RCs never count as sources.
+"""
+        class ManyStables(FakeSource):
+            """Offer five eligible previous stables and an RC between them."""
+            def tags(self):
+                """List more stables than the cap, out of order, to show the plan sorts them."""
+                return ['v0.20.0', 'v0.24.0', 'v0.21.0', 'v0.23.0-rc.1', 'v0.23.0', 'v0.22.0', 'v0.25.0']
+        result = plan('v0.25.0', 'v0.24.0', ManyStables(), floor='v0.20.0')
+        self.assertEqual([v['id'] for v in result['passes'] if v['id'].startswith('upgrade-')],
+                         ['upgrade-v0.24.0', 'upgrade-v0.23.0', 'upgrade-v0.22.0'])
+        self.assertTrue(all(v['previous'] == 'v0.24.0' for v in result['passes'] if v['priority'] == 'P0'))
+
+    def test_prerelease_plans_no_updater_pair(self):
+        """The updater never offers an RC or dev build, so cloning a pair only to skip its check is waste.
+
+The installer pair still runs, and carries the supervisor checks either way.
+"""
+        for candidate in ('v0.25.0-rc.1', 'v0.25.0-dev.1'):
+            with self.subTest(candidate=candidate):
+                result = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0']), floor='v0.23.0')
+                self.assertEqual(result['p0_sequence'], ['p0-fresh', 'p0-installer-upgrade'])
+                self.assertNotIn('p0-updater-upgrade', [v['id'] for v in result['passes']])
+
+    def test_installer_pair_upgrades_supervisors_before_agents_then_runs_p1_and_p2(self):
+        """The pair order is the priority order: bricking first, continuity next, the feedback send last.
+
+Each supervisor's upgrade is its own P0 checkpoint ahead of the new agents, so
+a flaky agent turn cannot obscure whether a supervisor came up. The old
+sessions have to start before the upgrade, so that P1 checkpoint precedes the
+relaunch; the updater pair checks discovery and relaunch only.
+"""
+        installer = checks('p0-installer-upgrade')
+        self.assertEqual([(key, spec['priority']) for key, spec in installer.items()],
+                         [('artifact-verification', 'P0'), ('old-fixture', 'P0'), ('old-sessions', 'P1'),
+                          ('update-relaunch', 'P0'), ('local-supervisor-upgrade', 'P0'),
+                          ('remote-supervisor-upgrade', 'P0'), ('local-supervisor-agent', 'P0'),
+                          ('remote-supervisor-agent', 'P0'), ('local-old-session', 'P1'),
+                          ('remote-old-session', 'P1'), ('remote-host-remove', 'P1'),
+                          ('remote-host-uninstall', 'P1'), ('p2-feedback-send', 'P2')])
+        self.assertEqual(installer['p2-feedback-send'], {'gui': True, 'command': False, 'continuity': False,
+                                                         'priority': 'P2'})
+        self.assertTrue(all(spec['command'] for key, spec in installer.items()
+                            if key not in ('artifact-verification', 'p2-feedback-send')))
+        self.assertEqual(list(checks('p0-updater-upgrade')),
+                         ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch'])
+        self.assertEqual({spec['priority'] for spec in checks('p0-updater-upgrade').values()}, {'P0'})
 
     def test_fresh_pass_checks_window_drag_after_its_sessions(self):
         """The title-bar check needs a selected session and must not cost the bonus session coverage.
@@ -107,8 +164,8 @@ fresh fixture keeps its four checkpoints.
         """A candidate's support cannot make an unsupported old app use its override."""
         source = FakeSource(['v0.24.0'])
         stable = plan('v0.25.0', 'v0.24.0', source, floor='v0.23.0')
-        self.assertEqual(stable['passes'][1]['update_path'], 'manual')
-        self.assertEqual(stable['passes'][2]['update_path'], 'override')
+        self.assertEqual(stable['passes'][1]['update_path'], 'override')
+        self.assertEqual(stable['passes'][2]['update_path'], 'manual')
         self.assertEqual(stable['passes'][4]['update_path'], 'override')
         self.assertEqual(stable['passes'][5]['update_path'], 'manual')
         rc = plan('v0.25.0-rc.1', 'v0.24.0', source, floor='v0.23.0')
@@ -118,8 +175,8 @@ fresh fixture keeps its four checkpoints.
         """After-publication testing still uses older versions, never candidate-to-itself."""
         result = plan('v0.24.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertTrue(all(v['previous'] == 'v0.23.0' for v in result['passes']))
-        self.assertEqual(result['passes'][1]['update_path'], 'manual')
-        self.assertEqual(result['passes'][2]['update_path'], 'ordinary')
+        self.assertEqual(result['passes'][1]['update_path'], 'ordinary')
+        self.assertEqual(result['passes'][2]['update_path'], 'manual')
 
     def test_downgrades_missing_old_source_and_unsafe_tags_are_refused(self):
         """Invalid gate inputs must fail before any VM can be created."""
@@ -735,11 +792,13 @@ artifact corruption as competing causes of the new refusal.
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.assertTrue(all(child.poll() == 0 for child in self.model.children))
 
-    def enable_p0(self, p0_only=False, supported=True, candidate='v0.25.0', p1_only=False):
+    def enable_p0(self, scope='full', supported=True, candidate='v0.25.0'):
         """Create a new priority-aware run without rewriting the legacy fixture's history.
 
 The modeled bases are independently stopped. No real release bytes, guest
 authentication, GUI outcome or product verdict is borrowed by these tests.
+`supported` says whether the fictional previous stable's app honors the update
+override, which decides whether its updater pair can discover the candidate.
 """
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
@@ -747,7 +806,7 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
                        disk_usage=lambda path: namedtuple('Usage', 'free')(self.free))
         release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []), floor='v0.23.0')
         release['sha256sums_sha256'] = 'fixture-checksum'
-        self.run.create(release, p0_only=p0_only, p1_only=p1_only)
+        self.run.create(release, scope=scope)
 
     def complete_p0(self, pass_id, through=None):
         """Exercise all real record and cleanup gates with explicitly synthetic observations.
@@ -755,8 +814,9 @@ authentication, GUI outcome or product verdict is borrowed by these tests.
 Tiny PNGs prove evidence format only. The fake substrate's stopped/absent
 state independently checks cleanup before the next fixture is permitted.
 An explicit boundary leaves the pair live for an unsettled evidence-gate test.
-Without a boundary, this helper also records the in-scope P1 with synthetic
-image evidence so cleanup cannot silently skip its new obligation.
+Without a boundary, this helper records every in-scope checkpoint, P1 and P2
+included, so cleanup cannot silently skip an obligation; out-of-scope tiers
+are left unrecorded, as the scheduler leaves them.
 """
         children = self.prepare(pass_id)
         image = self.evidence_file(pass_id + '.png', PNG)
@@ -770,152 +830,103 @@ image evidence so cleanup cannot silently skip its new obligation.
                 self.run.select_update(pass_id, 'v0.24.0')
             entry = self.run.selected(pass_id)
             for check in entry['required']:
-                if check not in self.run.executable_checks(entry)['required']:
-                    continue
-                if entry['required'][check].get('priority') == 'P1' and self.run.data['scope'] == 'p0-only':
+                if tier(entry, check) not in self.run.scope_tiers():
                     continue
                 refs = [receipt] if check == 'artifact-verification' else [image, command]
                 self.run.record(pass_id, check, 'pass', refs, 'Synthetic evidence contract, not a product observation.')
                 if check == through:
                     return children
-            self.assertEqual(self.run.verdict(self.run.executable_checks(priority_entry(entry, 'P0'))), 'pass')
+            self.assertEqual(self.run.verdict(priority_entry(entry, 'P0')), 'pass')
             self.run.cleanup(pass_id)
         self.assertTrue(all(child.poll() == 0 for child in children))
         self.assertEqual(set(self.model.states), {'mac-base', 'linux-base'})
 
-    def test_rc_discovery_skip_reports_the_observed_channel(self):
-        """Explain why discovery is unavailable while keeping unrun P0 checks visible."""
-        self.enable_p0(candidate='v0.25.0-rc.1')
+    def complete_stable_p0(self):
+        """Pass and release the fresh and updater pairs, leaving the installer pair for the test itself."""
         self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        self.prepare('p0-updater-upgrade')
-        with self.run.locked():
-            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
-            self.run.select_update('p0-updater-upgrade', 'v0.24.0')
-            p0 = self.run.report()['p0']
-            self.assertEqual(p0['verdict'], 'could not run')
-            self.assertEqual(p0['checks']['installer-upgrade'], 'pass')
-            self.assertEqual(p0['checks']['local-supervisor-agent'], 'could not run')
-            self.assertEqual(p0['unavailable_checks']['update-discovery'],
-                             'In-app update discovery was skipped as expected. v0.25.0-rc.1 is a release candidate. '
-                             'The in-app updater only discovers stable releases. '
-                             'The public update channel pointed to v0.24.0.')
-            self.assertNotIn('summary', p0)
-            receipt = self.run.directory / 'p0-updater-upgrade/latest-at-selection.json'
-            receipt.write_text('{}')
-            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
-
-    def test_p0_precedes_bonus_and_uses_distinct_upgrade_fixtures(self):
-        """Broader functionality and one successful upgrade path cannot mask another untested path."""
-        self.enable_p0()
-        for pass_id in ('fresh', 'p0-installer-upgrade', 'p0-updater-upgrade'):
-            with self.run.locked(), self.assertRaisesRegex(Refused, 'complete P0'):
-                self.run.prepare(pass_id, [])
-        self.assertEqual(self.model.calls, [])
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        with self.run.locked():
-            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
-            self.assertEqual(self.run.selected('p0-installer-upgrade')['update_path'], 'manual')
-            with self.assertRaisesRegex(Refused, 'complete P0'):
-                self.run.prepare('fresh', [])
         self.complete_p0('p0-updater-upgrade')
-        with self.run.locked():
-            self.assertEqual(self.run.selected('p0-updater-upgrade')['update_path'], 'override')
-            report = self.run.report()
-            self.assertEqual(report['p0']['verdict'], 'pass')
-            self.assertNotIn('unavailable_checks', report['p0'])
-            self.assertEqual(list(report['p0']['checks']),
-                             ['fresh-install-start', 'installer-upgrade', 'click-to-upgrade',
-                              'local-supervisor-agent', 'remote-supervisor-agent',
-                              'remote-host-remove', 'remote-host-uninstall'])
-            self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
-            self.assertEqual(report['verdict'], 'could not run')
-        self.prepare('fresh')
 
-    def test_manual_discovery_gap_allows_remaining_checks_feedback_cleanup_and_bonus(self):
-        """Unsupported discovery must not strand useful release coverage or fake a P0 pass.
+    def test_prerelease_reports_its_skipped_discovery_and_still_runs_p1_and_p2(self):
+        """An RC or dev run explains the discovery it never planned, and the rest of its coverage still runs.
 
-RC and dev candidates use manual installation. Every other checkpoint, including seeded-session
-survival and remote removal, must still pass before feedback or bonus work and
-before the report can say all runnable P0 checks passed.
+The formal P0 verdict stays incomplete, because discovery did not run, but the
+summary says every runnable P0 check passed once they have. The installer pair
+carries the supervisor checks, so they need no updater pair.
 """
-        cases = (
-            ('v0.25.0-rc.1', True, 'v0.25.0-rc.1 is a release candidate. '
-             'The in-app updater only discovers stable releases.'),
-            ('v0.25.0-dev.1', True, 'v0.25.0-dev.1 is a development prerelease. '
-             'The in-app updater only discovers stable releases.'),
-        )
-        for candidate, supported, reason in cases:
+        cases = (('v0.25.0-rc.1', 'v0.25.0-rc.1 is a release candidate.'),
+                 ('v0.25.0-dev.1', 'v0.25.0-dev.1 is a development prerelease.'))
+        for candidate, reason in cases:
             with self.subTest(candidate=candidate):
-                self.enable_p0(candidate=candidate, supported=supported)
-                for pass_id in self.run.data['plan']['p0_sequence']:
-                    self.complete_p0(pass_id)
+                self.enable_p0(candidate=candidate)
+                with self.run.locked():
+                    p0 = self.run.report()['p0']
+                    discovery = p0['unavailable_checks']['update-discovery']
+                    self.assertIn(reason, discovery)
+                    self.assertIn('only discovers stable releases, so this run planned no updater pair', discovery)
+                    self.assertIn('public update channel pointed to v0.24.0', discovery)
+                    self.assertEqual(p0['checks']['click-to-upgrade'], 'skipped')
+                    self.assertNotIn('summary', p0)
+                self.complete_p0('p0-fresh')
+                self.complete_p0('p0-installer-upgrade')
                 with self.run.locked():
                     report = self.run.report()
                     self.assertTrue(self.run.p0_executable_complete())
                     self.assertEqual(report['p0']['verdict'], 'could not run')
-                    self.assertEqual(report['p0']['checks']['click-to-upgrade'], 'could not run')
-                    discovery = report['p0']['unavailable_checks']['update-discovery']
-                    self.assertIn(reason, discovery)
-                    self.assertIn('public update channel pointed to v0.24.0', discovery)
                     self.assertEqual(report['p0']['summary'], 'All runnable P0 checks passed. ' + discovery)
-                    self.assertEqual(set(value for key, value in report['p0']['checks'].items()
-                                         if key != 'click-to-upgrade'), {'pass'})
+                    self.assertEqual({value for key, value in report['p0']['checks'].items()
+                                      if key != 'click-to-upgrade'}, {'pass'})
                     self.assertEqual(report['p1']['verdict'], 'pass')
-                    self.assertNotIn('update-discovery', self.run.selected('p0-updater-upgrade')['results'])
-                    self.assertEqual(report['passes']['p0-updater-upgrade']['phase'], 'deleted')
+                    self.assertEqual(report['p2']['verdict'], 'pass')
+                    self.assertEqual(report['passes']['p0-installer-upgrade']['phase'], 'deleted')
                 self.prepare('fresh')
                 with self.run.locked():
                     self.run.cleanup('fresh', discard_failed=True)
 
-    def test_manual_gap_does_not_waive_missing_checks_failed_discovery_or_selection_evidence(self):
-        """Report a skip only with valid selection evidence, and summarize only completed coverage."""
-        self.enable_p0(candidate='v0.25.0-rc.1')
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        self.complete_p0('p0-updater-upgrade', through='update-relaunch')
-        with self.run.locked():
-            self.assertFalse(self.run.p0_executable_complete())
-            self.assertIn('update-discovery', self.run.report()['p0']['unavailable_checks'])
-            self.assertNotIn('summary', self.run.report()['p0'])
-            with self.assertRaisesRegex(Refused, 'all P0'):
-                self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [], 'Premature feedback.')
-            entry = self.run.selected('p0-updater-upgrade')
-            selection = self.run.directory / 'p0-updater-upgrade/latest-at-selection.json'
-            original = selection.read_bytes()
-            selection.write_text('{}')
-            self.assertIn('update-discovery', self.run.executable_checks(entry)['required'])
-            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
-            selection.write_bytes(original)
-            self.assertNotIn('update-discovery', self.run.executable_checks(entry)['required'])
-            self.run.record('p0-updater-upgrade', 'update-discovery', 'fail', [], 'Observed product failure.')
-            self.assertIn('update-discovery', self.run.executable_checks(entry)['required'])
-            self.assertNotIn('unavailable_checks', self.run.report()['p0'])
-            self.assertEqual(self.run.report()['p0']['verdict'], 'fail')
-            with self.assertRaisesRegex(Refused, 'stop after the first'):
-                self.run.require_priority('fresh')
+    def test_p0_fixtures_run_in_order_before_bonus_and_each_answers_its_own_question(self):
+        """Broader functionality and one successful upgrade path cannot mask another untested path.
 
-    def test_p0_only_scope_and_changed_evidence_fence_bonus_cloning(self):
-        """A requested P0 stop stays effective, and stale successful evidence never authorizes more work."""
-        self.enable_p0(p0_only=True)
-        for pass_id in self.run.data['plan']['p0_sequence']:
-            self.complete_p0(pass_id)
-        calls = len(self.model.calls)
+Every P0 named result has its own checkpoints: the installer pair answers the
+installer upgrade, each supervisor's upgrade and each new agent separately.
+P1 and P2 report their own named results from the same pair.
+"""
+        self.enable_p0()
         with self.run.locked():
-            report = self.run.report()
-            self.assertEqual(report['requested_verdict'], 'pass')
-            self.assertEqual(report['verdict'], 'could not run')
-            with self.assertRaisesRegex(Refused, 'outside this run scope'):
+            with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
                 self.run.prepare('fresh', [])
-            # Revalidate bytes even after successful cleanup: a corrupt export
-            # invalidates the P0 answer without resurrecting any guest.
-            (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
+            for pass_id in ('p0-updater-upgrade', 'p0-installer-upgrade'):
+                with self.assertRaisesRegex(Refused, 'planned order'):
+                    self.run.prepare(pass_id, [])
+        self.assertEqual(self.model.calls, [])
+        self.complete_stable_p0()
+        with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
-        self.assertEqual(len(self.model.calls), calls)
+            self.assertEqual(self.run.selected('p0-updater-upgrade')['update_path'], 'override')
+            with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
+                self.run.prepare('fresh', [])
+        self.complete_p0('p0-installer-upgrade')
+        with self.run.locked():
+            self.assertEqual(self.run.selected('p0-installer-upgrade')['update_path'], 'manual')
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertNotIn('unavailable_checks', report['p0'])
+            self.assertEqual(list(report['p0']['checks']),
+                             ['fresh-install-start', 'click-to-upgrade', 'installer-upgrade',
+                              'local-supervisor-upgrade', 'remote-supervisor-upgrade', 'local-agent', 'remote-agent'])
+            self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
+            self.assertEqual(report['p1'], {'verdict': 'pass', 'checks': {
+                'local-old-session': 'pass', 'remote-old-session': 'pass',
+                'remote-host-remove': 'pass', 'remote-host-uninstall': 'pass'}})
+            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {'feedback-send': 'pass'}})
+            self.assertEqual(report['verdict'], 'could not run')
+        self.prepare('fresh')
 
-    def test_p0_failure_or_missing_fixture_stops_further_observations(self):
-        """Unavailable authentication and product failures both stop scheduling, but yield different verdicts."""
+    def test_a_failed_p0_pair_stops_its_own_checks_but_not_the_next_p0_pair(self):
+        """A broken fresh install says nothing about upgrades, so the next P0 pair may still run.
+
+Within the failed pair nothing else may be recorded, earlier checks included.
+The next pair waits only for the failed one to be released, which needs the
+maintainer's retention decision (`--discard-failed`); bonus work stays fenced.
+"""
         for status, expected in (('fail', 'fail'), ('could-not-run', 'could not run')):
             with self.subTest(status=status):
                 self.enable_p0()
@@ -925,136 +936,185 @@ before the report can say all runnable P0 checks passed.
                     self.assertEqual(self.run.report()['p0']['verdict'], expected)
                     with self.assertRaisesRegex(Refused, 'stop after the first'):
                         self.run.record('p0-fresh', 'fixture-clean', 'pass', [], 'Must not continue.')
-                    with self.assertRaisesRegex(Refused, 'stop after the first'):
-                        self.run.prepare('p0-installer-upgrade', [])
+                    with self.assertRaisesRegex(Refused, 'existing working pair'):
+                        self.run.prepare('p0-updater-upgrade', [])
                     self.run.cleanup('p0-fresh', discard_failed=True)
+                    with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
+                        self.run.prepare('fresh', [])
+                self.prepare('p0-updater-upgrade')
+                with self.run.locked():
+                    self.run.cleanup('p0-updater-upgrade', discard_failed=True)
 
     def test_p0_order_discovery_and_agent_evidence_are_real_boundaries(self):
-        """Neither a relaunch nor a screenshot can substitute updater discovery or an actual agent response."""
-        self.enable_p0(candidate='v0.25.0-rc.1')
+        """Neither a relaunch nor a manual install can substitute updater discovery, and P0 cannot gain bonus checks."""
+        self.enable_p0(supported=False)
         self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
         self.prepare('p0-updater-upgrade')
-        image = self.evidence_file('rc.png', PNG)
-        command = self.evidence_file('rc.txt', b'synthetic command evidence')
-        receipt = self.evidence_file('rc.json', json.dumps({
-            'version': 'v0.25.0-rc.1', 'previous_trust_ring': 'v0.24.0',
+        image = self.evidence_file('manual.png', PNG)
+        command = self.evidence_file('manual.txt', b'synthetic command evidence')
+        receipt = self.evidence_file('manual.json', json.dumps({
+            'version': 'v0.25.0', 'previous_trust_ring': 'v0.24.0',
             'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
             'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
         with self.run.locked():
-            with self.assertRaisesRegex(Refused, 'preceding P0'):
-                self.run.record('p0-updater-upgrade', 'local-supervisor-agent', 'pass', [image, command], 'Out of order.')
             self.run.record('p0-updater-upgrade', 'artifact-verification', 'pass', [receipt], 'Synthetic trust receipt.')
             self.run.record('p0-updater-upgrade', 'old-fixture', 'pass', [image, command], 'Synthetic old fixture.')
+            with self.assertRaisesRegex(Refused, 'preceding P0'):
+                self.run.record('p0-updater-upgrade', 'update-relaunch', 'pass', [image, command], 'Out of order.')
             self.run.select_update('p0-updater-upgrade', 'v0.24.0')
+            self.assertEqual(self.run.selected('p0-updater-upgrade')['update_path'], 'manual')
             with self.assertRaisesRegex(Refused, 'manual installer cannot prove'):
                 self.run.record('p0-updater-upgrade', 'update-discovery', 'pass', [image, command], 'Manual is not discovery.')
             with self.assertRaisesRegex(Refused, 'bonus passes'):
                 self.run.add_check('p0-updater-upgrade', 'extra-settings', gui=True)
 
-    def test_each_p0_agent_and_menu_check_needs_command_evidence_and_reports_separately(self):
-        """Agent and menu checks need independent command evidence; an earlier success cannot waive a later check."""
-        # P0-only scope keeps this regression about product-check evidence, without
+    def test_each_supervisor_and_agent_check_needs_command_evidence_and_reports_separately(self):
+        """A screenshot alone proves no upgrade or agent reply, and an earlier success cannot waive a later check.
+
+Each supervisor's upgrade answers its own question before any agent runs on
+it, so a passing upgrade with an unrun agent check shows exactly that.
+"""
+        # P1-only scope keeps the continuity checks in this regression without
         # inventing a feedback-send observation merely to clean its pair.
-        self.enable_p0(p0_only=True)
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        children = self.complete_p0('p0-updater-upgrade', through='update-relaunch')
+        self.enable_p0(scope='p1-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='update-relaunch')
         self.assertTrue(all(child.poll() is None for child in children))
         image = self.evidence_file('agent.png', PNG)
         command = self.evidence_file('agent.txt', b'synthetic agent response receipt')
         with self.run.locked():
-            for check in ('local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent', 'remote-old-session',
+            for check in ('local-supervisor-upgrade', 'remote-supervisor-upgrade', 'local-supervisor-agent',
+                          'remote-supervisor-agent', 'local-old-session', 'remote-old-session',
                           'remote-host-remove', 'remote-host-uninstall'):
                 with self.assertRaisesRegex(Refused, 'command/identity evidence'):
-                    self.run.record('p0-updater-upgrade', check, 'pass', [image], 'GUI alone is not execution evidence.')
-                self.run.record('p0-updater-upgrade', check, 'pass', [image, command], 'Synthetic evidence format only.')
-                report = self.run.report()['p0']
-                if check == 'local-supervisor-agent':
-                    # The local question also covers the old local session.
-                    self.assertEqual(report['checks']['local-supervisor-agent'], 'could not run')
-                if check == 'local-old-session':
-                    self.assertEqual(report['checks']['local-supervisor-agent'], 'pass')
-                    self.assertEqual(report['checks']['remote-supervisor-agent'], 'could not run')
-                    self.assertEqual(report['verdict'], 'could not run')
-            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+                    self.run.record('p0-installer-upgrade', check, 'pass', [image], 'GUI alone is not execution evidence.')
+                self.run.record('p0-installer-upgrade', check, 'pass', [image, command], 'Synthetic evidence format only.')
+                report = self.run.report()
+                if check == 'remote-supervisor-upgrade':
+                    self.assertEqual(report['p0']['checks']['remote-supervisor-upgrade'], 'pass')
+                    self.assertEqual(report['p0']['checks']['local-agent'], 'could not run')
+                    self.assertEqual(report['p0']['verdict'], 'could not run')
+                if check == 'remote-supervisor-agent':
+                    self.assertEqual(report['p0']['verdict'], 'pass')
+                    self.assertEqual(report['p1']['verdict'], 'could not run')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+            self.run.cleanup('p0-installer-upgrade')
 
-    def test_old_sessions_follow_each_hosts_agent_check_and_fold_into_its_question(self):
-        """Each old session belongs to its host's supervisor question, before the remote menu checks.
+    def test_a_failed_old_session_stops_p1_but_keeps_p0_feedback_cleanup_and_bonus(self):
+        """Losing a session is a continuity failure, not a bricked install, so it stops only the P1 chain.
 
-Each old-session check must follow its host's new-session check, which
-establishes that host's candidate supervisor; the remote one therefore follows
-the remote Update. A failed old session fails its host's supervisor question.
-A manifest written before these checks still answers all five questions.
+The later P1 checks share the same sessions and stop with it. P0 keeps its
+pass, the feedback send still runs, and the pair cleans up normally once the
+failure's evidence is retained.
 """
-        self.assertEqual(list(checks('p0-updater-upgrade')),
-                         ['artifact-verification', 'old-fixture', 'update-discovery', 'update-relaunch',
-                          'local-supervisor-agent', 'local-old-session', 'remote-supervisor-agent',
-                          'remote-old-session', 'remote-host-remove', 'remote-host-uninstall', 'p1-feedback-send'])
-        for check in ('local-old-session', 'remote-old-session'):
-            self.assertEqual(checks('p0-updater-upgrade')[check],
-                             {'gui': True, 'command': True, 'continuity': False, 'priority': 'P0'})
-            self.assertNotIn(check, checks('p0-installer-upgrade'))
-            self.assertNotIn(check, checks('upgrade-v0.24.0'))
-        self.enable_p0(p0_only=True)
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        self.complete_p0('p0-updater-upgrade', through='local-supervisor-agent')
+        self.enable_p0()
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-supervisor-agent')
         image = self.evidence_file('old-session.png', PNG)
         with self.run.locked():
-            self.run.record('p0-updater-upgrade', 'local-old-session', 'fail', [image],
+            self.run.record('p0-installer-upgrade', 'local-old-session', 'fail', [image],
                             'Synthetic failed old-session observation.')
-            report = self.run.report()['p0']
-            self.assertEqual(report['checks']['local-supervisor-agent'], 'fail')
-            self.assertEqual(report['verdict'], 'fail')
-            with self.assertRaisesRegex(Refused, 'stop after the first'):
-                self.run.record('p0-updater-upgrade', 'remote-supervisor-agent', 'pass', [image, image],
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'fail')
+            self.assertEqual(report['p1']['checks']['local-old-session'], 'fail')
+            self.assertEqual(report['p1']['checks']['remote-old-session'], 'could not run')
+            skipped = self.run.selected('p0-installer-upgrade')['results']['remote-old-session']
+            self.assertEqual(skipped['status'], 'skipped')
+            self.assertIn('local-old-session stopped its chain', skipped['detail'])
+            with self.assertRaisesRegex(Refused, 'already exists'):
+                self.run.record('p0-installer-upgrade', 'remote-old-session', 'pass', [image, image],
                                 'Must not continue.')
-            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image],
+                            'Synthetic feedback frames; no live send claimed.')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+        bonus = self.prepare('fresh')
+        with self.run.locked():
+            self.run.cleanup('fresh', discard_failed=True)
+        self.assertTrue(all(child.poll() == 0 for child in bonus))
 
-    def test_run_planned_before_old_sessions_keeps_its_answers_but_cannot_start_that_pair(self):
-        """An in-flight run must not acquire the new obligations mid-run, nor lose what it already retained.
+    def test_unavailable_old_sessions_leave_p0_running_and_p1_unavailable(self):
+        """Old sessions start on the previous release, so failing to start them says nothing about the candidate.
 
-Preparing its updater pair is refused before any clone, with a message naming
-the cause. A pair that was already prepared and recorded under the earlier
-coordinator still answers all five questions without the keys it never declared.
+The P0 checks after `old-sessions` still run; every old-session and remote
+menu check is then unavailable rather than failed.
 """
-        self.enable_p0(p0_only=True)
+        self.enable_p0(scope='p1-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='old-fixture')
+        image = self.evidence_file('old-sessions.png', PNG)
+        command = self.evidence_file('old-sessions.txt', b'synthetic version receipt')
+        with self.run.locked():
+            self.run.record('p0-installer-upgrade', 'old-sessions', 'could-not-run', [image],
+                            'Synthetic: the previous release never captured its conversation.')
+            for check in ('update-relaunch', 'local-supervisor-upgrade', 'remote-supervisor-upgrade',
+                          'local-supervisor-agent', 'remote-supervisor-agent'):
+                self.run.record('p0-installer-upgrade', check, 'pass', [image, command], 'Synthetic P0 evidence.')
+            results = self.run.selected('p0-installer-upgrade')['results']
+            for check in ('local-old-session', 'remote-old-session', 'remote-host-remove', 'remote-host-uninstall'):
+                self.assertEqual(results[check]['status'], 'skipped')
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'could not run')
+            self.assertEqual(report['p1']['checks']['local-old-session'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_failed_discovery_does_not_hide_the_supervisor_upgrade(self):
+        """The supervisor checks moved to the installer pair so a broken updater cannot hide a bricked supervisor.
+
+After the failed updater pair is released, the installer pair runs P0 and
+P1. P2 can never be dispatched, since P0 failed elsewhere, so that pair still
+cleans up normally; bonus work stays fenced.
+"""
+        self.enable_p0(supported=False)
         self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        with self.run.locked():
-            required = self.run.selected('p0-updater-upgrade')['required']
-            removed = {check: required.pop(check) for check in ('local-old-session', 'remote-old-session')}
-            self.run.save()
-        calls = len(self.model.calls)
-        with self.run.locked(), self.assertRaisesRegex(Refused, 'planned before P0 carried old sessions'):
-            self.run.prepare('p0-updater-upgrade', [])
-        self.assertEqual(len(self.model.calls), calls)
-        with self.run.locked():
-            self.run.selected('p0-updater-upgrade')['required'].update(removed)
-            self.run.save()
         self.prepare('p0-updater-upgrade')
         with self.run.locked():
-            for check in removed:
-                self.run.selected('p0-updater-upgrade')['required'].pop(check)
-            self.run.save()
-        image = self.evidence_file('legacy.png', PNG)
-        command = self.evidence_file('legacy.txt', b'synthetic legacy evidence')
-        receipt = self.evidence_file('legacy.json', json.dumps({
-            'version': self.run.data['plan']['candidate'], 'previous_trust_ring': 'v0.24.0',
-            'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
-            'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
-        with self.run.locked():
             self.run.select_update('p0-updater-upgrade', 'v0.24.0')
-            for check, spec in self.run.selected('p0-updater-upgrade')['required'].items():
-                if spec.get('priority') == 'P0':
-                    refs = [receipt] if check == 'artifact-verification' else [image, command]
-                    self.run.record('p0-updater-upgrade', check, 'pass', refs, 'Synthetic legacy observation.')
-            report = self.run.report()['p0']
-            self.assertEqual(report['verdict'], 'pass')
-            self.assertEqual(set(report['checks'].values()), {'pass'})
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.record('p0-updater-upgrade', 'update-discovery', 'fail',
+                            ['p0-updater-upgrade/latest-at-selection.json'], 'Synthetic: the old app found nothing.')
+            self.assertEqual(self.run.report()['p0']['checks']['click-to-upgrade'], 'fail')
+            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+        children = self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
+        image = self.evidence_file('feedback.png', PNG)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'fail')
+            self.assertEqual(report['p0']['checks']['local-supervisor-upgrade'], 'pass')
+            self.assertEqual(report['p0']['checks']['remote-agent'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'pass')
+            send = self.run.selected('p0-installer-upgrade')['results']['p2-feedback-send']
+            self.assertEqual(send['status'], 'skipped')
+            self.assertIn('p0-updater-upgrade did not pass', send['detail'])
+            with self.assertRaisesRegex(Refused, 'already exists'):
+                self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Never dispatched.')
+            self.run.cleanup('p0-installer-upgrade')
+            with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
+                self.run.prepare('fresh', [])
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_p0_only_scope_and_changed_evidence_fence_bonus_cloning(self):
+        """A requested P0 stop stays effective, and stale successful evidence never authorizes more work."""
+        self.enable_p0(scope='p0-only')
+        for pass_id in self.run.data['plan']['p0_sequence']:
+            self.complete_p0(pass_id)
+        calls = len(self.model.calls)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['requested_verdict'], 'pass')
+            self.assertEqual(report['verdict'], 'could not run')
+            self.assertEqual(report['p1']['verdict'], 'could not run')
+            self.assertEqual(self.run.selected('p0-installer-upgrade')['results'].keys() & {'old-sessions'}, set())
+            with self.assertRaisesRegex(Refused, 'outside this run scope'):
+                self.run.prepare('fresh', [])
+            # Revalidate bytes even after successful cleanup: a corrupt export
+            # invalidates the P0 answer without resurrecting any guest.
+            (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+        self.assertEqual(len(self.model.calls), calls)
 
     def test_mid_session_stop_and_stale_evidence_refuse_new_bonus_work(self):
         """A later stop request persists, while corrupt evidence fences a full run without relying on P0-only scope."""
@@ -1069,7 +1129,7 @@ coordinator still answers all five questions without the keys it never declared.
         self.enable_p0()
         self.complete_p0('p0-fresh')
         with self.run.locked():
-            self.run.limit_to_p0()
+            self.run.limit_scope('p0-only')
         with self.run.locked():
             self.assertEqual(self.run.report()['scope'], 'p0-only')
             with self.assertRaisesRegex(Refused, 'outside this run scope'):
@@ -1078,69 +1138,74 @@ coordinator still answers all five questions without the keys it never declared.
     def test_legacy_report_does_not_relabel_old_observations_as_p0(self):
         """Resuming historical manifests preserves their original coverage instead of inventing missing upgrade paths."""
         with self.run.locked():
-            self.assertEqual(self.run.report()['p0']['verdict'], 'not planned')
-            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'not planned')
+            self.assertEqual(report['p1']['verdict'], 'not planned')
+            self.assertEqual(report['p2']['verdict'], 'not planned')
 
-    def test_saved_five_check_run_keeps_its_original_p0_contract(self):
-        """Adding future coverage must not rewrite a retained release's accepted verdict or invent missing menu results."""
-        self.enable_p0(p0_only=True)
+    def test_run_planned_under_the_earlier_layout_is_refused_on_load(self):
+        """An in-flight run from before P0/P1/P2 must finish under the coordinator that started it.
+
+Its checkpoints and fences follow the earlier contract, so every command that
+loads it is refused before touching a guest, and the `report.json` its own
+coordinator saved stays as it was written.
+"""
+        self.enable_p0()
+        self.prepare('p0-fresh')
         with self.run.locked():
-            required = self.run.selected('p0-updater-upgrade')['required']
-            for check in ('remote-host-remove', 'remote-host-uninstall'):
-                required.pop(check)
+            self.run.data['plan'].pop('priority_layout')
             self.run.save()
-        for pass_id in self.run.data['plan']['p0_sequence']:
-            self.complete_p0(pass_id)
-        with self.run.locked():
-            report = self.run.report()['p0']
-            self.assertEqual(report['verdict'], 'pass')
-            self.assertEqual(len(report['checks']), 5)
-            self.assertNotIn('remote-host-remove', report['checks'])
-            self.assertNotIn('remote-host-uninstall', report['checks'])
+        saved = self.run.directory / 'report.json'
+        saved.write_text(json.dumps({'verdict': 'could not run', 'saved_by': 'the earlier coordinator'}))
+        before = saved.read_bytes()
+        calls = len(self.model.calls)
+        with self.assertRaisesRegex(Refused, 'earlier P0/P1 layout'):
+            with self.run.locked():
+                self.fail('an earlier-layout run must not load')
+        self.assertEqual(saved.read_bytes(), before)
+        self.assertEqual(len(self.model.calls), calls)
 
-    def ready_for_p1(self, p0_only=False, p1_only=False):
-        """Leave the final candidate pair live after independently validated P0.
+    def ready_for_p2(self, scope='full'):
+        """Leave the installer pair live after independently validated P0 and P1.
 
 This is a synthetic coordinator boundary, not a real feedback submission.
 The two preceding pairs have already passed their evidence and cleanup gates.
 """
-        self.enable_p0(p0_only=p0_only, p1_only=p1_only)
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        children = self.complete_p0('p0-updater-upgrade', through='remote-host-uninstall')
+        self.enable_p0(scope=scope)
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
         self.assertTrue(all(child.poll() is None for child in children))
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
-            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
-            self.assertNotIn('p1-feedback-send', self.run.selected('p0-updater-upgrade')['results'])
+            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'could not run')
+            self.assertNotIn('p2-feedback-send', self.run.selected('p0-installer-upgrade')['results'])
         return children
 
-    def test_p1_is_gui_only_and_required_before_last_pair_cleanup(self):
-        """A P0 pass neither invents a feedback result nor permits skipping the in-scope send."""
-        children = self.ready_for_p1(p1_only=True)
+    def test_p2_is_gui_only_and_required_before_last_pair_cleanup(self):
+        """A P0 and P1 pass neither invents a feedback result nor permits skipping the in-scope send."""
+        children = self.ready_for_p2(scope='p2-only')
         before = self.evidence_file('feedback-filled.png', PNG)
         after = self.evidence_file('feedback-closed.png', PNG)
         with self.run.locked():
-            spec = self.run.selected('p0-updater-upgrade')['required']['p1-feedback-send']
-            self.assertEqual(spec, {'gui': True, 'command': False, 'continuity': False, 'priority': 'P1'})
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
-                self.run.cleanup('p0-updater-upgrade')
+                self.run.cleanup('p0-installer-upgrade')
             self.assertTrue(all(child.poll() is None for child in children))
-            self.run.record('p0-updater-upgrade', 'p1-feedback-send', 'pass', [before, after],
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [before, after],
                             'Synthetic filled/closed frames; no live send or GUI result claimed.')
             report = self.run.report()
-            self.assertEqual(report['p1'], {'verdict': 'pass', 'checks': {'p1-feedback-send': 'pass'}})
+            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {'feedback-send': 'pass'}})
             self.assertEqual(report['requested_verdict'], 'pass')
             self.assertEqual(report['verdict'], 'could not run')
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-installer-upgrade')
             with self.assertRaisesRegex(Refused, 'outside this run scope'):
                 self.run.prepare('fresh', [])
         self.assertTrue(all(child.poll() == 0 for child in children))
 
-    def test_lost_p1_evidence_preserves_guests_until_recovered(self):
-        """Every P1 status retains its source guests until its exported evidence is recovered.
+    def test_lost_p2_evidence_preserves_guests_until_recovered(self):
+        """Every P2 status retains its source guests until its exported evidence is recovered.
 
-A late stop after P0 (the scope narrowed once P1 is already recorded) must not
+A late stop after P0 (the scope narrowed once P2 is already recorded) must not
 lift that protection either: the scope fences future work, not evidence.
 """
         cases = ((status, damage, narrowed)
@@ -1148,93 +1213,109 @@ lift that protection either: the scope fences future work, not evidence.
                  for damage, narrowed in (('changed', False), ('missing', False), ('missing', True)))
         for status, damage, narrowed in cases:
             with self.subTest(status=status, damage=damage, narrowed=narrowed):
-                children = self.ready_for_p1()
-                image = self.evidence_file('p1-only.png', PNG)
+                children = self.ready_for_p2()
+                image = self.evidence_file('p2-only.png', PNG)
                 expected = 'could not run' if status == 'could-not-run' else status
                 with self.run.locked():
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image],
-                                    'Synthetic P1 image independent of every P0 artifact.')
-                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image],
+                                    'Synthetic P2 image independent of every P0 artifact.')
+                    self.assertEqual(self.run.report()['p2']['verdict'], expected)
                     if narrowed:
-                        self.run.limit_to_p0()
+                        self.run.limit_scope('p0-only')
                     path = self.run.directory / image
                     if damage == 'changed':
-                        path.write_bytes(b'changed P1-only image')
+                        path.write_bytes(b'changed P2-only image')
                     else:
                         path.unlink()
                     report = self.run.report()
                     self.assertEqual(report['p0']['verdict'], 'pass')
-                    self.assertEqual(report['p1']['verdict'], 'fail' if status == 'fail' else 'could not run')
+                    self.assertEqual(report['p2']['verdict'], 'fail' if status == 'fail' else 'could not run')
                     calls = len(self.model.calls)
                     with self.assertRaisesRegex(Refused, 'incomplete or failed'):
-                        self.run.cleanup('p0-updater-upgrade')
+                        self.run.cleanup('p0-installer-upgrade')
                     self.assertEqual(len(self.model.calls), calls, 'refusal must precede shutdown or deletion')
                     self.assertTrue(all(child.poll() is None for child in children))
                     # Restoring the exact accepted bytes makes cleanup possible;
-                    # a blanket P1 cleanup refusal would fail this half.
+                    # a blanket P2 cleanup refusal would fail this half.
                     path.write_bytes(PNG)
-                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
-                    self.run.cleanup('p0-updater-upgrade')
+                    self.assertEqual(self.run.report()['p2']['verdict'], expected)
+                    self.run.cleanup('p0-installer-upgrade')
                 self.assertTrue(all(child.poll() == 0 for child in children))
 
-    def test_every_p1_result_requires_all_valid_p0_evidence(self):
-        """Failed and unavailable P1 records must not bypass the ordering fence that protects passing records."""
+    def test_every_p2_result_requires_all_valid_p0_evidence_and_a_finished_p1_sequence(self):
+        """Failed and unavailable sends must not bypass the ordering fence that protects passing records.
+
+P2 needs every P0 check of the run, an earlier pair's included, with retained
+evidence. P1's results are not its prerequisite, but the P1 sequence must be
+over: a send recorded while a P1 check could still run would close that check
+for good. An unavailable P1 check that stops the chain ends the sequence.
+"""
         self.enable_p0()
-        self.complete_p0('p0-fresh')
-        self.complete_p0('p0-installer-upgrade')
-        self.complete_p0('p0-updater-upgrade', through='remote-supervisor-agent')
-        image = self.evidence_file('p1.png', PNG)
+        self.complete_stable_p0()
+        self.complete_p0('p0-installer-upgrade', through='remote-supervisor-upgrade')
+        image = self.evidence_file('p2.png', PNG)
+        command = self.evidence_file('p2-agent.txt', b'synthetic agent receipt')
         with self.run.locked():
-            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
             for status in ('pass', 'fail', 'could-not-run'):
                 with self.subTest(status=status), self.assertRaisesRegex(Refused, 'complete all P0'):
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Out of order.')
-            command = self.evidence_file('remote-old-session.txt', b'synthetic remote old-session receipt')
-            self.run.record('p0-updater-upgrade', 'remote-old-session', 'pass', [image, command],
-                            'Synthetic old-session evidence; menu checks are still required.')
-            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
-            for check in ('remote-host-remove', 'remote-host-uninstall'):
-                for status in ('pass', 'fail', 'could-not-run'):
-                    with self.subTest(pending=check, status=status), self.assertRaisesRegex(Refused, 'complete all P0'):
-                        self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Before menu checks.')
-                self.run.record('p0-updater-upgrade', check, 'pass', [image, command],
-                                'Synthetic menu evidence; no real host mutation claimed.')
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image], 'Out of order.')
+            for check in ('local-supervisor-agent', 'remote-supervisor-agent'):
+                self.run.record('p0-installer-upgrade', check, 'pass', [image, command], 'Synthetic agent evidence.')
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
             # A previously accepted earlier fixture is still a prerequisite:
-            # the last pair alone cannot authorize P1 after its bytes changed.
+            # the last pair alone cannot authorize P2 after its bytes changed.
             (self.run.directory / 'p0-fresh.png').write_bytes(b'changed image')
             for status in ('pass', 'fail', 'could-not-run'):
                 with self.subTest(invalidated=status), self.assertRaisesRegex(Refused, 'complete all P0'):
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Invalid predecessor.')
-            self.assertNotIn('p1-feedback-send', self.run.selected('p0-updater-upgrade')['results'])
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image], 'Invalid predecessor.')
+            (self.run.directory / 'p0-fresh.png').write_bytes(PNG)
+            with self.assertRaisesRegex(Refused, 'finish the P1 sequence before P2: local-old-session'):
+                self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'could-not-run', [image], 'Too early.')
+            self.run.record('p0-installer-upgrade', 'local-old-session', 'could-not-run', [image],
+                            'Synthetic unavailable old session; it stops the P1 chain.')
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'After P1 ended.')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
 
-    def test_p0_stop_refuses_feedback_but_cleans_its_last_pair(self):
-        """A P0-only request sends nothing even though the retained full plan still declares P1."""
-        children = self.ready_for_p1(p0_only=True)
+    def test_p0_and_p1_stops_refuse_later_tiers_but_clean_the_last_pair(self):
+        """A stop after P0 records no continuity or feedback result, and a stop after P1 sends nothing."""
+        self.enable_p0(scope='p0-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-supervisor-agent')
+        image = self.evidence_file('scoped.png', PNG)
+        with self.run.locked():
+            for check, priority in (('local-old-session', 'P1'), ('p2-feedback-send', 'P2')):
+                with self.subTest(check=check), self.assertRaisesRegex(Refused, priority + ' is outside'):
+                    self.run.record('p0-installer-upgrade', check, 'fail', [image], 'Outside scope.')
+            self.assertEqual(self.run.report()['requested_verdict'], 'pass')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+        children = self.ready_for_p2(scope='p1-only')
         with self.run.locked():
             for status in ('pass', 'fail', 'could-not-run'):
-                with self.subTest(status=status), self.assertRaisesRegex(Refused, 'P1 is outside'):
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [], 'Outside scope.')
+                with self.subTest(status=status), self.assertRaisesRegex(Refused, 'P2 is outside'):
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image], 'Outside scope.')
             self.assertEqual(self.run.report()['requested_verdict'], 'pass')
-            self.run.cleanup('p0-updater-upgrade')
+            self.run.cleanup('p0-installer-upgrade')
         self.assertTrue(all(child.poll() == 0 for child in children))
 
-    def test_failed_p1_preserves_p0_and_allows_cleanup_and_bonus_observations(self):
+    def test_failed_p2_preserves_p0_and_p1_and_allows_cleanup_and_bonus_observations(self):
         """Feedback outages do not hold disposable guests or suppress independent bonus checks."""
         for status, expected in (('fail', 'fail'), ('could-not-run', 'could not run')):
             with self.subTest(status=status):
-                children = self.ready_for_p1()
+                children = self.ready_for_p2()
                 image = self.evidence_file('failed-feedback.png', PNG)
                 with self.run.locked():
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image],
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image],
                                     'Synthetic failed/unavailable feedback observation.')
                     report = self.run.report()
                     self.assertEqual(report['p0']['verdict'], 'pass')
                     self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
-                    self.assertEqual(report['p1']['verdict'], expected)
+                    self.assertEqual(report['p1']['verdict'], 'pass')
+                    self.assertEqual(report['p2']['verdict'], expected)
                     self.assertEqual(report['verdict'], expected)
-                    self.run.cleanup('p0-updater-upgrade')
-                    self.assertEqual(self.run.report()['p1']['verdict'], expected)
+                    self.run.cleanup('p0-installer-upgrade')
+                    self.assertEqual(self.run.report()['p2']['verdict'], expected)
                 self.assertTrue(all(child.poll() == 0 for child in children))
                 bonus = self.prepare('fresh')
                 with self.run.locked():
@@ -1243,37 +1324,248 @@ lift that protection either: the scope fences future work, not evidence.
                     self.run.cleanup('fresh', discard_failed=True)
                 self.assertTrue(all(child.poll() == 0 for child in bonus))
 
-    def test_mid_session_p1_stop_retains_each_result_and_refuses_bonus(self):
-        """Stopping after P1 includes its outcome; a failed send cannot become a P0-only requested pass."""
+    def test_mid_session_p2_stop_retains_each_result_and_refuses_bonus(self):
+        """Stopping after P2 includes its outcome; a failed send cannot become a narrower requested pass."""
         for status, expected in (('pass', 'pass'), ('fail', 'fail'), ('could-not-run', 'could not run')):
             with self.subTest(status=status):
-                children = self.ready_for_p1()
-                image = self.evidence_file('p1-scope.png', PNG)
+                children = self.ready_for_p2()
+                image = self.evidence_file('p2-scope.png', PNG)
                 with self.run.locked():
-                    self.run.limit_to_p1()
-                    self.run.record('p0-updater-upgrade', 'p1-feedback-send', status, [image], 'Synthetic P1 result.')
-                    self.assertEqual(self.run.report()['scope'], 'p1-only')
+                    self.run.limit_scope('p2-only')
+                    self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image], 'Synthetic P2 result.')
+                    self.assertEqual(self.run.report()['scope'], 'p2-only')
                     self.assertEqual(self.run.report()['requested_verdict'], expected)
-                    self.run.cleanup('p0-updater-upgrade')
+                    self.run.cleanup('p0-installer-upgrade')
                     with self.assertRaisesRegex(Refused, 'outside this run scope'):
                         self.run.prepare('fresh', [])
                 self.assertTrue(all(child.poll() == 0 for child in children))
 
-    def test_pre_p1_manifest_keeps_its_existing_obligations(self):
-        """Upgrading the coordinator must not demand a send the original run never planned."""
+    def test_widening_after_the_upgrade_cannot_start_old_sessions_on_the_candidate(self):
+        """A baseline skipped under a stop after P0 can never run once the pair's upgrade ran.
+
+Its sessions would start on the candidate and compare it with itself. Under
+the stop it stays unrecorded; widening records it and every P1 check behind
+it as skipped, the send still runs, and the pair cleans up normally.
+"""
+        self.enable_p0(scope='p0-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-supervisor-agent')
+        image = self.evidence_file('widened.png', PNG)
+        command = self.evidence_file('widened.txt', b'synthetic version receipt')
+        with self.run.locked():
+            self.assertNotIn('old-sessions', self.run.selected('p0-installer-upgrade')['results'])
+            self.run.continue_full()
+            results = self.run.selected('p0-installer-upgrade')['results']
+            self.assertIn('update-relaunch, later in the pair, already ran', results['old-sessions']['detail'])
+            for check in ('old-sessions', 'local-old-session', 'remote-old-session', 'remote-host-remove',
+                          'remote-host-uninstall'):
+                self.assertEqual(results[check]['status'], 'skipped')
+            with self.assertRaisesRegex(Refused, 'already exists'):
+                self.run.record('p0-installer-upgrade', 'old-sessions', 'pass', [image, command], 'On the candidate.')
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup('p0-installer-upgrade')
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Synthetic send frames.')
+            report = self.run.report()
+            self.assertEqual((report['p0']['verdict'], report['p1']['verdict'], report['p2']['verdict']),
+                             ('pass', 'could not run', 'pass'))
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_widening_to_p1_after_the_upgrade_closes_the_whole_p1_chain_and_cleans_up(self):
+        """Checks behind a baseline that can never run can never run either, so they cannot hold the pair.
+
+Widening a stop after P0 to a stop after P1 once the upgrade ran leaves no P1
+check runnable and no send in scope; the pair must clean up normally rather
+than wait forever for a sequence that cannot happen.
+"""
+        self.enable_p0(scope='p0-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='remote-supervisor-agent')
+        with self.run.locked():
+            self.run.limit_scope('p1-only')
+            entry = self.run.selected('p0-installer-upgrade')
+            for check in ('old-sessions', 'local-old-session', 'remote-old-session', 'remote-host-remove',
+                          'remote-host-uninstall'):
+                self.assertEqual(entry['results'][check]['status'], 'skipped')
+            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_baseline_failure_on_the_previous_release_is_recorded_as_unavailable(self):
+        """Nothing `old-sessions` sees can fail the candidate: it runs before any candidate code.
+
+A fail reported there is kept as could not run, with the original
+observation in its detail, so P1 is unavailable rather than failed.
+"""
+        self.enable_p0(scope='p1-only')
+        self.complete_stable_p0()
+        children = self.complete_p0('p0-installer-upgrade', through='old-fixture')
+        image = self.evidence_file('baseline.png', PNG)
+        with self.run.locked():
+            self.run.record('p0-installer-upgrade', 'old-sessions', 'fail', [image], 'Old app broke.')
+            result = self.run.selected('p0-installer-upgrade')['results']['old-sessions']
+            self.assertEqual(result['status'], 'could-not-run')
+            self.assertIn('Old app broke.', result['detail'])
+            self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade', discard_failed=True)
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_released_p0_pair_with_a_harness_failure_does_not_block_the_next_p0_pair(self):
+        """A relaunch that never brought the candidate back ends as a harness failure; it must not hide the supervisors.
+
+While the failed pair is live, nothing else may start. Once the maintainer
+released it, the next P0 pair may, while bonus work stays fenced.
+"""
+        self.enable_p0()
+        self.complete_p0('p0-fresh')
+        self.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            self.run.selected('p0-updater-upgrade')['automation_failure'] = {
+                'check_id': 'update-relaunch', 'status': 'could-not-run', 'kind': 'harness-failure',
+                'detail': 'Synthetic: the candidate never came back after Restart to update.'}
+            self.run.save()
+            with self.assertRaisesRegex(Refused, 'stop after the first'):
+                self.run.require_priority('p0-installer-upgrade')
+            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+            self.run.require_priority('p0-installer-upgrade')
+            with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
+                self.run.require_priority('fresh')
+            self.assertEqual(self.run.report()['p0']['checks']['click-to-upgrade'], 'could not run')
+        # The installer pair then runs P0 and P1; its send can never run, so
+        # it is recorded as skipped and the pair cleans up normally without a
+        # retention decision.
+        children = self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
+        with self.run.locked():
+            send = self.run.selected('p0-installer-upgrade')['results']['p2-feedback-send']
+            self.assertEqual(send['status'], 'skipped')
+            self.assertIn('p0-updater-upgrade was released before its P0 checks finished', send['detail'])
+            self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_released_incomplete_p0_pair_makes_the_send_unreachable_not_pending(self):
+        """A P0 pair discarded with checks never recorded can never complete, so the installer pair need not wait on P2.
+
+Discovery cannot run on a deleted fixture. Without a recorded failure the
+installer pair's send stays undispatchable all the same, and its pair must
+clean up normally rather than ask for a second retention decision.
+"""
+        self.enable_p0()
+        self.complete_p0('p0-fresh')
+        self.prepare('p0-updater-upgrade')
+        with self.run.locked():
+            self.run.cleanup('p0-updater-upgrade', discard_failed=True)
+            self.assertEqual(self.run.selected('p0-updater-upgrade')['results'], {})
+        children = self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
+        with self.run.locked():
+            self.assertEqual(self.run.report()['p0']['checks']['click-to-upgrade'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_failure_claim_from_the_previous_release_never_blocks_promotion(self):
+        """An aborted `old-sessions` turn that claimed fail saw only the previous release, not the candidate."""
         self.enable_p0()
         with self.run.locked():
-            self.run.selected('p0-updater-upgrade')['required'].pop('p1-feedback-send')
-            self.run.save()
-            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
-            with self.assertRaisesRegex(Refused, 'no planned P1'):
-                self.run.limit_to_p1()
-        for pass_id in self.run.data['plan']['p0_sequence']:
-            self.complete_p0(pass_id)
-        with self.run.locked():
-            self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
-            self.assertEqual(self.run.report()['p1']['verdict'], 'not planned')
+            self.run.data['gui_backend'] = 'guest-native'
+            for check in ('old-sessions', 'old-fixture'):
+                self.run.selected('p0-installer-upgrade')['tester'] = {
+                    'phase': 'failed', 'check_id': check,
+                    'observation': {'status': 'fail', 'detail': 'Synthetic aborted-turn claim.'}}
+                report = self.run.report()
+                with self.subTest(check=check):
+                    self.assertEqual(report['promotion_blocked_pending_review'], check != 'old-sessions')
 
+    def test_empty_evidence_cannot_settle_a_nonpass_for_cleanup(self):
+        """A zero-byte diagnostic is no evidence; the guests behind the observation must stay."""
+        children = self.ready_for_p2()
+        for name, value in (('empty.log', b''), ('empty.tar', None)):
+            if value is None:
+                with tarfile.open(self.run.directory / name, 'w') as archive:
+                    archive.addfile(tarfile.TarInfo('./diagnostic.log'), io.BytesIO(b''))
+        with self.run.locked():
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'could-not-run',
+                            [self.evidence_file('empty.log', b''), 'empty.tar::./diagnostic.log'],
+                            'Hand-made unavailable send with only empty files.')
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup('p0-installer-upgrade')
+            self.run.cleanup('p0-installer-upgrade', discard_failed=True)
+        self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_running_tester_owns_its_pass_against_hand_made_records(self):
+        """A manual record must not take the slot of a guest result on its way back, or stop a chain under it."""
+        self.enable_p0()
+        self.prepare('p0-fresh')
+        image = self.evidence_file('manual.png', PNG)
+        with self.run.locked():
+            for phase in ('running', 'reconciliation-required'):
+                with self.subTest(phase=phase):
+                    self.run.selected('p0-fresh')['tester'] = {'phase': phase, 'check_id': 'app-start',
+                                                               'termination_observed': True}
+                    for check in ('app-start', 'fixture-clean'):
+                        with self.assertRaisesRegex(Refused, 'guest tester owns this pass'):
+                            self.run.record('p0-fresh', check, 'could-not-run', [image], 'Hand-made observation.')
+            self.assertEqual(self.run.selected('p0-fresh')['results'], {})
+
+    def test_cleanup_keeps_a_pair_whose_later_tier_lacks_evidence_or_hit_a_harness_failure(self):
+        """Ordinary cleanup needs retained bytes behind a nonpass, and no unresolved automation failure.
+
+A hand-made unavailable send with no evidence, or a send whose import failed
+in the harness, may still need the live guests; only the maintainer's
+retention decision (`--discard-failed`) releases them.
+"""
+        for case in ('no evidence', 'automation failure'):
+            with self.subTest(case=case):
+                children = self.ready_for_p2()
+                with self.run.locked():
+                    if case == 'no evidence':
+                        self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'could-not-run', [],
+                                        'Hand-made unavailable send without evidence.')
+                    else:
+                        self.run.selected('p0-installer-upgrade')['automation_failure'] = {
+                            'check_id': 'p2-feedback-send', 'status': 'could-not-run', 'kind': 'harness-failure',
+                            'detail': 'Synthetic import failure after Send.'}
+                        self.run.limit_scope('p1-only')
+                    with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                        self.run.cleanup('p0-installer-upgrade')
+                    self.assertTrue(all(child.poll() is None for child in children))
+                    self.run.cleanup('p0-installer-upgrade', discard_failed=True)
+                self.assertTrue(all(child.poll() == 0 for child in children))
+
+    def test_a_confirmed_failure_outranks_a_later_harness_failure_in_every_verdict(self):
+        """A recorded lost session must still fail the run when the feedback turn later aborts in the harness."""
+        self.enable_p0()
+        self.complete_stable_p0()
+        self.complete_p0('p0-installer-upgrade', through='remote-supervisor-agent')
+        image = self.evidence_file('lost-session.png', PNG)
+        with self.run.locked():
+            self.run.record('p0-installer-upgrade', 'local-old-session', 'fail', [image], 'Synthetic lost session.')
+            self.run.selected('p0-installer-upgrade')['automation_failure'] = {
+                'check_id': 'p2-feedback-send', 'status': 'could-not-run', 'kind': 'harness-failure',
+                'detail': 'Synthetic aborted feedback turn.'}
+            report = self.run.report()
+            self.assertEqual(report['p1']['verdict'], 'fail')
+            self.assertEqual(report['p2']['verdict'], 'could not run')
+            self.assertEqual(report['passes']['p0-installer-upgrade']['verdict'], 'fail')
+            self.assertEqual((report['verdict'], report['requested_verdict']), ('fail', 'fail'))
+
+    def test_lost_retry_evidence_invalidates_only_the_checks_it_belongs_to(self):
+        """A missing archive from a P1 provider retry must not invalidate the pair's P0 checks or fence P2.
+
+Retry history of the pass-wide native preflight still counts everywhere.
+"""
+        children = self.ready_for_p2()
+        with self.run.locked():
+            entry = self.run.selected('p0-installer-upgrade')
+            entry['provider_retries'] = [{'check_id': 'old-sessions', 'sha256': {'missing-retry.tar::./x': 'f' * 64}}]
+            self.run.save()
+            report = self.run.report()
+            self.assertEqual((report['p0']['verdict'], report['p1']['verdict']), ('pass', 'could not run'))
+            self.assertIsNone(self.run.chain_block('p0-installer-upgrade', 'p2-feedback-send', 'pass'))
+            entry['provider_retries'][0]['check_id'] = 'native-preflight'
+            self.run.save()
+            self.assertEqual(self.run.report()['p0']['verdict'], 'could not run')
+            self.run.cleanup('p0-installer-upgrade', discard_failed=True)
+        self.assertTrue(all(child.poll() == 0 for child in children))
 
 if __name__ == '__main__':
     unittest.main()

@@ -112,6 +112,30 @@ class NativeUITests(unittest.TestCase):
                 ui.prepare(call)
         self.assertEqual(len(list((self.output / 'work').glob('*restart-timeout.json'))), 1)
 
+    def test_p0_relaunch_leaves_the_supervisor_to_its_own_checkpoint(self):
+        """A candidate app back with its old supervisor must reach `local-supervisor-upgrade`, Update action included.
+
+Only the P0 upgrade pairs relax the oracle; a bonus upgrade's same observation
+still times out, and either way a new app process with the candidate bundle
+installed is required.
+"""
+        old_supervisor = dict(version('0.30.0'), running_versions=['0.29.0'])
+        for pass_id, refused in (('p0-installer-upgrade', False), ('p0-updater-upgrade', False),
+                                 ('upgrade-v0.29.0', True)):
+            with self.subTest(pass_id=pass_id):
+                self.task['pass_id'] = pass_id
+                ui = NativeUI(self.operations, clock=iter((0, 0, 61)).__next__, pause=lambda value: None)
+                ui.bound.add('farhelm')
+                call = ui_call(1, 'farhelm', 'restart', [[150, 80]])
+                with mock.patch.object(self.operations, 'version',
+                                       side_effect=[version('0.29.0'), old_supervisor, old_supervisor]):
+                    ui.prepare(call)
+                    if refused:
+                        with self.assertRaisesRegex(RuntimeError, 'did not return'):
+                            ui.settle_restart(call)
+                    else:
+                        self.assertIn('cua.getApp', ui.settle_restart(call)['params']['arguments']['code'])
+
     def test_candidate_supervisor_cannot_hide_an_unchanged_gui_process(self):
         """Restart requires a new app process, not only candidate payloads or a newly started supervisor."""
         ui = NativeUI(self.operations, clock=iter((0, 61)).__next__, pause=lambda value: self.fail('unbounded wait'))

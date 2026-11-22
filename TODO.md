@@ -244,6 +244,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
+- **Brick test remote Mac uninstall.** The brick test's P1 covers Uninstall from the remote host's menu only for a
+  remote Linux host. Extend it to a remote Mac. That needs new Tart fixture work: the one Mac guest runs the helm, and
+  remote setup, Update and uninstall are refused on a Mac with the desktop app installed (SPEC.md, "Topology"), so the
+  remote Mac has to be a second Mac guest without the app. The procedure is in `releasing/mac-vm-test/BRICK-TEST.md`.
+
 ### Plan follow-up
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane

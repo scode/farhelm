@@ -48,7 +48,7 @@ def require_setup(profile, feedback=False):
 
 These records are operator attestations, not cryptographic certificates. Their
 base identities must match the profile, and runtime preflight still exercises
-the actual clone. Credential-copy consent does not authorize P1's live feedback
+the actual clone. Credential-copy consent does not authorize P2's live feedback
 send; that separate consent is required before any in-scope run starts.
 Historical profiles remain usable for status and cleanup.
 """
@@ -62,7 +62,7 @@ Historical profiles remain usable for status and cleanup.
             or authorization.get('auth_source') != config['auth_source']):
         raise Refused('fixture setup lacks standing consent for this credential and both disposable roles')
     if feedback and authorization.get('feedback_send_approved') is not True:
-        raise Unavailable('fixture setup lacks explicit consent for the fixed live P1 feedback send')
+        raise Unavailable('fixture setup lacks explicit consent for the fixed live P2 feedback send')
     receipt = private_json(config['fixture_receipt'])
     expected = {role: profile.values[role + '_base'] for role in ('mac', 'linux')}
     obligations = {'native-screenshot-click-type', 'native-after-reopen', 'clone-permission-carryover',
@@ -127,28 +127,37 @@ def source_url(source):
     return value
 
 
-# P0's old sessions show that an upgrading user's running agent sessions keep
-# running across the upgrade and resume after Restart (a deliberate exception
-# to P0's no-old-conversation rule, at the maintainer's request). The
-# remembered word is asked for only after Restart, so a reply naming it shows
-# the resumed conversation, not just any response.
+# P1's old sessions show that an upgrading user's running agent sessions keep
+# running across the upgrade and resume after Restart. The remembered word is
+# asked for only after Restart, so a reply naming it shows the resumed
+# conversation, not just any response.
 def old_sessions_instructions(managed=True):
-    """Have p0-updater-upgrade's old fixture start the old sessions the later checks compare against."""
+    """Have the installer pair's `old-sessions` start, on the previous release, the sessions P1 compares against.
+
+Everything here runs before any candidate code, so a failure is an unavailable
+P1 prerequisite rather than a product failure, and it never touches P0.
+"""
     capture = ('''Call inspect_state and remote_inspect_state until each shows
 exactly one session with a captured conversation (the old app offers Restart
 only after capture). Then call terminal_hosts and remote_terminal_hosts: they
-record each session's terminal host and child process identities.''' if managed else '''Require each conversation captured in Farhelm (the old app
+record each session's terminal host and child process identities. If either
+returns status unavailable, report could-not-run with its detail.''' if managed else '''Require each conversation captured in Farhelm (the old app
 offers Restart only after capture). Record both session and captured
 conversation identities, and each session's terminal host and child process
 identities (pid and start identity), in shared_state.json.''')
-    return '''P0 carries one old agent session per host into the upgrade. Still on the
+    versions = ('Call versions first and require the previous release still running. '
+                if managed else 'First independently confirm the previous release still runs. ')
+    return '''P1 carries one old agent session per host across the upgrade. ''' + versions + '''If it
+does not, report could-not-run before starting any session. Still on the
 previous release, through the old app's normal GUI launch ONE genuine Codex
 session on local and ONE on the remote host, using the configured model at low effort, YOLO and
 per-run trust where offered. In each send exactly: Remember the word bluebird.
 What is 17 + 25? Answer in one short sentence. Require a separate actual answer
 42 and completion. ''' + capture + '''
+This runs on the previous release, before any candidate code: if a session
+cannot be started or captured, report could-not-run, never fail.
 Leave both sessions running: do not restart, stop or delete them; later
-checkpoints use them. No feedback yet.'''
+checkpoints use them. Do not update yet. No feedback yet.'''
 
 
 def old_session_instructions(side, managed=True):
@@ -159,13 +168,13 @@ Whether the old session and its terminal host survived comes from the
 the session is touched: after its Restart the terminal host is legitimately
 replaced. The steps end with the final sample, so no path can stop short of
 what the import requires. The post-upgrade question's answer (48) differs from
-the old fixture's (42), so a frozen screen still showing the earlier answer
+the one `old-sessions` asked for (42), so a frozen screen still showing the earlier answer
 cannot read as a response.
 """
     survival = 'remote_host_survival' if side == 'remote' else 'host_survival'
     final = 'remote_old_session_after' if side == 'remote' else 'old_session_after'
     if managed:
-        compare = f'''Call prior_receipts for the old-fixture facts. Before selecting the old
+        compare = f'''Call prior_receipts for the old-sessions facts. Before selecting the old
 {side} session, call {survival} exactly once. It samples on its own and
 reports survived: the same session and launch generation, still captured, in
 the same terminal host with the same child. If survived is false, report fail
@@ -176,16 +185,16 @@ longer describes the upgrade.'''
 sample the import checks.'''
         clicks = ', never brick_ui method restart'
     else:
-        compare = f'''Read the old-fixture {side} session, conversation and terminal facts from
+        compare = f'''Read the old-sessions {side} session, conversation and terminal facts from
 shared_state.json. Before touching the old session, independently compare its
 launch generation and its terminal host's and child's process identities (pid
-and start identity) with the old-fixture ones: any change is a fail (but
+and start identity) with the old-sessions ones: any change is a fail (but
 automation-failure if you touched the old session before comparing).'''
         last = '''Finish by retaining the old session's launch generation and the terminal
 hosts present now, independently, after the resumed answer.'''
         clicks = ''
     return compare + f'''
-Select the old {side} session from old-fixture. Any step below not working is
+Select the old {side} session from old-sessions. Any step below not working is
 a fail. The rediscovered terminal must still show the earlier 17 + 25
 answer. Send: What is 6 times 8? Answer with the number only. Require the old
 agent's separate new answer 48.
@@ -205,7 +214,7 @@ Capture native images of the session after the restart and of the answers.'''
 
 
 def instructions(check_id, pass_id, update_path=None):
-    """Keep P0 and P1's declared contracts distinct from bonus acceptance work.
+    """Keep the P0, P1 and P2 declared contracts distinct from bonus acceptance work.
 
 Release metadata, source commits, paths and SSH alias are supplied separately.
 The recipe remains authoritative for broader checks, and the guest retains its
@@ -218,17 +227,17 @@ could-not-run boundary are too specific to leave to that mapping.
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
         return remote_host_instructions(check_id)
     contracts = {
-        'p1-feedback-send': '''This is the separately authorized P1 check after all runnable P0 checks passed.
-Expected RC or dev updater discovery skips do not block this check.
+        'p2-feedback-send': '''This is the separately authorized P2 check after all runnable P0 checks passed.
+Expected RC or dev updater discovery skips and P1 results do not block this check.
 Require context feedback_authorized true before opening Send; otherwise report
-could-not-run without sending. Read RECIPE.md's P1 contract. Through native CUA
+could-not-run without sending. Read RECIPE.md's P2 contract. Through native CUA
 send its exact two-paragraph brick-test message with this candidate tag to the
 normal farhelm.io feedback service; leave contact blank. Verify the dialog names
 the candidate version and desktop surface. Retain actual native images of the
 filled dialog before Send and closed dialog after success (or failure state).
 Pass only on observed successful closure; no command success receipt is needed.
 Do not send another message or inspect the private inbox. A failed product send
-is a P1 failure, independent from P0; finish this observation immediately.''',
+is a P2 failure, independent from P0 and P1; finish this observation immediately.''',
         'artifact-verification': '''Clone the context source_url into source_checkout if absent, fetch the previous
 tag, and require git rev-parse previous^{commit} equals previous_commit. From that
 checkout run context verification_helper with previous, candidate and output
@@ -312,10 +321,11 @@ No command receipt is needed.''',
 installer checksum with source-known keys. Disable automatic app updates in the
 guest's desktop-client.json BEFORE first launch, only if no Farhelm state exists.
 Launch the old installed app normally, verify previous app/local supervisor and
-disabled auto updates. Only for p0-updater-upgrade or a bonus upgrade fixture,
-provision the pinned SSH Linux host through the old app's normal native Add host
-GUI and require its old remote version. p0-installer-upgrade needs no remote
-product setup or conversation. Retain native image and command/version receipts.''',
+disabled auto updates. For every fixture except p0-updater-upgrade, provision
+the pinned SSH Linux host through the old app's normal native Add host GUI and
+require its old remote version. p0-updater-upgrade needs no remote product
+setup. Start no session or conversation here. Retain native image and
+command/version receipts.''',
         'update-discovery': '''Use the freshly selected context update_path. It must be ordinary or override;
 manual cannot satisfy discovery. For override, normally quit the old app and
 guest-open it with FARHELM_DESKTOP_UPDATE_LATEST=candidate, retaining the startup
@@ -333,18 +343,29 @@ using the public latest observation and fresh native update-control text naming
 the exact latest release (accessibility text or visible tooltip); report an
 indistinguishable endpoint as a gap. Retain native image and version/command
 receipts. Do not require the remote supervisor upgraded in this checkpoint.''',
-        'local-supervisor-agent': '''Require connected candidate local supervisor; its managed relaunch normally
-upgrades it automatically. Use local Update if the product offers it. Through
+        'old-sessions': old_sessions_instructions(managed=False),
+        'local-supervisor-upgrade': '''Require the connected candidate local supervisor in the native
+Farhelm UI; the candidate's relaunch normally upgrades it automatically. Use
+local Update only if the product offers it. Retain a native image and
+independent installed and running candidate version evidence. Launch no
+session here and leave the old local session untouched.''',
+        'remote-supervisor-upgrade': '''Observe the candidate's automatic remote update without clicking
+Update; it may already have finished during relaunch. Require the formerly old
+remote supervisor connected at candidate in the native UI, and independently
+verify the candidate remote binary and its running systemd user service over
+pinned SSH. Retain a native image plus remote version/service evidence. Launch
+no session here and leave the old remote session untouched.''',
+        'local-supervisor-agent': '''The candidate local supervisor's upgrade was established by
+local-supervisor-upgrade; require it still connected. Through
 native Farhelm GUI launch ONE genuine Codex session on local with the configured model,
 low effort, yolo, per-run trust true. Send: What is 17 + 25? Explain in one short
 sentence. Require separate actual answer 42 with sensible explanation, terminal
 responsiveness and idle/completion. Retain native image and candidate running
 version evidence. Leave the old session untouched. No settings/template
 prerequisites.''',
-        'remote-supervisor-agent': '''Observe the candidate's automatic remote update without clicking Update.
-Require the formerly old remote supervisor
-connected at candidate, independently verify its running systemd user service
-over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
+        'remote-supervisor-agent': '''The candidate remote supervisor's upgrade was established by
+remote-supervisor-upgrade; require it still connected at candidate and its
+systemd user service running over pinned SSH. Launch ONE genuine Codex session through Farhelm on that remote
 host with the configured model at low effort and yolo/trust true where supported. Send: What is 17 +
 25? Explain in one short sentence. Require actual answer 42, explanation,
 responsive terminal and completion. A plain command is insufficient. Retain
@@ -369,14 +390,9 @@ Any prerequisite refusal is permission-block/automation failure, never a pass.''
         # before waiting for Restart; P0 already completed that action earlier.
         if check_id == 'update-relaunch' and pass_id.startswith('upgrade-') and update_path in ('ordinary', 'override'):
             text = contracts['update-discovery'] + '\nThen complete the relaunch:\n' + text
-        if check_id == 'old-fixture' and pass_id == 'p0-updater-upgrade':
-            text += '\n' + old_sessions_instructions(managed=False)
         if check_id in ('app-start', 'old-fixture', 'update-relaunch'):
             text += ('\nIf the ordinary welcome card appears, dismiss it with got it before testing the session UI. '
-                     'Do not select Send feedback now or begin P1 early.')
-        if check_id == 'update-relaunch' and pass_id == 'p0-installer-upgrade':
-            text += ('\nThis installer fixture also requires its local supervisor connected at candidate, '
-                     'with independent running-version evidence; there is no later supervisor checkpoint here.')
+                     'Do not select Send feedback now or begin P2 early.')
         return text
     return (f'Perform RECIPE.md checkpoint {check_id} for {pass_id}, and read its matching '
             'acceptance contract and the staged filled addendum.md. The context check_contracts '
@@ -442,18 +458,29 @@ No remote setup, conversations, templates or settings.''',
 verify_previous and install_previous; its helper disables automatic updates
 before first launch. Call launch. Through native CUA dismiss welcome with got it,
 verify previous app/local supervisor and automatic updates off. Call versions.
-For every fixture except p0-installer-upgrade, add context.ssh.alias through the
+For every fixture except p0-updater-upgrade, add context.ssh.alias through the
 ordinary Add host GUI, accept its ordinary setup confirmation and require remote
 connected at previous. Then call remote_version.''',
-        'local-supervisor-agent': '''Require connected candidate local supervisor, using local Update only if offered.
+        'old-sessions': old_sessions_instructions(),
+        'local-supervisor-upgrade': '''Require the connected candidate local supervisor through native UI; the
+candidate's relaunch normally upgrades it automatically. Use local Update only
+if offered. Call versions and require the candidate running. Launch no session
+and leave the old local session from old-sessions untouched. Capture native
+images.''',
+        'remote-supervisor-upgrade': '''Observe the candidate's automatic remote update. It may already have finished
+during relaunch or the local checks. Keep the settings as they are and leave
+the manual Update actions untouched. Require the connected candidate remote
+host through native UI, then call remote_version. Launch no session and leave
+the old remote session from old-sessions untouched. Capture native images.''',
+        'local-supervisor-agent': '''Call prior_receipts: local-supervisor-upgrade established the candidate local
+supervisor. Require it still connected, using local Update only if offered.
 Through Farhelm native GUI launch one genuine local Codex session with the configured
 model at low effort, YOLO and per-run trust where offered. Send: What is 17 + 25? Explain
 in one short sentence. Require a separate actual answer 42, sensible explanation,
 responsive terminal and completion. Call versions. Leave the old session from
-old-fixture untouched. Retain actual native images.''',
-        'remote-supervisor-agent': '''Observe the candidate's automatic remote update. It may already have finished
-during relaunch or the local checks. Keep the settings as they are and leave
-the manual Update actions untouched.
+old-sessions untouched. Retain actual native images.''',
+        'remote-supervisor-agent': '''Call prior_receipts: remote-supervisor-upgrade established the candidate remote
+supervisor. Leave the manual Update actions untouched.
 Require connected candidate remote, then call remote_version. Launch one genuine
 remote Codex session with the configured model at low effort, YOLO and per-run trust where offered.
 Leave the launcher's optional Initial prompt blank. Launch first, then enter the
@@ -461,7 +488,7 @@ prompt in the visible agent terminal; the initial-prompt field can be offscreen
 even when present in AX. Scroll other launcher controls into view before clicking.
 Send: What is 17 + 25? Explain in one short sentence. Require a separate actual
 answer 42, explanation, responsive terminal and completion. Leave the old
-remote session from old-fixture untouched. Leave this new session running: the
+remote session from old-sessions untouched. Leave this new session running: the
 remote host Remove and Uninstall checks carry it. Capture native images.''',
         'local-old-session': old_session_instructions('local'),
         'remote-old-session': old_session_instructions('remote'),
@@ -515,8 +542,8 @@ candidate relaunch.''',
 then call launch. Require usable candidate, both connected hosts, retained
 sessions and responsiveness. Call versions, remote_version, inspect_state and
 continuity_reopen_after. Capture final native image.''',
-        'p1-feedback-send': '''Call prior_receipts. This is the separately approved P1 send after all runnable P0 checks passed.
-Expected RC or dev updater discovery skips do not block this check.
+        'p2-feedback-send': '''Call prior_receipts. This is the separately approved P2 send after all runnable P0 checks passed.
+Expected RC or dev updater discovery skips and P1 results do not block this check.
 Require context.feedback_authorized true. Open the normal ? > send feedback
 dialog. Use native paste for exactly this message, replacing vX.Y.Z only with
 context.candidate:
@@ -529,7 +556,7 @@ Leave contact blank. Verify the entire reactive message, candidate version and
 desktop app metadata. Capture a native image BEFORE Send. Press Send once;
 require the dialog closes by itself without failure, and capture the closed
 dialog/thanks state. Do not resend or inspect the private inbox. An actual send
-failure is a P1 product failure, independent from P0. No recipe/file browsing.''',
+failure is a P2 product failure, independent from P0 and P1. No recipe/file browsing.''',
         'addendum': '''Call prior_receipts and review this pass's observations against context.addendum.
 Report actual coverage and any gaps for this pass only. Separately declared
 extra-* checkpoints perform their own hands-on checks; do not claim a pending
@@ -537,11 +564,10 @@ one passed or perform it early here. Do not repeat P0, send feedback, or start
 another upgrade. Capture final native state if this checkpoint declares GUI.''',
     }
     if check_id == 'old-fixture':
-        # Only the updater fixture carries old sessions into P0's later checks;
-        # the installer fixture and bonus upgrades (which seed their own state)
-        # start none here.
-        return contracts[check_id] + ('\n' + old_sessions_instructions() if pass_id == 'p0-updater-upgrade'
-                                      else ' No session or feedback yet.')
+        # Old sessions get their own P1 checkpoint (`old-sessions`), so a
+        # failed old-version agent turn cannot fail this P0 one; bonus upgrades
+        # seed their own state later.
+        return contracts[check_id] + ' No session or feedback yet.'
     if check_id in contracts:
         return contracts[check_id]
     if check_id == 'window-drag':
@@ -650,7 +676,7 @@ def task_for(run, pass_id, check_id, context, timeout=1200):
     contract = build(check_id, pass_id, context.get('update_path'))
     # Older releases may predate the model in their catalog. Their custom
     # model input lets the session still use the same explicit ID as the tester.
-    if check_id in {'old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent',
+    if check_id in {'old-sessions', 'local-supervisor-agent', 'remote-supervisor-agent',
                     'codex-conversation', 'seed-state'}:
         contract += (f'\nWhen launching a genuine Codex session, select Codex and use the exact model '
                      f'{settings["model"]}. If it is absent from the catalog, enter and commit that '

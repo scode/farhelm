@@ -403,7 +403,7 @@ fit it.
 Before editing anything under `releasing/mac-vm-test/`, read `releasing/mac-vm-test/BRICK-TEST.md` in full, including
 "Validate changes to this coordinator".
 
-### Release brick test ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "did P0 checks succeed?", "did P1 checks succeed?")
+### Release brick test ("brick test release vX.Y.Z", "stop after P0 checks", "stop after P1 checks", "stop after P2 checks", "did P0 checks succeed?", "did P1 checks succeed?", "did P2 checks succeed?")
 
 When asked for a brick test, read `releasing/mac-vm-test/BRICK-TEST.md` in full before inspecting Tart state, then the
 files `releasing/mac-vm-test/BRICK-TEST.md`, "Release brick tests", names.

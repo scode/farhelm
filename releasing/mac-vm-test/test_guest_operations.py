@@ -22,10 +22,10 @@ import types
 import unittest
 from unittest import mock
 
-from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_snapshot,
+from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_payload, remote_host_snapshot,
                               run_fixed, select_hosts, serve, write_json)
 from guest_tester import managed_result, native_args, prompt, TesterError, validate_observation
-from checkpoint_contract import (available_operations, require_old_session,
+from checkpoint_contract import (EffectFailure, available_operations, require_old_session,
                                  required_operations, require_remote_host_effect, turn_timeout)
 from guest_workflow import managed_instructions
 from test_guest_tester import task
@@ -45,7 +45,11 @@ class ManagedOperationsTests(unittest.TestCase):
         self.value = task()
         self.value['context'] = {'managed_operations': True, 'pass_directory': str(self.pass_dir),
             'source_checkout': str(self.pass_dir / 'source'), 'signed_inputs': str(self.pass_dir / 'signed'),
-            'previous': 'v0.29.0', 'candidate': 'v0.30.0', 'ssh': {'alias': 'fixture-peer'}}
+            'previous': 'v0.29.0', 'candidate': 'v0.30.0', 'ssh': {'alias': 'fixture-peer'},
+            # The receipt handoff reads only prerequisites, so the fictional
+            # checkpoints these tests hand receipts between are declared in order.
+            'check_contracts': {key: {'priority': 'P0'} for key in ('check', 'update-discovery', 'update-relaunch',
+                                                                    'later')}}
         self.output = self.pass_dir / 'attempt/output'
         (self.output / 'work').mkdir(parents=True)
 
@@ -63,10 +67,33 @@ or a destructive cleanup cannot be accepted from a model's success claim.
 """
         before = {'service': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'MainPID': '71'},
                   'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
-                  'data_present': True, 'database_present': True}
+                  'data_present': True, 'database_present': True, 'farhelm_pids': [71, 80],
+                  'session_ids': ['session-a', 'session-b']}
         uninstalled = dict(before, service={'LoadState': 'not-found', 'ActiveState': 'inactive',
                                            'SubState': 'dead', 'MainPID': '0'}, lib_present=False,
-                           unit_present=False, binary_sha256=None, unit_sha256=None)
+                           unit_present=False, binary_sha256=None, unit_sha256=None, farhelm_pids=[])
+        # Kept data is the same data: an emptied, replaced or unreadable
+        # database fails even though the file is still there, and that is the
+        # product's failure (EffectFailure), not the harness's.
+        for ids in ([], ['other-session'], None):
+            with self.subTest(after_ids=ids), self.assertRaisesRegex(EffectFailure, 'lost the retained'):
+                require_remote_host_effect('remote-host-uninstall', before, dict(uninstalled, session_ids=ids))
+        # Uninstall is complete only with nothing of Farhelm's left running: a
+        # surviving terminal host fails it even with every file gone.
+        with self.assertRaisesRegex(EffectFailure, 'terminal hosts running'):
+            require_remote_host_effect('remote-host-uninstall', before, dict(uninstalled, farhelm_pids=[80]))
+        with self.assertRaisesRegex(EffectFailure, 'Remove changed'):
+            require_remote_host_effect('remote-host-remove', before, dict(before, farhelm_pids=[71]))
+        # A failed premise (the scan did not see the supervisor, or the
+        # starting database was unreadable) is the harness's: not an
+        # EffectFailure.
+        for label, start in (('supervisor unseen', dict(before, farhelm_pids=[80])),
+                             ('unreadable start', dict(before, session_ids=None))):
+            for check in ('remote-host-remove', 'remote-host-uninstall'):
+                with self.subTest(premise=label, check=check):
+                    with self.assertRaisesRegex(RuntimeError, 'provisioned running') as caught:
+                        require_remote_host_effect(check, start, uninstalled)
+                    self.assertNotIsInstance(caught.exception, EffectFailure)
         require_remote_host_effect('remote-host-remove', before, before)
         require_remote_host_effect('remote-host-uninstall', before, uninstalled)
         for check, after in (('remote-host-remove', uninstalled), ('remote-host-uninstall', before)):
@@ -86,36 +113,70 @@ or a destructive cleanup cannot be accepted from a model's success claim.
     def test_remote_snapshot_requires_manager_and_records_files_independently(self):
         """A disconnected user bus cannot masquerade as a successful uninstall.
 
-Read real fixture files with the production probe; only systemctl is injected.
-Missing units may return exit 1, but only a positive manager probe and explicit
+Read real fixture files with the production probe, executed from the exact
+source text shipped to the peer; only systemctl is injected. Missing units may
+return exit 1, but only a positive manager probe and explicit
 not-found/inactive properties make that an acceptable absence observation.
+
+The fixture home is reached through a symlink while the fictional procfs
+reports resolved executable paths, as the kernel does. The process scan counts
+the supervisor and a terminal host whose binary was already deleted, and skips
+an unrelated process, a vanished one, an unreadable link and non-process
+entries. A damaged database reads as no session ids rather than failing.
 """
+        real_home = self.root / 'remote-home-real'
         home = self.root / 'remote-home'
+        home.symlink_to(real_home)
         for path, data in (('.local/lib/farhelm/farhelm', b'binary'),
-                           ('.config/systemd/user/farhelm-supervisor.service', b'unit'),
-                           ('.local/state/farhelm/supervisor.db', b'database')):
-            file = home / path
+                           ('.config/systemd/user/farhelm-supervisor.service', b'unit')):
+            file = real_home / path
             file.parent.mkdir(parents=True, exist_ok=True)
             file.write_bytes(data)
+        (real_home / '.local/state/farhelm').mkdir(parents=True)
+        with contextlib.closing(sqlite3.connect(real_home / '.local/state/farhelm/supervisor.db')) as connection, connection:
+            connection.execute('CREATE TABLE sessions (id TEXT, token TEXT)')
+            connection.executemany('INSERT INTO sessions VALUES (?, ?)', [('session-b', 'x'), ('session-a', 'y')])
+        proc = self.root / 'proc'
+        lib = real_home / '.local/lib/farhelm'
+        for name, target in (('71', lib / 'farhelm'), ('80', str(lib / 'farhelm') + ' (deleted)'),
+                             ('90', '/usr/bin/sleep'), ('95', None), ('self', lib / 'farhelm')):
+            (proc / name).mkdir(parents=True)
+            if target is not None:
+                (proc / name / 'exe').symlink_to(target)
+        namespace = {}
+        exec(compile(remote_host_payload(), 'remote-host-payload', 'exec'), namespace)
+        shipped = namespace['remote_host_snapshot']
         loaded = b'LoadState=loaded\nActiveState=active\nSubState=running\nMainPID=71\n'
         def reply(code, output):
             """Expose exactly the subprocess text mode used by the Linux probe."""
             return subprocess.CompletedProcess([], code, output.decode(), '')
-        with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
-            snapshot = remote_host_snapshot(home)
+        with mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
+            snapshot = shipped(home, proc)
         self.assertEqual(snapshot['binary_sha256'], hashlib.sha256(b'binary').hexdigest())
         self.assertEqual(snapshot['unit_sha256'], hashlib.sha256(b'unit').hexdigest())
         self.assertTrue(snapshot['database_present'])
+        self.assertEqual(snapshot['farhelm_pids'], [71, 80])
+        self.assertEqual(snapshot['session_ids'], ['session-a', 'session-b'])
+        # A link that cannot be read (here a directory, as for a process whose
+        # link the kernel will not show this user) is skipped.
+        (proc / '97' / 'exe').mkdir(parents=True)
+        with mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
+            self.assertEqual(shipped(home, proc)['farhelm_pids'], [71, 80])
+        for damage in (b'', b'not a database'):
+            with self.subTest(damage=damage):
+                (real_home / '.local/state/farhelm/supervisor.db').write_bytes(damage)
+                with mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
+                    self.assertIsNone(shipped(home, proc)['session_ids'])
         with mock.patch('guest_operations.subprocess.run', return_value=reply(1, b'')) as runner:
             with self.assertRaisesRegex(RuntimeError, 'user manager'):
-                remote_host_snapshot(home)
+                remote_host_snapshot(home, proc)
             self.assertEqual(runner.call_count, 1)
         missing = b'LoadState=not-found\nActiveState=inactive\nSubState=dead\nMainPID=0\n'
         with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(1, missing)]):
-            self.assertEqual(remote_host_snapshot(home)['service']['LoadState'], 'not-found')
+            self.assertEqual(remote_host_snapshot(home, proc)['service']['LoadState'], 'not-found')
         with mock.patch('guest_operations.subprocess.run', side_effect=[reply(0, b'255\n'), reply(1, loaded)]):
             with self.assertRaisesRegex(RuntimeError, 'service observation'):
-                remote_host_snapshot(home)
+                remote_host_snapshot(home, proc)
 
     def test_remote_menu_snapshots_are_ordered_and_before_cannot_be_replaced(self):
         """A late or overwritten baseline must not hide an earlier destructive menu action."""
@@ -129,21 +190,94 @@ not-found/inactive properties make that an acceptable absence observation.
             self.assertIn('def remote_host_snapshot', ssh.call_args.args[0])
             with self.assertRaisesRegex(RuntimeError, 'already retained'):
                 operations.dispatch('remote_host_before')
-        self.assertNotIn('remote_host_before', available_operations('remote-supervisor-agent', 'p0-updater-upgrade', 'override'))
+        self.assertNotIn('remote_host_before', available_operations('remote-supervisor-agent', 'p0-installer-upgrade', 'manual'))
 
     def test_remote_menu_pass_requires_independent_effect_receipts(self):
         """Native success text alone cannot waive the SSH before/after acceptance contract."""
         for check in ('remote-host-remove', 'remote-host-uninstall'):
             with self.subTest(check=check):
                 self.value['check_id'] = check
-                self.value['pass_id'] = 'p0-updater-upgrade'
+                self.value['pass_id'] = 'p0-installer-upgrade'
                 write_json(self.output / 'managed-operations.json', {
-                    'completed': sorted(required_operations(check, 'p0-updater-upgrade', 'override') - {'remote_host_after'}),
+                    'completed': sorted(required_operations(check, 'p0-installer-upgrade', 'manual') - {'remote_host_after'}),
                     'observations': {}, 'receipts': [], 'continuity': None}, replace=True)
                 with self.assertRaisesRegex(TesterError, 'omitted operations: remote_host_after'):
                     managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Native success claim'})
                 self.assertIn('Remove' if check.endswith('remove') else 'Uninstall',
-                              managed_instructions(check, 'p0-updater-upgrade', 'override'))
+                              managed_instructions(check, 'p0-installer-upgrade', 'manual'))
+
+    def test_snapshots_that_contradict_a_menu_pass_import_as_a_product_failure(self):
+        """Lost data or a surviving terminal host is what the Uninstall did, so it fails the release, not the harness.
+
+A pass claim whose independent snapshots contradict it from a valid start is
+imported as fail; one whose starting premise failed stays a harness error.
+"""
+        self.value.update(check_id='remote-host-uninstall', pass_id='p0-installer-upgrade')
+        before = {'service': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'MainPID': '71'},
+                  'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
+                  'data_present': True, 'database_present': True, 'farhelm_pids': [71],
+                  'session_ids': ['session-a']}
+        after = dict(before, service={'LoadState': 'not-found', 'ActiveState': 'inactive', 'SubState': 'dead',
+                                      'MainPID': '0'}, lib_present=False, unit_present=False, binary_sha256=None,
+                     unit_sha256=None, farhelm_pids=[], session_ids=None)
+        def claim(start):
+            """Import a pass claim over the given starting snapshot and the damaged after snapshot."""
+            write_json(self.output / 'managed-operations.json', {
+                'completed': sorted(required_operations('remote-host-uninstall', 'p0-installer-upgrade', 'manual')),
+                'receipts': [], 'continuity': None,
+                'observations': {'remote_host_before': start, 'remote_host_after': after}}, replace=True)
+            return managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Native success claim.'})
+        result = claim(before)
+        self.assertEqual(result['status'], 'fail')
+        self.assertIn('lost the retained data', result['detail'])
+        with self.assertRaisesRegex(TesterError, 'effect premise failed'):
+            claim(dict(before, farhelm_pids=[]))
+
+    def test_installer_relaunch_pass_needs_the_owned_restart_to_a_new_app(self):
+        """Installed candidate files beside the old, still-running app must not pass as a relaunch.
+
+The installer pair's relaunch no longer requires the candidate supervisor,
+which used to imply a new app. The owned restart's transition receipt has to
+show a new app process instead, and the final observation must be that app.
+"""
+        self.value.update(check_id='update-relaunch', pass_id='p0-installer-upgrade')
+        self.value['context'].update(update_path='manual')
+        versions = {'installed': '0.30.0', 'bundle': '0.30.0', 'desktop_running': True,
+                    'running_versions': ['0.29.0'], 'cli': {'stdout': 'farhelm 0.30.0\n'}}
+        def attempt(final_pids, transition):
+            """Write this attempt's record, with the transition receipt only when given."""
+            receipts = []
+            if transition is not None:
+                write_json(self.output / 'work/managed-001-restart-transition.json', transition, replace=True)
+                receipts.append('managed-001-restart-transition.json')
+            write_json(self.output / 'managed-operations.json', {
+                'completed': ['install_candidate', 'versions'], 'receipts': receipts, 'continuity': None,
+                'observations': {'versions': dict(versions, desktop_pids=final_pids)}}, replace=True)
+            return managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Fictional relaunch claim'})
+        moved = {'before': {'desktop_pids': [101]}, 'after': {'desktop_pids': [202]}}
+        self.assertEqual(attempt([202], moved)['status'], 'pass')
+        for label, final, transition in (('no restart receipt', [101], None),
+                                         ('old app observed last', [101], moved),
+                                         ('no new process', [101], {'before': {'desktop_pids': [101]},
+                                                                    'after': {'desktop_pids': [101]}})):
+            with self.subTest(case=label), self.assertRaisesRegex(TesterError, 'relaunch premise'):
+                attempt(final, transition)
+
+    def test_nonpass_observation_imports_without_any_fixed_operation(self):
+        """A UI-only failed or unavailable observation is that observation, not a harness failure.
+
+The old app failing to start an old session is seen before any receipt
+exists; turning it into an automation failure would stop the installer
+pair's remaining P0 checks. A pass still needs its receipts.
+"""
+        self.value.update(check_id='local-old-session', pass_id='p0-installer-upgrade')
+        self.assertFalse((self.output / 'managed-operations.json').exists())
+        for status in ('could-not-run', 'fail'):
+            with self.subTest(status=status):
+                result = managed_result(self.value, self.output, {'status': status, 'detail': 'UI-only observation'})
+                self.assertEqual((result['status'], result['evidence']), (status, []))
+        with self.assertRaisesRegex(TesterError, 'no operation receipts'):
+            managed_result(self.value, self.output, {'status': 'pass', 'detail': 'Unsupported pass claim'})
 
     def test_failed_command_blocks_native_call_even_when_client_continues(self):
         """The old failure batched a failed receipt command and a restart; the second must never be forwarded."""
@@ -175,7 +309,7 @@ not-found/inactive properties make that an acceptable absence observation.
 The response is successful protocol data, so native-event validation does not
 mistake it for a provider error. It cannot mark the requested sample completed.
 """
-        self.value.update(check_id='old-fixture', pass_id='p0-updater-upgrade')
+        self.value.update(check_id='old-sessions', pass_id='p0-installer-upgrade')
         operations = self.operations()
         operations.perform = mock.Mock(side_effect=ObservationNotReady('observe the captured old session first'))
         native = types.SimpleNamespace(stdin=io.StringIO(), stdout=io.StringIO(json.dumps({
@@ -262,6 +396,34 @@ mistake it for a provider error. It cannot mark the requested sample completed.
         with self.assertRaisesRegex(RuntimeError, 'changed or disappeared'):
             later.dispatch('prior_receipts')
         self.assertIsNotNone(later.failure)
+
+    def test_receipt_handoff_carries_only_the_checkpoints_this_one_depends_on(self):
+        """A P0 or P2 checkpoint must not be stopped by a receipt an earlier P1 checkpoint left behind.
+
+The handoff follows the same tier rule as the coordinator's sequencing: P0
+reads earlier P0 receipts, P2 reads earlier P0 ones, P1 reads earlier P0 and
+P1 ones. A changed P1 receipt therefore stays out of the P0 and P2 handoffs
+and still fails the P1 one.
+"""
+        contracts = {'install': {'priority': 'P0'}, 'baseline': {'priority': 'P1'},
+                     'upgrade': {'priority': 'P0'}, 'survival': {'priority': 'P1'}, 'send': {'priority': 'P2'}}
+        self.value['context']['check_contracts'] = contracts
+        def attempt(check):
+            """Start one checkpoint's attempt in its own output directory, sharing the pass state."""
+            output = self.pass_dir / check / 'output'
+            (output / 'work').mkdir(parents=True)
+            return self.operations(dict(self.value, check_id=check), output), output
+        attempt('install')[0].receipt('install-receipt', {'installed': True})
+        baseline, output = attempt('baseline')
+        name = baseline.receipt('baseline-receipt', {'rows': 1})
+        (output / 'work' / name).write_text('{"rows":2}')
+        for check in ('upgrade', 'send'):
+            with self.subTest(check=check):
+                handoff = attempt(check)[0].dispatch('prior_receipts')['observation']
+                self.assertEqual([row['check_id'] for row in handoff], ['install'])
+        survival = attempt('survival')[0]
+        with self.assertRaisesRegex(RuntimeError, 'changed or disappeared'):
+            survival.dispatch('prior_receipts')
 
     def test_installer_cannot_replace_real_update_discovery(self):
         """The fixed API must preserve the acceptance boundary even if the model requests a shortcut."""
@@ -498,7 +660,7 @@ printf 'installer contract satisfied\\n'
 
     def test_feedback_task_embeds_the_authorized_message_without_file_browsing(self):
         """A fixture file read through Finder is unnecessary UI work and a possible new failure boundary."""
-        text = managed_instructions('p1-feedback-send', 'p0-updater-upgrade')
+        text = managed_instructions('p2-feedback-send', 'p0-installer-upgrade')
         self.assertIn('[brick-test] vX.Y.Z', text)
         self.assertIn('This is an automated release brick test checking that this release can send feedback;', text)
         self.assertIn('Use native paste', text)
@@ -661,17 +823,21 @@ record, bundle and CLI must independently agree on the candidate already.
     def test_remote_update_contract_observes_the_upgrade_on_relaunch(self):
         """A fast automatic update can finish before either remote checkpoint starts.
 
-P0 still needs a real remote agent response and independent service evidence;
+P0 observes the remote supervisor's upgrade on its own, with independent
+service evidence, before its agent check needs a real remote agent response;
 bonus upgrades still need original-process continuity from before the relaunch.
 """
-        for check, pass_id in (('remote-supervisor-agent', 'p0-updater-upgrade'),
+        for check, pass_id in (('remote-supervisor-upgrade', 'p0-installer-upgrade'),
                                ('remote-update', 'upgrade-v0.29.0')):
             with self.subTest(check=check):
                 text = managed_instructions(check, pass_id, 'override')
                 self.assertIn("candidate's automatic remote update", text)
                 self.assertIn('manual Update actions untouched', text)
                 self.assertIn('remote_version', required_operations(check, pass_id, 'override'))
-        self.assertIn('actual\nanswer 42', managed_instructions('remote-supervisor-agent', 'p0-updater-upgrade', 'override'))
+        self.assertIn('Launch no session', managed_instructions('remote-supervisor-upgrade', 'p0-installer-upgrade', 'manual'))
+        agent = managed_instructions('remote-supervisor-agent', 'p0-installer-upgrade', 'manual')
+        self.assertIn('remote-supervisor-upgrade established', agent)
+        self.assertIn('actual\nanswer 42', agent)
         self.assertIn('continuity_remote_after', required_operations('remote-update', 'upgrade-v0.29.0', 'override'))
         self.assertNotIn('continuity_remote_before',
                          available_operations('remote-update', 'upgrade-v0.29.0', 'override'))
@@ -890,7 +1056,7 @@ no command line other than a host's socket reaches a receipt.
             for row in rows:
                 connection.execute('INSERT INTO sessions VALUES (?,?,?,?,?)', row)
 
-    def attempt(self, check_id, pass_id='p0-updater-upgrade', **context):
+    def attempt(self, check_id, pass_id='p0-installer-upgrade', **context):
         """Start one checkpoint's operations, reading the pass state earlier attempts left."""
         value = task()
         value.update(check_id=check_id, pass_id=pass_id, context=dict(self.context, **context))
@@ -905,10 +1071,10 @@ no command line other than a host's socket reaches a receipt.
         return value, output, Operations(value, output, runner=runner, home=self.home)
 
     def old_fixture(self, *rows):
-        """Record the old fixture's local baseline: the captured session first, then the processes."""
+        """Record the local baseline `old-sessions` keeps: the captured session first, then the processes."""
         self.table = mac_table(*rows)
         self.sessions(generation=1, new=False)
-        _, _, operations = self.attempt('old-fixture')
+        _, _, operations = self.attempt('old-sessions')
         operations.dispatch('inspect_state')
         return operations.dispatch('terminal_hosts')['observation']['hosts']
 
@@ -936,9 +1102,9 @@ where it was gone by then, which nothing in the comparison may depend on.
     def test_old_session_requires_the_same_host_and_child_then_a_restart_onto_a_new_host(self):
         """A replacement that merely restores the screen and resumes the conversation must not pass.
 
-This is the upgrade promise P0 checks for every release: a running agent
+This is the upgrade promise P1 checks for every release: a running agent
 session keeps its terminal host across the upgrade, then Restart resumes it in
-a new one. The old fixture's identities reach the later turn only through
+a new one. The baseline identities reach the later turn only through
 retained receipts. A changed start time on the same pid, a new child, another
 pid on the same socket name, or a launch generation that moved before the
 comparison is a replacement. After the Restart the old host must be gone,
@@ -986,7 +1152,7 @@ empty early observation cannot count as a completed terminal-host sample.
 """
         self.sessions(generation=1, new=False)
         self.table = mac_table(*self.host(200, 1, 201))
-        _, _, operations = self.attempt('old-fixture')
+        _, _, operations = self.attempt('old-sessions')
         self.assertEqual(operations.dispatch('terminal_hosts')['status'], 'not-ready')
         self.assertEqual(operations.completed, set())
         self.assertEqual(operations.observations, {})
@@ -999,7 +1165,7 @@ empty early observation cannot count as a completed terminal-host sample.
 
     def test_repeated_readiness_deferrals_are_bounded(self):
         """Repeatedly skipping the captured-session observation must end an unproductive attempt."""
-        _, output, operations = self.attempt('old-fixture')
+        _, output, operations = self.attempt('old-sessions')
         for remaining in (2, 1, 0):
             self.assertEqual(operations.dispatch('terminal_hosts')['remaining_deferrals'], remaining)
         with self.assertRaisesRegex(RuntimeError, 'deferral limit exceeded'):
@@ -1020,7 +1186,7 @@ before the Restart shows nothing moved.
         restarted = self.host(500, 9, 501, name='c3')
         self.table = mac_table(*old)
         self.sessions(generation=1, new=False)
-        _, _, operations = self.attempt('old-fixture')
+        _, _, operations = self.attempt('old-sessions')
         self.assertEqual(operations.dispatch('terminal_hosts')['status'], 'not-ready')
         self.assertNotIn('terminal_hosts', operations.completed)
         self.old_fixture(*old)
@@ -1049,7 +1215,7 @@ before the Restart shows nothing moved.
             operations.dispatch('host_survival')
         self.assertIsNotNone(operations.failure)
 
-    def test_old_fixture_baseline_must_be_exactly_one_host_with_one_child(self):
+    def test_old_sessions_baseline_must_be_exactly_one_host_with_one_child(self):
         """No host, two hosts or a childless host would leave the survival comparison nothing unambiguous to compare.
 
 The previous release must run the old session in a terminal host: an old
@@ -1063,24 +1229,24 @@ refuses it rather than recording a comparison that could only fail later.
         for label, table in cases:
             with self.subTest(case=label):
                 self.table = table
-                _, _, operations = self.attempt('old-fixture')
+                _, _, operations = self.attempt('old-sessions')
                 operations.dispatch('inspect_state')
                 with self.assertRaisesRegex(RuntimeError, 'exactly one terminal host'):
                     operations.dispatch('terminal_hosts')
                 self.assertIsNotNone(operations.failure)
         self.table = mac_table(*old)
-        _, _, operations = self.attempt('old-fixture')
+        _, _, operations = self.attempt('old-sessions')
         operations.dispatch('inspect_state')
         self.assertEqual(len(operations.dispatch('terminal_hosts')['observation']['hosts']), 1)
 
     def test_a_baseline_retained_without_a_host_cannot_pass_survival(self):
-        """A receipt kept under the earlier contract, which accepted an old fixture with no host, must not compare as survived.
+        """A baseline receipt with no host, which an earlier contract accepted, must not compare as survived.
 
 The baseline sample now refuses that case itself; this is the comparison's own
-guard for an old-fixture receipt that predates the refusal.
+guard for a retained receipt that does not hold to that refusal.
 """
         self.sessions(generation=1, new=False)
-        _, _, operations = self.attempt('old-fixture')
+        _, _, operations = self.attempt('old-sessions')
         operations.dispatch('inspect_state')
         operations.receipt('terminal-hosts', {'hosts': [], 'unparsed_lines': 0})
         _, _, operations = self.attempt('local-old-session')
@@ -1089,12 +1255,16 @@ guard for an old-fixture receipt that predates the refusal.
             operations.dispatch('host_survival')
         self.assertIsNotNone(operations.failure)
 
-    def test_old_fixture_pass_needs_one_captured_session_per_host(self):
-        """Restart is only offered after capture, so an uncaptured old session cannot carry the later checks."""
-        value = dict(task(), check_id='old-fixture', pass_id='p0-updater-upgrade', context=self.context)
-        output = self.root / 'old-fixture-output'
+    def test_old_sessions_pass_needs_one_captured_session_per_host_on_the_previous_release(self):
+        """Restart is only offered after capture, so an uncaptured old session cannot carry the later checks.
+
+The sessions must also be on the previous release, which the version premise
+checks: started on the candidate, they would show nothing about an upgrade.
+"""
+        value = dict(task(), check_id='old-sessions', pass_id='p0-installer-upgrade', context=self.context)
+        output = self.root / 'old-sessions-output'
         output.mkdir()
-        completed = sorted(required_operations('old-fixture', 'p0-updater-upgrade', 'ordinary'))
+        completed = sorted(required_operations('old-sessions', 'p0-installer-upgrade', 'manual'))
         versions = {'installed': '0.29.0', 'bundle': '0.29.0', 'desktop_running': True,
                     'running_versions': ['0.29.0'], 'cli': {'stdout': 'farhelm 0.29.0\n'}}
         def record(remote_sessions):
@@ -1112,36 +1282,50 @@ guard for an old-fixture receipt that predates the refusal.
                     managed_result(value, output, {'status': 'pass', 'detail': 'fictional'})
         record([{'id': 'r', 'captured_conversation': 'c'}])
         self.assertEqual(managed_result(value, output, {'status': 'pass', 'detail': 'fictional'})['status'], 'pass')
+        versions.update(installed='0.30.0', bundle='0.30.0', running_versions=['0.30.0'],
+                        cli={'stdout': 'farhelm 0.30.0\n'})
+        record([{'id': 'r', 'captured_conversation': 'c'}])
+        with self.assertRaisesRegex(TesterError, 'running-version'):
+            managed_result(value, output, {'status': 'pass', 'detail': 'fictional'})
 
     def test_contract_confines_samples_to_their_checkpoints_and_floors_long_turns(self):
-        """Only the updater fixture records old sessions, and only old-session turns compare and sample afterwards.
+        """Only `old-sessions` records the baseline, and only old-session turns compare and sample afterwards.
 
 A comparison offered elsewhere could be run at the wrong moment; a baseline
-demanded of the installer fixture would hold it to sessions it never starts.
-The checkpoints that wait on genuine agent turns get a longer turn than the
+demanded of an old fixture would hold it to sessions it no longer starts, and
+would let a failed old-version agent turn fail that P0 checkpoint. Each
+supervisor's upgrade checkpoint observes only its own supervisor. The
+checkpoints that wait on genuine agent turns get a longer turn than the
 default, never past the tester's maximum.
 """
+        installer = 'p0-installer-upgrade'
         baseline = {'inspect_state', 'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'}
-        self.assertLessEqual(baseline, required_operations('old-fixture', 'p0-updater-upgrade', 'ordinary'))
-        self.assertFalse(baseline & required_operations('old-fixture', 'p0-installer-upgrade', 'manual'))
-        self.assertFalse(baseline & required_operations('old-fixture', 'upgrade-v0.29.0', 'manual'))
+        self.assertLessEqual(baseline | {'versions'}, required_operations('old-sessions', installer, 'manual'))
+        for pass_id, path in ((installer, 'manual'), ('p0-updater-upgrade', 'ordinary'), ('upgrade-v0.29.0', 'manual')):
+            self.assertFalse(baseline & required_operations('old-fixture', pass_id, path))
+        # The installer pair and bonus upgrades provision the remote host their
+        # later checks upgrade; the updater pair checks discovery only.
+        self.assertIn('remote_version', required_operations('old-fixture', installer, 'manual'))
+        self.assertNotIn('remote_version', required_operations('old-fixture', 'p0-updater-upgrade', 'ordinary'))
         once = {'host_survival', 'remote_host_survival', 'old_session_after', 'remote_old_session_after'}
-        for check in ('old-fixture', 'local-supervisor-agent', 'remote-supervisor-agent', 'reopen'):
-            self.assertFalse(once & available_operations(check, 'p0-updater-upgrade', 'ordinary'))
+        for check in ('old-fixture', 'old-sessions', 'local-supervisor-upgrade', 'remote-supervisor-upgrade',
+                      'local-supervisor-agent', 'remote-supervisor-agent', 'reopen'):
+            self.assertFalse(once & available_operations(check, installer, 'manual'))
+        self.assertEqual(required_operations('local-supervisor-upgrade', installer, 'manual'), {'versions'})
+        self.assertEqual(required_operations('remote-supervisor-upgrade', installer, 'manual'), {'remote_version'})
         # The new-session checks sample no terminal: nothing later depends on it.
-        self.assertEqual(required_operations('local-supervisor-agent', 'p0-updater-upgrade', 'ordinary'), {'versions'})
-        self.assertEqual(required_operations('remote-supervisor-agent', 'p0-updater-upgrade', 'ordinary'),
-                         {'remote_version'})
-        self.assertEqual(required_operations('local-old-session', 'p0-updater-upgrade', 'ordinary'),
+        self.assertEqual(required_operations('local-supervisor-agent', installer, 'manual'), {'versions'})
+        self.assertEqual(required_operations('remote-supervisor-agent', installer, 'manual'), {'remote_version'})
+        self.assertEqual(required_operations('local-old-session', installer, 'manual'),
                          {'prior_receipts', 'host_survival', 'old_session_after'})
-        self.assertEqual(required_operations('remote-old-session', 'p0-updater-upgrade', 'ordinary'),
+        self.assertEqual(required_operations('remote-old-session', installer, 'manual'),
                          {'prior_receipts', 'remote_host_survival', 'remote_old_session_after'})
         self.assertFalse({'remote_host_survival', 'remote_old_session_after'}
-                         & available_operations('local-old-session', 'p0-updater-upgrade', 'ordinary'))
-        self.assertEqual(turn_timeout('old-fixture', 'p0-updater-upgrade', 1200), 2400)
-        self.assertEqual(turn_timeout('old-fixture', 'p0-installer-upgrade', 1200), 1200)
-        self.assertEqual(turn_timeout('local-old-session', 'p0-updater-upgrade', 3000), 3000)
-        self.assertEqual(turn_timeout('old-fixture', 'p0-updater-upgrade', 3600), 3600)
+                         & available_operations('local-old-session', installer, 'manual'))
+        self.assertEqual(turn_timeout('old-sessions', installer, 1200), 1800)
+        self.assertEqual(turn_timeout('old-fixture', installer, 1200), 1200)
+        self.assertEqual(turn_timeout('local-old-session', installer, 3000), 3000)
+        self.assertEqual(turn_timeout('old-sessions', installer, 3600), 3600)
 
     def test_mac_process_rows_keep_only_hosts_in_this_state_directory_and_their_children(self):
         """A socket elsewhere, a nested path or a zombie child is not the session's host; odd lines are counted.
@@ -1170,7 +1354,7 @@ The gate still closes, and the failure receipt says how much output was
 withheld, so the attempt stays diagnosable without the private table.
 """
         self.sessions(generation=1, new=False)
-        value, output, operations = self.attempt('old-fixture')
+        value, output, operations = self.attempt('old-sessions')
         operations.dispatch('inspect_state')
         def failing(argv, **kwargs):
             """Return a partial table holding a private argument, with a failing status."""
@@ -1186,14 +1370,14 @@ withheld, so the attempt stays diagnosable without the private table.
         self.assertIn('withheld', retained[0]['stdout'])
         self.assertIn('fixture failure', retained[0]['stderr'])
 
-    def test_other_old_fixtures_sample_hosts_as_a_plain_diagnostic(self):
-        """Only the updater pair's old fixture is a baseline; an unprompted sample elsewhere must not fail the attempt.
+    def test_old_fixtures_sample_hosts_as_a_plain_diagnostic(self):
+        """Only `old-sessions` is a baseline; an unprompted sample at an old fixture must not fail the attempt.
 
-The installer fixture and bonus upgrades start no session at their old
-fixture, so neither the capture premise nor the one-host rule applies there.
+No old fixture starts a session any more, so neither the capture premise nor
+the one-host rule applies there.
 """
         self.table = mac_table(*self.host(200, 1, 201), *self.host(210, 2, 211, name='z9'))
-        for pass_id in ('p0-installer-upgrade', 'upgrade-v0.29.0'):
+        for pass_id in ('p0-installer-upgrade', 'p0-updater-upgrade', 'upgrade-v0.29.0'):
             with self.subTest(pass_id=pass_id):
                 _, _, operations = self.attempt('old-fixture', pass_id=pass_id)
                 self.assertEqual(len(operations.dispatch('terminal_hosts')['observation']['hosts']), 2)
@@ -1254,12 +1438,12 @@ host, with the old host gone, passes the import's check.
             return result
         def attempt(check_id):
             """Start one remote checkpoint's operations on the shared pass state."""
-            value = dict(task(), check_id=check_id, pass_id='p0-updater-upgrade', context=self.context)
+            value = dict(task(), check_id=check_id, pass_id='p0-installer-upgrade', context=self.context)
             self.attempts += 1
             output = self.pass_dir / f'remote-{self.attempts}/output'
             (output / 'work').mkdir(parents=True)
             return Operations(value, output, runner=runner, home=self.root / 'mac-home')
-        operations = attempt('old-fixture')
+        operations = attempt('old-sessions')
         rows = operations.dispatch('remote_inspect_state')['observation']['supervisor.db']['sessions']
         self.assertEqual(rows, [{'id': 'session-1', 'name': 'old', 'generation': 3,
                                  'captured_conversation': 'conversation-1'}])
