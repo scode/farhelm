@@ -67,7 +67,8 @@
 //! a key the input method takes while it composes (marked text, a CJK input source, a dead key's accent) arrives as
 //! committed text, never as a key-down, and on Wayland a text-input commit of several characters and a dead key
 //! followed by a key it does not compose with are inserted directly. The terminal drops those commits in its input
-//! handler while [`key_capture_armed`] says so, since they never reach the capture slot.
+//! handler while [`key_capture_armed`] says so, since they never reach the capture slot. A focused text field (the
+//! launcher's, which arms the sequence itself) still accepts them; SPEC.md's promise covers only the terminal's program.
 //!
 //! ## Shortcuts that act once per press
 //!
@@ -92,7 +93,7 @@
 //! and the key can reach the app's action before it reaches the focused terminal. The session Delete and Rename
 //! handlers ask the shown terminal directly whether its input has marked text. The physical-key interceptor also
 //! stops its keys before the focused element sees them, so composition checks for those actions belong to their
-//! handlers.
+//! handlers; the Keyboard shortcuts dialog's handler has none yet (`shortcuts.rs`).
 //!
 //! ## Shortcuts matched by the physical key
 //!

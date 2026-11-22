@@ -26,7 +26,8 @@
 //!
 //! NOTE: SPEC.md also says composition does not open the dialog. The old listener checked `isComposing`; here the
 //! interceptor takes the chord before the element that owns the input handler sees it, so refusing it falls to
-//! [`open_from_chord`], and the app has no way yet to ask the focused input whether it is composing. That gap is
+//! [`open_from_chord`], which does not ask yet; the session pane's `terminal_is_composing` (which the session Delete
+//! and Rename handlers use) answers it for the shown terminal, though not for a focused text field. That gap is
 //! recorded in `docs/gpui/parity/other-dialogs.md`; a chord typed mid-composition opens the dialog.
 
 #[cfg(test)]
