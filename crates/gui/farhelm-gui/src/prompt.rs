@@ -35,23 +35,23 @@
 //!
 //! Every answer closes the question before its action runs, with one exception: an answer whose action can fail, an
 //! extra one ([`Question::fallible_alternative`]) or the confirming one ([`ask_fallible`] or [`ask_inline_fallible`]).
-//! SPEC.md's YOLO question has an extra one: its "stop asking" answer first changes the host's setting, and
-//! "if changing that setting fails,
-//! nothing is started and the confirmation stays up with the reason". The host remove confirmation's Remove is a
-//! confirming one, as the old dialog stayed up through its request and showed the helm's refusal inside it. Such an
-//! answer keeps the question open while its action is in flight, with every answer frozen (drawn busy, doing nothing,
-//! Escape and any other dismissal included), so the first answer still wins. The action settles through the [`Attempt`]
-//! it is handed: success closes the question as any answer does, and failure shows the reason inside the question and
-//! arms the answers again, so the user can pick again. Focus stays on the answer the user pressed while the attempt
-//! runs, since a busy button keeps it, and the question never closes and reopens. After a failure an inline question
-//! leaves focus there. A centered one moves it to Cancel (every question has one), as the old host remove dialog did
-//! after a refusal: Enter or Escape then dismisses the question instead of Enter sending the refused action again, and
-//! a retry is a press on the answer again. It moves focus only while focus is still on the answer the attempt started
-//! from, so a user who tabbed or clicked elsewhere meanwhile keeps their place (SPEC_impl.md, "Questions: the prompt",
-//! records this narrow departure from SPEC.md's "Who may move focus"). An extra answer that can fail may sit on an
-//! inline question or on a centered one built with [`Question::keeps_focus_on_empty_click`]. Both presentations can
-//! also have a fallible confirmation, through [`ask_inline_fallible`] or [`ask_fallible`].
-//! [`Question::fallible_alternative`] describes what keeps each presentation open during the attempt.
+//! SPEC.md's YOLO question has an extra one: its "stop asking" answer first changes the host's setting, and "if
+//! changing that setting fails, nothing is started and the confirmation stays up with the reason". The host remove
+//! confirmation's Remove is a confirming one, as the old dialog stayed up through its request and showed the helm's
+//! refusal inside it. Such an answer keeps the question open while its action is in flight, with every answer frozen
+//! (drawn busy, doing nothing, Escape and any other dismissal included), so the first answer still wins. The action
+//! settles through the [`Attempt`] it is handed: success closes the question as any answer does, and failure shows the
+//! reason inside the question and arms the answers again, so the user can pick again. Focus stays on the answer the
+//! user pressed while the attempt runs, since a busy button keeps it, and the question never closes and reopens. After
+//! a failure an inline question leaves focus there. A centered one moves it to Cancel (every question has one), as the
+//! old host remove dialog did after a refusal: Enter or Escape then dismisses the question instead of Enter sending the
+//! refused action again, and a retry is a press on the answer again. It moves focus only while focus is still on the
+//! answer the attempt started from, so a user who tabbed or clicked elsewhere meanwhile keeps their place
+//! (SPEC_impl.md, "Questions: the prompt", records this narrow departure from SPEC.md's "Who may move focus"). An extra
+//! answer that can fail may sit on an inline question or on a centered one built with
+//! [`Question::keeps_focus_on_empty_click`]. Both presentations can also have a fallible confirmation, through
+//! [`ask_inline_fallible`] or [`ask_fallible`]. [`Question::fallible_alternative`] describes what keeps each
+//! presentation open during the attempt.
 //!
 //! A centered question that needs more than lines of text (the host setup confirmation's numbered plan with its Copy
 //! plan button, the host remove confirmation's explanation) carries a body the feature draws ([`Question::body`]), and
