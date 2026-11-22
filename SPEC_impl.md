@@ -4924,7 +4924,7 @@ parents using the ordinary umask, then re-resolves the configured spelling and r
 capturing the root identity. It may leave an empty root after a later refusal. Atomic mkdir remains the checkout
 collision authority. Known intent keys reconcile their original snapshot before current configuration or launch
 compilation; replacement identities additionally bind the source session and preserve its veto. The composer reads its
-checkout folder field from that accepted preview. It leaves the field read-only until an explicit existing-folder action
+checkout Folder line from that accepted preview. It leaves the folder read-only until an explicit existing-folder action
 changes the destination draft; the old editable `cwd` seed is never presented as a fresh-checkout path. Preview failures
 leave the path empty with an error state rather than displaying the old seed.
 

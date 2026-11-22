@@ -63,7 +63,6 @@ use gpui::{
     Window, div, px, svg,
 };
 
-use super::draft::DestinationKind;
 use super::draft::{
     Catalog, FOLDER_INSTALLATION_MOVED, Field, LaunchDraft, Mode, Tab, harness_label,
     remembered_permission,
@@ -1548,8 +1547,8 @@ fn field_label(label: impl IntoElement, palette: &theme::Palette) -> Div {
         .child(label)
 }
 
-/// Draw the controls that share the first destination row under one border. A recipe takes the folder's slot when
-/// launching into an environment. The component IDs still name the same actions and bridge targets.
+/// Draw the controls that share the first destination row under one border. The second segment holds the folder,
+/// repository or recipe, with its label above the segment. Keep the component IDs stable for the bridge.
 fn address_line(
     host: AnyElement,
     right: AnyElement,
@@ -2168,21 +2167,24 @@ impl Render for Launcher {
         // folder stay visible").
         // A new environment's folder is its home, shown as a held destination is (SPEC.md: "Folder is fixed to the new
         // sandbox's home, without Browse or recent folders").
-        let folder: AnyElement = if self.draft.destination_kind() == DestinationKind::Checkout {
-            self.checkout_folder_field(cx)
+        let managed_checkout = self.draft.checkout.is_some();
+        let folder = if managed_checkout {
+            None
         } else if self.draft.holds(Field::Destination) || self.draft.target.is_some() {
-            div()
-                .flex()
-                .items_center()
-                .min_h(ADDRESS_HEIGHT - px(2.))
-                .px(px(8.))
-                .font_family(crate::assets::TERMINAL_FONT)
-                .text_size(metrics::TEXT_MD)
-                .child(
-                    HostSentence::new("launcher-folder-held")
-                        .host(&HostText::from_host(self.draft.folder.value().as_str())),
-                )
-                .into_any_element()
+            Some(
+                div()
+                    .flex()
+                    .items_center()
+                    .min_h(ADDRESS_HEIGHT - px(2.))
+                    .px(px(8.))
+                    .font_family(crate::assets::TERMINAL_FONT)
+                    .text_size(metrics::TEXT_MD)
+                    .child(
+                        HostSentence::new("launcher-folder-held")
+                            .host(&HostText::from_host(self.draft.folder.value().as_str())),
+                    )
+                    .into_any_element(),
+            )
         } else {
             // The folder list opens under the field (`folder_list`), as wide as it.
             let tracker = self
@@ -2190,7 +2192,7 @@ impl Render for Launcher {
                 .list
                 .track_anchor("launcher-folder-anchor", window, cx);
             let on_arrow = weak.clone();
-            div()
+            Some(div()
                 .relative()
                 .child(
                     self.launcher_input(
@@ -2210,7 +2212,7 @@ impl Render for Launcher {
                     }),
                 )
                 .child(tracker)
-                .into_any_element()
+                .into_any_element())
         };
         // An unnamed managed checkout's name field reserves the placeholder for the `<repo>-N` it will get.
         let placeholder = if self.draft.checkout.is_none() {
@@ -2263,8 +2265,8 @@ impl Render for Launcher {
                     .flex_grow(0.3),
             )
         };
-        // Host always has a segment. When Recipe or Repository needs more room, its fields replace the right side
-        // of the address and use their own rows. Keep the host picker as the way back to an existing host.
+        // Host always has a segment. Recipe owns the other segment in a new environment, so Repository gets its
+        // own row there. On an existing host Repository and Folder use the same slot.
         let environment = self.draft.target.clone();
         let destination_switch = self.destination_switch(cx);
         let host = self.host_control(palette, window, cx);
@@ -2302,12 +2304,7 @@ impl Render for Launcher {
                 .flex_col()
                 .gap(px(ROW_GAP))
                 .children(first_line);
-            if self.draft.checkout.is_some() {
-                rows.children(container_host)
-                    .children(self.checkout_rows(palette, window, cx))
-                    .child(row("launcher-folder-row", "Folder", folder, palette))
-                    .into_any_element()
-            } else {
+            if let Some(folder) = folder {
                 // A new environment starts at its home. The short, held Folder segment leaves the host menu room
                 // for its reasons and keeps the same edge and height as the editable fields around it.
                 let held = div()
@@ -2332,39 +2329,17 @@ impl Render for Launcher {
                         .children(name.take()),
                 )
                 .into_any_element()
+            } else {
+                rows.children(container_host)
+                    .child(row(
+                        "launcher-repository-row",
+                        "Repository",
+                        self.repository_control(false, window, cx),
+                        palette,
+                    ))
+                    .into_any_element()
             }
-        } else if self.draft.checkout.is_some() {
-            let checkout = self.checkout_rows(palette, window, cx);
-            let host = div()
-                .flex()
-                .items_center()
-                .min_h(ADDRESS_HEIGHT)
-                .border_1()
-                .border_color(theme::color(palette.border))
-                .rounded(metrics::RADIUS_SM)
-                .bg(theme::color(palette.well))
-                .child(host);
-            div()
-                .flex()
-                .items_start()
-                .gap(px(ROW_GAP))
-                .child(
-                    row("launcher-host-row", "Host", host, palette)
-                        .w(px(ADDRESS_HOST_WIDTH))
-                        .flex_none(),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .gap(px(ROW_GAP))
-                        .children(checkout)
-                        .child(row("launcher-folder-row", "Folder", folder, palette)),
-                )
-                .into_any_element()
-        } else {
+        } else if let Some(folder) = folder {
             let invalid = self.folder_problem(cx).is_some();
             let focused = !self.draft.holds(Field::Destination)
                 && self.folder.focus_handle(cx).is_focused(window);
@@ -2381,6 +2356,22 @@ impl Render for Launcher {
                 "Folder",
                 "launcher-folder-row",
                 self.browse_button(palette, cx),
+                ink,
+                palette,
+            )
+            .into_any_element()
+        } else {
+            let ink = if self.checkout.repository.focus_handle(cx).is_focused(window) {
+                palette.accent
+            } else {
+                palette.border
+            };
+            address_line(
+                host,
+                self.repository_control(true, window, cx),
+                "Repository",
+                "launcher-repository-row",
+                None,
                 ink,
                 palette,
             )
@@ -2444,7 +2435,19 @@ impl Render for Launcher {
                     .children(destination_switch),
             )
             .children(self.replacement_checkout_warning(palette, cx))
+            .children(
+                managed_checkout
+                    .then(|| self.checkout_setup(palette, window, cx))
+                    .flatten(),
+            )
             .child(address_and_name)
+            .children(
+                managed_checkout
+                    .then(|| self.checkout_repository_note(window, cx))
+                    .flatten(),
+            )
+            .children(managed_checkout.then(|| self.checkout_folder_line(palette, cx)))
+            .children(managed_checkout.then(|| self.checkout_lifetime_note(palette)))
             .children(
                 self.host_picker
                     .note

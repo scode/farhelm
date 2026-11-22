@@ -55,6 +55,7 @@ use std::fmt;
 use std::ops::Range;
 use std::sync::Arc;
 
+use gpui::prelude::FluentBuilder as _;
 use gpui::{
     App, Div, ElementId, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement,
     RenderOnce, Role, SharedString, StatefulInteractiveElement as _, Styled, StyledText,
@@ -335,6 +336,7 @@ pub struct HostSentence {
     id: ElementId,
     parts: Vec<Part>,
     underlined_query: Option<(String, bool)>,
+    live_value: bool,
 }
 
 impl HostSentence {
@@ -344,7 +346,16 @@ impl HostSentence {
             id: id.into(),
             parts: Vec::new(),
             underlined_query: None,
+            live_value: false,
         }
+    }
+
+    /// Expose the same escaped words as the value of a label inside a live region. AccessKit's macOS adapter
+    /// announces the value, and its Linux adapter derives the spoken name of a Label from that value.
+    /// The enclosing region sets the announcement priority.
+    pub(crate) fn with_live_value(mut self) -> Self {
+        self.live_value = true;
+        self
     }
 
     /// Append the app's own words.
@@ -571,7 +582,8 @@ impl RenderOnce for HostSentence {
         div()
             .id(self.id)
             .role(Role::Label)
-            .aria_label(name)
+            .aria_label(name.clone())
+            .when(self.live_value, |label| label.aria_value(name))
             // `min_w_0` lets the sentence shrink to a flex row it sits in and wrap there. Without it a flex item's
             // minimum width is its whole unwrapped line (GPUI measures text with no wrap width for that query), so a
             // long session title in a dialog summary ran past the dialog's edge and was cut off there, hiding the part

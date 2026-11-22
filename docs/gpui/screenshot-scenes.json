@@ -2874,6 +2874,16 @@
       "reference": null
     },
     {
+      "golden": "launcher-managed-checkout",
+      "title": "Managed checkout with Host and Repository together and the previewed Folder below",
+      "reference": null
+    },
+    {
+      "golden": "launcher-managed-checkout-narrow",
+      "title": "Managed checkout on a narrow launcher",
+      "reference": null
+    },
+    {
       "golden": "launcher-replace-with",
       "title": "Replace with, showing the held host and the warning about replacing the source",
       "reference": null
