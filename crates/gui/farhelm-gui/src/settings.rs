@@ -65,6 +65,7 @@ mod card;
 mod checkout_field;
 mod checkouts;
 mod choices;
+pub(crate) use choices::preference_command;
 mod configured;
 mod containers;
 #[cfg(test)]

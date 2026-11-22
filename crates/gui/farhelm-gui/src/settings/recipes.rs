@@ -710,17 +710,7 @@ impl Recipes {
             return;
         }
         self.editor = None;
-        // New recipe is drawn again by the next frame; the coordinator keeps the move until then.
-        let target = self.new_recipe.clone();
-        match window {
-            Some(window) => focus::focus_in_layer(&target, mark, window, cx),
-            None => {
-                let mark = *mark;
-                let _ = self.window.update(cx, |_, window, cx| {
-                    focus::focus_in_layer(&target, &mark, window, cx)
-                });
-            }
-        }
+        focus::focus_after_editor_close(&self.new_recipe, mark, window, self.window, cx);
         cx.notify();
     }
 

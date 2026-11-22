@@ -322,17 +322,7 @@ impl TensorlakeForm {
                 {
                     self.recipe = Some(name.into());
                 }
-                // The Recipe choice is drawn again by the next frame; the coordinator keeps the move until then.
-                let target = self.recipe_choice.clone();
-                match window {
-                    Some(window) => focus::focus_in_layer(&target, mark, window, cx),
-                    None => {
-                        let mark = *mark;
-                        let _ = self.window.update(cx, |_, window, cx| {
-                            focus::focus_in_layer(&target, &mark, window, cx)
-                        });
-                    }
-                }
+                focus::focus_after_editor_close(&self.recipe_choice, mark, window, self.window, cx);
             }
             RecipeDeparture::Close => self.close_dialog(None, self.window, cx),
         }

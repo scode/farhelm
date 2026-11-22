@@ -628,19 +628,12 @@ pub(crate) fn session_is_remote(session: &str, cx: &App) -> bool {
 /// With no UI session (the app is between connections) nothing is sent and `done` is never called: the reset that
 /// ended the session already put up its own notice, and its dialogs, this question among them, are gone.
 fn save_consent(cx: &mut App, done: impl FnOnce(Result<(), HostText>, &mut App) + 'static) {
-    let (Some(operations), Ok(path)) = (
+    let (Some(operations), Ok(command)) = (
         session::current_operations(cx),
-        ApiPath::api(&["preferences"]),
+        crate::settings::preference_command(json!({ "tunnel_consent": true })),
     ) else {
         return;
     };
-    let command = Command::new(
-        Work::Save,
-        Method::Put,
-        path,
-        Some(json!({ "tunnel_consent": true })),
-        "PUT /api/preferences",
-    );
     // The completion is handed over to whichever of the two paths runs: the reply, or the refusal to start.
     let done = std::rc::Rc::new(std::cell::RefCell::new(Some(done)));
     let on_reply = done.clone();

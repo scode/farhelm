@@ -482,7 +482,9 @@ pub(super) fn whats_new_command(running: &str, on: bool) -> Result<Command, Path
     preference_command(crate::whats_new::preferences_patch(running, Some(on)))
 }
 
-fn preference_command(body: serde_json::Value) -> Result<Command, PathError> {
+/// Save only the preference fields the caller supplied. Each caller owns
+/// admission, ordering and reply handling for its change.
+pub(crate) fn preference_command(body: serde_json::Value) -> Result<Command, PathError> {
     Ok(Command::new(
         Work::Save,
         Method::Put,
