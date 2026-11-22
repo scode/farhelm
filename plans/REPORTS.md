@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`wide-glyph-padding-cells`](reports/wide-glyph-padding-cells.report.md) landed 2026-11-22 in #4580, #4588, #4592, #4598: keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
 - [`helpers-terminal-and-controls`](reports/helpers-terminal-and-controls.report.md) landed 2026-11-22 in #4595, #4596, #4599, #4602, #4604, #4606, #4613, #4622: consolidate duplicated terminal input mapping, keypad digit lookup, control focus rings, focus checks, trash animation and control test helpers without changing behavior
 - [`helpers-hosts-and-sessions`](reports/helpers-hosts-and-sessions.report.md) landed 2026-11-22 in #4597, #4601, #4605, #4610, #4612, #4614, #4619: consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior
 - [`helpers-launcher-and-templates`](reports/helpers-launcher-and-templates.report.md) landed 2026-11-22 in #4607, #4608, #4611, #4615, #4616, #4618, #4620, #4621: consolidate duplicated launcher, template and golden-scene fixture helpers without changing behavior
