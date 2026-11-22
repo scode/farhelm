@@ -51,3 +51,74 @@ None.
 Sol reviewed the implementation and the behavioral follow-ups, including preview authority and polite Folder
 announcements. Opus reviewed all three affected scenes in light and dark. Its second review confirmed the branch mark
 alignment and approved the result.
+
+### Landing
+
+#### What landed with it
+
+No other plan landed in this round. The plan's PR, #4603, landed together with a landing fix, #4609. Since the plan's
+work was written, main had gained recipe credentials in the launch environment and the desktop startup helper refactors;
+neither touches the launcher, and the rebase had no conflicts.
+
+An independent reviewer read the change against the plan's acceptance criteria and Decisions. It found no blocker:
+
+- **As decided.** All nine acceptance criteria are met. The two changed suspended-host screenshots go beyond the
+  acceptance criterion that no existing reference screenshot changes, but that scene shows a managed checkout and was
+  added after planning; the report says so.
+- **Behavior.** The Folder line and the Launch button use the same folder preview, so the line cannot show a stale path
+  from an earlier connection; the suspended-host message carried over; with the folder path now plain text instead of a
+  focusable field, the setup field comes before Host in tab order, which matches what is drawn.
+
+#### Fixes made while landing
+
+All in [#4609](https://github.com/scode/farhelm/pull/4609/changes):
+
+- **No new dependency.** The plan made the GUI crate depend on AccessKit directly, to mark the Folder line so screen
+  readers announce its updates without interrupting. GPUI already provides the AccessKit it uses, so the launcher now
+  takes it from there, and the GUI crate's dependencies and the lockfile are back to what main had.
+- **Two screenshot titles** in the GPUI scene list still described the old read-only folder field.
+
+#### Checks
+
+The plan changes the GUI launcher's layout, its reference screenshots and, as delivered, the GUI crate's dependencies,
+so the landing ran the GUI crate's full test suite (3312 tests, wider than the report's 245 focused tests), the lint
+runs, the end-to-end smoke test, every reference screenshot and the dependency checks. The worker runs were on a
+separate arm64 Linux test worker, the rest locally on x86_64.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo nextest run -p farhelm-gui`, on the test worker (recorder run `733036ee-e419-41cc-b016-49d9ff11a19f`): all 3312
+  passed.
+- `cargo clippy --all-targets -- -D warnings` and both desktop app clippy runs (with and without `--features agent`), on
+  the test worker, not through the recorder: passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `4229eba2-c39b-4481-929d-df4fa01a99f9`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `ccc16a5a-3f07-4d2c-a4cb-b450c6a7f71a`):
+  passed, the new and updated launcher scenes included.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `python3 -B scripts/check-crate-layering.py`,
+  `cargo-deny --locked check licenses sources`,
+  `python3 -B scripts/dependency-notices.py --check --only-if-inputs-changed-since origin/main`,
+  `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check`
+  and `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix (#4609):
+
+- `cargo nextest run -p farhelm-gui`, on the test worker (recorder run `0b76e4a9-fc76-4b98-b533-a8593cac9052`): all 3312
+  passed.
+- `cargo clippy --all-targets -- -D warnings` and both desktop app clippy runs, on the test worker: passed.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check` and `dprint check`, locally: passed.
+
+The fix only changes how one line names AccessKit and two scene titles, so the smoke test, the reference screenshots and
+the dependency checks above still apply; the GUI crate's dependencies now match main's.
+
+Skipped: the Rust workspace suite outside the GUI library, since nothing else changed; the desktop app's own tests,
+since the desktop app's process is untouched; macOS and native screen readers, since no Mac was part of this landing;
+CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The report quotes the new-environment Folder wording, but not that the same wording now also replaces "Select a
+  repository" before any repository is chosen. That case came with the planner's layout, not a decision of yours, and
+  the interaction tests do not cover it; a follow-up could show "Select a repository" again until one is picked.
+- Other status lines in the app that change as you fill in a form still lack the marking that makes screen readers
+  announce updates without interrupting, which the Folder line now has; the review queue already tracks this.
