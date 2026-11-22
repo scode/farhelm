@@ -120,6 +120,8 @@ impl CellRun {
 pub struct CellRow {
     /// The row's text continues on the next row (a soft wrap).
     pub wraps: bool,
+    /// The emulator reserved the last column for a wide character that wrapped to the next row.
+    pub wide_wrap_padding: bool,
     pub runs: Vec<CellRun>,
 }
 
@@ -136,12 +138,17 @@ impl CellRow {
 ///
 /// Tabs read as spaces (alacritty keeps a tab's first cell as `\t` for
 /// copying). The spacer cell after a wide character is covered by that
-/// character's run, and the placeholder alacritty leaves at the end of a row
-/// whose wide character wrapped to the next is blank. Blank cells in the
-/// default style are not sent: runs of them are dropped, and spaces in the
-/// default style at either end of a run are trimmed off it.
+/// character's run. A wrap placeholder at the end of a row instead sets
+/// the padding bit, so the receiver can distinguish it from a printed space.
+/// Blank cells in the default style are omitted, including default spaces
+/// at either end of another run.
 pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> CellRow {
     let cols = cols.min(row.len()).min(usize::from(u16::MAX));
+    let last_flags = cols
+        .checked_sub(1)
+        .map_or(Flags::empty(), |last| row[Column(last)].flags);
+    let wraps = last_flags.contains(Flags::WRAPLINE);
+    let wide_wrap_padding = last_flags.contains(Flags::WRAPLINE | Flags::LEADING_WIDE_CHAR_SPACER);
     let mut runs: Vec<CellRun> = Vec::new();
     // Whether the last run is printable ASCII and so may grow by a cell:
     // kept here rather than read from the run's text, which would scan it
@@ -192,10 +199,18 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
             let mut text = String::with_capacity(4 * (1 + zerowidth.len()));
             text.push(character);
             text.extend(zerowidth);
-            // A wide character's spacer is the next cell; one in the last
-            // column (which alacritty does not make) is drawn one cell wide
-            // rather than past the row.
-            let width = if wide && col + 1 < cols { 2 } else { 1 };
+            // A cell shift can leave a wide head beside the wrap placeholder.
+            // Preserve the placeholder's own column for text operations.
+            let width = if wide
+                && col + 1 < cols
+                && !row[Column(col + 1)]
+                    .flags
+                    .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+            {
+                2
+            } else {
+                1
+            };
             runs.push(CellRun {
                 col: at,
                 width,
@@ -208,8 +223,11 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
         }
     }
     trim_default_blanks(&mut runs);
-    let wraps = cols > 0 && row[Column(cols - 1)].flags.contains(Flags::WRAPLINE);
-    CellRow { wraps, runs }
+    CellRow {
+        wraps,
+        wide_wrap_padding,
+        runs,
+    }
 }
 
 /// Drop what draws the same as nothing: runs of default-style spaces, and
@@ -798,6 +816,7 @@ fn new_links(row: &CellRow, index: &HashMap<LinkKey, u16>) -> Vec<Link> {
 fn to_wire(row: &CellRow, index: &HashMap<LinkKey, u16>, added: &[Link], table_len: usize) -> Row {
     Row {
         wraps: row.wraps,
+        wide_wrap_padding: row.wide_wrap_padding,
         runs: row
             .runs
             .iter()

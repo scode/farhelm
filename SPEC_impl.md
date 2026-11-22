@@ -2801,14 +2801,18 @@ peer never accepts the former row-bearing JSON as a fallback: it is an incompati
 check must refuse mismatched helms and supervisors before an attachment starts. The desktop app needs no check of its
 own ("Version and skew").
 
-Binary rows carry a byte length, a wrap bit and runs with fixed-width columns, widths and metadata. Metadata holds
-twelve style flags and presence bits for nondefault foreground/background, an explicit underline color and a link index;
-present default foreground/background colors are refused, while an explicit default underline stays distinct from
-absence. Text and message-local hyperlink strings are length-prefixed UTF-8. No style or hyperlink dictionary survives a
-message. Counts and lengths are bounded before allocation or slicing, every read checks remaining bytes, counters stay
-within JavaScript's exact integers, and unknown kinds, malformed UTF-8, truncation and trailing bytes are errors. Shared
-row, color, link and ordering validation still applies. Packing counts the actual binary envelope, rows and links
-against the same 32 KiB target and 1 MiB hard bound; a whole row that exceeds the target still goes alone.
+Binary rows carry a byte length, a flags byte and runs with fixed-width columns, widths and metadata. Bit 0 of the flags
+byte marks a soft wrap. Protocol 86 adds bit 1 for the unused last column left when a wide character wraps. Receivers
+require bit 0 when bit 1 is set and refuse unknown bits. Copy, selection and link detection omit that column, including
+when it has its own styled run, and preserve ordinary spaces. An older receiver would either reject the new bit or infer
+padding from the next row and lose a printed space, so this needs a protocol bump. Run metadata holds twelve style flags
+and presence bits for nondefault foreground/background, an explicit underline color and a link index; present default
+foreground/background colors are refused, while an explicit default underline stays distinct from absence. Text and
+message-local hyperlink strings are length-prefixed UTF-8. No style or hyperlink dictionary survives a message. Counts
+and lengths are bounded before allocation or slicing, every read checks remaining bytes, counters stay within
+JavaScript's exact integers, and unknown kinds, malformed UTF-8, truncation and trailing bytes are errors. Shared row,
+color, link and ordering validation still applies. Packing counts the actual binary envelope, rows and links against the
+same 32 KiB target and 1 MiB hard bound; a whole row that exceeds the target still goes alone.
 
 Its contract, bounds and golden fixtures are in `farhelm-proto` (`crates/farhelm-proto/src/grid.rs` and
 `crates/farhelm-proto/grid-fixtures/`). Binary output fixtures pair bytes with JSON descriptions, including a fixed-seed

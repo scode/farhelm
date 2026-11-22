@@ -256,7 +256,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_85` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_86` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -267,7 +267,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 85;
+pub const PROTOCOL_VERSION: u32 = 86;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -6025,6 +6025,8 @@ mod tests {
     /// Older supervisors would accept the choice without applying it.
     /// Version 85 requires the supervisor to read the Claude recipe
     /// environment file now that the helm retires Claude settings delivery.
+    /// Version 86 marks the unused last column of a wide wrap in the binary
+    /// grid row.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6035,8 +6037,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_85() {
-        assert_eq!(PROTOCOL_VERSION, 85);
+    fn protocol_version_is_pinned_at_86() {
+        assert_eq!(PROTOCOL_VERSION, 86);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,

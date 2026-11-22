@@ -180,16 +180,16 @@ impl GridModel {
         let Some(range) = link.ranges.first() else {
             return (None, false);
         };
-        let Some((_, row)) = self.selection_line(range.start.line) else {
+        let Some((cols, row)) = self.selection_line(range.start.line) else {
             return (None, false);
         };
         let fragment = row
-            .text(range.start.col, range.end.col)
+            .text(range.start.col, range.end.col.min(row.text_columns(cols)))
             .trim_end_matches(' ')
             .to_owned();
         let mut identities = Identities::new(self);
         let mut read = |line| {
-            let Some((_, row)) = self.selection_line(line) else {
+            let Some((cols, row)) = self.selection_line(line) else {
                 return (0, String::new());
             };
             let mut count = 0;
@@ -214,7 +214,7 @@ impl GridModel {
             (
                 count,
                 if count == 1 {
-                    row.text(from, to)
+                    row.text(from, to.min(row.text_columns(cols)))
                 } else {
                     String::new()
                 },

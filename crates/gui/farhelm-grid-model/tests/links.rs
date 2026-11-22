@@ -70,6 +70,123 @@ fn plain_urls_join_wraps_and_keep_unicode_cell_offsets() {
     assert!(!link.covers(Position { line: 0, col: 2 }));
 }
 
+/// A styled pad can paint the final column without breaking a printed URL or becoming part of its hit range.
+/// A styled real space in the same column still ends the URL.
+#[test]
+fn a_styled_padding_run_is_outside_the_printed_url() {
+    for padding in [false, true] {
+        let model = model(
+            16,
+            vec![
+                json!({"w":true,"p":padding,"r":[[0,15,"https://a.test/",[0,-1,-1]],[15,1," ",[0,-1,2]]]}),
+                json!({"w":false,"r":[[0,2,"界",[0,-1,-1]]]}),
+            ],
+            vec![],
+        );
+        let link = model.link_at(Position { line: 0, col: 1 }).unwrap();
+        assert_eq!(
+            link.uri,
+            if padding {
+                "https://a.test/界"
+            } else {
+                "https://a.test/"
+            }
+        );
+        assert_eq!(link.ranges[0].end.col, 15);
+        assert_eq!(link.ranges.len(), if padding { 2 } else { 1 });
+        assert!(model.link_at(Position { line: 0, col: 15 }).is_none());
+    }
+}
+
+/// URL lookup must cross a padded middle row both when searching forward for the end and backward for the start.
+/// The same cells with a real space stop the URL at that row.
+#[test]
+fn the_url_search_crosses_a_padded_middle_row() {
+    for padding in [false, true] {
+        let model = model(
+            21,
+            vec![
+                ascii("https://example.test/", true, None),
+                json!({"w":true,"p":padding,"r":[
+                    [0,2,"界",[0,-1,-1]],[2,18,"abcdefghijklmnopqr",[0,-1,-1]],[20,1," ",[0,-1,2]]
+                ]}),
+                json!({"w":false,"r":[[0,2,"界",[0,-1,-1]],[2,4,"more",[0,-1,-1]]]}),
+            ],
+            vec![],
+        );
+        let start = model.link_at(Position { line: 0, col: 1 }).unwrap();
+        let end = model.link_at(Position { line: 2, col: 3 });
+        if padding {
+            assert_eq!(start.uri, "https://example.test/界abcdefghijklmnopqr界more");
+            assert_eq!(start.ranges.len(), 3);
+            assert_eq!(start.ranges[1].end.col, 20);
+            assert_eq!(end, Some(start));
+        } else {
+            assert_eq!(start.uri, "https://example.test/界abcdefghijklmnopqr");
+            assert_eq!(start.ranges.len(), 2);
+            assert!(end.is_none());
+        }
+    }
+}
+
+/// Generated OSC identities continue from the last text run, even when a separate color run paints the padding.
+/// A separate identity on the next row would split its label across what is really one linked stretch.
+#[test]
+fn osc_continuation_looks_past_the_styled_padding_run() {
+    let model = model(
+        4,
+        vec![
+            json!({"w":true,"p":true,"r":[[0,3,"abc",[0,-1,-1],0],[3,1," ",[0,-1,2]]]}),
+            json!({"w":false,"r":[[0,2,"界",[0,-1,-1],1]]}),
+        ],
+        vec![
+            json!(["1_alacritty", "https://example.test"]),
+            json!(["2_alacritty", "https://example.test"]),
+        ],
+    );
+    let above = model.link_at(Position { line: 0, col: 2 }).unwrap();
+    let below = model.link_at(Position { line: 1, col: 0 }).unwrap();
+    assert_eq!(
+        above.kind,
+        LinkKind::Osc {
+            id: "1_alacritty".into()
+        }
+    );
+    assert_eq!(below.kind, above.kind);
+    assert_eq!(above.ranges[0].end.col, 3);
+    assert!(model.link_at(Position { line: 0, col: 3 }).is_none());
+}
+
+/// The wire allows a link run to cover the last column. Its padded cell must not reappear as a false mismatch
+/// warning when disclosure reconstructs the visible label across the wrap.
+#[test]
+fn osc_disclosure_excludes_padding_inside_a_link_run() {
+    let model = model(
+        16,
+        vec![
+            json!({"w":true,"p":true,"r":[[0,16,"https://a.test/ ",[0,-1,-1],0]]}),
+            json!({"w":false,"r":[[0,2,"界",[0,-1,-1],1]]}),
+        ],
+        vec![
+            json!(["1_alacritty", "https://a.test/界"]),
+            json!(["2_alacritty", "https://a.test/界"]),
+        ],
+    );
+    let first = model.link_at(Position { line: 0, col: 1 }).unwrap();
+    let last = model.link_at(Position { line: 1, col: 0 }).unwrap();
+    assert_eq!(first.kind, last.kind);
+    assert_eq!(first.label, "https://a.test/");
+    assert!(model.link_at(Position { line: 0, col: 15 }).is_none());
+    assert!(
+        model
+            .link_disclosure(&first)
+            .unwrap()
+            .claimed_text
+            .is_none()
+    );
+    assert!(model.link_disclosure(&last).unwrap().claimed_text.is_none());
+}
+
 /// A hidden suffix cannot extend the address opened by a click on the visible prefix.
 #[test]
 fn a_printed_link_ends_before_a_concealed_suffix() {

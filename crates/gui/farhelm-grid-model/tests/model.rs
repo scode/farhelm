@@ -23,6 +23,7 @@ use farhelm_proto::grid::{
 fn row(wraps: bool, runs: &[(u16, u16, &str)]) -> Row {
     Row {
         wraps,
+        wide_wrap_padding: false,
         runs: runs
             .iter()
             .map(|&(col, width, text)| Run {
@@ -33,6 +34,14 @@ fn row(wraps: bool, runs: &[(u16, u16, &str)]) -> Row {
                 link: None,
             })
             .collect(),
+    }
+}
+
+/// Mark the last column as padding explicitly, whether or not a run paints it.
+fn padded_row(runs: &[(u16, u16, &str)]) -> Row {
+    Row {
+        wide_wrap_padding: true,
+        ..row(true, runs)
     }
 }
 
@@ -711,7 +720,7 @@ fn selection_uses_cells_original_widths_and_farhelm_trimming() {
             40,
             5,
             vec![
-                row(true, &[(0, 4, "abcd")]),
+                padded_row(&[(0, 4, "abcd")]),
                 row(false, &[(0, 2, "中"), (2, 1, "e\u{301}")]),
             ],
         ),
@@ -769,7 +778,7 @@ fn selection_word_and_line_ranges_match_cell_owned_text() {
             vec![
                 row(true, &[(0, 8, "(foo)  x")]),
                 row(false, &[(0, 4, "yz a")]),
-                row(true, &[(0, 7, "abcdefg")]),
+                padded_row(&[(0, 7, "abcdefg")]),
                 row(false, &[(0, 2, "中"), (2, 1, "z")]),
             ],
         ),
@@ -824,6 +833,45 @@ fn selection_word_and_line_ranges_match_cell_owned_text() {
         marked.word_range(pos(0, 0)),
         Some(Selection::new(pos(0, 0), pos(0, 2), SelectionMode::Linear))
     );
+}
+
+/// A row can end in a real space followed by a wide glyph on the next row. The explicit padding bit is the only
+/// reason to omit that last column from copying and word selection, even when the column has a colored run.
+#[test]
+fn copy_and_word_selection_respect_the_padding_bit() {
+    let pos = |line, col| Position { line, col };
+    for padding in [false, true] {
+        for styled in [false, true] {
+            let mut model = opened(4, 2, 10);
+            let mut first = row(true, &[(0, 3, "abc")]);
+            first.wide_wrap_padding = padding;
+            if styled {
+                first.runs.push(Run {
+                    col: 3,
+                    width: 1,
+                    text: " ".into(),
+                    style: Style {
+                        bg: Color::Palette(2),
+                        ..Style::PLAIN
+                    },
+                    link: None,
+                });
+            }
+            send(
+                &mut model,
+                rows(vec![(0, first), (1, row(false, &[(0, 2, "界")]))]),
+            );
+            send(&mut model, frame(1, 4, 2, 0));
+            assert_eq!(
+                model.selection_text(pos(0, 0), pos(1, 2), SelectionMode::Linear),
+                if padding { "abc界" } else { "abc 界" }
+            );
+            let word = model.word_range(pos(1, 0)).unwrap();
+            assert_eq!(word.start, if padding { pos(0, 0) } else { pos(1, 0) });
+            assert_eq!(word.end, pos(1, 2));
+            assert_eq!(model.word_range(pos(0, 3)).is_none(), padding);
+        }
+    }
 }
 
 /// A single soft-wrapped program line can fill the history cap. Word lookup

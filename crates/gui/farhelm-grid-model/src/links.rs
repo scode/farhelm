@@ -55,7 +55,7 @@ pub struct TerminalLink {
 }
 
 impl TerminalLink {
-    /// Half-open coverage includes wide-cell padding owned by a linked glyph.
+    /// Half-open coverage includes the second column of a linked two-column glyph.
     pub fn covers(&self, position: Position) -> bool {
         self.ranges
             .iter()
@@ -180,31 +180,23 @@ impl<'a> Identities<'a> {
             .is_some_and(|(a, b)| generated(a) && generated(b) && a.uri == b.uri)
     }
 
-    /// A soft-wrap seam can omit only the emulator's unused wide-cell pad.
-    fn previous_piece(&self, line: u64) -> bool {
-        let Some((_, row)) = self.model.selection_line(line) else {
-            return false;
-        };
-        let Some(first) = row.runs.first().filter(|run| run.col == 0) else {
-            return false;
-        };
-        let Some(previous) = line.checked_sub(1) else {
-            return false;
-        };
-        let Some((cols, row)) = self
+    /// Index of the preceding row's link run at a soft-wrap seam. A padding run has no link text or identity.
+    fn previous_piece(&self, line: u64) -> Option<usize> {
+        let (_, row) = self.model.selection_line(line)?;
+        let first = row.runs.first().filter(|run| run.col == 0)?;
+        let previous = line.checked_sub(1)?;
+        let (cols, row) = self
             .model
             .selection_line(previous)
-            .filter(|(_, row)| self.model.wraps_after(previous, row))
-        else {
-            return false;
-        };
-        let Some(last) = row.runs.last() else {
-            return false;
-        };
-        Self::joins(last.link.as_ref(), first.link.as_ref())
-            && (last.col + last.width == cols
-                || (last.col + last.width == cols - 1
-                    && self.model.pads_wide_wrap(previous, cols, row)))
+            .filter(|(_, row)| self.model.wraps_after(previous, row))?;
+        let text_end = row.text_columns(cols);
+        let index = row
+            .runs
+            .partition_point(|run| run.col < text_end)
+            .checked_sub(1)?;
+        let last = &row.runs[index];
+        (last.col + last.width >= text_end && Self::joins(last.link.as_ref(), first.link.as_ref()))
+            .then_some(index)
     }
 
     /// A lookup follows at most 128 predecessor rows, exactly as the pinned
@@ -217,7 +209,7 @@ impl<'a> Identities<'a> {
                 break;
             }
             pending.push(at);
-            if !self.previous_piece(at) {
+            if self.previous_piece(at).is_none() {
                 break;
             }
             let Some(previous) = at.checked_sub(1) else {
@@ -227,15 +219,20 @@ impl<'a> Identities<'a> {
         }
         for at in pending.into_iter().rev() {
             // Only lines whose row exists were pushed above, so this never skips in practice.
-            let Some((_, row)) = self.model.selection_line(at) else {
+            let Some((cols, row)) = self.model.selection_line(at) else {
                 continue;
             };
             let above = at
                 .checked_sub(1)
                 .and_then(|previous| self.rows.get(&previous))
-                .filter(|_| self.previous_piece(at));
+                .and_then(|keys| keys.get(self.previous_piece(at)?));
+            let text_end = row.text_columns(cols);
             let mut keys: Vec<Option<Arc<Link>>> = Vec::with_capacity(row.runs.len());
             for (index, run) in row.runs.iter().enumerate() {
+                if run.col >= text_end {
+                    keys.push(None);
+                    continue;
+                }
                 let before = index.checked_sub(1).and_then(|i| row.runs.get(i));
                 let key = if before.is_some_and(|before| {
                     before.col + before.width == run.col
@@ -243,7 +240,7 @@ impl<'a> Identities<'a> {
                 }) {
                     keys[index - 1].clone()
                 } else if let Some(above) = above.filter(|_| index == 0) {
-                    above.last().cloned().flatten()
+                    above.clone()
                 } else {
                     run.link.clone()
                 };
@@ -261,21 +258,28 @@ impl GridModel {
     /// Concealed cells break a printed URL: a plain click opens its address without showing it first, so it may only
     /// open what the terminal actually draws.
     pub fn row_links(&self, line: u64) -> Vec<TerminalLink> {
-        let Some((_, row)) = self.selection_line(line) else {
+        let Some((cols, row)) = self.selection_line(line) else {
             return Vec::new();
         };
         let mut identities = Identities::new(self);
         let keys = identities.row(line);
         let mut found: Vec<TerminalLink> = Vec::new();
+        let text_end = row.text_columns(cols);
         for (run, key) in row.runs.iter().zip(keys) {
             let Some(key) = key else { continue };
+            let end = (run.col + run.width).min(text_end);
+            let text = if end < run.col + run.width && run.is_plain_flow() {
+                &run.text[..usize::from(end - run.col)]
+            } else {
+                &run.text
+            };
             if let Some(last) = found.last_mut().filter(|last| {
                 matches!(&last.kind, LinkKind::Osc { id } if *id == key.id)
                     && last.uri == key.uri
                     && last.ranges[0].end.col == run.col
             }) {
-                last.ranges[0].end.col = run.col + run.width;
-                last.label.push_str(&run.text);
+                last.ranges[0].end.col = end;
+                last.label.push_str(text);
                 continue;
             }
             let mut first = line;
@@ -305,14 +309,11 @@ impl GridModel {
                 uri: key.uri.clone(),
                 ranges: vec![Selection::new(
                     Position { line, col: run.col },
-                    Position {
-                        line,
-                        col: run.col + run.width,
-                    },
+                    Position { line, col: end },
                     SelectionMode::Linear,
                 )],
                 evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
-                label: run.text.clone(),
+                label: text.to_owned(),
             });
         }
         let Some((first, last)) = self.url_window(line) else {
@@ -347,8 +348,11 @@ impl GridModel {
                 let to = if number == b.position.line {
                     b.position.col + b.width
                 } else {
-                    cols
+                    row.text_columns(cols)
                 };
+                if from >= to {
+                    continue;
+                }
                 if row
                     .runs
                     .iter()
@@ -389,15 +393,15 @@ impl GridModel {
             .find(|link| link.covers(position))
     }
 
-    /// Match the addon's neighboring-row search, whose budget counts text units,
-    /// not rows or glyphs. A blank anywhere in a neighboring row ends that side.
+    /// Bound the neighboring search in UTF-16 units. A real blank anywhere in a neighboring row ends that side.
+    /// Even a row with no text consumes one unit, so a run of padding-only rows cannot scan the whole history.
     ///
     /// `None` when `line` has no row; `row_links` checks that before asking.
     fn url_window(&self, line: u64) -> Option<(u64, u64)> {
         let (cols, row) = self.selection_line(line)?;
         let mut first = line;
         let mut last = line;
-        if !row.text(0, cols).starts_with(' ') {
+        if !row.text(0, row.text_columns(cols)).starts_with(' ') {
             let mut count = 0;
             while let Some(above) = first.checked_sub(1) {
                 let Some((cols, row)) = self
@@ -409,9 +413,9 @@ impl GridModel {
                 if count >= 2048 {
                     break;
                 }
-                let text = row.text(0, cols);
+                let text = row.text(0, row.text_columns(cols));
                 first = above;
-                count += text.encode_utf16().count();
+                count += text.encode_utf16().count().max(1);
                 if text.contains(' ') {
                     break;
                 }
@@ -432,9 +436,9 @@ impl GridModel {
             let Some((cols, row)) = self.selection_line(next) else {
                 break;
             };
-            let text = row.text(0, cols);
+            let text = row.text(0, row.text_columns(cols));
             last = next;
-            count += text.encode_utf16().count();
+            count += text.encode_utf16().count().max(1);
             if text.contains(' ') {
                 break;
             }

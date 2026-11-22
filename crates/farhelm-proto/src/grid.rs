@@ -77,13 +77,15 @@
 //!
 //! A link table is u16 count followed by entries of u16 id byte length,
 //! id bytes, u16 URI byte length, URI bytes. Indices are zero-based.
-//! Each row starts with u32 body byte length. Its body is u8 wraps (0/1),
+//! Each row starts with u32 body byte length. Its body is u8 row flags,
 //! u16 run count, then runs. Each run is u16 column, width, metadata and
 //! text byte length, optional i32 foreground/background/underline in that
 //! order, optional u16 link index, then text. Metadata's low twelve bits
 //! are style flags; bits 12/13/14/15 mark those four optional fields.
 //! Absent foreground/background mean default, and explicitly encoding
 //! their default is refused. Underline can be explicitly default.
+//! Row flag bit 0 marks a soft wrap. Bit 1 marks wide-wrap padding in
+//! the last column and requires bit 0. Bits 2 through 7 are refused.
 //!
 //! After the discriminator, rows carries its link table, u32 row count,
 //! then u16 y and a prefixed row for each entry. History carries u64 first,
@@ -111,7 +113,10 @@
 //!
 //! A row is `{"w":bool,"r":[run...]}`: `w` is true when the row's text
 //! continues on the next row (a soft wrap; selection joins wrapped rows
-//! without a newline). A run is `[col, width, text, style]` or
+//! without a newline). A row with `"p":true` has an unused last column
+//! because the next wide character wrapped. Text operations omit that
+//! column, even when a run covers it. An absent `p` means false.
+//! A run is `[col, width, text, style]` or
 //! `[col, width, text, style, link]` ([`Run`]):
 //!
 //! - `col` is the first column (0-based) and `width` the cells it covers
@@ -851,13 +856,17 @@ impl Run {
 }
 
 /// One row of cells. Its semantic JSON description is the object
-/// `{"w":bool,"r":[run...]}`; binary gives each row an independent length
+/// `{"w":bool,"r":[run...]}` with optional `"p":true` for wide-wrap padding.
+/// Binary gives each row an independent length
 /// boundary so readers can index history without keeping decoded runs.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 pub struct Row {
     /// The row's text continues on the next row (a soft wrap).
     #[serde(rename = "w")]
     pub wraps: bool,
+    /// The last column is emulator padding left by a wide character that wrapped.
+    #[serde(rename = "p", skip_serializing_if = "std::ops::Not::not")]
+    pub wide_wrap_padding: bool,
     #[serde(rename = "r")]
     pub runs: Vec<Run>,
 }
@@ -868,11 +877,21 @@ impl<'de> Deserialize<'de> for Row {
         struct Fields {
             #[serde(rename = "w")]
             wraps: bool,
+            #[serde(rename = "p", default)]
+            wide_wrap_padding: bool,
             #[serde(rename = "r")]
             runs: Vec<Run>,
         }
-        let Fields { wraps, runs } = object_only(deserializer)?;
-        Ok(Row { wraps, runs })
+        let Fields {
+            wraps,
+            wide_wrap_padding,
+            runs,
+        } = object_only(deserializer)?;
+        Ok(Row {
+            wraps,
+            wide_wrap_padding,
+            runs,
+        })
     }
 }
 
@@ -911,9 +930,11 @@ impl Row {
             .map(|run| Run::binary_len(&run.text, run.style, run.link.is_some()))
             .sum::<usize>()
     }
-    /// Check every run against `row_width`, and that runs are in increasing
-    /// column order without overlapping.
+    /// Check row flags and each run's width, column order and link reference.
     fn validate(&self, row_width: u16, links_len: usize) -> Result<(), GridError> {
+        if self.wide_wrap_padding && !self.wraps {
+            return Err(bound!("wide-wrap padding requires a soft wrap"));
+        }
         let mut next_free = 0u32;
         for run in &self.runs {
             if u32::from(run.col) < next_free {
