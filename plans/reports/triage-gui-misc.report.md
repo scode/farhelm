@@ -142,3 +142,93 @@ independent Opus visual review in both appearances, and the reviewed changed pic
 manifests. The existing one-line truncation of long template summaries remains. For the container leftovers scene, the
 discovery reason stays in the list above the open Delete question. The interaction tests independently exercised the
 failed read and successful recovery.
+
+### Landing
+
+#### What landed with it
+
+The plan's ten PRs (#4526, #4528, #4531, #4537, #4545, #4548, #4553, #4556, #4563, #4565) landed in this round together
+with the Tensorlake triage plan, which landed right after it, and with a landing fix, #4570. Both plans were based on
+the same main, which had gained only queue bookkeeping since. The two plans touch different areas: this one the desktop
+app and one helm launch path, the Tensorlake one the helm's Tensorlake provider and its test harness. Both edit SPEC.md,
+SPEC_impl.md and the helm-to-app channel types, in different places and consistently; neither changes what goes over the
+wire, so no protocol bump is needed. One thing did interact: the Tensorlake plan's change to test data shared by both
+plans broke this plan's launcher New and Clone tests. Only test data was affected, not product behavior; that plan's
+landing fix (#4571) corrected the tests' data, and both pass.
+
+An independent reviewer read the stack against the triage decisions and the specs, and found no blocker:
+
+- **Triage outcomes.** All 30 are accounted for. Most were fixed as decided, all seven test gaps among them; one was
+  discarded because main already grouped the shell choices before Model; five were deferred through the plan's size
+  gate, each with a self-contained entry in TODO.md's "Plan follow-up" and a concrete reason. The shell-naming rule went
+  into SPEC.md, while the matching change to the Stop and Delete approval cards was deferred.
+- **Behavior.** No bugs found in the changed paths: shell tabs kept through a shortened session list, Enter in Replace
+  with, leftover containers kept beside a failed refresh, Save with an untouched alias, the template prompt kept in the
+  draft, and the helm now withholding a draft prompt only from a program that cannot take one, which is where the prompt
+  was already silently lost before.
+- **Pictures and fragments.** All nine new screenshot scenes are in both the reference list and the scene list, the
+  changed scenes were re-published, and the 13 changelog fragments are accurate.
+
+#### Fixes made while landing
+
+All in [#4570](https://github.com/scode/farhelm/pull/4570/changes), comments and one spec sentence only:
+
+- **Input-method gaps.** The plan stopped composed input-method text reaching the terminal while the quick-launch key
+  sequence is waiting for its next key, and in rewriting the code notes about it, dropped the two that recorded what is
+  still open: the launcher's own text fields still accept composed text in that state, and the Keyboard shortcuts dialog
+  still opens on a chord typed mid-composition. Both notes are back, and the shortcuts note now points at the plan's new
+  check of whether the shown terminal is composing.
+- **The conversation selector.** SPEC.md said choosing "a different harness" clears the launcher's conversation
+  selector; choosing Bash or Zsh clears it too, so it now says "agent type or shell".
+
+#### Checks
+
+This round landed the desktop app triage plan and the Tensorlake triage plan together, stacked in that order on main.
+The checks ran on the combined result: the desktop plan changes the GUI library widely and the Tensorlake plan changes
+the helm and its Tensorlake test harness, so the landing ran the Rust workspace suite, the lint runs, the end-to-end
+smoke test and the full set of GUI reference screenshots. The worker runs were on a separate arm64 Linux test worker;
+the rest ran locally on x86_64.
+
+On both plans as delivered, stacked onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `2a6c5499-13b5-4d21-afb9-5b091042da05`): 8278 of 8280 passed. The two failures were the
+  desktop launcher's New and Clone tests broken by the Tensorlake plan's change to shared test data (that plan's "Fixes
+  made while landing"). Narrowed locally: both passed on the desktop plan alone (run
+  `c9d7f253-749f-44c6-925a-4eac026c4f6a`) and failed with the Tensorlake plan added (run
+  `813271e6-59c9-45eb-85a9-abc60d2b35c4`).
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker, not through
+  the recorder: passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `4bb63a13-d440-45fa-b532-fb5a776fa2bf`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `dbc90d25-7653-4d3f-ac84-510fd4b8c072`):
+  passed, the nine new scenes included.
+- The GUI screenshot-batch tests (`python3 -B scripts/test-gui-screenshot-batch.py`), locally: passed.
+- The Tensorlake harness's own checks (`deno check` and `deno test -A` on `scripts/tensorlake/rust-tests.ts` and
+  `sandbox-tests.ts`, and `shellcheck` on its two shell scripts; no sandbox), locally: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+After the landing fixes (#4570, #4571):
+
+- `cargo nextest run -p farhelm-gui --lib`, on the test worker (recorder run `2d36598c-3456-42f0-8d1a-9a000ee6b2d7`):
+  all 3280 passed, the two launcher tests among them. Narrowed first locally at the combined top with the fix (run
+  `4eefba0e-c50d-4d8d-b232-35bffc152685`): both passed.
+- `cargo nextest run -p farhelm-desktop`, the desktop app's own tests, on the test worker at the Tensorlake plan's top
+  with its fix (recorder run `a8d01b92-f47e-4b6f-813e-2decbe6ca87c`): all 184 passed. Its host listing reads the same
+  shared test data the Tensorlake plan changed, and the workspace run leaves the desktop app out.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+The rest of the first runs still applies: the fixes change only comments, one spec sentence, the launcher tests'
+fixture, a changelog fragment and a harness instruction line.
+
+Skipped: real Tensorlake sandbox runs, which spend cloud resources and were not needed for the helm logic the unit and
+contract tests cover; macOS, since no Mac was part of this landing; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- SPEC.md now requires the Stop and Delete approval cards to name what they would stop, but the cards still say "agent"
+  for a shell until the deferred follow-up lands, so the spec and the product disagree until then.
