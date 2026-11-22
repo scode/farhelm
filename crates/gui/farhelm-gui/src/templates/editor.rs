@@ -85,11 +85,6 @@ use crate::theme::{self, Palette, metrics};
 
 mod rows;
 
-/// The session name's two kinds explained, the old editor's words, under the session name and in its kind control's
-/// hover help.
-pub(super) const NAME_KIND_HELP: &str = "Base name: used as-is when free, otherwise numbered (app-review-2, -3, …). \
-                                         Fixed name: used exactly; a clash is reported.";
-
 /// `.templates-editor`: the gap between the editor's blocks.
 const EDITOR_GAP: f32 = 14.;
 /// `.templates-editor-heading h3`: the heading's size.

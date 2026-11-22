@@ -36,13 +36,13 @@ use gpui::{
     Subscription, Window, div, px,
 };
 
-use super::available_names;
-use super::editor::{NAME_KIND_HELP, save_command};
+use super::editor::save_command;
 use super::fields::{self, Field, taken_refusal};
 use super::save::{Candidate, choice_text};
+use super::{NAME_KIND_HELP, available_names, name_kind_control};
 use crate::components::{
-    Button, Checkbox, HoverHelp, RadioGroup, RadioOption, Role, TextInput, TextInputEvent,
-    TextInputState, Tier, capitalize_validation,
+    Button, Checkbox, HoverHelp, Role, TextInput, TextInputEvent, TextInputState, Tier,
+    capitalize_validation,
 };
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{NotStarted, OpKey, Outcome};
@@ -311,36 +311,16 @@ impl SavePanel {
         });
         let kind = (field == Field::Name).then(|| {
             let weak = cx.weak_entity();
-            [
-                (None, "Base name"),
-                (Some(TemplateNameKind::Fixed), "Fixed name"),
-            ]
-            .into_iter()
-            .fold(
-                RadioGroup::new(
-                    "save-template-name-kind",
-                    "Session name kind",
-                    HoverHelp::tooltip(format!("Session name kind. {NAME_KIND_HELP}")),
-                    Role::Group,
-                ),
-                |group, (value, text)| {
-                    group.option(RadioOption::new(
-                        text,
-                        HoverHelp::tooltip(format!("Session name: {text}. {NAME_KIND_HELP}")),
-                        value,
-                    ))
-                },
-            )
-            .chosen(Some(self.name_kind))
-            // The kind belongs to the name: it is chosen only while the name is kept.
-            .disabled(self.saving || !self.checked.contains(&Field::Name))
-            .on_change(move |kind, _, cx| {
-                let kind = *kind;
-                let _ = weak.update(cx, |panel, cx| {
-                    panel.name_kind = kind;
-                    cx.notify();
-                });
-            })
+            name_kind_control("save-template-name-kind", self.name_kind)
+                // The kind belongs to the name: it is chosen only while the name is kept.
+                .disabled(self.saving || !self.checked.contains(&Field::Name))
+                .on_change(move |kind, _, cx| {
+                    let kind = *kind;
+                    let _ = weak.update(cx, |panel, cx| {
+                        panel.name_kind = kind;
+                        cx.notify();
+                    });
+                })
         });
         div()
             .debug_selector(move || format!("save-template-choice-{}", field.key()))

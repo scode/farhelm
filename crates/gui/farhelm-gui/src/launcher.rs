@@ -113,3 +113,25 @@ pub(crate) mod view_tests;
 pub(crate) mod wake_tests;
 #[cfg(test)]
 pub(crate) mod yolo_tests;
+
+use farhelm_helm_client::ApiPath;
+use farhelm_proto::launcher::LaunchCatalogModel;
+use gpui::App;
+
+use crate::host_text::HostText;
+use crate::operations;
+
+/// Read the release's model catalog through the current UI session. The helm serves this on demand. The caller
+/// owns when to request it and what to do with the reply.
+///
+/// Returns whether the request was sent. A `false` result leaves no callback pending. A sent request follows
+/// [`operations::read`]'s rules for deferred replies and UI session resets.
+pub(crate) fn read_model_catalog(
+    cx: &mut App,
+    on_read: impl FnOnce(Result<Vec<LaunchCatalogModel>, HostText>, &mut App) + 'static,
+) -> bool {
+    let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
+        return false;
+    };
+    operations::read(path, "GET /api/launch-catalog", cx, on_read)
+}
