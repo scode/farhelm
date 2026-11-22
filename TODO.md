@@ -29,15 +29,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit keeping the existing `farhelm` Codex provider ID.** On 2026-11-22 the landing monitor answered
-  `recipe-credentials-in-launch-env`'s block on the maintainer's behalf: Codex launches and resumes keep the provider ID
-  `farhelm` while the recipe endpoint token moves into the launched processes' environment, and Farhelm removes the
-  settings keys it wrote. Codex 0.171.0 saves the provider ID with each conversation and would not resume one under a
-  different ID, so keeping it preserves Restart and opening a saved conversation by ID. The alternative was a fresh
-  provider ID, which keeps stale settings from ever applying but needs a separate way to configure the saved provider
-  for both forms of resume, including conversation IDs typed by hand. The same plan's next block deferred the whole
-  Codex migration (the next entry), so this choice now applies to the follow-up that takes it up.
-
 - **Revisit deferring the Codex credential migration.** On 2026-11-22 the landing monitor answered
   `recipe-credentials-in-launch-env`'s second block on the maintainer's behalf: the plan moves Claude's recipe
   credentials into the launch environment now and leaves Codex's delivery as it is, settings writes included, with the
@@ -64,7 +55,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   click that needs the helm (a launch, a Stop, another save) waiting for up to 20 seconds when one host is slow or
   unreachable. The window itself stays responsive, but actions look stuck. Check whether the per-host waits run in
   parallel (if they run one after another, the worst case is 20 seconds times the number of hosts), and improve this,
-  for example by moving these routes to the accepted form, as provisioning already is.
+  for example by moving these routes to the accepted form, as provisioning already is. Plan:
+  `plans/queue/slow-host-async-actions.md`.
 
 - **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
   about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
@@ -400,6 +392,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   instead of relying on the user manually getting known hosts initialized, so Farhelm can immediately use any Tailscale
   host it has ssh access to without fighting ssh known hosts. Separate from, and orthogonal to, the in-band status entry
   above. Not investigated yet, including how the wrapper fits Farhelm's non-interactive, connection-sharing ssh use.
+  Plan: `plans/queue/tailscale-ssh-hosts.md`.
 
 ### Plan follow-up
 
@@ -465,7 +458,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   scope selection. Startup can remove the record after finding the host gone even if its scope still holds a detached
   descendant. Preserve the unresolved scope selection across row removal and supervisor restart. Retry cleanup using the
   session and generation's derived scope name, and retire the obligation once the scope is confirmed gone. Cover a gone
-  host with an unconfirmed scope that becomes checkable on a later start.
+  host with an unconfirmed scope that becomes checkable on a later start. Plan:
+  `plans/queue/restart-deleted-cleanup.md`.
 
 - **Protect a test worker's checkout before staging.** The SSH driver copies tools, syncs and prunes source, and
   snapshots the result before `with-lock.sh` takes the execution lock. A second request can change the first run's
@@ -543,24 +537,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   duplicate place in tests and update SPEC. The Podman triage plan deferred the pair together because the older-row
   behavior is unsettled. Plan: `plans/queue/podman-place-host-identity.md`.
 
-- **Diagnose why Muse Code 1.4.24 runs a turn without sending a conversation report.** During the `harness-drift-tests`
-  live run on Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no
-  conversation report arrived and no hook log was written before teardown. If that holds in ordinary use, Farhelm cannot
-  offer to resume Muse conversations on Restart. Find out why the callback did not fire and fix or adapt Farhelm's Muse
-  integration.
+- **Evidence shows Muse Code conversation reporting is broken (1.4.24).** During the `harness-drift-tests` live run on
+  Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no conversation report
+  arrived and Farhelm's hook helper never even wrote a diagnostic log line before teardown—indicating conversation
+  reporting is broken on current Muse Code so Restart cannot resume Muse conversations. Find out why the callback did
+  not fire and fix or adapt Farhelm's Muse integration.
 
 - **Verify Restart actually resumes the same conversation in harness drift tests.** The `harness-drift-tests` Restart
   check currently verifies only that the CLI relaunches with Farhelm's saved resume arguments and accepts fresh
   unsubmitted input in the composer, so it would pass even if an agent silently opened a brand-new conversation instead
   of resuming. Update the drift tests for all eight tracked agents (Claude Code, Codex, Antigravity, Goose, Grok, Muse
   Code, OMP, Pi) to prove the resumed session actually stayed in turn 1's conversation — for example by checking turn
-  1's history or recall and confirming the post-resume hook reports the same conversation ID.
-
-- **Follow up on the compiled pixel-diff generator decision for the golden changes page.** During `golden-changes-page`
-  execution, the queue approved moving pixel decoding, comparison, and orange-highlight generation from Python into the
-  compiled golden test program (about 2 seconds vs 28 seconds for 68 changed pictures, and 6 seconds vs 112 seconds for
-  all 328). Revisit whether to keep the compiled path, and check whether this change is why a planning session had to
-  wait about 30 minutes for mockups because it needed to build Rust code, or whether that wait was unrelated.
+  1's history or recall and confirming the post-resume hook reports the same conversation ID. Plan:
+  `plans/queue/drift-verify-resume.md`.
 
 ### Tensorlake
 
@@ -710,16 +699,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   all in the narrow middle column, which makes the Destination box very tall.) Plan:
   `plans/queue/launcher-managed-checkout-compact.md`.
 
-- **Verify `https://farhelm.io/whats-new.json` is served without a redirect after the first website deploy.** The
-  installed Mac app fetches upgrade highlights from `https://farhelm.io/whats-new.json` with redirects disallowed; if
-  the live site redirects that URL, the app silently skips the What's new dialog and retries on every launch. Once the
-  website is deployed with the feed, confirm it responds directly without a redirect (the stable release pre-promotion
-  feed check should also catch this).
-
 - **Scrub link-local and tailnet addresses in agent screen-capture privacy guards.** Neither the screen-capture script
   (`scripts/capture-agent-screens.py`) nor the Rust screen-fixture privacy check treats link-local addresses
   (`169.254.0.0/16`) or tailnet/CGNAT addresses (`100.64.0.0/10`) as private, so a captured screen showing one could
-  reach a committed fixture. Teach both guards to scrub or refuse both ranges and add tests.
+  reach a committed fixture. Teach both guards to scrub or refuse both ranges and add tests. Plan:
+  `plans/queue/scrub-linklocal-tailnet.md`.
 
 - **Decide which button is primary on the launcher's hook setup prompt.** When starting a Grok or Antigravity session
   with automatic Restart hook setup turned off in Settings → Agents, the launcher shows a prompt asking whether to let
@@ -727,7 +711,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   **Launch without** is styled as the primary button and **Set up and launch** is the secondary button (chosen during
   `agent-hook-setup` because the prompt asks consent to modify the agent's saved configuration). Revisit when planning
   whether **Set up and launch** should be the primary button instead (or keep **Launch without** primary), and update
-  the prompt and its golden screenshots if changed.
+  the prompt and its golden screenshots if changed. Plan: `plans/queue/hook-setup-primary-button.md`.
 
 - **Replace on a guarded Codex session asks to confirm a YOLO launch.** it's a guarded session and i clicked replace and
   got a dialog indicating farhelm wants to replace with a yolo session instead of guarded. codex session. macos
