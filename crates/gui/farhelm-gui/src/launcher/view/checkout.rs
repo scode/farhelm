@@ -1288,7 +1288,7 @@ impl Launcher {
     /// allocation explanation fits the repository column even when the form is narrow.
     pub(super) fn checkout_folder_field(&self, cx: &App) -> AnyElement {
         if let Some(notice) = self.checkout_allocation_notice(cx) {
-            return help_line(notice, &theme::palette(cx)).into_any_element();
+            return help_line(notice, theme::palette(cx)).into_any_element();
         }
         self.launcher_input(
             "launcher-checkout-folder",

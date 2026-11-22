@@ -102,8 +102,9 @@
 //! red while it is not. Choosing either closes the menu; Resume goes at once, and the others read the host's activity
 //! and ask beside the row's button when it says so, as any of the row's questions do. Both are unavailable while the
 //! environment changes or something is pending for it, saying so in the row. While the environment is frozen
-//! (suspended, stopped, changing or being deleted), Replace with…, Replace and Stop are unavailable, as in the old menu,
-//! and Stop's description says what plain Stop leaves running in the environment. Clone's description is the old
+//! (suspended, stopped, changing or being deleted), Replace and Stop are unavailable, as in the old menu, and Stop's
+//! description says what plain Stop leaves running in the environment. Replace with… stays available while the
+//! environment offers Resume, because the launcher resumes the host before it sends the request. Clone's description is the old
 //! item's "New session in a new environment, keep this one", for a sandbox and a container alike, since the launcher
 //! opens a Clone of an environment session on a fresh environment. While it is being deleted, every command is
 //! unavailable ([`refused`]), and Clone's and Delete's description and help say why

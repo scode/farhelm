@@ -347,9 +347,9 @@ fn a_suspended_row_has_its_badge_and_a_stopped_container_never_does(cx: &mut Tes
 /// The old menu put the environment's commands at the head of the Clone group, offered Stop and suspend only while the
 /// environment runs, and withheld the supervisor's lifecycle verbs while it was frozen. Specified: a connected sandbox
 /// session's menu includes the ordinary viewer actions before Suspend and Stop and suspend. Once suspended it reads
-/// the same with Resume in Suspend's place and no Stop and suspend, and Replace
-/// with…, Replace and Stop ignore a click (the menu stays open), while Stop's description says the sandbox keeps
-/// billing.
+/// the same with Resume in Suspend's place and no Stop and suspend, Replace and Stop ignore a click (the menu stays
+/// open), while Stop's description says the sandbox keeps billing, and Replace with… still acts, since its launcher
+/// resumes the host first.
 #[gpui::test]
 fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
@@ -404,11 +404,7 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
                 == "The sandbox keeps running and billing until you suspend or delete it."),
         "Stop's description is the provider's"
     );
-    for item in [
-        "session-menu-replace-with",
-        "session-menu-replace",
-        "session-menu-stop",
-    ] {
+    for item in ["session-menu-replace", "session-menu-stop"] {
         test_support::click(cx, item);
         assert!(
             drawn(cx, "session-menu"),
@@ -416,6 +412,13 @@ fn the_menu_offers_the_environment_commands_by_phase(cx: &mut TestAppContext) {
         );
     }
     assert!(pending(&mut fake).is_empty(), "nothing was sent");
+    // Replace with stays available on a suspended sandbox that offers Resume: the launcher it opens resumes the host
+    // before sending anything, so choosing it closes the menu.
+    test_support::click(cx, "session-menu-replace-with");
+    assert!(
+        !drawn(cx, "session-menu"),
+        "Replace with acts while the environment offers Resume"
+    );
 }
 
 /// The focus coordinator's reveal (its module docs, after SPEC.md's "Reaching everything by keyboard"): the control

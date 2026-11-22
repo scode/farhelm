@@ -143,7 +143,7 @@ struct SceneState {
     /// Advancing the clock can run tasks that borrow the app. Request this from staging and advance outside its draw.
     advance_clock: Rc<Cell<Option<std::time::Duration>>>,
     /// Ends deliberately pending fixture work after its frame has been captured.
-    after_capture: Rc<Cell<Option<fn(&SceneState)>>>,
+    after_capture: Rc<Cell<Option<AfterCapture>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -373,6 +373,10 @@ fn fleet() -> [Fixture; 6] {
 /// anchors that frame recorded, or start work. Taken by the first frame that finds it, which runs it once that frame
 /// is done.
 type AfterDrawn = fn(&Entity<SessionList>, &SceneState, &mut Window, &mut App);
+
+/// What a scene does once its frame has been captured: end fixture work it left pending on purpose, so the capture
+/// shows the pending state and the scene still finishes cleanly.
+type AfterCapture = fn(&SceneState);
 
 /// Make the fleet's list, and run `after` on it once it has drawn.
 fn session_list_then(state: &SceneState, after: AfterDrawn, cx: &mut App) {

@@ -78,8 +78,9 @@
 //!   or Resume as the filled primary control while its environment is suspended or stopped, asking under itself when
 //!   the host's activity says so, and while that is under way turning a spinner in its glyph's slot, named
 //!   "Suspending…" or "Resuming…", at the same width, so the row still fits the 650-pixel floor. It is no [`Action`]
-//!   ([`Control`] says why). While the environment is frozen, Stop, Restart and Replace are unavailable, their carets
-//!   and "with…" choices included, and Clone and Delete stay (both wait while a Suspend or Resume runs); Stop's help says
+//!   ([`Control`] says why). While the environment is frozen, Stop, Restart and Replace are unavailable, and Clone and
+//!   Delete stay (both wait while a Suspend or Resume runs). While it offers Resume, the Restart and Replace carets'
+//!   "with…" choices stay available, because the launcher resumes the host before it sends the request. Stop's help says
 //!   what plain Stop leaves running there, and its question offers Stop and suspend (`session_list::stop`). While it is
 //!   being deleted every action is unavailable, Clone and Delete included, through `session_list::menu::refused` like
 //!   any other exclusion, and Stop's, Clone's and Delete's help say why, as the old header's tooltips did. Its Delete,

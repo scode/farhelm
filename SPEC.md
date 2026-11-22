@@ -5312,14 +5312,14 @@ whole container. Suspend and Resume affect any leftover sessions too.
 
 A container host reboot stops the container while retaining its files. Whenever the helm finds a container Stopped while
 connected to its container host, it attempts one automatic start. This also covers an external `podman stop` or
-out-of-memory kill. Stopped has its own state and is never labelled Suspended. A launch in an existing folder on a
-stopped container that offers Resume starts it and waits for a fresh connection. Its preparation pill says **Starting**.
-While starting, the ordinary unavailable card explains that Farhelm is starting the container again. A failed start
-shows the reason and offers Resume. Successful start brings back its supervisor with ordinary session classification. A
-host reboot interrupts sessions last known live, while known exits keep their outcome. A container stopped and started
-on the same host boot returns ended sessions through ordinary exit classification. Captured resumable conversations
-offer Restart, and agents never restart automatically. A helm restart reconnects running containers and leaves paused
-containers paused.
+out-of-memory kill. Stopped has its own state and is never labelled Suspended. A launch on a stopped container that
+offers Resume starts it and waits for a fresh connection. Its preparation pill says **Starting**. While starting, the
+ordinary unavailable card explains that Farhelm is starting the container again. A failed start shows the reason and
+offers Resume. Successful start brings back its supervisor with ordinary session classification. A host reboot
+interrupts sessions last known live, while known exits keep their outcome. A container stopped and started on the same
+host boot returns ended sessions through ordinary exit classification. Captured resumable conversations offer Restart,
+and agents never restart automatically. A helm restart reconnects running containers and leaves paused containers
+paused.
 
 Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
 cube. The launch action's accessible name names the new container and its host. Its session-owned host appears in Hosts,
