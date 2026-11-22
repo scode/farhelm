@@ -24,10 +24,12 @@ scratch when the stored one is gone or stale.
 - The script records every sandbox it creates (name, ID, disk size) in `<scratch>/ledger.jsonl` before using it.
   Snapshots outlive their sandboxes and bill storage, and once a sandbox is gone its ID is the only way to tell which
   snapshots were yours. Keep the ledger for the whole session.
-- `rust-tests.ts run` terminates its sandboxes when their shards end, including after failures, and then deletes the
-  snapshots whose source is in the ledger, except the template and its own staging snapshot (below). If a run is
-  interrupted, run `sandbox-tests.ts sweep` (below) before anything else. Never delete a snapshot or sandbox you cannot
-  attribute from the ledger.
+- `rust-tests.ts run` cleans up its completed shards after collecting their evidence. If a copy fails, it prints the
+  clone's name, ID and evidence directory and leaves that clone for recovery. Automatic sweeps honor that ledger entry
+  on later runs. Download the evidence before running the explicit `sandbox-tests.ts sweep`, which removes the retained
+  clones too. If `runs.tar.gz` could not be made, the original recorder files are under `/tmp/farhelm-tmp/test-runs/` on
+  the clone. After an interruption, check the ledger for evidence to recover before sweeping. Never delete a snapshot or
+  sandbox you cannot attribute from the ledger.
 
 ## Running the Rust tests on sandboxes
 
@@ -38,12 +40,14 @@ was there.
 
 1. With the pinned nextest on `PATH` (`docs/test-run-evidence.md`) and an empty working copy of the revision under test,
    `cargo build` (the e2e harness needs `target/debug/farhelm-fixtures`, which nextest's setup script would otherwise
-   build), then `cargo nextest archive --locked -p <package> ... --archive-file <file>`. The Rust packer also prepares
-   this revision's static native-musl CLI payload through `scripts/build-podman-test-payloads.sh`. Install `musl-tools`,
-   `file` and binutils locally. A matching absolute `FARHELM_HELM_PAYLOAD_DIR` can supply this ordinary installer input.
-   The packer stages it once even for a narrow initial filter, because the staging snapshot can later run another
-   selection from the same archive. An intentional `FARHELM_TEST_SKIP_PODMAN=1` avoids this build and is forwarded to
-   every shard. Record the missing real-environment coverage.
+   build), then `cargo nextest archive --locked -p <package> ... --archive-file <file>`. Build both into this checkout's
+   `target/`. The packer refuses a shared Cargo target directory because the archive and its staged fixture must agree
+   on the binary's path. The Rust packer also prepares this revision's static native-musl CLI payload through
+   `scripts/build-podman-test-payloads.sh`. Install `musl-tools`, `file` and binutils locally. A matching absolute
+   `FARHELM_HELM_PAYLOAD_DIR` can supply this ordinary installer input. The packer stages it once even for a narrow
+   initial filter, because the staging snapshot can later run another selection from the same archive. An intentional
+   `FARHELM_TEST_SKIP_PODMAN=1` avoids this build and is forwarded to every shard. Record the missing real-environment
+   coverage.
 2. `scripts/tensorlake/rust-tests.ts run --scratch <dir> --template <snapshot> --prefix <name-prefix> --shards <n> --archive <file> --out <dir> [-- <nextest filter arguments>]`.
    It uploads the archive (about a gigabyte), source, tools and static provisioning payloads once, to a staging sandbox,
    snapshots that, and clones the snapshot for every shard. The staging snapshot is kept, so rerunning the same archive
@@ -53,7 +57,9 @@ was there.
 3. Read each shard's `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh, then
    nextest's summary, failures and any runtime `SKIPPED` lines. A failed shard's run directories come back as
    `runs.tar.gz`; keep them as evidence. Shards run through the recorder's generic mode, because its nextest mode does
-   not take an archive; say so when reporting, with every shard's run ID.
+   not take an archive; say so when reporting, with every shard's run ID. Use a fresh `--out` for each run to preserve
+   earlier shard results. Individual partitions may be empty. The command fails if every partition is empty, any shard
+   fails, or required evidence cannot be retrieved.
 
 How it works, and why: the test binaries have absolute paths compiled in (fixture directories, `CARGO_BIN_EXE_*`, the
 target directory), so the staging sandbox unpacks the checkout at this checkout's own absolute path and each shard

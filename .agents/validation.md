@@ -1174,9 +1174,10 @@ systemd or SSH substrate ran.
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-rust-shard.sh` — the Tensorlake harness's own
-  checks (the Rust runner and its template builder): how the snapshot listing is read, and archive configuration
-  retaining the scoped prebuilt-Podman setup while removing only the local fixture build. Run them, with `deno check`,
-  when the harness changes; seconds, no sandbox. Using the harness itself is described in `.agents/tensorlake.md`.
+  checks (the Rust runner and its template builder): snapshot listing, archive configuration retaining the scoped
+  prebuilt-Podman setup, and a local CLI stand-in for empty partitions, failed verdicts and evidence-preserving cleanup.
+  Run them, with `deno check`, when the harness changes; seconds, no sandbox. Using the harness itself is described in
+  `.agents/tensorlake.md`.
 - `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
   `shellcheck scripts/boat/sandbox/*.sh` — the boat harness's own checks (the Rust shard, GPUI and docs screenshot
   runner and its pool): the shard configuration dropping only the local fixture build and keeping the scoped Podman

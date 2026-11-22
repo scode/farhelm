@@ -23,7 +23,10 @@ const HERE = import.meta.dirname!;
 export const HOME = "/home/tl-user";
 const TEMPLATE_DISK_MB = "10240"; // the platform minimum; a clone cannot be smaller than the template
 
-type LedgerRow = { name: string; id: string; disk_mb: string; template?: string };
+type LedgerRow =
+  | { name: string; id: string; disk_mb: string; template?: string }
+  | { template: string; from: string }
+  | { retained_sandbox: string };
 
 // --- sandboxes and the ledger
 
@@ -44,6 +47,13 @@ async function ledger(scratch: string): Promise<LedgerRow[]> {
   return text.split("\n").filter((l) => l.trim()).map((l) => JSON.parse(l));
 }
 
+/** Record evidence still on a clone so automatic cleanup on later runs leaves it available for recovery. */
+export async function retainSandbox(scratch: string, id: string) {
+  await Deno.writeTextFile(`${scratch}/ledger.jsonl`, JSON.stringify({ retained_sandbox: id }) + "\n", {
+    append: true,
+  });
+}
+
 /** Uploads a file to a sandbox as 100 MiB chunks over up to 12 parallel `tl sbx cp` calls, then reassembles it and
  * checks its size. Measured from a development host on 2026-11-08, one `tl sbx cp` moved about 0.7 MiB/s however fast
  * the link was, and eleven at once moved about 8 MiB/s in total: the cap is per transfer, so a 1 GiB file takes minutes
@@ -62,7 +72,9 @@ export async function uploadChunked(name: string, file: string, dest: string) {
     await $`tl sbx exec ${name} mkdir -p ${dest}.parts`;
     const queue = [...parts];
     await Promise.all(Array.from({ length: Math.min(12, parts.length) }, async () => {
-      for (let p = queue.shift(); p; p = queue.shift()) await $`tl sbx cp ${dir}/${p} ${name}:${dest}.parts/${p}`.quiet();
+      for (let p = queue.shift(); p; p = queue.shift()) {
+        await $`tl sbx cp ${dir}/${p} ${name}:${dest}.parts/${p}`.quiet();
+      }
     }));
     await $`tl sbx exec ${name} sh -c ${`cat ${dest}.parts/part.* > ${dest} && rm -rf ${dest}.parts`}`;
     const got = Number((await $`tl sbx exec ${name} stat -c %s ${dest}`.text()).trim());
@@ -79,8 +91,19 @@ export function snapshotRows(listing: string): [string, string, string][] {
     .map((c) => [c[0], c[4], c[1]]);
 }
 
-export async function sweep(scratch: string, keep: string[]) {
-  const rows = (await ledger(scratch)).filter((r) => r.id); // template rows record a snapshot, not a sandbox
+/** Automatic sweeps honor retained evidence, including a hold whose ledger append failed during this run.
+ * The explicit sweep command is the operator's cleanup after retrieving it. */
+export async function sweep(
+  scratch: string,
+  keep: string[],
+  { holds, removeRetained }: { holds?: ReadonlySet<string>; removeRetained?: boolean } = {},
+) {
+  const records = await ledger(scratch);
+  const retained = new Set(holds);
+  if (!removeRetained) {
+    for (const r of records) if ("retained_sandbox" in r) retained.add(r.retained_sandbox);
+  }
+  const rows = records.filter((r) => "id" in r).filter((r) => !retained.has(r.id));
   const alive = await $`tl sbx ls`.text();
   for (const r of rows) if (alive.includes(r.id)) await $`tl sbx terminate ${r.name}`.noThrow();
   const ids = new Set(rows.map((r) => r.id));
@@ -129,7 +152,7 @@ if (import.meta.main) {
   if (!a.scratch) throw new Error("--scratch <dir> is required");
   await $`mkdir -p ${a.scratch}`;
   if (cmd === "make-template") await makeTemplate(a);
-  else if (cmd === "sweep") await sweep(a.scratch, a.keep ? [a.keep] : []);
+  else if (cmd === "sweep") await sweep(a.scratch, a.keep ? [a.keep] : [], { removeRetained: true });
   else throw new Error("usage: sandbox-tests.ts make-template|sweep --scratch <dir> ...");
 }
 
