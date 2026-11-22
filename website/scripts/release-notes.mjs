@@ -39,12 +39,14 @@
 // escaped: MDX would otherwise read them as an expression or a tag, and an
 // entry like "the <path> argument" would break the build or vanish.
 //
-// The one exception is the folded full list. A release section from v0.42.0 on
-// can end with a `<details>` block ("All other changes") holding everything
-// the maintainer did not highlight, and its three frame lines must reach MDX
-// as real HTML so the list starts folded here as it does on GitHub. Only those
-// exact lines pass through unescaped (releasing/check-changelog.py holds the
-// file to that frame); a `<` anywhere else still goes through escapeMdx.
+// The one exception is the folded full list. A release section from v0.44.0 on
+// ends with a `<details>` block ("All changes") listing every change, the
+// highlighted ones included; v0.42.0 and v0.43.0 end with one ("All other
+// changes") holding only what the maintainer did not highlight. Its three
+// frame lines must reach MDX as real HTML so the list starts folded here as it
+// does on GitHub. Only those exact lines pass through unescaped
+// (releasing/check-changelog.py holds the file to that frame); a `<` anywhere
+// else still goes through escapeMdx.
 //
 // Screenshots belong to highlights only, so entries inside the fold are never
 // matched against a release's screenshot list: a shot whose PR only the fold
@@ -80,11 +82,21 @@ const HIGHLIGHT_NAMES = new Map([
 ]);
 
 /**
- * The folded full list's frame lines, exactly as releasing/check-changelog.py
- * requires them (`FOLD_OPEN`, `FOLD_SUMMARY`, `FOLD_CLOSE` there). They are
- * the only changelog lines the page passes to MDX as markup.
+ * The folded full list's summary lines, exactly as releasing/check-changelog.py
+ * requires them (`FOLD_SUMMARY` and `LEGACY_FOLD_SUMMARY` there). The complete
+ * one heads a list of every change; the older one, on v0.42.0 and v0.43.0
+ * only, heads a list of the changes not highlighted. The difference decides
+ * how a release's changes are counted for the app.
  */
-const FOLD_FRAME = new Set(['<details>', '<summary>All other changes</summary>', '</details>']);
+const COMPLETE_FOLD_SUMMARY = '<summary>All changes</summary>';
+const LEGACY_FOLD_SUMMARY = '<summary>All other changes</summary>';
+
+/**
+ * The folded full list's frame lines (`FOLD_OPEN` and `FOLD_CLOSE` in
+ * releasing/check-changelog.py, with either summary). They are the only
+ * changelog lines the page passes to MDX as markup.
+ */
+const FOLD_FRAME = new Set(['<details>', COMPLETE_FOLD_SUMMARY, LEGACY_FOLD_SUMMARY, '</details>']);
 
 /** A docs shot name, `<page>/<shot>` in lowercase kebab case (docs/docs-shots/SPEC.md). */
 const SHOT_NAME = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*$/;
@@ -202,21 +214,32 @@ function continuationEnd(lines, start) {
  * Render a release section and collect its app highlights in the same pass.
  * Eligibility, screenshot placement and the folded list determine what the
  * app can link to, so the page and feed share those decisions here.
+ *
+ * The feed's `totalChanges` is how many changes the release made for users:
+ * the entries of a complete fold, or, for a release without one (v0.42.0 and
+ * v0.43.0, whose fold leaves the highlights out, or a release with no fold),
+ * the highlights and the folded entries together. It is never computed as a
+ * complete fold minus the highlights, since highlights can merge or reword
+ * full-list entries and no count of them says how many changes they cover.
  */
 function releaseBody(release, shots) {
   const { version, date, lines } = release;
   const tag = `v${version}`;
-  const notes = hasUpgradeNotes(release) ? { version, date, highlights: [], additionalChanges: 0 } : null;
+  const notes = hasUpgradeNotes(release) ? { version, date, highlights: [], totalChanges: 0 } : null;
   const placed = new Set();
   const citationCounts = new Map();
   const out = [];
   let inFold = false;
+  let completeFold = false;
+  let highlightedEntries = 0;
+  let foldedEntries = 0;
   let entries = null;
   for (let index = 0; index < lines.length; index++) {
     const line = lines[index];
     if (FOLD_FRAME.has(line)) {
       if (line === '<details>') inFold = true;
       if (line === '</details>') inFold = false;
+      if (line === COMPLETE_FOLD_SUMMARY) completeFold = true;
       out.push(line);
       continue;
     }
@@ -234,9 +257,10 @@ function releaseBody(release, shots) {
     }
     if (!line.startsWith('- ')) continue;
     if (inFold) {
-      if (notes) notes.additionalChanges++;
+      foldedEntries++;
       continue;
     }
+    highlightedEntries++;
     const end = continuationEnd(lines, index);
     const continuation = lines.slice(index + 1, end + 1);
     out.push(...continuation.map(escapeMdx));
@@ -265,6 +289,7 @@ function releaseBody(release, shots) {
     const numbers = unplaced.map((shot) => `#${shot.entry}`).join(', ');
     throw new Error(`website/src/release-notes/${tag}.json: no entry of ${tag} cites ${numbers}`);
   }
+  if (notes) notes.totalChanges = completeFold ? foldedEntries : highlightedEntries + foldedEntries;
   return { body: out.join('\n').trim(), notes };
 }
 

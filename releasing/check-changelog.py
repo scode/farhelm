@@ -11,8 +11,9 @@ writes to the repository; every mode reports and exits non-zero on a problem.
 `format` lints `CHANGELOG.md` and the fragments under `releasing/changelog.d/` against the layouts the process has used:
 one `## vX.Y.Z - YYYY-MM-DD` heading per stable release, newest first; recognized category headings in their prescribed
 order; and entries with the required PR references. Current sections use one-paragraph bullets in every category, and
-may end with the folded full list (a `<details>` block with its own `####` categories) below the highlighted ones, while
-older curated sections retain their historical layouts, such as Misc fixes or Highlights subsections. The newest
+end with the folded full list of every change (a `<details>` block with its own `####` categories) below the
+highlighted ones, which must cite every PR the highlights cite. Older curated sections retain their historical layouts,
+such as a fold of only the changes not highlighted, Misc fixes, or Highlights subsections. The newest
 section, and only that one, may open with the fixed draft notice while its wording is still in review. The checker is
 deliberately narrower than what dist accepts, so a violation here is a curation slip, not a dist failure. It runs in the
 release gate on every tag.
@@ -73,8 +74,8 @@ FRAGMENT_README = "README.md"
 #
 # A current section has two tiers. Its `###` categories are the highlights: the entries the maintainer settled at
 # planning time, wrote at release time, or promoted from the agent's proposals. Below them, folded away, comes the full
-# list the agent writes of everything else that changed for users (`FOLD_*` below). Fixes worth highlighting is the
-# highlights' fix category; every other fix goes in the fold's Fixed.
+# list the agent writes of every change users could notice, highlighted or not (`FOLD_*` below). Fixes worth
+# highlighting is the highlights' fix category; the fold lists every fix, those included, under its Fixed.
 CATEGORIES: tuple[tuple[str, str], ...] = (
     ("Breaking", "\U0001f4a5"),  # collision
     ("Added", "\U0001f680"),  # rocket
@@ -89,8 +90,26 @@ CATEGORIES: tuple[tuple[str, str], ...] = (
 # blank line after the summary and before `FOLD_CLOSE` is what lets GitHub and MDX read the Markdown inside as Markdown.
 # The categories inside are `####` headings, so that the parser's `###` categories end where the fold begins.
 FOLD_OPEN = "<details>"
-FOLD_SUMMARY = "<summary>All other changes</summary>"
+FOLD_SUMMARY = "<summary>All changes</summary>"
 FOLD_CLOSE = "</details>"
+
+# The fold started out as the list of only the changes the highlights left out, titled to match. The maintainer made it
+# the list of every change on 2026-11-21, so that removing, rewording or merging highlights during review never changes
+# what the full list holds and can never drop a change from the notes. The sections curated before that keep their
+# title and their narrower contents; `website/scripts/release-notes.mjs` reads the same split to count each release's
+# changes for the desktop app.
+LEGACY_FOLD_SUMMARY = "<summary>All other changes</summary>"
+LEGACY_FOLD_SUMMARY_VERSIONS = frozenset({"0.42.0", "0.43.0"})
+
+
+def fold_summary_for(version: str) -> str:
+    """The exact summary line a fold-era section of this version must use."""
+    return LEGACY_FOLD_SUMMARY if version in LEGACY_FOLD_SUMMARY_VERSIONS else FOLD_SUMMARY
+
+
+def fold_lists_every_change(version: str) -> bool:
+    """Whether this version's fold is the complete list, so it must exist and cite every highlighted PR."""
+    return _version_tuple(version) >= FIRST_FOLD_VERSION and version not in LEGACY_FOLD_SUMMARY_VERSIONS
 FOLD_CATEGORIES: tuple[tuple[str, str], ...] = (
     ("Breaking", "\U0001f4a5"),
     ("Added", "\U0001f680"),
@@ -320,7 +339,8 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
             f"`{line[:60]}`: a `details` or `summary` tag outside code spans could open or close the fold on GitHub;"
             " put it in backticks"
             for line in lines
-            if line not in (FOLD_OPEN, FOLD_SUMMARY, FOLD_CLOSE) and FRAME_TAG_RE.search(CODE_SPAN_RE.sub("", line))
+            if line not in (FOLD_OPEN, fold_summary_for(version), FOLD_CLOSE)
+            and FRAME_TAG_RE.search(CODE_SPAN_RE.sub("", line))
         )
     lines, fold, fold_problems = _split_fold(version, lines)
     problems.extend(fold_problems)
@@ -334,6 +354,17 @@ def _check_release_body(version: str, lines: list[str], may_be_draft: bool = Fal
     if not categories and fold is None:
         problems.append("a release needs at least one category")
     problems.extend(_check_categories(version, categories, allowed))
+    # The complete fold is what makes the highlights a pure selection: whatever the maintainer removes or merges there,
+    # every change is still in the full list. A PR a highlight cites and the fold does not is the one way to lose that,
+    # so it is checked here rather than left to curation.
+    if fold_lists_every_change(version) and categories:
+        if fold is None:
+            problems.append("the folded full list lists every change, the highlighted ones included, so it cannot be omitted")
+        else:
+            missing = sorted(_cited_prs(lines) - _cited_prs(fold))
+            if missing:
+                numbers = ", ".join(f"#{number}" for number in missing)
+                problems.append(f"the highlights cite {numbers}, which the folded full list of every change does not")
 
     if fold is not None:
         fold_categories, fold_stray, fold_heading_problems = _split_categories(fold, "#### ", FOLD_CATEGORIES)
@@ -377,12 +408,33 @@ def _split_fold(version: str, lines: list[str]) -> tuple[list[str], list[str] | 
     body = rest[:end]
     if any(line in (FOLD_OPEN, FOLD_CLOSE) for line in body):
         problems.append("a section has at most one fold, and nothing inside it may open or close another")
-    if not body or body[0] != FOLD_SUMMARY:
-        problems.append(f"`{FOLD_OPEN}` must be followed directly by exactly `{FOLD_SUMMARY}`")
+    summary = fold_summary_for(version)
+    if not body or body[0] != summary:
+        problems.append(f"`{FOLD_OPEN}` must be followed directly by exactly `{summary}`")
         return above, body, problems
     if len(body) < 2 or body[1].strip():
-        problems.append(f"`{FOLD_SUMMARY}` needs a blank line below it, or GitHub shows the fold's Markdown as raw text")
+        problems.append(f"`{summary}` needs a blank line below it, or GitHub shows the fold's Markdown as raw text")
     return above, body[1:], problems
+
+
+def _cited_prs(lines: list[str]) -> set[int]:
+    """The PR numbers cited by the trailing references of the bullet entries in these lines.
+
+    An entry is its `- ` line plus any indented continuation lines, joined, the same way `_check_bullets` reads it: a
+    reference wrapped across lines passes that check, so reading line by line here would miss its numbers.
+    """
+    items: list[str] = []
+    for line in lines:
+        if line.startswith("- "):
+            items.append(line[2:])
+        elif line.startswith("  ") and items:
+            items[-1] += " " + line.strip()
+    cited: set[int] = set()
+    for item in items:
+        reference = PR_REFERENCE_RE.search(item)
+        if reference:
+            cited.update(int(number) for number in re.findall(r"#(\d+)", reference.group(0)))
+    return cited
 
 
 def _split_categories(
@@ -1106,12 +1158,13 @@ Notable user-facing changes in each stable release.
 """
 
 
-# The current layout: highlights, then the folded full list, below a release in the Misc fixes layout that it follows.
+# The current layout: highlights, then the folded full list of every change, highlighted ones included in the full
+# list's own words, below a release in the Misc fixes layout that it follows.
 FOLD_CHANGELOG = f"""# Changelog
 
 Notable user-facing changes in each stable release.
 
-## v0.42.0 - 2027-03-01
+## v0.44.0 - 2027-03-01
 
 ### \U0001f680 Added
 
@@ -1128,12 +1181,17 @@ Notable user-facing changes in each stable release.
 
 - A flag only scripts used is gone; drop it from yours. (#33)
 
+#### \U0001f680 Added
+
+- A feature, as the full list words it. (#31)
+
 #### \U0001f504 Changed
 
 - A small change. (#34)
 
 #### \U0001f527 Fixed
 
+- A fix most users would notice. (#32)
 - A rare fix. (#35)
 - Another rare fix. (#36, #37)
 
@@ -1306,7 +1364,7 @@ def self_test() -> int:
     )
     in_code = FOLD_CHANGELOG.replace("- A rare fix. (#35)", "- Exported pages now end with `</details>` correctly. (#35)")
     expect(check_changelog_format(in_code) == [], "a frame tag inside a code span passes")
-    with_draft = FOLD_CHANGELOG.replace("## v0.42.0 - 2027-03-01\n\n", f"## v0.42.0 - 2027-03-01\n\n{DRAFT_NOTICE}\n\n")
+    with_draft = FOLD_CHANGELOG.replace("## v0.44.0 - 2027-03-01\n\n", f"## v0.44.0 - 2027-03-01\n\n{DRAFT_NOTICE}\n\n")
     expect(check_changelog_format(with_draft) == [], "the draft notice works with the fold")
     fold_text = FOLD_CHANGELOG[FOLD_CHANGELOG.index(FOLD_OPEN) : FOLD_CHANGELOG.index(FOLD_CLOSE) + len(FOLD_CLOSE)]
     fold_variants = {
@@ -1354,6 +1412,47 @@ def self_test() -> int:
     }
     for what, text in fold_variants.items():
         expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+
+    # The fold lists every change so the maintainer can remove or merge highlights without losing one. A highlight's PR
+    # missing from the fold, or a fold left out under highlights, is the one way to break that, and only new sections are
+    # held to it: v0.42.0 and v0.43.0 shipped a fold of only the changes not highlighted, under the older title.
+    merged = FOLD_CHANGELOG.replace(
+        "### \U0001f680 Added\n\n- A feature the maintainer highlighted. (#31)\n\n"
+        "### \U0001f527 Fixes worth highlighting\n\n- A fix most users would notice. (#32)\n\n",
+        "### \U0001f680 Added\n\n- Both changes, summed up as one highlight. (#31, #32)\n\n",
+    )
+    expect(check_changelog_format(merged) == [], "a merged highlight whose PRs the fold cites passes")
+    wrapped = FOLD_CHANGELOG.replace("- Another rare fix. (#36, #37)", "- Another rare fix. (#36,\n  #37)").replace(
+        "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31, #37)"
+    )
+    expect(check_changelog_format(wrapped) == [], "a fold entry's wrapped reference counts toward the highlights' PRs")
+    complete_fold_variants = {
+        "a highlight citing a PR the fold leaves out": FOLD_CHANGELOG.replace(
+            "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31, #39)"
+        ),
+        "highlights with no fold": FOLD_CHANGELOG.replace(f"{fold_text}\n\n", ""),
+        "the older summary in a new section": FOLD_CHANGELOG.replace(FOLD_SUMMARY, LEGACY_FOLD_SUMMARY),
+        "a highlight whose wrapped reference cites a PR the fold leaves out": FOLD_CHANGELOG.replace(
+            "- A feature the maintainer highlighted. (#31)", "- A feature the maintainer highlighted. (#31,\n  #39)"
+        ),
+    }
+    for what, text in complete_fold_variants.items():
+        expect(check_changelog_format(text) != [], f"the format check rejects {what}")
+    legacy_fold = (
+        FOLD_CHANGELOG.replace("## v0.44.0", "## v0.42.0")
+        .replace(FOLD_SUMMARY, LEGACY_FOLD_SUMMARY)
+        .replace("#### \U0001f680 Added\n\n- A feature, as the full list words it. (#31)\n\n", "")
+        .replace("- A fix most users would notice. (#32)\n- A rare fix.", "- A rare fix.")
+    )
+    expect(check_changelog_format(legacy_fold) == [], "v0.42.0's fold of only the changes not highlighted passes")
+    legacy_fold_text = legacy_fold[legacy_fold.index(FOLD_OPEN) : legacy_fold.index(FOLD_CLOSE) + len(FOLD_CLOSE)]
+    legacy_no_fold = legacy_fold.replace(f"{legacy_fold_text}\n\n", "")
+    expect(FOLD_OPEN not in legacy_no_fold.split("## v0.41.0")[0], "the v0.42.0 fixture without a fold really has none")
+    expect(check_changelog_format(legacy_no_fold) == [], "v0.42.0 needs no fold under its highlights")
+    expect(
+        check_changelog_format(legacy_fold.replace(LEGACY_FOLD_SUMMARY, FOLD_SUMMARY)) != [],
+        "the format check rejects the new summary on a section that shipped with the older one",
+    )
 
     good_fragment = "---\nkind: added\npr: 12, 13\n---\n\nThe thing.\n"
     fragment = parse_fragment(Path("x.md"), good_fragment)

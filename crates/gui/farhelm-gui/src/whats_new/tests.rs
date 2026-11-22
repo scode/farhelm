@@ -31,7 +31,7 @@ pub(crate) fn highlights() -> Vec<ReleaseHighlights> {
         ReleaseHighlights {
             version: RUNNING.to_owned(),
             date: "2026-11-20".to_owned(),
-            additional_changes: 17,
+            total_changes: 17,
             highlights: vec![HighlightCategory {
                 name: "Added".to_owned(),
                 entries: vec![Highlight {
@@ -53,7 +53,7 @@ pub(crate) fn highlights() -> Vec<ReleaseHighlights> {
         ReleaseHighlights {
             version: "0.43.0".to_owned(),
             date: "2026-11-18".to_owned(),
-            additional_changes: 3,
+            total_changes: 3,
             highlights: vec![HighlightCategory {
                 name: "Fixes worth highlighting".to_owned(),
                 entries: vec![Highlight {
@@ -146,7 +146,7 @@ fn welcome_and_announcements_precede_upgrade_highlights(cx: &mut TestAppContext)
     );
     assert_eq!(
         label(cx, "whats-new-footer-note").as_deref(),
-        Some("20 additional changes not highlighted. See the release notes for the full detail.")
+        Some("20 changes in total. See the release notes for the full detail.")
     );
     assert!(
         helm.commands().is_empty(),

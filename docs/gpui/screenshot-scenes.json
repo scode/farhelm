@@ -2751,7 +2751,7 @@
     },
     {
       "golden": "whats-new-dialog",
-      "title": "Upgrade highlights from two releases with a screenshot link, a count of other changes and the opt-out"
+      "title": "Upgrade highlights from two releases with a screenshot link, the total count of changes and the opt-out"
     },
     {
       "golden": "announcements-dialog",

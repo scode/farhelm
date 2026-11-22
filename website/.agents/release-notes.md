@@ -7,15 +7,19 @@ governs everything here. It belongs to the "Release notes work" reading list in 
 The Release notes page (`/docs/release-notes/`, the sidebar entry under Overview) is generated from the repository's
 `CHANGELOG.md` by `website/scripts/release-notes.mjs` on every build and preview start, and is gitignored. Do not edit
 the page; a change to the notes themselves is a change to `CHANGELOG.md`, which `releasing/AGENTS.md` governs. Each
-release has a stable anchor named after its version, such as `/docs/release-notes/#v0.23.0`. A release from v0.42.0 on
-can end with its folded full list below the highlights, an HTML details block titled All other changes
-(`releasing/.agents/changelog.md`, "Format"); the generator passes its frame lines through as markup, so it starts
-closed on the page as it does on GitHub, and Starlight's own styling for details blocks draws it.
+release has a stable anchor named after its version, such as `/docs/release-notes/#v0.23.0`. A release from v0.44.0 on
+ends with its folded full list of every change below the highlights, an HTML details block titled All changes
+(`releasing/.agents/changelog.md`, "Format"); v0.42.0 and v0.43.0 end with one titled All other changes, which leaves
+the highlights out. The generator passes its frame lines through as markup, so it starts closed on the page as it does
+on GitHub, and Starlight's own styling for details blocks draws it.
 
 The build also serves `/whats-new.json` for the desktop app, from the same pass over the changelog. Version 1 includes
 finalized stable releases from v0.42.0 on. It carries highlight categories in page order, plain, bold and code text
-pieces, a count of the folded changes, and a link when an entry has screenshots. Keep changes to this JSON additive.
-Existing desktop releases keep reading it after newer versions ship. The public asset is generated and gitignored.
+pieces, the release's total count of changes, and a link when an entry has screenshots. The total is the complete fold's
+entries, or the highlights and the fold together for a release whose fold leaves the highlights out; it is never the
+fold minus the highlights, since highlights can merge or reword entries. Keep changes to this JSON additive. Existing
+desktop releases keep reading it after newer versions ship. (The count replaced an earlier count of only the folded
+changes before any stable release read the feed.) The public asset is generated and gitignored.
 
 An entry can show screenshots of what it changed, behind a closed **show screenshot** link under the entry's text.
 `website/src/release-notes/<version>.json` (for example `website/src/release-notes/v0.25.0.json`) lists them, naming

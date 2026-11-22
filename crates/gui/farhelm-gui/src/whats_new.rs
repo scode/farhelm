@@ -338,7 +338,7 @@ impl Render for HighlightsDialog {
         let count = self
             .releases
             .iter()
-            .map(|release| release.additional_changes)
+            .map(|release| release.total_changes)
             .fold(0, u64::saturating_add);
         let changes = if count == 1 { "change" } else { "changes" };
         DialogFrame::new("whats-new", TITLE, body, vec![
@@ -351,7 +351,7 @@ impl Render for HighlightsDialog {
                 .on_click(move |_, window, cx| dismiss(&got_it, false, window, cx)),
         ])
         .summary(subtitle(&self.releases))
-        .note(format!("{count} additional {changes} not highlighted. See the release notes for the full detail."))
+        .note(format!("{count} {changes} in total. See the release notes for the full detail."))
         .width(px(664.))
         .scroll_stop("Release highlights")
         .close("Close upgrade highlights", HoverHelp::tooltip("Close these highlights"), false,
