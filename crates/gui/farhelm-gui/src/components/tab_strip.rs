@@ -271,20 +271,16 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                 // on the chosen tab's fill, the accent elsewhere, as the other controls' rings.
                 .when(ring, |tab| {
                     tab.child(
-                        div()
-                            .absolute()
-                            .top_0()
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .border_2()
-                            .rounded_tl(metrics::RADIUS_SM)
-                            .rounded_tr(metrics::RADIUS_SM)
-                            .border_color(theme::color(if filled {
+                        super::focus_ring(
+                            px(0.).into(),
+                            if filled {
                                 palette.on_fill
                             } else {
                                 palette.accent
-                            })),
+                            },
+                        )
+                        .rounded_tl(metrics::RADIUS_SM)
+                        .rounded_tr(metrics::RADIUS_SM),
                     )
                 });
             let element = super::with_hover_help(

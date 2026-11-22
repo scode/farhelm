@@ -250,17 +250,7 @@ impl RenderOnce for Checkbox {
             // A native disabled checkbox dimmed its box, not its words (`.control-switch:disabled` likewise).
             .when(!enabled, |mark| mark.opacity(0.5))
             .when(ring, |mark| {
-                mark.child(
-                    div()
-                        .absolute()
-                        .top(ring_inset)
-                        .left(ring_inset)
-                        .right(ring_inset)
-                        .bottom(ring_inset)
-                        .border_2()
-                        .border_color(theme::color(ring_color))
-                        .rounded(ring_radius),
-                )
+                mark.child(super::focus_ring(ring_inset.into(), ring_color).rounded(ring_radius))
             });
         let custom_words = self.content.is_some();
         let words = div()

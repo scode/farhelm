@@ -109,7 +109,7 @@ pub use transition::{outline_fade, slide_down};
 use std::rc::Rc;
 
 use gpui::{
-    AnyView, App, ClickEvent, Div, ElementId, FocusHandle, InteractiveElement, KeyDownEvent,
+    AnyView, App, ClickEvent, Div, Edges, ElementId, FocusHandle, InteractiveElement, KeyDownEvent,
     ParentElement, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
     Styled as _, Window, div, point, prelude::FluentBuilder as _, px,
 };
@@ -562,6 +562,20 @@ pub(crate) struct Ring {
     pub(crate) radius: Pixels,
 }
 
+/// The two-pixel border that draws a control's keyboard focus ring. Insets are
+/// measured from the enclosing box. Negative insets extend the ring beyond its edge.
+/// The caller supplies the ink, corner styling, and conditions for showing it.
+fn focus_ring(insets: Edges<Pixels>, ink: theme::Token) -> Div {
+    div()
+        .absolute()
+        .top(insets.top)
+        .left(insets.left)
+        .right(insets.right)
+        .bottom(insets.bottom)
+        .border_2()
+        .border_color(theme::color(ink))
+}
+
 /// Make `stop`, the box drawn under `id`, a focus stop on `focus`, a handle its caller owns: a tab stop with `role` and
 /// `label` as its accessible role and name, and `ring` while the keyboard has put focus on it. It takes no keys. The
 /// ring, role and Tab reach every stop shares, scroll stops included ([`scroll_stop`] is this plus the scroll keys), so
@@ -604,16 +618,17 @@ pub(crate) fn focus_stop(
         .aria_label(label)
         .when(ringed, |stop| {
             stop.child(
-                div()
-                    .debug_selector(|| format!("{id}-ring"))
-                    .absolute()
-                    .top(ring.inset_y)
-                    .left(ring.inset_x)
-                    .right(ring.inset_x)
-                    .bottom(ring.inset_y)
-                    .border_2()
-                    .border_color(theme::color(palette.accent))
-                    .rounded(ring.radius),
+                focus_ring(
+                    Edges {
+                        top: ring.inset_y,
+                        left: ring.inset_x,
+                        right: ring.inset_x,
+                        bottom: ring.inset_y,
+                    },
+                    palette.accent,
+                )
+                .debug_selector(|| format!("{id}-ring"))
+                .rounded(ring.radius),
             )
         });
     focus::track(stop, focus, focus::OnPress::Focus)

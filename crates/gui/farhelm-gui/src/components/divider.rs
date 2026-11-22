@@ -57,7 +57,7 @@ use std::rc::Rc;
 use gpui::{
     App, CursorStyle, ElementId, Entity, FocusHandle, InteractiveElement, IntoElement, MouseButton,
     MouseMoveEvent, MouseUpEvent, ParentElement, Pixels, RenderOnce, Role, SharedString,
-    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _,
+    StatefulInteractiveElement, Styled, Window, canvas, div, prelude::FluentBuilder as _, px,
 };
 
 use super::HoverHelp;
@@ -244,16 +244,7 @@ impl RenderOnce for DividerGrip {
             // Only the pointer: a wheel over the grip still scrolls whatever lies under it.
             .block_mouse_except_scroll()
             .when(ring, |grip| {
-                grip.child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .border_2()
-                        .border_color(theme::color(palette.fg_1)),
-                )
+                grip.child(super::focus_ring(px(0.).into(), palette.fg_1))
             });
         let grip = super::with_hover_help(grip, &id, &divider.help, false, None, window, cx);
 

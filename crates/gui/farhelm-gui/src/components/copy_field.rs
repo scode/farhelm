@@ -286,16 +286,7 @@ impl RenderOnce for CopyField {
             // square corners, since `.header-copy` had none rounded. Drawn as an element because GPUI has no outline;
             // the field does not clip, so the ring outside its box shows.
             .when(ring, |field| {
-                field.child(
-                    div()
-                        .absolute()
-                        .top(px(-3.))
-                        .left(px(-3.))
-                        .right(px(-3.))
-                        .bottom(px(-3.))
-                        .border_2()
-                        .border_color(theme::color(palette.accent)),
-                )
+                field.child(super::focus_ring(px(-3.).into(), palette.accent))
             })
             .child(content)
             .child(

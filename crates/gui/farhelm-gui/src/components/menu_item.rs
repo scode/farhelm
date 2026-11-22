@@ -393,15 +393,7 @@ impl RenderOnce for MenuItem {
             // `outline: 2px solid var(--on-fill); outline-offset: -3px`: inside the fill, since an accent ring would
             // vanish against the accent fill.
             item = item.child(
-                div()
-                    .absolute()
-                    .top(px(1.))
-                    .left(px(1.))
-                    .right(px(1.))
-                    .bottom(px(1.))
-                    .border_2()
-                    .border_color(theme::color(palette.on_fill))
-                    .rounded(metrics::RADIUS_SM),
+                super::focus_ring(px(1.).into(), palette.on_fill).rounded(metrics::RADIUS_SM),
             );
         }
         // The visible description is the accessible description, so the help is the tooltip alone.
