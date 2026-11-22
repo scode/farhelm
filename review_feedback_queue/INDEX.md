@@ -127,25 +127,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
-  suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The
-  resulting failing scheduler ordering remains unverified after investigation.
-
-- [`tunnel-fixture-assumes-simple-short-temporary-root.md`](tunnel-fixture-assumes-simple-short-temporary-root.md) — The
-  tunnel transport tests can reject correct behavior when the temporary root needs path escaping or is too long for SSH
-  sharing.
-
-- [`redirect-regression-omits-location-header.md`](redirect-regression-omits-location-header.md) — The redirect
-  regression does not supply a redirect destination, so it cannot prove that Farhelm refuses to follow one.
-
-- [`trailing-http-golden-omits-populated-environment.md`](trailing-http-golden-omits-populated-environment.md) — The new
-  environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md)
-  — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
   the Templates leave question as inline, although the app centers it.
 

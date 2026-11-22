@@ -49,6 +49,7 @@ struct Seen {
 struct Reply {
     status: u16,
     content_type: &'static str,
+    location: Option<&'static str>,
     body: String,
 }
 
@@ -57,6 +58,7 @@ fn json(body: serde_json::Value) -> Reply {
     Reply {
         status: 200,
         content_type: "application/json",
+        location: None,
         body: body.to_string(),
     }
 }
@@ -66,6 +68,7 @@ fn text(status: u16, body: &str) -> Reply {
     Reply {
         status,
         content_type: "text/plain",
+        location: None,
         body: body.into(),
     }
 }
@@ -113,14 +116,22 @@ impl Stub {
                 let reply = queue.lock().unwrap().pop_front().unwrap_or(Reply {
                     status: 599,
                     content_type: "text/plain",
+                    location: None,
                     body: "unscripted request".into(),
                 });
-                (
+                let mut response = (
                     StatusCode::from_u16(reply.status).unwrap(),
                     [("content-type", reply.content_type)],
                     reply.body,
                 )
-                    .into_response()
+                    .into_response();
+                if let Some(location) = reply.location {
+                    response.headers_mut().insert(
+                        axum::http::header::LOCATION,
+                        axum::http::HeaderValue::from_static(location),
+                    );
+                }
+                response
             }
         });
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -188,6 +199,7 @@ async fn every_call_sends_the_documented_request() {
         Reply {
             status: 202,
             content_type: "application/json",
+            location: None,
             body: serde_json::json!({ "snapshot_id": "snap-1", "status": "in_progress" })
                 .to_string(),
         },
@@ -360,9 +372,8 @@ async fn failures_are_classified_with_the_servers_message() {
         text(422, "bad \u{202E}field"),
         text(503, &"x".repeat(10_000)),
         Reply {
-            status: 307,
-            content_type: "text/plain",
-            body: String::new(),
+            location: Some("/unexpected-redirect"),
+            ..text(307, "")
         },
         json(serde_json::json!({ "not": "a sandbox" })),
     ])
@@ -413,8 +424,10 @@ async fn failures_are_classified_with_the_servers_message() {
         }
     );
     assert_eq!(errors[8], TensorlakeError::Decode);
-    // One request per call: no retry, and the redirect was not followed.
-    assert_eq!(stub.seen().len(), 9);
+    // A same-server Location is reachable on the owned loopback stub.
+    let seen = stub.seen();
+    assert_eq!(seen.len(), 9, "{seen:?}");
+    assert!(seen.iter().all(|call| call.path != "/unexpected-redirect"));
     assert_eq!(
         errors[0].to_string(),
         "Tensorlake rejected the API key (HTTP 401)"

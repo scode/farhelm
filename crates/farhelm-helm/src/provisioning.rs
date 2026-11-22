@@ -4776,11 +4776,26 @@ mod tests {
             })
             .await
             .unwrap();
-        let ProbeResponse::Provisionable { probe_id, .. } = planned else {
+        let ProbeResponse::Provisionable { probe_id, plan, .. } = planned else {
             panic!("an absent supervisor must be offered setup: {planned:?}")
         };
         assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
 
+        // Give confirmation the coordinates already in the registry so it observes the suspended
+        // actor without replacing it while checking the preflight guard.
+        harness
+            .store
+            .admit_tensorlake_install(
+                host,
+                plan.farhelm_path.to_str().unwrap(),
+                plan.state_dir.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+        harness.manager.sync_registry().await.unwrap();
+        harness
+            .await_state(host, |state| matches!(state, HostState::Connected { .. }))
+            .await;
         sandboxes.set(crate::tensorlake::api::SandboxStatus::Suspended);
         harness.fleet.kill_connection(host);
         harness

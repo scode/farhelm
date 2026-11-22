@@ -242,11 +242,21 @@ fn host_list_body() -> serde_json::Value {
                 refresh: RefreshView::Pending,
             },
         ),
-        // A Tensorlake host carries its sandbox, recipe and size; the other
-        // kinds leave `tensorlake` out entirely.
+        // A session-owned sandbox carries its fresh launch target and metadata.
+        // The ordinary host fixtures also pin omission of the environment field.
         HostView {
             is_session_owned: true,
             tensorlake: Some(tensorlake_view(11)),
+            environment: Some(farhelm_proto::EnvironmentHostView {
+                name: "farhelm-host-k7q2-host11-m3x9".into(),
+                place_name: None,
+                target: farhelm_proto::LaunchTarget::Environment {
+                    recipe: "rust-dev".into(),
+                    place: farhelm_proto::Place::TensorlakeAccount,
+                },
+                tunnels: None,
+                credential_warning: None,
+            }),
             ..host(
                 11,
                 "tensorlake",
