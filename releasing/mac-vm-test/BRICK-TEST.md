@@ -595,6 +595,17 @@ reusing an old advancing pair or observing a replacement process cannot satisfy 
 
 ## Record evidence and finish
 
+After each named P0 check, the P1 check, and each planned bonus checkpoint, inspect the recorded result and send the
+maintainer an updated Markdown status table. Send it as soon as the result is available, including while `test` is still
+running on the same pair. Carry forward earlier results and show the checks still ahead. List all seven named P0 checks
+and P1. Group untouched historical pairs if there are many, then name the pair and checkpoint as each result comes in.
+
+Use **Passed**, **Failed**, **Intentional skip**, or **Not yet run** for the corresponding results. Give the reason for
+each intentional skip, including RC/dev discovery and checks outside a requested stop scope. Use **Could not run** for a
+blocked check and name the blocker. Leave its pending dependents **Not yet run**. For the supervisor checks, report the
+named P0 result once both the new agent and old-session checks have settled. The table describes progress. The P0, P1
+and full verdicts still come from the retained evidence and the rules below.
+
 Collect each named guest evidence directory with `control.py collect` before deletion. Inspect the exported tar and its
 members. References are relative to `test_run`, either `pass/file.json` or `pass/archive.tar::./member.png`; members are
 read without extraction. Never export authentication directories. Give new captures/exports new names instead of

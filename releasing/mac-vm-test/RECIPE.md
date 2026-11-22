@@ -359,6 +359,8 @@ Required permission scopes and approvals (no credential contents):
 
 ## Evidence and report
 
+Send the cumulative status table after each check as described in BRICK-TEST.md, "Record evidence and finish".
+
 Collect one screenshot per GUI check, the first launch's app log and any relaunch logs the bring-up capture can actually
 retain, the local supervisor's `supervisor.log` from the state directory when the release writes one, guest
 `farhelm --version` output, remote supervisor version and command continuity evidence, and diagnostics for failures.
