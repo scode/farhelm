@@ -324,20 +324,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   temporary outage keeps retrying. Route pending upload notices to the terminal the app ends up showing, and keep the
   shell tab available for a deliberate selection.
 
-- **Apply host identity rules to Podman places.** If an SSH alias starts reaching another machine or account, a Delete
-  can see no container there and forget a live one on the original host. Two aliases for the same machine and account
-  can also both appear usable for new containers. Use one stable machine/account identity for both outcomes. Record it
-  for the execution endpoint before sending a new container create, and dispatch only to that verified endpoint. Verify
-  the identity on the connection that reports absence before accepting that as proof of deletion. Refuse new containers
-  on a second place for the same machine and account while preserving safe cleanup for existing bindings. Honor the
-  ordinary supervisor's identity refusal when it is available and keep support for places without a supervisor. The
-  relevant code is in `environment/podman.rs`, `environment/podman_probe.rs` and `store/podman.rs` in the helm. For an
-  older binding whose create may have been sent, finding the owned container can establish its identity. If the
-  container is absent, the helm cannot distinguish a removed container from a changed route. Decide how users can clear
-  those rows without assuming the current endpoint is the original one. Cover both the retargeted alias and the
-  duplicate place in tests and update SPEC. The Podman triage plan deferred the pair together because the older-row
-  behavior is unsettled. Plan: `plans/queue/podman-place-host-identity.md`.
-
 - **Evidence shows Muse Code conversation reporting is broken (1.4.24).** During the `harness-drift-tests` live run on
   Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no conversation report
   arrived and Farhelm's hook helper never even wrote a diagnostic log line before teardown—indicating conversation

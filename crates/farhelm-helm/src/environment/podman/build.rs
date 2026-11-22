@@ -5,7 +5,6 @@
 
 use super::*;
 use crate::environment::recipes::{PodmanRecipeState, UnconfirmedImageCapture};
-use crate::store::PodmanPlaceIdentity;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -54,6 +53,7 @@ impl Podman {
         identity: &PodmanPlaceIdentity,
     ) -> anyhow::Result<String> {
         let place = expected.id;
+        let target = PlaceTarget::claimed(place, identity);
         let id = self
             .helper(name, expected, identity, "build", HelperBase::Bootstrap)
             .await?;
@@ -64,8 +64,8 @@ impl Podman {
             self.tag().await?,
             uuid::Uuid::new_v4().simple()
         );
-        let image = self.commit(name, place, &id, &tag, "managed-base").await?;
-        self.clear_helper(name, place, "build", &id).await?;
+        let image = self.commit(name, target, &id, &tag, "managed-base").await?;
+        self.clear_helper(name, target, "build", &id).await?;
         Ok(image)
     }
 
@@ -149,17 +149,22 @@ impl Podman {
         cancel: &std::sync::atomic::AtomicBool,
         rebuild: bool,
     ) -> anyhow::Result<BuiltImage> {
-        if !rebuild
-            && let Some(image) = self.state(name, place).await?.image
-            && self.exists(place, "image", &image.id).await?
-        {
-            return Ok(image);
+        if !rebuild && let Some(image) = self.state(name, place).await?.image {
+            let identity = self.recipe_place_identity(place).await?;
+            let target = PlaceTarget {
+                host: place,
+                identity: identity.as_ref(),
+            };
+            if self.exists(target, "image", &image.id).await? {
+                return Ok(image);
+            }
         }
         let (expected, _, ready) = self.place(place).await?;
         let identity = ready
             .identity
             .as_ref()
-            .context("the container host has no verified machine and account")?;
+            .map_err(|reason| anyhow::Error::msg(*reason))?;
+        let target = PlaceTarget::claimed(place, identity);
         check(cancel)?;
         enter(progress, events, "Preparing the recipe's base image");
         let managed;
@@ -236,7 +241,7 @@ impl Podman {
             uuid::Uuid::new_v4().simple()
         );
         let image = BuiltImage {
-            id: self.commit(name, place, &id, &tag, "software").await?,
+            id: self.commit(name, target, &id, &tag, "software").await?,
             built_at: now(),
             base: recipe.base.clone(),
             packages: recipe.packages.clone(),
@@ -255,7 +260,7 @@ impl Podman {
             })
             .await?;
         }
-        self.clear_helper(name, place, "build", &id).await?;
+        self.clear_helper(name, target, "build", &id).await?;
         Ok(image)
     }
 
@@ -361,7 +366,8 @@ impl Podman {
             let identity = ready
                 .identity
                 .as_ref()
-                .context("the container host has no verified machine and account")?;
+                .map_err(|reason| anyhow::Error::msg(*reason))?;
+            let target = PlaceTarget::claimed(place, identity);
             let id = self
                 .helper(
                     name,
@@ -372,7 +378,7 @@ impl Podman {
                 )
                 .await?;
             let info = self
-                .inspect(place, &id)
+                .inspect(target, &id)
                 .await?
                 .context("the preparer disappeared before Running")?;
             anyhow::ensure!(
@@ -412,7 +418,7 @@ impl Podman {
                 uuid::Uuid::new_v4().simple()
             );
             let prepared = PreparedImage {
-                id: self.commit(name, place, &id, &tag, "prepared").await?,
+                id: self.commit(name, target, &id, &tag, "prepared").await?,
                 prepared_at: now(),
                 farhelm_version: farhelm_proto::BUILD_VERSION.into(),
                 source_image: source.id.clone(),
@@ -422,7 +428,7 @@ impl Podman {
             if rebuild {
                 // Settle the helper before replacing the working pair so a
                 // removal failure leaves both replacements staged for cleanup.
-                self.clear_helper(name, place, "prepare", &id).await?;
+                self.clear_helper(name, target, "prepare", &id).await?;
             }
             let publication = self.0.builds.lock_podman_use(name, place).await?;
             let publish = rebuild
@@ -453,7 +459,7 @@ impl Podman {
             if !rebuild {
                 // Lazy preparation can keep its new checkpoint for the next
                 // launch even when this launch reports failed helper removal.
-                self.clear_helper(name, place, "prepare", &id).await?;
+                self.clear_helper(name, target, "prepare", &id).await?;
             }
             if let Err(error) = self.retire_images(name, place).await {
                 let reason = crate::tensorlake::shell::shown(&format!(
@@ -600,8 +606,13 @@ impl Podman {
         {
             return Ok(None);
         }
-        if !self.exists(place, "image", &source.id).await?
-            || !self.exists(place, "image", &prepared.id).await?
+        let identity = self.recipe_place_identity(place).await?;
+        let target = PlaceTarget {
+            host: place,
+            identity: identity.as_ref(),
+        };
+        if !self.exists(target, "image", &source.id).await?
+            || !self.exists(target, "image", &prepared.id).await?
         {
             return Ok(None);
         }
@@ -621,6 +632,7 @@ impl Podman {
         base: HelperBase<'_>,
     ) -> anyhow::Result<String> {
         let place = expected.id;
+        let target = PlaceTarget::claimed(place, identity);
         let reserved = format!(
             "farhelm-{role}-{}-{}",
             self.tag().await?,
@@ -644,7 +656,7 @@ impl Podman {
             HelperBase::Built(id) => (id, false, false),
         };
         if pull {
-            if let Err(error) = self.pull_base(place, image).await {
+            if let Err(error) = self.pull_base(target, image).await {
                 self.clear_helper_record(name, place, role, &reserved)
                     .await?;
                 return Err(error);
@@ -655,7 +667,7 @@ impl Podman {
                 .await?;
         }
         let result = self
-            .run(place, &reserved, role, name, image, bootstrap)
+            .run(target, &reserved, role, name, image, bootstrap)
             .await;
         let id = match result {
             Ok(id) => id,
@@ -664,7 +676,7 @@ impl Podman {
                 // create. A completed refusal plus absence settles this exact
                 // reserved owner, allowing the next build to proceed at once.
                 if error.downcast_ref::<CreateRefused>().is_some()
-                    && !self.exists(place, "container", &reserved).await?
+                    && !self.exists(target, "container", &reserved).await?
                 {
                     self.clear_helper_record(name, place, role, &reserved)
                         .await?;
@@ -688,12 +700,12 @@ impl Podman {
     async fn clear_helper(
         &self,
         name: &str,
-        place: HostId,
+        target: PlaceTarget<'_>,
         role: &str,
         id: &str,
     ) -> anyhow::Result<()> {
-        self.remove_container(place, id, role).await?;
-        self.clear_helper_record(name, place, role, id).await
+        self.remove_container(target, id, role).await?;
+        self.clear_helper_record(name, target.host, role, id).await
     }
 
     /// Clear only the helper this operation settled. Pre-send failures use
@@ -724,6 +736,14 @@ impl Podman {
     /// still create them. Only the persisted start marker authorizes recovery.
     async fn reconcile_helpers(&self, name: &str, place: HostId) -> anyhow::Result<()> {
         let state = self.state(name, place).await?;
+        if state.builder_container_id.is_none() && state.preparer_container_id.is_none() {
+            return Ok(());
+        }
+        let identity = self.recipe_place_identity(place).await?;
+        let target = PlaceTarget {
+            host: place,
+            identity: identity.as_ref(),
+        };
         for (role, id, sent) in [
             ("build", state.builder_container_id, state.build_started_at),
             (
@@ -735,7 +755,7 @@ impl Podman {
             let Some(id) = id else {
                 continue;
             };
-            let canonical = if let Some(info) = self.inspect(place, &id).await? {
+            let canonical = if let Some(info) = self.inspect(target, &id).await? {
                 self.owned(&info, role).await?;
                 anyhow::ensure!(
                     info.labels.get("farhelm.recipe").map(String::as_str) == Some(name),
@@ -765,7 +785,7 @@ impl Podman {
                 }
                 id
             };
-            self.clear_helper(name, place, role, &canonical).await?;
+            self.clear_helper(name, target, role, &canonical).await?;
         }
         Ok(())
     }
@@ -787,11 +807,20 @@ impl Podman {
         place: HostId,
         forget_missing_captures: bool,
     ) -> anyhow::Result<()> {
-        for mut id in self.state(name, place).await?.retired_images {
-            if self.exists(place, "image", &id).await? {
+        let images = self.state(name, place).await?.retired_images;
+        if images.is_empty() {
+            return Ok(());
+        }
+        let identity = self.recipe_place_identity(place).await?;
+        let target = PlaceTarget {
+            host: place,
+            identity: identity.as_ref(),
+        };
+        for mut id in images {
+            if self.exists(target, "image", &id).await? {
                 let text = self
                     .require(
-                        place,
+                        target,
                         vec!["image".into(), "inspect".into(), "--".into(), id.clone()],
                         COMMAND,
                     )
@@ -820,7 +849,7 @@ impl Podman {
                 }
                 let using = self
                     .require(
-                        place,
+                        target,
                         vec![
                             "ps".into(),
                             "--all".into(),
@@ -838,7 +867,7 @@ impl Podman {
                 // --no-prune: without it Podman also deletes the image's dangling parents, and one can be the user's
                 // own untagged recipe base (SPEC.md: user-owned base images are retained).
                 self.require(
-                    place,
+                    target,
                     vec![
                         "image".into(),
                         "rm".into(),
@@ -850,7 +879,7 @@ impl Podman {
                 )
                 .await?;
                 anyhow::ensure!(
-                    !self.exists(place, "image", &id).await?,
+                    !self.exists(target, "image", &id).await?,
                     "the retired image still exists"
                 );
             } else if image_id(&id).is_err() && !forget_missing_captures {
@@ -867,6 +896,17 @@ impl Podman {
             .await?;
         }
         Ok(())
+    }
+
+    /// The first runtime check may adopt a durable claim for images and
+    /// helpers from before the upgrade. Read that claim after the check so
+    /// the same cleanup attempt uses it before acting on an absence.
+    async fn recipe_place_identity(
+        &self,
+        place: HostId,
+    ) -> anyhow::Result<Option<PodmanPlaceIdentity>> {
+        self.place(place).await?;
+        self.0.store.podman_place_identity(place).await
     }
 
     /// Global admission closes first, then owned jobs finish their current
@@ -923,7 +963,7 @@ impl Podman {
 
     /// Pull only a missing selected base, then reject installation checkpoints.
     /// This reference is never entered in the helm-owned image cleanup list.
-    async fn pull_base(&self, place: HostId, reference: &str) -> anyhow::Result<()> {
+    async fn pull_base(&self, place: PlaceTarget<'_>, reference: &str) -> anyhow::Result<()> {
         if !self.exists(place, "image", reference).await? {
             self.require(
                 place,

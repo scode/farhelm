@@ -25,6 +25,27 @@ pub(crate) struct PodmanPlaceIdentity {
     pub(crate) uid: u32,
 }
 
+impl PodmanPlaceIdentity {
+    /// Accept only a complete, initialized Linux machine ID. Canonicalizing
+    /// here keeps uniqueness, persisted bindings and command guards aligned.
+    pub(crate) fn from_parts(machine: &str, uid: u32) -> Option<Self> {
+        (machine.len() == 32
+            && machine.bytes().all(|byte| byte.is_ascii_hexdigit())
+            && machine.bytes().any(|byte| byte != b'0'))
+        .then(|| Self {
+            machine_id: machine.to_ascii_lowercase(),
+            uid,
+        })
+    }
+}
+
+impl std::fmt::Debug for PodmanPlaceIdentity {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("PodmanPlaceIdentity")
+            .finish_non_exhaustive()
+    }
+}
+
 /// Admission for new work. Runtime observations for an existing container
 /// still need a usable command route when the place claim refuses new work.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -32,6 +53,25 @@ pub(crate) enum PlaceClaim {
     Owned { displaced: Option<HostId> },
     Twin { owner: HostId, name: String },
     Changed,
+}
+
+/// Read the endpoint currently owned by this registry entry, when it has
+/// established a claim. The caller chooses its transaction boundary.
+fn read_place_identity(
+    conn: &Connection,
+    host: HostId,
+) -> rusqlite::Result<Option<PodmanPlaceIdentity>> {
+    conn.query_row(
+        "SELECT machine_id, uid FROM podman_place_claims WHERE host_id = ?1",
+        [host],
+        |row| {
+            Ok(PodmanPlaceIdentity {
+                machine_id: row.get(0)?,
+                uid: row.get(1)?,
+            })
+        },
+    )
+    .optional()
 }
 
 /// Verify a probe's exact place ownership inside the transaction that will
@@ -71,6 +111,9 @@ pub struct PodmanBinding {
     /// with pending-send/install facts, before run or canonical ID admission.
     pub login: Option<PodmanLogin>,
     pub pending_create_at: Option<i64>,
+    /// The machine and account authorized before create. Older already-sent
+    /// bindings lack this evidence and keep their previous cleanup behavior.
+    pub(crate) place_identity: Option<PodmanPlaceIdentity>,
 }
 
 /// The account actually observed inside the selected image, never guessed
@@ -140,18 +183,47 @@ impl PodmanInstallGuard {
 /// Append container storage without changing the host table's identity.
 /// Historical version-only fixtures can already carry some of these columns.
 pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
-    for (name, definition) in [
-        ("environment_provider", "environment_provider TEXT"),
-        ("place_host", "place_host INTEGER REFERENCES hosts(id)"),
-        ("podman_container_id", "podman_container_id TEXT"),
-        ("podman_user", "podman_user TEXT"),
-        ("podman_home", "podman_home TEXT"),
-        ("podman_uid", "podman_uid INTEGER"),
-        (
-            "podman_pending_create_at",
-            "podman_pending_create_at INTEGER",
-        ),
-    ] {
+    add_missing_host_columns(
+        tx,
+        &[
+            ("environment_provider", "environment_provider TEXT"),
+            ("place_host", "place_host INTEGER REFERENCES hosts(id)"),
+            ("podman_container_id", "podman_container_id TEXT"),
+            ("podman_user", "podman_user TEXT"),
+            ("podman_home", "podman_home TEXT"),
+            ("podman_uid", "podman_uid INTEGER"),
+            (
+                "podman_pending_create_at",
+                "podman_pending_create_at INTEGER",
+            ),
+        ],
+    )?;
+    tx.execute_batch("CREATE INDEX IF NOT EXISTS hosts_place_host ON hosts(place_host);")?;
+    Ok(())
+}
+
+/// No backfill can prove where a pre-upgrade container was created.
+pub(super) fn migrate_container_place_identity(
+    tx: &rusqlite::Transaction<'_>,
+) -> anyhow::Result<()> {
+    add_missing_host_columns(
+        tx,
+        &[
+            ("podman_place_machine_id", "podman_place_machine_id TEXT"),
+            (
+                "podman_place_uid",
+                "podman_place_uid INTEGER CHECK (podman_place_uid BETWEEN 0 AND 4294967295)",
+            ),
+        ],
+    )
+}
+
+/// Some historical fixtures start with newer columns already present.
+fn add_missing_host_columns(
+    tx: &rusqlite::Transaction<'_>,
+    columns: &[(&str, &str)],
+) -> anyhow::Result<()> {
+    for (name, definition) in columns {
         let exists: bool = tx.query_row(
             "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = ?1",
             [name],
@@ -161,7 +233,6 @@ pub(super) fn migrate(tx: &rusqlite::Transaction<'_>) -> anyhow::Result<()> {
             tx.execute_batch(&format!("ALTER TABLE hosts ADD COLUMN {definition};"))?;
         }
     }
-    tx.execute_batch("CREATE INDEX IF NOT EXISTS hosts_place_host ON hosts(place_host);")?;
     Ok(())
 }
 
@@ -178,13 +249,14 @@ pub(super) fn decode_binding(
     home: Option<String>,
     uid: Option<u32>,
     pending_create_at: Option<i64>,
+    place_identity: (Option<String>, Option<u32>),
     session_owned: bool,
     admitted: bool,
 ) -> anyhow::Result<Option<PodmanBinding>> {
     match kind {
         HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => {
             anyhow::ensure!(
-                place_host.is_none(),
+                place_host.is_none() && place_identity == (None, None),
                 "an ordinary or Tensorlake host names a container place"
             );
             Ok(None)
@@ -202,6 +274,14 @@ pub(super) fn decode_binding(
                     _ => anyhow::bail!("a Podman row has only part of its login identity"),
                 },
                 pending_create_at,
+                place_identity: match place_identity {
+                    (Some(machine), Some(uid)) => Some(
+                        PodmanPlaceIdentity::from_parts(&machine, uid)
+                            .context("a Podman row has an invalid place identity")?,
+                    ),
+                    (None, None) => None,
+                    _ => anyhow::bail!("a Podman row has only part of its place identity"),
+                },
             };
             validate_name(&binding.name)?;
             if let Some(login) = &binding.login {
@@ -341,11 +421,7 @@ impl HelmStore {
             let Some(owns_supervisor) = owns_supervisor else {
                 return Ok(None);
             };
-            let previous: Option<PodmanPlaceIdentity> = tx.query_row(
-                "SELECT machine_id, uid FROM podman_place_claims WHERE host_id = ?1",
-                [host],
-                |row| Ok(PodmanPlaceIdentity { machine_id: row.get(0)?, uid: row.get(1)? }),
-            ).optional()?;
+            let previous = read_place_identity(&tx, host)?;
             if previous.is_some_and(|previous| previous != identity)
                 && referenced_place_reason(&tx, host)?.is_some()
             {
@@ -406,30 +482,64 @@ impl HelmStore {
             .await
     }
 
-    /// Freeze the installation selected for this exact create before sending
-    /// Podman any request. A retry must use these facts even after renewal.
+    /// Recipe images and helpers use the durable claim on their place.
+    /// References block replacement of that claim until cleanup finishes.
+    /// Artifacts left before the first successful probe may lack a claim.
+    pub(crate) async fn podman_place_identity(
+        &self,
+        host: HostId,
+    ) -> anyhow::Result<Option<PodmanPlaceIdentity>> {
+        self.conn
+            .call("read container place claim task panicked", move |conn| {
+                Ok(read_place_identity(conn, host)?)
+            })
+            .await
+    }
+
+    /// Freeze the installation and Podman endpoint selected for this exact
+    /// send. The first send needs the entry's current claim. A retry keeps
+    /// the original endpoint even if the active claim changes or is missing.
     pub(crate) async fn set_podman_prepared_create(
         &self,
         expected: PodmanInstallGuard,
         sent: i64,
         facts: &crate::environment::recipes::PreparedInstallFacts,
         login: &ContainerUser,
+        place_identity: Option<&PodmanPlaceIdentity>,
     ) -> anyhow::Result<bool> {
         validate_identity(&expected.binding.name, &login.name, &login.home)?;
         let json = serde_json::to_string(facts)?;
         let login = login.clone();
         let binding = expected.binding;
         let old = binding.login;
+        let previous = binding.place_identity;
+        let new = place_identity.cloned();
+        if previous.is_some() || binding.pending_create_at.is_some() {
+            anyhow::ensure!(
+                previous == new,
+                "the recorded container place identity changed"
+            );
+        } else {
+            anyhow::ensure!(new.is_some(), "a new container needs a verified place");
+        }
         self.conn.call("record prepared container create task panicked", move |conn| {
             Ok(conn.execute("UPDATE hosts SET podman_pending_create_at = ?2, tensorlake_prepared_install_json = ?3,
-                    podman_user = ?4, podman_home = ?5, podman_uid = ?6
+                    podman_user = ?4, podman_home = ?5, podman_uid = ?6,
+                    podman_place_machine_id = ?15, podman_place_uid = ?16
                 WHERE id = ?1 AND entry_uuid = ?7 AND environment_provider = 'podman' AND podman_container_id IS NULL
                   AND remote_farhelm IS NULL AND remote_state_dir IS NULL AND tensorlake_sandbox = ?8
                   AND place_host = ?9 AND tensorlake_recipe = ?10 AND podman_pending_create_at IS ?11
-                  AND podman_user IS ?12 AND podman_home IS ?13 AND podman_uid IS ?14",
+                  AND podman_user IS ?12 AND podman_home IS ?13 AND podman_uid IS ?14
+                  AND podman_place_machine_id IS ?17 AND podman_place_uid IS ?18
+                  AND (?15 IS NULL OR ?17 IS NOT NULL OR EXISTS (
+                      SELECT 1 FROM podman_place_claims AS claim
+                      WHERE claim.host_id = ?9 AND claim.machine_id = ?15 AND claim.uid = ?16
+                  ))",
                 rusqlite::params![expected.host, sent, json, login.name, login.home, login.uid, expected.entry_uuid,
                     binding.name, binding.place_host, binding.recipe, binding.pending_create_at,
-                    old.as_ref().map(|login| &login.user), old.as_ref().map(|login| &login.home), old.as_ref().map(|login| login.uid)])? == 1)
+                    old.as_ref().map(|login| &login.user), old.as_ref().map(|login| &login.home), old.as_ref().map(|login| login.uid),
+                    new.as_ref().map(|identity| &identity.machine_id), new.as_ref().map(|identity| identity.uid),
+                    previous.as_ref().map(|identity| &identity.machine_id), previous.as_ref().map(|identity| identity.uid)])? == 1)
         }).await
     }
 
@@ -811,14 +921,22 @@ mod tests {
 
     /// A pending row owns cleanup before a custom image reveals its account.
     /// Neither pending-send nor canonical ID can skip that observation, and
-    /// the observed account/facts write must reject a changed binding.
+    /// the observed account, place and facts write must reject a changed
+    /// binding or a place without the selected machine and account.
     #[farhelm_testtrace::test]
     async fn pending_login_and_selected_facts_are_admitted_atomically_before_send() {
         let directory = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&directory.path().join("helm.db"))
             .await
             .unwrap();
-        let place = store.list_hosts().await.unwrap()[0].id;
+        let place_row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .next()
+            .unwrap();
+        let place = place_row.id;
         let host = store
             .register_pending_session_container("farhelm-sess-observed".into(), "dev".into(), place)
             .await
@@ -855,15 +973,30 @@ mod tests {
             uid: 1234,
         };
         let guard = PodmanInstallGuard::of(&row).unwrap();
+        let identity = PodmanPlaceIdentity::from_parts(&"1".repeat(32), 1000).unwrap();
+        assert!(
+            !store
+                .set_podman_prepared_create(guard.clone(), 41, &facts, &login, Some(&identity))
+                .await
+                .unwrap(),
+            "the first send must be backed by a durable place claim"
+        );
+        assert_eq!(
+            store
+                .claim_podman_place(&place_row, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
         assert!(
             store
-                .set_podman_prepared_create(guard.clone(), 42, &facts, &login)
+                .set_podman_prepared_create(guard.clone(), 42, &facts, &login, Some(&identity))
                 .await
                 .unwrap()
         );
         assert!(
             !store
-                .set_podman_prepared_create(guard, 43, &facts, &login)
+                .set_podman_prepared_create(guard, 43, &facts, &login, Some(&identity))
                 .await
                 .unwrap(),
             "the old no-login binding cannot overwrite a sent create"
@@ -878,6 +1011,7 @@ mod tests {
         let binding = current.podman.unwrap();
         assert_eq!(binding.login_user().unwrap(), login);
         assert_eq!(binding.pending_create_at, Some(42));
+        assert_eq!(binding.place_identity, Some(identity));
         assert_eq!(
             store.podman_prepared_install(host).await.unwrap(),
             Some(facts)

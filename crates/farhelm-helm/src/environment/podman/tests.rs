@@ -2,16 +2,32 @@
 //! No process environment, container engine or user manager is changed.
 
 use super::*;
-use crate::environment::podman_probe::PlaceCommands;
+use crate::environment::podman_probe::{
+    CONTAINER_PLACE_UNVERIFIED, PlaceCommands, TEST_PLACE_IDENTITY, parse_place_identity,
+    simulate_verified_place,
+};
 use std::sync::Mutex;
 
 const ID: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+const MOVED_ENDPOINT: &str = "fe001122aabbccddeeff001122aabbcc\n1001\n";
+
+/// The valid initial probe identity, distinct from the image login account.
+fn original_endpoint() -> PodmanPlaceIdentity {
+    parse_place_identity(TEST_PLACE_IDENTITY).unwrap()
+}
 
 /// The command model distinguishes an absent resource from an unanswered
 /// command and records actual mutators, so a refusal cannot pass merely by
 /// returning the same error text as a destructive implementation.
 #[derive(Default)]
 struct Model {
+    /// Change the host behind the same registry destination. The cached
+    /// probe is deliberately free to retain its old observation.
+    place_identity: Option<&'static str>,
+    /// Move the alias after the initial lookup, when the create shell starts.
+    move_on_scoped_run: bool,
+    /// The first probe still sees the original endpoint before the alias moves.
+    move_after_identity_read: bool,
     exists: bool,
     status: String,
     helm: String,
@@ -59,12 +75,19 @@ impl Commands {
 #[async_trait::async_trait]
 impl PlaceCommands for Commands {
     async fn run(&self, _: &BaseRoute, argv: &[String]) -> anyhow::Result<String> {
-        use crate::environment::podman_probe::{PLACE_IDENTITY_READ, TEST_PLACE_IDENTITY};
+        use crate::environment::podman_probe::PLACE_IDENTITY_READ;
 
         Ok(match argv[0].as_str() {
             "uname" if argv[1] == "-s" => "Linux".into(),
             "uname" => "x86_64".into(),
-            "sh" if argv[2] == PLACE_IDENTITY_READ => TEST_PLACE_IDENTITY.into(),
+            "sh" if argv[2] == PLACE_IDENTITY_READ => {
+                let mut model = self.model.lock().unwrap();
+                let checked = model.place_identity.unwrap_or(TEST_PLACE_IDENTITY);
+                if std::mem::take(&mut model.move_after_identity_read) {
+                    model.place_identity = Some(MOVED_ENDPOINT);
+                }
+                checked.into()
+            }
             "sh" => "/usr/bin/podman".into(),
             "/usr/bin/podman" => serde_json::json!({"version":{"Version":"4.9.3"},
                 "host":{"security":{"rootless":true},"cgroupVersion":"v2","cgroupManager":"systemd"}}).to_string(),
@@ -80,6 +103,32 @@ impl PlaceCommands for Commands {
         argv: &[String],
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
+        {
+            let mut model = self.model.lock().unwrap();
+            if model.move_on_scoped_run && argv.iter().any(|arg| arg == "systemd-run") {
+                model.move_on_scoped_run = false;
+                model.place_identity = Some(MOVED_ENDPOINT);
+            }
+        }
+        simulate_verified_place(argv, self.endpoint_identity(), |argv| {
+            self.engine(argv, bound)
+        })
+        .await
+    }
+}
+
+impl Commands {
+    /// The command reads the current endpoint independently of its probe.
+    fn endpoint_identity(&self) -> &'static str {
+        self.model
+            .lock()
+            .unwrap()
+            .place_identity
+            .unwrap_or(TEST_PLACE_IDENTITY)
+    }
+
+    /// Only commands that pass verification reach the modeled engine.
+    async fn engine(&self, argv: &[String], bound: Duration) -> anyhow::Result<CommandResult> {
         assert!(!bound.is_zero(), "every real provider command is bounded");
         let (helper_oracle, lost_run, pending_session) = {
             let mut model = self.model.lock().unwrap();
@@ -120,6 +169,7 @@ impl PlaceCommands for Commands {
                     assert_eq!(binding.name, argv[offset + 1]);
                     assert_eq!(binding.login_user().unwrap(), image.login);
                     assert!(binding.pending_create_at.is_some());
+                    assert_eq!(binding.place_identity, Some(original_endpoint()));
                     assert_eq!(
                         self.store.podman_prepared_install(host).await.unwrap(),
                         Some(image.facts)
@@ -154,13 +204,15 @@ impl PlaceCommands for Commands {
         let mut model = self.model.lock().unwrap();
         let args = &argv[1..];
         Ok(match (args[0].as_str(), args.get(1).map(String::as_str)) {
-            ("container", Some("exists")) => output(if model.exists { 0 } else { 1 }, ""),
+            ("container", Some("exists")) =>
+                output(if model.place_identity.is_none() && model.exists { 0 } else { 1 }, ""),
             ("container", Some("inspect")) => output(0, &serde_json::json!([{
                 "Id": ID, "Name": model.name, "State": {"Status": model.status},
                 "Config": {"Labels":{"farhelm.helm":model.helm,"farhelm.role":model.role,"farhelm.recipe":"dev"}}
             }]).to_string()),
             ("rm", _) => { model.exists = false; output(0, ID) },
-            ("image", Some("exists")) => output(if model.image_exists { 0 } else { 1 }, ""),
+            ("image", Some("exists")) =>
+                output(if model.place_identity.is_none() && model.image_exists { 0 } else { 1 }, ""),
             ("image", Some("inspect")) => output(0, &serde_json::json!([{"Id":ID,"Config":{"Labels":{
                 "farhelm.helm":model.helm,"farhelm.recipe":"dev","farhelm.artifact":"software"
             }}}]).to_string()),
@@ -225,6 +277,19 @@ async fn fixture() -> (tempfile::TempDir, Podman, Arc<Commands>, HostId) {
         .add_ssh_host("place.example", None, None)
         .await
         .unwrap();
+    let (provider, commands) = fixture_on(store, place).await;
+    provider
+        .0
+        .places
+        .fresh(&provider.0.store, place)
+        .await
+        .unwrap();
+    (directory, provider, commands, place)
+}
+
+/// Build the command model without probing, so the caller can observe
+/// first contact or warm the route before testing a later boundary.
+async fn fixture_on(store: HelmStore, place: HostId) -> (Podman, Arc<Commands>) {
     crate::tensorlake::recipes::tests_support::create(&store, "dev").await;
     let tag = crate::tensorlake::config::helm_tag(&store.registry_namespace().await.unwrap());
     let commands = Arc::new(Commands {
@@ -240,7 +305,6 @@ async fn fixture() -> (tempfile::TempDir, Podman, Arc<Commands>, HostId) {
         release: tokio::sync::Notify::new(),
     });
     let places = PodmanPlaces::with_commands(commands.clone());
-    places.fresh(&store, place).await.unwrap();
     let delivery =
         crate::provisioning::credential_delivery::CredentialDelivery::detached(store.clone());
     let tensorlake = crate::tensorlake::Tensorlake::detached(store.clone());
@@ -251,7 +315,7 @@ async fn fixture() -> (tempfile::TempDir, Podman, Arc<Commands>, HostId) {
         tensorlake.builds().clone(),
         Arc::new(NoInstaller),
     );
-    (directory, provider, commands, place)
+    (provider, commands)
 }
 
 /// An unanswered helper send retains its pre-send name. Retrying cleanup
@@ -363,7 +427,10 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
         provider
             .create(
                 &binding,
-                Some(PreparedArtifact::Podman(PreparedContainer { image, guard })),
+                Some(PreparedArtifact::Podman(PreparedContainer {
+                    image: image.clone(),
+                    guard
+                })),
                 &Progress
             )
             .await
@@ -387,6 +454,42 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
             .await
             .is_err()
     );
+    // A retry past the uncertainty window can see absence at the original
+    // endpoint. Move the alias only as the scoped create starts.
+    assert!(
+        provider
+            .0
+            .store
+            .set_podman_pending_create(host, Some(0))
+            .await
+            .unwrap()
+    );
+    let row = commands.session_row(host).await;
+    assert_eq!(row.podman.as_ref().unwrap().pending_create_at, Some(0));
+    commands.model.lock().unwrap().move_on_scoped_run = true;
+    let guard = provider
+        .0
+        .builds
+        .lock_podman_use("dev", place)
+        .await
+        .unwrap();
+    let error = provider
+        .create(
+            &row.environment_binding().unwrap(),
+            Some(PreparedArtifact::Podman(PreparedContainer { image, guard })),
+            &Progress,
+        )
+        .await
+        .err()
+        .expect("an explicit retry must not send the create to the new endpoint");
+    assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+    assert_eq!(commands.endpoint_identity(), MOVED_ENDPOINT);
+    let pending = commands.session_row(host).await.podman.unwrap();
+    assert_eq!(pending.place_identity, Some(original_endpoint()));
+    assert!(
+        pending.pending_create_at.is_some_and(|at| at > 0),
+        "the send intent must have reached the store before the shell refused"
+    );
     assert_eq!(
         commands
             .model
@@ -400,12 +503,184 @@ async fn lost_session_create_records_login_and_refuses_an_automatic_second_run()
     );
 }
 
-/// Status preserves stopped separately from paused, and explicit deletion
-/// removes a paused canonical resource before minting a row-specific proof.
-/// Repeating removal after absence performs no second rm.
+/// The new endpoint would report absence even though the original container
+/// still exists. Status and sealed Delete must keep both the binding and its
+/// cached session, then Retry can finish deletion on the restored endpoint.
+#[farhelm_testtrace::test]
+async fn moved_container_place_keeps_the_session_and_offers_delete_retry() {
+    use crate::rest_harness::{FleetBuilder, HostScript, session};
+
+    let (builder, place) = FleetBuilder::new()
+        .await
+        .ssh("container-place.test", HostScript::default())
+        .await;
+    let (provider, commands) = fixture_on(builder.store().clone(), place).await;
+    provider
+        .0
+        .places
+        .fresh(&provider.0.store, place)
+        .await
+        .unwrap();
+    let harness = builder.podman(Arc::new(provider.clone())).start().await;
+    let store = &harness.store;
+    let host = store
+        .register_pending_session_container("farhelm-sess-test".into(), "dev".into(), place)
+        .await
+        .unwrap();
+    let row = commands.session_row(host).await;
+    let facts = crate::environment::recipes::PreparedInstallFacts {
+        home: "/home/ubuntu".into(),
+        farhelm_path: "/home/ubuntu/farhelm".into(),
+        state_dir: "/home/ubuntu/state".into(),
+        farhelm_version: farhelm_proto::BUILD_VERSION.into(),
+    };
+    assert!(
+        store
+            .set_podman_prepared_create(
+                crate::store::PodmanInstallGuard::of(&row).unwrap(),
+                now(),
+                &facts,
+                &ContainerUser {
+                    name: "ubuntu".into(),
+                    home: facts.home.to_str().unwrap().to_owned(),
+                    uid: 1000
+                },
+                Some(&original_endpoint()),
+            )
+            .await
+            .unwrap()
+    );
+    assert!(store.set_podman_container_id(host, ID).await.unwrap());
+    let row = commands.session_row(host).await;
+    assert!(
+        store
+            .admit_podman_install(
+                crate::store::PodmanInstallGuard::of(&row).unwrap(),
+                facts.farhelm_path.to_str().unwrap(),
+                facts.state_dir.to_str().unwrap(),
+            )
+            .await
+            .unwrap()
+    );
+    commands.model.lock().unwrap().exists = true;
+    harness.fleet.edit(host, |script| {
+        script.identity = Some("sandbox-install".into());
+        script.sessions = vec![session("keep-me", 1_700_000_000)];
+    });
+    harness.manager.sync_registry().await.unwrap();
+    harness.await_refreshed_as(host, "sandbox-install", 1).await;
+    let row = commands.session_row(host).await;
+    let binding = row.environment_binding().unwrap();
+    assert_eq!(
+        provider.status(&binding).await.unwrap(),
+        EnvironmentStatus::Running
+    );
+    assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
+
+    commands.model.lock().unwrap().place_identity = Some(MOVED_ENDPOINT);
+    assert!(
+        provider
+            .status(&binding)
+            .await
+            .unwrap_err()
+            .0
+            .contains(CONTAINER_PLACE_UNVERIFIED),
+        "the new route cannot report the original container missing"
+    );
+    let whole = crate::hosts::remove_host(
+        axum::extract::State(Arc::clone(&harness.state)),
+        axum::extract::Path(host),
+    )
+    .await;
+    assert!(!whole.status().is_success());
+    let body = axum::body::to_bytes(whole.into_body(), 4096).await.unwrap();
+    assert!(
+        String::from_utf8_lossy(&body).contains(CONTAINER_PLACE_UNVERIFIED),
+        "whole-container Delete must report the route issue and leave the entry available"
+    );
+    assert!(!harness.manager.sealed_failed(host));
+    assert_eq!(
+        commands
+            .session_row(host)
+            .await
+            .podman
+            .unwrap()
+            .container_id
+            .as_deref(),
+        Some(ID)
+    );
+    assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
+    let provisioning = harness.manager.host_provision_lock(host).await;
+    let error = crate::sessions::finish_seal_locked(&harness.state, host, provisioning)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+    assert!(matches!(
+        harness.manager.state(host),
+        Some(crate::manager::HostState::Deleting { failure: Some(reason) })
+            if reason.contains(CONTAINER_PLACE_UNVERIFIED)
+    ));
+    assert_eq!(
+        commands
+            .session_row(host)
+            .await
+            .podman
+            .unwrap()
+            .container_id
+            .as_deref(),
+        Some(ID)
+    );
+    assert_eq!(store.cached_sessions(host).await.unwrap().len(), 1);
+    assert!(
+        commands.model.lock().unwrap().exists,
+        "the original container is still present"
+    );
+
+    commands.model.lock().unwrap().place_identity = None;
+    let retry = crate::sessions::retry_environment_delete(
+        axum::extract::State(Arc::clone(&harness.state)),
+        axum::extract::Path(host),
+    )
+    .await;
+    assert!(
+        retry.status().is_success(),
+        "Retry failed: {}",
+        retry.status()
+    );
+    assert!(
+        store
+            .list_hosts()
+            .await
+            .unwrap()
+            .iter()
+            .all(|row| row.id != host)
+    );
+    assert!(!commands.model.lock().unwrap().exists);
+}
+
+/// A pre-upgrade binding on a twin remains usable for cleanup. Status
+/// preserves stopped separately from paused, and repeating deletion after
+/// absence performs no second rm.
 #[farhelm_testtrace::test]
 async fn status_and_deletion_preserve_stopped_paused_and_confirmed_absence() {
-    let (_directory, provider, commands, place) = fixture().await;
+    let (_directory, provider, commands, _) = fixture().await;
+    let place = provider
+        .0
+        .store
+        .add_ssh_host("old-twin.example", None, None)
+        .await
+        .unwrap();
+    assert!(
+        provider
+            .0
+            .places
+            .fresh(&provider.0.store, place)
+            .await
+            .err()
+            .expect("twin must refuse new work")
+            .to_string()
+            .contains("same machine and account")
+    );
     let host = provider
         .0
         .store
@@ -434,6 +709,7 @@ async fn status_and_deletion_preserve_stopped_paused_and_confirmed_absence() {
         .into_iter()
         .find(|row| row.id == host)
         .unwrap();
+    assert!(row.podman.as_ref().unwrap().place_identity.is_none());
     let binding = row.environment_binding().unwrap();
     {
         let mut model = commands.model.lock().unwrap();
@@ -449,6 +725,16 @@ async fn status_and_deletion_preserve_stopped_paused_and_confirmed_absence() {
         provider.status(&binding).await.unwrap(),
         EnvironmentStatus::Suspended { .. }
     ));
+    // No pre-upgrade endpoint evidence exists. The binding keeps its
+    // previous absence behavior even when the alias points elsewhere.
+    commands.model.lock().unwrap().place_identity = Some(MOVED_ENDPOINT);
+    assert!(matches!(
+        provider.status(&binding).await.unwrap(),
+        EnvironmentStatus::Missing(_)
+    ));
+    assert!(provider.destroy(&binding).await.is_ok());
+    assert!(commands.model.lock().unwrap().exists);
+    commands.model.lock().unwrap().place_identity = None;
     let proof = provider.destroy(&binding).await.unwrap();
     provider
         .0
@@ -1110,6 +1396,101 @@ async fn failed_base_pull_releases_unsent_helper() {
     let model = commands.model.lock().unwrap();
     assert!(model.commands.iter().any(|argv| argv[1] == "pull"));
     assert!(!model.commands.iter().any(|argv| argv[0] == "systemd-run"));
+}
+
+/// The durable place claim survives an external SSH edit. A build must
+/// avoid the other account's store, and cleanup there cannot forget the
+/// original account's helpers or images.
+#[farhelm_testtrace::test]
+async fn moved_place_refuses_build_and_preserves_recipe_artifacts() {
+    let (_directory, provider, commands, place) = fixture().await;
+    let (expected, _, ready) = provider.place(place).await.unwrap();
+    assert_eq!(ready.identity.as_ref(), Ok(&original_endpoint()));
+    commands.model.lock().unwrap().place_identity = Some(MOVED_ENDPOINT);
+    let error = provider
+        .helper(
+            "dev",
+            &expected,
+            ready.identity.as_ref().unwrap(),
+            "build",
+            HelperBase::Pull("user/base"),
+        )
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+    assert!(
+        provider
+            .state("dev", place)
+            .await
+            .unwrap()
+            .builder_container_id
+            .is_none()
+    );
+
+    provider
+        .edit("dev", place, |state| {
+            state.builder_container_id = Some(ID.into());
+            state.retired_images.push(ID.into());
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        provider
+            .reconcile_helpers("dev", place)
+            .await
+            .unwrap_err()
+            .to_string(),
+        CONTAINER_PLACE_UNVERIFIED
+    );
+    assert_eq!(
+        provider
+            .retire_images("dev", place)
+            .await
+            .unwrap_err()
+            .to_string(),
+        CONTAINER_PLACE_UNVERIFIED
+    );
+    let saved = provider.state("dev", place).await.unwrap();
+    assert_eq!(saved.builder_container_id.as_deref(), Some(ID));
+    assert_eq!(saved.retired_images, vec![ID]);
+    assert!(commands.model.lock().unwrap().commands.is_empty());
+}
+
+/// The cleanup that triggers the first probe after an upgrade must use
+/// the claim that probe establishes, even if the alias then moves.
+#[farhelm_testtrace::test]
+async fn cold_recipe_cleanup_uses_the_place_claim_it_establishes() {
+    use crate::rest_harness::{FleetBuilder, HostScript};
+
+    let (builder, place) = FleetBuilder::new()
+        .await
+        .ssh("cold-place.test", HostScript::default())
+        .await;
+    let store = builder.store();
+    let (provider, commands) = fixture_on(store.clone(), place).await;
+    provider
+        .edit("dev", place, |state| state.retired_images.push(ID.into()))
+        .await
+        .unwrap();
+    assert!(store.podman_place_identity(place).await.unwrap().is_none());
+    {
+        let mut model = commands.model.lock().unwrap();
+        model.move_after_identity_read = true;
+        model.image_exists = true;
+    }
+
+    let error = provider.retire_images("dev", place).await.unwrap_err();
+    assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+    assert_eq!(
+        store.podman_place_identity(place).await.unwrap(),
+        Some(original_endpoint())
+    );
+    assert_eq!(commands.endpoint_identity(), MOVED_ENDPOINT);
+    assert_eq!(
+        provider.state("dev", place).await.unwrap().retired_images,
+        vec![ID]
+    );
+    assert!(commands.model.lock().unwrap().commands.is_empty());
 }
 
 // ---------------------------------------------------------------------------

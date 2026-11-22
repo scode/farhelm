@@ -14,6 +14,7 @@ use crate::store::{HelmStore, HostId, HostRow, PlaceClaim, PodmanPlaceIdentity};
 use crate::units::{MANAGER_ENVIRONMENT_BUSCTL_ARGS, ManagerEnvironment, ManagerValue};
 use anyhow::Context as _;
 use serde::Serialize;
+use sha2::{Digest, Sha256};
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
@@ -23,9 +24,32 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 /// Launch consumers require a recent observation before using its tool path
 /// and proxy inputs. Explicit Refresh ignores this age and only joins in-flight work.
 const FRESH_FOR: Duration = Duration::from_secs(300);
-/// Both fields must come from one invocation, so an SSH retarget between
-/// separate commands cannot combine the machine and account of two hosts.
-pub(crate) const PLACE_IDENTITY_READ: &str = "cat /etc/machine-id && id -u";
+/// Check the tools needed on this route before new work can depend on them.
+/// Both identity fields come from one invocation.
+pub(crate) const PLACE_IDENTITY_READ: &str = r#"
+if command -v sha256sum >/dev/null && command -v tr >/dev/null; then
+    cat /etc/machine-id && id -u
+else
+    printf '%s\n' farhelm-identity-tools-missing
+fi
+"#;
+const IDENTITY_TOOLS_MISSING: &str = "This container host needs sha256sum and tr to verify its machine and account. Make these commands available on the host, then press Refresh.";
+/// The command sees a single shell and a single SSH login. The private
+/// marker is written only after a match, so an exit 1 before the guard runs
+/// cannot be mistaken for Podman returning "absent". The expected operand
+/// is a per-invocation digest so a moved SSH route does not see the old
+/// machine ID.
+const VERIFY_PLACE_AND_EXEC: &str = r#"
+machine=$(cat /etc/machine-id 2>/dev/null) &&
+    machine=$(printf '%s' "$machine" | tr 'ABCDEF' 'abcdef') &&
+    uid=$(id -u 2>/dev/null) &&
+    digest=$(printf '%s\n%s\n%s\n' "$2" "$machine" "$uid" | sha256sum) &&
+    [ "${digest%% *}" = "$1" ] || exit 125
+printf '%s\n' "$2" || exit 125
+shift 2
+exec "$@"
+"#;
+pub(super) const CONTAINER_PLACE_UNVERIFIED: &str = "Farhelm could not verify this container host's machine and account. Its SSH destination may have changed outside Farhelm. Restore the original destination, then try again.";
 /// A single place's identity for command fakes that model one Podman store.
 #[cfg(test)]
 pub(crate) const TEST_PLACE_IDENTITY: &str = "fe001122aabbccddeeff001122aabbcc\n1000\n";
@@ -46,8 +70,9 @@ const PROXY_VARIABLES: [&str; 10] = [
 /// Inputs used by the real provider. These never enter client JSON or logs.
 #[derive(Clone)]
 pub(crate) struct ReadyPlace {
-    /// The account's own store, read on the same route as its capabilities.
-    pub(crate) identity: Option<PodmanPlaceIdentity>,
+    /// A failed identity check refuses admission while still allowing
+    /// existing unguarded bindings to use the observed runtime.
+    pub(crate) identity: Result<PodmanPlaceIdentity, &'static str>,
     pub(crate) architecture: String,
     pub(crate) version: String,
     #[allow(
@@ -113,6 +138,36 @@ pub(crate) trait PlaceCommands: Send + Sync {
         })
     }
 
+    /// Trust a container command only after this invocation proves that the
+    /// recorded endpoint was checked in its own shell. Keep argv positional
+    /// and strip the proof before handing output to the Podman parser.
+    async fn run_verified(
+        &self,
+        route: &BaseRoute,
+        argv: &[String],
+        identity: &PodmanPlaceIdentity,
+        timeout: Duration,
+    ) -> anyhow::Result<crate::provisioning::CommandResult> {
+        let nonce = format!("farhelm-place-verified-{}", uuid::Uuid::new_v4().simple());
+        let marker = format!("{nonce}\n");
+        let mut wrapped = vec![
+            "sh".into(),
+            "-c".into(),
+            VERIFY_PLACE_AND_EXEC.into(),
+            "farhelm-container-place".into(),
+            place_digest(identity, &nonce),
+            nonce,
+        ];
+        wrapped.extend_from_slice(argv);
+        let mut result = self.run_bounded(route, &wrapped, timeout).await?;
+        anyhow::ensure!(
+            result.stdout.starts_with(marker.as_bytes()),
+            "{CONTAINER_PLACE_UNVERIFIED}"
+        );
+        result.stdout.drain(..marker.len());
+        Ok(result)
+    }
+
     /// Sensitive input shares ordinary argv lowering and bounded capture, but
     /// never becomes an argument at any shell or SSH layer. Fakes must opt in
     /// rather than silently dropping credential-bearing input.
@@ -125,6 +180,16 @@ pub(crate) trait PlaceCommands: Send + Sync {
     ) -> anyhow::Result<crate::provisioning::CommandResult> {
         anyhow::bail!("this place backend cannot send private command input")
     }
+}
+
+/// Bind the comparison to this command and the account without sending the
+/// recorded machine ID to the endpoint being checked.
+fn place_digest(identity: &PodmanPlaceIdentity, nonce: &str) -> String {
+    let value = format!("{nonce}\n{}\n{}\n", identity.machine_id, identity.uid);
+    Sha256::digest(value.as_bytes())
+        .iter()
+        .map(|byte| format!("{byte:02x}"))
+        .collect()
 }
 
 /// Execute through the place's ordinary route while keeping the helm's private
@@ -274,6 +339,35 @@ pub(super) fn lowered_command_for_test(
         control_dir: control_dir.into(),
     }
     .process(route, argv)
+}
+
+/// Model the shell's admission before passing argv to a scripted engine.
+/// The production method still checks and removes the returned nonce.
+#[cfg(test)]
+pub(super) async fn simulate_verified_place<'a, F, Fut>(
+    argv: &'a [String],
+    observed: &str,
+    execute: F,
+) -> anyhow::Result<crate::provisioning::CommandResult>
+where
+    F: FnOnce(&'a [String]) -> Fut,
+    Fut: std::future::Future<Output = anyhow::Result<crate::provisioning::CommandResult>>,
+{
+    if argv.get(2).map(String::as_str) != Some(VERIFY_PLACE_AND_EXEC) {
+        return execute(argv).await;
+    }
+    let identity = parse_place_identity(observed).expect("a scripted endpoint has an identity");
+    if argv[4] != place_digest(&identity, &argv[5]) {
+        return Ok(crate::provisioning::CommandResult {
+            code: Some(125),
+            signal: None,
+            stdout: Vec::new(),
+            stderr: String::new(),
+        });
+    }
+    let mut output = execute(&argv[6..]).await?;
+    output.stdout.splice(..0, argv[5].bytes().chain(*b"\n"));
+    Ok(output)
 }
 
 /// The stdin/temporary cleanup contract can be exercised without a container
@@ -569,7 +663,7 @@ impl PodmanPlaces {
         let _published = self.claim_publication.lock().await;
         let row = current_row(store, host).await?;
         let ready = self.ready(&row)?;
-        let identity = ready.identity.clone().context(IDENTITY_UNREADABLE)?;
+        let identity = ready.identity.clone().map_err(anyhow::Error::msg)?;
         anyhow::ensure!(
             store.owns_podman_place(row, identity).await?,
             "{CLAIM_NEEDS_REFRESH}"
@@ -594,9 +688,17 @@ impl PodmanPlaces {
         &self,
         route: &BaseRoute,
         argv: &[String],
+        identity: Option<&PodmanPlaceIdentity>,
         timeout: Duration,
     ) -> anyhow::Result<crate::provisioning::CommandResult> {
-        self.commands.run_bounded(route, argv, timeout).await
+        match identity {
+            Some(identity) => {
+                self.commands
+                    .run_verified(route, argv, identity, timeout)
+                    .await
+            }
+            None => self.commands.run_bounded(route, argv, timeout).await,
+        }
     }
 
     /// Private script bytes never enter the command description. Callers keep
@@ -660,7 +762,7 @@ impl PodmanPlaces {
             };
             let (admission_refusal, displaced) = match (&result, ordinary_refusal) {
                 (Ok(_), Some(_)) => (Some(CLAIM_NEEDS_REFRESH.into()), None),
-                (Ok(ReadyPlace { identity: Some(identity), .. }), None) => match service.settle_claim(&store, &row, identity, verified_supervisor).await {
+                (Ok(ReadyPlace { identity: Ok(identity), .. }), None) => match service.settle_claim(&store, &row, identity, verified_supervisor).await {
                     Ok(Some(PlaceClaim::Owned { displaced })) => (None, displaced),
                     Ok(Some(PlaceClaim::Twin { name, .. })) => (Some(twin_refusal(&name)), None),
                     Ok(Some(PlaceClaim::Changed)) => (Some(CHANGED_PLACE.into()), None),
@@ -670,7 +772,7 @@ impl PodmanPlaces {
                         None,
                     ),
                 },
-                (Ok(_), None) => (Some(IDENTITY_UNREADABLE.into()), None),
+                (Ok(ReadyPlace { identity: Err(reason), .. }), None) => (Some((*reason).into()), None),
                 (Err(_), _) => (None, None),
             };
             // Publication is route-bound too. A host edited during the command
@@ -936,15 +1038,20 @@ async fn probe_inner(
     scope?;
     // Existing bindings can still need command access when the identity probe
     // fails. Only admission of new work requires a successful identity read.
-    let identity = run(
+    let observed = run(
         commands,
         route,
         &["sh", "-c", PLACE_IDENTITY_READ],
         IDENTITY_UNREADABLE,
     )
-    .await
-    .ok()
-    .and_then(|output| parse_place_identity(&output));
+    .await;
+    let identity = match observed {
+        Ok(output) if output.trim_end() == "farhelm-identity-tools-missing" => {
+            Err(IDENTITY_TOOLS_MISSING)
+        }
+        Ok(output) => parse_place_identity(&output).ok_or(IDENTITY_UNREADABLE),
+        Err(_) => Err(IDENTITY_UNREADABLE),
+    };
     Ok(ReadyPlace {
         identity,
         architecture,
@@ -956,23 +1063,14 @@ async fn probe_inner(
 
 /// Machine IDs are case-insensitive hex. Reject empty, uninitialized and
 /// malformed results without including either raw identity field in errors.
-fn parse_place_identity(output: &str) -> Option<PodmanPlaceIdentity> {
+pub(super) fn parse_place_identity(output: &str) -> Option<PodmanPlaceIdentity> {
     let mut lines = output.lines();
     let machine_id = lines.next()?;
     let uid = lines.next()?;
-    if lines.next().is_some()
-        || machine_id.len() != 32
-        || !machine_id.bytes().all(|byte| byte.is_ascii_hexdigit())
-        || machine_id.bytes().all(|byte| byte == b'0')
-        || uid.is_empty()
-        || !uid.bytes().all(|byte| byte.is_ascii_digit())
-    {
+    if lines.next().is_some() || uid.is_empty() || !uid.bytes().all(|byte| byte.is_ascii_digit()) {
         return None;
     }
-    Some(PodmanPlaceIdentity {
-        machine_id: machine_id.to_ascii_lowercase(),
-        uid: uid.parse().ok()?,
-    })
+    PodmanPlaceIdentity::from_parts(machine_id, uid.parse().ok()?)
 }
 
 /// Keep exact proxy values, including empty ones, private to the caller.
@@ -1370,8 +1468,8 @@ mod tests {
         );
     }
 
-    /// Launch admission must not use a malformed or uninitialized machine
-    /// identity, while command access remains available to existing bindings.
+    /// An unusable identity or missing verifier tools refuses only new work.
+    /// Existing bindings can still get ordinary command access.
     #[farhelm_testtrace::test]
     async fn unreadable_identity_only_refuses_new_work() {
         let directory = tempfile::tempdir().unwrap();
@@ -1379,17 +1477,23 @@ mod tests {
             .await
             .unwrap();
         let host = store.list_hosts().await.unwrap()[0].id;
-        let places = PodmanPlaces::with_commands(scripted_places(&[
-            "00000000000000000000000000000000\n1000\n",
-        ]));
-        let refusal = places
-            .fresh(&store, host)
-            .await
-            .err()
-            .expect("invalid identity must block new work");
-        assert_eq!(refusal.to_string(), IDENTITY_UNREADABLE);
-        let (_, ready) = places.runtime(&store, host).await.unwrap();
-        assert!(ready.identity.is_none());
+        for (output, reason) in [
+            (
+                "00000000000000000000000000000000\n1000\n",
+                IDENTITY_UNREADABLE,
+            ),
+            ("farhelm-identity-tools-missing\n", IDENTITY_TOOLS_MISSING),
+        ] {
+            let places = PodmanPlaces::with_commands(scripted_places(&[output]));
+            let refusal = places
+                .fresh(&store, host)
+                .await
+                .err()
+                .expect("unusable identity must block new work");
+            assert_eq!(refusal.to_string(), reason);
+            let (_, ready) = places.runtime(&store, host).await.unwrap();
+            assert_eq!(ready.identity, Err(reason));
+        }
     }
 
     /// The oldest supported Podman must pass, and each missing prerequisite
@@ -1634,6 +1738,112 @@ mod tests {
             .expect("the current endpoint passes its check");
         assert!(service.view(&changed).unwrap().usable);
         commands.release.notify_one();
+    }
+
+    /// Run the production guard and capture layer with shell functions that
+    /// supply a fixture identity. A real command's status 1 counts only
+    /// after the guard evaluates and proves the expected account and machine.
+    #[cfg(target_os = "linux")]
+    #[farhelm_testtrace::test]
+    async fn absence_needs_a_same_shell_place_proof() {
+        struct ShellFixture {
+            system: SystemPlaceCommands,
+            before_guard: &'static str,
+        }
+        #[async_trait::async_trait]
+        impl PlaceCommands for ShellFixture {
+            async fn run(&self, _: &BaseRoute, _: &[String]) -> anyhow::Result<String> {
+                unreachable!("a second identity command cannot prove the command's own route")
+            }
+
+            async fn run_bounded(
+                &self,
+                route: &BaseRoute,
+                argv: &[String],
+                timeout: Duration,
+            ) -> anyhow::Result<crate::provisioning::CommandResult> {
+                assert_eq!(argv[2], VERIFY_PLACE_AND_EXEC);
+                assert!(
+                    argv[4].len() == 64 && argv[4].bytes().all(|byte| byte.is_ascii_hexdigit())
+                );
+                let mut args = argv.to_vec();
+                args[2] = format!("{}\n{}", self.before_guard, args[2]);
+                self.system.run_bounded(route, &args, timeout).await
+            }
+        }
+
+        let directory = tempfile::tempdir().unwrap();
+        let mut commands = ShellFixture {
+            system: SystemPlaceCommands {
+                control_dir: directory.path().into(),
+            },
+            before_guard: "cat() { echo FE001122AABBCCDDEEFF001122AABBCC; }; id() { echo 1000; }",
+        };
+        let command = [
+            "sh".into(),
+            "-c".into(),
+            "printf '%s' \"$1\"; exit 1".into(),
+            "test-command".into(),
+            "a quoted ' argument".into(),
+        ];
+        let mut expected = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        let output = commands
+            .run_verified(
+                &BaseRoute::Local,
+                &command,
+                &expected,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap();
+        assert_eq!((output.code, output.signal), (Some(1), None));
+        assert_eq!(output.stdout, b"a quoted ' argument");
+
+        expected.uid += 1;
+        let error = commands
+            .run_verified(
+                &BaseRoute::Local,
+                &command,
+                &expected,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
+        let missed = [
+            "sh".into(),
+            "-c".into(),
+            VERIFY_PLACE_AND_EXEC.into(),
+            "test-guard".into(),
+            place_digest(&expected, "unused-proof"),
+            "unused-proof".into(),
+            "sh".into(),
+            "-c".into(),
+            "echo unexpected".into(),
+        ];
+        let output = commands
+            .run_bounded(&BaseRoute::Local, &missed, Duration::from_secs(5))
+            .await
+            .unwrap();
+        assert!(
+            output.stdout.is_empty(),
+            "the mismatched shell must leave the command unsent"
+        );
+        assert_eq!(output.code, Some(125));
+
+        // A shell can exit before any verification. Its 1 is not Podman absence.
+        commands.before_guard = "exit 1";
+        expected.uid -= 1;
+        let error = commands
+            .run_verified(
+                &BaseRoute::Local,
+                &command,
+                &expected,
+                Duration::from_secs(5),
+            )
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), CONTAINER_PLACE_UNVERIFIED);
     }
 
     /// A missing busctl must not add a new place prerequisite. systemctl's

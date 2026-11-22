@@ -331,9 +331,10 @@ the user to remove that entry or change this one's destination and then press Re
 to one machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed
 of by removing the host from the registry.
 
-Container hosts also identify the machine and account that own their Podman storage, including on hosts without
-Farhelm installed. New containers and image builds use one host entry per machine and account. If the host connected
-to Farhelm already holds the ordinary identity, it can take an unused container host claim from a second entry.
+Container hosts also identify the machine and account that own their Podman storage, including on hosts without Farhelm
+installed. New containers and image builds use one host entry per machine and account. When Farhelm has verified which
+host owns the ordinary identity, that entry can take an unused container host claim from a second entry whose ordinary
+identity is absent or refused.
 
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected. A
@@ -5271,14 +5272,13 @@ default checkout folder when set and the container's home otherwise. Folder dest
 recent folders. Agent and command launches use the ordinary launch rules.
 
 A usable container host runs Podman 4.9.3 or later, rootless, with cgroup v2, the systemd cgroup manager and a working
-`systemd-run --user`. A background probe records Linux, architecture, version, the machine and account, and each
-requirement, with a timestamp.
-Opening the launcher refreshes probes in the background. No per-host opt-in is needed, and an environment host cannot
-itself host containers. The launcher and Settings → Containers show why a host is unusable. These checks refuse new
-work through a second entry for the same machine and account or a host that reaches a different machine or account
-while it still has containers, images or helpers. A Farhelm connection refusal for a duplicate, changed or unverified
-installation also prevents new work through that host. Such an admission refusal still allows existing containers
-to use the place's command route.
+`systemd-run --user`. New work also requires `sha256sum` and `tr` for place verification. A background probe records
+Linux, architecture, version, the machine and account, and each requirement, with a timestamp. Opening the launcher
+refreshes probes in the background. No per-host opt-in is needed, and an environment host cannot itself host containers.
+The launcher and Settings → Containers show why a host is unusable. These checks refuse new work through a second entry
+for the same machine and account or a host that reaches a different machine or account while it still has containers,
+images or helpers. A Farhelm connection refusal for a duplicate, changed or unverified installation also prevents new
+work through that host. Such an admission refusal still allows existing containers to use the place's command route.
 
 Built software and prepared images are kept per recipe and container host. The first launch there builds a missing
 software image and ensures a fresh prepared image. Launches during a Rebuild at that host wait for its outcome, even
@@ -5288,12 +5288,14 @@ a rebuilt source, as for Tensorlake. Launch progress names **Preparing &lt;recip
 with its first-launch/24-hour/update explanation, **Creating a &lt;recipe&gt; container on &lt;host&gt;…**, **Starting
 Farhelm in the container…**, and the ordinary session launch. Closing the client does not cancel the task.
 
-The helm records the session-owned row and reserved-prefix container name before creation. It connects directly through
-`podman exec -i`, locally or through the container host's SSH connection. Credentials, subscription logins, recipe
-tunnels, updates, hooks, conversation capture, attachments, terminal tabs, file links and downloads use the ordinary
-supervisor paths inside the container. Readable files anywhere in that account's container filesystem are available
-under the ordinary file rules. For localhost tunnels the environment is remote, even on the helm's own machine, and
-loopback means the container's loopback. No host checkout, Farhelm socket or host account home is bind-mounted.
+The helm records the session-owned row and reserved-prefix container name before creation. It records the container
+host's machine and account before sending the create and verifies both on the connection that runs it. It connects
+directly through `podman exec -i`, locally or through the container host's SSH connection. Credentials, subscription
+logins, recipe tunnels, updates, hooks, conversation capture, attachments, terminal tabs, file links and downloads use
+the ordinary supervisor paths inside the container. Readable files anywhere in that account's container filesystem are
+available under the ordinary file rules. For localhost tunnels the environment is remote, even on the helm's own
+machine, and loopback means the container's loopback. No host checkout, Farhelm socket or host account home is
+bind-mounted.
 
 Container sessions follow Sandbox sessions' ownership, launch cleanup, Clone, Restart, Replace, Delete and visibility
 contracts. Clone creates a new container from the recipe at its selected place, with repository intent and no disk copy.
@@ -5310,13 +5312,17 @@ the helm cannot ask the container's Farhelm (the container is paused or unreacha
 helm cannot talk to) or gets no answer, it offers the whole-container Delete, whose confirmation warns that the
 container, every session and process in it, its checkouts, files and unpushed work are destroyed, including sessions
 Farhelm does not list. That Delete works while paused or while its supervisor is disconnected when the container host
-can be reached, without Resume. Confirmed container absence precedes forgetting its row and cached sessions. Failure
-keeps the resource and reason visible for retry; a sealed container whose destruction failed shows as being deleted,
-with the reason and Retry. These Deletes and Retry answer within 20 seconds as Sandbox sessions' do, so a late answer
-loses the count of other sessions and the immediate offer of the whole-container Delete, and a late failure of the
-whole-container Delete reaches only the helm's log, unless the container was already known to be sealed when that Delete
-began, which then shows as being deleted with the reason and Retry. Host-level **Delete container** always destroys the
-whole container after its confirmation. Whole-container deletion moves no checkout to the trash.
+can be reached, without Resume. Confirmed container absence precedes forgetting its row and cached sessions. For a
+container with a recorded machine and account, the connection that checks for absence must verify both. If the container
+host's SSH destination now reaches another machine or account, the container and its sessions stay listed. Restore the
+original destination and retry. Status checks leave the container's state unanswered when the machine or account can't
+be verified. Containers created before Farhelm recorded this identity use the previous check on the current route.
+Failure keeps the resource and reason visible for retry. A sealed container whose destruction failed shows as being
+deleted, with the reason and Retry. These Deletes and Retry answer within 20 seconds as Sandbox sessions' do, so a late
+answer loses the count of other sessions and the immediate offer of the whole-container Delete, and a late failure of
+the whole-container Delete reaches only the helm's log, unless the container was already known to be sealed when that
+Delete began, which then shows as being deleted with the reason and Retry. Host-level **Delete container** always
+destroys the whole container after its confirmation. Whole-container deletion moves no checkout to the trash.
 
 Suspend uses Podman pause, preserving processes and memory. Resume unpauses them. The helm closes its exec connection
 before pausing, since a paused exec pipe can hang. Controls, the suspended card, rows and Stop and suspend follow the
@@ -5340,7 +5346,8 @@ cube. The launch action's accessible name names the new container and its host. 
 update eligibility and the existing attention area, with no permanent rail icon or ordinary launch/template/agent
 destination choice. A container host cannot be removed or retargeted while any environment row references it, including
 stopped environments and cleanup leftovers, or while recipe state records images or helpers there. The refusal names the
-environments or recipes to clean up first. This keeps the route available for confirmed resource cleanup.
+environments or recipes to clean up first. This keeps the route available for confirmed resource cleanup. If an SSH
+alias changes outside Farhelm, cleanup of a container with a recorded machine and account still requires that identity.
 
 Recent setups retain the recipe, container host when applicable, explicit agent selection and repository-or-home intent
 after Delete removes the environment. Applying one creates a fresh environment. A missing recipe or container host stays
@@ -5404,8 +5411,9 @@ files, or every name the installer would use to keep a user's file already being
 handle those states. Likewise, when a session was launched through a symlink outside the checkout root and the user
 later points that symlink at an archived checkout, a new terminal tab can open inside that archive, and deleting it from
 the trash is not refused. This never relaxes the remote-host boundary, removes a protection this specification states
-for a specific case (such as the foreign-replacement guard, the installer keeping a user's file, or uninstall refusing
-unknown app-bundle entries), or accepts database corruption, a bricked installation or similar lasting damage.
+for a specific case (such as a container host's SSH destination moving, the foreign-replacement guard, the installer
+keeping a user's file, or uninstall refusing unknown app-bundle entries), or accepts database corruption, a bricked
+installation or similar lasting damage.
 
 The reserved namespace is Farhelm's. A resource that matches Farhelm's reserved names or carries its required ownership
 labels is treated as Farhelm's own under the existing cleanup rules, even when it was created outside Farhelm, reuses a
