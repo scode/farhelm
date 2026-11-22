@@ -1575,9 +1575,9 @@ pub enum SealCount {
 /// async workers.
 #[derive(Clone, Debug)]
 pub struct SessionStore {
-    // pub(crate) for the service-layer tests that plant registry fixtures
-    // directly through `working_copies`' `&Connection` primitives (no FKs,
-    // no counter columns — tests compose the same helpers production does).
+    // The serving owner retains this connection through runtime drain for
+    // the final WAL checkpoint. Service tests also use it to plant registry
+    // fixtures with the same `working_copies` primitives production uses.
     pub(crate) conn: crate::db::Db,
 }
 
@@ -3373,6 +3373,7 @@ impl SessionStore {
             apply_schema(&conn, may_migrate)?;
             if may_migrate {
                 apply_reservation_retention(&conn, now_unix())?;
+                crate::db::maintain_on_owning_open(&conn, "session database");
             }
             Ok(conn)
         })
@@ -7231,12 +7232,17 @@ mod tests {
             .outcome
     }
 
-    /// Every column of every table, as SQLite itself describes it:
-    /// (table, column, type, notnull, default, pk).
+    /// The columns of the application tables as SQLite describes them.
+    ///
+    /// Planner statistics can appear on a populated store's owning open.
+    /// They tell us nothing about whether a migration created the right columns.
     fn columns_of(path: &Path) -> Vec<(String, String, String, i64, Option<String>, i64)> {
         let conn = Connection::open(path).expect("open raw");
         let tables: Vec<String> = conn
-            .prepare("SELECT name FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+            .prepare(
+                "SELECT name FROM sqlite_schema WHERE type = 'table' \
+                 AND name NOT GLOB 'sqlite_stat[0-9]*' ORDER BY name",
+            )
             .expect("prepare")
             .query_map([], |r| r.get(0))
             .expect("query")
@@ -8223,8 +8229,12 @@ mod tests {
 
         for path in [&migrated, &fresh] {
             let conn = Connection::open(path).expect("open raw");
+            // SQLite creates its own statistics tables without STRICT.
             let ddl: Vec<String> = conn
-                .prepare("SELECT sql FROM sqlite_schema WHERE type = 'table' ORDER BY name")
+                .prepare(
+                    "SELECT sql FROM sqlite_schema WHERE type = 'table' \
+                     AND name NOT GLOB 'sqlite_stat[0-9]*' ORDER BY name",
+                )
                 .expect("prepare")
                 .query_map([], |r| r.get(0))
                 .expect("query")
@@ -8775,13 +8785,18 @@ mod tests {
         let mut before = store.load_all().await.unwrap();
         before.sort_by(|a, b| a.id.cmp(&b.id));
         drop(store);
+        // Preserve the comparison of implicit indexes and triggers. Only
+        // planner statistics vary with the data each owning open finds.
         let definitions = |conn: &Connection| -> Vec<(String, String, Option<String>)> {
-            conn.prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
-                .unwrap()
-                .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
-                .unwrap()
-                .collect::<Result<_, _>>()
-                .unwrap()
+            conn.prepare(
+                "SELECT type, name, sql FROM sqlite_schema \
+                 WHERE name NOT GLOB 'sqlite_stat[0-9]*' ORDER BY type, name",
+            )
+            .unwrap()
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap()
         };
         let at_32 = dir.path().join("at-32.db");
         {
@@ -11465,6 +11480,7 @@ mod tests {
     /// Store entry points must pass their ownership into shared journal setup.
     /// A handoff beside an old rollback-mode store keeps FULL, while both fresh
     /// and existing owning opens use WAL/NORMAL and later readers set NORMAL too.
+    /// The size event makes the separate owning-only maintenance visible.
     #[farhelm_testtrace::test]
     async fn open_selects_durability_without_converting_for_a_non_owner() {
         let dir = tempfile::tempdir().unwrap();
@@ -11479,8 +11495,11 @@ mod tests {
                 .unwrap();
             (mode, sync)
         };
+        let capture = farhelm_testtrace::current_capture().unwrap();
+        let size_reports = || capture.matching("sqlite store size").unwrap().len();
         let owner = SessionStore::open(&path, true).await.unwrap();
         assert_eq!(settings(&owner), ("wal".into(), 1));
+        assert_eq!(size_reports(), 1);
         drop(owner);
         {
             let legacy = Connection::open(&path).unwrap();
@@ -11494,11 +11513,14 @@ mod tests {
         }
         let non_owner = SessionStore::open(&path, false).await.unwrap();
         assert_eq!(settings(&non_owner), ("delete".into(), 2));
+        assert_eq!(size_reports(), 1);
         drop(non_owner);
         let owner = SessionStore::open(&path, true).await.unwrap();
         assert_eq!(settings(&owner), ("wal".into(), 1));
+        assert_eq!(size_reports(), 2);
         let non_owner = SessionStore::open(&path, false).await.unwrap();
         assert_eq!(settings(&non_owner), ("wal".into(), 1));
+        assert_eq!(size_reports(), 2);
     }
 
     /// A fresh database (`user_version` 0) must come up on `user_version`
@@ -12663,8 +12685,13 @@ mod tests {
             let version = conn
                 .query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap();
+            // The report compares retention's application schema across
+            // opens. The fixture has yet to run owning-open ANALYZE.
             let schema = conn
-                .prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
+                .prepare(
+                    "SELECT type, name, sql FROM sqlite_schema \
+                     WHERE name NOT GLOB 'sqlite_stat[0-9]*' ORDER BY type, name",
+                )
                 .unwrap()
                 .query_map([], |row| {
                     Ok((
@@ -12717,18 +12744,21 @@ mod tests {
         let schema_after = (
             conn.query_row("PRAGMA user_version", [], |row| row.get::<_, i64>(0))
                 .unwrap(),
-            conn.prepare("SELECT type, name, sql FROM sqlite_schema ORDER BY type, name")
-                .unwrap()
-                .query_map([], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, Option<String>>(2)?,
-                    ))
-                })
-                .unwrap()
-                .collect::<Result<Vec<_>, _>>()
-                .unwrap(),
+            conn.prepare(
+                "SELECT type, name, sql FROM sqlite_schema \
+                 WHERE name NOT GLOB 'sqlite_stat[0-9]*' ORDER BY type, name",
+            )
+            .unwrap()
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, Option<String>>(2)?,
+                ))
+            })
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap(),
         );
         assert_eq!(
             schema_before, schema_after,

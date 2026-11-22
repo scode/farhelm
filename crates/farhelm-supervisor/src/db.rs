@@ -9,8 +9,9 @@
 //! fifty times apiece, and each opened its file with its own copy of the same
 //! flags, permission fix, and busy timeout. What stays in each store is what
 //! genuinely differs: its schema, its migrations, and per-connection pragmas
-//! such as the helm's `foreign_keys`. Journal conversion and sync policy stay
-//! shared, with conversion authority supplied by the state-directory owner.
+//! such as the helm's `foreign_keys`. Journal and sync policy stay shared.
+//! The state-directory owner also refreshes planner statistics after schema
+//! work and attempts a WAL checkpoint after its runtime drains on orderly stop.
 
 use anyhow::Context;
 use rusqlite::{Connection, OpenFlags};
@@ -29,8 +30,17 @@ use std::time::Duration;
 /// pathological case.
 pub const BUSY_TIMEOUT: Duration = Duration::from_secs(5);
 
+/// Keep the normal 1,000-frame autocheckpoint cycle at 4 KiB per page
+/// comfortably below the size limit, while trimming the retained journal
+/// after a large burst. SQLite applies this when the WAL rewinds.
+const JOURNAL_SIZE_LIMIT: i64 = 6 * 1024 * 1024;
+
+/// A reader may outlive the service. Give it a short chance to release its
+/// snapshot before leaving the remaining WAL for the next open.
+const STOP_CHECKPOINT_BUSY_TIMEOUT: Duration = Duration::from_millis(250);
+
 /// Open (creating if needed) a database file only this user can read, with the
-/// shared busy timeout. Blocking; call it from `spawn_blocking`.
+/// shared busy timeout and journal size limit. Blocking; call it from `spawn_blocking`.
 ///
 /// The caller must already have made the parent directory private (mode
 /// 0700, as `ensure_private_dir` does for the state directory). That, not the
@@ -87,6 +97,8 @@ fn open_private_with(path: &Path, label: &str, create: OpenFlags) -> anyhow::Res
     }
     conn.busy_timeout(BUSY_TIMEOUT)
         .context("setting sqlite busy timeout")?;
+    conn.pragma_update(None, "journal_size_limit", JOURNAL_SIZE_LIMIT)
+        .context("setting sqlite journal size limit")?;
     Ok(conn)
 }
 
@@ -120,7 +132,8 @@ pub fn configure_durability(
 ///
 /// A handoff can overlap an older process's transaction. SQLite may wait up to
 /// the connection's busy timeout here, adding that much to startup. A later
-/// owning open tries again; there is no retry task or checkpoint policy.
+/// owning open tries again. The stop checkpoint below can run even if this
+/// attempt left the database in rollback journal mode.
 fn try_enable_wal(conn: &Connection, label: &str) {
     match conn.query_row("PRAGMA journal_mode=WAL", [], |row| row.get::<_, String>(0)) {
         Ok(mode) if mode.eq_ignore_ascii_case("wal") => {}
@@ -134,6 +147,52 @@ fn try_enable_wal(conn: &Connection, label: &str) {
             ?error,
             "sqlite WAL conversion failed; keeping the current journal mode"
         ),
+    }
+}
+
+/// Refresh query planner statistics and record store size after an owning open.
+///
+/// A new connection has no query history. The 0x10000 bit asks SQLite to look
+/// at all tables, so even those first used after startup have statistics when
+/// SQLite considers them due. A maintenance failure leaves the opened store usable.
+pub fn maintain_on_owning_open(conn: &Connection, label: &str) {
+    if let Err(error) = conn.execute_batch("PRAGMA optimize=0x10002") {
+        tracing::warn!(database = label, %error, "sqlite planner maintenance failed");
+    }
+    let sizes = (|| -> anyhow::Result<(i64, i64, u64)> {
+        let (pages, free) = conn.query_row(
+            "SELECT page_count, freelist_count FROM pragma_page_count, pragma_freelist_count",
+            [],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )?;
+        Ok((pages, free, wal_size(conn)?))
+    })();
+    match sizes {
+        Ok((page_count, freelist_count, wal_bytes)) => {
+            tracing::info!(
+                database = label,
+                page_count,
+                freelist_count,
+                wal_bytes,
+                "sqlite store size"
+            );
+        }
+        Err(error) => tracing::warn!(database = label, %error, "reading sqlite store size failed"),
+    }
+}
+
+/// Use SQLite's resolved database filename so a symlink to the database
+/// measures the WAL actually used by the connection.
+fn wal_size(conn: &Connection) -> anyhow::Result<u64> {
+    let database = conn
+        .path()
+        .filter(|path| !path.is_empty())
+        .context("SQLite did not provide a database filename")?;
+    let wal = format!("{database}-wal");
+    match std::fs::metadata(wal) {
+        Ok(metadata) => Ok(metadata.len()),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(0),
+        Err(error) => Err(error).context("reading SQLite WAL metadata"),
     }
 }
 
@@ -217,6 +276,43 @@ impl Db {
         }
     }
 
+    /// Release WAL space at the end of an owning orderly stop.
+    ///
+    /// Call on the owning thread after its runtime has drained and while it
+    /// still holds the state-directory claim. The connection's last operation
+    /// uses a shorter busy timeout because a CLI or handoff peer can still
+    /// hold a snapshot. SQLite's busy result is a normal shutdown outcome.
+    pub fn checkpoint_for_stop(&self) {
+        let label = self.label;
+        let result = (|| -> anyhow::Result<(bool, i64, i64)> {
+            let conn = self
+                .conn
+                .lock()
+                .map_err(|_| anyhow::anyhow!("{label} mutex poisoned"))?;
+            conn.busy_timeout(STOP_CHECKPOINT_BUSY_TIMEOUT)?;
+            Ok(
+                conn.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?,
+            )
+        })();
+        match result {
+            Ok((true, wal_pages, checkpointed_pages)) => tracing::info!(
+                database = label,
+                wal_pages,
+                checkpointed_pages,
+                "sqlite stop checkpoint left a busy WAL"
+            ),
+            Ok((false, wal_pages, checkpointed_pages)) => tracing::debug!(
+                database = label,
+                wal_pages,
+                checkpointed_pages,
+                "sqlite stop checkpoint finished"
+            ),
+            Err(error) => tracing::warn!(database = label, %error, "sqlite stop checkpoint failed"),
+        }
+    }
+
     /// Run `work` on the connection on the blocking pool and return its
     /// result.
     ///
@@ -287,6 +383,118 @@ mod tests {
             conn.query_row("PRAGMA synchronous", [], |row| row.get(0))
                 .unwrap(),
         )
+    }
+
+    /// Both shared open modes need their own journal cap. A non-owning
+    /// connection does not inherit the setting from the first connection.
+    #[test]
+    fn shared_read_write_opens_set_the_journal_limit() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let owner = open_private(&path, "test database").unwrap();
+        let other = open_private_existing(&path, "test database").unwrap();
+        for conn in [owner, other] {
+            let limit: i64 = conn
+                .query_row("PRAGMA journal_size_limit", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(limit, JOURNAL_SIZE_LIMIT);
+        }
+    }
+
+    /// A new connection has no table usage history. Opening an indexed
+    /// database should still populate its statistics and report its size.
+    #[farhelm_testtrace::test]
+    fn owning_maintenance_analyzes_an_unseen_table_and_logs_sizes() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let conn = open_private(&path, "test database").unwrap();
+        conn.execute_batch(
+            "CREATE TABLE saved(value INTEGER);
+             CREATE INDEX by_value ON saved(value);
+             INSERT INTO saved VALUES (7), (9);",
+        )
+        .unwrap();
+        drop(conn);
+        let conn = open_private_existing(&path, "test database").unwrap();
+        let stats_tables: i64 = conn
+            .query_row(
+                "SELECT count(*) FROM sqlite_schema WHERE name = 'sqlite_stat1'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stats_tables, 0, "fixture starts without statistics");
+        maintain_on_owning_open(&conn, "test database");
+        let stat: String = conn
+            .query_row(
+                "SELECT stat FROM sqlite_stat1 WHERE idx = 'by_value'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(stat, "2 1");
+        let sizes = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("sqlite store size")
+            .unwrap();
+        assert_eq!(sizes.len(), 1);
+        assert_eq!(sizes[0].fields["database"], "test database");
+        assert!(sizes[0].fields["page_count"].parse::<u64>().unwrap() > 0);
+        assert!(sizes[0].fields["freelist_count"].parse::<u64>().is_ok());
+        assert_eq!(
+            sizes[0].fields["wal_bytes"], "0",
+            "rollback mode has no WAL"
+        );
+    }
+
+    /// A held read snapshot makes truncation busy. Stop must tolerate it
+    /// with the short connection timeout, then truncate once it is safe.
+    #[farhelm_testtrace::test]
+    fn stop_checkpoint_tolerates_a_reader_and_truncates_after_it_leaves() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("store.db");
+        let wal = dir.path().join("store.db-wal");
+        let conn = open_private(&path, "test database").unwrap();
+        configure_durability(&conn, "test database", true).unwrap();
+        assert_eq!(durability(&conn).0, "wal");
+        conn.execute_batch("CREATE TABLE saved(value); INSERT INTO saved VALUES (7)")
+            .unwrap();
+        let reader = Connection::open(&path).unwrap();
+        reader.execute_batch("BEGIN").unwrap();
+        let value = |conn: &Connection| {
+            conn.query_row("SELECT value FROM saved", [], |row| row.get::<_, i64>(0))
+                .unwrap()
+        };
+        assert_eq!(value(&reader), 7);
+        conn.execute_batch("UPDATE saved SET value = 9").unwrap();
+        assert_eq!(value(&conn), 9);
+        assert_eq!(value(&reader), 7, "fixture holds the earlier WAL snapshot");
+        assert!(std::fs::metadata(&wal).unwrap().len() > 0);
+        let db = Db::new(conn, "test database");
+        db.checkpoint_for_stop();
+        let busy = farhelm_testtrace::current_capture()
+            .unwrap()
+            .matching("sqlite stop checkpoint left a busy WAL")
+            .unwrap();
+        assert_eq!(busy.len(), 1);
+        assert_eq!(busy[0].fields["database"], "test database");
+        let timeout_ms: u128 = db
+            .lock()
+            .query_row("PRAGMA busy_timeout", [], |row| row.get::<_, i64>(0))
+            .unwrap()
+            .try_into()
+            .unwrap();
+        assert_eq!(timeout_ms, STOP_CHECKPOINT_BUSY_TIMEOUT.as_millis());
+        assert!(
+            std::fs::metadata(&wal).unwrap().len() > 0,
+            "busy WAL remains readable"
+        );
+        assert_eq!(value(&reader), 7);
+
+        reader.execute_batch("ROLLBACK").unwrap();
+        db.checkpoint_for_stop();
+        assert_eq!(std::fs::metadata(&wal).unwrap().len(), 0);
+        assert_eq!(value(&reader), 9);
     }
 
     /// A rare durable write must not downgrade a connection already configured

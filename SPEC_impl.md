@@ -3968,7 +3968,9 @@ no path values are stored in the notice.
   and expecting most Macs running Farhelm to have batteries. Schema migrations are atomic database-only operations: a
   lost migration leaves a complete earlier schema to migrate again. Older builds' SQLite versions can still open a WAL
   database. The `-wal` journal and `-shm` index live beside each database; copying only the `.db` file while Farhelm is
-  running can omit committed changes.
+  running can omit committed changes. Shared read-write opens set a 6 MiB journal limit when SQLite rewinds the WAL.
+  Owning opens run SQLite planner maintenance after schema setup and log page, free-page and WAL sizes. On orderly stop
+  the supervisor attempts a truncating WAL checkpoint after its writers drain, with a 250 ms wait for SQLite locks.
 - Host identity: generated once at first run and committed with FULL sync before publication, stored in the db.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
@@ -5234,7 +5236,10 @@ installation it is on, so it follows an open session the sidebar's filter hides
   consumer copy is learned again from the supervisor's durable source identity. Schema and local-row setup are atomic or
   repeatable database-only work. The separate checkout-config CLI opener is unchanged and keeps FULL. Backup and restore
   must keep each database with the `-wal` and `-shm` files its backup includes and remove current sidecars absent from
-  that backup before restoring, so unrelated journal data is not replayed.
+  that backup before restoring, so unrelated journal data is not replayed. Shared read-write opens set the same 6 MiB
+  limit at WAL rewind. Owning opens refresh planner statistics as needed and log store sizes after schema setup. An
+  orderly stop attempts a truncating WAL checkpoint after the helm's writers drain and waits up to 250 ms on SQLite
+  locks. The macOS app normally exits before the helm reaches that checkpoint.
 - Helm schema 36 drops the `profiles` catalog and its remembered default with no conversion (SPEC.md, the launch-kinds
   upgrade paragraph). Cached session rows may still carry the removed `source_profile` member; serde ignores it, so they
   keep listing without a rewrite. Helm schema 37 converts every cached session for launch kinds (see "Launch kinds: one

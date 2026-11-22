@@ -568,11 +568,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   smallest set of non-secret first-run settings Claude needs, found by an isolated probe, keeping the user's other
   settings and the normal agent home, and check it with a valid subscription login.
 
-- **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
-  (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
-  says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
-  settings or a periodic maintenance step as they grow. Plan: `plans/queue/sqlite-compaction-settings.md`.
-
 ### Drift test feature coverage
 
 - **Drift tests: base launch, Codex process isolation, and Cursor/OpenCode interactive turns.** Verify that Codex's
