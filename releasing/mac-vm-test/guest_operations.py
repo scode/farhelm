@@ -167,9 +167,11 @@ Farhelm's private lib directory (the supervisor and its terminal hosts alike,
 a deleted binary included), matched against the path both as spelled and
 resolved, since procfs reports the resolved one. Uninstall must leave none: a
 removed unit with a supervisor or terminal host still running is not a
-complete uninstall. Only pids are kept, so no command line or environment
-leaves the host. Links this user cannot read are skipped: Farhelm's own
-processes run as this user.
+complete uninstall. `stdio_proxy_pids` identifies the subset tied to an SSH
+connection, which may exit when Remove forgets that connection. Keep only the
+PIDs in both lists. Farhelm's own processes run as this user, so links this
+user cannot read are skipped. A missing command line leaves the PID in the
+full list without assigning the proxy role.
 
 `session_ids` are the kept database's session ids, read read-only, so an
 uninstall that emptied or replaced the database cannot pass as one that kept
@@ -198,6 +200,7 @@ the data; an unreadable database reads as None.
     data = home / '.local/state/farhelm'
     prefixes = (str(lib) + '/', os.path.realpath(lib) + '/')
     running = []
+    stdio_proxies = []
     for entry in proc.iterdir():
         if not entry.name.isdigit():
             continue
@@ -206,7 +209,17 @@ the data; an unreadable database reads as None.
         except OSError:
             continue  # Another user's process, a kernel thread, or one that exited mid-scan.
         if target.startswith(prefixes):
-            running.append(int(entry.name))
+            pid = int(entry.name)
+            running.append(pid)
+            # The first two arguments identify the proxy. Keep the read bounded
+            # and require the terminating NUL so a truncated argument cannot match.
+            try:
+                with (entry / 'cmdline').open('rb') as command:
+                    argv = command.read(4096).split(b'\0', 3)
+            except OSError:
+                continue
+            if len(argv) == 4 and argv[1:3] == [b'internal', b'stdio']:
+                stdio_proxies.append(pid)
     database = data / 'supervisor.db'
     session_ids = None
     if database.is_file():
@@ -220,7 +233,8 @@ the data; an unreadable database reads as None.
             'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest() if binary.is_file() else None,
             'unit_sha256': hashlib.sha256(unit.read_bytes()).hexdigest() if unit.is_file() else None,
             'data_present': data.is_dir(), 'database_present': database.is_file(),
-            'farhelm_pids': sorted(running), 'session_ids': session_ids}
+            'farhelm_pids': sorted(running), 'stdio_proxy_pids': sorted(stdio_proxies),
+            'session_ids': session_ids}
 
 
 def remote_host_payload():
