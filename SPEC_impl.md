@@ -6655,17 +6655,18 @@ since sshd can lag the sandbox's running state. The readiness script refuses a P
 `systemctl is-system-running` every 2 seconds for up to 180 until it says (right after boot it answers nothing, even
 with `--wait`) `running` or `degraded`, and requires passwordless `sudo -n`, apt, bash, curl and git before any
 installation. It stops at the first missing requirement with a message naming it, reported through the existing build
-failure line. The package script runs `dpkg --configure -a`, `apt-get update` and
-`apt-get install ca-certificates curl gh <packages>` through
-`sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a` with `DPkg::Lock::Timeout=600` and `confdef`/`confold`,
-each package shell-quoted. Each agent script downloads its installer with `curl --proto '=https' --tlsv1.2 -fsSL` into a
-file and runs that file (`bash` for `https://claude.ai/install.sh`, `CODEX_NON_INTERACTIVE=1 sh` for
-`https://chatgpt.com/codex/install.sh`), finds the command with `~/.local/bin` first on `PATH`, symlinks it into
-`/usr/local/bin` (on the default `PATH` of non-login ssh commands and the systemd user manager alike, and following the
-agent's updater when it re-points its own entry), and prints the bare command's `--version`, which the build records.
-The build's final script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each clone generates its own ID
-at boot) and removes the build logs. Logind, linger and Farhelm installation belong to the prepared layer below;
-ordinary setup recovery on an existing host still performs them directly.
+failure line. The package script runs `dpkg --configure -a` non-interactively through `sudo -n` first. It retries
+frontend or database lock contention for up to 600 one-second waits and reports other repair failures immediately. It
+then runs `apt-get update` and `apt-get install ca-certificates curl gh <packages>` through
+`sudo -n env DEBIAN_FRONTEND=noninteractive NEEDRESTART_MODE=a`. Apt uses `DPkg::Lock::Timeout=600` and
+`confdef`/`confold`, with each package shell-quoted. Each agent script downloads its installer with
+`curl --proto '=https' --tlsv1.2 -fsSL` into a file and runs that file (`bash` for `https://claude.ai/install.sh`,
+`CODEX_NON_INTERACTIVE=1 sh` for `https://chatgpt.com/codex/install.sh`), finds the command with `~/.local/bin` first on
+`PATH`, symlinks it into `/usr/local/bin` (on the default `PATH` of non-login ssh commands and the systemd user manager
+alike, and following the agent's updater when it re-points its own entry), and prints the bare command's `--version`,
+which the build records. The build's final script runs `apt-get clean`, truncates `/etc/machine-id` to empty (so each
+clone generates its own ID at boot) and removes the build logs. Logind, linger and Farhelm installation belong to the
+prepared layer below; ordinary setup recovery on an existing host still performs them directly.
 
 ## Tensorlake prepared snapshots
 

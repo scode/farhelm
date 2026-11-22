@@ -60,6 +60,9 @@ impl crate::environment::PreparationProgress for SessionPreparation<'_> {
         if !self.visible.swap(true, std::sync::atomic::Ordering::SeqCst) {
             let step = preparation_step();
             if let Some(run) = self.service.memory.lock().await.runs.get_mut(&self.host) {
+                // The pill shows the first running step. Publish the handoff as one progress update.
+                run.steps[0].status = StepStatus::Completed;
+                run.steps[0].message = None;
                 run.steps.insert(
                     1,
                     StepView {
@@ -626,10 +629,8 @@ impl ProvisioningService {
         let visible = preparation
             .visible
             .load(std::sync::atomic::Ordering::SeqCst);
-        self.set_step(host, 0, StepStatus::Completed, None).await;
-        if visible {
-            self.set_step(host, 1, StepStatus::Completed, None).await;
-        }
+        self.set_step(host, usize::from(visible), StepStatus::Completed, None)
+            .await;
         *index = 1 + usize::from(visible);
         self.set_step(host, *index, StepStatus::Running, None).await;
         let progress = CreationProgress {
@@ -1239,7 +1240,7 @@ impl ProvisioningService {
             || (!needs_snapshot && saved_facts.is_some())
         {
             return self
-                .prepared_tensorlake_steps(host, plan, index, &key, needs_snapshot, host_write)
+                .prepared_tensorlake_steps(host, plan, index, needs_snapshot, host_write)
                 .await;
         }
         // The free probe cannot know whether a pending create has appeared.
@@ -1314,7 +1315,7 @@ impl ProvisioningService {
         };
         self.set_step(host, *index, StepStatus::Running, None).await;
         let created = self
-            .create_host_sandbox(host, plan, &key, source, None, *index)
+            .create_host_sandbox(host, plan, source, None, None, *index)
             .await?;
         self.set_step(
             host,
@@ -1370,7 +1371,6 @@ impl ProvisioningService {
         host: HostId,
         plan: &TensorlakeAddPlan,
         index: &mut usize,
-        key: &crate::tensorlake::api::ApiKey,
         needs_snapshot: bool,
         host_write: &mut Option<crate::manager::ProvisionLockGuard>,
     ) -> anyhow::Result<()> {
@@ -1495,13 +1495,16 @@ impl ProvisioningService {
         // path is logged. The real-clone acceptance check reads these stages.
         let spawn_started = tokio::time::Instant::now();
         let created = self
-            .create_host_sandbox(host, plan, key, source, selected_facts.as_ref(), *index)
+            .create_host_sandbox(
+                host,
+                plan,
+                source,
+                selected_facts.as_ref(),
+                source_guard,
+                *index,
+            )
             .await?;
         let running_after = spawn_started.elapsed();
-        // Running is the live-process exclusion boundary. An interrupted or
-        // ambiguous create retains ordinary vendor failure/retry semantics;
-        // the in-memory guard is not a crash-safe source dependency record.
-        drop(source_guard);
         let target =
             ProvisioningTarget::Remote(crate::tensorlake::ssh::route(plan.destination.clone()));
         // The provider already waited for its gateway after Running. A cold
@@ -1708,13 +1711,15 @@ impl ProvisioningService {
     /// `source` is absent only when setup already observed the sandbox and
     /// skipped its build; if that sandbox disappears before this second lookup,
     /// refuse rather than create a replacement from an unbuilt base.
+    /// The optional source guard follows the create to its first Running
+    /// observation. The shared create releases it before waiting for SSH.
     async fn create_host_sandbox(
         &self,
         host: HostId,
         plan: &TensorlakeAddPlan,
-        _key: &crate::tensorlake::api::ApiKey,
         source: Option<SandboxSource>,
         prepared: Option<&PreparedInstallFacts>,
+        source_guard: Option<tokio::sync::OwnedMutexGuard<()>>,
         step_index: usize,
     ) -> anyhow::Result<bool> {
         let row = self.host_row(host).await?;
@@ -1726,7 +1731,7 @@ impl ProvisioningService {
                 &binding,
                 source,
                 prepared,
-                None,
+                source_guard,
                 &CreationProgress {
                     service: self,
                     host,

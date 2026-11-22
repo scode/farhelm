@@ -206,13 +206,7 @@ impl EnvironmentProvider for Tensorlake {
         // A fresh checkpoint skips the build engine's SSH-access admission.
         // Preserve the session launch's local-key prerequisite before any
         // billed preparation or create. Account registration remains the user's.
-        anyhow::ensure!(
-            matches!(
-                self.settings().await?.ssh_key,
-                farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
-            ),
-            "create and register Farhelm's SSH key in Settings → Tensorlake first"
-        );
+        self.require_session_ssh_key().await?;
         self.ensure_host_key().await.map_err(anyhow::Error::msg)?;
         let builds = self.builds();
         loop {
@@ -220,9 +214,16 @@ impl EnvironmentProvider for Tensorlake {
                 progress.needed().await;
             }
             builds
-                .ensure_prepared_snapshot_from_built(name, recipe, events.clone(), |text| {
-                    progress.step(text)
-                })
+                .ensure_prepared_snapshot_from_built(
+                    name,
+                    recipe,
+                    events.clone(),
+                    |text| async move {
+                        // A rebuild or expiry can invalidate the cache after the first freshness read.
+                        progress.needed().await;
+                        progress.step(text).await;
+                    },
+                )
                 .await?;
             let guard = builds.lock_snapshot_use(name).await?;
             if let Some(snapshot) = builds.fresh_prepared_snapshot(name).await? {
@@ -357,6 +358,19 @@ impl EnvironmentProvider for Tensorlake {
 }
 
 impl Tensorlake {
+    /// A session needs the saved local key even when its source is already prepared.
+    /// The account owner registers its public half separately.
+    pub(crate) async fn require_session_ssh_key(&self) -> anyhow::Result<()> {
+        anyhow::ensure!(
+            matches!(
+                self.settings().await?.ssh_key,
+                farhelm_proto::tensorlake::SshKeyStatus::Ready { .. }
+            ),
+            "create and register Farhelm's SSH key in Settings → Tensorlake first"
+        );
+        Ok(())
+    }
+
     /// The single create/recovery implementation serves prepared sessions and
     /// ordinary Add. Only durable pending-send or saved ID permits adoption.
     /// A missing source never sends a replacement request. The guard ends at
