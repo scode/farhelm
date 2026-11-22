@@ -375,6 +375,22 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Plan: `plans/queue/helpers-desktop-startup.md`. Plan: `plans/queue/helpers-terminal-and-controls.md`. Plan:
   `plans/queue/helpers-hosts-and-sessions.md`. Plan: `plans/queue/helpers-launcher-and-templates.md`.
 
+- **Report remote command status in-band, not through ssh's exit status.** Tailscale SSH on a Mac reports exit status 0
+  for every command (tailscale/tailscale#18256, still open on 2026-11-17), so adding such a Mac fails at the first probe
+  ("the supervisor probe closed before hello completion with exit status exit status: 0"), and past that a failed
+  install step, a payload checksum mismatch included, would read as success. Have every provisioning command Farhelm
+  runs on a host end with a status record carrying a per-run random tag, take the status from that record, and treat a
+  missing or malformed record as failure with a clear error; keep ssh's own 255 as an exit status. The commands share
+  one funnel, so this is a contained change. Decided 2026-11-17 over detecting Tailscale and refusing the host. Finish
+  with a real end-to-end add of a Mac that has Tailscale SSH on, since Tailscale SSH on macOS has other open problems.
+  Findings, upstream status and every place that reads exit statuses:
+  `lore/2026-11-17-tailscale-ssh-macos-exit-status.md`.
+
+- **Use the Tailscale SSH wrapper for Tailscale hosts.** If the user is using Tailscale, use the `tailscale ssh` wrapper
+  instead of relying on the user manually getting known hosts initialized, so Farhelm can immediately use any Tailscale
+  host it has ssh access to without fighting ssh known hosts. Separate from, and orthogonal to, the in-band status entry
+  above. Not investigated yet, including how the wrapper fits Farhelm's non-interactive, connection-sharing ssh use.
+
 ### Plan follow-up
 
 - **Keep deflake evidence tied to the selected revision's prerequisites.** Running the current deflake driver with an
