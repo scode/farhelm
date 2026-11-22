@@ -48,7 +48,7 @@ import tempfile
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
-from ipaddress import IPv6Address, IPv6Network
+from ipaddress import IPv4Address, IPv4Network, IPv6Address, IPv6Network
 
 from agent_screen_host import HostError, HostRun, default_farhelm
 
@@ -96,7 +96,22 @@ class Scrubber:
     # through a local proxy (Codex warns that its base URL is overridden). It says how the capture host is set up, so
     # its scheme, host and port become a neutral placeholder. `host` is the scrubbed host name, so a URL to this
     # machine by name is caught after the word replacements too.
-    LOCAL_IPV4 = (
+    # Keep the IPv4 ranges explicit. Shared CGNAT space can expose a tailnet address, while documentation ranges
+    # belong in captured screens.
+    LOCAL_IPV4 = tuple(
+        IPv4Network(network)
+        for network in (
+            "0.0.0.0/32",
+            "127.0.0.0/8",
+            "10.0.0.0/8",
+            "172.16.0.0/12",
+            "192.168.0.0/16",
+            "169.254.0.0/16",
+            "100.64.0.0/10",
+        )
+    )
+    # Keep the old scrubber's dotted spellings when IPv4Address rejects them, such as a zero-padded last octet.
+    LEGACY_LOCAL_IPV4 = re.compile(
         r"(?:0\.0\.0\.0|127(?:\.\d{1,3}){3}|10(?:\.\d{1,3}){3}|192\.168(?:\.\d{1,3}){2}"
         r"|172\.(?:1[6-9]|2\d|3[01])(?:\.\d{1,3}){2})"
     )
@@ -115,6 +130,12 @@ class Scrubber:
     EMAIL_PLACEHOLDER = "user@example.com"
 
     @classmethod
+    def _local_ipv4(cls, address: IPv4Address) -> bool:
+        """Apply the same fixture privacy policy to plain and IPv4-mapped addresses."""
+
+        return any(address in network for network in cls.LOCAL_IPV4)
+
+    @classmethod
     def _local_authority(cls, authority: str) -> bool | None:
         """Classify a complete host and port after the final userinfo separator, or None if they are incomplete."""
 
@@ -125,7 +146,13 @@ class Scrubber:
         literal = match["ipv6"]
         if literal is None:
             name = match["name"].rstrip(".").lower()
-            return name in ("localhost", "host") or re.fullmatch(cls.LOCAL_IPV4, name) is not None
+            if name in ("localhost", "host"):
+                return True
+            try:
+                address_v4 = IPv4Address(name)
+            except ValueError:
+                return cls.LEGACY_LOCAL_IPV4.fullmatch(name) is not None
+            return cls._local_ipv4(address_v4)
         try:
             address = IPv6Address(literal)
         except ValueError:
@@ -136,7 +163,7 @@ class Scrubber:
             or address.is_unspecified
             or address.is_link_local
             or address in cls.UNIQUE_LOCAL_IPV6
-            or (mapped is not None and re.fullmatch(cls.LOCAL_IPV4, str(mapped)) is not None)
+            or (mapped is not None and cls._local_ipv4(mapped))
         )
 
     @classmethod

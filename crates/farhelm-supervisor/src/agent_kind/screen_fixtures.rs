@@ -27,7 +27,7 @@ use super::screen_reader::{
 };
 use farhelm_proto::AgentKind;
 use farhelm_terminal_emulator::{Collected, Emulator, FeedMode, Size, trim_screen_tail};
-use std::net::Ipv6Addr;
+use std::net::{Ipv4Addr, Ipv6Addr};
 use std::path::{Path, PathBuf};
 use std::time::Instant;
 
@@ -210,7 +210,8 @@ pub(super) fn contains_email(text: &str) -> bool {
 
 /// Whether `text` holds a URL whose host is this machine or a private
 /// network: a loopback or unspecified address, `localhost`, an RFC 1918
-/// address, a unique-local or link-local IPv6 address, or the scrubbed name `host`.
+/// address, IPv4 link-local (`169.254.0.0/16`), CGNAT/tailnet (`100.64.0.0/10`),
+/// unique-local or link-local IPv6, or the scrubbed name `host`.
 ///
 /// An agent shows such a URL when the capture host's configuration routes it
 /// through a local proxy (Codex warns that its base URL is overridden), which
@@ -220,6 +221,9 @@ pub(super) fn contains_email(text: &str) -> bool {
 /// so check shorter candidates too. Each candidate can itself carry userinfo.
 pub(super) fn contains_local_url(text: &str) -> bool {
     text.match_indices("://").any(|(at, _)| {
+        if !ends_with_url_scheme(&text[..at]) {
+            return false;
+        }
         let tail = &text[at + 3..];
         let authority = tail
             .split(|c: char| "/?#\"<>`".contains(c) || c.is_whitespace())
@@ -242,6 +246,21 @@ pub(super) fn contains_local_url(text: &str) -> bool {
     })
 }
 
+/// Locate the scheme at a word boundary, matching the capture scrubber's URL scope in surrounding prose.
+fn ends_with_url_scheme(prefix: &str) -> bool {
+    prefix
+        .char_indices()
+        .rev()
+        .take_while(|&(_, c)| c.is_ascii_alphanumeric() || "+.-".contains(c))
+        .any(|(offset, c)| {
+            c.is_ascii_alphabetic()
+                && prefix[..offset]
+                    .chars()
+                    .next_back()
+                    .is_none_or(|before| !before.is_alphanumeric() && before != '_')
+        })
+}
+
 /// Classify a complete host and port, or report that the candidate has no usable authority.
 fn local_authority(authority: &str) -> Option<bool> {
     let rest = authority
@@ -257,9 +276,7 @@ fn local_authority(authority: &str) -> Option<bool> {
                 || address.is_unspecified()
                 || address.is_unicast_link_local()
                 || address.is_unique_local()
-                || address.to_ipv4_mapped().is_some_and(|mapped| {
-                    mapped.is_loopback() || mapped.is_unspecified() || mapped.is_private()
-                })
+                || address.to_ipv4_mapped().is_some_and(is_local_ipv4)
         });
     }
     let end = rest.find(':').unwrap_or(rest.len());
@@ -273,14 +290,39 @@ fn local_authority(authority: &str) -> Option<bool> {
     {
         return None;
     }
-    let octets: Option<Vec<u8>> = host.split('.').map(|part| part.parse().ok()).collect();
-    let private_ip = match octets.as_deref() {
-        Some([127, ..] | [10, ..] | [0, 0, 0, 0]) => true,
-        Some([192, 168, _, _]) => true,
-        Some([172, second, _, _]) => (16..=31).contains(second),
-        _ => false,
-    };
+    let private_ip = host
+        .parse::<Ipv4Addr>()
+        .map_or_else(|_| is_legacy_local_ipv4_host(host), is_local_ipv4);
     Some(private_ip || host.eq_ignore_ascii_case("localhost") || host.eq_ignore_ascii_case("host"))
+}
+
+/// Plain and IPv4-mapped URL hosts share the same privacy policy. The CGNAT block also carries tailnet addresses
+/// that can identify a peer on the capture machine's network.
+fn is_local_ipv4(address: Ipv4Addr) -> bool {
+    is_original_local_ipv4(address)
+        || address.is_link_local()
+        || matches!(address.octets(), [100, 64..=127, ..])
+}
+
+/// Keep classifying zero-padded dotted spellings in the original private ranges when the standard parser refuses them.
+/// The four octets still have to parse as decimal bytes, as they did before the two new ranges were added.
+fn is_legacy_local_ipv4_host(host: &str) -> bool {
+    let Ok(octets) = host
+        .split('.')
+        .map(str::parse)
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return false;
+    };
+    let Ok(octets) = <[u8; 4]>::try_from(octets) else {
+        return false;
+    };
+    is_original_local_ipv4(Ipv4Addr::from(octets))
+}
+
+/// The ranges common to the original canonical classifier and its fallback for padded hosts.
+fn is_original_local_ipv4(address: Ipv4Addr) -> bool {
+    address.is_loopback() || address.is_unspecified() || address.is_private()
 }
 
 /// A port can be absent or empty. A word after the colon can still be a password in a longer candidate.
@@ -388,6 +430,7 @@ fn screen_fixtures_carry_no_personal_data() {
 /// ordinary agent screens (links to documentation). Userinfo must not hide
 /// a local host, and the host has to survive adjacent prose with its own `@`.
 /// A public link can still mention a local name in its path or query.
+/// Boundary hosts keep the private ranges from widening to neighboring networks.
 #[test]
 fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
     for local in [
@@ -399,8 +442,14 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
         "http://[fe80::1%25eth0]:8080",
         "http://[::ffff:192.168.1.4]:8080",
         "https://192.168.1.4/",
+        "https://192.168.001.001/",
         "http://10.0.0.2:80",
         "http://172.20.1.1/",
+        "http://169.254.169.254/",
+        "http://100.64.0.1/",
+        "http://100.127.255.254:8080/",
+        "http://[::ffff:169.254.1.1]/",
+        "http://[::ffff:100.100.100.100]:8080/",
         "http://host:8080/",
         "http://user@localhost:8080/",
         "http://user:pass@localhost:8080/",
@@ -424,6 +473,17 @@ fn screen_fixtures_local_url_detector_matches_local_hosts_only() {
     for public in [
         "https://docs.example.com/x",
         "http://172.32.0.1/",
+        "http://100.63.255.255/",
+        "http://100.128.0.0/",
+        "http://169.253.0.1/",
+        "http://169.255.0.1/",
+        "http://[::ffff:100.63.255.255]/",
+        "http://[::ffff:100.128.0.0]/",
+        "http://[::ffff:169.253.0.1]/",
+        "http://[::ffff:169.255.0.1]/",
+        "http://192.0.2.1/guide",
+        "connected to 169.254.169.254 and 100.64.0.1",
+        "address ://100.64.0.1",
         "https://hostname.example/",
         "http://proxy.invalid/backend-api/codex",
         "https://user:pass@docs.example.com/x",

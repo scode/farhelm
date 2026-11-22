@@ -36,6 +36,12 @@ class ScrubberTests(unittest.TestCase):
             "[::ffff:192.168.1.4]",
             "127.0.0.1",
             "10.0.0.2",
+            "192.168.001.001",
+            "169.254.169.254",
+            "100.64.0.1",
+            "100.127.255.254",
+            "[::ffff:169.254.1.1]",
+            "[::ffff:100.100.100.100]",
         ):
             for userinfo in ("", "user@", "user:pass@", "user:p@ss@", "user:p,ass@"):
                 for suffix in ("/backend-api/codex", "?mode=proxy", "#proxy"):
@@ -45,6 +51,20 @@ class ScrubberTests(unittest.TestCase):
                         clean = scrubber.scrub(text)
                         self.assertEqual(clean, "base URL: http://proxy.invalid" + suffix)
                         self.assertIsNone(scrubber.check(clean))
+
+    def test_link_local_and_tailnet_ranges_apply_only_to_url_authorities(self):
+        """Keep addresses adjacent to the private ranges and bare addresses in captured output."""
+        scrubber = capture.Scrubber()
+        for host in ("100.63.255.255", "100.128.0.0", "169.253.0.1", "169.255.0.1", "192.0.2.1"):
+            for literal in (host, f"[::ffff:{host}]"):
+                with self.subTest(literal=literal):
+                    text = f"https://{literal}/guide"
+                    self.assertEqual(scrubber.scrub(text), text)
+                    self.assertIsNone(scrubber.check(text))
+        for text in ("connected to 169.254.169.254 and 100.64.0.1", "address ://100.64.0.1"):
+            with self.subTest(text=text):
+                self.assertEqual(scrubber.scrub(text), text)
+                self.assertIsNone(scrubber.check(text))
 
     def test_public_hosts_are_not_changed_by_at_signs_outside_the_authority(self):
         """A path or query naming a local host must not make an ordinary public documentation link private."""

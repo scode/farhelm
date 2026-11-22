@@ -457,12 +457,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Scrub link-local and tailnet addresses in agent screen-capture privacy guards.** Neither the screen-capture script
-  (`scripts/capture-agent-screens.py`) nor the Rust screen-fixture privacy check treats link-local addresses
-  (`169.254.0.0/16`) or tailnet/CGNAT addresses (`100.64.0.0/10`) as private, so a captured screen showing one could
-  reach a committed fixture. Teach both guards to scrub or refuse both ranges and add tests. Plan:
-  `plans/queue/scrub-linklocal-tailnet.md`.
-
 - **Decide which button is primary on the launcher's hook setup prompt.** When starting a Grok or Antigravity session
   with automatic Restart hook setup turned off in Settings → Agents, the launcher shows a prompt asking whether to let
   Farhelm install its hook files into that agent's configuration so **Restart** can resume conversations. Currently
