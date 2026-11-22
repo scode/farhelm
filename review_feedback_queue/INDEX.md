@@ -80,6 +80,51 @@ consequences.
   confirmed uninstall can affect a different Tailscale host if the saved name changes after Farhelm verifies the
   original host.
 
+- [`trailing-replace-with-folder-enter-out-of-bounds-highlight.md`](trailing-replace-with-folder-enter-out-of-bounds-highlight.md)
+  — In Replace with, pressing Enter after a template update shrinks the folder list can bypass the presentation guard
+  and replace and delete the source session.
+
+- [`trailing-replace-with-suspended-checkout-recent-skips-warning.md`](trailing-replace-with-suspended-checkout-recent-skips-warning.md)
+  — In Replace with on a suspended managed-checkout host, pressing Down then Enter on a retained recent checkout setup
+  immediately wakes, clones fresh, and deletes the source without showing the fresh-clone warning.
+
+- [`trailing-antigravity-omitted-from-approval-cwd-pinning.md`](trailing-antigravity-omitted-from-approval-cwd-pinning.md)
+  — When Antigravity workspace trust is on, agent Create, Spawn, and Clone show an unpinned symlink on the approval card
+  and resolve it only at start, allowing symlink masking or redirection during the approval wait.
+
+- [`trailing-agent-create-drops-target-incarnation-after-approval.md`](trailing-agent-create-drops-target-incarnation-after-approval.md)
+  — For agent-requested launches that do not pin an approval folder, a target host reconnect or retarget during the
+  final post-approval check can let the launch dispatch to the replacement connection.
+
+- [`trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md`](trailing-agent-fresh-checkout-rereads-claude-trust-after-approval.md)
+  — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
+  to a Not trusted approval or leave permanent trust with no archive cleanup record.
+
+- [`trailing-claude-trust-guard-allows-home-ancestors-and-fails-open.md`](trailing-claude-trust-guard-allows-home-ancestors-and-fails-open.md)
+  — Starting a Claude session in a parent of the home directory such as /home or /Users permanently marks it trusted in
+  Claude settings (covering the whole home directory), and an unresolvable HOME fails open when CLAUDE_CONFIG_DIR is
+  set.
+
+- [`trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md`](trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md)
+  — If a pre-upgrade Farhelm wrote Claude endpoint settings remotely before crashing or losing the reply, upgrading
+  skips cleaning ~/.claude/settings.json so a stale URL there can receive the new launch token.
+
+- [`trailing-podman-verify-place-nonce-in-argv-forgeable.md`](trailing-podman-verify-place-nonce-in-argv-forgeable.md) —
+  Because the place-identity guard passes its expected proof nonce in the SSH command line, a compromised host reached
+  after an SSH alias move can echo the nonce to spoof container absence on Delete or accept a pending create.
+
+- [`trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md`](trailing-podman-setup-scripts-and-creation-proxy-skip-place-verification.md)
+  — During a container build or setup, an external SSH alias or User change can open a fresh SSH connection and stream
+  cached proxy credentials on stdin without checking the host identity, or read proxies from the moved host.
+
+- [`trailing-set-tailscale-unparks-actor-on-sync-registry-failure.md`](trailing-set-tailscale-unparks-actor-on-sync-registry-failure.md)
+  — If saving a host's Tailscale setting succeeds but refreshing connections immediately hits a database read error,
+  Farhelm unparks the host and can dial under the previous SSH trust mode while a retry skips retiring those masters.
+
+- [`trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md`](trailing-setup-rerun-omits-tailscale-allowing-ssh-downgrade.md)
+  — Re-running failed setup on a Tailscale host omits the Tailscale flag from the probe request, so removing or toggling
+  the host concurrently lets Farhelm fall back to unpinned ordinary SSH and auto-provision or re-register it.
+
 ## High priority: material UX degradation
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
@@ -164,6 +209,71 @@ consequences.
 - [`trailing-authorized-stop-report-completion-without-settling-recorded-launch.md`](trailing-authorized-stop-report-completion-without-settling-recorded-launch.md)
   — Stop can acknowledge completion of a retained unconfirmed launch without establishing what its recorded
   terminal-host start left running.
+
+- [`trailing-hosts-menu-rerun-reads-live-host-state.md`](trailing-hosts-menu-rerun-reads-live-host-state.md) — Clicking
+  Re-run in a host menu re-reads live host state at click time, so a state update before the click can turn Re-run
+  failed setup into an unconfirmed remote host Update.
+
+- [`trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md`](trailing-wake-state-misclassifies-failed-stopped-and-stalls-60s.md)
+  — When waking a stopped container or previously failed sandbox fails past 20 seconds or repeats the same error, the
+  launcher either hangs for 60 seconds or reports that the host was suspended again.
+
+- [`trailing-hidden-post-wake-folder-wait-wedges-launcher.md`](trailing-hidden-post-wake-folder-wait-wedges-launcher.md)
+  — If a waking or quick-launch host changes connection incarnation while the hidden launcher reads its recent folders,
+  the stale reply is ignored and the launcher stays permanently stuck until disconnect or reset.
+
+- [`trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md`](trailing-visible-new-wake-replaces-tilde-and-quick-launch-error.md)
+  — Launching from a visible New dialog on a suspended or stopped host showing ~ wakes the host and silently starts in
+  an unshown remembered folder (which can also enable workspace trust or YOLO there), or fails with quick-launch
+  wording.
+
+- [`trailing-settings-trust-help-omits-agent-requested-launches.md`](trailing-settings-trust-help-omits-agent-requested-launches.md)
+  — The Settings pages for Codex, Muse, Pi, and Antigravity omit that their workspace-trust switch also applies to
+  agent-requested launches, which run without an approval card on Always-allow hosts.
+
+- [`trailing-interrupted-uploads-invisible-on-card-or-retired-session.md`](trailing-interrupted-uploads-invisible-on-card-or-retired-session.md)
+  — If an upload is cut off when the open session switches to a recovery, retired, or post-reset unavailable card,
+  neither a terminal message nor a window notice appears until you leave the session (and never if you quit).
+
+- [`trailing-duplicate-interrupted-upload-notices-silently-dropped.md`](trailing-duplicate-interrupted-upload-notices-silently-dropped.md)
+  — While an interrupted-upload banner remains undismissed, a later interrupted upload of the same file name (including
+  a different screenshot named pasted-1.png after returning to the session) is silently dropped.
+
+- [`trailing-new-container-managed-checkout-stretches-host-block.md`](trailing-new-container-managed-checkout-stretches-host-block.md)
+  — Choosing New container and Managed checkout inserts roughly 300 px of empty vertical space below the Container host
+  picker because a horizontal flex basis is applied inside a vertical flex column.
+
+- [`trailing-hosts-menu-remove-reads-live-skip-confirmation.md`](trailing-hosts-menu-remove-reads-live-skip-confirmation.md)
+  — Choosing Remove from a host menu checks the live skip-confirmation setting at click time rather than binding to the
+  drawn frame, so an SSH host and its per-host and per-session UI state can be forgotten without confirmation.
+
+- [`trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md`](trailing-ssh-host-setup-reads-live-skip-confirmation-at-settle.md)
+  — Adding an SSH host or re-running failed setup checks the skip-confirmation preference after the probe finishes
+  instead of at click time, so enabling that setting mid-probe starts installing without showing the plan.
+
+- [`trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md`](trailing-failed-rebuild-on-removed-host-blocks-recipe-delete.md)
+  — If a recipe rebuild or preparation fails on an empty container host and that host is later removed, deleting the
+  recipe always fails because cleanup still requires the removed host row.
+
+- [`trailing-podman-claim-and-recipe-guards-omit-tailscale.md`](trailing-podman-claim-and-recipe-guards-omit-tailscale.md)
+  — Toggling a container host's Tailscale SSH mode while a recipe build is starting can pass the SQL ownership guards
+  after a fresh probe reclaims the machine, carrying pre-toggle proxy settings onto the updated route.
+
+- [`trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md`](trailing-adopt-identity-leaves-podman-cache-and-claim-stale.md)
+  — After adopting a reinstalled or recycled container host, Farhelm can fail new container launches for up to 5 minutes
+  with a misleading moved-destination error and lock out another entry for the old machine across restarts.
+
+- [`trailing-podman-refresh-caches-wrong-machine-on-refusal.md`](trailing-podman-refresh-caches-wrong-machine-on-refusal.md)
+  — After an SSH alias temporarily points to another Podman machine and is restored, cached capabilities from the wrong
+  machine can break existing container operations or inject that machine's proxy settings into a recovering container.
+
+- [`trailing-tailscale-predictable-tmp-socket-dir-local-dos.md`](trailing-tailscale-predictable-tmp-socket-dir-local-dos.md)
+  — On a multi-user machine, another local account can pre-create the predictable /tmp/fhs-<digest> directory and
+  permanently block Farhelm from connecting to or setting up that Tailscale host.
+
+- [`trailing-remove-ssh-host-blocks-on-ssh-route-lock.md`](trailing-remove-ssh-host-blocks-on-ssh-route-lock.md) —
+  Removing an SSH host or finishing an uninstall awaits the SSH route lock and can hang past 20 seconds or stall for
+  minutes behind an open SSH sign-in prompt or background Podman check.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
@@ -1107,3 +1217,272 @@ consequences.
 - [`tensorlake-prepared-add-test-misses-pending-snapshot-guard.md`](tensorlake-prepared-add-test-misses-pending-snapshot-guard.md)
   — The prepared Tensorlake Add test can pass if Farhelm releases the chosen snapshot for retirement while the new
   sandbox is still starting.
+
+- [`trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md`](trailing-drift-turn2-hook-check-passes-on-noop-stop-ack.md)
+  — The opt-in Codex and Antigravity drift tests can pass after Restart even when Turn-2 hook verification did not
+  commit, because an ignored Stop callback still logs an ack carrying Turn 1's conversation ID.
+
+- [`trailing-test-worker-stop-reports-ended-before-lock-release.md`](trailing-test-worker-stop-reports-ended-before-lock-release.md)
+  — Stopping a test-worker run can report ended while the remote checkout flock is still held during stage cleanup,
+  causing an immediate follow-up run to fail as busy with an unknown holder.
+
+- [`trailing-test-worker-stop-during-prep-mutates-and-prunes.md`](trailing-test-worker-stop-during-prep-mutates-and-prunes.md)
+  — A stop requested after worker admission during preparation still overwrites the remote checkout, evicts an older
+  retained run, and publishes an empty finished directory.
+
+- [`trailing-test-worker-relative-checkout-breaks-lock-isolation.md`](trailing-test-worker-relative-checkout-breaks-lock-isolation.md)
+  — Passing a relative --checkout . or .. places remote state in the wrong parent directory, bypasses worker-wide
+  bootstrap and active locks, and forces a full re-bootstrap every run.
+
+- [`trailing-test-worker-collect-discards-recorded-exit-status.md`](trailing-test-worker-collect-discards-recorded-exit-status.md)
+  — Collecting a test-worker run later discards the worker's authoritative exit status, so invocation.txt cannot
+  distinguish a pass, failure, or forced kill (137).
+
+- [`trailing-test-worker-status-hides-bootstrap-lock.md`](trailing-test-worker-status-hides-bootstrap-lock.md) — When a
+  test-worker run times out waiting for worker bootstrap and tells the caller to check status, status never reports an
+  active standalone or cross-checkout bootstrap.
+
+- [`trailing-shortcuts-chord-opens-during-terminal-ime.md`](trailing-shortcuts-chord-opens-during-terminal-ime.md) —
+  Pressing the Keyboard shortcuts chord while an input method is composing in a focused terminal still opens the
+  overview dialog instead of ignoring composition.
+
+- [`trailing-settings-containers-reload-omits-loading-keeps-error.md`](trailing-settings-containers-reload-omits-loading-keeps-error.md)
+  — After a failed refresh in Settings -> Containers, deleting the last leftover or clicking Refresh hides the reading
+  indicator and leaves only the old refresh error visible while the new read waits.
+
+- [`trailing-template-summary-misstates-unsupported-permissions.md`](trailing-template-summary-misstates-unsupported-permissions.md)
+  — When a template stores an approval mode its chosen non-shell agent does not offer, approval cards and template list
+  summaries display that agent's default mode instead of the stored mode.
+
+- [`trailing-masked-input-test-omits-a11y-value-checks.md`](trailing-masked-input-test-omits-a11y-value-checks.md) — The
+  masked-input test checks painted text and accessible names but never inspects accessible values or runs with
+  accessibility active, leaving screen-reader secret exposure unguarded.
+
+- [`trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md`](trailing-podman-suspend-flashes-connecting-and-runs-retry-ladder.md)
+  — Suspending a container briefly flashes Connecting before Suspended, and a transient post-Suspend check failure on a
+  sandbox or container runs the full active reconnect ladder instead of one quiet check.
+
+- [`trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md`](trailing-tensorlake-setup-rerun-omits-suspended-and-sealed-refusal.md)
+  — Rerunning setup on a suspended or sealed Tensorlake host still offers the setup confirmation instead of refusing up
+  front, and confirming on a suspended host temporarily overwrites Suspended with a failed setup run.
+
+- [`trailing-tensorlake-rust-tests-summary-head-60-evicts-count.md`](trailing-tensorlake-rust-tests-summary-head-60-evicts-count.md)
+  — When a passing Tensorlake Rust shard emits 60 or more SKIPPED lines, head -60 evicts nextest's Summary line, causing
+  the runner to fail the passing shard and leave its sandbox retained.
+
+- [`trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md`](trailing-ssh-setup-existing-tensorlake-mutates-before-lock.md)
+  — Confirming an SSH-targeted setup plan on an existing Tensorlake host that became suspended can overwrite saved paths
+  and replace the suspended actor before taking the host lock or checking suspended state.
+
+- [`trailing-tensorlake-sandbox-tests-allocates-before-ledger.md`](trailing-tensorlake-sandbox-tests-allocates-before-ledger.md)
+  — An interruption or ledger write failure right after sandbox creation in the Tensorlake test harness can leave an
+  untracked worker sandbox running outside cleanup.
+
+- [`trailing-provisioning-service-omits-sealed-host-refusal.md`](trailing-provisioning-service-omits-sealed-host-refusal.md)
+  — While a sealed sandbox or container awaits deletion retry, direct Update or SSH-targeted setup probes are still
+  admitted instead of being refused.
+
+- [`trailing-plain-replace-and-restart-do-not-disable-suspend.md`](trailing-plain-replace-and-restart-do-not-disable-suspend.md)
+  — Unlike Replace with and Restart with, an in-flight plain Replace or Restart leaves Suspend enabled on that sandbox
+  or container host so suspending can interrupt the request.
+
+- [`trailing-suspend-silently-dropped-when-launch-starts-mid-check.md`](trailing-suspend-silently-dropped-when-launch-starts-mid-check.md)
+  — Clicking Suspend or Stop and suspend quietly does nothing without an error note if a launch on that host begins
+  while the pre-flight session activity read is in flight.
+
+- [`trailing-post-wake-disconnect-or-start-fail-reveals-silently.md`](trailing-post-wake-disconnect-or-start-fail-reveals-silently.md)
+  — If a waking host disconnects right as a post-wake checkout preview settles or launch start fails, the launcher can
+  reopen without any error alert explaining why nothing launched.
+
+- [`trailing-wake-drops-one-time-yolo-confirmation.md`](trailing-wake-drops-one-time-yolo-confirmation.md) — If a host
+  suspends while the launcher's YOLO confirmation is open, clicking Start YOLO session anyway wakes the host but forgets
+  the confirmation and re-asks YOLO once connected.
+
+- [`trailing-restart-with-wake-refusal-hardcodes-not-launched.md`](trailing-restart-with-wake-refusal-hardcodes-not-launched.md)
+  — When Restart with fails while waking a suspended or stopped host, the alert says Not launched instead of Restart
+  error, and Restart with wake is untested across launcher tests.
+
+- [`trailing-unverified-resumable-host-shows-checkout-allocation-notice.md`](trailing-unverified-resumable-host-shows-checkout-allocation-notice.md)
+  — On a suspended or stopped host without a verified identity, the managed-checkout Folder line promises automatic
+  folder allocation on wake even though Launch is refused as unverified.
+
+- [`trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md`](trailing-failed-post-wake-checkout-preview-omits-refusal-alert.md)
+  — When a post-wake checkout preview fails or is superseded, the reopened launcher omits the bordered Not launched
+  Role::Alert beside Launch (and shows no error at all when superseded).
+
+- [`trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md`](trailing-wake-folder-tests-omit-timeouts-removal-and-replace.md)
+  — The folder-wake test suite never asserts that the 60-second connection or busy-retry timeouts fire, that host
+  removal or retarget cancels wake, or that Replace with submits with its frozen delete guard.
+
+- [`trailing-wake-checkout-tests-omit-replace-with.md`](trailing-wake-checkout-tests-omit-replace-with.md) —
+  Managed-checkout wake tests cover only New mode and never test Replace with across wake, post-wake preview, Quick
+  Switcher failure release, or retained-recent Enter.
+
+- [`trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md`](trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md)
+  — Every wake-checkout test uses a verified suspended sandbox, leaving unverified resumable hosts and stopped Podman
+  containers uncovered.
+
+- [`trailing-claude-trust-empty-or-relative-home-edits-cwd.md`](trailing-claude-trust-empty-or-relative-home-edits-cwd.md)
+  — When a session runs with empty or relative HOME and no CLAUDE_CONFIG_DIR, Claude workspace-trust resolution bypasses
+  the home guard and edits .claude.json relative to the session working directory.
+
+- [`trailing-claude-trust-and-antigravity-missing-regression-tests.md`](trailing-claude-trust-and-antigravity-missing-regression-tests.md)
+  — No child-process test verifies the launch shim skips .claude.json in HOME, pins_approval_cwd has no direct unit
+  test, and trust-independence tests never turn Antigravity trust on.
+
+- [`trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md`](trailing-claude-trust-hint-shows-on-command-and-legacy-ordinary-dirs.md)
+  — When Claude asks about folder trust in a Command or legacy launch inside an ordinary folder, Farhelm shows the
+  Settings trust hint banner even though the Settings switch does not apply to those launches.
+
+- [`trailing-trust-band-keeps-undismissable-error-after-dismissal.md`](trailing-trust-band-keeps-undismissable-error-after-dismissal.md)
+  — After a failed or busy Don't show again click, dismissing the trust hint in Settings (or having the first click
+  succeed after a rapid second click) leaves a red Not saved alert stuck with no Close button.
+
+- [`trailing-pending-restart-scope-cleanups-sequential-starvation.md`](trailing-pending-restart-scope-cleanups-sequential-starvation.md)
+  — If multiple unconfirmed restart scope cleanups accumulate on Linux, wedged earlier entries can consume the 60-second
+  startup cleanup budget and prevent later cleanable scopes from being reaped.
+
+- [`trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md`](trailing-unwind-failed-host-relaunch-drops-pending-scope-cleanup.md)
+  — If a session row disappears during a failing restart whose replacement host started a scoped process, failing to
+  confirm scope teardown drops the pending cleanup obligation on the next supervisor start.
+
+- [`trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md`](trailing-pending-scope-cleanups-logs-invalid-session-id-unescaped.md)
+  — When discarding a malformed session ID from startup scope cleanup, the supervisor logs it with raw Display (%id)
+  instead of escaped Debug (?id), violating the session-ID logging rule.
+
+- [`trailing-interrupted-upload-empty-title-and-batch-title-drop.md`](trailing-interrupted-upload-empty-title-and-batch-title-drop.md)
+  — An interrupted upload in a session with an empty title renders 'to was', and batched interrupted uploads discard a
+  later upload's title if the first upload started before the session row loaded.
+
+- [`trailing-terminal-set-restore-blocks-carried-upload-interruptions.md`](trailing-terminal-set-restore-blocks-carried-upload-interruptions.md)
+  — After reconnecting with a remembered shell tab while the session row is omitted or delayed, the visible Agent
+  terminal never receives carried upload-interruption lines even after the user starts typing.
+
+- [`trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md`](trailing-overflowing-banner-stack-resets-to-oldest-after-reconnect.md)
+  — When an overflowing banner stack reconnects or takes back control and its newest notice was already drawn before
+  going inert, the stack resets to the top and hides the newest banner off the bottom.
+
+- [`trailing-later-codex-github-failure-hides-claude-cleanup-warning.md`](trailing-later-codex-github-failure-hides-claude-cleanup-warning.md)
+  — If legacy Claude settings cleanup fails on a host and a later Codex or GitHub credential step also fails, Farhelm
+  hides the Claude cleanup warning and reports the unrelated error for Claude replacements.
+
+- [`trailing-credential-delivery-test-stale-claude-settings-assertion.md`](trailing-credential-delivery-test-stale-claude-settings-assertion.md)
+  — The backend-failure delivery test still asserts .claude/settings.json is absent (always true now), leaving failed
+  agent-credentials and Codex config targets unverified before and after retry.
+
+- [`trailing-replace-with-existing-env-checkout-promises-trash.md`](trailing-replace-with-existing-env-checkout-promises-trash.md)
+  — In Replace with inside an existing sandbox or container, switching Destination to Managed checkout says the checkout
+  moves to trash on Delete even though deleting in an environment discards or destroys it permanently.
+
+- [`trailing-shifted-wide-wrap-spacer-drops-background.md`](trailing-shifted-wide-wrap-spacer-drops-background.md) —
+  Deleting characters on a colored terminal row that ended in a wrapped wide character drops the shifted padding cell's
+  background color and leaves a one-column gap.
+
+- [`trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md`](trailing-right-half-wide-erase-keeps-inverse-decoration-and-link.md)
+  — When a program erases only the right half of an inverted, underlined, struck-through, or hyperlinked wide character
+  with the same raw background, Farhelm keeps painting those attributes and link hit area across the erased column.
+
+- [`trailing-deleting-wide-spacer-swallows-shifted-space.md`](trailing-deleting-wide-spacer-swallows-shifted-space.md) —
+  Deleting only the right half of a wide character shifts a following space into its column and absorbs it into the wide
+  glyph, losing the space in copy and link detection.
+
+- [`trailing-left-half-wide-erase-drops-orphaned-background.md`](trailing-left-half-wide-erase-drops-orphaned-background.md)
+  — Erasing or deleting only the left half of a colored wide character leaves its surviving right cell painted in the
+  default background instead of its colored background.
+
+- [`trailing-host-scoped-trash-confirmation-stays-open-invisibly.md`](trailing-host-scoped-trash-confirmation-stays-open-invisibly.md)
+  — If a host leaves or empties while its 'Delete all on' confirmation is open in Trash, the invisible confirmation
+  keeps all other hosts' Delete/Retry buttons disabled and swallows the first Close or Escape.
+
+- [`trailing-mac-reboot-shell-discards-command-status-tag.md`](trailing-mac-reboot-shell-discards-command-status-tag.md)
+  — The manual macOS reboot test helper ignores the wrapped exit-status tag on SSH commands, so a lossy SSH server can
+  make a failed reboot look successful and stall for 30 minutes.
+
+- [`trailing-resolve-remote-status-clears-local-transport-signal.md`](trailing-resolve-remote-status-clears-local-transport-signal.md)
+  — If the local SSH or Podman client process is killed by a signal after stderr delivers the status record, Farhelm
+  discards the signal termination and can treat truncated stdout as exit 0.
+
+- [`trailing-podman-place-commands-lack-ssh-exit-status-wrapping.md`](trailing-podman-place-commands-lack-ssh-exit-status-wrapping.md)
+  — Podman commands over SSH trust raw SSH exit codes rather than status-tag wrapping, which would break container
+  builds and deletion checks on any Linux SSH server that loses exit codes; whether a supported Linux SSH server does so
+  remains unverified.
+
+- [`trailing-container-host-unanswered-embeds-raw-stderr.md`](trailing-container-host-unanswered-embeds-raw-stderr.md) —
+  When a verified container host command fails before the guard runs, Farhelm copies up to 64 KiB of uncropped,
+  unsanitized remote stderr directly into host status and HTTP errors.
+
+- [`trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md`](trailing-podman-refresh-settles-claims-with-stale-pre-probe-row.md)
+  — If Setup or Update updates a host's remote install paths while a container host check is running, the check settles
+  claims using the stale pre-probe row and can ignore an active installation identity refusal.
+
+- [`trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md`](trailing-podman-settle-claim-refuses-third-host-duplicate-transfer.md)
+  — When a stale unused container-host entry is refused as a duplicate of a third host, the verified owner of the
+  container machine cannot automatically take over the unused claim.
+
+- [`trailing-podman-probe-swallows-session-limit-on-identity-read.md`](trailing-podman-probe-swallows-session-limit-on-identity-read.md)
+  — Hitting SSH MaxSessions on the final machine-identity step of a container host check reports an unreadable identity
+  instead of naming the SSH session limit.
+
+- [`trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md`](trailing-podman-build-prepare-uses-runtime-seam-bypassing-admission.md)
+  — Later recipe build and preparation stages look up cached runtime capabilities instead of rechecking fresh admission,
+  allowing new helper containers to start on hosts with an ordinary identity refusal or stale probe.
+
+- [`trailing-claim-podman-place-retains-unused-claim-after-twin.md`](trailing-claim-podman-place-retains-unused-claim-after-twin.md)
+  — When an unused SSH host moves externally to a machine claimed by another host, Refresh refuses it as a twin but
+  keeps its old claim on disk, blocking a third entry for the vacated machine.
+
+- [`trailing-podman-leftovers-skip-place-identity-verification.md`](trailing-podman-leftovers-skip-place-identity-verification.md)
+  — If a claimed container host's SSH alias moves externally, deleting an unregistered leftover in Settings ->
+  Containers can falsely report success while leaving it running, and refreshing can hide all leftovers.
+
+- [`trailing-session-pane-stale-doc-on-helm-pushes.md`](trailing-session-pane-stale-doc-on-helm-pushes.md) — The
+  session_pane module comment still describes the pre-#4623 behavior where the helm withheld pushes while a command was
+  in flight.
+
+- [`trailing-trash-deleted-drops-removal-report-on-unordered-race.md`](trailing-trash-deleted-drops-removal-report-on-unordered-race.md)
+  — If an unordered Trash refresh fails or runs ahead of a Trash delete, the Trash button can drop the freeing-space
+  status or skip rechecking the listing after the delete settles.
+
+- [`trailing-suspend-read-activity-still-uses-ordered-lane.md`](trailing-suspend-read-activity-still-uses-ordered-lane.md)
+  — Primary Suspend and Stop and suspend actions still wait up to 20 seconds behind any slow host on the ordered channel
+  lane because their pre-flight session activity check was left on Lane::Ordered.
+
+- [`trailing-tailscale-setup-probe-exit-255-blames-socket-length.md`](trailing-tailscale-setup-probe-exit-255-blames-socket-length.md)
+  — On machines with a long username or state-directory path, a failed Tailscale SSH probe falsely reports that
+  state-directory socket length disables interactive SSH sign-in even though Tailscale puts its sockets under /tmp.
+
+- [`trailing-ensure-hosts-skips-tailscale-validation-for-registered.md`](trailing-ensure-hosts-skips-tailscale-validation-for-registered.md)
+  — An invalid Tailscale destination in --ensure-hosts is silently accepted when already registered and fails without
+  the entry index or Tailscale format guidance when new.
+
+- [`trailing-tailscale-destination-format-guidance-discarded.md`](trailing-tailscale-destination-format-guidance-discarded.md)
+  — Enabling Tailscale mode on an existing SSH host with a URI, port, or underscore alias reports it as 'not a usable
+  ssh destination' instead of showing the Tailscale format guidance.
+
+- [`trailing-tailscale-retarget-skips-ssh-route-lock.md`](trailing-tailscale-retarget-skips-ssh-route-lock.md) — Editing
+  a Tailscale host's destination races concurrent probes, sign-in prompts, and Podman checks—potentially deleting
+  known-hosts pins under active SSH, leaving old masters alive, or re-inserting the old destination.
+
+- [`trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md`](trailing-ssh-route-lock-leaks-cache-locks-on-delete-race.md)
+  — Removing an SSH host concurrently with a probe, sign-in preflight, or Podman check can re-insert an orphaned entry
+  into cache_locks for the lifetime of the helm.
+
+- [`trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md`](trailing-podman-leftovers-run-ssh-without-ssh-route-lock.md)
+  — Listing or deleting leftover containers on an unused SSH host races turning off Tailscale mode or removing the host,
+  risking failed SSH commands or orphaned Tailscale keys and ControlMasters.
+
+- [`trailing-probe-tailscale-mismatch-runs-before-new-entry-validation.md`](trailing-probe-tailscale-mismatch-runs-before-new-entry-validation.md)
+  — Probing an already-registered destination with the opposite Tailscale mode or probing a managed environment host
+  with Tailscale enabled asks to change Host settings instead of reporting AlreadyAdded or an invalid target.
+
+- [`trailing-add-host-tailscale-checkbox-evicts-focus.md`](trailing-add-host-tailscale-checkbox-evicts-focus.md) —
+  Pressing Enter on the Tailscale checkbox in Add host or receiving a background approval card during an agent host-add
+  request disables the checkbox and drops keyboard focus from it.
+
+- [`trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md`](trailing-host-settings-tailscale-switch-refusal-prefix-and-stuck-error.md)
+  — Toggling Tailscale in Host settings during a launch shows an unprefixed sentence fragment, stacks any earlier
+  failure above it, and leaves the launch refusal stuck even after an in-flight toggle succeeds.
+
+- [`trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md`](trailing-reply-and-outcome-debug-can-expose-ntfy-topic.md)
+  — Although ntfy::Settings omits Debug so diagnostics never include the ntfy topic, Reply and operations::Outcome
+  derive Debug over raw JSON response bodies that carry it (no production log call currently formats them).

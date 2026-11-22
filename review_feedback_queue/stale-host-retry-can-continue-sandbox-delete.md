@@ -26,3 +26,16 @@ Confidence: Unverified after investigation. The changed failed-seal publication 
 confirmed. The remaining premise is that the previous menu stays actionable across that particular transition.
 
 Provenance: trailing review d3e8a4e8-dfeb-4080-a7b4-080b9065a167, `terminal/l5`, `hostUpdates/l2`.
+
+Update at `66ad3aaa95ef03a2130e2d0194d58353912ae9da` (touched by `dfdef7da1653956bb4b48a74281f72d990863bba`): confirmed
+still present at `crates/gui/farhelm-gui/src/hosts/menu.rs:310-340` and
+`crates/gui/farhelm-gui/src/hosts/remedies.rs:180-186`. Neither Retry nor the sibling Re-run handler gates activation on
+`prompt::ActionFrame` / `when_shown`, so GPUI's dirty-frame redraw before Enter can activate a newly switched Retry item
+before presentation (contrasting with Adopt and Take over at `hosts/menu.rs:276-278`). Reviewer `g30/l5` suggested
+`high` (noting Retry could border `highest` if invoking `/retry-delete` from a "Try the connection again" click counts
+as unconfirmed machine destruction even though the helm already sealed the environment); reviewer `g05/f1` suggested
+`other`. The sibling Re-run live-state bug in the same menu (`hosts/menu.rs:417-447`) is tracked separately in
+`trailing-hosts-menu-rerun-reads-live-host-state.md`.
+
+Extended under run `34570dac-b635-4682-a942-3a3fc1728e12` as `g30-gui-refactors-approvals-hosts-prefs/l5`,
+`g05-triage-gui-templates-hosts/f1` (confidence: confirmed for live-state binding).
