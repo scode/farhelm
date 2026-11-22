@@ -460,6 +460,13 @@ impl Supervisor {
         initial_snapshot: Option<Vec<u8>>,
         setup_persistent_hooks: bool,
     ) -> Result<SpawnedInHost, HostSpawnFailure> {
+        // A corrupt file refuses before the launch spec is published.
+        // Only the terminal child receives these values.
+        let credentials = crate::recipe_credentials::RecipeCredentials::read(
+            &crate::recipe_credentials::host_file(&self.state_dir),
+        )
+        .await
+        .map_err(HostSpawnFailure::Spec)?;
         let PreparedLaunch {
             cwd,
             artifacts,
@@ -520,6 +527,7 @@ impl Supervisor {
                 left: HostLeft::Nothing,
             });
         }
+        credentials.inject(&mut env);
         let child = ChildSpec {
             argv: cmd.into_iter().map(OsString::from).collect(),
             cwd: PathBuf::from(&cwd),
