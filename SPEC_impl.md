@@ -3488,26 +3488,31 @@ checkout preview revision. Its write and the sparse dismissal patch publish ordi
 the configuration ordering funnel; dismissal uses the per-field preference queue and overlays a still-pending dismissal
 on fresh reads.
 
-Claude-specific file work lives in `agent_kind/claude/trust.rs`. After recording Ready, while still holding the
-preparation flock, the launch process resolves the canonical clone root and Claude's config from its login-shell
-environment. Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, with a nonempty legacy
+Claude-specific file work lives in `agent_kind/claude/trust.rs`. A structured Claude launch freezes its trust choice in
+`LaunchSelection.workspace_trust`. The supervisor derives a default-off `LaunchSpec.claude_workspace_trust` for the
+shim. The shim enters the final directory and uses the login shell's config environment before exec. Fresh checkout
+preparation with trust enabled makes the same edit under the preparation flock after recording Ready. That branch owns
+the archive cleanup record, including when the checkout first runs another agent.
+
+Claude 2.1.300 selects `$CLAUDE_CONFIG_DIR/.claude.json` or `~/.claude.json`, with a nonempty legacy
 `<config-dir>/.config.json` taking precedence (`<config-dir>` defaults to `~/.claude`). An empty unwritable legacy file
 also wins when the modern file is absent. Nonempty custom OAuth selects `.claude-custom-oauth.json`. An absent vendor
 file is left absent.
 
 The removal record stores the canonical file, selected lock alias, and canonical project key in the existing preparation
-record, durably before the edit. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink, so the
-integration shares that mkdir lock while replacing the canonical target and preserving the symlink. Launch and
-post-Delete edits retry contention for twelve seconds; startup cleanup tries the lock once without waiting. Neither
-steals a lock. The edit reads at most 16 MiB from a regular file under the lock, requires object-shaped
-configuration/projects/project, and changes only `hasTrustDialogAccepted`. A missing projects/project object is created
-for the opt-in. Removal deletes only that key, preserving even empty objects. A same-directory temporary file receives
-the original mode, is written and fsynced, renamed atomically, and followed by directory fsync. Publication refuses a
-replaced target/lock or a lock held for four seconds, leaving margin before Claude's ten-second stale-lock threshold.
-Temporary files and owned locks are cleaned on error. The advisory lock has the same accepted limit as Claude's own
-writers: a writer stalled past Claude's stale-lock threshold can publish an old snapshot after another writer takes
-over, losing an update in either direction. Claude's unlocked exit-save race and vendor format changes remain explicit
-limits too; none of these checks proves compatibility forever.
+record for fresh checkout preparation, durably before the edit. Later trust edits made as part of a Claude launch create
+no removal record. Claude 2.1.300 explicitly uses `<selected-config-path>.lock` even for a symlink, so the integration
+shares that mkdir lock while replacing the canonical target and preserving the symlink. Launch and post-Delete edits
+retry contention for twelve seconds; startup cleanup tries the lock once without waiting. Neither steals a lock. The
+edit reads at most 16 MiB from a regular file under the lock, requires object-shaped configuration/projects/project, and
+changes only `hasTrustDialogAccepted`. A missing projects/project object is created for the opt-in. Removal deletes only
+that key, preserving even empty objects. A same-directory temporary file receives the original mode, is written and
+fsynced, renamed atomically, and followed by directory fsync. Publication refuses a replaced target/lock or a lock held
+for four seconds, leaving margin before Claude's ten-second stale-lock threshold. Temporary files and owned locks are
+cleaned on error. The advisory lock has the same accepted limit as Claude's own writers: a writer stalled past Claude's
+stale-lock threshold can publish an old snapshot after another writer takes over, losing an update in either direction.
+Claude's unlocked exit-save race and vendor format changes remain explicit limits too; none of these checks proves
+compatibility forever.
 
 Confirmed archive or missing-source retirement schedules removal off the Delete reply path. The worker retains directory
 admission until it settles, preventing reuse while an old remover can still touch that path's key; terminal I/O and
@@ -3522,9 +3527,9 @@ leaves the record for a later startup, without a user-facing notice.
 `ClaudeReader::trust_prompt` refines only the captured question, its answer labels and dialog footer, excluding an
 ordinary input box. The flag starts false on reload or replacement, follows the sampled screen, and is shared by
 renames. Its transitions publish a sessions-changed hint. `SessionInfo.claude_trust_prompt` defaults false and omits
-false; listing and rename read the same sample cell. The UI visibility predicate also requires managed membership, the
-agent tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local ×
-lasts until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
+false. Listing and rename read the same sample cell. The hint requires the agent tab, a successfully read disabled
+setting, and neither dismissal. The band stays mounted while hidden so a local × lasts until the question actually
+leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
 Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings. Schema 93 adds
 `antigravity_trust` and its nullable hint dismissal alongside the existing per-agent preferences. Each switch defaults
@@ -3535,10 +3540,10 @@ overlays on fresh reads.
 
 The helm resolves these settings into an agent selection for any directory before compilation. The compiler remains pure
 so the YOLO guard can reproduce a launch exactly. A fresh checkout freezes the whole resolved launch in its existing
-create fingerprint. For an agent's Create, Spawn or Clone into an existing directory with Codex, Muse or Pi trust
-enabled, the helm asks the pinned target supervisor for the canonical directory. The card and dispatch use that same
-path so a symlink cannot redirect the trusted launch during the wait for Allow. Direct launches go through ordinary
-supervisor directory admission. Plain Restart and Replace keep the stored launch and its trust choice.
+create fingerprint. For an agent's Create, Spawn or Clone into an existing directory with Claude, Codex, Muse or Pi
+trust enabled, the helm asks the pinned target supervisor for the canonical directory. The card and dispatch use that
+same path so retargeting the original alias cannot redirect the launch during the wait for Allow. Direct launches go
+through ordinary supervisor directory admission. Plain Restart and Replace keep the stored launch and its trust choice.
 
 Protocol 55 adds the `membership_only` mode of `BrowseDirectory` and the required `managed_checkout` reply boolean. The
 focused mode skips child enumeration and the picker’s printable-label restriction. The supervisor canonicalizes the
@@ -8386,6 +8391,10 @@ or the terminal's host is known gone. An unreadable terminal and an exited agent
 keep it clear. A Restart reply describes the terminal published for the new run. The helm carries the value through its
 session cache and into the app's session row. Older cached rows omit it and decode as false until refreshed. Ignoring a
 positive report would cause the app to keep trying to attach, so this field requires a protocol bump.
+
+Protocol 84 makes the stored workspace-trust choice active for Claude launches. A supervisor needs to apply the
+best-effort settings edit in its launch shim. The hello rejects an older supervisor because it would accept the
+selection and start Claude without applying the choice.
 
 Outside the release commit a tag points at, that number is the fixed sentinel `0.0.0-unreleased`, and release commits
 never land on main. An untagged build therefore never claims to be a release: its version readout says so, and a

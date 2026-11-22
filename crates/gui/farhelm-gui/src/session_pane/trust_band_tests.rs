@@ -348,17 +348,14 @@ impl Trust<'_> {
 
 // ---- When it shows -------------------------------------------------------------------------------------------------
 
-/// SPEC.md: the band appears only "while Claude's trust question is visible in the agent terminal of a managed
-/// checkout, the setting is off, and the hint has not been dismissed", and "Failed settings reads never count as an off
-/// switch": advertising the opt-in over a folder the user chose, over a tab, or while trust is unknown would mislead.
-/// Specified (the old `hint_requires_current_managed_question_and_saved_opt_outs`): with every condition holding the
-/// band shows, and withdrawing any one of them hides it; the failure line needs the question, the checkout, the agent
-/// terminal and no ×, and shows while trust is unknown or the refused dismissal is unstored, but not while trust is on.
+/// A failed Settings read leaves trust unknown, so the band must keep the
+/// save error without advertising a switch whose state it cannot confirm.
+/// The agent tab and the current question gate both lines independently of
+/// the folder. Dismissal and the occurrence's × are separate choices.
 #[test]
 fn every_condition_withdraws_the_band_on_its_own() {
     let all = Facts {
         question: true,
-        eligible: true,
         agent_shown: true,
         trust: Some(false),
         dismissed: false,
@@ -367,9 +364,8 @@ fn every_condition_withdraws_the_band_on_its_own() {
     assert!(all.shows() && all.shows_failure(true) && !all.shows_failure(false));
     // Each withdrawn condition, and whether the failure line still shows without it.
     type Withdraw = fn(&mut Facts);
-    let withdrawn: [(Withdraw, bool); 7] = [
+    let withdrawn: [(Withdraw, bool); 6] = [
         (|facts| facts.question = false, false),
-        (|facts| facts.eligible = false, false),
         (|facts| facts.agent_shown = false, false),
         (|facts| facts.trust = Some(true), false),
         (|facts| facts.trust = None, true),
@@ -424,7 +420,7 @@ fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
     assert_eq!(
         test_support::label(trust.main.cx, COPY_ID).as_deref(),
         Some(
-            "Claude asks this for every new checkout. Farhelm can answer it for you, but it's off by default: \
+            "Claude asks this for every new folder. Farhelm can answer it for you, but it's off by default: \
              there's no supported way to do it, so Farhelm would have to edit Claude's own settings file, which \
              comes with caveats."
         )
@@ -436,27 +432,32 @@ fn the_band_reads_trust_then_shows_above_the_terminal_without_taking_focus(
     assert!(trust.reads().is_empty(), "one read");
 }
 
-/// The band belongs to Claude's question in a managed checkout's agent terminal only: a folder the user chose keeps
-/// Claude's question without an advertisement, and a shell tab is not where the question is. Specified: with `a`
-/// outside a managed checkout, no read is sent and no band shows; with `a` in one but a tab of its chosen, the band
-/// (trust known off) shows only once the agent terminal is chosen again.
+/// Claude shows the hint in ordinary folders. Selecting a shell tab hides
+/// the agent's question and its hint until the agent terminal returns.
 #[gpui::test]
-fn only_a_managed_checkouts_agent_terminal_shows_the_band(cx: &mut TestAppContext) {
-    let mut trust = open(cx);
+fn a_plain_folders_agent_terminal_shows_the_claude_band(cx: &mut TestAppContext) {
+    let agent = Agent {
+        asking: |key| claude_asking(key).unmanaged().not_launched_as_checkout(),
+        ..CLAUDE
+    };
+    let plain = (agent.asking)("a");
+    let row: SessionRow = serde_json::from_value(plain.entry().value).unwrap();
+    assert!(
+        row.info.working_copy.is_none(),
+        "premise: ordinary directory"
+    );
+    let mut trust = open_as(cx, agent);
     trust.shown();
-    trust.a_is(a().unmanaged());
-    assert!(!trust.shows());
-    assert!(trust.reads().is_empty(), "nothing to read for");
-
     push(
         &mut trust.main.helm,
         &["a", "b"],
-        &[(a(), 1)],
+        &[(plain, 1)],
         trust.main.cx,
     );
-    let read = trust.one_read();
-    trust.trust_is(read, false);
-    assert!(trust.shows(), "the premise: the agent terminal is chosen");
+    assert!(
+        trust.shows(),
+        "adding a tab leaves the current hint visible"
+    );
     click(trust.main.cx, "session-terminal-tab-tab-0");
     assert!(!trust.shows(), "not over a tab");
     click(trust.main.cx, AGENT_TAB_ID);

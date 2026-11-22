@@ -157,7 +157,7 @@ fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
         | LaunchHarness::Grok
         | LaunchHarness::Bash
         | LaunchHarness::Zsh => {
-            anyhow::bail!("this harness has no managed-checkout trust setting")
+            anyhow::bail!("this harness has no workspace-trust setting")
         }
     }
 }
@@ -189,7 +189,7 @@ fn agent_trust_state(
         | LaunchHarness::Grok
         | LaunchHarness::Bash
         | LaunchHarness::Zsh => {
-            anyhow::bail!("this harness has no managed-checkout trust setting")
+            anyhow::bail!("this harness has no workspace-trust setting")
         }
     };
     Ok(ClaudeTrustState {

@@ -1,5 +1,5 @@
-//! The trust hint band above the agent terminal offers Settings while a workspace-trust question is visible. Claude,
-//! Codex and Muse show it in managed checkouts. Antigravity also shows it in ordinary directories.
+//! The trust hint band above the agent terminal offers Settings while a recognized workspace-trust question is
+//! visible. Claude, Codex, Muse and Antigravity show it in any directory.
 //!
 //! SPEC.md, "Managed checkouts" (the paragraphs that start "While Claude's trust question is visible" and "Codex and
 //! Muse show the same nonmodal discovery hint"). Ported from the old app's `ClaudeTrustBand` (`claude_trust.rs`) and
@@ -8,9 +8,8 @@
 //! session view on 2026-11-14, and decided on 2026-11-16 that Codex's and Muse's are built as this one. Here's the TLDR
 //! of its rules:
 //!
-//! - **When it shows** ([`Facts::shows`]): the agent's question is on the open session's agent terminal in a directory
-//!   eligible for its trust setting, that trust is known off, its hint is not dismissed, and × has not hidden this
-//!   occurrence.
+//! - **When it shows** ([`Facts::shows`]): the open session's agent terminal shows the question, trust is known off,
+//!   the hint has not been dismissed, and × has not hidden this occurrence.
 //! - **Which agent asks** ([`TrustAgent::asking`]): Claude by its own flag, Codex, Muse and Antigravity by the harness-neutral flag
 //!   and the session's structured launch. The band shows one agent's note at a time and takes its read, its Settings
 //!   entry point, its dismissal and its words ([`TrustAgent::band_words`]) from that agent; it never branches on the
@@ -80,7 +79,6 @@ const RULE: f32 = 3.;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) struct Facts {
     pub(crate) question: bool,
-    pub(crate) eligible: bool,
     pub(crate) agent_shown: bool,
     pub(crate) trust: Option<bool>,
     pub(crate) dismissed: bool,
@@ -91,7 +89,6 @@ impl Facts {
     /// The explanation and its buttons: every condition holds, trust read as off (the old `show_hint`).
     pub(crate) fn shows(self) -> bool {
         self.question
-            && self.eligible
             && self.agent_shown
             && self.trust == Some(false)
             && !self.dismissed
@@ -102,24 +99,14 @@ impl Facts {
     /// up in its agent terminal and the occurrence is not hidden, unless trust is known to be on. An unknown trust keeps
     /// the line, without the explanation, which needs trust known off (the old `error_visible`).
     pub(crate) fn shows_failure(self, failed: bool) -> bool {
-        failed
-            && self.question
-            && self.eligible
-            && self.agent_shown
-            && !self.hidden
-            && self.trust != Some(true)
+        failed && self.question && self.agent_shown && !self.hidden && self.trust != Some(true)
     }
 }
 
-/// Read the asking agent's setting only for a reachable session in that
-/// agent's supported folder scope. A stale row carries its last known screen.
+/// Read the asking agent's setting only for a reachable session. A stale
+/// row carries its last known screen and cannot start a fresh read.
 fn at_question(row: &SessionRow) -> Option<TrustAgent> {
-    TrustAgent::asking(&row.info).filter(|&agent| eligible(agent, row) && !row.stale)
-}
-
-/// The same folder rule governs both the setting read and the painted hint.
-fn eligible(agent: TrustAgent, row: &SessionRow) -> bool {
-    !agent.managed_checkouts_only() || row.info.working_copy.is_some()
+    TrustAgent::asking(&row.info).filter(|_| !row.stale)
 }
 
 // ---- State ----------------------------------------------------------------------------------------------------------
@@ -358,7 +345,6 @@ pub(crate) fn draw(
     let known = state.known.read(cx);
     let facts = Facts {
         question: true,
-        eligible: eligible(agent, row),
         agent_shown,
         trust: known.and_then(|known| known.trust),
         dismissed: !settings::trust_hint_shown(agent, cx)

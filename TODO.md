@@ -141,11 +141,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
   costs in the app.
 
-- **Fix "answer trust dialog" for Claude Code.** fix "answer trust dialog" feature for claude code. confirmed to not
-  work in 0.39.0 for a plain folder. might just be that we only enabled the behavior for managed checkouts. either way
-  it's infuriatingly annoying. let's also test out codex while we're at it. Plan:
-  `plans/queue/agent-trust-every-folder.md`.
-
 - **Linux installation and updates for the desktop app.** The GPUI desktop app runs on Linux but has no install story:
   no package (tarball, .deb, AppImage or Flatpak not chosen), no desktop entry or icon install beyond what a build
   provides, and no auto-update (the updater runs only in the installed Mac app, so Linux shows no update UI). Decide the
@@ -241,11 +236,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
-
-- **Consider consistent workspace-trust scope across agents.** Antigravity's workspace-trust switch applies to all
-  launches (including plain folders), whereas Claude, Codex, Muse and Pi under Settings → Agent trust currently apply
-  only to managed checkouts. Decide whether to make the scope consistent across agents and under what conditions (see
-  also "Fix 'answer trust dialog' for Claude Code"). Plan: `plans/queue/agent-trust-every-folder.md`.
 
 - **Consolidate the helpers duplicated across Farhelm.** Work through the repeated helpers from the 2026-11-21 review.
   Reuse the existing shared module where one fits and keep each helper scoped to its actual callers. Locations below are

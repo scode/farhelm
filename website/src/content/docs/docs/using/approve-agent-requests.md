@@ -39,8 +39,8 @@ that matter:
   (the agent bypasses its safety checks). For a new
   [managed checkout](/docs/using/start-a-session/#start-from-a-managed-checkout), the card also names the repository it
   would clone, such as `GitHub: acme/web`, above the exact directory the clone would go into;
-- for a Codex, Muse or Pi launch or restart, the [workspace-trust choice](/docs/using/start-a-session/#workspace-trust)
-  Farhelm sends, when the launch includes one;
+- for a Claude, Codex, Muse or Pi launch or restart, the
+  [workspace-trust choice](/docs/using/start-a-session/#workspace-trust) Farhelm sends, when the launch includes one;
 - for a template change, the whole template as it would be saved, including any command line. If the agent changes its
   **⚡** mark or number key, the card shows the change and which other template loses the mark or key;
 - for a link, the site your browser would contact, above the full URL. Check the site: a URL can be written to look like

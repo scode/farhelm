@@ -3002,7 +3002,7 @@ mod workspace_trust_tests {
         for enabled in [false, true] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
                 keep_spare: true,
-                claude_trust: false,
+                claude_trust: enabled,
                 codex_trust: enabled,
                 muse_trust: enabled,
                 pi_trust: enabled,
@@ -3047,17 +3047,18 @@ mod workspace_trust_tests {
     /// one must not authorize another harness through a shared trust bit.
     #[test]
     fn workspace_trust_settings_remain_independent() {
-        for (enabled_harness, codex_trust, muse_trust, pi_trust) in [
-            (LaunchHarness::Codex, true, false, false),
-            (LaunchHarness::Muse, false, true, false),
-            (LaunchHarness::Pi, false, false, true),
+        for enabled_harness in [
+            LaunchHarness::Claude,
+            LaunchHarness::Codex,
+            LaunchHarness::Muse,
+            LaunchHarness::Pi,
         ] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
                 keep_spare: true,
-                claude_trust: true,
-                codex_trust,
-                muse_trust,
-                pi_trust,
+                claude_trust: enabled_harness == LaunchHarness::Claude,
+                codex_trust: enabled_harness == LaunchHarness::Codex,
+                muse_trust: enabled_harness == LaunchHarness::Muse,
+                pi_trust: enabled_harness == LaunchHarness::Pi,
                 antigravity_trust: false,
                 root: None,
                 post_clone: None,

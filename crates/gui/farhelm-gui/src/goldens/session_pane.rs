@@ -36,6 +36,19 @@ pub(super) fn flag_agent_trust_hints(_: &SceneState, _: &mut Window, cx: &mut Ap
         .into_any_element()
 }
 
+/// Claude's band points to the caveats for letting Farhelm edit its settings.
+pub(super) fn claude_trust_hint(state: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    div()
+        .w(px(740.))
+        .child(crate::session_pane::trust_band_golden(
+            crate::settings::TrustAgent::Claude,
+            "a",
+            &state.ring,
+            cx,
+        ))
+        .into_any_element()
+}
+
 /// The open session's details bar for every kind of status and host it draws differently, from a fake helm's snapshot:
 /// running on the local host (`Local (this machine)`, the red laptop), waiting on a remote that left its mark at the
 /// cloud, exited with a stop annotation, interrupted (the amber ended color), a launch failure whose long detail ends in

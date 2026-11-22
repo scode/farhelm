@@ -2899,8 +2899,8 @@ struct AgentCreateDispatch {
     /// What the target matches a keyed retry by; see
     /// [`LaunchEditsRequest::request_fingerprint`].
     request_fingerprint: Option<String>,
-    /// Destination ownership was read on this connection before approval.
-    /// A replacement connection cannot inherit its trust decision.
+    /// The destination connection used for launch composition and any trust
+    /// path check. Its replacement cannot inherit that approval.
     composition_incarnation: Option<u64>,
     agent_wrapper_supplied: bool,
     wrapper_approved: bool,
@@ -3826,7 +3826,7 @@ async fn template_listing(state: &AppState, caller_entry_uuid: &str) -> anyhow::
 ///
 /// Snapshotted by `sessions::mode_from_source`. Agent launches retain every
 /// historical word except the compiler-owned workspace-trust segment,
-/// which follows Settings and the target's managed-checkout ownership. The
+/// which follows the current setting for that agent. The
 /// original source passes the YOLO guard before that edit, so normalization
 /// cannot erase a forged command/selection mismatch. Command launches stay
 /// exact. A legacy source (created before launch kinds) is refused with a
@@ -12338,6 +12338,7 @@ mod tests {
     async fn inherited_spawn_normalizes_trust_before_approval_and_dispatch() {
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
         for harness in [
+            LaunchHarness::Claude,
             LaunchHarness::Codex,
             LaunchHarness::Muse,
             LaunchHarness::Pi,
