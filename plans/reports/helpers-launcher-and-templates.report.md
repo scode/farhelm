@@ -96,3 +96,64 @@ A fresh Sol reviewer checked each draft against its own base. Accepted findings 
 visibility and two comments. The final fixture review checked which event opens each dialog, what its subscription keeps
 alive, the session rows' timestamps and the TODO deletion. It found no issues. Each commit message and PR title passed a
 cold read.
+
+### Landing
+
+#### What landed with it
+
+The plan's eight PRs (#4607, #4608, #4611, #4615, #4616, #4618, #4620, #4621) landed second in this round, after the
+hosts and sessions helpers and before the host command status change. Since the plan was written, main had gained the
+terminal and controls helpers (landed in the previous round), which made the keypad digit lookup and the capitalizing of
+validation messages shared. Two of this plan's commits touched the same template files and conflicted with that only in
+which shared code those files load; the landing kept both sides, and the desktop window builds at each of those commits.
+Nothing else differs from what the plan delivered.
+
+TODO.md also conflicted in the "Consolidate the helpers duplicated across Farhelm" entry. The report says its last
+commit keeps the keypad lookup and the other helper work still listed there. By landing time the other three helper
+plans had landed and taken their items out of the entry, the keypad lookup included, so only this plan's three items
+were left, and its last commit now removes the whole entry instead of just its items.
+
+An independent reviewer read the plan line by line against its plan file and found nothing to fix: the launcher's and
+template switcher's refusals for a missing or unavailable template keep their wording and order, the YOLO chip and the
+effort search word read as before, and the reference screenshots that now share their setup draw what they drew before
+(the round's screenshot check confirms it).
+
+#### Fixes made while landing
+
+None beyond the TODO.md entry above.
+
+#### Checks
+
+The round landed two refactors of the desktop window's code and a change to how the helm learns whether a host setup
+command succeeded, so the landing ran the whole Rust workspace, the desktop app's tests, the lint runs, the end-to-end
+smoke test and every reference screenshot, once, on the three plans stacked together. The worker runs were on a separate
+arm64 Linux test worker with a systemd user manager and SSH to itself; the rest ran locally.
+
+On the three plans as delivered, rebased onto main and stacked:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `068b2cdd-019d-458c-8d42-853d8baa039b`): all 8342 passed, and none printed a runtime `SKIPPED`, so the tests that need
+  the systemd user manager, Podman or SSH ran rather than returning early. The 86 tests marked ignored (benchmarks and
+  opt-in real-host and real-Mac tests among them) did not run, as on every run.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (with and without `--features agent`), on the test worker: passed. Lints are not runtime tests, so they
+  have no recorder run.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `d7399edb-dd5b-4c27-bdff-c8afce3a87d9`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `dbfad242-d312-4bbc-8951-85c55a6a19f7`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `87d4fc87-f934-4921-977d-06508c7234bb`):
+  every reference screenshot matched.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot
+  comparison page's own tests), locally: passed.
+
+After the changelog fix on the host command status plan (#4629), which touches only a release-notes draft:
+`python3 releasing/check-changelog.py format` and `dprint check`, locally: passed. Everything above still applies.
+
+Skipped: macOS, since nothing in the round builds only on a Mac; for the host command status plan, a real Tailscale SSH
+Mac and the real Tensorlake gateway, which its report names as post-landing checks; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- Nothing beyond the TODO.md entry above.
