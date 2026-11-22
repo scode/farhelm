@@ -219,27 +219,72 @@ fn reopen_command(
     id: &str,
     seen_alive: Option<&Path>,
 ) -> std::process::Command {
-    let mut command = std::process::Command::new("/bin/sh");
+    let marker = format!("{REOPENED_ENV}={id}");
+    wait_then_open_bundle(
+        "farhelm-reopen",
+        pid,
+        bundle,
+        opener,
+        None,
+        seen_alive,
+        &[OsStr::new("--env"), OsStr::new(&marker)],
+    )
+}
+
+/// Both reopen paths wait for the old process to exit before asking Launch
+/// Services for a new instance. A bounded wait can give up while the old
+/// process is still alive. The caller supplies any extra opener arguments
+/// and configures its own process group and environment overrides.
+///
+/// `seen_alive` lets tests release their stand-in app after the helper has
+/// observed it alive. Paths and opener arguments stay separate through `exec`.
+pub(super) fn wait_then_open_bundle(
+    label: &str,
+    pid: u32,
+    bundle: &Path,
+    opener: &Path,
+    wait_tenths: Option<u32>,
+    seen_alive: Option<&Path>,
+    opener_args: &[&OsStr],
+) -> Command {
+    // The bounded updater's assignments used to reach its opener whenever the
+    // parent had already exported those shell names. Keep them on that path.
+    // The unbounded reopen continues to use only positional parameters.
+    const WAIT_AND_OPEN: &str = r#"if [ -n "$2" ]; then
+  pid="$1"; tenths="$2"; seen="$3"; app="$4"; opener="$5"; waited=0
+  shift 5
+  set -- "$pid" "$tenths" "$seen" "$opener" -n "$@" "$app"
+fi
+while kill -0 "$1" 2>/dev/null; do
+  [ -n "$3" ] && : > "$3"
+  [ -n "$2" ] && [ "$waited" -ge "$2" ] && exit 0
+  sleep 0.1
+  [ -n "$2" ] && waited=$((waited + 1))
+done
+shift 3
+exec "$@""#;
+
+    let mut command = Command::new("/bin/sh");
     command
-        .arg("-c")
-        .arg(
-            "while kill -0 \"$1\" 2>/dev/null; do \
-               if [ -n \"$6\" ]; then : >\"$6\"; fi; sleep 0.1; \
-             done; \
-             exec \"$2\" -n --env \"$3=$4\" \"$5\"",
-        )
-        .arg("farhelm-reopen")
+        .args(["-c", WAIT_AND_OPEN, label])
         .arg(pid.to_string())
-        .arg(opener)
-        .arg(REOPENED_ENV)
-        .arg(id)
-        .arg(bundle)
-        .arg(seen_alive.unwrap_or(Path::new("")))
-        .stdin(std::process::Stdio::null())
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null());
-    // As for Restart to update: the reopened app starts from this one's
-    // original PATH, not the login PATH this process switched to.
+        .arg(
+            wait_tenths
+                .map(|limit| limit.to_string())
+                .unwrap_or_default(),
+        )
+        .arg(seen_alive.unwrap_or(Path::new("")));
+    if wait_tenths.is_some() {
+        command.arg(bundle).arg(opener).args(opener_args);
+    } else {
+        command.arg(opener).arg("-n").args(opener_args).arg(bundle);
+    }
+    command
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null());
+    // The next instance resolves its own login PATH. Give it this instance's
+    // original PATH so startup files run against the same base each time.
     crate::restore_inherited_path(&mut command);
     command
 }

@@ -323,28 +323,6 @@ const RELAUNCH_OPENER: &str = "/usr/bin/open";
 /// is stuck makes the helper give up.
 const RELAUNCH_WAIT_TENTHS: u32 = 600;
 
-/// The helper's script: wait for the process `$1` to exit, bounded at `$4`
-/// tenths of a second, then run the opener `$3` on the bundle `$2` with
-/// `-n`, which asks for a new instance: macOS can briefly keep listing an
-/// app as running after its process has exited, and a plain `open` would
-/// then only try to bring that old instance forward. If the
-/// process is still there at the bound, give up without opening anything:
-/// opening a bundle whose app is still running only brings that app to the
-/// front, and an app that has not quit in a minute is not one to relaunch
-/// over.
-///
-/// `$5`, empty in the app, names a file the helper creates each time it has
-/// seen the process alive. It is the tests' readiness signal: they release
-/// their stand-in app only once the helper is provably waiting on it.
-const RELAUNCH_SCRIPT: &str = r#"pid="$1"; app="$2"; opener="$3"; tenths="$4"; seen="$5"; waited=0
-while kill -0 "$pid" 2>/dev/null; do
-  [ -n "$seen" ] && : > "$seen"
-  [ "$waited" -ge "$tenths" ] && exit 0
-  sleep 0.1
-  waited=$((waited + 1))
-done
-exec "$opener" -n "$app""#;
-
 /// Spawn the relaunch helper, detached in its own process group so the
 /// app's exit does not take it along, with every standard stream closed.
 ///
@@ -371,26 +349,20 @@ fn relaunch_command(
     wait_tenths: u32,
     seen_alive: Option<&Path>,
 ) -> Command {
-    let mut command = Command::new("/bin/sh");
+    let mut command = super::bundle::wait_then_open_bundle(
+        "farhelm-relaunch",
+        pid,
+        bundle,
+        opener,
+        Some(wait_tenths),
+        seen_alive,
+        &[],
+    );
     command
         .env_remove(LATEST_OVERRIDE_ENV)
         // A reopen marker this app started with is not the next instance's:
         // that one was opened by Restart to update, not by a reopen.
-        .env_remove(super::bundle::REOPENED_ENV)
-        .arg("-c")
-        .arg(RELAUNCH_SCRIPT)
-        .arg("farhelm-relaunch")
-        .arg(pid.to_string())
-        .arg(bundle)
-        .arg(opener)
-        .arg(wait_tenths.to_string())
-        .arg(seen_alive.unwrap_or(Path::new("")))
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null());
-    // The next instance looks up its own login PATH; it must start from this
-    // one's original PATH, not the login PATH this process switched to.
-    crate::restore_inherited_path(&mut command);
+        .env_remove(super::bundle::REOPENED_ENV);
     #[cfg(unix)]
     {
         use std::os::unix::process::CommandExt;
