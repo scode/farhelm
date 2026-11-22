@@ -80,3 +80,96 @@ corresponding hints can appear in ordinary folders while the question is visible
 Both PRs cleared the GPT-6.2 Sol high source gate after corrections to the tests, help and specs. The remaining cases
 are recorded above as follow-ups. Opus 5.5 high checked every changed scene in light and dark and found no design
 mismatch. Both commit messages passed a cold read.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs (#4567, #4572) landed second in this round, after the launch that resumes a suspended host, with a
+landing fix, #4583, followed by SQLite maintenance and the test worker's staging lock. Since the plan's work was
+written, main had gained the desktop app triage and the Tensorlake triage, which also changed the helm's agent requests
+and sessions; there was no conflict. The supervisor protocol goes from 83 to 84, the only bump in the round, and it
+covers the change.
+
+An independent reviewer read the stack against the plan's acceptance criteria and Decisions. It found no blocker, but
+one serious consequence, fixed below.
+
+#### Fixes made while landing
+
+All in [#4583](https://github.com/scode/farhelm/pull/4583/changes):
+
+- **Claude trust in the home directory.** With Claude's switch on, a launch now marks its directory trusted in Claude's
+  settings file in any directory, including the home directory, which the launcher falls back to and which agent
+  launches without a repository use. Claude treats a trusted directory as covering every directory inside it (the
+  executor's own check showed this), so one launch in the home directory would make Claude trust everything under it:
+  outside Farhelm too, and after the switch is turned off, since these edits keep no removal record. That goes well
+  beyond the accumulating entries you accepted. The landing narrowed your "every folder" decision only there: the
+  launch-time edit now skips the home directory and the filesystem root, prints a short note in the session's terminal,
+  and Claude asks its own question there. SPEC.md, the Claude docs page and the changelog fragment say so. This judgment
+  call is recorded in TODO.md's "Plan decisions to revisit"; the alternative was to apply it everywhere with a warning.
+- **Claude creates and reconnects.** Every agent request to start a Claude session now went through the approval step
+  that remembers which host connection checked the folder, even with the switch off, so a helm reconnect while the
+  approval card was open refused the request. The connection is now recorded only when the folder is checked.
+- **A broken test and a missing list entry.** The settings search test looked for a phrase the plan removed from
+  Claude's caution, which failed the workspace suite; five new trust screenshots were missing from the list of
+  screenshot scenes, which that list's own check fails on. Three SPEC.md sentences and several code comments still
+  described trust as limited to managed checkouts; they now describe any folder.
+
+#### Checks
+
+This round landed four plans stacked in this order on main: the launch that resumes a suspended host, agent trust in
+every folder (protocol 84), SQLite maintenance, and the test worker's staging lock. The checks ran on the combined
+result. The worker runs used this round's own test worker harness, so they exercised it too; they ran on a separate
+arm64 Linux test worker, and the rest ran locally on x86_64.
+
+On the four plans as delivered, stacked onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `fa0b5b85-0c85-4685-a517-30a4dc406bf9`): 8304 of 8308 passed. Two failures were the
+  worker running out of disk during the run (helm provisioning over SSH and the real Podman environment test, both "no
+  space left on device"); the other two were the GUI tests the trust and wake plans' landing fixes correct.
+- The four clippy runs (`--all-targets`, `-p farhelm --bins`, and the desktop app with and without `--features agent`),
+  on the test worker, not through the recorder: two errors, which the wake plan's landing fix corrects.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `99f4ecdb-f251-4c4c-bdcb-84747ee38556`): all
+  184 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `0b374828-a0ef-49ad-9af6-966eeace3dad`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `dbe2bda8-bda8-4af3-b9b6-ffc64f569658`):
+  passed.
+- `python3 -B scripts/test-worker/test-test-worker.py`, the worker harness's own tests against a local SSH stand-in,
+  locally (recorder run `f6f57fc8-5f99-4ac8-8038-9994d9ce98de`): all 9 tests passed (the report counts eight scenarios);
+  `shellcheck -x` on the harness scripts and `python3 -m py_compile` on its Python files: passed.
+- The docs website build (`bun install --frozen-lockfile && bun run build`), `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+After the landing fixes (#4582, #4583, #4584):
+
+- `cargo nextest run --workspace --exclude farhelm-desktop` again, on the test worker with free disk (recorder run
+  `442411a7-47a3-448c-be2c-fb6e4582df74`): all 8309 passed, among them the two tests the full disk had failed, the two
+  corrected GUI tests and the new home-directory test.
+- The four clippy runs, on the test worker: passed.
+- `python3 -B scripts/test-gui-screenshot-batch.py` (which would have failed before #4583 added five trust screenshots
+  missing from the screenshot list), the docs website build, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py`, `dprint check`, `python3 releasing/check-changelog.py format` and
+  `python3 scripts/check-agents-md.py`, locally: passed.
+
+The first runs' desktop, smoke, golden and harness results still apply. The fixes change no desktop-app or harness code
+and nothing that draws: in the GUI library a removed `&`, a type alias, comments and tests; in the helm and the
+supervisor only Claude agent requests and Claude trust launches, which the smoke test's stand-in agents never make.
+
+Skipped: a launch onto a real suspended Tensorlake sandbox or stopped container, and a real Claude launch with trust on,
+which spend cloud resources or vendor turns; macOS, since no Mac was part of this landing; CI, which runs only on
+demand.
+
+#### Things you should know that the report does not say
+
+- The Settings caution box does not mention the home-directory exception; changing its text would have meant
+  re-rendering that screen's reference pictures. SPEC.md, the docs page and the release note do.
+- Agent environment launches without a repository start in the sandbox's home directory, so with the switch on Claude
+  now asks there instead of being answered for.
+- Codex, Muse and Pi are not exposed the same way: their trust is passed per launch and stores nothing.
+- Claude's trust hint now appears over Command-tab Claude sessions in any folder, offering a switch that never applies
+  to Command launches.
+- No test checks that a session's first launch and its Restart both carry the new Claude trust setting from the saved
+  launch.
