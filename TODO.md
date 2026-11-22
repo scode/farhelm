@@ -681,6 +681,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Deflake
 
+- **Wait for the terminal-host helper to restore stdout in the descendant PTY test.**
+  `the_exit_is_reported_while_a_descendant_holds_the_pty` in `crates/terminal-host/tests/host_lifecycle.rs` failed in
+  the v0.44.1 Linux release gate when it sampled stdout during the helper's readiness FIFO write. Failure evidence
+  `0363fbf7-7a8f-4f6d-b2cb-b627e371d917`. The isolated retry `f1492329-18dc-4d14-a6c6-6610282d20f5` and hosted retry job
+  `137328954707` passed the test. The fixture should make the descriptor restoration observable before asserting that
+  the descendant still owns a PTY.
+
 ### Difficult deflake
 
 ## Broken tests

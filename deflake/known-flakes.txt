@@ -8,3 +8,5 @@
 # remove this line in the same PR. See deflake/SPEC.md.
 #
 # Seeded on 2026-09-12 from the TODO.md Deflake bucket as it stood then.
+
+nextest terminal-host::host_lifecycle the_exit_is_reported_while_a_descendant_holds_the_pty  # descendant-pty-restore-stdout
