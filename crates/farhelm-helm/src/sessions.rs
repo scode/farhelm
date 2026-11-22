@@ -2223,6 +2223,7 @@ async fn do_create_session_with_environment(
         session,
         CreateAcceptance {
             environment_target,
+            origin,
             github_repo: github_checkout.map(|checkout| checkout.repo),
             requested_cwd,
             accept_result,
@@ -2238,6 +2239,8 @@ async fn do_create_session_with_environment(
 struct CreateAcceptance {
     /// Only protected launch admission supplies this; SessionInfo cannot.
     environment_target: Option<farhelm_proto::LaunchTarget>,
+    /// An agent-created environment can be cached, but cannot teach GUI launch defaults.
+    origin: CreateOrigin,
     /// Trusted request intent, retained across lookup-only reconciliation.
     /// SessionInfo's descriptive repo field cannot establish this authority.
     github_repo: Option<farhelm_proto::GithubRepo>,
@@ -2300,11 +2303,15 @@ async fn record_created_history(
 ) -> anyhow::Result<bool> {
     let CreateAcceptance {
         environment_target,
+        origin,
         github_repo,
         requested_cwd,
         explicit_selection,
         ..
     } = acceptance;
+    if environment_target.is_some() && origin != CreateOrigin::User {
+        return Ok(false);
+    }
     // A fresh request's cwd is not its accepted destination: the target
     // allocated that path. Keep the actual path for diagnostics while repo
     // intent, independently captured from the request, controls reuse.
@@ -2566,6 +2573,7 @@ async fn create_fresh_session_resolved(
     let preview_incarnation = accepted_checkout_preview(checkout, claim)?.incarnation;
     let acceptance = CreateAcceptance {
         environment_target: req.environment_target.clone(),
+        origin,
         github_repo: Some(farhelm_proto::parse_github_repo(&checkout.repo)?),
         requested_cwd: req.cwd.clone(),
         accept_result,

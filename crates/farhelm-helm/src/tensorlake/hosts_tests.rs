@@ -101,6 +101,8 @@ struct FakeState {
     /// Park resource acquisition before it owns a lease, to prove a hold
     /// cancels a late recipe read rather than starting forwards afterwards.
     connected_gate: Option<Arc<Gate>>,
+    /// Hold the actor's status read after Suspend independently of the confirming API poll.
+    suspended_status_gate: Option<Arc<Gate>>,
 }
 
 /// A pause point inside a fake call: the call notifies `entered`, then waits
@@ -194,7 +196,15 @@ impl EnvironmentProvider for FakeApi {
         };
         let sandbox = &binding.sandbox;
         match self.get_sandbox(&ApiKey::new(KEY.into()), sandbox).await {
-            Ok(info) => Ok(environment_status(sandbox, info.status, info.error_details)),
+            Ok(info) => {
+                let gate = self.0.lock().unwrap().suspended_status_gate.take();
+                if let Some(gate) = gate {
+                    assert_eq!(info.status, SandboxStatus::Suspended);
+                    gate.entered.notify_one();
+                    gate.release.notified().await;
+                }
+                Ok(environment_status(sandbox, info.status, info.error_details))
+            }
             Err(TensorlakeError::NotFound { .. }) => Ok(missing(sandbox)),
             Err(error) => Err(unanswered(error.to_string())),
         }
@@ -1862,10 +1872,28 @@ async fn lifecycle_suspend_resume_preserves_the_host_and_is_idempotent() {
         .set_tensorlake_suspended_at(host, Some(1))
         .await
         .unwrap();
+    let gate = Arc::new(Gate::default());
+    api.0.lock().unwrap().suspended_status_gate = Some(gate.clone());
     let mut suspended_at = None;
-    for _ in 0..2 {
+    for attempt in 0..2 {
         let (status, body) = lifecycle_host(&harness, host, "suspend").await;
         assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        if attempt == 0 {
+            tokio::time::timeout(Duration::from_secs(2), gate.entered.notified())
+                .await
+                .unwrap_or_else(|_| {
+                    panic!(
+                        "post-Suspend status check never entered: state {:?}, provider calls {:?}",
+                        harness.manager.state(host),
+                        api.calls()
+                    )
+                });
+            assert!(matches!(
+                harness.manager.state(host),
+                Some(HostState::Suspended { .. })
+            ));
+            gate.release.notify_one();
+        }
         let at = row(&harness.store, host)
             .await
             .tensorlake
@@ -2584,7 +2612,7 @@ fn spawn_stop_and_suspend(
 /// The exact 504 text Stop and suspend answers with when it is still running
 /// at the host reply bound, whichever half is running then.
 const STOP_AND_SUSPEND_CARRIES_ON: &str = "Stop and suspend did not finish within 20 seconds; it \
-     carries on, suspending the environment only once the agent has stopped cleanly, and the \
+     carries on, suspending the environment only once Stop has finished cleanly, and the \
      session list will show the result";
 
 /// Wait for a Stop and suspend reply at the host reply bound: it must come
@@ -2727,7 +2755,7 @@ async fn stop_and_suspend_never_suspends_before_its_stop_finishes() {
         (status, body.as_str()),
         (
             axum::http::StatusCode::CONFLICT,
-            "The agent stopped, but cleanup was incomplete; the environment was not suspended: \
+            "The session stopped. Cleanup was incomplete, so Farhelm skipped suspension: \
              terminal tab t1 could not be closed"
         )
     );

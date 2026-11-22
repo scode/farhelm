@@ -394,6 +394,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Show Stop and suspend's continuing work and actual timeout failures.** The desktop drops every 504 from this
+  command. A reply from the helm's 20-second bound means the operation is still running. Add a helm-only typed marker to
+  that reply and show its program-neutral explanation in the session row and header, including while Stop runs before
+  the host phase changes. A supervisor's own 504 has no continuation marker and must show as a failure. Cover both
+  responses, and keep the other host and environment operations' reply handling separate from this fix.
+
 - **Keep Tensorlake Suspend and Resume tied to the sandbox Farhelm created.** A failed setup can leave a sandbox name
   reserved before Farhelm sends Create. Refuse Suspend and Resume when the host has neither a saved sandbox ID nor an
   outstanding create. An outstanding create permits a name lookup. Save the resolved ID and clear the outstanding marker

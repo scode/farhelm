@@ -142,9 +142,6 @@ consequences.
 - [`worker-allocation-precedes-ownership-ledger.md`](worker-allocation-precedes-ownership-ledger.md) — A created worker
   can fall outside cleanup when ledger writing fails or remote creation succeeds before the local request times out.
 
-- [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
-  suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
-
 - [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
   suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The
   resulting failing scheduler ordering remains unverified after investigation.
@@ -172,10 +169,6 @@ consequences.
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-environment-history-admits-agent-origin.md`](trailing-environment-history-admits-agent-origin.md) — Agent
-  environment launches enter GUI place-default and recent-history bookkeeping. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-sealed-delete-comment-hold-versus-seal-record.md`](trailing-sealed-delete-comment-hold-versus-seal-record.md)
   — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
@@ -191,13 +184,6 @@ consequences.
 - [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`stop-and-suspend-hides-timeout-reason.md`](stop-and-suspend-hides-timeout-reason.md) — When Stop and suspend exceeds
-  its reply deadline, Farhelm can leave you without the explanation that it is still working or that Stop already
-  failed.
-
-- [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
-  failure can say an agent stopped after stopping Bash or Zsh.
 
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
   the Templates leave question as inline, although the app centers it.

@@ -517,10 +517,10 @@ pub(super) async fn delete_whole_environment(
 /// before. At the bound the reply is [`stop_and_suspend_carries_on`]'s 504
 /// while both halves carry on in order on a task of their own. That reply
 /// cannot know which half is running, so it promises only the order: the
-/// environment is suspended once the agent has stopped cleanly. A partial
+/// environment is suspended once Stop has finished cleanly. A partial
 /// outcome stays truthful because nothing claims more: a Stop that fails or
 /// leaves cleanup undone after the reply leaves the environment running, with
-/// the reason only in the helm's log, and the session list shows the agent's
+/// the reason only in the helm's log, and the session list shows the session's
 /// state and its host's as they are. Decided by the migration's orchestrator
 /// on 2026-11-15 together with the host's Suspend and Resume
 /// (`crate::tensorlake::lifecycle::suspend`), whose outcome likewise lands in
@@ -547,7 +547,7 @@ pub(crate) async fn stop_and_suspend(
 fn stop_and_suspend_carries_on() -> String {
     format!(
         "Stop and suspend did not finish within {} seconds; it carries on, suspending the \
-         environment only once the agent has stopped cleanly, and the session list will show the \
+         environment only once Stop has finished cleanly, and the session list will show the \
          result",
         HOST_REPLY_BOUND.as_secs()
     )
@@ -581,12 +581,12 @@ async fn stop_then_suspend(
         return Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::Conflict,
             format!(
-                "The agent stopped, but cleanup was incomplete; the environment was not suspended: \
+                "The session stopped. Cleanup was incomplete, so Farhelm skipped suspension: \
                  {notice}"
             ),
         )));
     }
     crate::environment::lifecycle::change(state, key.host, false)
         .await
-        .context("The agent stopped, but the environment was not suspended")
+        .context("The session stopped. Farhelm could not suspend the environment")
 }

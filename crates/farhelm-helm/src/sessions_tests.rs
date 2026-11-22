@@ -23,6 +23,7 @@ mod captured_create_history {
     /// These represent the trusted composer intent, never a peer's echoed launch.
     fn intent(recipe: &str, place: store::HostId, yolo: bool) -> CreateAcceptance {
         CreateAcceptance {
+            origin: super::super::CreateOrigin::User,
             environment_target: Some(LaunchTarget::Environment {
                 recipe: recipe.into(),
                 place: Place::PodmanHost(place),
@@ -80,6 +81,67 @@ mod captured_create_history {
             })
             .await
             .unwrap()
+    }
+
+    /// Accept an agent's environment session without letting it teach the
+    /// GUI a recipe, container host, folder or launch setting.
+    #[farhelm_testtrace::test]
+    async fn an_agent_environment_create_updates_the_cache_without_teaching_history() {
+        let h = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                identity: Some("launch-history-install".into()),
+                ..Default::default()
+            })
+            .await
+            .start()
+            .await;
+        let host = rest_harness::local_id(&h.store).await;
+        h.await_refreshed(host).await;
+        let (claim, _) = create_target(&h.state, Some(host)).unwrap();
+        let before = snapshot(&h).await;
+        let agent = CreateAcceptance {
+            origin: super::super::CreateOrigin::Agent {
+                agent_wrapper_supplied: false,
+                wrapper_approved: false,
+            },
+            explicit_selection: None,
+            ..intent("agent-recipe", host, false)
+        };
+        let session = rest_harness::session("agent-created", 100);
+        accept_created_session(&h.state, &claim, session, agent)
+            .await
+            .unwrap();
+        assert!(
+            h.store
+                .has_cached_session(&store::SessionKey::new(host, "agent-created"))
+                .await
+                .unwrap()
+        );
+        assert_eq!(snapshot(&h).await, before);
+
+        let session = rest_harness::session("user-created", 101);
+        let raw_user = CreateAcceptance {
+            explicit_selection: None,
+            ..intent("user-recipe", host, false)
+        };
+        assert!(
+            record_created_history(&h.state, &claim, &session, raw_user)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            h.store.preferences().await.unwrap().last_container_host,
+            Some(host)
+        );
+        assert!(
+            h.store
+                .environment_launch_history()
+                .await
+                .unwrap()
+                .is_empty(),
+            "raw commands teach a place without adding a reusable setup"
+        );
     }
 
     /// Drive the actual adoption boundary, including its newly published claim.
@@ -9267,6 +9329,7 @@ async fn a_create_with_another_entries_suffix_returns_its_own_prefix() {
                 reply,
                 CreateAcceptance {
                     environment_target: None,
+                    origin: super::CreateOrigin::User,
                     github_repo: None,
                     requested_cwd: "/work".into(),
                     accept_result: None,

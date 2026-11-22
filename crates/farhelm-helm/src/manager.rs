@@ -4503,8 +4503,16 @@ impl HostActor {
         // below has dialed at least once (the immediate attempt has no wait
         // in front of it), so it is never zero on return.
         let mut number = 0;
+        // Keep the state published by Suspend visible through the first provider recheck.
+        let confirmed_suspend = matches!(
+            self.status.borrow().state,
+            HostState::Suspended {
+                suspended_by_farhelm_at: Some(_),
+                ..
+            }
+        );
         for attempt in 0..=ladder.len() as u32 {
-            if active {
+            if active && (!confirmed_suspend || attempt > 0) {
                 self.publish_refresh(
                     HostState::Connecting {
                         attempt,
@@ -4855,7 +4863,32 @@ impl HostActor {
             Ok(provider) => provider.status(&binding).await,
             Err(reason) => Err(reason),
         };
-        match environment_gate(observed, binding.provider().when_status_unanswered()) {
+        let gate = environment_gate(observed, binding.provider().when_status_unanswered());
+        if progress.active
+            && matches!(gate, EnvironmentGate::Dial { .. })
+            && matches!(
+                self.status.borrow().state,
+                HostState::Suspended {
+                    suspended_by_farhelm_at: Some(_),
+                    ..
+                }
+            )
+        {
+            // The provider check ended the quiet part of this attempt. Give an actual dial its ordinary progress.
+            self.publish_refresh(
+                HostState::Connecting {
+                    attempt: 0,
+                    stage: progress.stage,
+                    last_error: None,
+                },
+                None,
+                LiveSessions::Clear,
+                None,
+                PublishGuard::WhileIncarnation(progress.incarnation),
+                0,
+            );
+        }
+        match gate {
             EnvironmentGate::Dial { unanswered: None } => {
                 self.record_running();
                 self.dial(row, progress).await

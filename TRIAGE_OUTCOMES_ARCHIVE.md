@@ -37480,3 +37480,79 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: `surpwxrxqpurlyxszxwzklktyntmqmzu`, `plan/triage-tensorlake/03-add-host-and-setup`,
   [draft PR](https://github.com/scode/farhelm/pull/4549/changes). Fixed as decided.
+
+## trailing-environment-history-admits-agent-origin.md
+
+- Outcome: `fix code`.
+- Assessment: record_created_history (sessions.rs:2284-2345) passes `environment_target` into history without checking
+  origin. tensorlake_add.rs:347 attaches the target for every caller, agent ones included. environment_history.rs:82-99
+  writes `last_container_host` and evicts old rows from the shared window. `origin` is available in
+  do_create_session_with_environment (sessions.rs:2096 onward). Basis: SPEC.md:5528-5532: "Only what the user explicitly
+  selects in the GUI may affect the GUI's future defaults and suggestions ... anything an agent creates do not qualify".
+  Fix: drop `environment_target` from the bookkeeping acceptance when the origin is Agent.
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: `zmtkoxttvlnxrxlxsoozwyoyzorskuru`, `plan/triage-tensorlake/04-suspend-feedback-and-history`,
+  [draft PR](https://github.com/scode/farhelm/pull/4554/changes). Fixed as decided.
+
+## shell-stop-suspend-error-names-agent.md
+
+- Outcome: `fix code`.
+- Assessment: If Stop and suspend partly fails on a shell (or command) session, the error says "The agent stopped, but …
+  the environment was not suspended". Verified: farhelm-helm sessions/sandbox.rs:584 and :591 have fixed agent wording.
+  The helm does not know the program at that point.
+- Decision: Q2, the maintainer picked "Yes, as a spec principle". (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix the surface (or add the test) as the Assessment describes, following the shell-naming
+  principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
+  changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
+  and its index entry.
+- Execution: `zmtkoxttvlnxrxlxsoozwyoyzorskuru`, `plan/triage-tensorlake/04-suspend-feedback-and-history`,
+  [draft PR](https://github.com/scode/farhelm/pull/4554/changes). Fixed as decided.
+
+## successful-suspend-flashes-connecting.md
+
+- Outcome: `fix code`.
+- Assessment: After a sandbox host is confirmed Suspended, its row can briefly show Connecting before it settles back to
+  Suspended. The landed tensorlake-ui-fixes plan report records seeing this flash. Verified: The mechanism is still
+  present. `environment/lifecycle.rs` `perform` releases the hold without a fresh window, the actor keeps its `active`
+  flag, and `manager.rs` `connect_phase` publishes `Connecting` before the status check returns Suspended. The trigger
+  is ordinary (Suspend on a connected host), so it is not rare and the rare-glitch filter does not apply.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code, small (skip publishing Connecting for the first probe after a
+  confirmed Suspend). If the fix turns out not to be straightforward, or needs significant additional complexity, stop
+  and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and docs, not counting this
+  ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the item back to the
+  maintainer. Remove the feedback file and its index entry.
+- Execution: `zmtkoxttvlnxrxlxsoozwyoyzorskuru`, `plan/triage-tensorlake/04-suspend-feedback-and-history`,
+  [draft PR](https://github.com/scode/farhelm/pull/4554/changes). Fixed as decided.
+
+## stop-and-suspend-hides-timeout-reason.md
+
+- Outcome: `fix code`.
+- Assessment: When Stop and suspend on a sandbox session runs past 20 s, the user gets no "it carries on" message. If
+  the Stop itself fails with a timeout, that failure is not shown either. Verified: the GUI deliberately drops every 504
+  (`session_list/environment.rs:104-110, 667-681`). Its comment admits a supervisor's own 504 failure is dropped too:
+  "the helm marks neither". SPEC.md ~1664-1665: "If the two have not finished within 20 seconds, the answer says the
+  action carries on and suspends the sandbox only once the agent has stopped cleanly".
+- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Mark "carries on"
+  replies" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we definitely need
+  to batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance
+  of them running concurrently."
+- Completion criteria: Add a typed carries-on marker to the helm's bounded reply (an additive protocol field is
+  accepted) so the GUI shows SPEC's "the action carries on" explanation for Stop and suspend and still shows real
+  timeout failures. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: `zmtkoxttvlnxrxlxsoozwyoyzorskuru`, `plan/triage-tensorlake/04-suspend-feedback-and-history`,
+  [draft PR](https://github.com/scode/farhelm/pull/4554/changes). Deferred in full to the Plan follow-up TODO “Show Stop
+  and suspend's continuing work and actual timeout failures.” The typed channel signal, operation notice, two timeout
+  cases and visual coverage together exceeded the size gate.
