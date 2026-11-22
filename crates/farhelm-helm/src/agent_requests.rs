@@ -18399,9 +18399,10 @@ mod tests {
                 status.client.is_none(),
                 "nothing is routed to a sealed supervisor"
             );
-            // The host-level Delete stays available, and its own failure must
-            // not release the host: that would reconnect to the sealed Farhelm
-            // and lose the deletion Retry.
+            // The host-level Delete stays available. If destruction fails,
+            // the connection hold is released. The seal record keeps the
+            // failure and its Retry visible and blocks routing even if the
+            // actor reconnects to the sealed supervisor.
             let (status, text) = host_delete(&h, owned).await;
             assert!(
                 !status.is_success(),

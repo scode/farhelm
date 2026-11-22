@@ -1,32 +1,5 @@
 # Triage outcomes
 
-## trailing-sealed-delete-comment-hold-versus-seal-record.md
-
-- Outcome: `fix code`.
-- Assessment: None. A test comment says a failed host-level Delete must not release the host's connection hold.
-  Production deliberately releases it, and the seal record keeps the failure. Verified: The comment is still at
-  agent_requests.rs:18299-18301. hosts.rs:1377-1381 releases the hold on provider error.
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md
-
-- Outcome: `fix code`.
-- Assessment: None. The protocol doc for the Suspended host state still describes only Tensorlake, although paused
-  containers use it too. Verified: farhelm-proto/src/ui_channel.rs:1077-1084 still reads "A Tensorlake host whose
-  sandbox Tensorlake reports suspended". The user-facing refusal is already fixed (see
-  trailing-shared-suspended-refusal-retains-tensorlake-noun.md).
-- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
-  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
-  separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
-  Assessment describes. No behavior change. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
 ## browser-shard-failure-sweeps-running-siblings.md
 
 - Outcome: `other`.
