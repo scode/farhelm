@@ -35,7 +35,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Codex migration recorded as a Plan follow-up. The executor found that Codex 0.171.0 launch overrides cannot keep a
   leftover settings bearer away from a tokenless endpoint: leaving the token out keeps the stale bearer, and an empty
   one sends an empty Authorization header. The alternative was to widen the plan to find and verify a way to isolate
-  Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working.
+  Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working. Plan:
+  `plans/queue/codex-recipe-credentials-at-launch.md`.
 
 - **Revisit skipping Claude trust in the home directory and root.** On 2026-11-22 the landing monitor, landing
   `agent-trust-every-folder` (fix #4583), narrowed the maintainer's "every folder" decision for Claude only: with
@@ -43,7 +44,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings file, prints a note, and leaves Claude to ask. Claude treats a trusted directory as covering every directory
   inside it, so trusting home would trust everything under it, outside Farhelm and after the switch is off, with no
   removal record. The alternative was to apply the edit in every folder as decided, with a caveat in Settings and the
-  release note.
+  release note. Plan: `plans/queue/claude-trust-home-dir-policy.md`.
 
 ## Near term
 
@@ -263,7 +264,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   command. A reply from the helm's 20-second bound means the operation is still running. Add a helm-only typed marker to
   that reply and show its program-neutral explanation in the session row and header, including while Stop runs before
   the host phase changes. A supervisor's own 504 has no continuation marker and must show as a failure. Cover both
-  responses, and keep the other host and environment operations' reply handling separate from this fix.
+  responses, and keep the other host and environment operations' reply handling separate from this fix. Plan:
+  `plans/queue/stop-and-suspend-timeout-feedback.md`.
 
 - **Keep Tensorlake Suspend and Resume tied to the sandbox Farhelm created.** A failed setup can leave a sandbox name
   reserved before Farhelm sends Create. Refuse Suspend and Resume when the host has neither a saved sandbox ID nor an
@@ -271,7 +273,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   together before sending any mutation, then use the ID for status polls and retries. Keep the existing provider
   deadline across the lookup and mutation. Let the local write finish under the host's provisioning lock, since
   cancelling its wait can leave the SQLite write running after that lock is released. Cover both verbs on a failed row
-  and confirm a retry uses the saved ID after recovery.
+  and confirm a retry uses the saved ID after recovery. Plan: `plans/queue/tensorlake-lifecycle-sandbox-identity.md`.
 
 - **Keep all sandbox leftovers visible when Tensorlake discovery fails.** During unfinished cleanup, a failed refresh
   can replace the previously listed sandboxes with the cleanup rows alone. Have the helm report the discovery failure
@@ -279,7 +281,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   row when cleanup supersedes discovery. A known empty cleanup snapshot after the last cleanup finishes should remove
   its old **Cleaning up…** or **Retry cleanup** row even during the outage. Keep the existing reply bound, and
   distinguish a discovery failure from an individual cleanup error in Settings. Cover refresh, cleanup completion during
-  the outage, and recovery.
+  the outage, and recovery. Plan: `plans/queue/tensorlake-leftovers-discovery-failure.md`.
 
 - **Move Codex recipe endpoint credentials out of its settings.** Farhelm can overwrite a concurrent save to
   `~/.codex/config.toml` when it delivers a recipe endpoint. Keep the `farhelm` provider ID so existing sessions can
@@ -287,27 +289,30 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   override that omitted the token field sent the stale settings bearer to the new endpoint (recorder
   `c235a277-a9fb-497d-a323-ebb0538a8976`). Explicitly clearing the field sent an empty Authorization header (recorder
   `59601200-f69b-4179-99a6-a94f4a685ec5`). Find an override or compatible isolation mechanism that preserves saved
-  conversations, user settings and requests to tokenless endpoints without an Authorization header.
+  conversations, user settings and requests to tokenless endpoints without an Authorization header. Plan:
+  `plans/queue/codex-recipe-credentials-at-launch.md`.
 
 - **Explain stale launcher choices.** In the empty command field, Enter on a recent setup that has disappeared can do
   nothing without saying why. Clicking a search result for a host that just vanished can also clear the query without
   selecting anything. In `launcher/view/search.rs` and `search/start.rs`, use the existing stale-result warning before
   dropping either choice. Keep the search text, and keep a withdrawn keyboard selection from falling through to Launch.
   A missing explicit host or recent choice in typed results should use the same warning. Preserve the history reset when
-  the host installation changes so an old choice cannot match a different installation.
+  the host installation changes so an old choice cannot match a different installation. Plan:
+  `plans/queue/explain-stale-launcher-choices.md`.
 
 - **Name the program a Stop or Delete approval would end.** An agent can request Stop or Delete of a Bash or Zsh
   session, but the approval card says it would stop an agent. The card in `approvals/model.rs` needs the resolved
   target's launch kind from `ApprovalSession`. Carry that fact compatibly and use program-neutral wording if an older
   helm cannot supply it. Say which processes the action would stop, including terminal tabs where the deletion guard
   permits it. Keep the approved deletion tied to the same target and guard. Test shell targets in both actions and check
-  the approval wording with and without live processes.
+  the approval wording with and without live processes. Plan: `plans/queue/approval-card-program-wording.md`.
 
 - **Attach files pasted from a Wayland file manager.** A terminal paste can ignore copied files or type their displayed
   paths. In the vendored Wayland `clipboard.rs`, read `text/uri-list` before image or text, as SPEC.md's “Attachments”
   requires. Accept only local `file:` URLs. Keep ordinary paste working when the list has only web links or invalid
   entries by reading the next available flavor from the captured offer. Cancel the paste if that offer has expired. Keep
   the vendor patch and its tree in sync, and test both a file offer and a browser link offered as URI and plain text.
+  Plan: `plans/queue/wayland-clipboard-file-paste.md`.
 
 - **Use the desktop's reduced-motion setting for the attention cue and other motion.** On Linux the attention cue can
   disappear when the desktop portal and Farhelm's startup setting disagree. `layers/cue.rs` starts a flight from the
@@ -315,19 +320,20 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   preference everywhere and remove the separate desktop startup read. Use the stationary flash from SPEC.md's “Status”
   while reduced motion is on, including during a live change. Make ongoing cursor and status animations pause and resume
   with the preference while clocks and one-shot deadlines keep running. Test a preference change in an open window.
+  Plan: `plans/queue/toolkit-reduced-motion.md`.
 
 - **Show the main terminal when a remembered shell tab cannot attach.** Reopening a session can leave it stuck
   reconnecting to a remembered shell tab whose terminal the supervisor cannot read. Fall back to the main terminal after
   an explicit initial refusal, even if the shell tab remains listed. The terminal stream currently uses the same detach
   code for that refusal and for some dropped supervisor connections. Give the desktop app a way to tell them apart so a
   temporary outage keeps retrying. Route pending upload notices to the terminal the app ends up showing, and keep the
-  shell tab available for a deliberate selection.
+  shell tab available for a deliberate selection. Plan: `plans/queue/fallback-unattachable-remembered-tab.md`.
 
 - **Evidence shows Muse Code conversation reporting is broken (1.4.24).** During the `harness-drift-tests` live run on
   Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no conversation report
   arrived and Farhelm's hook helper never even wrote a diagnostic log line before teardown—indicating conversation
   reporting is broken on current Muse Code so Restart cannot resume Muse conversations. Find out why the callback did
-  not fire and fix or adapt Farhelm's Muse integration.
+  not fire and fix or adapt Farhelm's Muse integration. Plan: `plans/queue/fix-muse-conversation-reporting.md`.
 
 ### Tensorlake
 
@@ -456,7 +462,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the agent bypasses its safety checks: no person, classifier, AI reviewer or sandbox stops its actions on Local (this
   machine) without asking you. This launch uses the agent's own setting, which Farhelm cannot override or classify. It
   is treated as YOLO on this host. Local (this machine) asks before every YOLO launch. Nothing has been started." with
-  Cancel, "Start, and don't ask again on this host" and "Start YOLO session anyway".)
+  Cancel, "Start, and don't ask again on this host" and "Start YOLO session anyway".) Plan:
+  `plans/queue/remove-own-setting-permission.md`.
 
 ## Mid term
 
