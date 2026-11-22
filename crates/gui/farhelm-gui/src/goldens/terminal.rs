@@ -1,6 +1,6 @@
-//! Golden scenes for the terminal: its styles and cursor shapes, an attached terminal's status line, exit line and
-//! reconnect card, a file link's hover display, and the scrim a pending Delete puts over it. The scene list itself,
-//! `SCENES` with each scene's name and size, stays in `mod.rs`.
+//! Golden scenes for the terminal: its styles, wide glyphs and cursor shapes, an attached terminal's status line,
+//! exit line and reconnect card, a file link's hover display, and the scrim a pending Delete puts over it. The scene
+//! list itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
 
 use crate::session;
 use crate::session_list::SessionList;
@@ -138,6 +138,34 @@ pub(super) fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut
         CursorPhase {
             focused: true,
             on: true,
+        },
+        cx,
+    );
+    state.terminals.borrow_mut().push(view);
+}
+
+/// The last column of the first colored row is a separate padding run. Its background must meet the grid's edge.
+/// The following row starts with a two-cell lightning glyph from the bundled font, so no fallback font is needed.
+pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    const HEAD: &str = "wide character wraps here";
+    const GREEN: i64 = 0x12a_6f62;
+    let width: u16 = HEAD.len().try_into().unwrap();
+    let screen = serde_json::json!([
+        [0, {"w": true, "p": true, "r": [
+            run(0, width, HEAD, 0, -1, GREEN),
+            run(width, 1, " ", 0, -1, GREEN),
+        ]}],
+        screen_row(1, vec![
+            run(0, 2, "⚡", 0, -1, GREEN),
+            run(2, 9, "continued", 0, -1, GREEN),
+        ]),
+    ]);
+    let cursor = serde_json::json!({"x":0,"y":0,"visible":false,"shape":"block","blink":false});
+    let view = terminal_view(
+        grid_output(width + 1, 2, screen, cursor),
+        CursorPhase {
+            focused: false,
+            on: false,
         },
         cx,
     );

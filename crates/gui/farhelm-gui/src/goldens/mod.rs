@@ -628,6 +628,12 @@ static SCENES: &[Scene] = &[
         setup: terminal_styles_setup,
     },
     Scene {
+        name: "terminal-wide-glyphs",
+        size: (340., 150.),
+        draw: terminals,
+        setup: terminal_wide_glyphs_setup,
+    },
+    Scene {
         name: "terminal-cursors",
         size: (380., 80.),
         draw: terminals,

@@ -14,7 +14,8 @@
 //!   Printable ASCII of one style shares a run; any other cell (a wide
 //!   character, one with combining characters, any non-ASCII character) is
 //!   a run of its own, as the format requires. Blank cells in the default
-//!   style are left out, which the format reads as blank.
+//!   style are left out, which the format reads as blank. Wide-wrap padding
+//!   is marked separately and carries a space run only when it needs paint.
 //! - **The screen** ([`Screen`], [`SentScreen`]): what the screen looks
 //!   like now, and what the client was last sent, from which
 //!   [`SentScreen::update`] makes the next `rows` and `frame` messages:
@@ -140,8 +141,8 @@ impl CellRow {
 /// copying). The spacer cell after a wide character is covered by that
 /// character's run. A wrap placeholder at the end of a row instead sets
 /// the padding bit, so the receiver can distinguish it from a printed space.
-/// Blank cells in the default style are omitted, including default spaces
-/// at either end of another run.
+/// Its nondefault style travels in a separate unlinked space run. Default
+/// blank cells are omitted, including default spaces at either end of a run.
 pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> CellRow {
     let cols = cols.min(row.len()).min(usize::from(u16::MAX));
     let last_flags = cols
@@ -223,6 +224,20 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
         }
     }
     trim_default_blanks(&mut runs);
+    if wide_wrap_padding {
+        let col = cols - 1;
+        let style = style_of(&row[Column(col)], colors);
+        if style != Style::PLAIN {
+            // Keep the paint separate from text, even beside a run with the same style.
+            runs.push(CellRun {
+                col: col as u16,
+                width: 1,
+                text: " ".into(),
+                style,
+                link: None,
+            });
+        }
+    }
     CellRow {
         wraps,
         wide_wrap_padding,

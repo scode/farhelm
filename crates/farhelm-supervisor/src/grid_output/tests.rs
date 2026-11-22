@@ -191,6 +191,57 @@ fn screen_and_history_distinguish_wide_wrap_padding_from_a_printed_space() {
     assert_eq!(history.lines[2], visible.lines[2]);
 }
 
+/// A colored wrap placeholder paints exactly its own column. A real space in the same style stays part of the
+/// preceding text run, and a hyperlink covering the placeholder's pen does not give it a target.
+#[test]
+fn colored_wrap_padding_is_one_unlinked_run_on_screen_and_in_history() {
+    for linked in [false, true] {
+        let mut emulator = emulator(4, 6, 100, b"\x1b[42m");
+        if linked {
+            feed(
+                &mut emulator,
+                b"\x1b]8;id=example;https://example.test\x1b\\",
+            );
+        }
+        feed(&mut emulator, "abc界\r\nabc 界".as_bytes());
+        let cell = &emulator.term().grid()[Line(0)][Column(3)];
+        assert!(cell.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER));
+        assert_eq!(
+            cell.hyperlink().is_some(),
+            linked,
+            "the padding inherits the active pen"
+        );
+        let visible = screen(&emulator);
+        let padded = &visible.lines[0];
+        let printed = &visible.lines[2];
+        assert!(padded.wide_wrap_padding && padded.wraps);
+        assert!(!printed.wide_wrap_padding && printed.wraps);
+        let [text, padding] = padded.runs.as_slice() else {
+            panic!("expected separate text and padding runs: {:?}", padded.runs);
+        };
+        assert_eq!((text.col, text.width, text.text.as_str()), (0, 3, "abc"));
+        assert_eq!(text.link.is_some(), linked);
+        assert_eq!(text.style.bg, Color::Palette(2));
+        assert_eq!(padding.style, text.style);
+        assert_eq!(
+            (padding.col, padding.width, padding.text.as_str()),
+            (3, 1, " ")
+        );
+        assert!(padding.link.is_none());
+        let [text] = printed.runs.as_slice() else {
+            panic!("expected a single printed run: {:?}", printed.runs);
+        };
+        assert_eq!((text.col, text.width, text.text.as_str()), (0, 4, "abc "));
+        assert_eq!(text.link.is_some(), linked);
+
+        feed(&mut emulator, b"\r\n\r\n\r\n\r\n\r\n");
+        let history = HistoryCursor::new().read(&emulator, 0, usize::MAX);
+        assert_eq!(history.cols, 4);
+        assert_eq!(&history.lines[0], padded);
+        assert_eq!(&history.lines[2], printed);
+    }
+}
+
 /// Deleting a wide character's continuation and inserting a blank can place the wide head immediately before
 /// a wrap placeholder. Giving the head both columns would hide the padding on the wire.
 #[test]

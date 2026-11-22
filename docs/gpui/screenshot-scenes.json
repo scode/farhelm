@@ -2616,6 +2616,11 @@
       "reference": null
     },
     {
+      "golden": "terminal-wide-glyphs",
+      "title": "Background color through the last column of a wide-character wrap",
+      "reference": null
+    },
+    {
       "golden": "terminal-cursors",
       "title": "Terminal cursor shapes",
       "reference": null
