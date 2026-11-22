@@ -6162,9 +6162,11 @@ and prepared images in the place account's Podman storage. Keep per-place state 
 Podman entries keyed by place-host id. Recheck Podman artifacts with `podman image exists` before trusting records,
 since a host may have been reinstalled or its storage removed. Preparation becomes stale after strictly more than 86,400
 seconds, a different Farhelm version or a rebuilt source. Concurrent requests for the same recipe/place join its build
-or preparation. A Podman session launch builds a missing software image. Tensorlake session launch retains its
-built-snapshot prerequisite because builds bill. The Tensorlake build and preparation details below remain applicable to
-that provider.
+or preparation. A Podman launch checks for an active job under source exclusion before it picks a prepared image. If
+there is a job, the launch releases the guard before awaiting the result so the job can publish or clean up. A joined
+failure ends the launch. Later launches apply the ordinary freshness and existence checks to the retained pair. A Podman
+session launch builds a missing software image. Tensorlake session launch retains its built-snapshot prerequisite
+because builds bill. The Tensorlake build and preparation details below remain applicable to that provider.
 
 Rebuild is a required provider operation that returns after admission or joining. It reads the current definition. A
 Podman Rebuild refuses as busy when a preparation-only job holds that recipe/place, so joining cannot claim a rebuild
@@ -6229,14 +6231,17 @@ creation, read the manager again before installing the initial proxy settings fo
 environment alone does not reliably reach its user manager. This makes each session's proxy inheritance deterministic
 and independent of the helm's or SSH command's incidental environment.
 
-After successful build/preparation replacement, remove a superseded owned image once no container uses it. Rebuild
-cleans the place's replaced images, and recipe deletion cleans owned images at every place before forgetting their
-records. Never delete a user's base image. Reject Farhelm-managed checkpoint images as recipe bases. Discover leftovers
-with Podman's label-filtered listing at usable cached places and every place referenced by an environment row. Failed
-explicit cleanup keeps its resource and reason visible for retry. An unanswered Podman capture keeps its ownership tag
-even when Podman reports it absent. Recipe Delete can ask for consent to forget that tag even if the absence report came
-after a previous Delete's reply timed out. A confirmed Delete checks again and forgets the tag only if Podman reports
-absence. If the image exists, it follows the usual ownership and usage checks. No startup cleanup worker is introduced.
+Rebuild forces both the software build and preparation. The replacement images are owned in the retirement record until
+one edit under source exclusion publishes the pair and records the superseded images for retirement. A failed Rebuild
+cleans up its staged images and keeps the previous pair in use, subject to normal freshness and existence checks. A
+ready place reports the Rebuild failure and that new sessions use the previous image. Remove a superseded owned image
+once no container uses it. Recipe deletion cleans owned images at every place before forgetting their records. Never
+delete a user's base image. Reject Farhelm-managed checkpoint images as recipe bases. Discover leftovers with Podman's
+label-filtered listing at usable cached places and every place referenced by an environment row. Failed explicit cleanup
+keeps its resource and reason visible for retry. An unanswered Podman capture keeps its ownership tag even when Podman
+reports it absent. Recipe Delete can ask for consent to forget that tag even if the absence report came after a previous
+Delete's reply timed out. A confirmed Delete checks again and forgets the tag only if Podman reports absence. If the
+image exists, it follows the usual ownership and usage checks. No startup cleanup worker is introduced.
 
 ### Environment ownership and refusal
 

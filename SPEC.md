@@ -5272,7 +5272,9 @@ Opening the launcher refreshes probes in the background. No per-host opt-in is n
 itself host containers. The launcher and Settings → Containers show why a host is unusable.
 
 Built software and prepared images are kept per recipe and container host. The first launch there builds a missing
-software image and ensures a fresh prepared image. Preparation becomes stale after 24 hours, a Farhelm version change or
+software image and ensures a fresh prepared image. Launches during a Rebuild at that host wait for its outcome, even
+when the previous images are still available. A launch that joins a failed Rebuild receives its error. Later launches
+reuse the previous images if they are still fresh. Preparation becomes stale after 24 hours, a Farhelm version change or
 a rebuilt source, as for Tensorlake. Launch progress names **Preparing &lt;recipe&gt; on &lt;host&gt;…**, when needed
 with its first-launch/24-hour/update explanation, **Creating a &lt;recipe&gt; container on &lt;host&gt;…**, **Starting
 Farhelm in the container…**, and the ordinary session launch. Closing the client does not cancel the task.
@@ -5343,19 +5345,21 @@ adds no network policy or CPU/memory limits. The container host's Podman configu
 containers follow the same rules as sandbox agents ([Agents and environments](#agents-and-environments)), including
 Delete requests and Clone from other hosts.
 
-Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu base. Superseded Farhelm-built images are
-removed after successful replacement once no container uses them. Rebuild at a place and recipe deletion clean up that
-place's owned images. User-owned base images are retained, and a checkpoint image Farhelm manages cannot be used as a
-recipe base. Settings → Containers shows probe status per host and a refreshable **Containers not on this helm** list
-with confirmed Delete and retryable failure, following the sandbox-leftovers pattern except that a failed Delete's
-reason shows only while Settings stays open: the helm keeps no record of it, so after reopening the leftover is listed
-again with no reason, and a reply that arrives after Settings closed is not shown. The list asks every container host at
-once, and a listing or Delete that waits on a container host for more than 20 seconds says the host did not answer in
-time. Such a Delete carries on, and the list shows whether the container is gone when it is read again. Deleting a
-container's own host (Host-level Delete container, or Containers' Delete of a leftover that has a host row) answers the
-same way: the host leaves Hosts once its container is deleted, and if that deletion fails after the reply, the host
-stays listed and the reason reaches only the helm's log. These replies follow the rule that every host-waiting route the
-GUI sends is bounded. There is no Add host → Podman, Docker support or macOS container host support.
+Farhelm may pull the recipe's image when missing and the pinned managed Ubuntu base. Rebuild replaces both images only
+when the new software and prepared images are ready. If it fails, the previous images stay recorded and a ready place
+explains that new sessions use the previous image. Superseded Farhelm-built images are removed once no container uses
+them. Recipe deletion cleans up the place's owned images. User-owned base images are retained, and a checkpoint image
+Farhelm manages cannot be used as a recipe base. Settings → Containers shows probe status per host and a refreshable
+**Containers not on this helm** list with confirmed Delete and retryable failure, following the sandbox-leftovers
+pattern except that a failed Delete's reason shows only while Settings stays open: the helm keeps no record of it, so
+after reopening the leftover is listed again with no reason, and a reply that arrives after Settings closed is not
+shown. The list asks every container host at once, and a listing or Delete that waits on a container host for more than
+20 seconds says the host did not answer in time. Such a Delete carries on, and the list shows whether the container is
+gone when it is read again. Deleting a container's own host (Host-level Delete container, or Containers' Delete of a
+leftover that has a host row) answers the same way: the host leaves Hosts once its container is deleted, and if that
+deletion fails after the reply, the host stays listed and the reason reaches only the helm's log. These replies follow
+the rule that every host-waiting route the GUI sends is bounded. There is no Add host → Podman, Docker support or macOS
+container host support.
 
 ### Retired containerized sessions
 

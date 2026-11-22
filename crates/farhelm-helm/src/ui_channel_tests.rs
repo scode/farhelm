@@ -1782,7 +1782,7 @@ async fn a_place_jobs_admission_step_and_end_reach_the_connected_ui() {
     let at_bumps = Arc::new(std::sync::Mutex::new(Vec::new()));
     let (observed, record) = (Arc::clone(&builds), Arc::clone(&at_bumps));
     events.observe_bumps(move || {
-        let admitted = observed.podman_job_active("dev", local);
+        let admitted = observed.podman_job("dev", local).is_some();
         record.lock().unwrap().push(admitted);
     });
     let (step, finish) = (
@@ -1861,7 +1861,7 @@ async fn a_recipe_edit_reaches_the_connected_ui_and_the_reads_start_nothing() {
         "no check command ran"
     );
     let builds = harness.state.recipe_builds();
-    assert!(!builds.is_building("dev") && !builds.podman_job_active("dev", local));
+    assert!(!builds.is_building("dev") && builds.podman_job("dev", local).is_none());
 }
 
 /// A preference write sent as a command comes back as a change to the

@@ -430,8 +430,9 @@ struct Registry {
 }
 
 /// A Rebuild may accept launch joiners, while a preparation-only job cannot
-/// claim that a Rebuild click will replace software. Cancellation is checked
-/// between bounded commands, never by aborting a mutating command halfway.
+/// claim that a Rebuild click will replace software. Launches join before
+/// selecting a source because the old images stay recorded during a Rebuild.
+/// Cancellation is checked between commands so ownership can settle first.
 struct PodmanJob {
     progress: watch::Receiver<PodmanProgress>,
     rebuild: bool,
@@ -563,12 +564,15 @@ impl RecipeBuilds {
     /// Settings reads shared durable state and this registry synchronously.
     /// The Place match and recipe-state layout are exhaustive provider homes;
     /// image existence belongs to actual reuse, never a list's probe fan-out.
+    /// The cached place check qualifies the fallback wording while a container
+    /// host cannot launch, even if its image records are still fresh.
     #[warn(clippy::wildcard_enum_match_arm)]
     pub(crate) fn place_view(
         &self,
         name: &str,
         state: &RecipeState,
         place: farhelm_proto::Place,
+        place_usable: bool,
     ) -> farhelm_proto::recipes::RecipePlaceView {
         let (built_at, prepared_at, stale, present, building, step, failure, cleanup_pending) =
             match place {
@@ -650,6 +654,22 @@ impl RecipeBuilds {
                                 || state.prepare_started_at.is_some()
                                 || !state.retired_images.is_empty()
                         });
+                    let failure = current.and_then(|state| {
+                        state.last_failure.as_ref().map(|reason| {
+                            if place_usable
+                                && state.last_failure_from_rebuild
+                                && state.image.is_some()
+                                && state.prepared.is_some()
+                                && stale.is_none()
+                            {
+                                format!(
+                                    "Rebuild failed: {reason}. New sessions use the previous image."
+                                )
+                            } else {
+                                reason.clone()
+                            }
+                        })
+                    });
                     (
                         current.and_then(|state| state.image.as_ref().map(|image| image.built_at)),
                         current.and_then(|state| {
@@ -659,7 +679,7 @@ impl RecipeBuilds {
                         current.is_some_and(|state| state.prepared.is_some()),
                         building,
                         step,
-                        current.and_then(|state| state.last_failure.clone()),
+                        failure,
                         cleanup_pending,
                     )
                 }
@@ -739,7 +759,7 @@ impl RecipeBuilds {
         let owner = Arc::clone(self);
         let ended = Arc::clone(&events);
         tokio::spawn(async move {
-            let _admission = PodmanJobAdmission {
+            let admission = PodmanJobAdmission {
                 owner,
                 key,
                 events: ended,
@@ -747,6 +767,9 @@ impl RecipeBuilds {
             let result = work(progress.clone(), cancel)
                 .await
                 .map_err(|error| super::shell::shown(&error.to_string()));
+            // Owned work has settled. Retire admission before waking joiners
+            // so a new attempt can never join this job's terminal result.
+            drop(admission);
             progress.send_modify(|view| view.result = Some(result));
         });
         // Bump with the registry unlocked: a bump observer runs inside the
@@ -818,11 +841,18 @@ impl RecipeBuilds {
         Ok(())
     }
 
-    /// Leftover deletion must not race a helper's live preparation owner.
-    pub(crate) fn podman_job_active(&self, name: &str, place: crate::store::HostId) -> bool {
+    /// Subscribe to pending publication before selecting a Podman source.
+    /// Only jobs still doing owned work are discoverable. Existing receivers
+    /// get their result even after the job leaves the registry.
+    pub(crate) fn podman_job(
+        &self,
+        name: &str,
+        place: crate::store::HostId,
+    ) -> Option<watch::Receiver<PodmanProgress>> {
         self.registry()
             .podman_jobs
-            .contains_key(&(name.to_owned(), place))
+            .get(&(name.to_owned(), place))
+            .map(|job| job.progress.clone())
     }
     /// Inject the exact installer and version selected at helm assembly. Detached
     /// tests use an explicit unavailable installer; production has no late fallback.

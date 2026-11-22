@@ -326,16 +326,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   host with an unconfirmed scope that becomes checkable on a later start. Plan:
   `plans/queue/restart-deleted-cleanup.md`.
 
-- **Keep working container images when Rebuild fails.** Rebuild currently retires a recipe's Podman software and
-  prepared images before building replacements (`crates/farhelm-helm/src/environment/podman/build.rs`). A package or
-  installer outage can leave a previously usable recipe unable to start new sessions. Force actual rebuilding with a
-  flag, retain the last usable images until replacement succeeds, and keep the ordinary freshness rules for later
-  launches. Launches for the same recipe and place must still join an active Rebuild and receive its outcome, even while
-  old images remain recorded. Coordinate source selection with the job registry and release any source guard before
-  awaiting the rebuild's publication. Test both a failure with a usable fallback and a launch concurrent with Rebuild.
-  Deferred from the Podman triage plan because preserving active-job joining exceeds the original size gate. Plan:
-  `plans/queue/keep-images-on-failed-rebuild.md`.
-
 - **Apply host identity rules to Podman places.** If an SSH alias starts reaching another machine or account, a Delete
   can see no container there and forget a live one on the original host. Two aliases for the same machine and account
   can also both appear usable for new containers. Use one stable machine/account identity for both outcomes. Record it

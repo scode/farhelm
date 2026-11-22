@@ -118,8 +118,12 @@ impl Podman {
         Ok(())
     }
 
-    /// Every base gets its own committed software layer. Catalog edits take
-    /// effect on explicit Rebuild; ordinary reuse retains the recorded layer.
+    /// Catalog edits take effect on explicit Rebuild. Its new software layer
+    /// stays in the retirement record until the prepared image is ready.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "the software stage shares the place job's progress, cancellation and rebuild admission"
+    )]
     async fn software(
         &self,
         name: &str,
@@ -128,9 +132,10 @@ impl Podman {
         progress: &tokio::sync::watch::Sender<PodmanProgress>,
         events: &FleetEvents,
         cancel: &std::sync::atomic::AtomicBool,
+        rebuild: bool,
     ) -> anyhow::Result<BuiltImage> {
-        let state = self.state(name, place).await?;
-        if let Some(image) = state.image
+        if !rebuild
+            && let Some(image) = self.state(name, place).await?.image
             && self.exists(place, "image", &image.id).await?
         {
             return Ok(image);
@@ -217,16 +222,18 @@ impl Podman {
             claude_version: last_line(&claude),
             codex_version: last_line(&codex),
         };
-        let saved = image.clone();
-        let publication = self.0.builds.lock_podman_use(name, place).await?;
-        self.edit(name, place, move |state| {
-            state.retired_images.retain(|id| id != &saved.id);
-            if let Some(old) = state.image.replace(saved) {
-                state.retired_images.push(old.id);
-            }
-        })
-        .await?;
-        drop(publication);
+        if !rebuild {
+            let saved = image.clone();
+            let _publication = self.0.builds.lock_podman_use(name, place).await?;
+            self.edit(name, place, move |state| {
+                let id = saved.id.clone();
+                if let Some(old) = state.image.replace(saved) {
+                    state.retired_images.push(old.id);
+                }
+                state.retired_images.retain(|retired| retired != &id);
+            })
+            .await?;
+        }
         self.clear_helper(name, place, "build", &id).await?;
         Ok(image)
     }
@@ -247,28 +254,23 @@ impl Podman {
         cancel: Arc<std::sync::atomic::AtomicBool>,
         rebuild: bool,
     ) -> anyhow::Result<PreparedImage> {
+        let mut preparation_started = false;
         let mut result = async {
             check(&cancel)?;
-            self.edit(name, place, |state| state.last_failure = None)
-                .await?;
+            self.edit(name, place, |state| {
+                state.last_failure = None;
+                state.last_failure_from_rebuild = false;
+            })
+            .await?;
             if rebuild {
-                let publication = self.0.builds.lock_podman_use(name, place).await?;
-                self.edit(name, place, |state| {
-                    if let Some(old) = state.image.take() {
-                        state.retired_images.push(old.id);
-                    }
-                    if let Some(old) = state.prepared.take() {
-                        state.retired_images.push(old.id);
-                    }
-                })
-                .await?;
-                drop(publication);
+                self.0.places.fresh(&self.0.store, place).await?;
             }
-            self.prepare_images_owned(name, recipe, place, progress, events.clone(), cancel)
+            preparation_started = true;
+            self.prepare_images_owned(name, recipe, place, progress, &events, &cancel, rebuild)
                 .await
         }
         .await;
-        if result.is_err() {
+        if result.is_err() && preparation_started {
             // Ordinary failures attempt cleanup, while ambiguous sends and
             // refused cleanup retain their durable names/IDs for later retry.
             if let Err(cleanup) = self.reconcile_helpers(name, place).await {
@@ -281,50 +283,59 @@ impl Podman {
                     error.context(format!("image cleanup did not finish: {cleanup:#}"))
                 });
             }
-            let reason = result
-                .as_ref()
-                .err()
-                .map(|error| crate::tensorlake::shell::shown(&error.to_string()));
+        }
+        if let Err(error) = &result {
+            let reason = crate::tensorlake::shell::shown(&error.to_string());
             let _ = self
-                .edit(name, place, move |state| state.last_failure = reason)
+                .edit(name, place, move |state| {
+                    state.last_failure = Some(reason);
+                    state.last_failure_from_rebuild = rebuild;
+                })
                 .await;
         }
         events.bump();
         result
     }
 
-    /// Installation may run without source exclusion after the helper first
-    /// runs. Publication rechecks the source and retires an overtaken result.
+    /// A Rebuild publishes both images in one guarded edit. The registry owns
+    /// preparation until it settles, and recipe deletion waits for that job,
+    /// so neither path can retire a staged image halfway through installation.
+    #[allow(
+        clippy::too_many_arguments,
+        reason = "frozen recipe/place and job progress, cancellation and rebuild admission have distinct owners"
+    )]
     async fn prepare_images_owned(
         &self,
         name: &str,
         recipe: &Recipe,
         place: HostId,
         progress: tokio::sync::watch::Sender<PodmanProgress>,
-        events: Arc<FleetEvents>,
-        cancel: Arc<std::sync::atomic::AtomicBool>,
+        events: &FleetEvents,
+        cancel: &std::sync::atomic::AtomicBool,
+        rebuild: bool,
     ) -> anyhow::Result<PreparedImage> {
         self.reconcile_helpers(name, place).await?;
         loop {
-            check(&cancel)?;
-            if let Some(prepared) = self.fresh_image(name, place).await? {
+            check(cancel)?;
+            if !rebuild && let Some(prepared) = self.fresh_image(name, place).await? {
                 return Ok(prepared);
             }
             let source = self
-                .software(name, recipe, place, &progress, &events, &cancel)
+                .software(name, recipe, place, &progress, events, cancel, rebuild)
                 .await?;
             let source_guard = self.0.builds.lock_podman_use(name, place).await?;
-            if self
-                .state(name, place)
-                .await?
-                .image
-                .as_ref()
-                .map(|image| &image.id)
-                != Some(&source.id)
+            if !rebuild
+                && self
+                    .state(name, place)
+                    .await?
+                    .image
+                    .as_ref()
+                    .map(|image| &image.id)
+                    != Some(&source.id)
             {
                 continue;
             }
-            enter(&progress, &events, "Preparing Farhelm's installation");
+            enter(&progress, events, "Preparing Farhelm's installation");
             let (expected, _, _) = self.place(place).await?;
             let id = self
                 .helper(name, &expected, "prepare", &source.id, false)
@@ -338,7 +349,7 @@ impl Podman {
                 "the preparer did not become Running"
             );
             drop(source_guard);
-            check(&cancel)?;
+            check(cancel)?;
             let requested = match &source.base {
                 RecipeBase::ManagedUbuntu => "ubuntu",
                 RecipeBase::ContainerImage { user, .. } => user,
@@ -356,7 +367,7 @@ impl Podman {
                 .preparer
                 .prepare(&route, user.home.clone().into())
                 .await?;
-            check(&cancel)?;
+            check(cancel)?;
             anyhow::ensure!(
                 facts.farhelm_version == farhelm_proto::BUILD_VERSION
                     && facts.home.is_absolute()
@@ -377,35 +388,57 @@ impl Podman {
                 facts,
                 login: user,
             };
+            if rebuild {
+                // Settle the helper before replacing the working pair so a
+                // removal failure leaves both replacements staged for cleanup.
+                self.clear_helper(name, place, "prepare", &id).await?;
+            }
             let publication = self.0.builds.lock_podman_use(name, place).await?;
-            let same_source = self
-                .state(name, place)
-                .await?
-                .image
-                .as_ref()
-                .map(|image| &image.id)
-                == Some(&source.id);
-            let saved = prepared.clone();
-            self.edit(name, place, move |state| {
-                if same_source {
-                    state.retired_images.retain(|id| id != &saved.id);
-                    if let Some(old) = state.prepared.replace(saved) {
+            let publish = rebuild
+                || self
+                    .state(name, place)
+                    .await?
+                    .image
+                    .as_ref()
+                    .map(|image| &image.id)
+                    == Some(&source.id);
+            if publish {
+                let saved = prepared.clone();
+                self.edit(name, place, move |state| {
+                    if let Some(old) = state.prepared.take() {
                         state.retired_images.push(old.id);
                     }
-                }
-            })
-            .await?;
+                    if rebuild && let Some(old) = state.image.replace(source) {
+                        state.retired_images.push(old.id);
+                    }
+                    state
+                        .retired_images
+                        .retain(|id| id != &saved.id && id != &saved.source_image);
+                    state.prepared = Some(saved);
+                })
+                .await?;
+            }
             drop(publication);
-            self.clear_helper(name, place, "prepare", &id).await?;
+            if !rebuild {
+                // Lazy preparation can keep its new checkpoint for the next
+                // launch even when this launch reports failed helper removal.
+                self.clear_helper(name, place, "prepare", &id).await?;
+            }
             if let Err(error) = self.retire_images(name, place).await {
                 let reason = crate::tensorlake::shell::shown(&format!(
                     "superseded image cleanup did not finish: {error:#}"
                 ));
-                self.edit(name, place, move |state| state.last_failure = Some(reason))
-                    .await?;
+                let recorded = self
+                    .edit(name, place, move |state| state.last_failure = Some(reason))
+                    .await;
+                // Once the replacement pair is durable, the Rebuild is
+                // successful. Pending retirement still has its own record.
+                if !rebuild {
+                    recorded?;
+                }
             }
-            if same_source {
-                enter(&progress, &events, "Ready");
+            if publish {
+                enter(&progress, events, "Ready");
                 return Ok(prepared);
             }
         }

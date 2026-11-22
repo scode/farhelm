@@ -900,7 +900,7 @@ async fn shared_admission_joins_lazy_work_and_deletion_waits_for_its_boundary() 
     );
     release.send(()).unwrap();
     cleanup.await.unwrap().unwrap();
-    assert!(!builds.podman_job_active("dev", place));
+    assert!(builds.podman_job("dev", place).is_none());
     drop(guard);
     assert!(
         builds.lock_podman_use("dev", place).await.is_ok(),
