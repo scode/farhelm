@@ -7,7 +7,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
 - [in-flight 442cdc] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
 - [pending] `agent-trust-every-folder.md` — make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live (after `agent-hook-setup.md`)
-- [landing 0a7830] `maximized-window-no-zoom-animation.md` — open a Mac window that was maximized at quit already zoomed, without the grow animation, keeping the ordinary frame a later zoom returns to
 - [pending] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
 - [in-flight f036ea] `deflake-historical-base-prereqs.md` — refuse deflake sweeps of bases older than the current battery list, with an explanation, before anything starts
 - [pending] `test-worker-staging-lock.md` — stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests

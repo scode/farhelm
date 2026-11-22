@@ -58,3 +58,79 @@ follow-up could suppress the resize animation only for startup.
 The required independent GPT-6.2 Sol source review at high effort found no actionable issues. It checked both sides of
 the macOS-only field, the ordering of native frame positioning, Zoom and presentation, the callback lock, and the
 existing paths for user Zoom and the initial frame report. A cold wording pass checked the commit and draft PR text.
+
+### Landing
+
+#### What landed with it
+
+The plan's PR, #4547, merged alone in this round, with a landing fix, #4557. Since the plan's work was written, main had
+gained the supervisor triage plan and a TODO entry; neither touches window opening or the vendored GPUI library, and the
+rebase had no conflicts.
+
+An independent reviewer read the change, the macOS window-opening code it edits, the code that runs while the window
+zooms, and how Farhelm remembers the window frame. It found no blocker:
+
+- **The order of steps.** The window is put at its ordinary position before the hidden zoom, so macOS remembers the
+  right size and position for Window → Zoom to go back to. The old step that corrected the position after showing was
+  removed, because it would now move the already-zoomed window. Zooming before showing runs Farhelm's resize handling
+  right away, and the reviewer confirmed this cannot deadlock. Both code paths that open a window pass the new setting.
+- **Remembering the frame.** The window's first size report after opening already says maximized, which is what Farhelm
+  waits for before it starts saving window moves and resizes, so the remembered ordinary size and position are left as
+  they were. Fullscreen, ordinary windows and Linux are unchanged.
+- **Vendoring rules.** The change to the vendored GPUI library comes with the patch files and `vendor/README.md` entry
+  the vendoring rules require, and the patches match the code.
+
+#### Fixes made while landing
+
+All in [#4557](https://github.com/scode/farhelm/pull/4557/changes), wording only:
+
+- **The changelog fragment** said the window "opens at its zoomed size on the next launch", which it did before too. It
+  now says the window appears already zoomed instead of opening at its ordinary size and growing into place.
+- **Why "maximized" allows a two-point gap.** SPEC_impl.md and the desktop parity notes for the GPUI migration
+  (`docs/gpui/parity/desktop-integration-and-linux-packaging.md`) said a zoom came out a point short, as if that were
+  still true. That was the old zoom after showing; they now say so, and that nobody has checked on a Mac whether the new
+  zoom has the same gap. The Mac check could show whether the tolerance is still needed.
+- **SPEC.md** said Zoom returns the window to "the ordinary frame it opened from"; it never visibly opens there now, so
+  it says "its remembered ordinary frame".
+
+#### Checks
+
+The plan changes Mac-only window opening in the vendored GPUI library, with its patch files, and a comment in the GUI
+library. The landing machine runs Linux and the shared test Mac was unreachable, so nothing ran on a Mac. Instead the
+landing type-checked the Mac code from Linux and ran the Linux checks that cover the touched crates and the saving and
+restoring of the window frame. The worker runs were on a separate arm64 Linux test worker; the rest ran locally on
+x86_64.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo check --locked --target aarch64-apple-darwin -p gpui-pre-macos`, locally, in a separate target directory with a
+  Mac-only shader file replaced by an empty placeholder: passed with no warnings. It type-checks the vendored GPUI core
+  and Mac crates with the change; it neither links nor runs anything. The GUI library and desktop app could not be
+  checked this way, because a TLS dependency needs Apple's C toolchain.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` and the
+  same with `--features agent`, on the test worker, not through the recorder: passed.
+- The vendored GPUI patch tests
+  (`cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support` with its three test
+  targets), on the test worker (recorder run `4fa0ce8a-b514-4181-984b-fe1e103778eb`): all 5 passed.
+- `python3 -B scripts/gui-lifecycle.py`, the Linux app lifecycle test with maximized save and restore, on the test
+  worker (recorder run `dc1b36c7-a5d9-4401-af1f-8ffde916ff03`): every step passed.
+- `cargo fmt --all -- --check`, `dprint check`, `python3 releasing/check-changelog.py format` and
+  `python3 scripts/check-agents-md.py`, locally: passed. The What's New formatting difference the report mentions was
+  fixed on main by the previous round's landing.
+
+After the landing fix (#4557), which changes only Markdown: `dprint check`,
+`python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+Reused from the report: the vendored VTE, Alacritty and paired-terminal tests, which the change does not touch. Skipped:
+the Rust workspace suite, the GUI reference screenshots and the end-to-end smoke test, since Linux behavior and drawing
+are unchanged; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The report warns that a Mac compile error would break devbuilds and the next Mac release. The vendored GPUI code the
+  plan changed now type-checks for the Mac, so a compile error there is unlikely. Farhelm's own GUI library and desktop
+  app were not compiled for the Mac, but the plan changes only a comment in them.
+- If the Mac check shows the hidden zoom does nothing (the window opens at its ordinary size with no animation), the
+  damage is worse than a missing animation fix. Farhelm stops saving window moves and resizes for that whole session,
+  until the user zooms by hand, and because the window is still remembered as maximized, every later launch hits the
+  same thing. That would make a fix urgent.
