@@ -78,6 +78,9 @@ the host itself. Without an alias, the navigation rail and the session list show
 of the hostname, or the whole IP address. The local Mac's destination and a Tensorlake sandbox's destination cannot be changed. **Start YOLO sessions without asking** is the same choice the
 YOLO confirmation offers when you [start a session](/docs/using/start-a-session/#confirm-a-yolo-launch).
 
+For an SSH host, **Connection → Tailscale host** changes how Farhelm reaches the host and verifies its SSH key.
+Changing it reconnects the host. [Add a remote host](/docs/get-started/add-a-remote-host/) explains what the host needs.
+
 **Manage sessions on this host without asking** lets agents in this host's sessions create, spawn, copy, rename, stop,
 restart and delete sessions on this same host. A copy's source must be here too. It starts off on every host, including
 Tensorlake sandboxes. Requests for other hosts, template changes, host changes and

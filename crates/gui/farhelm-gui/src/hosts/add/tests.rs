@@ -254,7 +254,7 @@ fn a_blank_alias_is_sent_as_none_and_a_malformed_one_is_refused_before_contact(
     let (mut helm, cx, _add) = open_rail(cx);
     open_dialog(cx);
     type_text(cx, "dev@newbox");
-    keys(cx, "tab");
+    keys(cx, "tab tab");
     assert!(alias_focused(cx), "the premise: Tab reached the alias");
     keys(cx, "space space enter");
     let (id, body) = one_probe(&mut helm);
@@ -294,7 +294,7 @@ fn add_sends_the_probe_with_its_new_entry_under_the_dialogs_key(cx: &mut TestApp
     let (mut helm, cx, _add) = open_rail(cx);
     open_dialog(cx);
     type_text(cx, "dev@newbox");
-    keys(cx, "tab");
+    keys(cx, "tab tab");
     type_text(cx, "newbox1");
     click(cx, "add-host-submit");
     let (_, body) = one_probe(&mut helm);
@@ -326,9 +326,13 @@ fn ssh_add_resumes_its_unchanged_probe_after_the_setup_master_answers(cx: &mut T
     open_dialog(cx);
     type_text(cx, "dev@newbox");
     keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("add-host-tailscale"));
+    keys(cx, "space tab");
+    assert!(alias_focused(cx));
     type_text(cx, "newbox1");
     click(cx, "add-host-submit");
     let (probe, body) = one_probe(&mut helm);
+    assert_eq!(body["target"]["tailscale"], true);
     push_questions(
         &mut helm,
         &[
@@ -395,7 +399,7 @@ fn cancel_inline_ssh_sign_in_keeps_the_destination_and_alias(cx: &mut TestAppCon
     let (mut helm, cx, _add) = open_rail_for_setup(cx);
     open_dialog(cx);
     type_text(cx, "dev@newbox");
-    keys(cx, "tab");
+    keys(cx, "tab tab");
     type_text(cx, "newbox1");
     click(cx, "add-host-submit");
     let (probe, _) = one_probe(&mut helm);

@@ -489,7 +489,8 @@ fn add_answers_allow_with_the_edited_destination_then_probes(cx: &mut TestAppCon
     f.open().expect("opened");
     crate::test_support::select_all_text(f.cx);
     type_text(f.cx, "ops@new.example2");
-    keys(f.cx, "tab");
+    keys(f.cx, "tab tab");
+    assert!(alias_focused(f.cx), "the premise: Tab reached the alias");
     crate::test_support::select_all_text(f.cx);
     type_text(f.cx, "newbox2");
     assert_eq!(
@@ -772,6 +773,7 @@ fn offer(f: &mut Fixture<'_>, from_agent: bool) -> setup::Offer {
         target: setup::Target::New {
             destination: "ops@new.example".to_owned(),
             alias: "newbox".to_owned(),
+            tailscale: false,
             opener,
             from_agent,
         },

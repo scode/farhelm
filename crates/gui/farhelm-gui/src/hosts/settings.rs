@@ -18,9 +18,11 @@
 //!   will not store). Success closes the field; a refusal keeps the draft with the helm's words under it, including the
 //!   helm's answer that the change waits for a setup or Update running on the host. Escape closes an open field rather
 //!   than the dialog, and does nothing while its save is in flight.
-//! - **During a launch.** A destination's Save sends nothing while a session launch is in flight
+//!   SSH hosts also have a Tailscale switch, which saves on its own route and reconnects the host on success.
+//! - **During a launch.** Destination and Tailscale edits wait while a session launch is in flight.
+//!   A destination's Save sends nothing while a session launch is in flight
 //!   ([`super::launch_in_flight`]), and its row says "Destination: not started, a session launch is in progress;
-//!   try again when it finishes", the draft kept as typed ([`Field::waits_for_launches`] says why only the destination).
+//!   try again when it finishes", the draft kept as typed. The Tailscale switch keeps the pushed value in that case.
 //! - **Appearance.** The sixteen icons and the eight colors, each a pressed-or-not choice ([`appearance`]), a click
 //!   saving icon and color together at once, and a preview of the mark as the session list draws it.
 //! - **Checkouts.** The host's own checkout folder, on every host kind: the shared explicitly saved folder field
@@ -103,6 +105,7 @@ const ROW_LABEL: f32 = 104.;
 const ROW_GAP: f32 = 12.;
 /// `.setting-group`'s gap: a description sits this close under its own label.
 const GROUP_GAP: f32 = 4.;
+const TAILSCALE_SWITCH: &str = "host-settings-tailscale";
 /// The host's mark in the header's tile.
 const TILE_MARK: f32 = 24.;
 
@@ -491,6 +494,10 @@ pub(crate) struct HostSettingsDialog {
     cancel_focus: FocusHandle,
     /// The icon and color the last appearance click chose, while its save is in flight.
     appearance: Draft<(HostIcon, HostColor)>,
+    /// The route switch saves on its own verb and follows the pushed value after the save settles.
+    tailscale: Switch,
+    /// Route edits wait until a launch has finished using the current connection.
+    tailscale_launch_refused: bool,
     /// One per [`Permission`], by [`Permission::index`].
     switches: Vec<Switch>,
     /// The Checkouts section's folder field, a view of its own made with the dialog, so its read of the host's folder
@@ -534,6 +541,11 @@ impl HostSettingsDialog {
             save_focus: cx.focus_handle().tab_stop(true),
             cancel_focus: cx.focus_handle().tab_stop(true),
             appearance: Draft::load((view.icon, view.color)),
+            tailscale: Switch {
+                draft: Draft::load(view.tailscale),
+                focus: cx.focus_handle().tab_stop(true),
+            },
+            tailscale_launch_refused: false,
             switches: Permission::ALL
                 .iter()
                 .map(|_| Switch {
@@ -743,6 +755,32 @@ impl HostSettingsDialog {
         );
     }
 
+    /// Save a route change through the same host operation key as a destination edit.
+    fn toggle_tailscale(&mut self, on: bool, cx: &mut Context<Self>) {
+        self.tailscale_launch_refused = super::launch_in_flight(cx);
+        if self.tailscale_launch_refused {
+            self.refused.record(TAILSCALE_SWITCH, &Ok(()));
+            cx.notify();
+            return;
+        }
+        let host = HostView::key(self.host);
+        self.save_now(
+            TAILSCALE_SWITCH,
+            |dialog: &mut Self| &mut dialog.tailscale.draft,
+            on,
+            |on| {
+                Ok(Command::new(
+                    Work::Save,
+                    Method::Post,
+                    ApiPath::api(&["hosts", &host, "tailscale"])?,
+                    Some(serde_json::json!({ "tailscale": on })),
+                    "POST /api/hosts/[host]/tailscale",
+                ))
+            },
+            cx,
+        );
+    }
+
     /// The user chose `choice` (a new icon with the shown color, or the shown icon with a new color): save the pair.
     fn choose(&mut self, choice: (HostIcon, HostColor), cx: &mut Context<Self>) {
         let host = self.host;
@@ -867,7 +905,7 @@ impl Render for HostSettingsDialog {
 }
 
 impl HostSettingsDialog {
-    /// Connection: the destination (for a kind whose destination the user chose) and the alias.
+    /// SSH hosts can edit the address and its trust policy. Every host can change its alias.
     fn connection(
         &self,
         view: &HostView,
@@ -880,7 +918,56 @@ impl HostSettingsDialog {
             rows.push(self.field_row(Field::Destination, view, palette, cx));
         }
         rows.push(self.field_row(Field::Alias, view, palette, cx));
+        if kind.edits_destination() {
+            rows.push(self.tailscale_row(view, palette, cx));
+        }
         section("connection", "Connection", true, rows, palette)
+    }
+
+    /// A refused toggle returns to the pushed route and shows the reason on its own row.
+    fn tailscale_row(&self, view: &HostView, palette: &Palette, cx: &Context<Self>) -> AnyElement {
+        const HELP: &str = "Connect through Tailscale and verify the host's advertised SSH key instead of using \
+                           ~/.ssh/known_hosts. Changing this setting reconnects the host.";
+        let weak = cx.weak_entity();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(GROUP_GAP))
+            .min_w_0()
+            .child(
+                div()
+                    .text_size(px(LABEL_TEXT))
+                    .line_height(px(LABEL_LINE_HEIGHT))
+                    .child(
+                        Checkbox::new(
+                            TAILSCALE_SWITCH,
+                            "Tailscale host",
+                            HoverHelp::tooltip(HELP),
+                            Role::Switch,
+                        )
+                        .switch()
+                        .checked(shown(&self.tailscale.draft, view.tailscale))
+                        .focus(&self.tailscale.focus)
+                        .on_toggle(move |on, _, cx| {
+                            let _ = weak.update(cx, |dialog, cx| dialog.toggle_tailscale(on, cx));
+                        }),
+                    ),
+            )
+            .child(help(HELP, palette))
+            .children(self.tailscale.draft.refusal().map(|refusal| {
+                failure_line("host-settings-tailscale-error".into(), refusal, palette)
+            }))
+            .children(self.tailscale_launch_refused.then(|| {
+                failure_line(
+                    "host-settings-tailscale-launch".into(),
+                    &HostText::from_host(super::LAUNCH_IN_FLIGHT),
+                    palette,
+                )
+            }))
+            .children(self.refused.line(TAILSCALE_SWITCH, |id, text| {
+                failure_line(id.into(), &HostText::from_host(text), palette)
+            }))
+            .into_any_element()
     }
 
     /// One Connection row (`.host-settings-row`): its label, then its value with Edit, or its open field with Save and

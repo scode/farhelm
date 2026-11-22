@@ -20,7 +20,8 @@ use serde_json::{Value, json};
 
 use crate::focus;
 use crate::hosts::add::tests::{
-    alias, destination, dialog_key, error_line, one_probe, open_dialog, open_rail_with, type_text,
+    alias, alias_focused, destination, dialog_key, error_line, one_probe, open_dialog,
+    open_rail_with, type_text,
 };
 use crate::hosts::tests::{nothing_in_flight, start_work};
 use crate::operations::{OpKey, Work};
@@ -72,16 +73,16 @@ fn preferences(on: bool) -> CollectionState {
     }
 }
 
-/// Open Add host, type `dev@newbox` and the alias `newbox1`, press Add, and answer the probe with [`plan_reply`]; the
-/// dialog's host-add key.
+/// Offer setup for a Tailscale draft so a refused setup has to restore the route along with its text fields.
 fn probe_a_plan(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> OpKey {
     open_dialog(cx);
     type_text(cx, "dev@newbox");
-    keys(cx, "tab");
+    keys(cx, "tab space tab");
     type_text(cx, "newbox1");
     let key = dialog_key(cx);
     click(cx, "add-host-submit");
-    let (id, _) = one_probe(helm);
+    let (id, body) = one_probe(helm);
+    assert_eq!(body["target"]["tailscale"], true);
     helm.reply(id, 200, Some(plan_reply()));
     settle(cx);
     key
@@ -197,6 +198,7 @@ pub(crate) fn reference_offer(opener: gpui::FocusHandle, mark: crate::focus::Mar
         target: super::Target::New {
             destination: "dev@new-box".into(),
             alias: String::new(),
+            tailscale: false,
             opener,
             from_agent: false,
         },
@@ -544,6 +546,13 @@ fn a_refused_setup_reopens_add_host_with_the_destination_alias_and_reason(cx: &m
     assert_eq!(error_line(cx).as_deref(), Some(USED));
     assert_eq!(label(cx, "prompt"), None, "no setup question");
     assert_eq!(alias(cx), "newbox1");
+    assert!(
+        frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some("add-host-tailscale")
+                && node.toggled == Some(gpui::Toggled::True)
+        }),
+        "the reopened draft kept its Tailscale mode"
+    );
     keys(cx, "escape");
     assert!(
         !any_open(cx),
@@ -864,7 +873,8 @@ fn without_asking_a_setup_refused_during_a_launch_reopens_add_host(cx: &mut Test
     let (mut helm, cx, _add) = open_rail_with(cx, vec![preferences(true)]);
     open_dialog(cx);
     type_text(cx, "dev@newbox");
-    keys(cx, "tab");
+    keys(cx, "tab tab");
+    assert!(alias_focused(cx), "the premise: Tab reached the alias");
     type_text(cx, "newbox1");
     click(cx, "add-host-submit");
     let (probe, _) = one_probe(&mut helm);

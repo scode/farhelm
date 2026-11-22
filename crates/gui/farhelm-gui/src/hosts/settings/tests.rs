@@ -525,6 +525,49 @@ fn the_destination_waits_for_a_launch_and_the_alias_does_not(cx: &mut TestAppCon
     );
 }
 
+/// A mode edit must wait for a launch that uses the old route. A refused
+/// edit shows the helm's reason and returns to the mode shown by Hosts.
+#[gpui::test]
+fn tailscale_mode_waits_for_a_launch_and_uses_the_helm_value_after_refusal(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = open_build_box(cx);
+    let switch = "host-settings-tailscale";
+    assert_eq!(on(cx, switch), Some(false));
+    let launch = start_work(&mut helm, cx, Work::Launch, OpKey::new_launch());
+    click(cx, switch);
+    assert!(helm.commands().is_empty());
+    assert_eq!(on(cx, switch), Some(false));
+    assert_eq!(
+        label(cx, "host-settings-tailscale-launch").as_deref(),
+        Some(crate::hosts::LAUNCH_IN_FLIGHT)
+    );
+
+    helm.reply(launch, 200, None);
+    settle(cx);
+    assert!(nothing_in_flight(cx));
+    click(cx, switch);
+    let (id, path, body) = one_command(&mut helm);
+    assert_eq!(path, "/api/hosts/2/tailscale");
+    assert_eq!(body, json!({ "tailscale": true }));
+    assert_eq!(on(cx, switch), Some(true));
+    helm.reply(id, 409, Some(json!("This host is busy")));
+    settle(cx);
+    assert_eq!(on(cx, switch), Some(false));
+    assert_eq!(
+        label(cx, "host-settings-tailscale-error").as_deref(),
+        Some("This host is busy")
+    );
+
+    click(cx, switch);
+    let (id, _, _) = one_command(&mut helm);
+    push_build_box(&mut helm, |host| host.tailscale = true, cx);
+    helm.reply(id, 200, None);
+    settle(cx);
+    assert_eq!(on(cx, switch), Some(true));
+    assert_eq!(label(cx, "host-settings-tailscale-error"), None);
+}
+
 /// Why this matters: the alias is the name a host is shown under, and clearing it must be possible (the helm then names
 /// the host by its destination); Escape in an open field must close the field, not the whole dialog, as the old
 /// dialog's did, also after a stray press on the veil beside the dialog (the old "host-settings-backdrop-escape").
@@ -636,7 +679,7 @@ fn a_local_host_pushed_with_an_alias_is_named_by_it(cx: &mut TestAppContext) {
 /// Cancel, which is unavailable mid-save. Specified: with the destination's save in flight, Escape sends nothing more,
 /// leaves the dialog and the field open, and the field closes only once the helm answers. The Escape was a key press,
 /// so the Save's own move back to Edit does not run (the user moved on since the Save); focus, left on the field that
-/// went, is recovered to the closest control left, the destination's Edit drawn in its place.
+/// went, is recovered to the closest remaining control. With this layout that is the Tailscale switch.
 #[gpui::test]
 fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);
@@ -645,6 +688,7 @@ fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext
     keys(cx, "n e w b o x enter");
     let (id, _, _) = one_command(&mut helm);
     assert_eq!(host_work(cx), Some(Work::Save), "the premise: in flight");
+    assert_eq!(focused_id(cx).as_deref(), Some("input-state"));
 
     keys(cx, "escape");
     assert!(helm.commands().is_empty(), "Escape sent nothing");
@@ -665,7 +709,7 @@ fn escape_while_a_save_is_in_flight_keeps_the_field_open(cx: &mut TestAppContext
     assert_eq!(editing(cx), None, "the answer closed it");
     assert_eq!(
         focused_id(cx).as_deref(),
-        Some("host-settings-edit-destination"),
+        Some("host-settings-tailscale"),
         "the coordinator's recovery, not the Save's move"
     );
 }
@@ -784,13 +828,14 @@ fn an_appearance_choice_saves_icon_and_color_together(cx: &mut TestAppContext) {
 
 /// Why this matters: SPEC.md, "Reaching everything by keyboard": every choice must be reachable and usable without a
 /// pointer, and the old picker's choices were buttons Tab reached one by one (not a radio group the arrows walk, which
-/// would save at every step). Specified: from the destination's Edit, two Tabs reach Cloud and one more House; Enter
+/// would save at every step). From the destination's Edit, Tab passes the alias and Tailscale switch to reach Cloud.
+/// One more Tab reaches House. Enter
 /// there sends House with the current color; fifteen more Tabs reach the Default color and one more Lavender, where
 /// Space sends Lavender with the current icon.
 #[gpui::test]
 fn the_picker_is_reached_and_used_by_keyboard(cx: &mut TestAppContext) {
     let (mut helm, cx) = open_build_box(cx);
-    keys(cx, "tab tab");
+    keys(cx, "tab tab tab");
     assert_eq!(focused_id(cx).as_deref(), Some("host-icon-cloud"));
     keys(cx, "tab enter");
     assert_eq!(focused_id(cx).as_deref(), Some("host-icon-house"));
