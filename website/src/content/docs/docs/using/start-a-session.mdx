@@ -412,11 +412,11 @@ the agent itself fails to start, for example because it is not installed on that
 status shows error; the agent's page in [Supported agents](/docs/agents/) says what to install. An agent that starts and
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
 
-If you try to launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume), Farhelm shows the
-host's name and asks you to resume it first. For example, **devbox is suspended. Resume it in Hosts, then launch.**
-**Restart with** and **Replace with** say **then restart** or **then replace** instead.
-A [quick launch](/docs/using/launch-templates/#quick-launch) to a suspended Tensorlake host is refused for the same
-reason.
+A launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume) resumes it first, and a launch
+on a stopped container starts it first. The launcher shows **Resuming** or **Starting** while Farhelm waits for the host
+to reconnect, then starts the session. This works the same for **Restart with**, **Replace with** and a
+[quick launch](/docs/using/launch-templates/#quick-launch). If the host cannot be resumed, or is suspended again before
+it reconnects, the launcher comes back with your choices and says the session was not launched.
 
 If the host does not answer within 20 seconds, the launcher comes back without **Not launched.** and says the request is
 still being carried out: the session may still start and appear in the session list. Your choices stay in the launcher.

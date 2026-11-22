@@ -312,8 +312,8 @@ example while the helm's machine is asleep. An idle agent while Farhelm stays co
 Farhelm does not suspend idle hosts itself or resume them without a user action. After Farhelm disconnects, configured
 tunnels leave no separate connection keeping the sandbox awake.
 
-To start a session on a suspended host, resume it first; a launch on it is
-[refused until then](/docs/using/start-a-session/#when-a-launch-fails).
+Starting a session on a suspended host resumes it first;
+[Start a session](/docs/using/start-a-session/#when-a-launch-fails) says what the launcher shows meanwhile.
 
 ## Delete a sandbox
 
