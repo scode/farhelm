@@ -454,6 +454,7 @@ fn sent(helm: &mut FakeHelm) -> (Vec<(Method, String, serde_json::Value)>, Vec<u
                  method,
                  path,
                  body,
+                 ..
              }| ((method, path, body.unwrap_or_default()), id),
         )
         .unzip()

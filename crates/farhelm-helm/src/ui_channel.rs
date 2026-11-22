@@ -5,14 +5,12 @@
 //! of it. SPEC_impl.md's "GUI architecture" section states the rules, and
 //! SPEC.md's "Losing the connection to the helm" and "One GUI at a time" the
 //! product behavior they serve. The GUI may treat the channel as a stream that
-//! never loses or reorders anything, because three things the old GUI had to
-//! defend against one action at a time cannot happen here:
+//! delivers changes in wire order and keeps the GUI's chosen command ordering:
 //!
-//! - **Commands are admitted in receive order.** [`run`] starts a command only
-//!   after the previous one replied. Without that, a quick launch could
-//!   overtake the template save sent just before it, which the old GUI fenced
-//!   by hand. Heartbeats bypass the queue, so a slow command never makes a live
-//!   channel look dead.
+//! - **Ordered commands are admitted in receive order.** [`run`] starts one
+//!   after the previous ordered command replies, so a quick launch cannot
+//!   overtake its template save. The GUI can mark independent work unordered
+//!   to let it run concurrently. Heartbeats bypass both lanes.
 //! - **There are no reads to race.** The GUI never polls. After every command
 //!   and every fleet feed bump, the channel re-runs each pushed collection's
 //!   existing GET handler in process and sends what differs from what it last
@@ -67,11 +65,12 @@ use axum::http::{HeaderMap, HeaderValue, Method, Request, StatusCode, header};
 use axum::response::IntoResponse;
 use farhelm_proto::ui_channel::{
     ANNOUNCEMENTS_KEY, Availability, ClientMessage, Collection, CollectionChanges, CollectionMeta,
-    CollectionState, Command, HelmMarker, KeyedEntry, ListCounts, PREFERENCES_KEY, Reply,
+    CollectionState, Command, HelmMarker, KeyedEntry, Lane, ListCounts, PREFERENCES_KEY, Reply,
     SESSION_QUERY_PATH, ServerMessage, SessionQuery,
 };
 // `Method` alone is axum's, the router's method; this is the command's.
 use farhelm_proto::ui_channel::Method as WireMethod;
+use futures_util::{StreamExt, stream::FuturesUnordered};
 use serde_json::Value;
 use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
@@ -121,7 +120,8 @@ const OUTGOING_QUEUE: usize = 64;
 /// The reader waits when it is full, which in turn stops reading the socket.
 const INCOMING_QUEUE: usize = 64;
 
-/// Commands that may wait behind the one in flight. The window's operation
+/// Combined limit for waiting ordered commands and in-flight unordered
+/// commands. The window's operation
 /// store admits one pending edit per session, so twice the session list cap
 /// fits a full marked-session edit with room for other commands. New bulk
 /// actions on objects such as hosts or templates must budget for this limit
@@ -857,12 +857,10 @@ impl Channel {
         Box::pin(async move { route(router, request).await.reply(id) })
     }
 
-    /// The channel-local [`SESSION_QUERY_PATH`] command. The new query is
-    /// validated by serving the list with it, so the route's own refusals (an
-    /// unknown status or sort word) answer here unchanged and leave the old
-    /// query in force. Its selected key is not validated: one that names no
-    /// session is accepted and carries nothing.
-    async fn set_session_query(&mut self, command: Command) -> (Vec<ServerMessage>, Reply) {
+    /// Validate the channel-local query with the list route and keep the old
+    /// query on refusal. The completion flush uses whichever query is in
+    /// force. A selected key that names no session carries nothing.
+    async fn set_session_query(&mut self, command: Command) -> Reply {
         let reply = |status: StatusCode, body: Option<Value>| Reply {
             id: command.id,
             status: status.as_u16(),
@@ -871,29 +869,26 @@ impl Channel {
         };
         if command.method != WireMethod::Put {
             let body = Value::String(format!("{SESSION_QUERY_PATH} takes PUT"));
-            return (
-                Vec::new(),
-                reply(StatusCode::METHOD_NOT_ALLOWED, Some(body)),
-            );
+            return reply(StatusCode::METHOD_NOT_ALLOWED, Some(body));
         }
         let query: SessionQuery =
             match serde_json::from_value(command.body.clone().unwrap_or(Value::Null)) {
                 Ok(query) => query,
                 Err(error) => {
                     let body = Value::String(format!("not a session query: {error}"));
-                    return (Vec::new(), reply(StatusCode::BAD_REQUEST, Some(body)));
+                    return reply(StatusCode::BAD_REQUEST, Some(body));
                 }
             };
         let request = match self.request(Method::GET, &session_list_path(&query), None) {
             Ok(request) => request,
             Err(error) => {
                 let body = Value::String(format!("not a session query: {error}"));
-                return (Vec::new(), reply(StatusCode::BAD_REQUEST, Some(body)));
+                return reply(StatusCode::BAD_REQUEST, Some(body));
             }
         };
         let routed = route(self.router.clone(), request).await;
         if !routed.status.is_success() {
-            return (Vec::new(), routed.reply(command.id));
+            return routed.reply(command.id);
         }
         // A query that names a sort takes the order over from the stored
         // preference; a later one without a sort (the GUI clearing a filter,
@@ -902,8 +897,7 @@ impl Channel {
         // what the GUI last named.
         self.sort_follows_preference = query.sort.is_none();
         self.query = query;
-        let changes = self.changes().await;
-        (changes, reply(StatusCode::NO_CONTENT, None))
+        reply(StatusCode::NO_CONTENT, None)
     }
 }
 
@@ -988,12 +982,10 @@ fn reply_body(body: &[u8]) -> Option<Value> {
 /// Serve one channel until the GUI goes away, the channel breaks, or another
 /// UI takes the seat.
 ///
-/// The loop owns all ordering. Commands queue in arrival order and start one
-/// at a time. Heartbeats and fleet changes can reach the GUI while a command
-/// waits on a host. When a command completes, the loop sends any remaining
-/// changes and its reply together. Returning drops the in-flight request.
-/// Owned work carries on and cancellable work stops, as for an HTTP caller
-/// that left.
+/// Ordered commands start in arrival order. Unordered requests run in this
+/// loop alongside them, so returning drops requests from both lanes. Owned
+/// work carries on and cancellable work stops, as for an HTTP caller that
+/// left. Heartbeats and fleet pushes can reach the GUI during a host wait.
 pub(crate) async fn run(
     mut channel: Channel,
     mut incoming: mpsc::Receiver<ClientMessage>,
@@ -1005,22 +997,21 @@ pub(crate) async fn run(
     if outgoing.send(channel.snapshot().await).await.is_err() {
         return;
     }
-    let mut queue: VecDeque<Command> = VecDeque::new();
-    let mut in_flight: Option<InFlight> = None;
+    let mut ordered_queue: VecDeque<Command> = VecDeque::new();
+    let mut ordered_in_flight: Option<InFlight> = None;
+    let mut unordered = FuturesUnordered::<InFlight>::new();
     loop {
-        while in_flight.is_none() {
-            let Some(command) = queue.pop_front() else {
+        while ordered_in_flight.is_none() {
+            let Some(command) = ordered_queue.pop_front() else {
                 break;
             };
             if command.path.as_str() == SESSION_QUERY_PATH {
-                let (changes, reply) = channel.set_session_query(command).await;
-                for message in changes.into_iter().chain([ServerMessage::Reply(reply)]) {
-                    if outgoing.send(message).await.is_err() {
-                        return;
-                    }
+                let reply = channel.set_session_query(command).await;
+                if !finish_command(&mut channel, &mut feed, &outgoing, reply).await {
+                    return;
                 }
             } else {
-                in_flight = Some(channel.start(command));
+                ordered_in_flight = Some(channel.start(command));
             }
         }
         tokio::select! {
@@ -1037,23 +1028,31 @@ pub(crate) async fn run(
                     }
                 }
                 Some(ClientMessage::Command(command)) => {
-                    if queue.len() >= MAX_QUEUED_COMMANDS {
+                    if ordered_queue.len() + unordered.len() >= MAX_QUEUED_COMMANDS {
                         tracing::debug!(
-                            "a UI channel queued more than {MAX_QUEUED_COMMANDS} commands; closing it"
+                            "a UI channel exceeded its {MAX_QUEUED_COMMANDS}-command allowance; closing it"
                         );
                         return;
                     }
-                    queue.push_back(command);
+                    match command.lane.for_path(&command.path) {
+                        Lane::Ordered => ordered_queue.push_back(command),
+                        Lane::Unordered => unordered.push(channel.start(command)),
+                    }
                 }
             },
-            reply = async { in_flight.as_mut().expect("guarded").await }, if in_flight.is_some() => {
-                in_flight = None;
-                feed.borrow_and_update();
-                let changes = channel.changes().await;
-                for message in changes.into_iter().chain([ServerMessage::Reply(reply)]) {
-                    if outgoing.send(message).await.is_err() {
-                        return;
+            // Keep control messages first and feed pushes last. Give both lanes a chance to poll when an ordered
+            // backlog is ready to answer, since the unordered watchdog already counts from send.
+            reply = async {
+                tokio::select! {
+                    reply = async { ordered_in_flight.as_mut().expect("guarded").await }, if ordered_in_flight.is_some() => {
+                        ordered_in_flight = None;
+                        reply
                     }
+                    Some(reply) = unordered.next(), if !unordered.is_empty() => reply,
+                }
+            }, if ordered_in_flight.is_some() || !unordered.is_empty() => {
+                if !finish_command(&mut channel, &mut feed, &outgoing, reply).await {
+                    return;
                 }
             }
             changed = feed.changed() => {
@@ -1069,6 +1068,29 @@ pub(crate) async fn run(
             }
         }
     }
+}
+
+/// Flush the finished request's visible effects before its reply. The loop
+/// awaits the entire batch so a feed push or a second completion cannot cut
+/// between the changes and the reply.
+async fn finish_command(
+    channel: &mut Channel,
+    feed: &mut watch::Receiver<u64>,
+    outgoing: &mpsc::Sender<ServerMessage>,
+    reply: Reply,
+) -> bool {
+    feed.borrow_and_update();
+    for message in channel
+        .changes()
+        .await
+        .into_iter()
+        .chain([ServerMessage::Reply(reply)])
+    {
+        if outgoing.send(message).await.is_err() {
+            return false;
+        }
+    }
+    true
 }
 
 // ---------------------------------------------------------------------------

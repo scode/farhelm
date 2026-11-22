@@ -38,7 +38,7 @@ mod ws;
 
 pub use channel::{
     ChannelConfig, ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, CommandError,
-    CommandFuture, Method,
+    CommandFuture, Lane, Method,
 };
 pub use collections::{Collections, Pushed, PushedChanges, PushedEntry, PushedState};
 pub use farhelm_proto::ui_channel::{ApiPath, PathError};

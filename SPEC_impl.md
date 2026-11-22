@@ -200,10 +200,10 @@ cannot see a value a view copied out of shared state, nor a change made without 
 silently. The answer in both cases is the same. Build each mechanism once, route every feature through it, and make
 going around it fail a lint, a type check or a test rather than a reviewer's attention.
 
-Here's the short version: the GUI talks to the helm only through one ordered UI channel, plus terminal streams and plain
-HTTP for transfers. The store holds what the helm pushed, and views draw from it. One owner each moves focus, draws
-overlays, asks questions, holds pending work, decides notices and runs animation time. On any break of the channel the
-whole UI resets.
+The GUI talks to the helm through one UI channel with commands ordered by default, plus terminal streams and plain HTTP
+for transfers. The store holds what the helm pushed, and views draw from it. One owner each moves focus, draws overlays,
+asks questions, holds pending work, decides notices and runs animation time. On any break of the channel the whole UI
+resets.
 
 Port, not redesign: the GPUI app copies the old app's layout, spacing, colors and behavior as of reference commit
 `24bc0580`. Read old behavior from git at that commit and check screens side by side with the reference screenshots.
@@ -233,9 +233,9 @@ binary's crate or the helm client stops denying `unwrap_used` and `expect_used`.
 
 ### The UI channel
 
-Owner: the UI channel, one WebSocket per UI. It carries everything except bulk data, in one ordered stream:
+Owner: the UI channel, one WebSocket per UI. It carries these messages in one stream:
 
-- commands from the GUI, each an envelope of `{id, method, path, body}`;
+- commands from the GUI, each an envelope of `{id, method, path, body, lane}` with the default ordered lane omitted;
 - the helm's reply to each command, with its status and body: done, refused, or accepted (for long work), plus the
   helm-only markers among the routed response's headers (`farhelm_proto::ui_channel::HelmMarker`);
 - state the helm pushes: a full snapshot of the pushed collections when the channel opens, then changes per collection.
@@ -330,23 +330,24 @@ functions, with their own credentials and approvals. A route may therefore chang
 second blocking mode kept for a client that does not exist. When a shared `do_*` function changes behavior, check the
 relay path that also calls it.
 
-Commands are admitted in the order they arrive. The channel's owner starts each command only after the previous one has
-replied (done, refused or accepted), and it serializes replies and pushes onto the wire. This is what makes the stream
-ordered: without it, a quick launch could overtake the template save sent just before it, which the old GUI had to fence
-by hand. Heartbeats bypass the queue.
+Commands are ordered by default. The channel starts each ordered command after the preceding ordered command replies
+(done, refused or accepted), so a launch cannot overtake its template save. The GUI can mark independent commands
+`Unordered`. Those start on arrival and can answer in any order, alongside ordered work. The session query always stays
+ordered because it changes the channel's own projection. Queued ordered commands and in-flight unordered commands share
+one backlog limit. The channel serializes replies and pushes onto the wire. Heartbeats bypass both lanes.
 
-Serial admission only works if every handler replies promptly, so every handler does:
+Handlers bound how long the app waits for a reply:
 
 - A timeout against a host is an ordinary reply ("the host timed out"). The helm's links to supervisors stay fallible,
   and the user sees that, but it never leaks into the transport. Bounding a handler's host wait is preferred over adding
   an accepted form.
 - A command whose normal duration can exceed the host-wait bound uses the accepted form: provisioning, host update,
   recipe builds, and sandbox and container (environment) session creates, which take minutes. Every other command bounds
-  its host wait. A later click therefore waits behind at most one bounded command, never behind a long launch. Each
-  route converted to accepted names the state that carries its eventual outcome (success, partial result or refusal).
-  Reuse existing domain progress where it exists; otherwise the outcome goes in one bounded operation-result collection
-  keyed by envelope id, with explicit completion and removal rules. "Accepted" settles the transport watchdog. It does
-  not mean the work succeeded.
+  its host wait. An ordered command waits only for preceding ordered commands' bounded replies. Each route converted to
+  accepted names the state that carries its eventual outcome (success, partial result or refusal). Reuse existing domain
+  progress where it exists; otherwise the outcome goes in one bounded operation-result collection keyed by envelope id,
+  with explicit completion and removal rules. "Accepted" settles the transport watchdog. It does not mean the work
+  succeeded.
 - An environment session create (`POST /api/environment-sessions`, and its legacy Tensorlake spelling
   `POST /api/sandbox-sessions`) answers 202 with `{host_id, run_id}` once admitted, and its outcome lands on that run in
   the pushed host progress: completed, or failed with the "Not launched." reason. A failed run's message is always the
@@ -465,14 +466,14 @@ Owner: the UI channel's watchdog, and the UI-session owner.
 
 A heartbeat, plus one watchdog that treats any command left unanswered for N seconds as a broken channel, replaces every
 per-request deadline. The heartbeat is the GUI's: the helm sends no keepalive of its own, and closes a channel that has
-sent nothing for about a minute, so a GUI that vanished without closing gives up the seat. A command's clock starts when
-the channel admits it (when the previous command's reply arrived), not when the GUI sent it, so a queue behind a slow
-command does not trip the watchdog. N is set above the helm's own bound on host waits. That bound is also the longest
-any queued click can wait behind a slow host, so it is kept short (the exact value is chosen with the channel's
-implementation). However the channel broke, the same code runs: the window goes inert behind "Reconnecting to the
-helm…", everything that came from the helm is dropped, and the window rebuilds from the new snapshot. One generic notice
-says the connection was lost and that something done just before may or may not have happened. No action tracks its own
-fate.
+sent nothing for about a minute, so a GUI that vanished without closing gives up the seat. An ordered command's clock
+starts when the preceding ordered reply arrives, or at send when that lane is empty. An unordered command's clock starts
+at send. The watchdog uses the earliest deadline among both lanes, the snapshot and the outstanding heartbeat. N is set
+above the helm's own bound on host waits. A reply must name either the first pending ordered command or a pending
+unordered command. Other reply IDs break the channel. However the channel broke, the same code runs: the window goes
+inert behind "Reconnecting to the helm…", everything that came from the helm is dropped, and the window rebuilds from
+the new snapshot. One generic notice says the connection was lost and that something done just before may or may not
+have happened. No action tracks its own fate.
 
 In the embedded topology the UI reconnects to the same helm. If the helm task itself has ended, the app shows the
 existing startup-refusal surface and exits; there is no in-process helm restarter. A refused credential shows a terminal

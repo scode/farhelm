@@ -1,4 +1,4 @@
-//! A stand-in helm for GUI tests: in process, ordered, and without a runtime.
+//! A stand-in helm for GUI tests, in process and without a runtime.
 //!
 //! The GUI is written against [`ChannelHandle`] and [`ChannelEvents`]; a [`FakeHelm`] serves the same pair directly,
 //! so a GUI test drives the real GUI code with no sockets, threads or timers. Everything is synchronous and
@@ -6,7 +6,8 @@
 //! displacement or a refused credential exactly when it wants. Nothing happens unless the test does it, which is
 //! what makes the fake safe under GPUI's deterministic test executor.
 //!
-//! Ordering matches the real channel: events and replies share one queue, so a test that pushes changes and then
+//! Ordered commands answer in order. The test can answer an unordered command whenever it chooses. Events and
+//! replies share one queue, so a test that pushes changes and then
 //! replies gets the GUI to see the changes before the reply, as the helm guarantees; and a break announces the new
 //! state before the commands it lost fail. Pushed state is decoded the way the channel decodes it, so a test that
 //! pushes an entry the GUI could not decode fails in the fake rather than handing the GUI something the real channel
@@ -21,14 +22,14 @@
 pub mod terminal;
 pub mod transfers;
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 
 use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HelmMarker, Reply};
 use serde_json::Value;
 use tokio::sync::mpsc;
 
 use crate::channel::{
-    ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, CommandError, Completion, Item,
+    ChannelEvent, ChannelEvents, ChannelHandle, ChannelState, CommandError, Completion, Item, Lane,
     Method, Request,
 };
 use crate::collections::{decode_changes, decode_state};
@@ -40,6 +41,8 @@ pub struct FakeCommand {
     pub method: Method,
     pub path: String,
     pub body: Option<Value>,
+    /// The effective lane the helm would use for this command.
+    pub lane: Lane,
 }
 
 /// The user decisions the GUI forwarded, in order. Tests assert on these to check the GUI's buttons.
@@ -55,8 +58,9 @@ pub struct FakeHelm {
     items: mpsc::UnboundedSender<Item>,
     connected: bool,
     next_id: u64,
-    /// Commands the test has read and not answered.
-    unanswered: VecDeque<(u64, Completion)>,
+    /// Commands the test has read and not answered, with the same reply rules as the real channel.
+    ordered: VecDeque<(u64, Completion)>,
+    unordered: BTreeMap<u64, Completion>,
     decisions: Vec<FakeDecision>,
 }
 
@@ -70,7 +74,8 @@ impl FakeHelm {
             items,
             connected: false,
             next_id: 1,
-            unanswered: VecDeque::new(),
+            ordered: VecDeque::new(),
+            unordered: BTreeMap::new(),
             decisions: Vec::new(),
         };
         fake.state(ChannelState::Connecting);
@@ -125,8 +130,8 @@ impl FakeHelm {
         taken
     }
 
-    /// Answer a command returned by [`FakeHelm::commands`]. Answers must follow command order, as the helm's do. The
-    /// reply carries no helm markers, like most of the helm's; [`FakeHelm::reply_marked`] answers with some.
+    /// Answer a command returned by [`FakeHelm::commands`]. Ordered replies must follow the order in their lane.
+    /// Use [`FakeHelm::reply_marked`] to add helm markers.
     pub fn reply(&mut self, id: u64, status: u16, body: Option<Value>) {
         self.reply_marked(id, status, Vec::new(), body);
     }
@@ -141,17 +146,13 @@ impl FakeHelm {
         markers: Vec<HelmMarker>,
         body: Option<Value>,
     ) {
-        let position = self.unanswered.front().map(|(front, _)| *front);
-        assert_eq!(
-            position,
-            Some(id),
-            "the fake helm answers commands in order"
-        );
-        #[expect(
-            clippy::unwrap_used,
-            reason = "the fake is a test double: a panic here is how it reports a broken test, never a GUI behavior"
-        )]
-        let (_, done) = self.unanswered.pop_front().unwrap();
+        let done = if let Some((_, done)) = self.ordered.pop_front_if(|(front, _)| *front == id) {
+            done
+        } else if let Some(done) = self.unordered.remove(&id) {
+            done
+        } else {
+            panic!("the fake helm cannot answer unknown or out-of-order command {id}");
+        };
         let reply = Reply {
             id,
             status,
@@ -188,7 +189,12 @@ impl FakeHelm {
         self.drain();
         self.connected = false;
         self.state(state);
-        for (_, done) in std::mem::take(&mut self.unanswered) {
+        for done in self
+            .ordered
+            .drain(..)
+            .map(|(_, done)| done)
+            .chain(std::mem::take(&mut self.unordered).into_values())
+        {
             let _ = self
                 .items
                 .send(Item::Complete(done, Err(CommandError::Reset)));
@@ -213,6 +219,7 @@ impl FakeHelm {
                 method,
                 path,
                 body,
+                lane,
                 done,
             } => {
                 if !self.connected {
@@ -223,12 +230,18 @@ impl FakeHelm {
                 }
                 let id = self.next_id;
                 self.next_id += 1;
-                self.unanswered.push_back((id, done));
+                match lane {
+                    Lane::Ordered => self.ordered.push_back((id, done)),
+                    Lane::Unordered => {
+                        self.unordered.insert(id, done);
+                    }
+                }
                 taken.push(FakeCommand {
                     id,
                     method,
                     path: path.as_str().to_owned(),
                     body,
+                    lane,
                 });
             }
             Request::TakeBack => self.decisions.push(FakeDecision::TakeBack),
@@ -313,5 +326,60 @@ mod tests {
         assert_eq!(lost.now_or_never(), Some(Err(CommandError::Reset)));
         handle.take_back();
         assert_eq!(fake.decisions(), [FakeDecision::TakeBack]);
+    }
+
+    /// A GUI test can stage either unordered reply first, even with ordered work outstanding. The recorded lane
+    /// also lets callers pin the scheduling choice at the GUI boundary.
+    #[test]
+    fn unordered_replies_can_pass_earlier_commands_in_the_fake() {
+        let (mut fake, handle, mut events) = FakeHelm::new();
+        fake.connect(vec![]);
+        let ordered =
+            handle.command_in_lane(Lane::Unordered, Method::Put, ApiPath::session_query(), None);
+        let path = ApiPath::api(&["hosts"]).unwrap();
+        let first = handle.command_in_lane(Lane::Unordered, Method::Get, path.clone(), None);
+        let last = handle.command_in_lane(Lane::Unordered, Method::Get, path, None);
+        let sent = fake.commands();
+        let [query, before, after] = &sent[..] else {
+            panic!("expected three commands");
+        };
+        assert_eq!(
+            [query.lane, before.lane, after.lane],
+            [Lane::Ordered, Lane::Unordered, Lane::Unordered]
+        );
+        fake.reply(after.id, 201, None);
+        fake.reply(before.id, 202, None);
+        fake.reply(query.id, 200, None);
+        while events.try_recv().is_some() {}
+        for (completion, sent, status) in [
+            (last, after, 201),
+            (first, before, 202),
+            (ordered, query, 200),
+        ] {
+            let reply = completion.now_or_never().unwrap().unwrap();
+            assert_eq!((reply.id, reply.status), (sent.id, status));
+        }
+    }
+
+    /// An unordered command between two ordered commands does not let the fake accept the second ordered reply first.
+    /// Otherwise a GUI test could stage a sequence of events the real app would never receive.
+    #[test]
+    #[should_panic(expected = "the fake helm cannot answer unknown or out-of-order command")]
+    fn the_fake_rejects_an_ordered_reply_that_passes_another() {
+        let (mut fake, handle, _events) = FakeHelm::new();
+        fake.connect(vec![]);
+        let path = ApiPath::api(&["hosts"]).unwrap();
+        let _first = handle.command(Method::Get, path.clone(), None);
+        let _unordered = handle.command_in_lane(Lane::Unordered, Method::Get, path.clone(), None);
+        let _last = handle.command(Method::Get, path, None);
+        let sent = fake.commands();
+        let [first, unordered, last] = &sent[..] else {
+            panic!("expected three commands");
+        };
+        assert_eq!(
+            [first.lane, unordered.lane, last.lane],
+            [Lane::Ordered, Lane::Unordered, Lane::Ordered]
+        );
+        fake.reply(last.id, 200, None);
     }
 }

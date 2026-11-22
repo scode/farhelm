@@ -59,6 +59,7 @@ fn lifecycle(fake: &mut FakeHelm) -> Vec<(u64, String, Value)> {
         method,
         path,
         body,
+        ..
     } in fake.commands()
     {
         let lifecycle = method == Method::Delete
