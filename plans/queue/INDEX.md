@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 18ce7b] `wide-glyph-padding-cells.md` — keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
 - [in-flight c94452] `launcher-managed-checkout-compact.md` — make the launcher's managed-checkout destination compact: one Host | Repository address line, then the clone's folder and a one-line note across the full width
-- [complete] `helpers-desktop-startup.md` — consolidate the desktop app's duplicated startup and updater helpers (reopen wait, hello probe, window size, stable-version check, state-file wiring, peer text, reinstall hover) without changing behavior
+- [landing def426] `helpers-desktop-startup.md` — consolidate the desktop app's duplicated startup and updater helpers (reopen wait, hello probe, window size, stable-version check, state-file wiring, peer text, reinstall hover) without changing behavior
 - [in-flight f40ad0] `helpers-terminal-and-controls.md` — consolidate duplicated terminal input mapping, keypad digit lookup, control focus rings, focus checks, trash animation and control test helpers without changing behavior
 - [in-flight b3042b] `helpers-hosts-and-sessions.md` — consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior (after `triage-gui-misc.md`)
 - [pending] `helpers-launcher-and-templates.md` — consolidate duplicated launcher, template and golden-scene fixture helpers without changing behavior (after `triage-gui-misc.md`, `launch-wakes-suspended-host.md`)
