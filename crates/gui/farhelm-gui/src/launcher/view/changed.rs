@@ -15,9 +15,9 @@ use gpui::{AnyElement, IntoElement, ParentElement as _, Styled as _, div};
 use super::Launcher;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{Mode, RestartBaseline};
-use crate::permission::words::{effort_label, permission_display};
+use crate::permission::words::{effort_word, permission_display};
 use crate::theme::{self, metrics};
-use farhelm_proto::{LaunchEffort, LaunchPermission};
+use farhelm_proto::LaunchPermission;
 
 /// A setting Restart with marks when it differs from the stored launch.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -97,14 +97,6 @@ impl Launcher {
                 .child(words)
                 .into_any_element(),
         )
-    }
-}
-
-/// The old marker's effort word: the wire spelling (`effort_value`), "default" for none.
-fn effort_word(effort: Option<LaunchEffort>) -> String {
-    match effort {
-        Some(_) => effort_label(effort).to_lowercase(),
-        None => "default".to_owned(),
     }
 }
 
