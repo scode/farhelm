@@ -70,7 +70,7 @@ use crate::hosts::identity::{self, phase};
 use crate::local_time::Zone;
 use crate::operations::Work;
 use crate::session;
-use crate::session_list::age::{self, Age};
+use crate::session_list::age::Age;
 use crate::session_list::environment::{self, Environment};
 use crate::session_list::status::{self, HostLookup};
 use crate::session_list::{menu, outcome};
@@ -588,15 +588,12 @@ pub(crate) struct Band {
 }
 
 impl Band {
-    /// The band for `row` with the viewer's clock at `now` ([`age::seconds`]) and the age's stamp in `zone`: `None` for
-    /// a session the card does not show, and for one with no status to draw (nobody classified it) and no age, for
-    /// which the old view drew no band either.
+    /// The band for a session the card shows, provided it has a status or an age. The viewer's clock supplies
+    /// `now` ([`crate::session_list::age::seconds`]) and the age's stamp uses `zone`.
     pub(crate) fn of(row: &SessionRow, now: Option<i64>, zone: Zone) -> Option<Band> {
         let band = Band {
-            status: status::live(row)
-                .map(Status::Live)
-                .or_else(|| status::ended_words(row, false).map(Status::Ended)),
-            age: age::of(row.info.effective_activity(), now, zone),
+            status: Status::of(row),
+            age: details::activity_age(row, now, zone),
         };
         let something = band.status.is_some() || band.age.is_some();
         (shows_row(row) && something).then_some(band)
