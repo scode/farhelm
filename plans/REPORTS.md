@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`restart-deleted-cleanup`](reports/restart-deleted-cleanup.report.md) landed 2026-11-22 in #4625: persist unresolved systemd scope cleanups from deleted-meanwhile Restarts in `supervisor.db` and retry them on supervisor startup until confirmed gone
 - [`drift-verify-resume`](reports/drift-verify-resume.report.md) landed 2026-11-22 in #4628: update harness drift tests across all eight tracked agents to prove Restart resumes the same conversation via Turn-1 code word, Turn-2 recall, and post-resume hook conversation-ID match
 - [`scrub-linklocal-tailnet`](reports/scrub-linklocal-tailnet.report.md) landed 2026-11-22 in #4627: scrub and refuse IPv4 link-local (`169.254.0.0/16`) and tailnet/CGNAT (`100.64.0.0/10`) URLs (plain and IPv4-mapped IPv6) in both agent screen-capture privacy guards
 - [`slow-host-async-actions`](reports/slow-host-async-actions.report.md) landed 2026-11-22 in #4623, #4626, #4631, #4633: keep live desktop UI pushes flowing while host commands wait and add an unordered UI-channel lane for environment lifecycle, Trash and session Stop/Delete, with Opus design-review gates and a mandatory post-landing architecture review
