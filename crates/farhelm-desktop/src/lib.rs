@@ -657,13 +657,7 @@ impl DesktopBootstrap {
                     && runtime.block_on(await_own_supervisor_answering(
                         &own,
                         MANAGED_SUPERVISOR_SERVING_WAIT,
-                        || async {
-                            Ok(
-                                farhelm_helm::discover_local_supervisor(&farhelm, &state_dir)
-                                    .await?
-                                    == farhelm_helm::LocalSupervisorDiscovery::Answering,
-                            )
-                        },
+                        || local_supervisor_answers(&farhelm, &state_dir),
                     )) == OwnSupervisorWait::Answered;
                 if answered {
                     None
@@ -683,12 +677,7 @@ impl DesktopBootstrap {
             runtime.block_on(await_managed_supervisor_serving(
                 child,
                 MANAGED_SUPERVISOR_SERVING_WAIT,
-                || async {
-                    Ok(
-                        farhelm_helm::discover_local_supervisor(&farhelm, &state_dir).await?
-                            == farhelm_helm::LocalSupervisorDiscovery::Answering,
-                    )
-                },
+                || local_supervisor_answers(&farhelm, &state_dir),
             ))?;
         }
         drop(app_lock);
@@ -965,6 +954,15 @@ fn plan_local_supervisor<T>(own: Option<(T, bool)>, found: Discovered) -> Superv
             wait_first: true,
         },
     }
+}
+
+/// A version-skew reply to the hello still means a supervisor is answering.
+/// Forward probe errors so each startup wait can apply its own error policy.
+async fn local_supervisor_answers(farhelm: &Path, state_dir: &Path) -> anyhow::Result<bool> {
+    Ok(
+        farhelm_helm::discover_local_supervisor(farhelm, state_dir).await?
+            == farhelm_helm::LocalSupervisorDiscovery::Answering,
+    )
 }
 
 /// How waiting for the app's own non-answering supervisor ended.

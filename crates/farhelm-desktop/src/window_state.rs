@@ -140,13 +140,20 @@ fn parse_window_state(bytes: &[u8]) -> Option<WindowState> {
 pub fn restore_maximized_after_event(pending: Option<bool>, observed: bool) -> Option<bool> {
     pending.filter(|expected| *expected != observed)
 }
+
+/// Saved sizes must be at least 320 by 240 and fit on one display. Both
+/// restore paths share this check and decide placement separately.
+fn saved_size_fits_monitor(saved: WindowRect, monitor: &WindowRect) -> bool {
+    saved.width >= 320
+        && saved.height >= 240
+        && saved.width <= monitor.width
+        && saved.height <= monitor.height
+}
+
 /// Keep a saved frame only when it fits fully on one connected display.
 pub(crate) fn usable_rect(rect: WindowRect, monitors: &[WindowRect]) -> Option<WindowRect> {
-    if rect.width < 320 || rect.height < 240 {
-        return None;
-    }
     monitors.iter().find_map(|monitor| {
-        if rect.width > monitor.width || rect.height > monitor.height {
+        if !saved_size_fits_monitor(rect, monitor) {
             return None;
         }
         let left = i64::from(rect.x);
@@ -174,12 +181,7 @@ pub(crate) fn restore_rectangle(
     }
     monitors
         .iter()
-        .find(|monitor| {
-            saved.width >= 320
-                && saved.height >= 240
-                && saved.width <= monitor.width
-                && saved.height <= monitor.height
-        })
+        .find(|monitor| saved_size_fits_monitor(saved, monitor))
         .map(|monitor| center_on_monitor((saved.width, saved.height), *monitor))
 }
 
