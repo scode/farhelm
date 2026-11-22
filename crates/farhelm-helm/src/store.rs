@@ -338,15 +338,17 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 96;
+pub(crate) const SCHEMA_VERSION: i64 = 97;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
 
 mod environment_history;
 mod podman;
-pub(crate) use podman::PodmanInstallGuard;
 pub use podman::{NewPodmanHost, PodmanBinding, PodmanLogin};
+pub(crate) use podman::{
+    PlaceClaim, PodmanInstallGuard, PodmanPlaceIdentity, has_podman_place_claim,
+};
 
 /// Named secrets have their own table so list responses never need to decode a
 /// secret-bearing configuration object. The monotonically increasing revision
@@ -3173,12 +3175,14 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {TENSORLAKE_ACCOUNT_SCHEMA}
               {TENSORLAKE_RECIPES_SCHEMA}
               {CREDENTIALS_SCHEMA}
+              {podman_place_claims_schema}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 96;",
+              PRAGMA user_version = 97;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
+            podman_place_claims_schema = podman::PLACE_CLAIMS_SCHEMA,
         ))
         .context("creating schema")?;
         podman::migrate(&tx)?;
@@ -5167,6 +5171,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 96;")
             .context("migrating helm.db to schema version 96")?;
         version = 96;
+    }
+    if version == 96 {
+        tx.execute_batch(podman::PLACE_CLAIMS_SCHEMA)
+            .context("creating container place identity claims")?;
+        tx.execute_batch("PRAGMA user_version = 97;")
+            .context("migrating helm.db to schema version 97")?;
+        version = 97;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
@@ -7854,8 +7865,8 @@ impl HelmStore {
     ///
     /// ## What a retarget leaves alone
     ///
-    /// Everything else the helm knows about the row. The learned identity and
-    /// the session cache are facts about an install, and the next handshake
+    /// The learned supervisor identity and the session cache are facts about
+    /// an install, and the next handshake
     /// against the new endpoint decides what happens to them (a mismatch
     /// freezes, and adoption is what purges).
     pub async fn update_ssh_destination(
@@ -7863,6 +7874,18 @@ impl HelmStore {
         host: HostId,
         destination: &str,
     ) -> anyhow::Result<()> {
+        self.update_ssh_destination_changed(host, destination)
+            .await?;
+        Ok(())
+    }
+
+    /// Report whether the edit actually releases a place's cached admission.
+    /// The text comparison and release of any unused claim share the write.
+    pub(crate) async fn update_ssh_destination_changed(
+        &self,
+        host: HostId,
+        destination: &str,
+    ) -> anyhow::Result<bool> {
         self.change_ssh_destination(host, destination, true).await
     }
 
@@ -7881,7 +7904,9 @@ impl HelmStore {
         host: HostId,
         destination: &str,
     ) -> anyhow::Result<()> {
-        self.change_ssh_destination(host, destination, false).await
+        self.change_ssh_destination(host, destination, false)
+            .await?;
+        Ok(())
     }
 
     /// The body of [`Self::update_ssh_destination`], committing only when
@@ -7891,7 +7916,7 @@ impl HelmStore {
         host: HostId,
         destination: &str,
         commit: bool,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<bool> {
         let conn = self.conn.clone();
         let destination = destination.to_string();
         if !destination_is_usable(&destination) {
@@ -7899,7 +7924,7 @@ impl HelmStore {
                 destination,
             )));
         }
-        tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
             let mut conn = conn.lock();
             let tx = conn
                 .transaction()
@@ -7908,31 +7933,34 @@ impl HelmStore {
                 clippy::type_complexity,
                 reason = "keep the full storage discriminator beside the alias at the SQL boundary"
             )]
-            let current: Option<(String, Option<String>, Option<String>, Option<String>)> = tx
+            let current: Option<(String, Option<String>, Option<String>, Option<String>, bool)> = tx
                 .query_row(
-                    "SELECT kind, alias, tensorlake_sandbox, environment_provider FROM hosts WHERE id = ?1",
-                    rusqlite::params![host],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+                    "SELECT kind, alias, tensorlake_sandbox, environment_provider, destination IS NOT ?2
+                     FROM hosts WHERE id = ?1",
+                    rusqlite::params![host, destination],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
                 )
                 .optional()
                 .context("looking up host before updating its destination")?;
             let current = match current {
-                Some((kind, alias, sandbox, provider)) => {
-                    Some((HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?, alias))
-                }
+                Some((kind, alias, sandbox, provider, retargeted)) => Some((
+                    HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?,
+                    alias,
+                    retargeted,
+                )),
                 None => None,
             };
             match current {
                 None => Err(anyhow::Error::new(HostStoreError::HostNotFound(host))),
-                Some((HostKind::Local, _)) => {
+                Some((HostKind::Local, _, _)) => {
                     Err(anyhow::Error::new(HostStoreError::LocalHostImmutable))
                 }
                 // The sandbox's name is the destination; see
                 // `HostKind::destination_is_editable`.
-                Some((HostKind::Tensorlake | HostKind::Podman, _)) => {
+                Some((HostKind::Tensorlake | HostKind::Podman, _, _)) => {
                     Err(anyhow::Error::new(HostStoreError::DestinationManaged))
                 }
-                Some((HostKind::Ssh, alias)) => {
+                Some((HostKind::Ssh, alias, retargeted)) => {
                     podman::refuse_referenced_place(&tx, host)?;
                     // Explicit aliases and the unaliased local display name
                     // are compared here. Colliding with another SSH row's
@@ -7956,6 +7984,11 @@ impl HelmStore {
                     {
                         return Err(anyhow::Error::new(HostStoreError::AliasTaken(name)));
                     }
+                    // The entry is unused. An explicit retarget frees the old
+                    // endpoint even if its new endpoint never answers a probe.
+                    if retargeted {
+                        tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [host])?;
+                    }
                     let changed = tx
                         .execute(
                             "UPDATE OR IGNORE hosts SET destination = ?2 WHERE id = ?1",
@@ -7971,7 +8004,7 @@ impl HelmStore {
                     if commit {
                         tx.commit().context("committing destination update")?;
                     }
-                    Ok(())
+                    Ok(retargeted)
                 }
             }
         })

@@ -484,7 +484,7 @@ impl AppState {
         // changes must reach the feed the hosts collection is re-read on. The
         // cache predates the manager, so this is the first point both exist.
         let podman_places = provisioning.credential_delivery().places();
-        podman_places.publish_to(Arc::clone(manager.events()));
+        podman_places.publish_to(&manager);
         AppState {
             podman_places,
             _automatic_updates: provisioning::AutomaticUpdates::start(&provisioning),

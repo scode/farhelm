@@ -5,6 +5,7 @@
 
 use super::*;
 use crate::environment::recipes::{PodmanRecipeState, UnconfirmedImageCapture};
+use crate::store::PodmanPlaceIdentity;
 
 #[cfg(test)]
 #[path = "tests.rs"]
@@ -35,13 +36,27 @@ truncate -s 0 /etc/machine-id || fail
 rm -f "$log" || fail
 "#;
 
+/// Registry bases need inspection before a helper runs. A previously built
+/// layer already belongs to this recipe and can be used directly by ID.
+enum HelperBase<'a> {
+    Bootstrap,
+    Pull(&'a str),
+    Built(&'a str),
+}
+
 impl Podman {
     /// The registry base is user-owned; the bootstrap's committed layer is
     /// helm-owned and recorded for retirement before another helper uses it.
-    async fn managed_base(&self, name: &str, expected: &HostRow) -> anyhow::Result<String> {
+    async fn managed_base(
+        &self,
+        name: &str,
+        expected: &HostRow,
+        identity: &PodmanPlaceIdentity,
+    ) -> anyhow::Result<String> {
         let place = expected.id;
-        self.pull_base(place, UBUNTU).await?;
-        let id = self.helper(name, expected, "build", UBUNTU, true).await?;
+        let id = self
+            .helper(name, expected, identity, "build", HelperBase::Bootstrap)
+            .await?;
         self.script(place, &id, root_user(), BOOTSTRAP, IMAGE_WORK)
             .await?;
         let tag = format!(
@@ -141,23 +156,29 @@ impl Podman {
             return Ok(image);
         }
         let (expected, _, ready) = self.place(place).await?;
+        let identity = ready
+            .identity
+            .as_ref()
+            .context("the container host has no verified machine and account")?;
         check(cancel)?;
         enter(progress, events, "Preparing the recipe's base image");
-        let (base, requested) = match &recipe.base {
-            RecipeBase::ManagedUbuntu => (
-                self.managed_base(name, &expected).await?,
-                "ubuntu".to_owned(),
-            ),
+        let managed;
+        let (source, requested) = match &recipe.base {
+            RecipeBase::ManagedUbuntu => {
+                managed = self.managed_base(name, &expected, identity).await?;
+                (HelperBase::Built(&managed), "ubuntu")
+            }
             RecipeBase::ContainerImage { reference, user } => {
-                self.pull_base(place, reference).await?;
-                (reference.clone(), user.clone())
+                (HelperBase::Pull(reference), user.as_str())
             }
             RecipeBase::TensorlakeImage { .. } | RecipeBase::TensorlakeSnapshot { .. } => {
                 anyhow::bail!("this recipe's base cannot run in a container")
             }
         };
-        let id = self.helper(name, &expected, "build", &base, false).await?;
-        let user = self.login(place, &id, &requested).await?;
+        let id = self
+            .helper(name, &expected, identity, "build", source)
+            .await?;
+        let user = self.login(place, &id, requested).await?;
         self.script(
             place,
             &id,
@@ -336,9 +357,19 @@ impl Podman {
                 continue;
             }
             enter(&progress, events, "Preparing Farhelm's installation");
-            let (expected, _, _) = self.place(place).await?;
+            let (expected, _, ready) = self.place(place).await?;
+            let identity = ready
+                .identity
+                .as_ref()
+                .context("the container host has no verified machine and account")?;
             let id = self
-                .helper(name, &expected, "prepare", &source.id, false)
+                .helper(
+                    name,
+                    &expected,
+                    identity,
+                    "prepare",
+                    HelperBase::Built(&source.id),
+                )
                 .await?;
             let info = self
                 .inspect(place, &id)
@@ -520,20 +551,25 @@ impl Podman {
             .into_iter()
             .find(|row| row.id == place)
             .context("the container place was removed before its state could be recorded")?;
-        self.edit_at(name, &expected, edit).await
+        self.edit_at(name, &expected, None, edit).await
     }
 
-    /// The first helper ownership write uses the row paired with the observed
-    /// route, before any pull/command. A winning removal or retarget refuses
-    /// that exact write; later commands cannot silently adopt another endpoint.
-    async fn edit_at<F>(&self, name: &str, expected: &HostRow, edit: F) -> anyhow::Result<()>
+    /// New helper ownership requires the claim paired with the observed route.
+    /// Ordinary bookkeeping and cleanup still work after a place is refused.
+    async fn edit_at<F>(
+        &self,
+        name: &str,
+        expected: &HostRow,
+        claim: Option<&PodmanPlaceIdentity>,
+        edit: F,
+    ) -> anyhow::Result<()>
     where
         F: FnOnce(&mut PodmanRecipeState) + Send + 'static,
     {
         let place = expected.id;
         self.0
             .store
-            .update_recipe_place_state(name, expected, move |_, state| {
+            .update_recipe_place_state(name, expected, claim, move |_, state| {
                 edit(state.podman.entry(place).or_default());
             })
             .await?
@@ -572,17 +608,17 @@ impl Podman {
         Ok(Some(prepared))
     }
 
-    /// A reserved name is pending ownership until run returns a canonical ID.
-    /// A crash between those writes keeps enough evidence for later cleanup.
-    /// Only a completed refusal with confirmed absence can settle the name
-    /// before the ambiguous-create window expires.
+    /// A reserved name fences the claim before the first storage mutation,
+    /// including a base pull. A failed pull cannot have sent a helper create.
+    /// Once create has been sent, only confirmed refusal and absence can
+    /// clear the name before the ambiguous-create window expires.
     async fn helper(
         &self,
         name: &str,
         expected: &HostRow,
+        identity: &PodmanPlaceIdentity,
         role: &str,
-        image: &str,
-        bootstrap: bool,
+        base: HelperBase<'_>,
     ) -> anyhow::Result<String> {
         let place = expected.id;
         let reserved = format!(
@@ -592,7 +628,7 @@ impl Podman {
         );
         let pending = reserved.clone();
         let preparing = role == "prepare";
-        self.edit_at(name, expected, move |state| {
+        self.edit_at(name, expected, Some(identity), move |state| {
             if preparing {
                 state.preparer_container_id = Some(pending);
                 state.prepare_started_at = Some(now());
@@ -602,6 +638,22 @@ impl Podman {
             }
         })
         .await?;
+        let (image, pull, bootstrap) = match base {
+            HelperBase::Bootstrap => (UBUNTU, true, true),
+            HelperBase::Pull(reference) => (reference, true, false),
+            HelperBase::Built(id) => (id, false, false),
+        };
+        if pull {
+            if let Err(error) = self.pull_base(place, image).await {
+                self.clear_helper_record(name, place, role, &reserved)
+                    .await?;
+                return Err(error);
+            }
+            // The pull may take longer than the uncertain-create window.
+            // Start that window just before Podman can receive the create.
+            self.edit(name, place, |state| state.build_started_at = Some(now()))
+                .await?;
+        }
         let result = self
             .run(place, &reserved, role, name, image, bootstrap)
             .await;
@@ -614,20 +666,8 @@ impl Podman {
                 if error.downcast_ref::<CreateRefused>().is_some()
                     && !self.exists(place, "container", &reserved).await?
                 {
-                    self.edit(name, place, move |state| {
-                        if preparing
-                            && state.preparer_container_id.as_deref() == Some(reserved.as_str())
-                        {
-                            state.preparer_container_id = None;
-                            state.prepare_started_at = None;
-                        } else if !preparing
-                            && state.builder_container_id.as_deref() == Some(reserved.as_str())
-                        {
-                            state.builder_container_id = None;
-                            state.build_started_at = None;
-                        }
-                    })
-                    .await?;
+                    self.clear_helper_record(name, place, role, &reserved)
+                        .await?;
                 }
                 return Err(error);
             }
@@ -653,12 +693,26 @@ impl Podman {
         id: &str,
     ) -> anyhow::Result<()> {
         self.remove_container(place, id, role).await?;
+        self.clear_helper_record(name, place, role, id).await
+    }
+
+    /// Clear only the helper this operation settled. Pre-send failures use
+    /// the reserved name, while removal uses the ID resolved before delete.
+    async fn clear_helper_record(
+        &self,
+        name: &str,
+        place: HostId,
+        role: &str,
+        id: &str,
+    ) -> anyhow::Result<()> {
+        let settled = id.to_owned();
         let preparing = role == "prepare";
         self.edit(name, place, move |state| {
-            if preparing {
+            if preparing && state.preparer_container_id.as_deref() == Some(settled.as_str()) {
                 state.preparer_container_id = None;
                 state.prepare_started_at = None;
-            } else {
+            } else if !preparing && state.builder_container_id.as_deref() == Some(settled.as_str())
+            {
                 state.builder_container_id = None;
                 state.build_started_at = None;
             }

@@ -830,7 +830,7 @@ impl Podman {
         let recipes = self.0.store.tensorlake_recipe_rows().await?;
         let mut places = std::collections::BTreeSet::new();
         for row in &rows {
-            if row.kind.can_host_environments() && self.0.places.view(row)?.usable {
+            if row.kind.can_host_environments() && self.0.places.runtime_observed(row)? {
                 places.insert(row.id);
             }
             if let Some(binding) = &row.podman {

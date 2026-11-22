@@ -331,6 +331,10 @@ the user to remove that entry or change this one's destination and then press Re
 to one machine and never resolves this on its own. Last-known sessions of a host that is permanently gone are disposed
 of by removing the host from the registry.
 
+Container hosts also identify the machine and account that own their Podman storage, including on hosts without
+Farhelm installed. New containers and image builds use one host entry per machine and account. If the host connected
+to Farhelm already holds the ordinary identity, it can take an unused container host claim from a second entry.
+
 A host that is a Tensorlake sandbox Farhelm created is the exception to two of those rules, because Farhelm owns the
 machine and not only the entry: removing it is not merely forgetting it, and its destination cannot be corrected. A
 Tensorlake host can instead belong to a sandbox session; it follows these rules except where
@@ -5267,9 +5271,14 @@ default checkout folder when set and the container's home otherwise. Folder dest
 recent folders. Agent and command launches use the ordinary launch rules.
 
 A usable container host runs Podman 4.9.3 or later, rootless, with cgroup v2, the systemd cgroup manager and a working
-`systemd-run --user`. A background probe records Linux, architecture, version and each requirement, with a timestamp.
+`systemd-run --user`. A background probe records Linux, architecture, version, the machine and account, and each
+requirement, with a timestamp.
 Opening the launcher refreshes probes in the background. No per-host opt-in is needed, and an environment host cannot
-itself host containers. The launcher and Settings → Containers show why a host is unusable.
+itself host containers. The launcher and Settings → Containers show why a host is unusable. These checks refuse new
+work through a second entry for the same machine and account or a host that reaches a different machine or account
+while it still has containers, images or helpers. A Farhelm connection refusal for a duplicate, changed or unverified
+installation also prevents new work through that host. Such an admission refusal still allows existing containers
+to use the place's command route.
 
 Built software and prepared images are kept per recipe and container host. The first launch there builds a missing
 software image and ensures a fresh prepared image. Launches during a Rebuild at that host wait for its outcome, even

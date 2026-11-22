@@ -8,20 +8,28 @@
 //! start and end bump the fleet feed the hosts collection is re-read on.
 
 use crate::access::{BaseRoute, RemoteCommand, base_route};
-use crate::feed::FleetEvents;
-use crate::store::{HelmStore, HostId, HostRow};
+use crate::aggregate::host_display_name;
+use crate::manager::{ConnectionManager, HostState};
+use crate::store::{HelmStore, HostId, HostRow, PlaceClaim, PodmanPlaceIdentity};
 use crate::units::{MANAGER_ENVIRONMENT_BUSCTL_ARGS, ManagerEnvironment, ManagerValue};
 use anyhow::Context as _;
 use serde::Serialize;
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Mutex, OnceLock, Weak};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 /// Launch consumers require a recent observation before using its tool path
 /// and proxy inputs. Explicit Refresh ignores this age and only joins in-flight work.
 const FRESH_FOR: Duration = Duration::from_secs(300);
+/// Both fields must come from one invocation, so an SSH retarget between
+/// separate commands cannot combine the machine and account of two hosts.
+pub(crate) const PLACE_IDENTITY_READ: &str = "cat /etc/machine-id && id -u";
+/// A single place's identity for command fakes that model one Podman store.
+#[cfg(test)]
+pub(crate) const TEST_PLACE_IDENTITY: &str = "fe001122aabbccddeeff001122aabbcc\n1000\n";
+const IDENTITY_UNREADABLE: &str = "Farhelm could not verify this container host's machine and account. Check its SSH destination and press Refresh.";
 const PROXY_VARIABLES: [&str; 10] = [
     "http_proxy",
     "https_proxy",
@@ -38,6 +46,8 @@ const PROXY_VARIABLES: [&str; 10] = [
 /// Inputs used by the real provider. These never enter client JSON or logs.
 #[derive(Clone)]
 pub(crate) struct ReadyPlace {
+    /// The account's own store, read on the same route as its capabilities.
+    pub(crate) identity: Option<PodmanPlaceIdentity>,
     pub(crate) architecture: String,
     pub(crate) version: String,
     #[allow(
@@ -286,12 +296,16 @@ struct CachedProbe {
     checked_at: u64,
     observed: Instant,
     result: Result<ReadyPlace, String>,
+    /// A place can run commands for existing containers while refusing new work.
+    admission_refusal: Option<String>,
 }
 
 #[derive(Default)]
 struct Cache {
     probes: HashMap<HostId, CachedProbe>,
-    refreshing: HashSet<HostId>,
+    /// The current task's permit. A retarget removes it so the next request
+    /// starts a new probe even if the old route is still answering.
+    refreshing: HashMap<HostId, Arc<()>>,
 }
 
 /// One helm's probe cache and in-flight admission. Refresh tasks retain the
@@ -301,13 +315,13 @@ pub(crate) struct PodmanPlaces {
     cache: Mutex<Cache>,
     /// Wakes the helm's own waiters ([`Self::runtime`], [`Self::fresh`]).
     changed: tokio::sync::Notify,
-    /// The helm's fleet feed, which the hosts collection is re-read on. Set
-    /// once, when the helm's state adopts this cache (`AppState`'s
-    /// constructor), because the cache is built before the connection manager
-    /// that owns the feed. A check that changes state before then bumps
-    /// nothing, which loses nothing: no GUI can be connected yet, and its
-    /// first snapshot reads the cache as it is.
-    feed: OnceLock<Arc<FleetEvents>>,
+    /// Serialize claim writes with publishing their verdicts, so a probe
+    /// cannot advertise a claim after another probe has transferred it.
+    claim_publication: tokio::sync::Mutex<()>,
+    /// Publish through the manager's feed and consult its ordinary host actors
+    /// without keeping the manager alive. Before AppState adopts this cache,
+    /// there is no GUI to wake. Its first snapshot reads the current check.
+    manager: OnceLock<Weak<ConnectionManager>>,
 }
 
 impl PodmanPlaces {
@@ -324,40 +338,74 @@ impl PodmanPlaces {
             commands,
             cache: Mutex::new(Cache::default()),
             changed: tokio::sync::Notify::new(),
-            feed: OnceLock::new(),
+            claim_publication: tokio::sync::Mutex::new(()),
+            manager: OnceLock::new(),
         })
     }
 
-    /// Announce this cache's changes on `feed` from now on. One cache serves
-    /// one helm, so only the first call takes effect; a later one (a test
-    /// assembling a second state over the same delivery service) is ignored.
-    pub(crate) fn publish_to(&self, feed: Arc<FleetEvents>) {
-        let _ = self.feed.set(feed);
+    /// Attach to the helm that owns these checks. One cache serves one helm,
+    /// so a second AppState over the same delivery service cannot redirect it.
+    pub(crate) fn publish_to(&self, manager: &Arc<ConnectionManager>) {
+        let _ = self.manager.set(Arc::downgrade(manager));
     }
 
     /// Bump the feed for a change a host entry shows. Callers hold no cache
     /// lock: the re-read this wakes takes it.
     fn announce(&self) {
-        if let Some(feed) = self.feed.get() {
-            feed.bump();
+        if let Some(manager) = self.manager.get().and_then(Weak::upgrade) {
+            manager.events().bump();
         }
+    }
+
+    /// Release a place claim and invalidate its probe before publishing the
+    /// registry edit. A probe in flight during the change cannot reclaim the
+    /// old endpoint if the entry is edited back to the same destination.
+    pub(crate) async fn retarget(
+        &self,
+        store: &HelmStore,
+        host: HostId,
+        destination: &str,
+    ) -> anyhow::Result<()> {
+        let _published = self.claim_publication.lock().await;
+        if store
+            .update_ssh_destination_changed(host, destination)
+            .await?
+        {
+            let mut cache = self.cache.lock().unwrap();
+            cache.probes.remove(&host);
+            cache.refreshing.remove(&host);
+            self.changed.notify_waiters();
+        }
+        Ok(())
     }
 
     /// Read locally without waiting on a host. A changed endpoint has no current
     /// result, regardless of the timestamp of the previous endpoint's probe.
     pub(crate) fn view(&self, row: &HostRow) -> anyhow::Result<ProbeView> {
         let route = base_route(row)?;
+        let ordinary_state = self.ordinary_state(row);
+        let ordinary_refusal = ordinary_state.as_ref().and_then(ordinary_identity_refusal);
         let cache = self.cache.lock().unwrap();
         let probe = cache
             .probes
             .get(&row.id)
             .filter(|probe| probe.route == route);
         let ready = probe.and_then(|probe| probe.result.as_ref().ok());
+        let reason = ordinary_refusal.map(str::to_owned).or_else(|| {
+            probe.and_then(|probe| {
+                probe
+                    .result
+                    .as_ref()
+                    .err()
+                    .cloned()
+                    .or_else(|| probe.admission_refusal.clone())
+            })
+        });
         Ok(ProbeView {
             checked_at: probe.map(|probe| probe.checked_at),
-            refreshing: cache.refreshing.contains(&row.id),
-            usable: ready.is_some(),
-            reason: probe.and_then(|probe| probe.result.as_ref().err().cloned()),
+            refreshing: cache.refreshing.contains_key(&row.id),
+            usable: ready.is_some() && reason.is_none(),
+            reason,
             architecture: ready.map(|ready| ready.architecture.clone()),
             version: ready.map(|ready| ready.version.clone()),
         })
@@ -367,13 +415,76 @@ impl PodmanPlaces {
     /// Stale results and retargeted endpoints require a background refresh first.
     pub(crate) fn ready(&self, row: &HostRow) -> anyhow::Result<ReadyPlace> {
         let route = base_route(row)?;
+        let ordinary_state = self.ordinary_state(row);
+        let ordinary_refusal = ordinary_state.as_ref().and_then(ordinary_identity_refusal);
         let cache = self.cache.lock().unwrap();
         let probe = cache
             .probes
             .get(&row.id)
             .filter(|probe| probe.route == route && probe.observed.elapsed() <= FRESH_FOR)
             .context("the container host needs a fresh Podman check")?;
-        probe.result.clone().map_err(anyhow::Error::msg)
+        let ready = probe.result.clone().map_err(anyhow::Error::msg)?;
+        if let Some(reason) = ordinary_refusal.or(probe.admission_refusal.as_deref()) {
+            anyhow::bail!("{reason}");
+        }
+        Ok(ready)
+    }
+
+    /// Orphan discovery scans already observed capabilities without scheduling
+    /// new checks or treating new-work refusal as loss of command access.
+    pub(super) fn runtime_observed(&self, row: &HostRow) -> anyhow::Result<bool> {
+        let route = base_route(row)?;
+        Ok(self
+            .cache
+            .lock()
+            .unwrap()
+            .probes
+            .get(&row.id)
+            .is_some_and(|probe| probe.route == route && probe.result.is_ok()))
+    }
+
+    /// A host that runs Podman without a supervisor uses its place claim alone.
+    /// An actor's refusal applies only to the registry entry it observed.
+    fn ordinary_state(&self, row: &HostRow) -> Option<HostState> {
+        self.manager.get()?.upgrade()?.state_for_registry_row(row)
+    }
+
+    /// Read the incumbent only on a collision. Its duplicate hello can
+    /// identify the ordinary owner even when that owner's supervisor is
+    /// unreachable. Any other refusal needs the challenger's own live hello
+    /// before the store rechecks both rows and can transfer an unused claim.
+    async fn settle_claim(
+        &self,
+        store: &HelmStore,
+        row: &HostRow,
+        identity: &PodmanPlaceIdentity,
+        verified_supervisor: Option<String>,
+    ) -> anyhow::Result<Option<PlaceClaim>> {
+        let claim = store
+            .claim_podman_place(row, identity.clone(), verified_supervisor.clone(), None)
+            .await?;
+        let Some(PlaceClaim::Twin { owner, .. }) = &claim else {
+            return Ok(claim);
+        };
+        let Ok(incumbent) = current_row(store, *owner).await else {
+            return Ok(claim);
+        };
+        let verified = match self.ordinary_state(&incumbent) {
+            Some(HostState::Duplicate { twin, identity }) if twin == row.id => Some(identity),
+            Some(HostState::IdentityMismatch { recorded, .. })
+            | Some(HostState::IdentityUnverified { recorded })
+                if incumbent.host_identity.as_ref() == Some(&recorded) =>
+            {
+                verified_supervisor
+            }
+            _ => None,
+        };
+        let Some(verified) = verified else {
+            return Ok(claim);
+        };
+        store
+            .claim_podman_place(row, identity.clone(), Some(verified), Some(&incumbent))
+            .await
     }
 
     /// Reconnection cannot depend on somebody opening the launcher. Runtime
@@ -406,7 +517,7 @@ impl PodmanPlaces {
                         Ok(ready) => return Ok((route, ready)),
                         Err(reason)
                             if requested
-                                && !self.cache.lock().unwrap().refreshing.contains(&host) =>
+                                && !self.cache.lock().unwrap().refreshing.contains_key(&host) =>
                         {
                             return Err(anyhow::Error::msg(reason));
                         }
@@ -429,7 +540,7 @@ impl PodmanPlaces {
         store: &HelmStore,
         host: HostId,
     ) -> anyhow::Result<ReadyPlace> {
-        if let Ok(ready) = self.ready(&current_row(store, host).await?) {
+        if let Ok(ready) = self.confirm_cached_admission(store, host).await {
             return Ok(ready);
         }
         tokio::time::timeout(Duration::from_secs(30), async {
@@ -438,14 +549,32 @@ impl PodmanPlaces {
                 let changed = self.changed.notified();
                 tokio::pin!(changed);
                 changed.as_mut().enable();
-                if !self.cache.lock().unwrap().refreshing.contains(&host) {
-                    return self.ready(&current_row(store, host).await?);
+                if !self.cache.lock().unwrap().refreshing.contains_key(&host) {
+                    return self.confirm_cached_admission(store, host).await;
                 }
                 changed.await;
             }
         })
         .await
         .context("the container host's fresh Podman check did not finish in time")?
+    }
+
+    /// An explicit route edit releases the claim in storage. Even if the
+    /// route later returns to the same text, only a new probe can claim it.
+    async fn confirm_cached_admission(
+        &self,
+        store: &HelmStore,
+        host: HostId,
+    ) -> anyhow::Result<ReadyPlace> {
+        let _published = self.claim_publication.lock().await;
+        let row = current_row(store, host).await?;
+        let ready = self.ready(&row)?;
+        let identity = ready.identity.clone().context(IDENTITY_UNREADABLE)?;
+        anyhow::ensure!(
+            store.owns_podman_place(row, identity).await?,
+            "{CLAIM_NEEDS_REFRESH}"
+        );
+        Ok(ready)
     }
 
     /// A new session container inherits the place's environment at setup.
@@ -486,7 +615,7 @@ impl PodmanPlaces {
 
     /// Schedule only this host and return immediately. The current row is read
     /// again before execution, and a stale observation cannot replace a result
-    /// for a different route. Each host has at most one in-flight command chain.
+    /// for a different route. Requests join the current check for a host.
     pub(crate) async fn refresh(
         self: &Arc<Self>,
         store: HelmStore,
@@ -494,25 +623,69 @@ impl PodmanPlaces {
     ) -> anyhow::Result<()> {
         let row = current_row(&store, host).await?;
         base_route(&row)?;
-        if !self.cache.lock().unwrap().refreshing.insert(host) {
-            return Ok(());
-        }
+        let permit = {
+            let mut cache = self.cache.lock().unwrap();
+            let std::collections::hash_map::Entry::Vacant(slot) = cache.refreshing.entry(host)
+            else {
+                return Ok(());
+            };
+            let permit = Arc::new(());
+            slot.insert(Arc::clone(&permit));
+            permit
+        };
         // Only an admitted check changes the view (`refreshing` turns on); a
         // joined one changes nothing and so announces nothing.
         self.announce();
         let service = Arc::clone(self);
         tokio::spawn(async move {
-            let _refreshing = Refreshing {
+            let refreshing = Refreshing {
                 service: Arc::clone(&service),
                 host,
+                permit,
             };
             let Ok(row) = current_row(&store, host).await else {
                 return;
             };
             let Ok(route) = base_route(&row) else { return };
             let result = probe(service.commands.as_ref(), &route).await;
+            let _published = service.claim_publication.lock().await;
+            if !refreshing.is_current(&service.cache.lock().unwrap()) {
+                return;
+            }
+            let ordinary_state = service.ordinary_state(&row);
+            let ordinary_refusal = ordinary_state.as_ref().and_then(ordinary_identity_refusal);
+            let verified_supervisor = match ordinary_state {
+                Some(HostState::Connected { identity, .. }) => identity,
+                _ => None,
+            };
+            let (admission_refusal, displaced) = match (&result, ordinary_refusal) {
+                (Ok(_), Some(_)) => (Some(CLAIM_NEEDS_REFRESH.into()), None),
+                (Ok(ReadyPlace { identity: Some(identity), .. }), None) => match service.settle_claim(&store, &row, identity, verified_supervisor).await {
+                    Ok(Some(PlaceClaim::Owned { displaced })) => (None, displaced),
+                    Ok(Some(PlaceClaim::Twin { name, .. })) => (Some(twin_refusal(&name)), None),
+                    Ok(Some(PlaceClaim::Changed)) => (Some(CHANGED_PLACE.into()), None),
+                    Ok(None) => return,
+                    Err(_) => (
+                        Some("Farhelm could not record this container host's machine and account. Press Refresh to try again.".into()),
+                        None,
+                    ),
+                },
+                (Ok(_), None) => (Some(IDENTITY_UNREADABLE.into()), None),
+                (Err(_), _) => (None, None),
+            };
             // Publication is route-bound too. A host edited during the command
             // chain receives no stale success for its new endpoint.
+            if let Some(displaced) = displaced {
+                let mut cache = service.cache.lock().unwrap();
+                if let Some(previous) = cache.probes.get_mut(&displaced) {
+                    let name = host_display_name(
+                        row.kind,
+                        row.destination.as_deref(),
+                        row.alias.as_deref(),
+                    );
+                    previous.admission_refusal = Some(twin_refusal(&name));
+                }
+            }
             if let Ok(current) = current_row(&store, host).await
                 && base_route(&current).ok().as_ref() == Some(&route)
             {
@@ -526,6 +699,7 @@ impl PodmanPlaces {
                             .as_secs(),
                         observed: Instant::now(),
                         result,
+                        admission_refusal,
                     },
                 );
             }
@@ -534,26 +708,65 @@ impl PodmanPlaces {
     }
 }
 
+const CHANGED_PLACE: &str = "This container host now reaches a different machine or account. Its SSH destination may have changed outside Farhelm. Restore it and press Refresh before starting containers.";
+const CLAIM_NEEDS_REFRESH: &str = "This container host needs a fresh Podman check. Press Refresh.";
+
+fn ordinary_identity_refusal(state: &HostState) -> Option<&'static str> {
+    match state {
+        HostState::Duplicate { .. } => Some(
+            "Farhelm already connects to this installation through another host. Use that host for new containers.",
+        ),
+        HostState::IdentityMismatch { .. } => Some(
+            "This host now reaches a different Farhelm installation. Check its SSH destination or adopt the new installation from Hosts before starting containers.",
+        ),
+        HostState::IdentityUnverified { .. } => Some(
+            "Farhelm could not verify the installation on this host. Check its SSH destination and press Retry in Hosts before starting containers.",
+        ),
+        _ => None,
+    }
+}
+
+/// Give the user the winning host and how to resolve two entries that reach
+/// one Podman store, including the common case of a copied machine.
+fn twin_refusal(name: &str) -> String {
+    format!(
+        "This host reaches the same machine and account as {name}, so new containers go through {name}. If these are different machines, a copied machine may still have the original machine ID. Give the copy a new machine ID and press Refresh. Otherwise, remove one entry or change its destination."
+    )
+}
+
 /// A cancelled or panicking refresh must release its in-flight admission too.
 ///
 /// Its drop is also where a check's end is announced, after the result (if
 /// any) is stored and `refreshing` is off. Announcing at the store instead
 /// would let the woken re-read see the new result still marked refreshing,
-/// with nothing left to announce the flag clearing. Every drop flips
-/// `refreshing` off, so the bump is always a real change.
+/// with nothing left to announce the flag clearing. A discarded task must
+/// leave the slot alone if another check has already taken it.
 struct Refreshing {
     service: Arc<PodmanPlaces>,
     host: HostId,
+    permit: Arc<()>,
+}
+
+impl Refreshing {
+    /// Compare permit identity so a task from an earlier route can neither
+    /// publish nor clear the current task's slot.
+    fn is_current(&self, cache: &Cache) -> bool {
+        cache
+            .refreshing
+            .get(&self.host)
+            .is_some_and(|permit| Arc::ptr_eq(permit, &self.permit))
+    }
 }
 
 impl Drop for Refreshing {
     fn drop(&mut self) {
-        self.service
-            .cache
-            .lock()
-            .unwrap()
-            .refreshing
-            .remove(&self.host);
+        {
+            let mut cache = self.service.cache.lock().unwrap();
+            if !self.is_current(&cache) {
+                return;
+            }
+            cache.refreshing.remove(&self.host);
+        }
         self.service.changed.notify_waiters();
         self.service.announce();
     }
@@ -721,11 +934,44 @@ async fn probe_inner(
     )
     .await;
     scope?;
+    // Existing bindings can still need command access when the identity probe
+    // fails. Only admission of new work requires a successful identity read.
+    let identity = run(
+        commands,
+        route,
+        &["sh", "-c", PLACE_IDENTITY_READ],
+        IDENTITY_UNREADABLE,
+    )
+    .await
+    .ok()
+    .and_then(|output| parse_place_identity(&output));
     Ok(ReadyPlace {
+        identity,
         architecture,
         version,
         podman,
         proxy,
+    })
+}
+
+/// Machine IDs are case-insensitive hex. Reject empty, uninitialized and
+/// malformed results without including either raw identity field in errors.
+fn parse_place_identity(output: &str) -> Option<PodmanPlaceIdentity> {
+    let mut lines = output.lines();
+    let machine_id = lines.next()?;
+    let uid = lines.next()?;
+    if lines.next().is_some()
+        || machine_id.len() != 32
+        || !machine_id.bytes().all(|byte| byte.is_ascii_hexdigit())
+        || machine_id.bytes().all(|byte| byte == b'0')
+        || uid.is_empty()
+        || !uid.bytes().all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    Some(PodmanPlaceIdentity {
+        machine_id: machine_id.to_ascii_lowercase(),
+        uid: uid.parse().ok()?,
     })
 }
 
@@ -871,6 +1117,281 @@ mod tests {
         }
     }
 
+    /// A successful capability check with a caller-chosen identity answer.
+    /// Each requested answer is consumed only after the preceding probe ran.
+    fn scripted_places(identities: &[&str]) -> Arc<FakeCommands> {
+        let replies = identities.iter().flat_map(|identity| {
+            [
+                ("uname", "Linux"),
+                ("uname", "x86_64"),
+                ("sh", "/usr/bin/podman"),
+                ("/usr/bin/podman", r#"{"version":{"Version":"4.9.3"},"host":{"security":{"rootless":true},"cgroupVersion":"v2","cgroupManager":"systemd"}}"#),
+                ("busctl", r#"{"type":"as","data":[]}"#),
+                ("systemd-run", ""),
+                ("systemctl", ""),
+                ("sh", *identity),
+            ]
+            .map(|(program, reply)| (program.into(), Ok(reply.into())))
+        });
+        Arc::new(FakeCommands {
+            replies: Mutex::new(replies.collect()),
+            seen: Mutex::new(Vec::new()),
+        })
+    }
+
+    /// Duplicate place entries refuse new work. Their cached capability is
+    /// still usable to check a container bound before it became a twin.
+    #[farhelm_testtrace::test]
+    async fn twin_admission_does_not_take_away_runtime_capabilities() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let first = store
+            .add_ssh_host("place-one.test", None, None)
+            .await
+            .unwrap();
+        let second = store
+            .add_ssh_host("place-two.test", None, None)
+            .await
+            .unwrap();
+        let places = PodmanPlaces::with_commands(scripted_places(&[
+            TEST_PLACE_IDENTITY,
+            TEST_PLACE_IDENTITY,
+        ]));
+
+        assert!(places.fresh(&store, first).await.is_ok());
+        let refusal = places
+            .fresh(&store, second)
+            .await
+            .err()
+            .expect("twin must refuse new work");
+        assert!(
+            refusal
+                .to_string()
+                .contains("same machine and account as place-one.test")
+        );
+        let second_row = current_row(&store, second).await.unwrap();
+        assert!(!places.view(&second_row).unwrap().usable);
+        let (_, ready) = places.runtime(&store, second).await.unwrap();
+        assert_eq!(ready.podman, PathBuf::from("/usr/bin/podman"));
+    }
+
+    /// An ordinary supervisor can refuse its registered identity even when
+    /// the Podman endpoint is otherwise usable and has no competing claim.
+    #[farhelm_testtrace::test]
+    async fn ordinary_identity_mismatch_refuses_container_admission() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+        use crate::store::DialedAs;
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY, TEST_PLACE_IDENTITY]));
+        let (builder, usable) = builder
+            .ssh(
+                "place-without-supervisor.test",
+                HostScript {
+                    reachable: false,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let (builder, host) = builder
+            .ssh(
+                "place-reinstalled.test",
+                HostScript {
+                    identity: Some("new-install".into()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let row = current_row(builder.store(), host).await.unwrap();
+        builder
+            .store()
+            .record_first_contact(host, &DialedAs::of(&row), "previous-install")
+            .await
+            .unwrap();
+        let harness = builder.start().await;
+        harness
+            .await_state(host, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await;
+
+        let places = &harness.state.podman_places;
+        assert!(places.fresh(&harness.store, usable).await.is_ok());
+        let refusal = places
+            .fresh(&harness.store, host)
+            .await
+            .err()
+            .expect("identity mismatch must block new work");
+        assert!(
+            refusal
+                .to_string()
+                .contains("different Farhelm installation")
+        );
+        assert!(!places.view(&row).unwrap().usable);
+        assert!(places.runtime(&harness.store, host).await.is_ok());
+        assert!(
+            places.fresh(&harness.store, usable).await.is_ok(),
+            "the refused actor did not displace the usable place"
+        );
+    }
+
+    /// A reinstall can leave an unused place claim on the old host entry
+    /// while another entry connects to the new installation. The stale
+    /// ordinary claim must not prevent both entries from settling on a
+    /// single usable place.
+    #[farhelm_testtrace::test]
+    async fn verified_supervisor_takes_unused_place_from_refused_incumbent() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+        use crate::store::DialedAs;
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY, TEST_PLACE_IDENTITY]));
+        let reinstalled = |reachable| HostScript {
+            reachable,
+            identity: Some("new-install".into()),
+            ..HostScript::default()
+        };
+        let (builder, former) = builder.ssh("former-place.test", reinstalled(true)).await;
+        let (builder, next) = builder.ssh("next-place.test", reinstalled(false)).await;
+        let row = current_row(builder.store(), former).await.unwrap();
+        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        builder
+            .store()
+            .record_first_contact(former, &DialedAs::of(&row), "previous-install")
+            .await
+            .unwrap();
+        assert_eq!(
+            builder
+                .store()
+                .claim_podman_place(&row, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
+        let harness = builder.start().await;
+        harness
+            .await_state(former, |state| {
+                matches!(state, HostState::IdentityMismatch { .. })
+            })
+            .await;
+        // If the new entry wins the hello first, the former entry sees a
+        // duplicate. Keep the new entry down until the mismatch is visible.
+        harness.fleet.edit(next, |script| script.reachable = true);
+        assert!(harness.manager.retry_now(next).await.unwrap());
+        harness
+            .await_state(next, |state| {
+                matches!(state, HostState::Connected { identity: Some(id), .. } if id == "new-install")
+            })
+            .await;
+
+        let places = &harness.state.podman_places;
+        assert!(places.fresh(&harness.store, next).await.is_ok());
+        assert!(
+            !harness
+                .store
+                .owns_podman_place(row, identity)
+                .await
+                .unwrap()
+        );
+        assert!(places.fresh(&harness.store, former).await.is_err());
+        assert!(places.runtime(&harness.store, former).await.is_ok());
+    }
+
+    /// A duplicate hello can identify the ordinary owner even when that
+    /// owner's supervisor is down. A Podman-only check can then reunite the
+    /// claims if the duplicate has no recorded resources.
+    #[farhelm_testtrace::test]
+    async fn duplicate_hello_settles_place_for_unreachable_supervisor() {
+        use crate::rest_harness::{FleetBuilder, HostScript};
+        use crate::store::DialedAs;
+
+        let builder = FleetBuilder::new()
+            .await
+            .place_commands(scripted_places(&[TEST_PLACE_IDENTITY]));
+        let (builder, owner) = builder
+            .ssh(
+                "ordinary-owner.test",
+                HostScript {
+                    reachable: false,
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let (builder, twin) = builder
+            .ssh(
+                "duplicate.test",
+                HostScript {
+                    identity: Some("ordinary-install".into()),
+                    ..HostScript::default()
+                },
+            )
+            .await;
+        let row = current_row(builder.store(), owner).await.unwrap();
+        builder
+            .store()
+            .record_first_contact(owner, &DialedAs::of(&row), "ordinary-install")
+            .await
+            .unwrap();
+        let twin_row = current_row(builder.store(), twin).await.unwrap();
+        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        assert_eq!(
+            builder
+                .store()
+                .claim_podman_place(&twin_row, identity.clone(), None, None)
+                .await
+                .unwrap(),
+            Some(PlaceClaim::Owned { displaced: None })
+        );
+        let harness = builder.start().await;
+        harness
+            .await_state(owner, |state| {
+                matches!(state, HostState::Unreachable { .. })
+            })
+            .await;
+        harness
+            .await_state(twin, |state| {
+                matches!(state, HostState::Duplicate { twin, identity }
+                if *twin == owner && identity == "ordinary-install")
+            })
+            .await;
+
+        let places = &harness.state.podman_places;
+        assert!(places.fresh(&harness.store, owner).await.is_ok());
+        assert!(
+            harness
+                .store
+                .owns_podman_place(row, identity)
+                .await
+                .unwrap()
+        );
+    }
+
+    /// Launch admission must not use a malformed or uninitialized machine
+    /// identity, while command access remains available to existing bindings.
+    #[farhelm_testtrace::test]
+    async fn unreadable_identity_only_refuses_new_work() {
+        let directory = tempfile::tempdir().unwrap();
+        let store = HelmStore::open(&directory.path().join("helm.db"))
+            .await
+            .unwrap();
+        let host = store.list_hosts().await.unwrap()[0].id;
+        let places = PodmanPlaces::with_commands(scripted_places(&[
+            "00000000000000000000000000000000\n1000\n",
+        ]));
+        let refusal = places
+            .fresh(&store, host)
+            .await
+            .err()
+            .expect("invalid identity must block new work");
+        assert_eq!(refusal.to_string(), IDENTITY_UNREADABLE);
+        let (_, ready) = places.runtime(&store, host).await.unwrap();
+        assert!(ready.identity.is_none());
+    }
+
     /// The oldest supported Podman must pass, and each missing prerequisite
     /// must identify the actual refused feature without needing a real host.
     #[farhelm_testtrace::test]
@@ -923,6 +1444,7 @@ mod tests {
             ]}).to_string()),
             ("systemd-run", String::new()),
             ("systemctl", String::new()),
+            ("sh", TEST_PLACE_IDENTITY.into()),
         ];
         let commands = FakeCommands {
             replies: Mutex::new(
@@ -954,14 +1476,15 @@ mod tests {
     }
 
     /// Background refreshes must join per host and leave reads immediately
-    /// available while commands are held. This exercises the cache's actual
-    /// consumer seam without starting a process or changing its environment.
+    /// available while commands are held. A retarget discards both completed
+    /// and in-flight observations, even if the user restores the old text.
     #[farhelm_testtrace::test]
     async fn refresh_is_background_deduplicated_and_route_bound() {
         struct HeldCommands {
             entered: tokio::sync::Notify,
             release: tokio::sync::Notify,
             calls: std::sync::atomic::AtomicUsize,
+            hold: std::sync::atomic::AtomicBool,
         }
         #[async_trait::async_trait]
         impl PlaceCommands for HeldCommands {
@@ -969,11 +1492,14 @@ mod tests {
                 self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
                 let answer = match argv[0].as_str() {
                     "uname" if argv[1] == "-s" => {
-                        self.entered.notify_one();
-                        self.release.notified().await;
+                        if self.hold.load(std::sync::atomic::Ordering::Relaxed) {
+                            self.entered.notify_one();
+                            self.release.notified().await;
+                        }
                         "Linux".to_string()
                     }
                     "uname" => "x86_64".to_string(),
+                    "sh" if argv[2] == PLACE_IDENTITY_READ => TEST_PLACE_IDENTITY.into(),
                     "sh" => "/usr/bin/podman".to_string(),
                     "/usr/bin/podman" => serde_json::json!({
                         "version": {"Version": "4.9.3"},
@@ -985,6 +1511,22 @@ mod tests {
                 };
                 Ok(answer)
             }
+        }
+        /// Wait on the completion signal shared by the real cache waiters.
+        async fn wait_for_probe(service: &PodmanPlaces, row: &HostRow) {
+            tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    let changed = service.changed.notified();
+                    tokio::pin!(changed);
+                    changed.as_mut().enable();
+                    if !service.view(row).unwrap().refreshing {
+                        break;
+                    }
+                    changed.await;
+                }
+            })
+            .await
+            .expect("the released fake probe still has a pending cache entry");
         }
         let directory = tempfile::tempdir().unwrap();
         let path = directory.path().join("helm.db");
@@ -1004,6 +1546,7 @@ mod tests {
             entered: tokio::sync::Notify::new(),
             release: tokio::sync::Notify::new(),
             calls: std::sync::atomic::AtomicUsize::new(0),
+            hold: std::sync::atomic::AtomicBool::new(true),
         });
         let service = PodmanPlaces::with_commands(commands.clone());
         service.refresh(store.clone(), host).await.unwrap();
@@ -1020,30 +1563,77 @@ mod tests {
         assert!(service.view(&row).unwrap().refreshing);
         assert!(!service.view(&row).unwrap().usable);
         commands.release.notify_one();
+        wait_for_probe(&service, &row).await;
+        assert!(service.view(&row).unwrap().usable);
+        assert!(service.ready(&row).is_ok());
+        service
+            .retarget(&store, host, "before.example")
+            .await
+            .unwrap();
+        assert!(
+            service.view(&row).unwrap().usable,
+            "a no-op retains the claim"
+        );
+        let identity = parse_place_identity(TEST_PLACE_IDENTITY).unwrap();
+        assert!(
+            store
+                .owns_podman_place(row.clone(), identity.clone())
+                .await
+                .unwrap()
+        );
+        service.refresh(store.clone(), host).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), commands.entered.notified())
+            .await
+            .expect("the second probe must already be in flight");
+        let permit = service.cache.lock().unwrap().refreshing[&host].clone();
+        service
+            .retarget(&store, host, "after.example")
+            .await
+            .unwrap();
+        let changed = current_row(&store, host).await.unwrap();
+        assert!(!service.view(&changed).unwrap().usable);
+        assert!(service.ready(&changed).is_err());
+        service
+            .retarget(&store, host, "before.example")
+            .await
+            .unwrap();
+        let restored = current_row(&store, host).await.unwrap();
+        assert!(!service.view(&restored).unwrap().usable);
+        commands.release.notify_one();
+        // Retarget removed the slot, so only the probe's own reference can
+        // witness its exit. Wait for that before checking for publication.
         tokio::time::timeout(Duration::from_secs(2), async {
-            while service.view(&row).unwrap().refreshing {
+            while Arc::strong_count(&permit) > 1 {
                 tokio::task::yield_now().await;
             }
         })
         .await
-        .unwrap();
-        assert!(service.view(&row).unwrap().usable);
-        assert!(service.ready(&row).is_ok());
-        let conn = rusqlite::Connection::open(path).unwrap();
-        conn.execute(
-            "UPDATE hosts SET destination = 'after.example' WHERE id = ?1",
-            [host],
-        )
-        .unwrap();
-        let changed = store
-            .list_hosts()
+        .expect("the abandoned probe must exit after its held command answers");
+        assert!(!service.view(&restored).unwrap().usable);
+        assert!(
+            !store.owns_podman_place(restored, identity).await.unwrap(),
+            "the pre-edit probe cannot re-claim the restored destination"
+        );
+
+        // Refresh on the edited host must start while the abandoned
+        // route's probe is still waiting for its remote answer.
+        service.refresh(store.clone(), host).await.unwrap();
+        tokio::time::timeout(Duration::from_secs(2), commands.entered.notified())
             .await
-            .unwrap()
-            .into_iter()
-            .find(|row| row.id == host)
+            .expect("the check from the old route must be in flight");
+        service
+            .retarget(&store, host, "after.example")
+            .await
             .unwrap();
-        assert!(!service.view(&changed).unwrap().usable);
-        assert!(service.ready(&changed).is_err());
+        commands
+            .hold
+            .store(false, std::sync::atomic::Ordering::Relaxed);
+        tokio::time::timeout(Duration::from_secs(2), service.fresh(&store, host))
+            .await
+            .expect("a fresh check must not wait for the abandoned route")
+            .expect("the current endpoint passes its check");
+        assert!(service.view(&changed).unwrap().usable);
+        commands.release.notify_one();
     }
 
     /// A missing busctl must not add a new place prerequisite. systemctl's
@@ -1066,6 +1656,7 @@ mod tests {
             ),
             ("systemd-run".into(), Ok(String::new())),
             ("systemctl".into(), Ok(String::new())),
+            ("sh".into(), Ok(TEST_PLACE_IDENTITY.into())),
         ];
         let commands = FakeCommands {
             replies: Mutex::new(replies.into()),
