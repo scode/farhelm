@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [pending] `remove-own-setting-permission.md` — Remove "Agent's own setting" permission mode, treat unproven launches as YOLO, and offer guarded Replace
+- [in-flight 442cce] `remove-own-setting-permission.md` — Remove "Agent's own setting" permission mode, treat unproven launches as YOLO, and offer guarded Replace
 - [pending] `codex-recipe-credentials-at-launch.md` — Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
 - [pending] `claude-trust-home-dir-policy.md` — Skip Claude workspace trust in home, its parents, and root, fail closed on unusable HOME, and align Settings and docs
 - [pending] `stop-and-suspend-timeout-feedback.md` — Distinguish Stop and suspend's 20-second reply notice from supervisor timeouts in helm and desktop app
