@@ -53,7 +53,9 @@ use super::recents::{RecentFilter, destination_label, placement, ranked, selecti
 use super::view::host_name_with_phase;
 use super::words::{HARNESS_SEARCH_ORDER, guarded_permission_help};
 use crate::host_text::{HostSentence, HostText};
-use crate::permission::words::{effort_label, permission_tooltip};
+use crate::permission::words::{
+    DEFAULT_EFFORT_HELP, DEFAULT_EFFORT_WORD, effort_label, effort_word, permission_tooltip,
+};
 use crate::templates::rows::{self as template_rows, Row as TemplateRow};
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -113,7 +115,7 @@ fn needs_harness(scope: Scope, value: &str, agent_without_harness: bool) -> bool
     match scope {
         Scope::Effort | Scope::Perms => true,
         Scope::All => {
-            value.eq_ignore_ascii_case(&effort_word(None))
+            value.eq_ignore_ascii_case(DEFAULT_EFFORT_WORD)
                 || EFFORT_ORDER
                     .iter()
                     .any(|effort| value.eq_ignore_ascii_case(&effort_word(Some(*effort))))
@@ -385,7 +387,7 @@ impl Row {
                 "Use this model for the session".to_owned()
             }
             Row::Effort(Some(_)) => "Use this reasoning effort for the session".to_owned(),
-            Row::Effort(None) => "Use the agent's default reasoning effort".to_owned(),
+            Row::Effort(None) => DEFAULT_EFFORT_HELP.to_owned(),
             Row::Permission(permission) => match permission.permission() {
                 None => {
                     "Use the agent's own setting, which Farhelm cannot force or classify".to_owned()
@@ -434,14 +436,6 @@ impl Row {
 /// A harness's search word: its label, lowercased (`opencode`, not the protocol's `open_code`).
 fn harness_word(harness: LaunchHarness) -> String {
     harness_label(harness).to_ascii_lowercase()
-}
-
-/// An effort's search word: its value, lowercased; `default` for the agent's default.
-fn effort_word(effort: Option<LaunchEffort>) -> String {
-    match effort {
-        Some(_) => effort_label(effort).to_ascii_lowercase(),
-        None => "default".to_owned(),
-    }
 }
 
 /// Whether `value` looks like a path, which offers "Use this path": it starts with `/`, `~` or `.`, or holds a `/`.
@@ -650,7 +644,7 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
         && !blank_all
         && let Some(harness) = harness
     {
-        if scope == Scope::Effort && harness.offers_effort() && matches("default") {
+        if scope == Scope::Effort && harness.offers_effort() && matches(DEFAULT_EFFORT_WORD) {
             rows.push(Row::Effort(None));
         }
         let efforts = compatible_efforts(harness, inputs.model, inputs.catalog.unwrap_or_default());

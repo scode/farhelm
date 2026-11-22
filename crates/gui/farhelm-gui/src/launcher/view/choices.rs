@@ -39,7 +39,7 @@ use crate::host_text::Line;
 use crate::launcher::draft::{Edit, Mode, RestartBaseline, harness_label};
 use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
 use crate::permission::words::{
-    effort_label, permission_display, permission_help, permission_tooltip,
+    DEFAULT_EFFORT_HELP, effort_label, permission_display, permission_help, permission_tooltip,
 };
 use crate::theme::{self, metrics};
 
@@ -279,7 +279,7 @@ impl Launcher {
             let options = std::iter::once(SelectOption::new(
                 "default",
                 "Default",
-                HoverHelp::tooltip("Use the agent's default reasoning effort"),
+                HoverHelp::tooltip(DEFAULT_EFFORT_HELP),
             ))
             .chain(efforts.iter().map(|effort| {
                 SelectOption::new(
@@ -305,11 +305,7 @@ impl Launcher {
                 .into_any_element()
         } else {
             let group = RadioGroup::new("launcher-effort", "Effort", help, Role::Group).option(
-                RadioOption::new(
-                    "Default",
-                    HoverHelp::tooltip("Use the agent's default reasoning effort"),
-                    None,
-                ),
+                RadioOption::new("Default", HoverHelp::tooltip(DEFAULT_EFFORT_HELP), None),
             );
             efforts
                 .iter()

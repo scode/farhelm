@@ -27,6 +27,21 @@ pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
     }
 }
 
+/// The default effort's query word is part of the `effort:default` syntax.
+pub(crate) const DEFAULT_EFFORT_WORD: &str = "default";
+
+/// Lowercase the displayed effort for searches and the previous-setting marker. The explicit labels are ASCII,
+/// including `xhigh`. The default uses its fixed search word.
+pub(crate) fn effort_word(effort: Option<LaunchEffort>) -> String {
+    match effort {
+        Some(_) => effort_label(effort).to_ascii_lowercase(),
+        None => DEFAULT_EFFORT_WORD.to_owned(),
+    }
+}
+
+/// Default means the agent decides the effort. Keep that explanation the same in search, the select and the radio.
+pub(crate) const DEFAULT_EFFORT_HELP: &str = "Use the agent's default reasoning effort";
+
 /// A permission's name in the footer and on its segment (old `permission_display_value`), with no choice as
 /// "Default". It differs from the launcher's escalation banner names (its draft's `permission_name`) in two words, as
 /// the old app's did: no choice there is the agent's own setting, and Custom there is "Custom flags".
