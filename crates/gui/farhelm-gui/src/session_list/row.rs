@@ -90,9 +90,10 @@
 use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
-    AnyElement, App, ClickEvent, Entity, FocusHandle, FontWeight, HoverListenerMode,
-    InteractiveElement, IntoElement, ParentElement, SharedString, StatefulInteractiveElement,
-    Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px, relative,
+    AnyElement, App, ClickEvent, Div, ElementId, Entity, FocusHandle, FontWeight,
+    HoverListenerMode, InteractiveElement, IntoElement, ParentElement, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    relative,
 };
 
 use super::environment::{self, Environment};
@@ -103,7 +104,7 @@ use super::status::{self, Badge};
 use super::summary::{self, SummaryCard};
 use super::{SessionList, age, delete, outcome, replace, replace_yolo, stop};
 use crate::assets::{self, Icon};
-use crate::components::{HoverHelp, ListRow, Role, StatusMark};
+use crate::components::{HoverHelp, ListRow, Role, StatusMark, spinner_icon};
 use crate::focus;
 use crate::host_text::{self, HostSentence, HostText, Line};
 use crate::local_time::Zone;
@@ -406,24 +407,26 @@ pub(crate) fn row(
         // A pending Stop goes before the title, as the old `.stop-progress` did, and so does an environment's pending
         // Suspend, Resume or Stop and suspend, in the same look.
         .children(stop::in_flight(session.key, cx).then(|| {
-            stop::progress(
+            progress_title(
                 session.key,
                 "session-stop-progress",
                 stop::PROGRESS_LABEL,
                 steps.spinner,
                 selected,
-                cx,
+                palette,
             )
+            .flex_none()
         }))
         .children(pending.map(|pending| {
-            stop::progress(
+            progress_title(
                 session.key,
                 "session-environment-progress",
                 pending.label(),
                 steps.spinner,
                 selected,
-                cx,
+                palette,
             )
+            .flex_none()
         }))
         // A pinned row's glyph, immediately before the title ([`super::pins`]).
         .children(
@@ -433,9 +436,17 @@ pub(crate) fn row(
         // A pending Delete takes the title's place on screen, as the old row's did; the open control and the list item
         // keep the title as their accessible names.
         .child(match delete::in_flight(session.key, cx) {
-            Some(label) => {
-                delete::progress(session.key, label, steps.spinner, selected, cx).into_any_element()
-            }
+            Some(label) => progress_title(
+                session.key,
+                "session-delete-progress",
+                label,
+                steps.spinner,
+                selected,
+                palette,
+            )
+            .flex_1()
+            .min_w_0()
+            .into_any_element(),
             None => title_element(
                 &title,
                 retired,
@@ -658,6 +669,39 @@ fn title_element(
     .into_any_element()
 }
 
+/// The words and spinner for a pending request in the title line. The stem identifies the request's own status,
+/// and the label names it for assistive technology. Use the fill's ink on the selected row, where the accent would
+/// disappear. Stop and environment requests take their own width before the title. Delete fills the title's slot.
+fn progress_title(
+    key: &str,
+    stem: &'static str,
+    label: &'static str,
+    step: u8,
+    selected: bool,
+    palette: &Palette,
+) -> Stateful<Div> {
+    let ink = theme::color(if selected {
+        palette.on_fill
+    } else {
+        palette.accent
+    });
+    div()
+        .id(ElementId::Name(format!("{stem}-{key}").into()))
+        .debug_selector(move || stem.into())
+        .role(Role::Status)
+        .aria_label(label)
+        .flex()
+        .flex_row()
+        .items_center()
+        .gap(px(6.))
+        .whitespace_nowrap()
+        .text_size(metrics::TEXT_ROW_TITLE)
+        .font_weight(FontWeight::SEMIBOLD)
+        .text_color(ink)
+        .child(spinner_icon(step, px(12.), ink))
+        .child(label)
+}
+
 /// A marked stripe uses the fill's ink on the open row so both meanings remain visible.
 fn marker(key: &str, selected: bool, palette: &Palette) -> impl IntoElement {
     leading_marker(if selected {
@@ -770,21 +814,30 @@ fn stale_mark(
     palette: &Palette,
     selected: bool,
 ) -> impl IntoElement + use<> {
+    let (mark, id) = stale_cause_mark(row_id, cause, selected);
+    div().flex_none().child(mark.content(row_marks::cell(
+        id,
+        Icon::Stale,
+        status::stale_mark_color(palette, selected),
+    )))
+}
+
+/// Both densities anchor the cause's hover help beside the sidebar and give it the same accessible name.
+/// Return the mark's stable id for the compact clock cell, which also uses it for its picture.
+fn stale_cause_mark(
+    row_id: &str,
+    cause: &'static str,
+    selected: bool,
+) -> (StatusMark, SharedString) {
     let id = SharedString::from(format!("{row_id}{CAUSE_ID_SUFFIX}"));
-    div().flex_none().child(
-        StatusMark::new(
-            id.clone(),
-            cause,
-            HelpPlace::Row { selected }.place(HoverHelp::tooltip(status::cause_help(cause))),
-            Role::Status,
-            cause,
-        )
-        .content(row_marks::cell(
-            id,
-            Icon::Stale,
-            status::stale_mark_color(palette, selected),
-        )),
-    )
+    let mark = StatusMark::new(
+        id.clone(),
+        cause,
+        HelpPlace::Row { selected }.place(HoverHelp::tooltip(status::cause_help(cause))),
+        Role::Status,
+        cause,
+    );
+    (mark, id)
 }
 
 /// A compact row's words for its summary card, which are its accessible description and what the tooltip reports: what
@@ -891,17 +944,8 @@ fn detail_line(
             }),
         )
         .children(cause.map(|cause| {
-            div().flex_none().child(
-                StatusMark::new(
-                    format!("{row_id}{CAUSE_ID_SUFFIX}"),
-                    cause,
-                    HelpPlace::Row { selected }
-                        .place(HoverHelp::tooltip(status::cause_help(cause))),
-                    Role::Status,
-                    cause,
-                )
-                .ink(inks.secondary),
-            )
+            let (mark, _) = stale_cause_mark(row_id, cause, selected);
+            div().flex_none().child(mark.ink(inks.secondary))
         }))
         .children(suspended.then(|| suspended_mark(row_id, true, selected, inks)))
         .children(deleting.map(|deleting| {

@@ -31,22 +31,18 @@
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{SessionStopOutcome, SessionStopRequest};
-use gpui::{
-    App, Context, ElementId, FontWeight, InteractiveElement, IntoElement, ParentElement, Role,
-    SharedString, StatefulInteractiveElement as _, Styled, Window, div, px,
-};
+use gpui::{App, Context, SharedString, Window};
 use serde_json::{Value, json};
 
 use super::environment;
 use super::{SessionList, menu, outcome};
-use crate::components::{HoverHelp, Tier, spinner_icon};
+use crate::components::{HoverHelp, Tier};
 use crate::environment_ui::ProviderUi;
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::session;
-use crate::theme::{self, metrics};
 
 /// The menu's Stop item's hover help (the item's description line says the same at more length).
 pub(super) fn menu_help(row: &SessionRow) -> &'static str {
@@ -306,46 +302,9 @@ fn notice(body: Option<&Value>) -> Option<String> {
 
 // ---- What the row shows ----------------------------------------------------------------------------------------------
 
-/// Whether `key` has a Stop in flight: its row then shows [`progress`] before its title.
+/// Whether `key` has a Stop in flight. Its row then shows the Stop's progress before its title.
 pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
     outcome::in_flight(key, cx) == Some(Work::Stop)
-}
-
-/// The row's in-progress mark for `key`'s pending request: the spinner at `step` and `label` ("Stopping…" for a Stop),
-/// before the title, in the accent, or in the fill's ink on the selected row (the old `.stop-progress`, which shared
-/// `.delete-progress`'s look). An environment's pending Suspend, Resume or Stop and suspend draws the same mark
-/// (`super::environment::Pending`). Its id is `<stem>-<key>` and its debug selector `stem`, so each request's mark is
-/// found by its own stem (`session-stop-progress`, `session-environment-progress`).
-pub(super) fn progress(
-    key: &str,
-    stem: &'static str,
-    label: &'static str,
-    step: u8,
-    selected: bool,
-    cx: &App,
-) -> impl IntoElement {
-    let palette = theme::palette(cx);
-    let ink = theme::color(if selected {
-        palette.on_fill
-    } else {
-        palette.accent
-    });
-    div()
-        .id(ElementId::Name(format!("{stem}-{key}").into()))
-        .debug_selector(move || stem.into())
-        .role(Role::Status)
-        .aria_label(label)
-        .flex()
-        .flex_row()
-        .flex_none()
-        .items_center()
-        .gap(px(6.))
-        .whitespace_nowrap()
-        .text_size(metrics::TEXT_ROW_TITLE)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(ink)
-        .child(spinner_icon(step, px(12.), ink))
-        .child(label)
 }
 
 #[cfg(test)]

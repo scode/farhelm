@@ -59,22 +59,17 @@ use std::rc::Rc;
 use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionDeleteOutcome};
-use gpui::{
-    App, BorrowAppContext as _, Context, ElementId, FontWeight, Global, InteractiveElement,
-    IntoElement, ParentElement, Role, SharedString, StatefulInteractiveElement as _, Styled,
-    Window, div, px,
-};
+use gpui::{App, BorrowAppContext as _, Context, Global, SharedString, Window};
 use serde_json::Value;
 
 use super::environment_delete::{self, AskAgain};
 use super::{SessionList, delete_notice, menu, outcome};
-use crate::components::{HoverHelp, Tier, spinner_icon};
+use crate::components::{HoverHelp, Tier};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
 use crate::session::{self, PerSession};
-use crate::theme::{self, metrics};
 
 // ---- What a Delete of a row asks and sends ---------------------------------------------------------------------------
 
@@ -462,43 +457,6 @@ pub(crate) fn in_flight(key: &str, cx: &App) -> Option<&'static str> {
         DeleteGuard::AgentEnded => "Stopping tabs…",
         DeleteGuard::NothingAlive => "Deleting…",
     })
-}
-
-/// The row's in-progress mark for `key`'s pending Delete: the spinner at `step` and the label from [`in_flight`],
-/// drawn where the title would be. In the accent, or in the fill's ink on the selected row
-/// (`.session-row.selected .delete-progress`), where the accent would vanish into the accent fill.
-pub(super) fn progress(
-    key: &str,
-    label: &'static str,
-    step: u8,
-    selected: bool,
-    cx: &App,
-) -> impl IntoElement {
-    let palette = theme::palette(cx);
-    let ink = theme::color(if selected {
-        palette.on_fill
-    } else {
-        palette.accent
-    });
-    div()
-        .id(ElementId::Name(
-            format!("session-delete-progress-{key}").into(),
-        ))
-        .debug_selector(|| "session-delete-progress".into())
-        .role(Role::Status)
-        .aria_label(label)
-        .flex()
-        .flex_row()
-        .flex_1()
-        .min_w_0()
-        .items_center()
-        .gap(px(6.))
-        .whitespace_nowrap()
-        .text_size(metrics::TEXT_ROW_TITLE)
-        .font_weight(FontWeight::SEMIBOLD)
-        .text_color(ink)
-        .child(spinner_icon(step, px(12.), ink))
-        .child(label)
 }
 
 #[cfg(test)]
