@@ -986,9 +986,8 @@ where
                 break;
             }
             frames_written.fetch_add(1, Ordering::Relaxed);
-            // Output-path checkpoint; see the first one in
-            // `OutputStream::next_output`. Data frames only: control
-            // replies are not what that path loses.
+            // A successful data-frame write places the frame on the
+            // connection. The checkpoint narrows where output was lost.
             if matches!(frame.kind, farhelm_proto::FrameKind::Data) {
                 debug!(
                     channel = frame.channel,

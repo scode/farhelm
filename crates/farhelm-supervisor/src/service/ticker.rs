@@ -262,9 +262,8 @@ pub(crate) struct Observation {
     /// change counting reads this; a recognized screen answers for itself.
     pub(crate) changed: bool,
     /// The reading this sample may count as a transition away from: the
-    /// previous stored reading of this run, or `None` when this sample only
-    /// establishes a baseline (the run's first sample, the first after a
-    /// failed capture).
+    /// previous stored reading of this run, or `None` until a sample has
+    /// established a baseline.
     pub(crate) prior: Option<Reading>,
     /// This sample's reading, or `None` when the reader recognized the
     /// screen but it says nothing about the agent (a menu the user opened),
@@ -369,14 +368,13 @@ pub(crate) struct ActivitySample {
     pub(crate) screen_yolo: bool,
     /// Claude-only compatibility signal for UIs predating harness-neutral hints.
     pub(crate) claude_trust_prompt: bool,
-    /// Current trust question, cleared on failed capture as well as when the
-    /// dialog leaves the screen. A rename shares this run's sample cell.
+    /// Current trust question, cleared by a later sample without the dialog
+    /// or by a fresh run sample cell. A rename keeps the current cell.
     pub(crate) workspace_trust_prompt: bool,
     /// A reloaded pane has no process-local screen history yet. While this
     /// is true, the list reply leaves its status provisional so the helm
     /// can keep the last cached answer until this process sees real evidence.
-    /// A recognized wait is returned immediately, then retires this flag
-    /// so a later failed capture can withdraw that claim.
+    /// A recognized wait is returned immediately and retires this flag.
     /// New launches start false: their initial `Running` is intentional.
     pub(crate) startup_provisional: bool,
     /// How many times this session has been sampled at all.
@@ -407,12 +405,9 @@ pub(crate) struct ActivitySample {
     /// The screen text compared with the preceding sample, bounded to
     /// [`SAMPLE_TAIL_BYTES`]. `None` before the first sample.
     pub(crate) comparison: Option<String>,
-    /// What the session's screen reader concluded from the most recent
-    /// successful capture that said anything about the agent, or the
-    /// change-counting reading when there is no screen to read (before the
-    /// first sample, and after a failed capture withdrew what the last
-    /// screen showed). A "can't tell" screen (`ScreenState::Unknown`) is
-    /// never stored; the reading before it stands.
+    /// The latest reading that said something about the agent. Before a
+    /// sample arrives the cell has its default. A "can't tell" screen
+    /// (`ScreenState::Unknown`) leaves the previous reading in place.
     ///
     /// Stored rather than recomputed per reply: replies read it and never
     /// run a reader, and the reading is a function of the capture, which is
@@ -421,13 +416,10 @@ pub(crate) struct ActivitySample {
     /// Whether [`Self::reading`] came from a successful sample of this run,
     /// so that the next sample may count as a transition away from it.
     ///
-    /// False for a new or reloaded run and after a failed capture. That is
-    /// the rule that keeps baselines from reordering the list: a session
-    /// that has shown the same question for hours reads `Waiting` on the
-    /// first sample after a supervisor restart, a session restart, or a
-    /// capture recovery, and if that first sample could count as "entered
-    /// waiting" the session would jump to the top of its group and read
-    /// "just now" every time — the stale-activity bug by another route.
+    /// Starts false on a new or reloaded run. The first recognized sample
+    /// may see a question that has been on screen for hours. Treating that
+    /// sample as a transition into `Waiting` would move the session to the
+    /// top of its group and make it read "just now" after every restart.
     transition_ready: bool,
     /// Whether this run already logged that its dedicated screen reader
     /// fell back to change counting. Once per run, so a vendor UI change

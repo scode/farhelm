@@ -3520,11 +3520,11 @@ clear that replacement folder's trust record, causing Claude to ask about trust 
 leaves the record for a later startup, without a user-facing notice.
 
 `ClaudeReader::trust_prompt` refines only the captured question, its answer labels and dialog footer, excluding an
-ordinary input box. A run-scoped sample bool is false after reload/replacement or failed capture, is shared by renames,
-and publishes a sessions-changed hint on transitions. `SessionInfo.claude_trust_prompt` defaults false and omits false;
-listing and rename read the same sample cell. The UI visibility predicate also requires managed membership, the agent
-tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local × lasts
-until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
+ordinary input box. The flag starts false on reload or replacement, follows the sampled screen, and is shared by
+renames. Its transitions publish a sessions-changed hint. `SessionInfo.claude_trust_prompt` defaults false and omits
+false; listing and rename read the same sample cell. The UI visibility predicate also requires managed membership, the
+agent tab, a successfully read disabled setting, and neither dismissal. The band stays mounted while hidden so a local ×
+lasts until the question actually leaves the screen; its flow row lets the existing terminal resize observer fit it.
 
 Helm schema 57 adds independent `codex_trust`, `muse_trust` and `pi_trust` checkout settings. Schema 93 adds
 `antigravity_trust` and its nullable hint dismissal alongside the existing per-agent preferences. Each switch defaults
@@ -3552,13 +3552,13 @@ unmanaged. The normal skew-aware update path remains unchanged.
 
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads workspace trust
 through the harness integration seam, independently of its activity reading. The flag defaults false in older cached
-snapshots, resets with the run or failed capture, and shares the existing activity cell across renames. Codex
-recognition uses its captured 0.159.0 folder-access menu (`waiting-trust`) and the reported Quit variant
-(`waiting-derived-trust-quit`, derived from that capture): the Back choice requires `esc back`, and Quit requires
-`esc quit`. Muse uses captured 1.4.10-R6427.1 and 1.4.14 startup trust menus. Antigravity uses the captured 1.5.13 trust
-menu and current confirmation footer. These readers require the dialog's choices and current footer. The GUI attributes
-the shared flag to the session's structured launch. Its read and draw paths share the same directory scope check, which
-allows Antigravity outside managed checkouts. Pi uses its project-resource approval flag without a trust recognizer.
+snapshots, resets with the run, and shares the existing activity cell across renames. Codex recognition uses its
+captured 0.159.0 folder-access menu (`waiting-trust`) and the reported Quit variant (`waiting-derived-trust-quit`,
+derived from that capture): the Back choice requires `esc back`, and Quit requires `esc quit`. Muse uses captured
+1.4.10-R6427.1 and 1.4.14 startup trust menus. Antigravity uses the captured 1.5.13 trust menu and current confirmation
+footer. These readers require the dialog's choices and current footer. The GUI attributes the shared flag to the
+session's structured launch. Its read and draw paths share the same directory scope check, which allows Antigravity
+outside managed checkouts. Pi uses its project-resource approval flag without a trust recognizer.
 
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
@@ -3952,20 +3952,21 @@ no path values are stored in the notice.
   supervisor-authoritative list), spawn idempotency keys, captured conversation identities, host identity, and the boot
   id last seen. Comparing the stored boot id against the current one (`/proc/sys/kernel/random/boot_id`;
   `kern.bootsessionuuid` on macOS — a per-boot UUID, chosen over `kern.boottime` because the kernel rewrites boottime on
-  clock steps and a boot id must never change mid-boot) is how "interrupted" is classified per SPEC.md. Before schema
-  work, an open holding the state-directory claim attempts to convert the file to WAL. A failed conversion, or a result
-  other than `wal`, warns and continues in the current mode; the next owning open tries again. Every ordinary read-write
-  connection reads the actual mode and sets `synchronous=NORMAL` only for WAL, otherwise retaining FULL. WAL/NORMAL
-  preserves database consistency and committed state across process crashes, but an OS crash or power loss can lose the
-  last commits. Host-identity creation temporarily uses FULL and commits before the identity can be reported to a helm;
-  losing that source identity after a helm recorded it would leave an installation refusing to start. The connection
-  returns to its previous sync setting before the identity is returned. If conversion left a rollback journal, this
-  critical write uses EXTRA instead, which also synchronizes journal removal. On macOS, FULL and EXTRA make these writes
-  durable only up to the drive's cache: SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit,
-  judging the additional protection marginal and expecting most Macs running Farhelm to have batteries. Schema
-  migrations are atomic database-only operations: a lost migration leaves a complete earlier schema to migrate again.
-  Older builds' SQLite versions can still open a WAL database. The `-wal` journal and `-shm` index live beside each
-  database; copying only the `.db` file while Farhelm is running can omit committed changes.
+  clock steps and a boot id must never change mid-boot) detects interruptions caused by a reboot. Retirement of an old
+  tmux terminal can also produce this outcome. Before schema work, an open holding the state-directory claim attempts to
+  convert the file to WAL. A failed conversion, or a result other than `wal`, warns and continues in the current mode;
+  the next owning open tries again. Every ordinary read-write connection reads the actual mode and sets
+  `synchronous=NORMAL` only for WAL, otherwise retaining FULL. WAL/NORMAL preserves database consistency and committed
+  state across process crashes, but an OS crash or power loss can lose the last commits. Host-identity creation
+  temporarily uses FULL and commits before the identity can be reported to a helm; losing that source identity after a
+  helm recorded it would leave an installation refusing to start. The connection returns to its previous sync setting
+  before the identity is returned. If conversion left a rollback journal, this critical write uses EXTRA instead, which
+  also synchronizes journal removal. On macOS, FULL and EXTRA make these writes durable only up to the drive's cache:
+  SQLite does not request `F_FULLFSYNC`. The maintainer accepted this limit, judging the additional protection marginal
+  and expecting most Macs running Farhelm to have batteries. Schema migrations are atomic database-only operations: a
+  lost migration leaves a complete earlier schema to migrate again. Older builds' SQLite versions can still open a WAL
+  database. The `-wal` journal and `-shm` index live beside each database; copying only the `.db` file while Farhelm is
+  running can omit committed changes.
 - Host identity: generated once at first run and committed with FULL sync before publication, stored in the db.
 - The interrupted-session surface is a centered neutral card in the empty terminal area: it explains that a host restart
   paused the session and keeps the terminal absent until the user intentionally chooses Restart or confirms Replace.
@@ -4070,34 +4071,33 @@ no path values are stored in the notice.
   and restored verbatim on supervisor restart. A sample dates activity when its reading is working (from recognized
   content on every such sample; from change counting only when the screen actually changed, since change counting's
   working also covers the quiet samples before it decays) and when waiting begins; a question that stays on screen does
-  not refresh it, and idle never does. Like work starts below, a baseline sample (a run's first, or the first after a
-  failed capture) never dates anything. Persisting it does not contradict the rule that liveness is never persisted: a
-  status is a claim about NOW and rots the instant the process it describes moves on, while this is a claim about a past
-  instant that the passage of time cannot falsify. The two must not be conflated in the other direction either —
-  classification still reads sample COUNTS and never this clock, for the population-dependence reason above. The value
-  advances only when the dated sample is at least a minute newer than what is already stored, and the reason is blast
-  radius rather than resolution. Two costs, scaling differently: a durable `UPDATE` per session per crossing, which
-  without the quantum would be a write per busy session every two seconds; and a fleet-wide UI wake, which is COALESCED
-  — the helm detects a changed session by comparing whole serialized `SessionInfo`s, but bumps the invalidation feed at
-  most once per host refresh that found anything different, however many sessions moved. So the wake is bounded per
-  refresh while the writes are bounded per session, and without a quantum a single busy agent would re-render every
-  connected client on every drain. No user distinguishes two sessions whose last output was twenty seconds apart; the
-  same quantum applies to the moment waiting begins, so a question asked within a minute of the last working stamp keeps
-  that older stamp. Writes are monotonic in SQL as well as in memory, so a backwards clock step cannot make displayed
-  activity younger or undo an unseen observation; a lost write costs age precision after restart until another dated
-  sample crosses the quantum, and nothing else.
+  not refresh it, and idle never does. Like work starts below, the first sample that establishes a baseline never dates
+  anything. Persisting it does not contradict the rule that liveness is never persisted: a status is a claim about NOW
+  and rots the instant the process it describes moves on, while this is a claim about a past instant that the passage of
+  time cannot falsify. The two must not be conflated in the other direction either — classification still reads sample
+  COUNTS and never this clock, for the population-dependence reason above. The value advances only when the dated sample
+  is at least a minute newer than what is already stored, and the reason is blast radius rather than resolution. Two
+  costs, scaling differently: a durable `UPDATE` per session per crossing, which without the quantum would be a write
+  per busy session every two seconds; and a fleet-wide UI wake, which is COALESCED — the helm detects a changed session
+  by comparing whole serialized `SessionInfo`s, but bumps the invalidation feed at most once per host refresh that found
+  anything different, however many sessions moved. So the wake is bounded per refresh while the writes are bounded per
+  session, and without a quantum a single busy agent would re-render every connected client on every drain. No user
+  distinguishes two sessions whose last output was twenty seconds apart; the same quantum applies to the moment waiting
+  begins, so a question asked within a minute of the last working stamp keeps that older stamp. Writes are monotonic in
+  SQL as well as in memory, so a backwards clock step cannot make displayed activity younger or undo an unseen
+  observation; a lost write costs age precision after restart until another dated sample crosses the quantum, and
+  nothing else.
 - Work-start ordering: the ticker separately advances `last_work_started_at` when a sample's reading moves a session
   from idle or waiting to working, or from idle or working to waiting. Both sides must be readings of the same run's
-  successful samples: the run's first sample, the first successful sample after a capture failure, and a "can't tell"
-  screen only establish or keep a baseline. That rule is what stops a question that has been on screen for hours from
-  jumping to the top and reading "just now" after every supervisor restart, session restart, or capture recovery.
-  Continued work in the same burst, a redraw of the same question, and completion do not advance it. The badge and the
-  ordering read the same stored reading, so they cannot drift apart. The key is milliseconds since the epoch, but
-  allocation is supervisor-local monotonic state rather than a bare clock read: startup seeds it to the greatest
-  effective key across every loaded row (ended rows included), and a start reserves `max(now_ms, previous + 1)` with
-  saturation. This orders same-millisecond bursts and survives a backward clock step on one supervisor. Separate
-  supervisors still have only their wall clocks and the helm's deterministic creation/id/host tie-breakers; this does
-  not claim distributed causality across skewed hosts.
+  samples. The first sample that says something about the agent establishes the baseline. A "can't tell" sample keeps
+  it. This stops a question that has been on screen for hours from jumping to the top and reading "just now" after a
+  supervisor or session restart. Continued work in the same burst, a redraw of the same question, and completion do not
+  advance it. The badge and the ordering read the same stored reading, so they cannot drift apart. The key is
+  milliseconds since the epoch, but allocation is supervisor-local monotonic state rather than a bare clock read:
+  startup seeds it to the greatest effective key across every loaded row (ended rows included), and a start reserves
+  `max(now_ms, previous + 1)` with saturation. This orders same-millisecond bursts and survives a backward clock step on
+  one supervisor. Separate supervisors still have only their wall clocks and the helm's deterministic creation/id/host
+  tie-breakers; this does not claim distributed causality across skewed hosts.
 
   New sessions start at their creation time in milliseconds. Rename and explicit restart share the same session key,
   while their new run gets fresh transition evidence, so neither operation itself promotes. A start writes immediately,
@@ -6224,9 +6224,9 @@ connection handshake change, or transparent recovery of failed Replaces.
 A user's Delete of a session in an environment is `ControlMsg::DeleteSessionOrSeal` (protocol 76), sent only by the
 helm's full-authority connection; a session-authenticated one is refused like a create. The supervisor handles it like
 `DeleteSession` (agent fence, so the session's in-flight agent requests finish first; admission; directory admission;
-lifecycle claim), with each wait before the decision bounded so that a busy environment gets a definite "nothing was
-deleted" `Conflict` rather than a decision taken after the helm gave up. A supervisor already sealed answers `Sealed` to
-any such request, whether or not the session still exists; an unsealed one that does not find the session answers
+lifecycle claim). When admission exceeds its budget, a busy environment gets a "nothing was deleted" `Conflict`. The
+session lookup, teardown preflight and store decision run after that bound. A supervisor already sealed answers `Sealed`
+to any such request, whether or not the session still exists; an unsealed one that does not find the session answers
 `NotFound`, which the helm reads as an earlier attempt having deleted only that session. Otherwise teardown runs its
 read-only preflight, then one store transaction counts the other rows in `sessions` (any state: a `Launching` row is
 written before its terminal starts, and a Restart keeps its row while its entry is off the in-memory map; a pending
@@ -6257,13 +6257,13 @@ agent fence), queues behind any other environment session Delete of the same hos
 lock without waiting (a setup, update, suspend or whole-environment removal answers "try again"), re-reads the row and
 requires it session-owned and machine-deleting, and sends the request only while the host is connected, with a reply
 deadline derived from the supervisor's wait bound and teardown's own bounds. Not connected, not sent, sent without an
-answer, or past the deadline: the helm answers with a marker that nothing was decided (`ENVIRONMENT_UNASKED_HEADER`),
-which the client answers by offering the warned whole-environment Delete. The route itself answers within the host reply
-bound ("The UI channel"), so only a marker decided within it reaches the client. The desktop app does not send this
-Delete yet: its environment session Delete comes with the environment sessions' port
-(`crates/gui/farhelm-gui/src/session_list/delete.rs`). `Deleted` runs the ordinary local forgetting and reports the
-supervisor's count; `Sealed` destroys the environment through the same removal path as host removal, under the lock
-already held.
+answer, or past the deadline: the helm sends `ENVIRONMENT_UNASKED_HEADER` and the client offers the warned
+whole-environment Delete. For a sent request with no answer, the supervisor's decision can still be pending or have
+committed. The route itself answers within the host reply bound ("The UI channel"), so only a marker decided within it
+reaches the client. The desktop app does not send this Delete yet: its environment session Delete comes with the
+environment sessions' port (`crates/gui/farhelm-gui/src/session_list/delete.rs`). `Deleted` runs the ordinary local
+forgetting and reports the supervisor's count; `Sealed` destroys the environment through the same removal path as host
+removal, under the lock already held.
 
 Whenever a connection publishes a listing with `sealed` set for a session-owned, machine-deleting host, a helm-owned
 finisher destroys it through that same function, at most one at a time per host. A sealed listing from any other host is

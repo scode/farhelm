@@ -660,7 +660,7 @@ pub type DeletedSessionCleanupGate = BoundaryGate;
 /// refuses — and a test cannot arrange the losing side of that race from
 /// outside: the shell it needs to watch does not exist until the tab's host
 /// starts, and the settle begins whenever the open reaches it, bounded only
-/// by [`TAB_LAUNCH_SETTLE`]. Under enough load the fixture shell's death has
+/// by `TAB_LAUNCH_SETTLE`. Under enough load the fixture shell's death has
 /// been observed landing after the settle (2026-08-18, three concurrent e2e
 /// binaries on a four-core box, with the tabs of the time), turning the
 /// refusal test into a successful open of a live tab. Holding this boundary
@@ -3255,9 +3255,9 @@ fn same_launch_entry(
 /// The terminal a failed relaunch's re-published entry names.
 ///
 /// Every relaunch starts a new terminal host, so the previous terminal is
-/// never where the new generation runs. A definitive failure changed
-/// nothing outside this process and puts the previous terminal back. An
-/// ambiguous one (a replacement host that could not be confirmed ended)
+/// never where the new generation runs. A definitive failure puts the
+/// previous terminal back once the replacement is known absent or reaped.
+/// A replacement program may have run before cleanup. An ambiguous failure
 /// may have left a live agent this code cannot name, so it names no
 /// terminal: the previous one's exited program would otherwise be read as
 /// the new generation's exit, and a later Delete would read the session as
@@ -4623,14 +4623,15 @@ pub(crate) fn notification_cell()
 ///   of the sockets that scan found gone, after the same reading of
 ///   `sessions` and before the reclaim ends any host.
 ///   Re-adoption does not take it: it contacts only the one socket a launch
-///   recorded, which no spawn can be starting. Never held while a lifecycle
-///   claim, `attachments`, or a terminal call is acquired.
+///   recorded, which no spawn can be starting. A lifecycle claim comes
+///   first when one is needed. Host startup and adoption run under the
+///   fence. Acquiring `attachments` stays outside it.
 /// - `host_adoption`, after a lifecycle claim and before `host_scan` and
 ///   `sessions`: a re-adoption takes it, holding the session's claim (taken
 ///   without waiting), only around swapping its outcome into `sessions`;
 ///   `serve`'s reload takes it, with no claim, from collecting the
-///   terminals it keeps until its map replaces the old one. Never held
-///   across a connection to a host.
+///   terminals it keeps through host adoption until its map replaces the
+///   old one. This keeps reload from overwriting a concurrent re-adoption.
 /// - `sessions` before `restarting_rows`, `restarting_tabs` and
 ///   `last_listed`: the restart window swaps a session for its held row and
 ///   its tab cell, and a listing reads the held rows and an orderly stop the
@@ -6857,14 +6858,10 @@ impl Supervisor {
                                 inferred: false,
                             },
                         );
-                        // The pane still rides into `found_panes` even
-                        // though this row takes the sentinel branch (item
-                        // 5/19 of the review-swarm fix batch): a
-                        // `SessionEntry` built with no `terminal` at all
-                        // breaks `Attach` and leaks the host out from
-                        // under `DeleteSession`'s teardown — the terminal
-                        // genuinely exists right now regardless of which durable outcome this pass
-                        // assigns the row.
+                        // The sentinel settles the launch outcome. Keep the
+                        // adopted terminal available for Attach when it exists.
+                        // Delete also has the durable launch record to find
+                        // the host.
                         if let Some(found) = found {
                             found_panes.insert(row.id.clone(), found);
                         }
@@ -12694,9 +12691,10 @@ impl Supervisor {
     ///
     /// ## Restoring on failure
     ///
-    /// A failure that is DEFINITIVE about having changed nothing outside
-    /// this process puts the previous run's outcome back
-    /// ([`SessionStore::abort_relaunch`]) — that is what makes item 4's
+    /// A definitive failure establishes that the replacement did not start
+    /// or that cleanup has settled it. Its program may have run briefly.
+    /// Restore the previous run's outcome with [`SessionStore::abort_relaunch`].
+    /// That makes item 4's
     /// "only a successful restart clears the annotation" true rather than
     /// merely intended. A failure that is AMBIGUOUS about a spawned agent
     /// leaves the `Launching` row alone for reload to reconcile: restoring
@@ -13275,9 +13273,8 @@ impl Supervisor {
             // the PREVIOUS run ended (item 4).
             annotation: None,
             restart_offer,
-            // Supplied by `relaunch_into_terminal`: pane reuse carries the
-            // preflight list, while replacement in a surviving session
-            // supplies a post-replacement discovery.
+            // Restart replaces the agent host. Its reply carries the tab
+            // list collected before the restart, since those hosts stay open.
             tabs,
 
             github_repo: None,
@@ -24565,42 +24562,23 @@ await new Promise(() => {});
         living.wait().expect("reap the living child");
     }
 
-    /// Releases the ordering test's held-open fake host start on every
-    /// exit path, not just the passing one.
+    /// Publishes the ordering test's host-start release on normal exit
+    /// and during cancellation.
     ///
     /// The fake host program blocks as it starts until `release-start`
-    /// appears, and the host start under test (`spawn_agent_in_host`)
-    /// waits for the fake's exit as its first stage. While the observer
-    /// runs, the only thing that ends the hold is the release file, so
-    /// the release is a guard established before the concurrent
-    /// operation rather than a write after the assertions. The ordinary path releases
-    /// explicitly once the observation is collected (see
-    /// [`release`](Self::release)); cancellation of the test future
-    /// lands in [`drop`](Self::drop) instead, which publishes the
-    /// same file.
+    /// appears, and the host start under test waits for the fake's exit as
+    /// its first stage. Establish the guard before the concurrent observation
+    /// so unwinding still publishes the release.
     ///
-    /// Publishing the file is necessary but not sufficient: teardown
-    /// deletes the scratch directory microseconds after a failure,
-    /// and the shell polls every 20ms, so a release written and then
-    /// immediately unlinked sleeps through its whole lifetime unseen
-    /// (demonstrated, not theorized — the shell survived a landed
-    /// `Ok(())` release twice). The panic path therefore does not
-    /// rely on `drop`: the observer catches the panic while the
-    /// outer future is still healthy (see [`catch_panic`]), releases,
-    /// waits for the shell's deletion-ack, and only then resumes the
-    /// unwind into teardown. The shell provably saw the release
-    /// before anything can remove it.
+    /// A shell polling every 20ms can miss the file if teardown immediately
+    /// removes its directory. The observer catches its panic, publishes the
+    /// release and gives the shell five seconds to acknowledge it by deleting
+    /// the file. The observer then resumes unwinding.
     ///
-    /// What this does NOT do: kill anything. The shell's pid is
-    /// inside the host start where the fixture cannot name it, so the
-    /// fallback for a release that cannot land at all
-    /// (the scratch directory is gone, so the write has nowhere to
-    /// go) or is never acknowledged (the 5s ack bound expires) is the
-    /// fake's own iteration cap, which touches no files and ends the
-    /// shell on its own. Cancellation likewise gets the release
-    /// without the ack — `drop` cannot await — so a cancelled hold
-    /// ends at the cap; nothing in this test cancels the future, so
-    /// that arm is defense in depth, not an exercised path.
+    /// The guard owns only the release file. The joined host-start future
+    /// owns the first stage, with a deadline and kill-on-drop on cancellation.
+    /// The fake's iteration cap is an independent bound if it is still
+    /// running but never observes the file.
     struct ReleaseHeldStart {
         release: std::path::PathBuf,
     }
@@ -24618,14 +24596,9 @@ await new Promise(() => {});
     }
 
     impl Drop for ReleaseHeldStart {
-        /// Cancellation fallback: publish the same release the
-        /// ordinary path would have. Must not panic — this runs
-        /// during unwinding — so the write's error is discarded; if
-        /// the directory is gone, or the shell never sees the file
-        /// before teardown removes it, the fake's iteration cap is
-        /// what ends the shell. This covers cancellation only: the
-        /// panic path needs the ack wait, which `drop` cannot await,
-        /// so it goes through [`catch_panic`] instead.
+        /// Publish a best-effort release on cancellation. The first-stage
+        /// owner's drop can end the shell independently. The observer's
+        /// panic goes through [`catch_panic`] so it can await the ack.
         fn drop(&mut self) {
             self.release();
         }
@@ -24859,9 +24832,8 @@ exit 1
                         // would sleep through the file's whole lifetime.
                         // Wait for its deletion-ack first, so the shell
                         // provably saw the release before anything can
-                        // remove it. Bounded: on expiry the unwind
-                        // proceeds anyway and the shell falls back to
-                        // its own iteration cap.
+                        // remove it. On expiry, unwind drops the host-start
+                        // future and its first-stage child.
                         let ack_deadline =
                             std::time::Instant::now() + std::time::Duration::from_secs(5);
                         while held_start.release.exists()

@@ -943,10 +943,9 @@ async fn handle_stop_session(
         // handler's alone: it records a CLASSIFICATION rather than a new
         // intent. The store adds an annotation only for an existing intent.
         let stop_error = if alive_pid.is_some() {
-            // Nothing is read off the terminal before the kill: SPEC.md
-            // (Terminal experience) says a full-screen program's last
-            // frame is not retained after it exits and no snapshot of it
-            // is taken or stored.
+            // The original terminal stays viewable as long as its host
+            // keeps it. A program killed in full-screen mode can leave
+            // that frame showing there (SPEC.md "Terminal experience").
             stop_live_agent(&sup, &session_id, &entry, alive_identity)
                 .await
                 .err()
@@ -1345,12 +1344,10 @@ fn teardown_failure_message(error: TeardownError) -> String {
 /// Owned like [`handle_delete_session`] and taking the same locks in the
 /// same order (agent fence, admission, directory admission, lifecycle
 /// claim), so the session's in-flight agent requests finish first and a
-/// create is either already recorded or will meet the seal. Unlike it, the
-/// waits before the decision are bounded (`SupervisorTimeouts::
-/// seal_delete_wait`): a helm with its own deadline is waiting, and a
-/// decision taken after it gave up would contradict the "nothing was
-/// decided" it showed the user. The fence is waited for, never refused: an
-/// agent request in flight is what a user Delete waits behind.
+/// create is either already recorded or will meet the seal. Those admission
+/// waits share `SupervisorTimeouts::seal_delete_wait`. Expiry there refuses
+/// without deciding. The session lookup, preflight and seal transaction
+/// follow admission, so a missing reply leaves their result unknown.
 ///
 /// The decision sits between teardown's two halves: after every preflight
 /// that could refuse, before anything destructive. A failure to record the
@@ -1377,11 +1374,9 @@ async fn handle_delete_session_or_seal(
             return (already_sealed(), None);
         }
         let bound = mutation_sup.timeouts.seal_delete_wait;
-        // Every lock this Delete waits for before deciding is inside the
-        // bound, the session's lifecycle claim included: a Restart keeps that
-        // claim through its slow relaunch, and a tab open takes it without
-        // directory admission, so either could otherwise hold the decision
-        // past the helm's deadline.
+        // Bound admission, including the lifecycle claim held through
+        // Restart or tab open. The session lookup, teardown preparation
+        // and durable seal decision follow admission.
         let waited = tokio::time::timeout(bound, async {
             let fence = mutation_sup.agent_request_locks.claim(&mutation_id).await;
             let permit = Arc::clone(&mutation_sup.admission)
@@ -7218,8 +7213,10 @@ mod tests {
 
     /// Spec: the two CREATING verbs refuse an empty, control-laced or
     /// oversized `--host`, refuse a field TOTAL past [`CREATE_FIELD_CAP`],
-    /// and hold an intent key to [`INTENT_KEY_CAP`]. `Clone` needs a host;
-    /// `Create` may name none (a template may set it), but a spawn may not
+    /// and hold an intent key to [`INTENT_KEY_CAP`]. `Clone` needs an explicit
+    /// source and can omit a host at this boundary. The helm checks the
+    /// destination against the source. `Create` may name no host (a template
+    /// may set it), but a spawn may not
     /// name one, and its template names are bounded in number and length
     /// and refused with control characters. A create's flags count against
     /// the total as the JSON they travel as.
@@ -12202,10 +12199,9 @@ mod tests {
             assert!(sup.store.is_sealed().await.unwrap());
         }
 
-        /// Why: the helm waiting on this Delete has a deadline and tells the
-        /// user nothing was decided when it passes; a supervisor that still
-        /// decided later would make that untrue. Spec: with the session's
-        /// agent fence held past the wait bound, the Delete answers a
+        /// An unanswered agent request can hold the fence for longer than
+        /// Delete's admission budget. With the session's agent fence held
+        /// past that bound, the Delete answers a
         /// `Conflict` saying nothing was deleted, and the session and the
         /// supervisor are as they were.
         #[farhelm_testtrace::test]
@@ -12292,10 +12288,8 @@ mod tests {
             );
         }
 
-        /// Why: a Restart keeps the session's lifecycle claim through its
-        /// whole relaunch, and the helm waiting on this Delete has a deadline;
-        /// a Delete that waited on that claim unbounded could still seal after
-        /// the helm told the user nothing was decided. Spec: with only the
+        /// A Restart keeps the session's lifecycle claim through its whole
+        /// relaunch, so that claim must share Delete's admission bound. With only the
         /// session's lifecycle claim held past the bound, the Delete answers
         /// "nothing was deleted", and releasing the claim afterwards deletes
         /// and seals nothing.
