@@ -238,7 +238,7 @@ impl RemoteRoute {
     pub(crate) fn stdin_idle_limit_secs(&self) -> Option<u64> {
         match self {
             Self::Ssh {
-                access: SshAccessKind::UserConfig,
+                access: SshAccessKind::UserConfig | SshAccessKind::Tailscale,
                 ..
             } => None,
             Self::Ssh {
@@ -356,6 +356,7 @@ pub(crate) fn ssh_command_args(
         ConnectionPolicy::OneShot => {
             let options = match access {
                 SshAccess::UserConfig => Vec::new(),
+                SshAccess::Tailscale(access) => access.options(),
                 SshAccess::Tensorlake(access) => {
                     access.oneshot_options().map_err(anyhow::Error::msg)?
                 }

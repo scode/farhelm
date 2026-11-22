@@ -187,6 +187,8 @@ impl SharedConnection {
     }
 }
 
+mod tailscale;
+
 /// How ssh authenticates to a host and checks its host key, as a plain
 /// choice that can travel in a plan or a registry decision
 /// ([`crate::store::HostKind::ssh_access`]); [`SshAccess::resolve`] turns
@@ -200,6 +202,8 @@ impl SharedConnection {
 pub(crate) enum SshAccessKind {
     /// The user's own ssh setup: their keys, agent and known hosts.
     UserConfig,
+    /// Resolve the address and pin host keys through the local Tailscale daemon.
+    Tailscale,
     /// Farhelm's own Tensorlake key and known-hosts file, on top of the
     /// user's config (see [`crate::tensorlake::ssh`]).
     Tensorlake,
@@ -214,7 +218,7 @@ impl SshAccessKind {
     /// Tensorlake supplies its own key and never forwards authentication questions to the desktop.
     pub(crate) fn asks_user(self) -> bool {
         match self {
-            Self::UserConfig => true,
+            Self::UserConfig | Self::Tailscale => true,
             Self::Tensorlake => false,
         }
     }
@@ -226,6 +230,8 @@ impl SshAccessKind {
 pub(crate) enum SshAccess {
     /// The user's keys and host-key policy, with Farhelm's keepalive settings on its shared connections.
     UserConfig,
+    /// An address and private host-key file prepared from the same Tailscale lookup.
+    Tailscale(tailscale::TailscaleSshAccess),
     /// Farhelm's key and known-hosts file for Tensorlake's gateway: the same
     /// access, and the same option set, the snapshot builder uses
     /// ([`crate::tensorlake::ssh`]).
@@ -233,17 +239,31 @@ pub(crate) enum SshAccess {
 }
 
 impl SshAccess {
+    /// Prepare access before constructing a process. Only Tailscale needs a lookup and key-file write.
+    pub(crate) async fn prepare(
+        kind: SshAccessKind,
+        state_dir: &std::path::Path,
+        destination: &str,
+    ) -> anyhow::Result<Self> {
+        match kind {
+            SshAccessKind::Tailscale => Ok(Self::Tailscale(
+                tailscale::TailscaleSshAccess::prepare(state_dir, destination).await?,
+            )),
+            SshAccessKind::UserConfig | SshAccessKind::Tensorlake => Self::resolve(kind, state_dir),
+        }
+    }
+
     /// Resolve `kind` against the helm's state directory, where Farhelm's
     /// Tensorlake key and known-hosts file live. Pure: it names the files
     /// and never creates them, so a dial can never generate a key (only the
-    /// user's Create SSH key in Settings does). Fails only when a relative
-    /// state directory cannot be made absolute.
+    /// user's Create SSH key in Settings does). Tailscale requires asynchronous preparation.
     pub(crate) fn resolve(
         kind: SshAccessKind,
         state_dir: &std::path::Path,
     ) -> anyhow::Result<SshAccess> {
         Ok(match kind {
             SshAccessKind::UserConfig => SshAccess::UserConfig,
+            SshAccessKind::Tailscale => anyhow::bail!("Tailscale SSH access has not been prepared"),
             SshAccessKind::Tensorlake => SshAccess::Tensorlake(
                 crate::tensorlake::ssh::TensorlakeSshAccess::for_state_dir(state_dir)
                     .context("locating Farhelm's Tensorlake ssh key")?,
@@ -260,7 +280,37 @@ impl SshAccess {
                 SHARED_ALIVE_COUNT.to_string(),
             ]),
             SshAccess::UserConfig => Ok(Vec::new()),
+            SshAccess::Tailscale(access) => {
+                let mut options = access.options();
+                if shared {
+                    options.extend([
+                        SHARED_ALIVE_INTERVAL.to_string(),
+                        SHARED_ALIVE_COUNT.to_string(),
+                    ]);
+                }
+                Ok(options)
+            }
             SshAccess::Tensorlake(access) => access.options().map_err(anyhow::Error::msg),
+        }
+    }
+
+    fn kind(&self) -> SshAccessKind {
+        match self {
+            Self::UserConfig => SshAccessKind::UserConfig,
+            Self::Tailscale(_) => SshAccessKind::Tailscale,
+            Self::Tensorlake(_) => SshAccessKind::Tensorlake,
+        }
+    }
+
+    /// OpenSSH borrows a master before authenticating, so pinned access must use its own socket namespace.
+    pub(crate) fn control_socket(
+        &self,
+        control_dir: &std::path::Path,
+        connection: SharedConnection,
+    ) -> Option<std::path::PathBuf> {
+        match self {
+            Self::Tailscale(access) => access.control_socket(connection),
+            Self::UserConfig | Self::Tensorlake(_) => control_socket(control_dir, connection),
         }
     }
 }
@@ -305,16 +355,21 @@ pub(crate) fn ssh_sign_in_args(
     dest: &str,
     control_dir: &std::path::Path,
     connection: SharedConnection,
+    access: &SshAccess,
 ) -> anyhow::Result<Vec<String>> {
     anyhow::ensure!(
-        control_socket(control_dir, connection).is_some(),
+        access.kind().asks_user(),
+        "This SSH access has its own credentials"
+    );
+    anyhow::ensure!(
+        access.control_socket(control_dir, connection).is_some(),
         "SSH sign-in needs a shared socket"
     );
     ssh_args(
         dest,
         control_dir,
         connection,
-        &SshAccess::UserConfig,
+        access,
         &["BatchMode=no", SSH_ONE_PASSWORD_PROMPT],
     )
 }
@@ -326,7 +381,7 @@ fn ssh_args(
     access: &SshAccess,
     authentication: &[&str],
 ) -> anyhow::Result<Vec<String>> {
-    let control_socket = control_socket(control_dir, connection);
+    let control_socket = access.control_socket(control_dir, connection);
     let access_options = access
         .options(control_socket.is_some())?
         .into_iter()
@@ -460,7 +515,7 @@ pub(crate) fn ssh_control_exit_args(
     connection: SharedConnection,
     access: &SshAccess,
 ) -> anyhow::Result<Option<Vec<String>>> {
-    if control_socket(control_dir, connection).is_none() {
+    if access.control_socket(control_dir, connection).is_none() {
         return Ok(None);
     }
     let mut args = ssh_base_args(dest, control_dir, connection, access)?;
@@ -495,13 +550,9 @@ pub(crate) fn ssh_stdio_args(
     remote_farhelm: &str,
     remote_state_dir: Option<&str>,
 ) -> anyhow::Result<Vec<String>> {
-    let kind = match access {
-        SshAccess::UserConfig => SshAccessKind::UserConfig,
-        SshAccess::Tensorlake(_) => SshAccessKind::Tensorlake,
-    };
     let host = crate::access::HostAccess::Remote(crate::access::RemoteRoute::Ssh {
         destination: dest.into(),
-        access: kind,
+        access: access.kind(),
     });
     let argv = host.stdio_argv(remote_farhelm, remote_state_dir);
     crate::access::ssh_command_args(
@@ -585,12 +636,20 @@ fn control_socket_within(
     connection: SharedConnection,
     max_socket_path: usize,
 ) -> Option<std::path::PathBuf> {
+    control_socket_named(control_dir, connection.socket_name(), max_socket_path)
+}
+
+/// Bound the expanded socket path before SSH ever sees it, including its temporary bind suffix.
+fn control_socket_named(
+    control_dir: &std::path::Path,
+    name: &str,
+    max_socket_path: usize,
+) -> Option<std::path::PathBuf> {
     // OpenSSH expands ${...} even inside its quoted ControlPath. A literal
     // directory with that spelling cannot safely name a shared socket.
     if control_dir.to_str().is_some_and(|path| path.contains("${")) {
         return None;
     }
-    let name = connection.socket_name();
     let literal = name.len() - "%C".len();
     let expanded = control_dir.as_os_str().len() + 1 + literal + EXPANDED_TOKEN;
     (expanded + MASTER_TEMP_SUFFIX <= max_socket_path).then(|| control_dir.join(name))

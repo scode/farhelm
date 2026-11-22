@@ -184,7 +184,12 @@ impl SignIn {
         let listener = UnixListener::bind(&socket).context("opening the SSH sign-in socket")?;
         std::fs::set_permissions(&socket, std::fs::Permissions::from_mode(0o600))?;
 
-        let interactive = ssh::ssh_sign_in_args(destination, &self.state_dir, connection)?;
+        let interactive = ssh::ssh_sign_in_args(
+            destination,
+            &self.state_dir,
+            connection,
+            &SshAccess::UserConfig,
+        )?;
         // OpenSSH generates ProxyJump using argv[0]. A unique name resolved by this client's PATH avoids inserting
         // a user path into a shell command. The directory has no `ssh` entry to shadow the original program.
         let path = std::env::var_os("PATH").unwrap_or_else(|| "/usr/bin:/bin".into());
