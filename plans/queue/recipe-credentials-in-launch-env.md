@@ -391,34 +391,57 @@ deliver its report through the queue script, write a closing entry in its log, a
 
 No release note needed.
 
-## Blocked
+## Decisions
 
-Blocked on 2026-11-22 (claim 442cdc).
+### 2026-11-22: answer to a blocked question
 
-### Keep existing Codex conversations resumable during credential migration
+The question, as the executor put it:
 
-Farhelm currently writes a recipe's endpoint token under the `farhelm` provider ID in Codex settings. The plan moves the
-token into Farhelm-launched processes and selects a fresh provider ID to keep stale settings from taking effect. A stale
-bearer can make the endpoint reject the user's next request even when Farhelm has delivered a replacement token.
+> Blocked on 2026-11-22 (claim 442cdc).
+>
+> ### Keep existing Codex conversations resumable during credential migration
+>
+> Farhelm currently writes a recipe's endpoint token under the `farhelm` provider ID in Codex settings. The plan moves
+> the token into Farhelm-launched processes and selects a fresh provider ID to keep stale settings from taking effect. A
+> stale bearer can make the endpoint reject the user's next request even when Farhelm has delivered a replacement token.
+>
+> Codex 0.171.0 saves the provider ID with each conversation. I created a conversation with the existing ID, stopped
+> Codex, and removed the old token and provider selection from the fixture's settings. In the isolated loopback test,
+> `codex resume <thread-id> --no-daemon -c model_provider=farhelm_recipe` refused the saved conversation even with both
+> provider definitions supplied. Providing both definitions without selecting one led to the sign-in screen. Selecting
+> `farhelm` with the endpoint and token-variable name supplied through `-c` resumed the conversation and the new
+> loopback endpoint received the new fake bearer. This is a direct TUI observation on one installed version. The
+> successful case followed cleanup of the known old token and did not exercise other custom settings.
+> [Codex 0.171.0 resume implementation](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/app-server/src/config_manager.rs#L500-L565)
+>
+> The plan must preserve Restart for Codex sessions saved under the old provider. The same constraint applies when a
+> user opens an existing conversation by ID from the launcher. Keeping the existing provider ID for new launches and
+> resumes is the smallest option. Farhelm would still move token values into the child environment and clean the
+> settings keys it previously wrote. Before delivery, verify that a stale setting cannot override the environment
+> credential. Keeping the fresh ID for new launches would require a separate way to configure the saved provider for
+> both forms of resume, including conversations whose ID was entered by hand.
+>
+> I recommend retaining the existing provider ID and verifying isolation from stale settings. The first draft prepares
+> child environment injection. Which provider choice should the plan use for the delivery and cleanup change?
+>
+> [Draft #4558](https://github.com/scode/farhelm/pull/4558/changes) passed both focused spawn tests (recorder run
+> `e903603d-eeab-42e5-a7f1-526ad9d66a2f`) and strict Clippy on the affected packages.
 
-Codex 0.171.0 saves the provider ID with each conversation. I created a conversation with the existing ID, stopped
-Codex, and removed the old token and provider selection from the fixture's settings. In the isolated loopback test,
-`codex resume <thread-id> --no-daemon -c model_provider=farhelm_recipe` refused the saved conversation even with both
-provider definitions supplied. Providing both definitions without selecting one led to the sign-in screen. Selecting
-`farhelm` with the endpoint and token-variable name supplied through `-c` resumed the conversation and the new loopback
-endpoint received the new fake bearer. This is a direct TUI observation on one installed version. The successful case
-followed cleanup of the known old token and did not exercise other custom settings.
-[Codex 0.171.0 resume implementation](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/app-server/src/config_manager.rs#L500-L565)
+The maintainer's answer:
 
-The plan must preserve Restart for Codex sessions saved under the old provider. The same constraint applies when a user
-opens an existing conversation by ID from the launcher. Keeping the existing provider ID for new launches and resumes is
-the smallest option. Farhelm would still move token values into the child environment and clean the settings keys it
-previously wrote. Before delivery, verify that a stale setting cannot override the environment credential. Keeping the
-fresh ID for new launches would require a separate way to configure the saved provider for both forms of resume,
-including conversations whose ID was entered by hand.
+### Answer: keep the existing Codex provider ID
 
-I recommend retaining the existing provider ID and verifying isolation from stale settings. The first draft prepares
-child environment injection. Which provider choice should the plan use for the delivery and cleanup change?
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks". A later change of mind is a follow-up, not a reason to stop the plan.
 
-[Draft #4558](https://github.com/scode/farhelm/pull/4558/changes) passed both focused spawn tests (recorder run
-`e903603d-eeab-42e5-a7f1-526ad9d66a2f`) and strict Clippy on the affected packages.
+Keep the existing `farhelm` provider ID for new Codex launches and for resumes, as recommended. Restart and opening a
+saved conversation by ID must keep working for Codex conversations saved under that ID, including ones whose ID the user
+types into the launcher, and a fresh ID would break both unless the plan built a second way to configure the saved
+provider.
+
+The rest of the delivery change stays as planned: the recipe's endpoint token moves into the environment of the
+processes Farhelm launches, and Farhelm removes the settings keys it wrote earlier. Before delivery, verify that a stale
+setting cannot override the credential Farhelm delivers. Your experiment showed that supplying the provider's endpoint
+and token-variable name with `-c` at resume used the new bearer; passing the same `-c` overrides on every Codex launch
+and resume is an acceptable way to make the delivered values win over a leftover file entry. If verification shows a
+stale setting can still win even then, block again with what you observed.
