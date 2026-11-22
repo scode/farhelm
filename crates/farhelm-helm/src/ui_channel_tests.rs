@@ -440,6 +440,65 @@ async fn a_command_waits_for_the_one_before_it_while_heartbeats_are_answered() {
     );
 }
 
+/// Status from elsewhere in the fleet should still reach the GUI during a slow
+/// command. Hold a save inside its route while an independent feed bump publishes
+/// a new item. The GUI receives the item while the save still holds its gate.
+#[farhelm_testtrace::test]
+async fn a_feed_bump_pushes_changes_while_a_command_is_held() {
+    let routes = Arc::new(TestRoutes::default());
+    let (release, gate) = oneshot::channel();
+    *routes.save_gate.lock().unwrap() = Some(gate);
+    let (mut driven, _snapshot) = drive(Arc::clone(&routes)).await;
+
+    driven
+        .to_channel
+        .send(command(
+            1,
+            "PUT",
+            "/api/test/value",
+            Some(Value::String("saved".into())),
+        ))
+        .await
+        .unwrap();
+    tokio::time::timeout(NOTICE, routes.gated_save_started.notified())
+        .await
+        .expect("the save reached its gate before the feed bump");
+
+    let item = serde_json::json!({ "id": "external" });
+    routes.items.lock().unwrap().push(item.clone());
+    driven.feed.send_modify(|revision| *revision += 1);
+    let message = tokio::time::timeout(NOTICE, driven.from_channel.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "no list change before the save was released (gate receiver present: {}, value: {:?})",
+                !release.is_closed(),
+                routes.value.lock().unwrap(),
+            )
+        })
+        .expect("the channel should still be open");
+    let ServerMessage::Changes(changes) = message else {
+        panic!("expected the list change while the save was held");
+    };
+    assert_eq!(
+        changes.upsert,
+        vec![KeyedEntry {
+            key: "external".into(),
+            value: item,
+        }]
+    );
+    assert!(
+        routes.value.lock().unwrap().is_none(),
+        "the save was still held when the change arrived"
+    );
+
+    release.send(()).unwrap();
+    let ServerMessage::Reply(reply) = next(&mut driven).await else {
+        panic!("expected the save's reply once released");
+    };
+    assert_eq!((reply.id, reply.status), (1, 204));
+}
+
 /// A GUI that sees "done" already shows the result (SPEC_impl.md): every
 /// change a command causes is pushed before that command's reply, without
 /// waiting for a feed bump.

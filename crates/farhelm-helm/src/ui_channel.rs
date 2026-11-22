@@ -18,9 +18,9 @@
 //!   existing GET handler in process and sends what differs from what it last
 //!   sent THIS channel. So "an older list read brought back a deleted session"
 //!   has no reads to happen in.
-//! - **Changes come before the reply.** The re-projection after a command runs
-//!   before its reply is sent, so a GUI that sees "done" already holds the
-//!   result and needs no optimistic update.
+//! - **Changes come before the reply.** The feed keeps pushing while a command
+//!   runs. On completion, the channel sends any remaining changes and the reply
+//!   as one batch, so a GUI that sees "done" already holds the result.
 //!
 //! Commands are not a second API. Each one is the HTTP request it names, run
 //! through the helm's own router ([`crate::api_router`]) with the channel's own
@@ -989,11 +989,11 @@ fn reply_body(body: &[u8]) -> Option<Value> {
 /// UI takes the seat.
 ///
 /// The loop owns all ordering. Commands queue in arrival order and start one
-/// at a time; while one runs, heartbeats are still answered at once, and feed
-/// bumps are left for the re-projection that follows the command (which
-/// covers them). When a command completes, its changes are pushed and only
-/// then its reply. Returning drops any command still in flight: owned work
-/// carries on, cancellable work stops, as for an HTTP caller that left.
+/// at a time. Heartbeats and fleet changes can reach the GUI while a command
+/// waits on a host. When a command completes, the loop sends any remaining
+/// changes and its reply together. Returning drops the in-flight request.
+/// Owned work carries on and cancellable work stops, as for an HTTP caller
+/// that left.
 pub(crate) async fn run(
     mut channel: Channel,
     mut incoming: mpsc::Receiver<ClientMessage>,
@@ -1056,7 +1056,7 @@ pub(crate) async fn run(
                     }
                 }
             }
-            changed = feed.changed(), if in_flight.is_none() => {
+            changed = feed.changed() => {
                 if changed.is_err() {
                     return;
                 }

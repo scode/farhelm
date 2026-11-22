@@ -7,7 +7,7 @@
 //! test holds the create's reply until it has set up the moment the reply arrives in.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HostView};
+use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HostView, SessionRow};
 use gpui::VisualTestContext;
 use serde_json::json;
 
@@ -229,18 +229,35 @@ fn launching_sends_one_create_and_hides_the_launcher(cx: &mut gpui::TestAppConte
 
 /// SPEC.md, "Creation": "A successful New or Clone opens its session only while the submitted launcher opening is
 /// still current and the user has pressed no key or pointer button anywhere in the page since their last answer to
-/// it", and then "ordinary sidebar selection applies". Specified: with no input after the press, the reply naming the
-/// new session b selects b.
+/// it", and then "ordinary sidebar selection applies". The new row can already be in the sidebar while the Create
+/// reply is pending. Selection still follows the reply, which identifies the session that the user's press created.
 #[gpui::test]
 fn a_launch_the_user_waited_for_opens_its_session(cx: &mut gpui::TestAppContext) {
     let (mut helm, cx, create) = launched(cx);
-    let id = create.id;
-    assert_ne!(
-        selected(cx).as_deref(),
-        Some("b"),
-        "the premise: b is not selected yet"
+    let prior_selection = selected(cx);
+    let made = session("b");
+    let order = &["a", "b"];
+    helm.push(crate::session_list::tests::change(
+        crate::session_list::tests::listing_meta(order, order.len() as u64, false),
+        std::slice::from_ref(&made),
+        &[],
+    ));
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| {
+            crate::session::current_store(cx)
+                .expect("a store")
+                .read(cx)
+                .collections()
+                .get::<SessionRow>("b")
+                .is_some()
+        }),
+        "the premise: the new row arrived before the Create reply"
     );
-    created(&mut helm, cx, id, "b");
+    assert_eq!(selected(cx), prior_selection, "the row alone moves nothing");
+
+    helm.reply(create.id, 200, Some(made.entry().value));
+    settle(cx);
     assert_eq!(
         selected(cx).as_deref(),
         Some("b"),
