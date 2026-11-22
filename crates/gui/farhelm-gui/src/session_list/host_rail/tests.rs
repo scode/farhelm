@@ -24,8 +24,8 @@ use farhelm_proto::ui_channel::{
     HostView, KeyedEntry, ListCounts, RefreshView, SESSION_QUERY_PATH,
 };
 use gpui::{
-    AppContext as _, DriverNode, DriverText, HeadlessAppContext, Modifiers, MouseButton, Role,
-    ScrollDelta, ScrollEvent, TestAppContext, Toggled, VisualTestContext, point, px, size,
+    AppContext as _, DriverNode, HeadlessAppContext, Modifiers, MouseButton, Role, ScrollDelta,
+    ScrollEvent, TestAppContext, Toggled, VisualTestContext, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -39,8 +39,10 @@ use crate::hosts::tests::{
 };
 use crate::main_view::MainView;
 use crate::session_list::tests::{
-    carrying, change, listing, open_main, painted, preferences, session,
+    acknowledge_commands, carrying, change, inside, listing, open_main, painted, preferences,
+    session,
 };
+use crate::test_support::drawn;
 use crate::test_support::{self, any_open, focused_id, frame, meta};
 use crate::{assets, bootstrap, layers};
 
@@ -182,9 +184,7 @@ pub(crate) fn filtered(order: &[&str], total: u64, matching: u64) -> CollectionM
 /// Answer, as done, every command the window has sent so far (remembering the selection, a seen mark), so a test's
 /// next look at the fake sees only what its own step sent.
 pub(crate) fn answer_everything(fake: &mut FakeHelm) {
-    for command in fake.commands() {
-        fake.reply(command.id, 200, None);
-    }
+    acknowledge_commands(fake);
 }
 
 /// Every command the window sent since the last look, each checked to be a session query, as (its command, its body).
@@ -231,37 +231,7 @@ pub(crate) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNo
         .find(|node| node.element_id.as_deref() == Some(id))
 }
 
-/// The nodes drawn under `id`: the node itself and every node inside it, at any depth. Text a node shows is painted by
-/// the text element inside it, not by the node, so this is where its text is found.
-pub(crate) fn within<'a>(nodes: &'a [DriverNode], id: &str) -> Vec<&'a DriverNode> {
-    let Some(top) = nodes
-        .iter()
-        .position(|node| node.element_id.as_deref() == Some(id))
-    else {
-        panic!("{id} was not drawn");
-    };
-    let inside = |mut index: usize| loop {
-        if index == top {
-            return true;
-        }
-        match nodes[index].parent {
-            Some(parent) => index = parent,
-            None => return false,
-        }
-    };
-    (0..nodes.len())
-        .filter(|&index| inside(index))
-        .map(|index| &nodes[index])
-        .collect()
-}
-
-/// The lines of text painted under `id` (see [`within`]), with where each was painted.
-pub(crate) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
-    within(nodes, id)
-        .into_iter()
-        .flat_map(|node| node.texts.iter().cloned())
-        .collect()
-}
+pub(crate) use crate::session_list::tests::{texts_within, within};
 
 /// The accessible name of the control drawn under `id`; fails if nothing was drawn under it.
 pub(crate) fn label(nodes: &[DriverNode], id: &str) -> String {
@@ -1641,11 +1611,6 @@ fn push_hosts(fake: &mut FakeHelm, listed: &[HostView], cx: &mut VisualTestConte
     test_support::settle(cx);
 }
 
-/// Whether the element recorded under the debug `selector` (a rail mark, see `status::avatar_marks`) was drawn.
-fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
-    cx.debug_bounds(selector).is_some()
-}
-
 /// Why this matters: SPEC.md, "Session list": "Per-host connection state is always visible on each rail avatar, with
 /// its name and phase available on hover and to screen readers", and "an unreachable host's identity mark is dimmed".
 /// The dot is a picture; the phase's words in the avatar's name are what a screen reader hears. Specified: over a
@@ -1855,23 +1820,6 @@ fn running_work_rings_the_avatar_and_names_the_work(cx: &mut TestAppContext) {
     }
     assert!(!drawn(cx, "host-rail-update-2"));
     assert_eq!(label(&nodes, "hosts-panel-toggle"), "Hosts");
-}
-
-/// Whether `nodes` draw the element `id` inside the element `ancestor`, by the frame's own parent links.
-fn inside(nodes: &[DriverNode], id: &str, ancestor: &str) -> bool {
-    let Some(mut at) = nodes
-        .iter()
-        .position(|node| node.element_id.as_deref() == Some(id))
-    else {
-        return false;
-    };
-    while let Some(parent) = nodes[at].parent {
-        if nodes[parent].element_id.as_deref() == Some(ancestor) {
-            return true;
-        }
-        at = parent;
-    }
-    false
 }
 
 /// Push `runs` as changed host progress, each under its host's id, and settle.

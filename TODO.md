@@ -250,18 +250,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
   `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
 
-  - `approval-views-repeat-status-lookups.md`. In `approvals/host_add.rs:95–110` and
-    `approvals/tunnel.rs:173–182,194–202`, share one approval-row lookup and one in-progress operation lookup by request
-    ID in the approvals module.
-  - `gui-command-paths-repeat-reply-classification.md`. In `operations.rs:546–556,633–643`, let the keyless command path
-    project `Outcome::from_reply` into body or refusal words. Keep its command-error handling separate.
-  - `hosts-menu-and-settings-repeat-operation-logic.md`. In `hosts/menu.rs:485–494,513–518,568–574`, have Remove use
-    Delete's existing `close` helper after taking the focus mark. In `hosts/identity/phase.rs:409–417,575–586`, share
-    the suspend/resume infinitive while keeping provider-specific subjects in their lines. In
-    `hosts/progress.rs:151–180`, `hosts/status.rs:425–448` and `hosts/uninstall.rs:427–449`, share the operations-store
-    ID check and conditional update that discards old-session state and notifies only on change. Keep separate globals
-    for the observers. In `hosts/setup.rs:888–922` and `hosts/remove.rs:429–465`, share permanent-answer save admission,
-    clearing on admission and handling a busy preferences key or refused reply. Pass each panel's wording.
   - `launcher-repeats-choices-and-summary-formatting.md`. Recheck these call sites against the landed
     `launcher-command-field` plan's redesign. Share the lowercase effort spelling and `default` fallback for search and
     the change notice beside the labels in `permission/words.rs:16–27`, used from `launcher/search.rs:413–419` and
@@ -285,23 +273,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `goldens/settings.rs:122–183`. Share the session fixture's title and `TEST_NOW` activity/seen timestamps while
     scenes supply their status (`goldens/session_list.rs:42–47,114–119,154–160`, `goldens/other_dialogs.rs:112–117`,
     `goldens/mod.rs:301–307`).
-  - `session-list-actions-repeat-admission-and-progress.md`. In `session_list/`, share operation admission across
-    `menu.rs:601–615`, `environment.rs:625–642`, `restart.rs:278–306`, `stop.rs:226–247`, `delete.rs:366–392`,
-    `environment_delete.rs:242–267` and `replace.rs:319–346`. The helper takes the command result and completion, finds
-    the store, starts work under the session key and returns `NotStarted` on refusal. Keep guards, logging and progress
-    clocks local. Share `outcome.rs:432–437`'s in-flight lookup with `stop.rs:285–290`, `restart.rs:314–319`,
-    `replace.rs:414–419`, `delete.rs:435–442` and `environment.rs:323–344`, letting callers filter kinds. Share the
-    status label, colors and spinner for the progress title in `delete.rs:484–516` and `stop.rs:296–327` with
-    caller-supplied selector, label and flex sizing. Share the stale-cause mark's ID, name, role and tooltip in
-    `row.rs:639–660,758–769`, with the clock or text styling supplied by compact and full rows.
-  - `session-pane-repeats-last-known-status.md`. Share the last-known status and activity-age projections between the
-    Details bar and unavailable-session view, keeping their visibility rules local. See
-    `session_pane/details.rs:239–245,260–264` and `session_pane/unavailable.rs:561–569`.
-  - `settings-repeat-preference-and-focus-wiring.md`. Share the sparse `PUT /api/preferences` constructor and diagnostic
-    label in `settings/choices.rs:377–387`, `session_list/order.rs:212–220`, `session_list/host_rail/expansion.rs:71–79`
-    and `terminal/tunnels.rs:605–617`. Let Order pass its object and the callers keep their write and completion
-    policies. Share focus-mark restoration to the editor opener using the stored window when the callback has none in
-    `settings/credentials.rs:362–371` and `settings/recipes.rs:717–727`, keeping editor and refresh bookkeeping local.
   - `templates-repeat-lookup-and-control-wiring.md`. In `templates/dispatch.rs:221–243,295–313`, share launcher and
     switcher template lookup and unavailable/missing-name wording, with each surface supplying its sentence ID. Share
     the available-name read in helm order in `templates/armed.rs:475–499` and `templates/editor.rs:1494–1507`. The
@@ -309,21 +280,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `templates/editor/rows.rs:652–678` and `templates/save_panel.rs:308–340`, passing each control's ID, selection and
     handler. Share the typed `GET /api/launch-catalog` request and decode in `templates/dialog.rs:766–789` and
     `launcher/view.rs:477–500`, keeping retries, failure display and quick-launch continuation local.
-  - `session-list-tests-repeat-frame-and-request-helpers.md`. Paths in this item are under `session_list/`. Share the
-    mouse move, vertical pixel scroll and settle in `list_tests.rs:57–67` and `lifecycle_tests.rs:1707–1717`. Put the
-    debug-bounds drawn predicate from `host_rail/tests.rs:1543–1546` and `menu_tests.rs:128–131` beside the existing
-    test bounds helper. Share frame parent traversal across `host_rail/tests.rs:234–264,1759–1774`,
-    `lifecycle_tests.rs:142–158,1142–1162` and `row_tests.rs:53–75`, keeping frame order, including the collection root
-    and checking every match for reused IDs. Share fresh-frame painted-text collection in
-    `environment_delete_tests.rs:94–97`, `environment_tests.rs:231–234` and `lifecycle_tests.rs:176–179`. Share the
-    row-menu toggle, item click and settle in `environment_tests.rs:224–229`, `lifecycle_tests.rs:160–165` and
-    `menu_tests.rs:146–151`, with the Delete wrapper supplying its item ID. Share a fake-helm drain returning commands
-    acknowledged with empty 200 responses in order. Keep path filters and result shape at the callers in
-    `seen_tests.rs:37–52`, `pin_drag_tests.rs:34–48`, `marking_tests.rs:396–409`, `pins_tests.rs:33–49`,
-    `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
 
   Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
-  Plan: `plans/queue/helpers-hosts-and-sessions.md`. Plan: `plans/queue/helpers-launcher-and-templates.md`.
+  Plan: `plans/queue/helpers-launcher-and-templates.md`.
 
 - **Report remote command status in-band, not through ssh's exit status.** Tailscale SSH on a Mac reports exit status 0
   for every command (tailscale/tailscale#18256, still open on 2026-11-17), so adding such a Mac fails at the first probe

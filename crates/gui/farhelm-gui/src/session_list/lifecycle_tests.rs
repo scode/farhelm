@@ -16,10 +16,7 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::DeleteGuard;
 use farhelm_proto::ui_channel::SessionRow;
-use gpui::{
-    AppContext as _, Modifiers, Pixels, ScrollDelta, ScrollEvent, TestAppContext,
-    VisualTestContext, point, px,
-};
+use gpui::{AppContext as _, Modifiers, Pixels, TestAppContext, VisualTestContext, px};
 use gpui_component::Root;
 use serde_json::{Value, json};
 
@@ -27,7 +24,8 @@ use super::delete_notice;
 use super::menu_tests::{any_layer, click_at, drawn, ended, entry, label_of, lit, push, snapshot};
 use super::outcome::PROGRESS_SHOWS_AFTER;
 use super::tests::{
-    Fixture, change, launcher_drawn, listing_meta, open_main, painted, selected, sent, session,
+    Fixture, ancestors, change, choose_menu_item as choose, inside, launcher_drawn, listing_meta,
+    open_main, painted_frame as texts, scroll_list, selected, sent, session,
 };
 use crate::focus::Mark;
 use crate::main_view::MainView;
@@ -141,27 +139,7 @@ pub(crate) fn refuse_for_yolo(fake: &mut FakeHelm, cx: &mut VisualTestContext, i
 
 /// Whether a fresh frame draws the element `id` inside the element `ancestor`, by the frame's own parent links.
 pub(crate) fn drawn_inside(cx: &mut VisualTestContext, id: &str, ancestor: &str) -> bool {
-    let nodes = frame(cx);
-    let Some(mut at) = nodes
-        .iter()
-        .position(|node| node.element_id.as_deref() == Some(id))
-    else {
-        return false;
-    };
-    while let Some(parent) = nodes[at].parent {
-        if nodes[parent].element_id.as_deref() == Some(ancestor) {
-            return true;
-        }
-        at = parent;
-    }
-    false
-}
-
-/// Open the menu of the row whose menu button is `button` and choose `item`, by clicks.
-fn choose(cx: &mut VisualTestContext, button: &'static str, item: &'static str) {
-    test_support::click(cx, button);
-    test_support::click(cx, item);
-    test_support::settle(cx);
+    inside(&frame(cx), id, ancestor)
 }
 
 /// The hover help of the open question's Cancel, as shown once the pointer has rested on it for the hover delay.
@@ -171,11 +149,6 @@ fn cancel_help(cx: &mut VisualTestContext) -> Option<String> {
     test_support::advance(cx, layers::HOVER_DELAY);
     cx.update(|window, cx| layers::shown_tooltip(window, cx))
         .map(|shown| shown.text.to_string())
-}
-
-/// Every line of text painted in a fresh frame.
-fn texts(cx: &mut VisualTestContext) -> Vec<String> {
-    painted(&frame(cx))
 }
 
 // ---- When each asks, and what each sends ---------------------------------------------------------------------------
@@ -1148,19 +1121,14 @@ fn the_one_off_answer_replaces_again_with_consent_exactly_once(cx: &mut TestAppC
 fn in_row(cx: &mut VisualTestContext, id: &str, key: &str) -> Option<gpui::Bounds<Pixels>> {
     let item = format!("session-item-{key}");
     let nodes = frame(cx);
-    let inside = |mut at: usize| loop {
-        match nodes[at].parent {
-            Some(parent) if nodes[parent].element_id.as_deref() == Some(item.as_str()) => {
-                return true;
-            }
-            Some(parent) => at = parent,
-            None => return false,
-        }
-    };
     nodes
         .iter()
         .enumerate()
-        .find(|(at, node)| node.element_id.as_deref() == Some(id) && inside(*at))
+        .find(|(at, node)| {
+            node.element_id.as_deref() == Some(id)
+                && ancestors(&nodes, *at)
+                    .any(|parent| nodes[parent].element_id.as_deref() == Some(item.as_str()))
+        })
         .map(|(_, node)| node.bounds)
 }
 
@@ -1705,16 +1673,4 @@ fn a_yolo_question_below_its_rows_last_line_is_scrolled_into_view_too(cx: &mut T
         cancel.top() >= list.top() && cancel.bottom() <= list.bottom(),
         "Cancel is in the list's view: {cancel:?} in {list:?}"
     );
-}
-
-/// Scroll the list down by `by` with the pointer over it, as a wheel or trackpad would (the list tests' helper).
-fn scroll_list(cx: &mut VisualTestContext, by: Pixels) {
-    let at = test_support::center(cx, "session-rows");
-    cx.simulate_mouse_move(at, None, Modifiers::none());
-    cx.simulate_event(ScrollEvent {
-        position: at,
-        delta: ScrollDelta::Pixels(point(px(0.), -by)),
-        ..Default::default()
-    });
-    test_support::settle(cx);
 }

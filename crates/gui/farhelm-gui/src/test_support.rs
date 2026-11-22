@@ -591,6 +591,12 @@ pub(crate) fn frame(cx: &mut VisualTestContext) -> Vec<gpui::DriverNode> {
     cx.update(|window, _| window.driver_nodes().to_vec())
 }
 
+/// Whether the last frame recorded debug bounds for `selector`, the same record that [`bounds`] reads.
+/// Use this when absence is expected or forcing a redraw would advance the state the test is observing.
+pub(crate) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
+    cx.debug_bounds(selector).is_some()
+}
+
 /// The id of the first element holding focus, among those with an id, in a fresh [`frame`]. Unlike [`focused`], which
 /// asks whether a handle the test holds has focus, this names whatever has it, for a test that holds no handle (a GPUI
 /// Kit field's, a row's own).
@@ -835,6 +841,31 @@ mod shared_helper_tests {
     use gpui::{InteractiveElement as _, Styled as _};
     use std::cell::Cell;
     use std::rc::Rc;
+
+    /// Absence checks rely on the last presented frame. A predicate that redraws could settle the state being tested.
+    /// Specified: removing a recorded element from the fixture leaves it drawn until the next frame records its absence.
+    #[gpui::test]
+    fn drawn_reads_the_last_frames_debug_bounds(cx: &mut TestAppContext) {
+        let show = Rc::new(Cell::new(true));
+        let drawn_show = show.clone();
+        let cx = open(cx, move |_, _| {
+            let mut root = div();
+            if drawn_show.get() {
+                root = root.child(div().debug_selector(|| "drawn-check".into()).size(px(20.)));
+            }
+            root.into_any_element()
+        });
+        assert_eq!(super::bounds(cx, "drawn-check").size.width, px(20.));
+        assert!(super::drawn(cx, "drawn-check"));
+
+        show.set(false);
+        assert!(
+            super::drawn(cx, "drawn-check"),
+            "the previous frame is still recorded"
+        );
+        super::redraw(cx);
+        assert!(!super::drawn(cx, "drawn-check"));
+    }
 
     /// Why this matters: tests that hold no focus handle (a GPUI Kit field's, a list row's own) name the focused
     /// element by its id, and a helper that named nothing, or an element other than the focused one, would let a focus

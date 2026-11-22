@@ -22,11 +22,11 @@ use super::environment_tests::{
 };
 use super::host_rail::tests::hover_help;
 use super::menu_tests::{any_layer, drawn, ended, label_of};
-use super::tests::{collections, painted, session};
+use super::tests::{choose_delete, collections, painted_frame as texts, session};
 use crate::actions::{DELETE_SESSION_CHORD, DELETE_SESSION_SHORTCUT_NAME};
 use crate::operations::{HelmMarker, OpKey, Work};
 use crate::session as ui_session;
-use crate::test_support::{self, focused_id, frame, meta};
+use crate::test_support::{self, focused_id, meta};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -83,18 +83,6 @@ fn one_delete(fake: &mut FakeHelm, path: &str) -> u64 {
         "exactly one Delete"
     );
     sent[0].0
-}
-
-/// Open the menu of the row whose menu button is `button`, and choose Delete.
-fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
-    test_support::click(cx, button);
-    test_support::click(cx, "session-menu-delete");
-    test_support::settle(cx);
-}
-
-/// Every line of text painted in a fresh frame.
-fn texts(cx: &mut VisualTestContext) -> Vec<String> {
-    painted(&frame(cx))
 }
 
 /// The work in flight on session `key`'s own key.

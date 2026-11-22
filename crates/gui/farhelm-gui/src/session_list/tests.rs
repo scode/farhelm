@@ -9,13 +9,16 @@
 
 use std::time::Duration;
 
-use farhelm_helm_client::fake::FakeHelm;
+use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_helm_client::{Collections, collections::decode_state};
 use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
     KeyedEntry, ListCounts, PREFERENCES_KEY, Preferences, SessionRow,
 };
-use gpui::{AppContext as _, DriverNode, Role, TestAppContext, VisualTestContext};
+use gpui::{
+    AppContext as _, DriverNode, DriverText, Modifiers, Pixels, Role, ScrollDelta, ScrollEvent,
+    TestAppContext, VisualTestContext, point, px,
+};
 use serde_json::{Value, json};
 
 use super::menu_tests::ended;
@@ -466,10 +469,94 @@ pub(crate) fn painted(nodes: &[DriverNode]) -> Vec<String> {
         .collect()
 }
 
+/// Read the painted words of one fresh frame. Use [`painted`] directly when assertions share a frame.
+pub(super) fn painted_frame(cx: &mut VisualTestContext) -> Vec<String> {
+    painted(&frame(cx))
+}
+
+/// Follow the frame's parent indices from the nearest parent out. Strict containment checks omit the node itself.
+pub(super) fn ancestors(nodes: &[DriverNode], at: usize) -> impl Iterator<Item = usize> + '_ {
+    std::iter::successors(nodes[at].parent, |&index| nodes[index].parent)
+}
+
+/// Whether the first node with `id` is inside a node with `ancestor`. Tests for controls with reused IDs check all
+/// their matching nodes instead, using [`ancestors`].
+pub(super) fn inside(nodes: &[DriverNode], id: &str, ancestor: &str) -> bool {
+    nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+        .is_some_and(|at| {
+            ancestors(nodes, at).any(|parent| nodes[parent].element_id.as_deref() == Some(ancestor))
+        })
+}
+
+/// The first node with `id` and its descendants, in frame order. Fail if the root was absent so a negative text
+/// assertion cannot pass just because its element failed to draw.
+pub(crate) fn within<'a>(nodes: &'a [DriverNode], id: &str) -> Vec<&'a DriverNode> {
+    let Some(top) = nodes
+        .iter()
+        .position(|node| node.element_id.as_deref() == Some(id))
+    else {
+        panic!("{id} was not drawn");
+    };
+    nodes
+        .iter()
+        .enumerate()
+        .filter(|(at, _)| *at == top || ancestors(nodes, *at).any(|parent| parent == top))
+        .map(|(_, node)| node)
+        .collect()
+}
+
+/// The lines painted by the element and its descendants, including their positions for layout assertions.
+pub(crate) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
+    within(nodes, id)
+        .into_iter()
+        .flat_map(|node| node.texts.iter().cloned())
+        .collect()
+}
+
+/// Move the pointer over the rows before a vertical pixel scroll, then settle so the next step sees the scrolled list.
+pub(super) fn scroll_list(cx: &mut VisualTestContext, by: Pixels) {
+    let at = test_support::center(cx, "session-rows");
+    cx.simulate_mouse_move(at, None, Modifiers::none());
+    cx.simulate_event(ScrollEvent {
+        position: at,
+        delta: ScrollDelta::Pixels(point(px(0.), -by)),
+        ..Default::default()
+    });
+    test_support::settle(cx);
+}
+
+/// Choose an item through the drawn row menu so click, focus and settle follow the same path as in the app.
+pub(super) fn choose_menu_item(
+    cx: &mut VisualTestContext,
+    button: &'static str,
+    item: &'static str,
+) {
+    test_support::click(cx, button);
+    test_support::click(cx, item);
+    test_support::settle(cx);
+}
+
+/// Open the row menu at `button`, click Delete and settle. The caller checks the action's result.
+pub(super) fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
+    choose_menu_item(cx, button, "session-menu-delete");
+}
+
+/// Answer the commands received since the fake's last command read with empty 200s, in send order. Previously read
+/// commands must have been answered first. Return the envelopes so callers can filter the routes they assert on.
+pub(super) fn acknowledge_commands(fake: &mut FakeHelm) -> Vec<FakeCommand> {
+    let commands = fake.commands();
+    for command in &commands {
+        fake.reply(command.id, 200, None);
+    }
+    commands
+}
+
 /// Whether the launcher's dialog is drawn: what the list's New triggers (the heading's New, the quick switcher's New
 /// row) open.
 pub(crate) fn launcher_drawn(cx: &mut VisualTestContext) -> bool {
-    cx.debug_bounds("launcher").is_some()
+    test_support::drawn(cx, "launcher")
 }
 
 // ---- The rows ------------------------------------------------------------------------------------------------------

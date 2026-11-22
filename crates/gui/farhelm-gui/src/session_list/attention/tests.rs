@@ -40,7 +40,7 @@ use crate::session_list::host_rail::tests::{
 };
 use crate::session_list::marking::{MENU_ID, MENU_TOGGLE_ID};
 use crate::session_list::tests::{Fixture, listing, open_main, preferences_state, session};
-use crate::test_support::{self, any_open, focused_id, frame, meta};
+use crate::test_support::{self, any_open, drawn, focused_id, frame, meta};
 
 // ---- Fixtures ------------------------------------------------------------------------------------------------------
 
@@ -304,11 +304,6 @@ fn row_ids(cx: &mut VisualTestContext) -> Vec<i64> {
         .collect();
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     rows.into_iter().map(|(_, id)| id).collect()
-}
-
-/// Whether the last frame drew something under the debug selector or component id `selector`.
-fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
-    cx.debug_bounds(selector).is_some()
 }
 
 /// Where the element drawn under `menu` sits relative to the one drawn under `opener`: what stays the same when a menu

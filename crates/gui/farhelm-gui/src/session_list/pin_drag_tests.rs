@@ -27,7 +27,7 @@ use super::menu_tests::any_layer;
 use super::menu_tests::{drawn, label_of, push, snapshot};
 use super::pin_drag::{GRIP_HELP, GRIP_LABEL};
 use super::pins_tests::away;
-use super::tests::{change, listing_meta, open_main, row_order, session};
+use super::tests::{acknowledge_commands, change, listing_meta, open_main, row_order, session};
 use crate::actions::RENAME_SESSION_CHORD;
 use crate::test_support::{self, focused_id, frame};
 
@@ -36,10 +36,9 @@ use crate::test_support::{self, focused_id, frame};
 /// Every command the window sent since the last call, answered with success in order, as (method, path, body): all of
 /// them, so a test that expects one move and nothing else sees anything else the drag might have sent.
 fn sent(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
-    fake.commands()
+    acknowledge_commands(fake)
         .into_iter()
         .map(|command| {
-            fake.reply(command.id, 200, None);
             (
                 command.method,
                 command.path,

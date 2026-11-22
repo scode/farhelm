@@ -27,7 +27,9 @@ use super::environment::needs_confirmation;
 use super::host_rail::tests::{hover_help, texts_within};
 use super::lifecycle_tests::node_bounds;
 use super::menu_tests::{any_layer, drawn, label_of, snapshot};
-use super::tests::{Fixture, launcher_drawn, open_main, painted, session};
+use super::tests::{
+    Fixture, choose_menu_item as choose, launcher_drawn, open_main, painted_frame as texts, session,
+};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::host_text::HostSentence;
 use crate::launcher::{draft::Tab, folder_default_tests::edit_draft};
@@ -230,18 +232,6 @@ fn menu_items(cx: &mut VisualTestContext) -> Vec<String> {
         .collect();
     items.sort_by(|a, b| f32::from(a.0).total_cmp(&f32::from(b.0)));
     items.into_iter().map(|(_, id)| id).collect()
-}
-
-/// Open the row menu whose button is `button` and choose `item`.
-fn choose(cx: &mut VisualTestContext, button: &'static str, item: &'static str) {
-    test_support::click(cx, button);
-    test_support::click(cx, item);
-    test_support::settle(cx);
-}
-
-/// Every line of text painted in a fresh frame.
-fn texts(cx: &mut VisualTestContext) -> Vec<String> {
-    painted(&frame(cx))
 }
 
 // ---- Marks and words -----------------------------------------------------------------------------------------------

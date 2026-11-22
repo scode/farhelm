@@ -17,7 +17,9 @@ use serde_json::{Value, json};
 
 use super::host_rail::tests::{hosts, local, remote};
 use super::menu_tests::{any_layer, drawn, ended, label_of, push, snapshot};
-use super::tests::{Fixture, carrying, change, listing_meta, open_main, selected, session};
+use super::tests::{
+    Fixture, acknowledge_commands, carrying, change, listing_meta, open_main, selected, session,
+};
 use crate::actions::QUICK_SWITCHER_CHORD;
 use crate::test_support::{focused_id, meta};
 use crate::{layers, test_support};
@@ -38,10 +40,9 @@ fn unseen(key: &'static str) -> Fixture {
 /// the helm answers a seen write, a preference write or a session query. For tests about what is sent, so that nothing
 /// waits behind a command they do not answer.
 fn answered(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
-    fake.commands()
+    acknowledge_commands(fake)
         .into_iter()
         .map(|command| {
-            fake.reply(command.id, 200, None);
             (
                 command.method,
                 command.path,
