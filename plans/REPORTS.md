@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launch-wakes-suspended-host`](reports/launch-wakes-suspended-host.report.md) landed 2026-11-22 in #4564, #4568, #4573, #4582: make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
 - [`agent-trust-every-folder`](reports/agent-trust-every-folder.report.md) landed 2026-11-22 in #4567, #4572, #4583: make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live
 - [`sqlite-compaction-settings`](reports/sqlite-compaction-settings.report.md) landed 2026-11-22 in #4574: add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
 - [`test-worker-staging-lock`](reports/test-worker-staging-lock.report.md) landed 2026-11-22 in #4575, #4584: stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
