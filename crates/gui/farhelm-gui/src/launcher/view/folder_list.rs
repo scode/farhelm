@@ -22,7 +22,7 @@
 //! What the list holds besides the draft (the open layer, the highlight, `field_list`) is the launcher's alone; its rows
 //! are worked out from the draft and the history each time they are needed.
 
-use farhelm_proto::text::{escaped, is_presentation_unsafe, notation};
+use farhelm_proto::text::{escaped, escaped_units};
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, WeakEntity, Window, div,
@@ -97,17 +97,10 @@ pub(in crate::launcher) fn tail_label(path: &str) -> String {
     }
     // The first visible character kept; one place goes to the ellipsis.
     let mut start = count - (LABEL_CHARS - 1);
-    // Walk the path as `escaped` spells it: a character it escapes (an unsafe one, or the `<` of a literal `<U+`, the
-    // same rule as `escaped`'s) is one indivisible run of its escape's width; everything else is one character.
+    // Use the escape boundaries of the full label. The display budget counts characters, including in an escape.
     let mut shown = 0;
-    for (index, ch) in path.char_indices() {
-        let width = if is_presentation_unsafe(ch) || (ch == '<' && path[index..].starts_with("<U+"))
-        {
-            notation(ch).chars().count()
-        } else {
-            1
-        };
-        let end = shown + width;
+    for unit in escaped_units(path) {
+        let end = shown + unit.chars().count();
         if shown < start && start < end {
             start = end;
             break;
