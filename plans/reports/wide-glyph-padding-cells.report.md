@@ -87,3 +87,63 @@ to a wide character can be covered by the glyph if its appearance and attributes
 Independent Sol high source reviews passed after correcting two text readers that still included padding, extending the
 encoder test for unlinked text, and fixing the cross-wrap link test's row. Independent Opus 5.5 high reviews approved
 the wrap and right-half erase scenes in both appearances. Fresh readers confirmed the wording of the four drafts.
+
+### Landing
+
+#### What landed with it
+
+No other plan landed in this round. The plan's four PRs (#4580, #4588, #4592, #4598) landed with no landing fix. Since
+the plan's work was written, main had gained the compact managed-checkout launcher and a dependency fix, neither near
+the terminal grid. The rebase conflicted only in TODO.md, where this plan and another landed plan had each removed their
+own part of the same shared entry; the landing kept main's version and applied exactly this plan's removals. Main's
+supervisor protocol was 85, and this plan alone moves it to 86.
+
+An independent reviewer found no blocker; two minor leftovers, listed at the end, were left as follow-ups:
+
+- **The new row marker.** The supervisor marks wrap padding only when the last cell really is the placeholder of a wide
+  character that wrapped, and sends padding that carries a background color as a plain space in the last column. The
+  desktop window no longer guesses padding anywhere; it reads the marker.
+- **Version skew.** The helm passes the terminal stream through without decoding it, and the desktop app embeds its
+  helm, so the only mismatch possible is a helm against a supervisor of another version, which the version check
+  refuses, showing the host as Needs update. Scrollback is kept as terminal state, not in the new row format, so nothing
+  needs migrating.
+- **Tests.** The supervisor tests drive the real terminal emulator for every case the plan lists, on screen and in
+  scrollback, and every desktop window test has a control case without the marker.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+The plan changes the terminal stream's format between the supervisor and the window (protocol 86), the supervisor's
+encoder, the desktop window's terminal model and a terminal screenshot, so the landing ran the Rust workspace suite, the
+lint runs, the desktop app's tests, the end-to-end smoke test and every reference screenshot. The worker runs were on a
+separate arm64 Linux test worker, the rest locally on x86_64.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `b105555d-3798-4f47-8d36-28b8b9052941`): all 8332 passed.
+- The four clippy runs (`--all-targets`, `-p farhelm --bins`, and the desktop app with and without `--features agent`),
+  on the test worker, not through the recorder: passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `af7c77b4-42d0-4136-8e83-41827d140e3d`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `5b3e91e0-7237-4fa0-99ca-409f1980aec9`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `1f5d1552-7ba8-46dd-bbb4-50d036a266da`):
+  passed, including the redrawn wide-character scene.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+Skipped: upgrading a running supervisor across the protocol change, which the plan's own real-host check also did not
+do; macOS, since no Mac was part of this landing; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- A comment in the protocol code still says the padding cell after a wide character is never sent, right beside the new
+  paragraph saying colored padding is sent as a space; one clause would reconcile them.
+- The report says two text readers were fixed to skip padding; the end-to-end tests' helper that turns a terminal row
+  into text is a third one that still ignores the new marker, so a future test of a colored wide wrap would see a
+  trailing space. No current test depends on it.
