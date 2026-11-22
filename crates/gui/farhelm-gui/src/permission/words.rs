@@ -92,6 +92,9 @@ pub(crate) fn permission_help(
         Some(LaunchPermission::Guarded) => {
             guarded_mode(harness).unwrap_or(permission_tooltip(LaunchPermission::Guarded))
         }
+        Some(LaunchPermission::Yolo) => {
+            "YOLO: Farhelm treats this launch as bypassing approval and sandbox checks"
+        }
         Some(value) => permission_tooltip(value),
         None => {
             "Not classified · Agent's own setting\nFarhelm did not force a guarded permission mode for this launch. The \

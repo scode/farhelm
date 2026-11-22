@@ -22,8 +22,8 @@ use super::connection::{
 };
 use super::core::{
     CreateInputs, RequestError, SessionEntry, Supervisor, create_fingerprint,
-    ensure_title_printable, error_kind, require_active_launch, terminal_less_launch_may_be_live,
-    truncate_for_error,
+    create_launch_field_bytes, ensure_title_printable, error_kind, require_active_launch,
+    terminal_less_launch_may_be_live, truncate_for_error,
 };
 use super::launch_artifacts::{
     append_launch_excerpt, cleanup_error_once, read_launch_sentinel, sentinel_could_still_apply,
@@ -383,11 +383,11 @@ async fn handle_create_session(
         // not its size: omitting parent or any part of the launch would leave
         // an unbounded write path through a cap the other fields cannot dodge.
         // SPEC.md's 64 KiB create bound counts the whole launch (command,
-        // resume command, and the rest), as the JSON it is stored and
-        // fingerprinted as. The resume command's element count is bounded
+        // resume command, and the rest), using its stored shape and the
+        // same byte budget as before the permission migration. The resume command's element count is bounded
         // separately: ten thousand EMPTY elements cost almost no bytes and are
         // still nothing a resume command could legitimately be.
-        let mode_bytes = mode.field_bytes();
+        let mode_bytes = create_launch_field_bytes(&mode);
         let template_elements = mode
             .resume_argv()
             .ok()

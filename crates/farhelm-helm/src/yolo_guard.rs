@@ -26,8 +26,8 @@ use crate::store::HostId;
 /// message is what the command line and agents show.
 #[derive(Debug, thiserror::Error)]
 #[error(
-    "{host_name} asks before YOLO launches, and this launch is YOLO or uses the agent's own setting: nothing was \
-     started. Confirm the YOLO launch explicitly in the GUI, or turn on \"Start YOLO sessions \
+    "{host_name} asks before YOLO launches. Nothing was started. Confirm the YOLO launch \
+     in the GUI, or turn on \"Start YOLO sessions \
      without asking\" in the host's settings"
 )]
 pub(crate) struct YoloNeedsConfirmation {
@@ -36,8 +36,7 @@ pub(crate) struct YoloNeedsConfirmation {
 
 /// Whether admission must treat a launch as YOLO, as the launch itself says
 /// ([`farhelm_proto::SessionLaunch::yolo`]): an agent launch by its
-/// stored permission (including an unclassified own-setting mode), a command
-/// launch by the user's assertion. Farhelm
+/// stored permission, a command launch by the user's assertion. Farhelm
 /// never reads a command line to second-guess either (SPEC.md). A legacy
 /// launch carries no verdict and is never created anew, so it reads as not
 /// YOLO here; nothing that can reach this check holds one.
@@ -234,9 +233,8 @@ mod tests {
         }
     }
 
-    /// A copied pre-upgrade command keeps its own-setting classification:
-    /// neither a GUI replace nor an agent clone/inherit may pass it off as a
-    /// newly compiled guarded launch on a host that asks first.
+    /// A copy of an agent launch without a recorded mode still needs YOLO
+    /// confirmation. Reusing its saved argv cannot establish Guarded.
     #[farhelm_testtrace::test]
     async fn old_no_flag_launches_and_their_copies_require_confirmation() {
         let harness = crate::rest_harness::idle_helm().await;

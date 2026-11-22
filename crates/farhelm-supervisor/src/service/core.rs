@@ -1711,6 +1711,9 @@ fn classify_unallocated_checkout_conflict(
 /// a human debugging a database. Delete removes this snapshot with its
 /// session. A session-free refusal replays for one day; the next keyed
 /// admission or writable open prunes expired rows (see `store::Reservation`).
+/// A copied launch may cross the schema-39 permission migration while its
+/// reservation still carries the older selection. Replay can match that
+/// metadata change through [`same_plain_create_after_permission_migration`].
 ///
 /// A FRESH GitHub-checkout create gets its own versioned encoding
 /// ([`FreshCreateFingerprint`]), binding the helm's authoritative
@@ -1737,6 +1740,70 @@ pub(crate) fn create_fingerprint(
     let ordinary = serde_json::to_string(&("session_launch_v1", parent, cwd, title, launch))
         .expect("a fingerprint of strings and options always serializes");
     bind_prompt_fingerprint(ordinary, prompt)
+}
+
+/// A keyed plain Replace can replay after schema 39 stamps the source's
+/// formerly absent agent permission as YOLO. Its reservation still carries
+/// the old value. Reverse only that stamp, then require exact fingerprint
+/// equality so neither a changed command nor a different intent can replay.
+fn same_plain_create_after_permission_migration(recorded: &str, requested: &str) -> bool {
+    const PREFIX: &str = r#"["session_launch_v1","#;
+    if !recorded.starts_with(PREFIX) || !requested.starts_with(PREFIX) {
+        return false;
+    }
+    type PlainFingerprint = (
+        String,
+        Option<String>,
+        String,
+        Option<String>,
+        SessionLaunch,
+    );
+    let Ok((tag, parent, cwd, title, mut launch)) =
+        serde_json::from_str::<PlainFingerprint>(requested)
+    else {
+        return false;
+    };
+    if !remove_legacy_yolo_stamp(&mut launch) {
+        return false;
+    }
+    serde_json::to_string(&(tag, parent, cwd, title, launch)).is_ok_and(|prior| prior == recorded)
+}
+
+/// Schema 39 stores this YOLO value in place of an omitted agent permission.
+fn has_legacy_yolo_stamp(launch: &SessionLaunch) -> bool {
+    launch.agent_selection().is_some_and(|selection| {
+        selection.permissions == Some(farhelm_proto::LaunchPermission::Yolo)
+            && selection.harness.stored_permission(None) == selection.permissions
+    })
+}
+
+/// Preserve the create-field budget of a saved command across schema 39.
+/// The fixed overhead from spelling the classified permission as `"yolo"`
+/// in place of `null` is separate from everything the caller can size.
+pub(crate) fn create_launch_field_bytes(launch: &SessionLaunch) -> usize {
+    const CLASSIFICATION_BYTES: usize = r#""yolo""#.len() - "null".len();
+    launch.field_bytes() - usize::from(has_legacy_yolo_stamp(launch)) * CLASSIFICATION_BYTES
+}
+
+/// Recover the old representation for exact comparison of the saved command.
+fn remove_legacy_yolo_stamp(launch: &mut SessionLaunch) -> bool {
+    if has_legacy_yolo_stamp(launch)
+        && let SessionLaunch::Agent { selection, .. } = launch
+    {
+        selection.permissions = None;
+        return true;
+    }
+    false
+}
+
+/// A pending clone can span supervisors on different schema versions. Both
+/// must see the same selection and commands apart from the permission stamp.
+fn same_launch_across_permission_migration(a: &SessionLaunch, b: &SessionLaunch) -> bool {
+    a == b
+        || [(a, b), (b, a)].into_iter().any(|(before, after)| {
+            let mut unstamped = after.clone();
+            remove_legacy_yolo_stamp(&mut unstamped) && *before == unstamped
+        })
 }
 
 /// Preserve every prompt-free retry encoding byte for byte. A first message
@@ -1792,7 +1859,7 @@ pub(crate) fn validate_named_start(
     let bytes = serde_json::to_vec(named)
         .expect("named start serializes")
         .len();
-    if bytes + launch.field_bytes() > super::handlers::CREATE_FIELD_CAP
+    if bytes + create_launch_field_bytes(launch) > super::handlers::CREATE_FIELD_CAP
         || named.argv.len() > crate::store::RESUME_TEMPLATE_ELEMENT_CAP
     {
         return Err("named conversation start exceeds the launch request bound".into());
@@ -8937,6 +9004,10 @@ impl Supervisor {
             return Ok(false);
         };
         let same_request = reservation.fingerprint == claim.fingerprint
+            || same_plain_create_after_permission_migration(
+                &reservation.fingerprint,
+                &claim.fingerprint,
+            )
             || reservation.fingerprint == crate::store::tombstone_fingerprint(&claim.fingerprint);
         Ok(same_request
             && reservation.dedup_scope == claim.dedup_scope
@@ -9711,7 +9782,10 @@ impl Supervisor {
                 .title
                 .as_ref()
                 .is_none_or(|title| *title == row.title);
-            if row.launch != inputs.launch || !same_cwd || !same_title {
+            if !same_cwd
+                || !same_title
+                || !same_launch_across_permission_migration(&row.launch, &inputs.launch)
+            {
                 return Err(RequestError::new(
                     ErrorKind::Conflict,
                     "this intent key's interrupted first attempt recorded a different launch, \
@@ -10002,6 +10076,10 @@ impl Supervisor {
             .is_some_and(|(recorded, requested)| recorded.0 == requested.0);
         let same_request = same_agent_request
             || reservation.fingerprint == claim.fingerprint
+            || same_plain_create_after_permission_migration(
+                &reservation.fingerprint,
+                &claim.fingerprint,
+            )
             || same_fresh_checkout_except_wrapper_approval(
                 &reservation.fingerprint,
                 &claim.fingerprint,
@@ -26829,6 +26907,86 @@ exit 1
             r#"["session_launch_v1",null,"/work",null,{"kind":"agent","selection":{"harness":"codex","model":"gpt-6-astra","effort":"high","permissions":"yolo"},"start":["codex","--yolo","{farhelm_args}"],"resume":["codex","--yolo","resume","{conversation}","{farhelm_args}"]}]"#,
             "changing the encoding would permanently reject a matching retry after upgrade"
         );
+    }
+
+    /// A lost Replace reply leaves a reservation for the old launch. The
+    /// metadata stamp on the source can change on upgrade while the retry
+    /// still asks for the same command. Changed argv or title still means
+    /// a different request.
+    #[farhelm_testtrace::test]
+    fn saved_launch_identity_survives_the_permission_migration() {
+        use farhelm_proto::{LaunchPermission, LaunchSelection};
+
+        let selection = LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        };
+        let start = vec!["codex".into(), "{farhelm_args}".into()];
+        let resume = Some(vec![
+            "codex".into(),
+            "resume".into(),
+            "{conversation}".into(),
+            "{farhelm_args}".into(),
+        ]);
+        let saved = SessionLaunch::Agent {
+            selection: selection.clone(),
+            start: start.clone(),
+            resume: resume.clone(),
+        };
+        let recorded = launch_fingerprint(None, "/work", &saved, Some("title"));
+        let migrated = SessionLaunch::Agent {
+            selection: LaunchSelection {
+                permissions: Some(LaunchPermission::Yolo),
+                ..selection.clone()
+            },
+            start: start.clone(),
+            resume: resume.clone(),
+        };
+        let retry = launch_fingerprint(None, "/work", &migrated, Some("title"));
+        assert_ne!(recorded, retry, "premise: metadata changed on disk");
+        assert!(same_plain_create_after_permission_migration(
+            &recorded, &retry
+        ));
+        assert!(!same_plain_create_after_permission_migration(
+            &retry, &recorded
+        ));
+        assert!(same_launch_across_permission_migration(&saved, &migrated));
+        assert!(same_launch_across_permission_migration(&migrated, &saved));
+        assert!(
+            migrated.field_bytes() > saved.field_bytes(),
+            "premise: the encoded selection grew"
+        );
+        assert_eq!(
+            create_launch_field_bytes(&saved),
+            create_launch_field_bytes(&migrated),
+            "the migration does not consume more of a saved command's field budget",
+        );
+        let different_argv = SessionLaunch::Agent {
+            selection: LaunchSelection {
+                permissions: Some(LaunchPermission::Yolo),
+                ..selection
+            },
+            start: vec!["codex".into(), "--yolo".into(), "{farhelm_args}".into()],
+            resume,
+        };
+        assert!(!same_plain_create_after_permission_migration(
+            &recorded,
+            &launch_fingerprint(None, "/work", &different_argv, Some("title")),
+        ));
+        assert!(!same_launch_across_permission_migration(
+            &different_argv,
+            &saved
+        ));
+        assert!(!same_plain_create_after_permission_migration(
+            &recorded,
+            &launch_fingerprint(None, "/work", &migrated, Some("another title")),
+        ));
     }
 
     /// A fingerprint a supervisor from before launch kinds stored for

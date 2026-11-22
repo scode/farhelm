@@ -413,9 +413,8 @@ fn summaries_name_the_setup() {
     }
 }
 
-/// The agent's default Guarded mode goes unsaid in a row (it reads "Defaults" when nothing else was set), Cursor's
-/// omitted permission is the agent's own setting, and OMP's explicit Guarded is its default too. Why: a row says what
-/// differs from a fresh launch (old `compact recents distinguish guarded defaults and own-setting`).
+/// A recent setup omits a Guarded default and shows YOLO explicitly. An old
+/// Cursor setup without a recorded permission uses its current YOLO default.
 #[test]
 fn the_guarded_default_goes_unsaid() {
     assert!(uses_guarded_default(&selection(LaunchHarness::Claude)));
@@ -425,10 +424,7 @@ fn the_guarded_default_goes_unsaid() {
     };
     assert!(uses_guarded_default(&omp));
     assert!(!uses_guarded_default(&selection(LaunchHarness::Cursor)));
-    assert_eq!(
-        permission_value(&selection(LaunchHarness::Cursor)),
-        "Agent's own setting"
-    );
+    assert_eq!(permission_value(&selection(LaunchHarness::Cursor)), "YOLO");
     assert_eq!(permission_value(&selection(LaunchHarness::Pi)), "YOLO");
 }
 

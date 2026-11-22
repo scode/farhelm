@@ -220,11 +220,13 @@ fn the_first_agent_escalates_only_a_deliberate_choice() {
     let edit = chosen.choose_harness(LaunchHarness::Cursor, None, None);
     let escalation = edit
         .escalation
-        .expect("a deliberate Guarded becomes Cursor's own setting");
-    assert_eq!(escalation.after, None, "Cursor's own setting");
+        .expect("a deliberate Guarded becomes Cursor's YOLO default");
+    assert_eq!(escalation.after, Some(LaunchPermission::Yolo));
     assert_eq!(
         edit.notice.as_deref(),
-        Some("The selected permission is unavailable for this harness, so it was cleared"),
+        Some(
+            "The selected permission is unavailable for this harness, so it was replaced by YOLO, this harness's default"
+        ),
         "the first agent still says what it did to a deliberate choice"
     );
 }
@@ -827,24 +829,25 @@ fn restart_with_is_offered_only_for_a_resumable_launch() {
     );
 }
 
-/// Restart with shows the permission the stored command was built with, so a Claude session stored before guarded
-/// flags stays "Agent's own setting" rather than today's Guarded default; a session with no captured conversation
-/// must name one; Reset choices returns to the source's own launch.
+/// Restart with shows a saved Claude launch without a recorded mode as YOLO.
+/// Reset choices returns to that classification, and an uncaptured session
+/// still requires a conversation name.
 #[test]
 fn restart_with_shows_the_stored_permission_and_resets_to_it() {
     let mut source = session(agent_launch(selection(LaunchHarness::Claude), true));
     source.restart_offer = RestartOffer::default();
     let mut draft = LaunchDraft::restart_with("s1", &source, Some(1)).unwrap();
     assert_eq!(
-        draft.agent.permissions, None,
-        "the agent's own setting, as stored"
+        draft.agent.permissions,
+        Some(LaunchPermission::Yolo),
+        "the saved launch has no recorded permission mode"
     );
     assert!(matches!(&draft.mode, Mode::RestartWith(restart) if restart.conversation_required));
 
-    draft.choose_permissions(Some(LaunchPermission::Yolo));
+    draft.choose_permissions(Some(LaunchPermission::Guarded));
     draft.edit_conversation("abc".into());
     draft.reset_choices(Some(LaunchPermission::Guarded));
-    assert_eq!(draft.agent.permissions, None);
+    assert_eq!(draft.agent.permissions, Some(LaunchPermission::Yolo));
     assert_eq!(draft.conversation, "");
 
     source.restart_offer = RestartOffer::Resume;

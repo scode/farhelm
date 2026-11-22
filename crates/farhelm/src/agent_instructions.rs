@@ -167,8 +167,8 @@ fn render(agent: &Command) -> String {
          workspace-write with on-request approval, Muse uses its auto-review profile,\n\
          Antigravity requests its auto mode (its default mode where auto mode is unavailable), and\n\
          OMP's guarded choice approves workspace edits and asks about other actions. Your\n\
-         own rules and in-session mode switches can loosen these modes. Older stored launches without those flags and\n\
-         Cursor's own setting count as YOLO on hosts that ask first. A command\n\
+         own rules and in-session mode switches can loosen these modes. Older saved agent launches without a\n\
+         recorded permission mode count as YOLO. Cursor defaults to YOLO. A command\n\
          launch is --command with the command line to run and --yolo or --no-yolo: your\n\
          statement of whether it bypasses human, classifier and sandbox safety checks. Farhelm believes it and never\n\
          checks the command, so say it truthfully. On a command launch --agent TYPE declares\n\
@@ -250,8 +250,8 @@ fn render(agent: &Command) -> String {
          session still waits is refused within about half a minute; wait for the first. Nothing\n\
          was done after any approval refusal.\n\
          \n\
-         On a host that asks before YOLO launches, an agent may not start a YOLO launch (one\n\
-         that bypasses safety checks or uses the agent's own setting) or any command launch, and nothing you pass changes that:\n\
+         On a host that asks before YOLO launches, an agent may not start a launch treated as YOLO or any command\n\
+         launch. This includes saved agent launches with no recorded permission and launches using custom flags.\n\
          there is no override. If such a launch is refused, tell the user which host refused;\n\
          they can allow it by turning on \"Start YOLO sessions without asking\" for that\n\
          host. Neither command permission waives this rule for create, clone or spawn.\n\

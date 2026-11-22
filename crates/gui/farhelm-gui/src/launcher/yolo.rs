@@ -24,7 +24,7 @@ pub(crate) enum YoloReason {
     CustomFlags,
     /// YOLO chosen on an agent type that offers other modes.
     ChosenPermission,
-    /// An agent type that offers only YOLO.
+    /// An agent type whose offered permissions all count as YOLO.
     OnlyMode(LaunchHarness),
     /// A command launch asserted to be YOLO; Farhelm never reads the command to check.
     Asserted,
@@ -42,7 +42,7 @@ impl YoloReason {
             Some(selection) if selection.permissions == Some(LaunchPermission::Custom) => {
                 YoloReason::CustomFlags
             }
-            Some(selection) if selection.harness.offers_only_yolo() => {
+            Some(selection) if !selection.harness.offers_non_yolo_mode() => {
                 YoloReason::OnlyMode(selection.harness)
             }
             Some(selection)
@@ -80,14 +80,13 @@ impl YoloReason {
                     .to_owned()
             }
             YoloReason::ChosenPermission => {
-                "This launch uses YOLO permissions. Another permission mode would keep the \
-                                             agent's safety checks instead."
+                "Farhelm treats this launch as YOLO. A guarded or approval mode is available for a new launch."
                     .to_owned()
             }
             YoloReason::OnlyMode(harness) => {
                 let name = harness_label(harness);
                 format!(
-                    "Farhelm offers {name} only in YOLO mode, so every {name} session runs this way."
+                    "Farhelm treats every {name} permission choice as YOLO."
                 )
             }
             YoloReason::Asserted => {

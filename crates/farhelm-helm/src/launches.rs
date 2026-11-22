@@ -1676,32 +1676,61 @@ mod tests {
         }
     }
 
-    /// Cursor remains a Generic launch even when model and permission choices
-    /// are explicit; a saved ID must not synthesize Resume.
     /// Spec: `normalize_selection` is exactly the selection `compile`
-    /// records, including Pi's omitted permissions becoming `yolo`.
+    /// records, including omitted Cursor and Pi permissions becoming YOLO.
     ///
     /// Why: a fresh-checkout create reconciled after a lost reply records
-    /// its selection without compiling. If the two disagreed, the same Pi
+    /// its selection without compiling. If the two disagreed, the same
     /// request would leave a different remembered permission default
     /// depending on whether its first reply arrived.
     #[farhelm_testtrace::test]
     fn normalized_and_compiled_selections_agree() {
-        let pi = LaunchSelection {
-            permission_flags: None,
-            harness: LaunchHarness::Pi,
-            model: None,
-            effort: None,
-            permissions: None,
-            wrapper_prefix: None,
-            container: None,
-            workspace_trust: None,
-        };
-        let normalized = normalize_selection(pi.clone());
-        assert_eq!(normalized.permissions, Some(LaunchPermission::Yolo));
-        assert_eq!(compile(pi).expect("compile pi").selection, normalized);
+        for harness in [LaunchHarness::Pi, LaunchHarness::Cursor] {
+            let draft = selection(harness);
+            let normalized = normalize_selection(draft.clone());
+            assert_eq!(normalized.permissions, Some(LaunchPermission::Yolo));
+            assert_eq!(compile(draft).expect("compile draft").selection, normalized);
+        }
     }
 
+    /// A saved template can reset Cursor's permission to the default. The
+    /// resulting command uses the same explicit flag as a fresh Cursor launch.
+    #[test]
+    fn a_saved_cursor_template_can_reset_to_explicit_yolo() {
+        use farhelm_proto::launcher::{
+            LaunchTemplate, LauncherState, TemplateContext, apply_template,
+        };
+
+        let template: LaunchTemplate = serde_json::from_str(
+            r#"{"name":"old-cursor","fields":{"agent":"cursor","permissions":null}}"#,
+        )
+        .expect("read the saved template");
+        assert_eq!(template.fields.permissions, Some(None));
+        let draft = apply_template(
+            &LauncherState::default(),
+            &template,
+            &TemplateContext {
+                catalog: &[],
+                known_hosts: &[],
+                known_recipes: &[],
+                known_places: &[],
+                host_fixed: false,
+            },
+        )
+        .expect("apply Cursor template");
+        assert_eq!(draft.harness, Some(LaunchHarness::Cursor));
+        assert_eq!(draft.permissions, None, "the template cleared the choice");
+        let launch = compile(LaunchSelection {
+            permissions: draft.permissions,
+            ..selection(draft.harness.unwrap())
+        })
+        .expect("compile Cursor from the saved template");
+        assert_eq!(launch.selection.permissions, Some(LaunchPermission::Yolo));
+        assert_eq!(launch.invocation, "cursor-agent --force");
+    }
+
+    /// Cursor defaults to the same argv as an explicit YOLO choice. Its
+    /// permissions and model do not grant conversation reporting or Restart.
     #[test]
     fn cursor_launches_preserve_intent_without_conversation_integration() {
         for model in [None, Some("composer-2.5"), Some("custom[effort=high]")] {
@@ -1721,11 +1750,15 @@ mod tests {
                 if let Some(model) = model {
                     expected.extend(["--model".into(), model.into()]);
                 }
-                if permissions.is_some() {
-                    expected.push("--force".into());
-                }
+                expected.push("--force".into());
                 assert_eq!(shell_words::split(&launch.invocation).unwrap(), expected);
-                assert_eq!(launch.selection, input);
+                assert_eq!(
+                    launch.selection,
+                    LaunchSelection {
+                        permissions: Some(LaunchPermission::Yolo),
+                        ..input
+                    }
+                );
                 assert_eq!(launch.agent_kind, AgentKind::Generic);
                 let snapshot =
                     farhelm_supervisor::agent_kind::IntegrationSnapshot::of(&launch.launch);
