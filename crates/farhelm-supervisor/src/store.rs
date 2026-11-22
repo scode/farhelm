@@ -8256,10 +8256,21 @@ mod tests {
                 [],
             )
             .expect_err("a second metadata row must be refused");
-            // The seal's CHECK (schema 35) keeps it a flag on both paths:
-            // nothing ever clears it, so a stray value must never be stored.
-            conn.execute("INSERT INTO supervisor_meta (id, sealed) VALUES (0, 2)", [])
+            // Fresh databases can have no metadata row yet. Updating the
+            // singleton on both paths isolates the seal's own CHECK.
+            conn.execute(
+                "INSERT INTO supervisor_meta (id, sealed) VALUES (0, 0) ON CONFLICT(id) DO NOTHING",
+                [],
+            )
+            .expect("ensure the metadata singleton exists");
+            let error = conn
+                .execute("UPDATE supervisor_meta SET sealed = 2 WHERE id = 0", [])
                 .expect_err("a seal other than 0 or 1 must be refused");
+            assert!(
+                matches!(error, rusqlite::Error::SqliteFailure(code, _)
+                    if code.extended_code == rusqlite::ffi::SQLITE_CONSTRAINT_CHECK),
+                "{error:?}"
+            );
             // The terminal kind's CHECK is the other constraint
             // `table_info` cannot see; the migration adds it with
             // `ALTER TABLE`, so it is the one most easily lost on that path.

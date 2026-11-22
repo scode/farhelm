@@ -5211,6 +5211,13 @@ mod tests {
         )
         .await;
         let terminal = spawn_host(&sup, "resuming", "printf 'work resumed\\n'; sleep 300").await;
+        // The one sample below needs a caught-up host with the new screen.
+        crate::service::core::tests::host_terminals::wait_for(
+            &terminal,
+            "the caught-up host's resumed screen",
+            |host| host.status().caught_up && host.screen_tail(4096).contains("work resumed"),
+        )
+        .await;
         let base = install_durable_running_entry(&sup, "resuming", terminal).await;
         let mut integrated = entry_with(base.terminal.clone(), LastOutcome::Running);
         integrated.info = base.info.clone();

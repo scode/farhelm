@@ -7447,9 +7447,9 @@ impl Supervisor {
 
     /// [`Self::reload_sessions_with_hosts`] as the tests that drive a reload
     /// by hand call it, beside a supervisor that already owns the state
-    /// directory: host rows are attributed when `may_write` says the caller
-    /// may scan, with runtimes that report to no notifier, and no runtime
-    /// counts as already adopted. The tests that use it have no hosts.
+    /// directory. A writable reload can adopt hosts it finds during the
+    /// scan. Release the fixture's existing runtimes before calling it,
+    /// since this helper starts with an empty map of adopted hosts.
     #[cfg(test)]
     async fn reload_sessions(
         state_dir: &Path,
@@ -24339,7 +24339,20 @@ await new Promise(() => {});
             .report(&id, token.clone(), "session_start", Some(peer))
             .await
             .expect("the parent report admits");
+        let [OwnedRuntime::Hosted(runtime)] = fixture.runtimes.as_slice() else {
+            panic!("the fixture owns one host-backed runtime");
+        };
+        let (pid, start) = (runtime.pid, runtime.start);
+        assert_eq!(
+            crate::procs::ProcessIdentity::read(pid),
+            Some(crate::procs::ProcessIdentity { pid, start }),
+            "premise: the adopted runtime still owns its process group"
+        );
+        // Group signalling is asynchronous for a host-backed owner. Observe
+        // both identities ending before looking at the durable offer.
         fixture.kill_owner();
+        wait_pid_gone(pid, start, "the runtime").await;
+        wait_pid_gone(peer.pid, peer.start, "the OMP reporter").await;
         assert_eq!(
             fixture.offer(&id).await,
             farhelm_proto::RestartOffer::Resume,
@@ -26425,6 +26438,8 @@ exit 1
         let sup = host_supervisor(state.path(), dummy_exe())
             .await
             .expect("supervisor construction does not touch the launch shim");
+        let hosts = state.path().join(crate::hosts::HOSTS_DIR_NAME);
+        assert!(!hosts.exists(), "premise: the host directory is absent");
         {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(
@@ -26472,18 +26487,16 @@ exit 1
         let reply = received_create_frame(&mut rx).await;
         let decoded: ControlMsg = serde_json::from_slice(&reply.body).unwrap();
         assert!(
-            matches!(decoded, ControlMsg::Error { .. }),
+            matches!(&decoded, ControlMsg::Error { message, .. } if message.contains("writing launch spec")),
             "create must fail when the spec cannot be published: {decoded:?}"
         );
         assert!(
             sup.sessions.lock().await.is_empty(),
             "no session may be recorded for a spec that never made it to disk"
         );
-        let hosts = state.path().join(crate::hosts::HOSTS_DIR_NAME);
-        assert!(
-            std::fs::read_dir(&hosts).map_or(true, |mut entries| entries.next().is_none()),
-            "a failed spec publication must never start a terminal host"
-        );
+        // The start path creates hosts/ before spawning its first stage.
+        // The directory survives even if a failed create removes its socket.
+        assert!(!hosts.exists(), "the host start path was entered");
         // The DURABLE half, which the in-memory map cannot show: the
         // launching row this create committed before touching the disk
         // must be rolled back, not merely left out of the session map.
@@ -35721,6 +35734,19 @@ exit 1
                 if recovery == "reboot" {
                     seams.boot_id = Arc::new(|| Ok(Some("sentinel-next-boot".into())));
                 }
+                let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
+                if kind == "existing" && recovery == "already-error" {
+                    // An observer can read the Error row during startup.
+                    // Only the owner may retire its launch evidence.
+                    let sentinel = crate::launch::status_path_for_spec(&spec);
+                    let spec_before = std::fs::read(&spec).unwrap();
+                    let sentinel_before = std::fs::read(&sentinel).unwrap();
+                    Supervisor::reload_sessions(state.path(), &sup.store, &seams, false)
+                        .await
+                        .unwrap();
+                    assert_eq!(std::fs::read(&spec).unwrap(), spec_before);
+                    assert_eq!(std::fs::read(&sentinel).unwrap(), sentinel_before);
+                }
                 Supervisor::reload_sessions(state.path(), &sup.store, &seams, true)
                     .await
                     .unwrap();
@@ -35734,7 +35760,6 @@ exit 1
                     ReservationOutcome::Created,
                     "{kind}/{recovery}: cleanup must preserve acceptance first"
                 );
-                let spec = crate::launch::spec_path_for_launch(state.path(), &row.id, 0);
                 assert!(!crate::launch::status_path_for_spec(&spec).exists());
                 assert!(!spec.exists());
                 drop(sup);
@@ -37107,6 +37132,7 @@ exit 1
                 .await
                 .unwrap()
                 .unwrap();
+            let origin_id = origin.id.clone();
             let path = state
                 .path()
                 .join("checkout-preparation")
@@ -37187,6 +37213,12 @@ exit 1
             assert_eq!(observed.sentinel.is_some(), should_error, "{evidence}");
             if let Some(detail) = observed.sentinel {
                 assert!(detail.contains("checkout preparation"), "{detail}");
+            }
+            if evidence == "borrower" {
+                // The borrower ended its own host. Release the origin's
+                // runtime too so reload can adopt it without a takeover.
+                let origin = sup.sessions.lock().await[&origin_id].clone();
+                release_fixture_host(&origin);
             }
             let (reloaded, _) = Supervisor::reload_sessions(
                 state.path(),

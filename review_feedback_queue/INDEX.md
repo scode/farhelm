@@ -133,20 +133,6 @@ consequences.
   — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
   directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
 
-- [`stop-wait-test-releases-exit-before-wait-witness.md`](stop-wait-test-releases-exit-before-wait-witness.md) — The
-  regression can miss Stop ceasing to wait for final terminal output, leaving a lost opportunity to return the complete
-  launch-failure explanation undetected.
-
-- [`foreign-host-refusal-test-cannot-observe-shutdown.md`](foreign-host-refusal-test-cannot-observe-shutdown.md) — The
-  regression meant to protect another session's terminal cannot detect a Shutdown sent before the expected refusal.
-
-- [`seed-cancellation-test-accepts-lost-emulator.md`](seed-cancellation-test-accepts-lost-emulator.md) — The regression
-  test for keeping an ended runtime's emulator readable also passes when read reports that the emulator was lost.
-
-- [`cancellation-test-releases-encoder-before-abort-witness.md`](cancellation-test-releases-encoder-before-abort-witness.md)
-  — The regression that promises to cancel a Restart caller during history encoding can instead let that caller finish
-  normally, without rejecting the failed cancellation premise.
-
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
 
@@ -233,48 +219,12 @@ consequences.
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-checkout-status-borrower-reload-keeps-origin-runtime.md`](trailing-checkout-status-borrower-reload-keeps-origin-runtime.md)
-  — borrower reload fixture retains a competing origin runtime. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md`](trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md)
-  — failed-spec test accepts an attempted host start as never started. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-startup-error-artifact-readonly-oracle.md`](trailing-deleted-startup-error-artifact-readonly-oracle.md)
-  — Deleted reload test loses read-only Error-artifact ownership oracle. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md`](trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md)
-  — Host-backed teardown removes the owner-exit test's exit barrier. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md`](trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md)
-  — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md`](trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md)
-  — List-limit test checks an undrained reply cache. Abbreviated collection; confidence, proposed dismissals and
-  unresolved consequences are preserved in the entry.
-
-- [`trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md`](trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md)
-  — Keep the target host alive through conformance observation. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-test-one-shot-sample-before-host-catch-up.md`](trailing-test-one-shot-sample-before-host-catch-up.md) —
-  Persistence test can skip an uncaught-up host. Abbreviated collection; confidence, proposed dismissals and unresolved
-  consequences are preserved in the entry.
-
 - [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md)
   — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md`](trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md)
-  — Migrated seal CHECK assertion accepts a duplicate-key failure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
