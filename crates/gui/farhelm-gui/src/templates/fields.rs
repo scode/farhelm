@@ -31,6 +31,7 @@ use farhelm_proto::launcher::{
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 
 use super::summary::permission_label;
+use crate::components::capitalize_validation;
 use crate::host_text::{HostSentence, HostText};
 use crate::permission::words::effort_label;
 
@@ -426,7 +427,7 @@ impl Draft {
     pub fn refusal(&self, catalog: Option<&[LaunchCatalogModel]>) -> Option<String> {
         if let Some(text) = &self.wrapper_input {
             return Some(match farhelm_proto::split_wrapper_prefix(text) {
-                Err(reason) => capitalized(reason),
+                Err(reason) => capitalize_validation(reason),
                 // The text parses now but has not reached the fields yet; the editor writes it there on every edit,
                 // so this is a race the user can resolve by looking again.
                 Ok(_) => "Wrapper prefix changed while saving; review it and try again".to_owned(),
@@ -436,7 +437,7 @@ impl Draft {
             self.fields.permissions.flatten(),
             self.fields.permission_flags.as_deref(),
         ) {
-            return Some(capitalized(reason));
+            return Some(capitalize_validation(reason));
         }
         for field in Field::ALL
             .into_iter()
@@ -498,7 +499,9 @@ pub fn name_refusal(
         return None;
     }
     if let Err(reason) = farhelm_proto::launcher::check_new_template_name(name) {
-        return Some(HostSentence::new("template-name-refusal").text(capitalized(reason)));
+        return Some(
+            HostSentence::new("template-name-refusal").text(capitalize_validation(reason)),
+        );
     }
     taken_refusal(name, names)
 }
@@ -555,12 +558,4 @@ pub fn duplicate_name(name: &str, names: &[&str]) -> String {
         }
         number += 1;
     }
-}
-
-/// A shared rule's reason as a sentence: its first letter capitalized (the old app's `local_validation_notice`).
-pub(super) fn capitalized(mut reason: String) -> String {
-    if let Some(first) = reason.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    reason
 }

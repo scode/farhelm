@@ -56,6 +56,7 @@ use super::Recipes;
 use super::draft::{Base, Draft, TunnelDraft};
 use crate::components::{
     Button, HoverHelp, RadioGroup, RadioOption, TextInput, TextInputState, Tier,
+    capitalize_validation,
 };
 use crate::environment_ui;
 use crate::focus::Mark;
@@ -120,14 +121,6 @@ const BASES: [(Base, &str, &str); 4] = [
 const REQUIREMENTS: &str = "Farhelm builds on this base. It must boot systemd as its init system, let the sandbox user \
                             use sudo without a password, be Ubuntu or Debian with apt, and have bash, curl and git. The \
                             build checks these first and stops with the one that's missing.";
-
-/// A shared rule's reason as a sentence, its first letter capitalized: the old app's `local_validation_notice`.
-fn capitalized(mut reason: String) -> String {
-    if let Some(first) = reason.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    reason
-}
 
 /// `/api/tensorlake/recipes`, or with `name` the recipe's own route.
 fn path(name: Option<&str>) -> Result<ApiPath, PathError> {
@@ -539,13 +532,13 @@ impl Editor {
         if self.saved.is_none()
             && let Err(reason) = check_recipe_name(&name)
         {
-            self.fail(capitalized(reason.to_owned()), draft, cx);
+            self.fail(capitalize_validation(reason.to_owned()), draft, cx);
             return false;
         }
         let recipe = match draft.to_save() {
             Ok(recipe) => recipe,
             Err(reason) => {
-                self.fail(capitalized(reason), draft, cx);
+                self.fail(capitalize_validation(reason), draft, cx);
                 return false;
             }
         };

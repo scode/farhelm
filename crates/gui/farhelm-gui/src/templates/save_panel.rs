@@ -37,11 +37,11 @@ use gpui::{
 };
 
 use super::editor::{NAME_KIND_HELP, save_command, stored_names};
-use super::fields::{self, Field, capitalized, taken_refusal};
+use super::fields::{self, Field, taken_refusal};
 use super::save::{Candidate, choice_text};
 use crate::components::{
     Button, Checkbox, HoverHelp, RadioGroup, RadioOption, Role, TextInput, TextInputEvent,
-    TextInputState, Tier,
+    TextInputState, Tier, capitalize_validation,
 };
 use crate::host_text::{HostSentence, HostText};
 use crate::operations::{NotStarted, OpKey, Outcome};
@@ -147,7 +147,7 @@ impl SavePanel {
         if let Err(reason) =
             check_new_template_name(&template.name).and_then(|()| check_template_shape(template))
         {
-            return Some(plain(capitalized(reason)));
+            return Some(plain(capitalize_validation(reason)));
         }
         let draft = fields::Draft {
             name: template.name.clone(),
