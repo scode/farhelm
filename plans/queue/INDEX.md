@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
 - [complete] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
 - [in-flight c678f0] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
-- [pending] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
+- [in-flight 8c5649] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
 - [in-flight bb46f1] `agent-trust-every-folder.md` — make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live (after `agent-hook-setup.md`)
 - [pending] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
 - [pending] `test-worker-staging-lock.md` — stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
