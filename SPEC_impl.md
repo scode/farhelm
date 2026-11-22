@@ -7997,9 +7997,14 @@ by the Homebrew and system binary directories.
 `AbandonProcessGroup=true` keeps terminal hosts and their agents and tab shells alive when launchd replaces or restarts
 the supervisor. Setup bootstraps an absent job; an already loaded job must name the planned plist and is kickstarted
 without killing a running process. Update removes the loaded registration with `bootout`, confirms it is absent and
-bootstraps the new plist. Rewriting a plist alone would leave launchd's old loaded configuration in use. Neither path
-uses `launchctl disable`, whose persistent override would prevent a later setup from starting the job. Launchd actions
-are explicit members of the same frozen action list as Linux actions, without a separate service-manager abstraction.
+bootstraps the new plist. Rewriting a plist alone would leave launchd's old loaded configuration in use. `bootout`
+returns as soon as it has sent SIGTERM, and launchd keeps listing the job for a while after. Measured over SSH on macOS
+26 and 27 with a throwaway job, it was still listed right after every successful bootout, even when the process exited
+at once, and gone 0.2 to 2.6 seconds later; launchd killed a process that ignored SIGTERM about five seconds after
+bootout. Both Update and uninstall therefore poll the job for at least 15 seconds before calling it still loaded. A
+single check right after bootout failed an uninstall's first attempt. Neither path uses `launchctl disable`, whose
+persistent override would prevent a later setup from starting the job. Launchd actions are explicit members of the same
+frozen action list as Linux actions, without a separate service-manager abstraction.
 
 Every remote Darwin `stat` call uses the system `/usr/bin/stat` regardless of PATH, including uninstall.
 
