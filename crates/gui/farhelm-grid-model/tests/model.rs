@@ -708,19 +708,22 @@ fn clipboard_parts_are_atomic_and_primary_is_ignored() {
     );
 }
 
-/// Copying joins soft wraps at each line's original width, skips the unused
-/// cell before a wide wrap, keeps combining marks, and excludes a wide glyph
-/// whose first cell lies before the selection. Rectangles never join wraps.
+/// Copying joins soft wraps at each line's original width and skips the unused
+/// cell before a wide wrap even when its background is painted. It keeps combining
+/// marks and excludes a wide glyph whose first cell lies before the selection.
+/// Rectangles never join wraps.
 #[test]
 fn selection_uses_cells_original_widths_and_farhelm_trimming() {
     let mut model = opened(4, 2, 10);
+    let mut history_head = padded_row(&[(0, 4, "abcd"), (4, 1, " ")]);
+    history_head.runs[1].style.bg = Color::Palette(2);
     send(
         &mut model,
         history(
             40,
             5,
             vec![
-                padded_row(&[(0, 4, "abcd")]),
+                history_head,
                 row(false, &[(0, 2, "中"), (2, 1, "e\u{301}")]),
             ],
         ),

@@ -372,6 +372,8 @@ linux/terminal-status--dark.png 9953a6832d31407d3bedc57131cabb96240e743c
 linux/terminal-status--light.png 422e0e4b5d911364a6d6a72e6f63e27ab2504b33
 linux/terminal-styles--dark.png 1cba223f1d0cba90a1a75f647db4777e2039149d
 linux/terminal-styles--light.png 1c1142a213eda81a9955b53a6c58ce0a2f42bd6e
+linux/terminal-wide-glyphs--dark.png 10af75610b5f6f6aa3409934ec8553f5c909c3bc
+linux/terminal-wide-glyphs--light.png c2ed58779f48b907e3272aa569359573f4226c42
 linux/text-input--dark.png 8c14d93796886eee6a8285fe7cafd77fcbe42e06
 linux/text-input--light.png 9040479ef2780f6e130c5a0e39758ddeff3adab2
 linux/text-input-growing--dark.png 20ebfc056dca3cf84d5a9dfa34c6602ed47b7d60

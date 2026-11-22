@@ -116,6 +116,8 @@
 //! without a newline). A row with `"p":true` has an unused last column
 //! because the next wide character wrapped. Text operations omit that
 //! column, even when a run covers it. An absent `p` means false.
+//! The supervisor sends nondefault padding style as a single unlinked space
+//! run at the last column, separate from the neighboring text.
 //! A run is `[col, width, text, style]` or
 //! `[col, width, text, style, link]` ([`Run`]):
 //!
