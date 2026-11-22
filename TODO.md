@@ -46,7 +46,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   about a second. GPUI opens a maximized window at its ordinary frame and then asks macOS to zoom it, and that zoom
   animates. Low priority. A fix probably means opening the window at the zoomed frame directly, or zooming without the
   animation, in the vendored GPUI macOS code (with its patch file), while keeping the ordinary frame that Restore
-  returns to.
+  returns to. Plan: `plans/queue/maximized-window-no-zoom-animation.md`.
 
 - **One slow host holds up every other action for up to 20 seconds.** The desktop app sends its commands to the helm one
   at a time, each starting when the previous one has answered. Saving a replacement credential (delivered to every host,
@@ -273,7 +273,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   - `terminal-grid-row-traversal-duplicated.md`. In
     `crates/gui/farhelm-grid-model/src/{paths.rs:335–383,selection.rs:241–281}`, both row walks fill gaps, split plain
     runs, keep other runs' widths and drop wide-wrap padding. Share a walker yielding column, width and text. Keep byte
-    offsets for paths and UTF-16 offsets for selection with the callers.
+    offsets for paths and UTF-16 offsets for selection with the callers. Plan:
+    `plans/queue/wide-glyph-padding-cells.md`.
   - `gui-controls-repeat-shared-rendering.md`. Share the absolute two-pixel focus-ring element across
     `components/button.rs:1163–1200`, `select.rs:414–427`, `radio_group.rs:775–787,840–852,900–912,953–965`,
     `menu_item.rs:312–326`, `list_row.rs:125–136`, `tab_strip.rs:240–256`, `copy_field.rs:288–299`,
@@ -371,6 +372,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
 
   Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
+  Plan: `plans/queue/helpers-desktop-startup.md`. Plan: `plans/queue/helpers-terminal-and-controls.md`. Plan:
+  `plans/queue/helpers-hosts-and-sessions.md`. Plan: `plans/queue/helpers-launcher-and-templates.md`.
 
 ### Plan follow-up
 
@@ -381,7 +384,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   nextest and desktop doctests. Without required mode the historical recorder warns and continues after a mismatch.
   Decide which historical batteries and bases the current driver supports. For a pre-removal base, verify either
   enforcement of its pin and phase requirements or refusal with an explanation before any tests run. For a current base,
-  verify the system-tmux path.
+  verify the system-tmux path. Plan: `plans/queue/deflake-historical-base-prereqs.md`.
 
 - **Protect a test worker's checkout before staging.** The SSH driver copies tools, syncs and prunes source, and
   snapshots the result before `with-lock.sh` takes the execution lock. A second request can change the first run's
@@ -392,7 +395,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
   Include standalone bootstrap, which also copies tools. Bind collection to one invocation so a request that never ran
   or a run whose lock has just been released cannot copy another run's evidence. Distinguish older artifacts when a
-  caller reuses an output directory.
+  caller reuses an output directory. Plan: `plans/queue/test-worker-staging-lock.md`.
 
 - **Keep interrupted uploads visible after their session goes away.** The terminal leaves a line for each interrupted
   upload in `terminal/attachments.rs` (`Carried` and `prune_carried`), then the desktop can discard the lines when it
@@ -401,6 +404,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   either when the user moves to another session or when removal is established. Reuse the notice center and account for
   a successful Delete or Replace behind a filter, when an incomplete list cannot prove absence. Cover leaving during a
   transfer and losing its source session without reopening it, including when there are no terminals left to draw it.
+  Plan: `plans/queue/interrupted-upload-notices.md`.
 
 - **Keep bulk Stop and Delete bound to what the user saw.** In the desktop session list's marked bar, the click reads
   fresh confirmation preferences and shell guards. Capture the drawn targets, guards, confirmation preference, and the
@@ -408,13 +412,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and environment Delete scope still match at acceptance and at queued dispatch. Reword or remove targets when facts
   change without widening consent. This is the rule in SPEC_impl.md's “Questions: the prompt” and SPEC.md's bulk
   actions. Cover changed confirmation preferences, a retargeted host and an unreachable environment that reconnects
-  while Delete is pending.
+  while Delete is pending. Plan: `plans/queue/bulk-actions-bound-to-drawn.md`.
 
 - **Pace metadata changes to marked sessions.** Pin, Unpin, Mute, Unmute, Mark read and Mark unread can issue a burst
   from the desktop's marked menu. The helm closes its UI channel when more than 64 commands are pending, leaving the
   window reconnecting with a partly applied batch. Use the existing reply-paced Stop/Delete and group-move mechanisms as
   guides. Keep each eligible row's drawn write, acceptance-time refusal if busy, row-local failures, and cancellation on
-  reconnect. Cover a batch larger than the channel limit and show that rows keep making progress after a refusal.
+  reconnect. Cover a batch larger than the channel limit and show that rows keep making progress after a refusal. Plan:
+  `plans/queue/pace-bulk-metadata-changes.md`.
 
 - **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
   next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
@@ -423,7 +428,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   space makes selection, printed-path detection and hyperlink joining treat the padding as text. The current client
   infers padding from an uncovered last column before a wide glyph. The row format has only a wrap bit and styled runs,
   so settle how to carry that distinction across versions before changing the encoder. Cover both a colored placeholder
-  and a real styled space before a wrapped wide glyph.
+  and a real styled space before a wrapped wide glyph. Plan: `plans/queue/wide-glyph-padding-cells.md`.
 
 - **Show the new background after erasing half of a wide terminal glyph.** If a program erases just the right column of
   a wide character using a different background, the grid encoder sends the old two-column run and hides the erased
@@ -431,7 +436,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   in scrollback. Also preserve the previous row's wide-wrap padding when the half-erased glyph starts a wrapped row. The
   viewer currently recognizes that padding by the next run occupying two columns. With separate cells it needs the same
   explicit wrap distinction as the colored-margin item above. Cover erasure both mid-row and just after a wrap,
-  including selection and links across the seam.
+  including selection and links across the seam. Plan: `plans/queue/wide-glyph-padding-cells.md`.
 
 - **Keep working container images when Rebuild fails.** Rebuild currently retires a recipe's Podman software and
   prepared images before building replacements (`crates/farhelm-helm/src/environment/podman/build.rs`). A package or
@@ -496,7 +501,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Deep dive on SQLite compaction settings.** Review how Farhelm's databases handle compaction: WAL checkpointing
   (nothing sets `wal_autocheckpoint`, so SQLite's default of 1000 pages applies, and the supervisor's database module
   says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
-  settings or a periodic maintenance step as they grow.
+  settings or a periodic maintenance step as they grow. Plan: `plans/queue/sqlite-compaction-settings.md`.
 
 - **Extend real harness drift tests.** Exercise conversation rotation in more installed agents, verify the identity
   shown after Restart, check that subagent reports are rejected, and cover permission and question prompts and
@@ -509,7 +514,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Destination box with Managed checkout selected; under the Repository field, a wrapped "Managed checkout of <repo> on
   <host>" line with the full checkout path, a paragraph explaining that Farhelm clones into a new folder named after the
   session and trashes it when the last session using it is deleted, and then a separate Folder field repeating the path,
-  all in the narrow middle column, which makes the Destination box very tall.)
+  all in the narrow middle column, which makes the Destination box very tall.) Plan:
+  `plans/queue/launcher-managed-checkout-compact.md`.
 
 ## Mid term
 
