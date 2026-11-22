@@ -17,16 +17,18 @@
 #                              (`cargo nextest run --workspace --exclude farhelm-desktop ARG...`) through the recorder
 #   gui --out DIR [SUITE...]   sync, build the GPUI app there, and run `smoke` and/or `lifecycle` (both by default)
 #   run --out DIR -- CMD...    sync, then run CMD from the synced tree (a clippy, a narrow nextest selection)
-#   status                     show the worker's lock holder and the last runs' summaries
+#   collect --out DIR ID       retrieve one finished run's evidence
+#   status                     show the checkout's lock holder and recent run summaries
 #   stop                       end the run holding the lock (interrupting this script does not end the remote run)
 #
-# Each run writes a summary and console logs under `<out>`, and, when it fails, the recorder's retained run
-# directories as `<out>/runs.tar.gz`. The worker prints its own summary. A failed evidence copy is reported and
-# returns failure even when the remote command passed. A failed remote command keeps its exit status.
+# Each run prints an invocation id. The driver stamps `<out>/invocation.txt` and clears the harness's old artifacts
+# there, then copies that invocation's summary, logs and retained failure evidence. A refused run has no evidence
+# to copy. The worker keeps its 20 newest runs per checkout for later collection.
 #
 # The worker keeps one tree per checkout name under `~/farhelm-test-worker/<checkout>/` with its own `target/`, so
-# builds stay incremental across runs. The tree's lock covers execution after the driver stages the tools and source.
-set -u
+# builds stay incremental. An invocation stages its own tools and source and only installs the source under the tree
+# lock. Bootstrap has exclusive use of the worker while it changes prerequisites shared by every checkout.
+set -uo pipefail
 
 die() {
   echo "test-worker: $*" >&2
@@ -48,12 +50,19 @@ if [ "${1:-}" = __tailscale_rsh ]; then
   exec tailscale ssh "$user$host" -o BatchMode=yes -o ConnectTimeout=15 "$@"
 fi
 
+output_locked=
+if [ "${1:-}" = __output_locked ]; then
+  shift
+  output_locked=1
+fi
+original_args=("$@")
+
 here=$(cd "$(dirname "$0")" && pwd) || die "cannot find the script's directory"
 checkout=$(cd "$here/../.." && pwd) || die "cannot find the checkout"
 config="$HOME/.farhelm-test-worker"
 out=
 cmd=${1:-}
-[ -n "$cmd" ] || die "usage: test-worker.sh bootstrap|rust|gui|run|status [options]"
+[ -n "$cmd" ] || die "usage: test-worker.sh bootstrap|rust|gui|run|collect|status|stop [options]"
 shift
 args=()
 while [ $# -gt 0 ]; do
@@ -65,6 +74,49 @@ while [ $# -gt 0 ]; do
   *) args+=("$1"); shift ;;
   esac
 done
+
+# Keep the stamp and the files it describes together if two clients reuse an output directory. The wrapper
+# execs this script with the lease on fd 9, before either client touches any of the harness's artifact names.
+case "$cmd" in
+rust | gui | run | collect)
+  [ -n "$out" ] || die "$cmd needs --out DIR"
+  if [ -z "$output_locked" ]; then
+    exec python3 "$here/lock-output.py" "$out" "$0" "${original_args[@]}"
+  fi
+  ;;
+esac
+
+invocation=
+source=unknown
+case "$cmd" in
+bootstrap | rust | gui | run)
+  invocation=$(python3 -c 'import uuid; print(uuid.uuid4())') || die "could not generate an invocation id"
+  ;;
+collect)
+  if [ -z "${args[0]:-}" ] || [ -n "${args[1]+extra}" ]; then
+    die "collect needs an invocation id"
+  fi
+  invocation=${args[0]}
+  [[ "$invocation" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+    || die "invalid invocation id"
+  ;;
+esac
+if [ -n "$invocation" ]; then
+  printf 'test-worker: invocation %s\n' "$invocation" >&2
+fi
+
+stamp_out() {
+  printf 'invocation: %s\nsource commit: %s\noutcome: %s\n' "$invocation" "$source" "$1" >"$out/invocation.txt"
+}
+
+# A reused directory can contain an archive from a previous failed run. Clear only names owned by the harness.
+case "$cmd" in
+rust | gui | run | collect)
+  rm -f -- "$out/"{invocation.txt,summary.txt,console.log,smoke.log,lifecycle.log,runs.tar.gz} \
+    || die "could not clear earlier evidence in $out"
+  stamp_out preparing || die "could not stamp evidence directory $out"
+  ;;
+esac
 
 # ---- Configuration and transport ------------------------------------------------------------------------------------
 
@@ -84,94 +136,117 @@ esac
 
 name=$(basename "$checkout")
 base="farhelm-test-worker/$name"
+stage="$base/stage/$invocation"
+result="$base/out/$invocation"
 
 # Run a command line on the worker. The worker's login shell gets it as one string, so every word is quoted here.
 remote() {
-  "${ssh_cmd[@]}" "$(printf '%q ' "$@")"
+  # A disconnected client's transport must not keep its local output directory locked.
+  "${ssh_cmd[@]}" "$(printf '%q ' "$@")" 9>&-
 }
 
-# Send the harness's own worker scripts. They live outside the synced tree so that a run never executes a script the
-# working copy under test has changed.
-push_tools() {
-  remote mkdir -p "$base/tools" "$base/src" "$base/out" || return 1
-  rsync -a --delete -e "$rsh" "$here/remote/" "$destination:$base/tools/"
-}
-
-# Mirror the working copy's tracked files (jj's view of `@`, so a jj checkout's uncommitted edits are included) into
-# the worker's tree. Only tracked files are sent: build output, package caches and ignored files never cross. rsync's
-# `--files-from` cannot delete, so the worker keeps the list it last received and `prune.py` removes the files that
-# list named and this one does not, which leaves the worker's own build output (`target/`) alone.
-sync_tree() {
-  local list source
-  list=$(mktemp) || return 1
+# Compose the source stamp from the local checkout before staging. `jj file list` includes working-copy changes the
+# snapshot of `@` sees. The Git path mirrors the tracked files on disk and labels its potentially dirty source.
+source_list() {
   if [ -d "$checkout/.jj" ]; then
-    jj -R "$checkout" file list -r @ >"$list" || { rm -f "$list"; return 1; }
-    source=$(jj -R "$checkout" log -r @ --no-graph -T commit_id) || { rm -f "$list"; return 1; }
+    jj -R "$checkout" file list -r @ >"$list" || return 1
+    source=$(jj -R "$checkout" log -r @ --no-graph -T commit_id) || return 1
   else
-    git -C "$checkout" ls-files >"$list" || { rm -f "$list"; return 1; }
-    source=$(git -C "$checkout" rev-parse HEAD)-plus-working-tree || { rm -f "$list"; return 1; }
+    git -C "$checkout" ls-files >"$list" || return 1
+    source=$(git -C "$checkout" rev-parse HEAD)-plus-working-tree || return 1
   fi
-  local code=0
-  rsync -a --files-from="$list" -e "$rsh" "$checkout/" "$destination:$base/src/" >/dev/null || code=1
-  if [ "$code" = 0 ]; then
-    remote python3 "$base/tools/prune.py" "$base" <"$list" || code=1
-  fi
-  # The recorder needs a git checkout to record from; snapshot.sh says why the worker's tree gets its own commits.
-  if [ "$code" = 0 ]; then
-    remote bash "$base/tools/snapshot.sh" "$base" "$source" || code=1
-  fi
-  rm -f "$list"
-  return "$code"
 }
 
-# Copy a run's outputs back: its summary and logs, and the retained runs when it failed.
+list=
+owns_stage=
+cleanup() {
+  [ -z "$list" ] || rm -f -- "$list"
+  # Ownership passes to the detached controller before starting SSH. A lost transport at that point leaves a stage
+  # for the worker to reap. The driver's exit must never delete a stage a run may already be using.
+  [ -z "$owns_stage" ] || remote rm -rf -- "$stage" >/dev/null 2>&1
+}
+
+stage_tools() {
+  # Create the lease from the start, so opening it for a later sweep cannot refresh a stale stage's mtime.
+  # shellcheck disable=SC2016 # The worker's Bash expands its own arguments.
+  remote bash -c 'mkdir -p -- "$1" && mkdir -- "$2" && touch -- "$2/.lock"' bash "$base/stage" "$stage" || return 1
+  owns_stage=1
+  # Refresh the stage age before unlocking. A long transfer must leave time to start the next one.
+  # shellcheck disable=SC2016 # The worker's Bash expands its own arguments.
+  stage_rsync=$(printf '%q ' flock "$stage/.lock" bash -c \
+    'stage=$1; shift; trap '\''touch -- "$stage"'\'' EXIT; rsync "$@"' rsync "$stage")
+  rsync -a -e "$rsh" --rsync-path="$stage_rsync" "$here/remote/" "$destination:$stage/tools/" 9>&-
+}
+
+# Upload only tracked bytes into the private stage. Reading a shared checkout as rsync's alternate source here would
+# let an overlapping install change the bytes used for this request. The locked install still preserves mtimes.
+stage_source() {
+  rsync -a --files-from="$list" -e "$rsh" --rsync-path="$stage_rsync" \
+    "$checkout/" "$destination:$stage/src/" >/dev/null 9>&- \
+    && rsync -a -e "$rsh" --rsync-path="$stage_rsync" "$list" "$destination:$stage/files" 9>&-
+}
+
+# The worker publishes this marker after the runner has stopped writing. The relative path carries the invocation id
+# even if a different run wins the lock before this copy starts.
 fetch_out() {
-  local run=$1
-  [ -n "$out" ] || return 0
-  mkdir -p "$out" || return 1
-  rsync -a -e "$rsh" "$destination:$base/out/$run/" "$out/" >/dev/null
+  rsync -a -e "$rsh" --exclude '/source' --exclude '/finished' "$destination:$result/" "$out/" >/dev/null 9>&-
 }
 
-# Bootstrap first when the worker has never been bootstrapped with this version of the bootstrap script: a fresh or
-# reset worker has no marker, and a changed script needs its new steps. A finished bootstrap is only a hash compare.
-ensure_bootstrapped() {
-  local want have
-  want=$(sha256sum "$here/remote/bootstrap.sh" | cut -d' ' -f1) || return 1
-  have=$(remote cat farhelm-test-worker/bootstrapped 2>/dev/null)
-  [ "$have" = "$want" ] && return 0
-  echo "test-worker: bootstrapping $destination first (fresh worker or changed bootstrap)" >&2
-  remote bash "$base/tools/bootstrap.sh" >&2
-}
-
-need_out() {
-  [ -n "$out" ] || die "$cmd needs --out DIR"
+copy_failed() {
+  stamp_out "copy failed (command exit $1)" || exit 1
+  printf 'test-worker: could not copy evidence to %s (command exit %s)\n' "$out" "$1" >&2
+  [ "$1" != 0 ] || exit 1
+  exit "$1"
 }
 
 # ---- Commands -------------------------------------------------------------------------------------------------------
 
 case "$cmd" in
-bootstrap)
-  push_tools || die "could not reach $destination or copy the worker scripts"
-  remote bash "$base/tools/bootstrap.sh"
-  ;;
-rust | gui | run)
-  need_out
-  push_tools || die "could not reach $destination or copy the worker scripts"
-  ensure_bootstrapped || die "could not bootstrap $destination (run the bootstrap command to see why)"
-  sync_tree || die "could not sync the working copy to $destination"
-  remote bash "$base/tools/with-lock.sh" "$base" "run-$cmd.sh" "${args[@]}"
-  code=$?
-  if ! fetch_out "$cmd"; then
-    printf 'test-worker: could not copy evidence to %s (command exit %s)\n' "$out" "$code" >&2
-    [ "$code" != 0 ] || exit 1
+bootstrap | rust | gui | run)
+  trap cleanup EXIT
+  trap 'exit 130' INT
+  trap 'exit 143' TERM
+  if [ "$cmd" != bootstrap ]; then
+    list=$(mktemp) || die "could not create a source list"
+    source_list || die "could not identify the source checkout"
+    stamp_out staging || die "could not stamp evidence directory $out"
   fi
+  stage_tools || die "could not reach $destination or stage the worker scripts"
+  if [ "$cmd" != bootstrap ]; then
+    stage_source || die "could not stage the working copy on $destination"
+  fi
+  owns_stage=
+  remote bash "$stage/tools/with-lock.sh" "$base" "$invocation" "$cmd" "$source" ${args[@]+"${args[@]}"}
+  code=$?
+  [ "$cmd" != bootstrap ] || exit "$code"
+  if remote test -f "$result/finished"; then
+    fetch_out || copy_failed "$code"
+  elif [ "$?" != 1 ] || [ "$code" = 0 ]; then
+    copy_failed "$code"
+  fi
+  stamp_out "exit $code" || exit 1
   exit "$code"
   ;;
+collect)
+  source=$(remote bash -s -- "$base" "$invocation" <"$here/remote/collect.sh")
+  code=$?
+  if [ "$code" != 0 ]; then
+    source=unknown
+    stamp_out "collection refused (exit $code)" || exit 1
+    exit "$code"
+  fi
+  if ! fetch_out; then
+    stamp_out "collection copy failed" || exit 1
+    echo "test-worker: could not copy evidence for $invocation to $out" >&2
+    exit 1
+  fi
+  stamp_out collected || die "could not stamp evidence directory $out"
+  ;;
 stop)
-  remote bash "$base/tools/stop.sh" "$base"
+  remote bash -s -- "$base" <"$here/remote/stop.sh"
   ;;
 status)
-  remote bash -c "cat $(printf '%q' "$base")/lock.holder 2>/dev/null; tail -n 5 $(printf '%q' "$base")/out/*/summary.txt 2>/dev/null"
+  remote bash -s -- "$base" <"$here/remote/status.sh"
   ;;
 *)
   die "unknown command $cmd"

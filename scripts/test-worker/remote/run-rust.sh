@@ -3,14 +3,16 @@
 # slots, no retries), exactly as `.agents/validation.md` runs it locally. Extra arguments go to `cargo nextest run`
 # after the workspace selection (a filter expression, `-E ...`, or a narrower package selection's extra flags).
 #
-# Usage: run-rust.sh <base> [nextest arg...]. Writes <base>/out/rust/summary.txt, console.log, and runs.tar.gz on failure.
+# Usage: run-rust.sh <base> <out> [nextest arg...]. Writes summary.txt, console.log, and runs.tar.gz on failure.
 set -u
+# The recorder owns a separate command session. A TERM must leave this shell waiting until it has stopped.
+cancelled=
+trap 'cancelled=1' TERM
 base=$(cd "$1" && pwd) || exit 1
-shift
+out=$2
+shift 2
 # shellcheck source=SCRIPTDIR/env.sh
-. "$base/tools/env.sh"
-out=$base/out/rust
-rm -rf "$out" && mkdir -p "$out" || exit 1
+. "$(dirname "$0")/env.sh"
 cd "$base/src" || exit 1
 use_pinned_toolchain
 substrate >"$out/summary.txt"
@@ -21,12 +23,14 @@ nextest_dir=$(python3 scripts/install-pinned-nextest.py 2>>"$out/console.log") |
   exit 1
 }
 export PATH="$nextest_dir:$PATH"
+[ -z "$cancelled" ] || exit 143
 selection="workspace Rust targets on the test worker ($(uname -m))"
 [ $# -gt 0 ] && selection="$selection, narrowed: $*"
 python3 scripts/record-test-run.py --runner nextest --kind development --selection "$selection" \
   --concurrency '4 nextest slots; retries 0' -- cargo nextest run --workspace --exclude farhelm-desktop "$@" \
   >>"$out/console.log" 2>&1
 code=$?
+[ -z "$cancelled" ] || code=143
 run_dir=$(grep -oE 'test-run evidence: [^ ]+' "$out/console.log" | tail -1 | cut -d' ' -f3)
 {
   echo "exit: $code"

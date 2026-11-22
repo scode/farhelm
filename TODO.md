@@ -441,17 +441,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   host with an unconfirmed scope that becomes checkable on a later start. Plan:
   `plans/queue/restart-deleted-cleanup.md`.
 
-- **Protect a test worker's checkout before staging.** The SSH driver copies tools, syncs and prunes source, and
-  snapshots the result before `with-lock.sh` takes the execution lock. A second request can change the first run's
-  checkout even when the worker then refuses it as busy. Hold ownership across staging and execution or stage in an
-  isolated tree that can be installed under the lock. Keep incremental builds and the supported behavior where an
-  interrupted local command leaves its remote run going. Verify that a rejected second request leaves the first run's
-  tools and source byte-for-byte intact.
-
-  Include standalone bootstrap, which also copies tools. Bind collection to one invocation so a request that never ran
-  or a run whose lock has just been released cannot copy another run's evidence. Distinguish older artifacts when a
-  caller reuses an output directory. Plan: `plans/queue/test-worker-staging-lock.md`.
-
 - **Keep interrupted uploads visible after their session goes away.** The terminal leaves a line for each interrupted
   upload in `terminal/attachments.rs` (`Carried` and `prune_carried`), then the desktop can discard the lines when it
   learns the session is gone. SPEC.md's “Attachments” says upload failures must be visible. Preserve the file name and

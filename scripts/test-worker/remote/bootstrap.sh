@@ -2,7 +2,7 @@
 # Prepare an Ubuntu 24.04 machine (x86_64 or arm64, passwordless sudo, systemd) as a Farhelm test worker. Idempotent:
 # every step checks or converges, so it can run again after a change here or a failed run. Workers may be reset to a
 # fresh image at any time, so `test-worker.sh` runs this before any run on a worker whose marker (written last, below)
-# is missing or names another version of this script.
+# is missing or names another version of this script. with-lock.sh holds exclusive worker ownership throughout.
 #
 # The worker builds the tests itself, unlike a boat sandbox, which runs binaries built on the development machine. So
 # besides what `scripts/boat/sandbox/bootstrap.sh` installs (rootless Podman with the exact production base image, the
@@ -20,11 +20,6 @@
 set -u
 step() { echo "== $(date -u +%H:%M:%S) $1"; }
 me=$(id -un)
-
-# Two checkouts' first runs on a fresh worker would otherwise bootstrap at once and fight over apt's lock.
-mkdir -p "$HOME/farhelm-test-worker" || exit 1
-exec 8>"$HOME/farhelm-test-worker/bootstrap.lock" || exit 1
-flock 8 || exit 1
 
 step apt
 sudo -n env DEBIAN_FRONTEND=noninteractive dpkg --configure -a >/dev/null 2>&1
@@ -97,5 +92,7 @@ dpkg-query -W -f='mesa-vulkan-drivers ${Version}\n' mesa-vulkan-drivers
 df -h / | tail -1
 # The runs bootstrap first whenever this marker is missing (a worker reset to a fresh image) or names another
 # version of this script (test-worker.sh compares it with the hash of the copy it is about to run).
-sha256sum "$0" | cut -d' ' -f1 >"$HOME/farhelm-test-worker/bootstrapped" || exit 1
+marker=$(dirname "$0")/bootstrap-version
+(set -o pipefail && sha256sum "$0" | cut -d' ' -f1 >"$marker") \
+  && mv -f "$marker" "$HOME/farhelm-test-worker/bootstrapped" || exit 1
 step finished
