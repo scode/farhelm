@@ -935,15 +935,7 @@ impl OptionState {
             ))
             .when(self.ring, |segment| {
                 segment.child(
-                    div()
-                        .absolute()
-                        .top(px(1.))
-                        .left(px(1.))
-                        .right(px(1.))
-                        .bottom(px(1.))
-                        .border_2()
-                        .border_color(theme::color(ring))
-                        .rounded(metrics::RADIUS_SM - px(1.)),
+                    super::focus_ring(px(1.).into(), ring).rounded(metrics::RADIUS_SM - px(1.)),
                 )
             })
     }
@@ -1003,17 +995,7 @@ impl OptionState {
                 self.chosen,
             ))
             .when(self.ring, |chip| {
-                chip.child(
-                    div()
-                        .absolute()
-                        .top(px(inset))
-                        .left(px(inset))
-                        .right(px(inset))
-                        .bottom(px(inset))
-                        .border_2()
-                        .border_color(theme::color(ring))
-                        .rounded(radius),
-                )
+                chip.child(super::focus_ring(px(inset).into(), ring).rounded(radius))
             })
     }
 
@@ -1081,14 +1063,7 @@ impl OptionState {
             }))
             .when(self.ring, |card| {
                 card.child(
-                    div()
-                        .absolute()
-                        .top(px(inset))
-                        .left(px(inset))
-                        .right(px(inset))
-                        .bottom(px(inset))
-                        .border_2()
-                        .border_color(theme::color(palette.accent))
+                    super::focus_ring(px(inset).into(), palette.accent)
                         .rounded(metrics::RADIUS_SM + px(3.)),
                 )
             })
@@ -1148,17 +1123,7 @@ impl OptionState {
                 )
             })
             .when(self.ring, |circle| {
-                circle.child(
-                    div()
-                        .absolute()
-                        .top(px(-3.))
-                        .left(px(-3.))
-                        .right(px(-3.))
-                        .bottom(px(-3.))
-                        .border_2()
-                        .border_color(theme::color(palette.accent))
-                        .rounded_full(),
-                )
+                circle.child(super::focus_ring(px(-3.).into(), palette.accent).rounded_full())
             })
     }
 }

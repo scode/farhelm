@@ -160,16 +160,7 @@ impl RenderOnce for ListRow {
                 .when(self.paint_hover_fill, |row| {
                     row.bg(theme::color(hover_fill))
                 })
-                .child(
-                    div()
-                        .absolute()
-                        .top_0()
-                        .left_0()
-                        .right_0()
-                        .bottom_0()
-                        .border_2()
-                        .border_color(theme::color(ring_color)),
-                );
+                .child(super::focus_ring(px(0.).into(), ring_color));
         }
         let row = super::with_hover_help(row, &self.id, &self.help, true, Some(&focus), window, cx);
         let row = focus::track(row, &focus, focus::OnPress::Control);

@@ -448,14 +448,7 @@ impl RenderOnce for Select {
         if ring {
             // The old global `:focus-visible` ring, as the buttons draw it: two pixels of accent, one pixel clear.
             control = control.child(
-                div()
-                    .absolute()
-                    .top(px(-3.))
-                    .left(px(-3.))
-                    .right(px(-3.))
-                    .bottom(px(-3.))
-                    .border_2()
-                    .border_color(theme::color(palette.accent))
+                super::focus_ring(px(-3.).into(), palette.accent)
                     .rounded(metrics::RADIUS_SM + px(3.)),
             );
         }

@@ -1172,30 +1172,12 @@ impl RenderOnce for Button {
                 Tier::ColorChoice => (px(1.), px(COLOR_CHOICE_SIZE / 2. - 2.)),
                 _ => (px(2.), px(1.)),
             };
-            button = button.child(
-                div()
-                    .absolute()
-                    .top(inset)
-                    .left(inset)
-                    .right(inset)
-                    .bottom(inset)
-                    .border_2()
-                    .border_color(theme::color(ring_color))
-                    .rounded(radius),
-            );
+            button = button.child(super::focus_ring(inset.into(), ring_color).rounded(radius));
         } else if ring {
             // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
             // no outline: two pixels wide, one pixel clear of the button's edge.
             button = button.child(
-                div()
-                    .absolute()
-                    .top(px(-3.))
-                    .left(px(-3.))
-                    .right(px(-3.))
-                    .bottom(px(-3.))
-                    .border_2()
-                    .border_color(theme::color(ring_color))
-                    .rounded(metrics::RADIUS_SM + px(3.)),
+                super::focus_ring(px(-3.).into(), ring_color).rounded(metrics::RADIUS_SM + px(3.)),
             );
         }
         if active {
