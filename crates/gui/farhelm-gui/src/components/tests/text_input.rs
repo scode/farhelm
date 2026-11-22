@@ -168,7 +168,8 @@ fn a_growing_box_takes_line_breaks_keeps_tabs_and_lets_tab_move_on(cx: &mut Test
 /// The masked field stands in for the old `type="password"` inputs (the ntfy access token): its owner must get the text
 /// as typed, or a save would send something else, while the window must not show it. Specified: "abc" typed into a
 /// plain field and "xyz" into a masked one each report three edits and hold what was typed; the painted frame shows
-/// "abc" (the premise that a field's text is painted at all) and nowhere "xyz".
+/// "abc" (the premise that a field's text is painted at all) and nowhere "xyz". The password control remains named
+/// for its field, and the frame's accessible names contain no raw secret.
 #[gpui::test]
 fn a_masked_input_holds_what_was_typed_and_paints_none_of_it(cx: &mut TestAppContext) {
     let (cx, fields) = open_fields(
@@ -185,7 +186,20 @@ fn a_masked_input_holds_what_was_typed_and_paints_none_of_it(cx: &mut TestAppCon
     let edits = vec![TextInputEvent::Changed; 3];
     assert_eq!(take(cx, &fields[0]), ("abc".into(), edits.clone()));
     assert_eq!(take(cx, &fields[1]), ("xyz".into(), edits));
-    let painted: String = frame(cx)
+    let nodes = frame(cx);
+    let password = nodes
+        .iter()
+        .find(|node| node.role == Some(gpui::Role::PasswordInput))
+        .expect("the password control is accessible");
+    assert_eq!(password.label.as_deref(), Some("Title"));
+    assert!(
+        nodes
+            .iter()
+            .filter_map(|node| node.label.as_deref())
+            .all(|text| !text.contains("xyz")),
+        "accessible names must omit the secret"
+    );
+    let painted: String = nodes
         .into_iter()
         .flat_map(|node| node.texts.into_iter().map(|line| line.text.to_string()))
         .collect();

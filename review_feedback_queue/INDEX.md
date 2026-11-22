@@ -238,28 +238,6 @@ consequences.
   its reply deadline, Farhelm can leave you without the explanation that it is still working or that Stop already
   failed.
 
-- [`secret-handling-tests-omit-output-assertions.md`](secret-handling-tests-omit-output-assertions.md) — Credential
-  tests can pass even if a token, login file, or device credential appears outside the intended entry field or request,
-  because they rarely look for the secret in the painted frame, refusal text, or logs.
-
-- [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
-  macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
-
-- [`update-restart-failure-test-follows-status-id.md`](update-restart-failure-test-follows-status-id.md) — The updater
-  test can pass if a restart failure moves inline under a new element ID instead of staying in the hover help.
-
-- [`terminal-input-replays-accept-empty-fixtures.md`](terminal-input-replays-accept-empty-fixtures.md) — The terminal
-  key and mouse compatibility replays can pass without running their assertions when their fixture tables are empty.
-
-- [`wrapped-link-test-misses-second-open.md`](wrapped-link-test-misses-second-open.md) — The test checks that the second
-  click gives no refusal but never verifies that it opens the link.
-
-- [`inline-sign-in-tests-conflate-identifiers.md`](inline-sign-in-tests-conflate-identifiers.md) — The Add Host tests
-  can pass if Send or Cancel uses the identifier for the whole sign-in instead of the individual question.
-
-- [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
-  the switch still shows its draft choice, even if it never starts following the saved setting.
-
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.
 

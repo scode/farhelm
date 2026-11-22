@@ -510,13 +510,25 @@ fn check_failed_stays_until_dismissed_or_the_next_check(cx: &mut TestAppContext)
 }
 
 /// A failed restart is said in the hover only (SPEC.md), so nothing joins the readout for it. Specified: with the
-/// restart failed, no status is drawn beside the check button.
+/// restart failed, the installed update's readout paints the same words. Resting on its toggle reveals the reason.
 #[gpui::test]
 fn a_failed_restart_shows_nothing_inline(cx: &mut TestAppContext) {
-    let (cx, _readout, _feed, _seen, _other) =
-        open(cx, readout_in(Activity::RestartFailed, false, 1));
-    assert!(drawn(cx, "app-version-check"));
-    assert!(!drawn(cx, "app-update-status") && !drawn(cx, "app-update-failure"));
+    let reason = "Restart could not finish.";
+    let (cx, _readout, feed, _seen, _other) = open(cx, readout_in(Activity::Idle, true, 0));
+    assert!(drawn(cx, "app-version-toggle") && shows(cx, "↑"));
+    let ready = painted(cx);
+    let mut state = readout_in(Activity::RestartFailed, true, 1);
+    state.tooltip = reason.into();
+    publish(cx, &feed, state);
+    assert_eq!(painted(cx), ready, "failure adds no inline text");
+    let button = test_support::center(cx, "app-version-toggle");
+    cx.simulate_mouse_move(button, None, Modifiers::none());
+    test_support::settle(cx);
+    test_support::advance(cx, crate::layers::HOVER_DELAY);
+    assert!(
+        painted(cx).join(" ").contains(reason),
+        "the hover help shows the reason"
+    );
 }
 
 // ---- Focus ---------------------------------------------------------------------------------------------------------

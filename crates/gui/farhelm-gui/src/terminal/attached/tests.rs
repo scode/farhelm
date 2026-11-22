@@ -5244,13 +5244,18 @@ fn the_display_follows_wrapped_rows_and_returns_after_a_click(cx: &mut TestAppCo
         (true, false),
         "the display is back while the pointer rests"
     );
-    // The test platform keeps only the last address opened, and this is the same one, so the second click shows it
-    // opened by not being refused: a refused click is the only outcome here that does not open.
+    // Replace the fake platform's recorded URL so a dropped second click cannot pass on the first click's result.
+    h.cx.update(|_, cx| cx.open_url("https://example.com/previous"));
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/previous")
+    );
     h.cx.simulate_mouse_down(row1, MouseButton::Left, Modifiers::none());
     h.cx.simulate_mouse_up(row1, MouseButton::Left, Modifiers::none());
     settle(h.cx);
-    assert!(
-        h.cx.debug_bounds("terminal-link-refusal").is_none(),
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/wrapped"),
         "a second click opens too"
     );
 }
