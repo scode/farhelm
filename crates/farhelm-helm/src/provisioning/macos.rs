@@ -5,18 +5,51 @@
 //! then execute the resulting script with the ordinary bounded SSH runner.
 
 use std::path::Path;
+use std::time::Duration;
 
 use super::backend::{BackendFailure, path_text, shell_path};
 use crate::ssh::shell_quote;
+
+/// How long launchd lets a stopping supervisor run after SIGTERM before it
+/// SIGKILLs it (the plist's `ExitTimeOut`).
+///
+/// launchd's own default was measured at about five seconds (macOS 26 and
+/// 27, over SSH, in the `user/<uid>` domain), which cuts the supervisor's
+/// orderly stop short: closing output clients and checkpointing terminal
+/// hosts may take ten seconds by design, then a few more for pending windows
+/// and the final database checkpoint (`stop_in_order` in the supervisor). A
+/// SIGKILL there loses the checkpoints, so the next supervisor replays more
+/// output.
+///
+/// Sixty seconds is the most launchd allows: on both versions it records any
+/// larger value (61, 90 and 300 were tried) as 60, and a job asking for 90
+/// was killed 60 seconds after bootout. The Linux unit relies on systemd's
+/// default of 90 seconds; the Mac gets as close to that as launchd permits,
+/// still several times the orderly stop's design length. Measured on both
+/// versions, launchd honors the key for `bootout` (20 seconds asked, 20
+/// waited). launchd.plist(5) ties the key to system shutdown as well, so a
+/// remote Mac's shutdown or reboot may now wait for the supervisor's orderly
+/// stop too, as systemd does on Linux; that effect was not measured.
+pub(super) const SUPERVISOR_EXIT_TIMEOUT: Duration = Duration::from_secs(60);
+
+/// How long [`bootout_job_sh`] waits for launchd to drop a booted-out job:
+/// [`SUPERVISOR_EXIT_TIMEOUT`] plus margin, so that launchd's own SIGKILL
+/// always comes first and the wait fails only if launchd itself misbehaves.
+/// Callers that boot out a job size their SSH command bound with this.
+pub(super) const BOOTOUT_WAIT: Duration =
+    SUPERVISOR_EXIT_TIMEOUT.saturating_add(Duration::from_secs(15));
 
 /// Render the foreground supervisor job without giving launchd its children.
 ///
 /// `AbandonProcessGroup` is essential: terminal hosts must survive both a crash
 /// and a replacement of the supervisor. The Background session type permits an
-/// SSH-only user domain. `/usr/bin/env` removes session markers inherited by the
-/// user manager before the supervisor starts; arguments are plist strings, never
-/// shell text. Shared-directory permissions and plist installation belong to the
-/// plan, not this renderer.
+/// SSH-only user domain. `ExitTimeOut` gives the supervisor's orderly stop its
+/// time ([`SUPERVISOR_EXIT_TIMEOUT`]); a job loaded from an older plist keeps
+/// launchd's short default until an Update reloads it, and that Update's own
+/// bootout still stops the old job under the old timeout. `/usr/bin/env`
+/// removes session markers inherited by the user manager before the supervisor
+/// starts; arguments are plist strings, never shell text. Shared-directory
+/// permissions and plist installation belong to the plan, not this renderer.
 pub(super) fn supervisor_plist(
     farhelm: &Path,
     state_dir: &Path,
@@ -63,10 +96,12 @@ pub(super) fn supervisor_plist(
     <key>KeepAlive</key>\n    <dict>\n\
         <key>SuccessfulExit</key><false/>\n    </dict>\n\
     <key>AbandonProcessGroup</key><true/>\n\
+    <key>ExitTimeOut</key><integer>{}</integer>\n\
 </dict>\n</plist>\n",
         xml_text(label),
         arguments,
         xml_text(&path),
+        SUPERVISOR_EXIT_TIMEOUT.as_secs(),
     ))
 }
 
@@ -89,7 +124,7 @@ pub(super) fn start_script(
     // Only Update may unload the job, so an ordinary start never even defines
     // the function that would.
     if refresh {
-        script.push_str(BOOTOUT_JOB_SH);
+        script.push_str(&bootout_job_sh());
     }
     script.push_str(
         r#"if [ "$active" = active ]; then
@@ -126,7 +161,7 @@ fi
 ///
 /// The caller has already removed the plist and checked uninstall authority.
 /// Terminal hosts are stopped only once launchd no longer lists the job
-/// ([`BOOTOUT_JOB_SH`]), which is after the supervisor process has exited.
+/// ([`bootout_job_sh`]), which is after the supervisor process has exited.
 /// Bootout alone deliberately preserves children; the installed command's exit
 /// status 0 is the stable proof for hosts. Only leftover socket files are removed
 /// afterwards. A retry after lib removal succeeds only if `hosts` is absent;
@@ -147,7 +182,7 @@ pub(super) fn stop_script(
         shell_path(state_dir)?,
         farhelm_supervisor::hosts::HOSTS_DIR_NAME,
     ));
-    script.push_str(BOOTOUT_JOB_SH);
+    script.push_str(&bootout_job_sh());
     script.push_str(
         r#"if [ "$active" = active ]; then
     bootout_job || exit 1
@@ -276,32 +311,52 @@ EOF_JOB
 /// therefore failed the uninstall of a running supervisor on its first try;
 /// Update runs the same sequence and was not observed separately.
 ///
-/// launchd SIGKILLs a process that ignores SIGTERM about five seconds after
-/// bootout (measured on macOS 26 and 27), and the job disappears then, so the
-/// wait allows 75 polls 0.2 seconds apart: about three times that. A poll cost
-/// under 10 ms in the same measurements, so the whole wait stays near 16
-/// seconds, inside the callers' 30-second command bound. A job still listed
-/// after that, or an inspection failure on any poll, fails the step as before.
-/// A retry then finds the job gone or boots it out again: a second bootout of
-/// a job launchd is still removing returned 0 in the same probes.
+/// launchd SIGKILLs a process still running when the job's `ExitTimeOut`
+/// runs out, and the job disappears then (measured on macOS 26 and 27 with
+/// launchd's default of about five seconds, 20 and the 60-second maximum).
+/// The wait runs until [`BOOTOUT_WAIT`] has passed by the wall clock, which
+/// outlasts [`SUPERVISOR_EXIT_TIMEOUT`], so it gives up only on a job launchd
+/// itself fails to drop. A deadline rather than a poll count keeps the bound
+/// independent of how long each poll takes; the clock is not monotonic, but a
+/// step backwards only lengthens the wait into the SSH bound's slack, and a
+/// large step forwards fails early into a retry. A job still listed at the
+/// deadline, or an inspection failure on any poll, fails the step. A retry
+/// then finds the job gone or boots it out again: a second bootout of a job
+/// launchd is still removing returned 0 in the same probes.
+///
+/// Polls come every 0.2 seconds for the first ten, which covers the usual
+/// case of a job gone within a few seconds without adding latency, then once
+/// a second, so a supervisor that uses its whole grace costs about 70 polls
+/// rather than 300. A job loaded from a plist without `ExitTimeOut` keeps
+/// launchd's short default, so it is gone well inside this wait.
 ///
 /// Requires the inspection fragment ([`job_inspection_script`]) earlier in
 /// the same script, since it reuses `inspect_job`, `job_target` and `active`.
-const BOOTOUT_JOB_SH: &str = r#"bootout_job() {
+/// `date` and `sleep` are called by name so the unit tests can stand in for
+/// the clock.
+fn bootout_job_sh() -> String {
+    let seconds = BOOTOUT_WAIT.as_secs();
+    format!(
+        r#"bootout_job() {{
     launchctl bootout "$job_target" || return 1
+    now=$(date +%s) || return 1
+    deadline=$((now + {seconds}))
     polls=0
     while :; do
         inspect_job || return 1
         [ "$active" = active ] || return 0
-        polls=$((polls + 1))
-        if [ "$polls" -ge 75 ]; then
-            printf '%s\n' "launchd job $job_target is still loaded after 75 checks over 15 seconds since bootout" >&2
+        now=$(date +%s) || return 1
+        if [ "$now" -ge "$deadline" ]; then
+            printf '%s\n' "launchd job $job_target is still loaded {seconds} seconds after bootout" >&2
             return 1
         fi
-        sleep 0.2
+        polls=$((polls + 1))
+        if [ "$polls" -le 10 ]; then sleep 0.2; else sleep 1; fi
     done
+}}
+"#
+    )
 }
-"#;
 
 /// Report unambiguous mounts on or below a path without wedging uninstall.
 ///
@@ -471,6 +526,9 @@ mod tests {
         )
         .unwrap();
         assert!(plist.contains("<key>AbandonProcessGroup</key><true/>"));
+        // launchd records anything above 60 as 60, so a larger value would
+        // only misstate the grace the supervisor gets.
+        assert!(plist.contains("<key>ExitTimeOut</key><integer>60</integer>"));
         assert!(plist.contains("<key>SuccessfulExit</key><false/>"));
         assert!(plist.contains("<string>/owned/a &amp; b/farhelm</string>"));
         assert!(plist.contains("<string>/owned/state &lt;one&gt;</string>"));
@@ -523,7 +581,7 @@ mod tests {
     /// missing with launchd's real status and diagnostic. This is what real
     /// launchd does: bootout returns before the job is gone (measured on
     /// macOS 26 and 27). `lingering = None` models a job that never goes away.
-    /// `sleep` is stubbed so the 15-second wait costs nothing; every call is
+    /// `sleep` is stubbed so the wait costs nothing; every call is
     /// still logged, which lets tests count polls.
     fn lingering_launchctl(fixture: &ShellFixture, lingering: Option<u32>) {
         let state = fixture.directory.path().join("job-state");
@@ -692,14 +750,31 @@ esac"#,
         }
     }
 
-    /// The wait is bounded: a job launchd keeps listing fails the step with a
-    /// diagnostic naming the bound, after exactly 75 polls, and nothing after
-    /// bootout (terminal hosts, bootstrap) runs.
+    /// The wait is bounded by the clock: a job launchd keeps listing fails the
+    /// step with a diagnostic naming [`BOOTOUT_WAIT`] once that much time has
+    /// passed since bootout, and nothing after bootout (terminal hosts,
+    /// bootstrap) runs. A stub `date` advances five seconds per call, so the
+    /// deadline falls on the fifteenth poll; that also shows the backoff (ten
+    /// short sleeps, then one-second ones) without a real 75-second wait.
     #[test]
     fn a_job_that_never_disappears_fails_after_the_bounded_wait() {
+        assert_eq!(
+            BOOTOUT_WAIT,
+            Duration::from_secs(75),
+            "the counts below assume it"
+        );
         for refresh in [false, true] {
             let fixture = ShellFixture::new();
             lingering_launchctl(&fixture, None);
+            let clock = fixture.directory.path().join("clock");
+            fs::write(&clock, "0").unwrap();
+            fixture.tool(
+                "date",
+                &format!(
+                    "clock={}\nnow=$(cat \"$clock\")\necho $((now + 5)) > \"$clock\"\nprintf '%s\\n' \"$now\"",
+                    shell_path(&clock).unwrap()
+                ),
+            );
             fixture.tool("readlink", "printf '%s\\n' \"$3\"");
             fixture.tool("native-stat", "exit 99");
             let script = if refresh {
@@ -722,16 +797,28 @@ esac"#,
             assert_eq!(result.status.code(), Some(1), "refresh={refresh}");
             assert!(
                 String::from_utf8_lossy(&result.stderr)
-                    .contains("is still loaded after 75 checks over 15 seconds"),
+                    .contains("is still loaded 75 seconds after bootout"),
                 "refresh={refresh}: {}",
                 String::from_utf8_lossy(&result.stderr)
             );
             let commands = fixture.commands();
+            // The deadline is 0 + 75; polls read 5, 10, ... 75, and the one
+            // reading 75 fails before sleeping.
+            assert_eq!(
+                commands
+                    .matches("launchctl print user/501/io.farhelm.test")
+                    .count(),
+                16,
+                "refresh={refresh}: the first inspection plus 15 polls"
+            );
+            // Epoch seconds: `%S` would wrap every minute and break the deadline.
+            assert!(commands.contains("date +%s\n"), "refresh={refresh}");
             assert_eq!(
                 commands.matches("sleep 0.2").count(),
-                74,
+                10,
                 "refresh={refresh}"
             );
+            assert_eq!(commands.matches("sleep 1").count(), 4, "refresh={refresh}");
             assert!(!commands.contains("bootstrap"), "refresh={refresh}");
             assert!(!commands.contains("native-stat"), "refresh={refresh}");
         }
