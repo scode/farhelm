@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
+- [landing 8f7454] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
 - [in-flight 18ce7b] `wide-glyph-padding-cells.md` — keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
 - [in-flight c94452] `launcher-managed-checkout-compact.md` — make the launcher's managed-checkout destination compact: one Host | Repository address line, then the clone's folder and a one-line note across the full width
 - [complete] `helpers-desktop-startup.md` — consolidate the desktop app's duplicated startup and updater helpers (reopen wait, hello probe, window size, stable-version check, state-file wiring, peer text, reinstall hover) without changing behavior
