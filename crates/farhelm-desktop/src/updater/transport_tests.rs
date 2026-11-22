@@ -164,14 +164,27 @@ async fn a_nonresponding_peer_hits_the_client_deadline() {
     );
 }
 
-/// A bound loopback port kept without a listener gives a connection refusal with
-/// no external service or fixed-port premise. The error must remain an error.
+/// A refused connection must surface as a fetch error. A private socket path
+/// left by a closed listener gives a refusal on macOS too, where a bound TCP
+/// port without a listener can leave the client waiting until its deadline.
 #[farhelm_testtrace::test]
 async fn a_refused_connection_is_not_missing_metadata() {
-    let reserved = tokio::net::TcpSocket::new_v4().unwrap();
-    reserved.bind("127.0.0.1:0".parse().unwrap()).unwrap();
-    let address = reserved.local_addr().unwrap();
-    let error = fetch_with_client(&client(), &format!("http://{address}/"), 8)
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("updater.sock");
+    drop(std::os::unix::net::UnixListener::bind(&path).unwrap());
+    assert_eq!(
+        std::os::unix::net::UnixStream::connect(&path)
+            .unwrap_err()
+            .kind(),
+        std::io::ErrorKind::ConnectionRefused,
+        "fixture premise: the socket path has no listening process"
+    );
+    let client = reqwest::Client::builder()
+        .unix_socket(path)
+        .timeout(Duration::from_secs(2))
+        .build()
+        .unwrap();
+    let error = fetch_with_client(&client, "http://localhost/", 8)
         .await
         .unwrap_err();
     assert!(
