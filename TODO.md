@@ -337,14 +337,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   reporting is broken on current Muse Code so Restart cannot resume Muse conversations. Find out why the callback did
   not fire and fix or adapt Farhelm's Muse integration.
 
-- **Verify Restart actually resumes the same conversation in harness drift tests.** The `harness-drift-tests` Restart
-  check currently verifies only that the CLI relaunches with Farhelm's saved resume arguments and accepts fresh
-  unsubmitted input in the composer, so it would pass even if an agent silently opened a brand-new conversation instead
-  of resuming. Update the drift tests for all eight tracked agents (Claude Code, Codex, Antigravity, Goose, Grok, Muse
-  Code, OMP, Pi) to prove the resumed session actually stayed in turn 1's conversation — for example by checking turn
-  1's history or recall and confirming the post-resume hook reports the same conversation ID. Plan:
-  `plans/queue/drift-verify-resume.md`.
-
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's

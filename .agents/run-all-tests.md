@@ -135,7 +135,8 @@ second clippy run on floating stable is needed.
 - `python3 scripts/test-todo-picker.py` (TODO extraction and legacy standalone checklist)
 - `python3 -B scripts/test-capture-agent-screens.py` (fixture URL privacy and terminal host ownership with stand-ins, no
   vendor turns)
-- `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins with zero vendor turns)
+- `python3 -B scripts/test-run-harness-drift.py` (runner stand-ins verify the per-case timeout and verdict retention
+  with zero vendor turns)
 - `deno test -A scripts/serve-page.ts` (legacy standalone server; agent pages use the `interactive-artifact` skill)
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
@@ -256,12 +257,12 @@ rerunning the check.
 ### Real agent drift
 
 Run `python3 -B scripts/run-harness-drift.py` on Linux as part of this explicitly requested flow, before the sweep. Each
-tracked agent spends a real vendor turn. Record PASSED, COULD NOT RUN and FAILED separately with the recorder run IDs.
-Missing credentials or manual hooks leave coverage unknown for that agent; never sign in, edit hook files or accept a
-vendor update to get past them. A FAILED case is handled like any other failure under the ground rules: fixed when the
-fix is straightforward, otherwise recorded in `TODO.md` with its evidence (it is drift in a vendor's CLI, not a flake),
-and either way it does not hold back the sweep or the release gate. Keep going through the rest of this flow and
-preserve the evidence for any failures.
+tracked agent spends two real vendor turns to verify that Restart preserves the conversation. Record PASSED, COULD NOT
+RUN and FAILED separately with the recorder run IDs. Missing credentials or manual hooks leave coverage unknown for that
+agent; never sign in, edit hook files or accept a vendor update to get past them. A FAILED case is handled like any
+other failure under the ground rules: fixed when the fix is straightforward, otherwise recorded in `TODO.md` with its
+evidence (it is drift in a vendor's CLI, not a flake), and either way it does not hold back the sweep or the release
+gate. Keep going through the rest of this flow and preserve the evidence for any failures.
 
 ## 3. Deflake sweep
 
