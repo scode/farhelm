@@ -1200,7 +1200,11 @@ impl Launcher {
                     None => None,
                 }
             }
-            Err(words) => Some(status_line(id, words.raw().to_owned(), palette)),
+            Err(words) => Some(status_line(
+                id,
+                HostSentence::new("launcher-repository-error-text").host(words),
+                palette,
+            )),
         }
     }
 

@@ -25,7 +25,7 @@ use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
-    Pixels, SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
+    Pixels, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px,
 };
 
 use super::changed::Changed;
@@ -35,6 +35,7 @@ use crate::components::{
 };
 use crate::focus::{self, Mark};
 use crate::harness;
+use crate::host_text::Line;
 use crate::launcher::draft::{Edit, Mode, RestartBaseline, harness_label};
 use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
 use crate::permission::words::{
@@ -472,17 +473,18 @@ impl Launcher {
 }
 
 /// A line of warning-colored words below the affected control, announced politely as a
-/// status (the old line was no live region, so a choice's side effect went unannounced), and named by its words since
-/// plain text is not in the accessibility tree.
+/// status (the old line was no live region, so a choice's side effect went unannounced). Host words use a `Line`
+/// that preserves direction isolation on screen and supplies the escaped name to assistive technology.
 pub(super) fn status_line(
     id: &'static str,
-    words: String,
+    words: impl Into<Line>,
     palette: &theme::Palette,
 ) -> Stateful<Div> {
+    let words = words.into();
     div()
         .id(id)
         .role(Role::Status)
-        .aria_label(SharedString::from(words.clone()))
+        .aria_label(words.accessible_text())
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.warn))
         .child(words)

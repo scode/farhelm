@@ -242,9 +242,6 @@ consequences.
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`checkout-status-bypasses-host-text.md`](checkout-status-bypasses-host-text.md) — A launcher status line can show
-  repository-search errors without Farhelm’s usual treatment of invisible or right-to-left characters.
-
 - [`gui-command-debug-includes-secret-body.md`](gui-command-debug-includes-secret-body.md) — A future diagnostic that
   prints a GUI command could expose a token or login file included in that request.
 
@@ -258,9 +255,6 @@ consequences.
 - [`secret-handling-tests-omit-output-assertions.md`](secret-handling-tests-omit-output-assertions.md) — Credential
   tests can pass even if a token, login file, or device credential appears outside the intended entry field or request,
   because they rarely look for the secret in the painted frame, refusal text, or logs.
-
-- [`launcher-stale-search-selection-fails-silently.md`](launcher-stale-search-selection-fails-silently.md) — Choosing a
-  vanished host or stale recent setup can clear the search or do nothing without saying why.
 
 - [`moved-on-confirmation-test-accepts-wrong-focus.md`](moved-on-confirmation-test-accepts-wrong-focus.md) — The
   macOS-style Reset test can pass when focus lands on the wrong drawn control and stays there.
