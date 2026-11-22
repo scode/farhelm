@@ -121,13 +121,13 @@ const OUTGOING_QUEUE: usize = 64;
 /// The reader waits when it is full, which in turn stops reading the socket.
 const INCOMING_QUEUE: usize = 64;
 
-/// Commands that may wait behind the one in flight before the channel is
-/// closed. Commands run one at a time, so a GUI that keeps sending while one
-/// is stuck behind a slow host would otherwise grow this queue without bound.
-/// A real GUI never comes close: its watchdog resets the window long before.
-/// Closing is the same failure the GUI already handles (a reset), not a new
-/// refusal for it to understand.
-pub(crate) const MAX_QUEUED_COMMANDS: usize = 64;
+/// Commands that may wait behind the one in flight. The window's operation
+/// store admits one pending edit per session, so twice the session list cap
+/// fits a full marked-session edit with room for other commands. New bulk
+/// actions on objects such as hosts or templates must budget for this limit
+/// too. The channel serves the app's own window, so that window can use the
+/// whole allowance. Going over closes the channel and makes it reconnect.
+pub(crate) const MAX_QUEUED_COMMANDS: usize = 2 * farhelm_proto::LIST_SESSIONS_CAP;
 
 // ---------------------------------------------------------------------------
 // The seat
