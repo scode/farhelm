@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`triage-helm`](reports/triage-helm.report.md) landed 2026-11-21 in #4493, #4497, #4500, #4505, #4507, #4508, #4509, #4510, #4521: execute the 2026-11-21 triage outcomes for the helm (hosts, provisioning, automatic update, desktop startup), in grouped PRs
 - [`triage-podman`](reports/triage-podman.report.md) landed 2026-11-21 in #4482, #4490, #4501, #4504, #4515, #4522: execute the 2026-11-21 triage outcomes for containers (Podman), in grouped PRs
 - [`exited-terminal-scrollback`](reports/exited-terminal-scrollback.report.md) landed 2026-11-21 in #4512, #4516, #4523: let every retained terminal line be scrolled to and selected after an agent exits (or the red status line shows), including history under a killed full-screen agent
 - [`status-mark-hover-ring`](reports/status-mark-hover-ring.report.md) landed 2026-11-21 in #4517, #4524: stop drawing the hover ring around status icons (agent mark, idle time and the like) while controls keep it
