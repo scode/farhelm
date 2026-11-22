@@ -17,6 +17,28 @@ use crate::test_support::{click_before_redraw, meta};
 
 /// Show the temporary capsule with the launcher hidden and the fake's Resume still outstanding.
 pub(super) fn launcher_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    suspended_launcher_setup(state, window, cx, open_wake_launcher);
+    state
+        .after_capture
+        .set(Some(super::session_list::disconnect_pending_launch));
+}
+
+/// Show a complete managed checkout on a suspended host before the press, while its allocation is still promised.
+pub(super) fn launcher_waking_checkout_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    suspended_launcher_setup(state, window, cx, open_waking_checkout);
+}
+
+/// The same pinned registry and drawing setup for the two launcher scenes that target the suspended sandbox.
+fn suspended_launcher_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+    open: super::AfterDrawn,
+) {
     use crate::launcher::view_tests::fixture_hosts;
     use crate::session_list::tests::{listing, preferences};
     window.set_driver_enabled(true);
@@ -29,10 +51,7 @@ pub(super) fn launcher_wake_setup(state: &SceneState, window: &mut Window, cx: &
     let mut keep = state.keep.borrow_mut();
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
-    state.after.set(Some(open_wake_launcher));
-    state
-        .after_capture
-        .set(Some(super::session_list::disconnect_pending_launch));
+    state.after.set(Some(open));
 }
 
 /// Use the same visible launcher press that hides the form and starts Resume.
@@ -42,11 +61,39 @@ fn open_wake_launcher(
     window: &mut Window,
     cx: &mut App,
 ) {
-    use farhelm_proto::ui_channel::{HostStateView, HostView};
-    let Some(store) = crate::session::current_store(cx) else {
+    let Some(mut draft) = suspended_launch_draft(cx) else {
         state.after.set(Some(open_wake_launcher));
         return;
     };
+    draft.edit_folder("/home/user/work".into());
+    let mark = crate::focus::Mark::take(cx);
+    assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
+    state.after.set(Some(press_wake_launcher));
+}
+
+/// Wait for the registry before drawing the allocation notice. No preview is issued while this host is suspended.
+fn open_waking_checkout(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(mut draft) = suspended_launch_draft(cx) else {
+        state.after.set(Some(open_waking_checkout));
+        return;
+    };
+    draft.choose_repository(farhelm_proto::GithubRepo {
+        owner: "acme".into(),
+        name: "bar".into(),
+    });
+    let mark = crate::focus::Mark::take(cx);
+    assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
+}
+
+/// A complete existing-host command draft, once the fake has published the chosen host's suspension.
+fn suspended_launch_draft(cx: &App) -> Option<crate::launcher::draft::LaunchDraft> {
+    use farhelm_proto::ui_channel::{HostStateView, HostView};
+    let store = crate::session::current_store(cx)?;
     let host = store
         .read(cx)
         .collections()
@@ -55,10 +102,7 @@ fn open_wake_launcher(
     assert!(matches!(host.state, HostStateView::Suspended { .. }));
     let mut draft = crate::launcher::launch_tests::command_draft();
     draft.choose_host(12, "~".into());
-    draft.edit_folder("/home/user/work".into());
-    let mark = crate::focus::Mark::take(cx);
-    assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
-    state.after.set(Some(press_wake_launcher));
+    Some(draft)
 }
 
 /// The capture waits for the actual launch button and then for the wake it opens.

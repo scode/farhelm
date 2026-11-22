@@ -10,7 +10,9 @@
 use std::time::Duration;
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
-use farhelm_proto::ui_channel::{Collection, CollectionChanges, HostView, KeyedEntry};
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, HostStateView, HostView, KeyedEntry,
+};
 use farhelm_proto::{AcceptedGithubPreview, CheckoutPreviewBinding, GithubRepo};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
@@ -21,7 +23,8 @@ use super::request::{
     UNVERIFIED_HOST, WAIT_FOR_PREVIEW,
 };
 use super::view_tests::{
-    answer_catalog, click_in_body, draft, launcher_on, name_of, read, shown_refusal,
+    answer_catalog, click_in_body, draft, fixture_hosts, launcher_on, launcher_with_hosts, name_of,
+    read, shown_refusal,
 };
 use crate::layers;
 use crate::test_support::{self, settle};
@@ -2211,5 +2214,426 @@ fn a_quick_launch_whose_preview_fails_is_shown(cx: &mut TestAppContext) {
     assert_eq!(
         name_of(cx, "launcher-preview-error").as_deref(),
         Some(words)
+    );
+}
+
+// ---- Waking the existing checkout host ----------------------------------------------------------------------------
+
+const WAKE_RESUME: &str = "/api/hosts/12/resume";
+
+/// A complete form on a suspended sandbox. The repository is already chosen, so a single Launch press can
+/// authorize the allocation. A typed title is kept exact, unlike a template's numbered base.
+fn suspended_checkout<'a>(
+    cx: &'a mut TestAppContext,
+    title: Option<&str>,
+) -> (FakeHelm, &'a mut VisualTestContext, HostView) {
+    let hosts = fixture_hosts(&[0, 11]);
+    let host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    assert_eq!(host.id, 12);
+    assert!(host.identity.is_some());
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    let mut draft = command_draft(host.id);
+    draft.choose_repository(repo("acme", "bar"));
+    if let Some(title) = title {
+        draft.edit_name(title.into());
+    }
+    let (mut helm, cx) = launcher_with_hosts(cx, draft, hosts);
+    pre_wake_traffic(&mut helm, cx, title);
+    (helm, cx, host)
+}
+
+/// Verify the actual form is fully resolved up to the host connection. It names its allocation policy and
+/// supplies no old folder or preview. Answer only unrelated reads before the press.
+fn pre_wake_traffic(helm: &mut FakeHelm, cx: &mut VisualTestContext, title: Option<&str>) {
+    let expected = if title.is_some() {
+        "The folder is named after the session when the host is ready"
+    } else {
+        "The folder is picked automatically when the host is ready"
+    };
+    assert_eq!(name_of(cx, expected).as_deref(), Some(expected));
+    assert!(checkout_folder(cx).is_empty());
+    assert!(name_of(cx, "launcher-checkout-folder").is_none());
+    assert!(name_of(cx, "launcher-preview-path").is_none());
+    let unexpected = super::environment_launch_tests::answer_except(helm, cx, |command| {
+        matches!(
+            command.path.as_str(),
+            WAKE_RESUME | PREVIEW | "/api/sessions"
+        )
+    });
+    assert!(
+        unexpected.is_empty(),
+        "no launch traffic before the press: {unexpected:?}"
+    );
+}
+
+/// A checkout press sends only Resume. The held form keeps New and lifecycle changes out through the preview.
+fn press_checkout_wake(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> FakeCommand {
+    test_support::click(cx, "launcher-launch");
+    one_checkout_wake(helm, cx)
+}
+
+/// Verify that the press reached the suspended host and retained the create's ownership before it has a path.
+fn one_checkout_wake(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> FakeCommand {
+    let commands = sent(helm, cx);
+    let [resume] = &commands[..] else {
+        panic!("only one Resume expected, got {commands:?}");
+    };
+    assert_eq!(resume.path, WAKE_RESUME);
+    assert_checkout_preparing(cx);
+    resume.clone()
+}
+
+/// The ordinary window remains usable while the checkout owns its destination and the launcher slot.
+fn assert_checkout_preparing(cx: &mut VisualTestContext) {
+    assert!(!test_support::any_open(cx));
+    assert!(name_of(cx, "launch-wake").is_some());
+    assert!(name_of(cx, "launch-progress").is_none());
+    cx.update(|_, cx| {
+        assert!(super::launch::busy(cx));
+        assert!(super::launch::host_lifecycle_refusal(12, cx).is_some());
+    });
+}
+
+/// The exact preview belongs to the new connection. Holding it proves the wake cannot submit with its old path.
+pub(crate) struct HeldCheckoutPreview {
+    command: FakeCommand,
+    trash_reads: Vec<FakeCommand>,
+}
+
+impl HeldCheckoutPreview {
+    /// Release the preview first, then any trash reads sent while the window processed the host change.
+    pub(crate) fn reply(self, helm: &mut FakeHelm, status: u16, body: Value) {
+        helm.reply(self.command.id, status, Some(body));
+        for command in self.trash_reads {
+            reply_checkout_trash(helm, &command);
+        }
+    }
+}
+
+/// Match the window's unrelated reconnect traffic without letting the fixture consume a create or a Retry.
+fn reply_checkout_trash(helm: &mut FakeHelm, command: &FakeCommand) {
+    assert_eq!(command.path, "/api/checkout-trash/list");
+    helm.reply(
+        command.id,
+        200,
+        Some(crate::trash::tests::listing(&[], false)),
+    );
+}
+
+/// Hold the sole fresh preview. Either side of it can contain an independent trash-list read.
+pub(crate) fn hold_woken_preview(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &HostView,
+    title: &str,
+) -> HeldCheckoutPreview {
+    let commands = sent(helm, cx);
+    let previews = to(&commands, PREVIEW);
+    let [preview] = &previews[..] else {
+        panic!("one fresh preview of {title:?} expected, got {commands:?}");
+    };
+    let mut trash_reads = Vec::new();
+    for command in commands {
+        if command.id < preview.id {
+            reply_checkout_trash(helm, &command);
+        } else if command.id > preview.id {
+            assert_eq!(command.path, "/api/checkout-trash/list");
+            trash_reads.push(command);
+        }
+    }
+    settle(cx);
+    let body = preview.body.as_ref().unwrap();
+    assert_eq!(body["host"], host.id);
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["title"], title);
+    assert_checkout_preparing(cx);
+    HeldCheckoutPreview {
+        command: preview.clone(),
+        trash_reads,
+    }
+}
+
+/// Match the same installed host and connection that the outgoing preview names.
+pub(crate) fn woken_checkout_reply(host: &HostView, basename: &str) -> Value {
+    let HostStateView::Connected { identity, .. } = &host.state else {
+        panic!("the host must have a live connection to answer a preview");
+    };
+    assert!(identity.is_some(), "the fixture verifies the installation");
+    assert_eq!(identity, &host.identity);
+    let cwd = format!("/work/{basename}");
+    let mut reply = preview_reply(&cwd, basename, 3);
+    reply["host"] = json!(host.id.to_string());
+    reply["incarnation"] = json!(host.incarnation);
+    reply["installation_identity"] = json!(identity);
+    reply
+}
+
+/// Release the exact preview and check the complete request. An expired or replaced wake must never get here.
+pub(crate) fn create_woken_checkout(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &HostView,
+    preview: HeldCheckoutPreview,
+    basename: &str,
+) -> FakeCommand {
+    let expected = woken_checkout_reply(host, basename);
+    preview.reply(helm, 200, expected.clone());
+    settle(cx);
+    let commands = sent(helm, cx);
+    let [create] = &commands[..] else {
+        panic!("only one create expected, got {commands:?}");
+    };
+    assert_eq!(create.path, "/api/sessions");
+    let body = create.body.as_ref().unwrap();
+    assert_eq!(body["expected_incarnation"], host.incarnation);
+    assert_eq!(body["cwd"], expected["cwd"]);
+    assert_eq!(
+        body["github_checkout"]["preview"]["incarnation"],
+        host.incarnation
+    );
+    assert_eq!(body["github_checkout"]["preview"]["cwd"], expected["cwd"]);
+    assert!(!test_support::any_open(cx));
+    create.clone()
+}
+
+/// Connect to the same installation on a fresh incarnation, which is the only legal connection for the preview.
+pub(crate) fn connect_checkout_host(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &mut HostView,
+) {
+    let identity = host.identity.as_deref().expect("verified fixture host");
+    let connection = crate::hosts::tests::connected_with("0.40.0", identity, 1);
+    super::wake_tests::push(helm, cx, host, connection);
+}
+
+/// A revealed form asks for its own preview. Answer every command in wire order, checking that the lost or
+/// expired press sent neither a create nor a second Resume.
+fn answer_reopened_checkout_preview(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &HostView,
+    basename: &str,
+) {
+    let commands = sent(helm, cx);
+    assert_eq!(to(&commands, PREVIEW).len(), 1, "{commands:?}");
+    for command in commands {
+        let body = match command.path.as_str() {
+            PREVIEW => Some(woken_checkout_reply(host, basename)),
+            "/api/checkout-trash/list" => Some(crate::trash::tests::listing(&[], false)),
+            "/api/sessions" | WAKE_RESUME => panic!("the spent press sent {command:?}"),
+            _ => None,
+        };
+        helm.reply(command.id, 200, body);
+    }
+    settle(cx);
+}
+
+/// The approved checkout uses the single wake deadline to reach its connection. A preview held past that time
+/// still belongs to the accepted press, so it can create without showing the form.
+#[gpui::test]
+fn a_woken_checkout_can_preview_after_the_connection_deadline(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspended_checkout(cx, None);
+    let resume = press_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    test_support::advance(cx, Duration::from_secs(59));
+    assert!(sent(&mut helm, cx).is_empty());
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    test_support::advance(cx, Duration::from_secs(2));
+    assert_checkout_preparing(cx);
+    assert!(sent(&mut helm, cx).is_empty());
+    let create = create_woken_checkout(&mut helm, cx, &host, preview, "bar-1");
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+}
+
+/// A late connection belongs to the host, not the expired press. The reopened form may preview for a new
+/// press, but will not spend the old one.
+#[gpui::test]
+fn a_late_checkout_connection_cannot_spend_the_expired_press(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspended_checkout(cx, None);
+    let resume = press_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    test_support::advance(cx, Duration::from_secs(59));
+    assert_checkout_preparing(cx);
+    test_support::advance(cx, Duration::from_secs(1));
+    assert_eq!(
+        shown_refusal(cx).as_deref(),
+        Some(
+            "Not launched. The host resumed, but this window did not see it connect within 60 seconds. The session was not launched; try again."
+        ),
+    );
+    assert!(name_of(cx, "launch-wake").is_none());
+    assert!(
+        super::environment_launch_tests::answer_except(&mut helm, cx, |command| {
+            matches!(
+                command.path.as_str(),
+                PREVIEW | "/api/sessions" | WAKE_RESUME
+            )
+        })
+        .is_empty()
+    );
+    connect_checkout_host(&mut helm, cx, &mut host);
+    answer_reopened_checkout_preview(&mut helm, cx, &host, "bar-1");
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+    assert!(name_of(cx, "launcher-launch").is_some());
+}
+
+/// A typed name authorizes exactly its matching folder. When the new connection finds that name taken,
+/// re-show the form with the refusal so the user can choose a different title.
+#[gpui::test]
+fn a_woken_checkout_with_a_taken_typed_name_returns_to_the_form(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspended_checkout(cx, Some("taken"));
+    let resume = press_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "taken");
+    preview.reply(&mut helm, 409, json!(TAKEN));
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-preview-error").as_deref(),
+        Some(TAKEN)
+    );
+    assert_eq!(
+        read(cx, |launcher, _, cx| launcher.name.text(cx).to_string()),
+        "taken"
+    );
+    assert!(name_of(cx, "launch-wake").is_none());
+    let after = sent(&mut helm, cx);
+    assert!(to(&after, PREVIEW).is_empty());
+    assert!(to(&after, "/api/sessions").is_empty());
+}
+
+/// A race that takes the freshly previewed path spends the old press. The user sees the new path and decides
+/// whether to send another create.
+#[gpui::test]
+fn a_woken_checkout_that_loses_its_path_previews_again_without_creating(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspended_checkout(cx, None);
+    let resume = press_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    let create = create_woken_checkout(&mut helm, cx, &host, preview, "bar-1");
+    let words =
+        "the checkout preview is no longer current; obtain a new preview before resubmitting";
+    helm.reply_marked(
+        create.id,
+        409,
+        vec![farhelm_proto::ui_channel::HelmMarker::CreateUnaccepted],
+        Some(json!(words)),
+    );
+    settle(cx);
+    assert!(shown_refusal(cx).unwrap().contains("nothing was accepted"));
+    answer_reopened_checkout_preview(&mut helm, cx, &host, "bar-2");
+    assert_eq!(checkout_folder(cx), "/work/bar-2");
+    assert!(to(&sent(&mut helm, cx), "/api/sessions").is_empty());
+}
+
+/// Read two setups while connected and establish that the recorded installation can still be identified when the
+/// host suspends. Only the managed setup is useful without the connection that supplied its directory history.
+fn suspend_with_recents(cx: &mut TestAppContext) -> (FakeHelm, &mut VisualTestContext, HostView) {
+    use super::recents_view_tests::{answer_history, chosen, history, launched};
+    use farhelm_proto::{LaunchHarness, LaunchPermission};
+
+    let mut hosts = fixture_hosts(&[0, 11]);
+    let mut host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
+    let suspended = host.state.clone();
+    assert!(matches!(suspended, HostStateView::Suspended { .. }));
+    host.state =
+        crate::hosts::tests::connected_with("0.40.0", host.identity.as_deref().unwrap(), 1);
+    hosts.entries[1].value = serde_json::to_value(&host).unwrap();
+    let open_draft = LaunchDraft::new(Some(host.id), "/work".into(), None);
+    let (mut helm, cx) = launcher_with_hosts(cx, open_draft, hosts);
+    let codex = chosen(
+        LaunchHarness::Codex,
+        None,
+        None,
+        Some(LaunchPermission::Guarded),
+    );
+    let mut checkout = launched("/work/old-checkout", &codex);
+    checkout["host"] = json!(host.id);
+    checkout["github_repo"] = json!({ "owner": "acme", "name": "bar" });
+    let mut folder = launched("/work", &codex);
+    folder["host"] = json!(host.id);
+    answer_history(&mut helm, cx, &history(vec![checkout, folder]));
+    assert!(
+        name_of(cx, "launcher-recent-1").is_some(),
+        "both rows were read"
+    );
+
+    super::wake_tests::push(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::session_list::environment_tests::changing(
+            farhelm_proto::tensorlake::LifecycleDirection::Suspending,
+        ),
+    );
+    assert!(
+        name_of(cx, "launcher-recent-0").is_none(),
+        "the host is still changing"
+    );
+    super::wake_tests::push(&mut helm, cx, &mut host, suspended);
+    assert!(
+        name_of(cx, "launcher-recent-0").is_some_and(|name| name.contains("acme/bar")),
+        "the same installation has the repository choice"
+    );
+    assert!(name_of(cx, "launcher-recent-1").is_none());
+    assert!(
+        draft(cx).checkout.is_none(),
+        "the recent setup has not been applied"
+    );
+    let outstanding = super::environment_launch_tests::answer_except(&mut helm, cx, |command| {
+        matches!(
+            command.path.as_str(),
+            WAKE_RESUME | PREVIEW | "/api/launch-history?host=12"
+        )
+    });
+    assert!(
+        outstanding.is_empty(),
+        "suspension alone sends no Resume or checkout traffic"
+    );
+    (helm, cx, host)
+}
+
+/// The empty command pane applies and launches a recent checkout in the same Enter. The setup supplies its
+/// repository choice while suspended, and only the new connection can supply its folder.
+#[gpui::test]
+fn recent_checkout_enter_wakes_the_verified_host_before_previewing(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspend_with_recents(cx);
+    test_support::keys(cx, "down");
+    assert!(
+        crate::session_list::host_rail::tests::node(&test_support::frame(cx), "launcher-recent-0")
+            .is_some_and(|node| node.selected == Some(true))
+    );
+    test_support::keys(cx, "enter");
+    let resume = one_checkout_wake(&mut helm, cx);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    let create = create_woken_checkout(&mut helm, cx, &host, preview, "bar-2");
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+}
+
+/// Retargeting a suspended row must withdraw the previous installation's repository setup immediately, even
+/// though neither row has a connected history key.
+#[gpui::test]
+fn a_changed_installation_loses_its_retained_checkout_setup(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host) = suspend_with_recents(cx);
+    host.identity = Some("another-installation".into());
+    let state = host.state.clone();
+    super::wake_tests::push(&mut helm, cx, &mut host, state);
+    assert!(name_of(cx, "launcher-recent-0").is_none());
+    assert!(
+        sent(&mut helm, cx)
+            .iter()
+            .all(|command| command.path != WAKE_RESUME)
     );
 }

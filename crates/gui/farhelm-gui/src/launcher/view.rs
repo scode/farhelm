@@ -2169,7 +2169,7 @@ impl Render for Launcher {
         // A new environment's folder is its home, shown as a held destination is (SPEC.md: "Folder is fixed to the new
         // sandbox's home, without Browse or recent folders").
         let folder: AnyElement = if self.draft.destination_kind() == DestinationKind::Checkout {
-            self.checkout_folder_field()
+            self.checkout_folder_field(cx)
         } else if self.draft.holds(Field::Destination) || self.draft.target.is_some() {
             div()
                 .flex()
@@ -2831,15 +2831,7 @@ impl Launcher {
         if self.draft.folder_default_waiting() && self.settle_folder_default(cx) {
             self.sync_fields(window, cx);
         }
-        if !launch::wake::start(
-            cx.entity(),
-            &self.draft.mode,
-            &host,
-            source,
-            mark,
-            window,
-            cx,
-        ) {
+        if !launch::wake::start(cx.entity(), &self.draft, &host, source, mark, window, cx) {
             return false;
         }
         self.waiting_batches.clear();

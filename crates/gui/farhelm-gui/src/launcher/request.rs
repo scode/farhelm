@@ -370,9 +370,9 @@ impl LaunchDraft {
         None
     }
 
-    /// A managed checkout's reason, if it has one: a repository chosen, no named conversation, on a host with an
-    /// installation identity, with a current preview. The conversation comes before the preview, so a launch the helm
-    /// would refuse anyway is not told to wait for one.
+    /// A managed checkout needs a repository, a verified existing installation and no named conversation. A
+    /// connected host needs its current preview. A resumable host can take the press before there is a connection on
+    /// which to ask for that preview.
     fn checkout_refusal(&self, target: Target<'_>) -> Option<&'static str> {
         let checkout = self.checkout.as_ref()?;
         if checkout.repo.is_none() {
@@ -385,12 +385,15 @@ impl LaunchDraft {
         if self.target.is_some() {
             return None;
         }
-        let verified = self
+        let host = self
             .host
             .and_then(|id| target.hosts.iter().find(|host| host.id == id))
-            .is_some_and(|host| host.identity.as_deref().is_some_and(|id| !id.is_empty()));
-        if !verified {
+            .filter(|host| host.identity.as_deref().is_some_and(|id| !id.is_empty()));
+        let Some(host) = host else {
             return Some(UNVERIFIED_HOST);
+        };
+        if self.can_wake(host) {
+            return None;
         }
         match target.preview {
             Preview::Ready(_) => None,

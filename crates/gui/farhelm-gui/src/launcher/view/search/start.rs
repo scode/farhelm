@@ -14,7 +14,7 @@ use gpui::{
     SharedString, Stateful, StatefulInteractiveElement as _, Styled as _, Window, div, px, svg,
 };
 
-use super::super::recents::RecentRefusal;
+use super::super::recents::{RecentRefusal, RecentSurface};
 use super::{
     Drawn, Launcher, RETURN_KEY, Row, SetupSource, command_heading, command_pane_fits,
     draw_search_rows, status_line,
@@ -136,7 +136,7 @@ impl Launcher {
             return;
         };
         let mark = Mark::take(cx);
-        match self.take_recent(&entry, window, cx) {
+        match self.take_recent(&entry, RecentSurface::CommandPane, window, cx) {
             Ok(()) => {
                 self.search_box.refusal = None;
                 self.close_search(window, cx);

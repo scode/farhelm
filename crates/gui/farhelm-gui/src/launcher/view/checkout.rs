@@ -540,13 +540,10 @@ impl Launcher {
     /// line or the new preview, as any quick launch that did not start does. The old launcher's guarded submit compared
     /// the whole preview identity the same way.
     ///
-    /// One exception: a quick launch never shown follows its own template base name's numbering. When the preview it
-    /// waits for came back taken and the taken-name rule moved the name on to its next candidate, with nothing else
-    /// changed, it waits for that candidate's preview instead (SPEC.md, "Managed checkouts": a shortcut "obtains the
-    /// same exact preview and launches without showing the path first", and a base name "uses its first free
-    /// candidate"; the old app's "quick launch numbers a template base name when its checkout is taken"). The user
-    /// pressed the shortcut for exactly that numbering. A shown launcher's wait (the YOLO question's guarded answer)
-    /// still gives up, since the user sees the name change and presses Launch again for the new folder.
+    /// A launch held out of sight follows its own numbered name. When the preview it waits for came back taken and
+    /// the taken-name rule moved the name to its next candidate, with all other inputs intact, it waits for that
+    /// candidate's preview. A shortcut or a press before waking the host already authorized that allocation. When
+    /// the form stays shown after a guarded answer, the user can see the name change and press again.
     fn settle_waiting_launch(launcher: &WeakEntity<Launcher>, cx: &mut App) {
         let Some(entity) = launcher.upgrade() else {
             return;
@@ -904,8 +901,23 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// Put the read-only folder field in step with the preview: its path, escaped as host text is, or empty with a
-    /// placeholder saying why there is none (the old placeholders).
+    /// A checkout on a resumable installation names its allocation policy before it can obtain an exact path.
+    /// The name entered in the draft still determines what the host will be asked to reserve.
+    fn checkout_allocation_notice(&self, cx: &App) -> Option<&'static str> {
+        self.draft.checkout.as_ref()?.repo.as_ref()?;
+        let host = self.chosen_host(cx)?;
+        if !self.draft.can_wake(host) {
+            return None;
+        }
+        Some(if self.draft.checkout_title().is_empty() {
+            "The folder is picked automatically when the host is ready"
+        } else {
+            "The folder is named after the session when the host is ready"
+        })
+    }
+
+    /// Put the read-only folder field in step with its destination. Clear it while the allocation notice takes
+    /// its place so a path from an earlier connection cannot survive the change.
     fn show_checkout_path(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(checkout) = &self.draft.checkout else {
             return;
@@ -915,6 +927,7 @@ impl Launcher {
             (Some(_), _) if self.draft.target.is_some() => {
                 (String::new(), "Cloned inside the new environment")
             }
+            (Some(_), _) if self.checkout_allocation_notice(cx).is_some() => (String::new(), ""),
             (Some(_), Preview::Ready(preview)) => (
                 farhelm_proto::text::escaped(&preview.binding.cwd).to_string(),
                 "",
@@ -1111,7 +1124,10 @@ impl Launcher {
         {
             rows.push(note.into_any_element());
         }
-        if let Some(repo) = &checkout.repo {
+        // The folder field already explains how the path will be allocated when there is a connection.
+        if let Some(repo) = &checkout.repo
+            && self.checkout_allocation_notice(cx).is_none()
+        {
             rows.push(self.preview_block(repo, palette, cx));
         }
         rows.push(help_line(EXPLANATION, palette).into_any_element());
@@ -1268,9 +1284,12 @@ impl Launcher {
             .into_any_element()
     }
 
-    /// The folder field while a managed checkout is chosen: read-only, showing the preview's path (SPEC.md: "the
-    /// composer's folder field shows the current preview's effective path read-only, or a pending or error state").
-    pub(super) fn checkout_folder_field(&self) -> AnyElement {
+    /// A preview supplies the read-only folder path. Before a wake, show wrapping help in the same place so the
+    /// allocation explanation fits the repository column even when the form is narrow.
+    pub(super) fn checkout_folder_field(&self, cx: &App) -> AnyElement {
+        if let Some(notice) = self.checkout_allocation_notice(cx) {
+            return help_line(notice, &theme::palette(cx)).into_any_element();
+        }
         self.launcher_input(
             "launcher-checkout-folder",
             &self.checkout.path,
@@ -1293,8 +1312,10 @@ impl Launcher {
                 "Managed checkout (select a repository)".to_owned()
             }
             (None, _) => format!("Managed checkout: {} (select a repository)", checkout.query),
-            // A new environment's checkout has no folder yet: the helm names it once the environment connects.
-            (Some(repo), _) if self.draft.target.is_some() => {
+            // Checking out on a host without a connection cannot name a path yet.
+            (Some(repo), _)
+                if self.draft.target.is_some() || self.checkout_allocation_notice(cx).is_some() =>
+            {
                 format!("gh:{}", repo_identifier(repo))
             }
             (Some(_), Preview::Ready(preview)) => preview.binding.cwd.clone(),
