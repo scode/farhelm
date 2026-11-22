@@ -44,8 +44,8 @@ use farhelm_proto::ui_channel::{
 use std::rc::Rc;
 
 use farhelm_proto::{
-    LaunchTarget, RETIRED_CONTAINER_REASON, ReadinessWording, RestartOffer, SessionInfo,
-    SessionLaunch,
+    LaunchHarness, LaunchTarget, RETIRED_CONTAINER_REASON, ReadinessWording, RestartOffer,
+    SessionInfo, SessionLaunch,
 };
 use gpui::{App, Entity, Window};
 
@@ -334,6 +334,14 @@ pub fn restart_with_unavailable(session: &str, cx: &App) -> Option<String> {
     restart_with_reason(row)
 }
 
+/// Restart with's fallback wording when there is no conversation it can resume and no more specific explanation.
+const NO_CAPTURED_CONVERSATION: &str = "No captured conversation to resume";
+
+/// Name the declared agent in the shared refusal. Each launch kind determines when this refusal applies.
+fn unsupported_resume_reason(harness: LaunchHarness) -> String {
+    format!("{} sessions can't be resumed", harness_label(harness))
+}
+
 /// The old app's `restart_with_reason` (`session_view.rs` at the reference commit): a legacy launch is never changed
 /// (Replace with is the way), an agent launch can be edited when its conversation can be resumed or it has a stored
 /// resume command to take a named one, and a command launch when it declared an agent type and a resume command and its
@@ -359,10 +367,7 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
             // Reporting support and a stored resume command are separate facts: an older agent launch can gain
             // tracking without gaining a resume command, which needs recreating, not a claim about capture.
             if selection.harness.agent_kind().restart_readiness().is_none() {
-                Some(format!(
-                    "{} sessions can't be resumed",
-                    harness_label(selection.harness)
-                ))
+                Some(unsupported_resume_reason(selection.harness))
             } else if offer == RestartOffer::NoResumeCommand {
                 Some(
                     "This agent launch has no resume command, so it cannot be restarted; use Clone or Replace with"
@@ -371,7 +376,7 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
             } else if offer == RestartOffer::NotCaptured {
                 Some(not_captured_reason(info))
             } else {
-                Some("No captured conversation to resume".to_owned())
+                Some(NO_CAPTURED_CONVERSATION.to_owned())
             }
         }
         SessionLaunch::Command(command) => {
@@ -385,11 +390,9 @@ pub(super) fn restart_with_reason(row: &SessionRow) -> Option<String> {
                 RestartOffer::Resume => None,
                 // A declared type Farhelm has no conversation reporting for can carry a resume command, and will never
                 // have a conversation to fill it with.
-                RestartOffer::NoConversationReporting => command
-                    .agent
-                    .map(|agent| format!("{} sessions can't be resumed", harness_label(agent))),
+                RestartOffer::NoConversationReporting => command.agent.map(unsupported_resume_reason),
                 RestartOffer::NotCaptured => Some(not_captured_reason(info)),
-                RestartOffer::NoResumeCommand => Some("No captured conversation to resume".to_owned()),
+                RestartOffer::NoResumeCommand => Some(NO_CAPTURED_CONVERSATION.to_owned()),
             }
         }
         SessionLaunch::Legacy { .. } => Some(
