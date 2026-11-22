@@ -1,16 +1,16 @@
 {
   "_comment": "Written by scripts/publish-docs-shots.sh; never edit by hand. See docs/docs-shots/SPEC.md.",
   "base": "https://raw.githubusercontent.com/scode/farhelm",
-  "captured_at": "2026-11-21T04:43:11Z",
-  "captured_from": "28f177284f9ad7012e6c577684e98b0d888c371d",
-  "commit": "22c654eedbef227397f0abc3b9b999e7bb15c500",
+  "captured_at": "2026-11-22T18:54:14Z",
+  "captured_from": "4b60fe6467c54c6770caddc2570bf6b0800a36e1",
+  "commit": "e1cbe1695b16943c9983c146836afa4a216f4e21",
   "shots": {
     "add-a-remote-host/add-button": {
       "height": 699,
       "width": 752
     },
     "add-a-remote-host/add-dialog": {
-      "height": 1312,
+      "height": 1475,
       "width": 1760
     },
     "add-a-remote-host/connected-host": {
@@ -26,7 +26,7 @@
       "width": 1860
     },
     "first-session/statuses": {
-      "height": 854,
+      "height": 780,
       "width": 1368
     },
     "first-session/this-machine": {
@@ -34,12 +34,12 @@
       "width": 752
     },
     "launch-templates/applied": {
-      "height": 707,
-      "width": 1891
+      "height": 1182,
+      "width": 1982
     },
     "launch-templates/apply": {
-      "height": 601,
-      "width": 2426
+      "height": 686,
+      "width": 2406
     },
     "launch-templates/edit-form": {
       "height": 1513,
@@ -50,16 +50,16 @@
       "width": 1984
     },
     "launch-templates/save-as-template": {
-      "height": 1021,
-      "width": 2484
+      "height": 1055,
+      "width": 1984
     },
     "launch-templates/templates-button": {
       "height": 494,
       "width": 616
     },
     "manage-hosts/app-settings": {
-      "height": 1931,
-      "width": 1815
+      "height": 1735,
+      "width": 1841
     },
     "manage-hosts/details": {
       "height": 860,
@@ -70,7 +70,7 @@
       "width": 1866
     },
     "manage-hosts/host-settings": {
-      "height": 2882,
+      "height": 2771,
       "width": 1600
     },
     "manage-hosts/remove-dialog": {
@@ -397,6 +397,26 @@
       "height": 168,
       "width": 1072
     },
+    "release-notes/v0-44-1-antigravity-trust": {
+      "height": 1444,
+      "width": 2114
+    },
+    "release-notes/v0-44-1-conversation-hooks": {
+      "height": 695,
+      "width": 2035
+    },
+    "release-notes/v0-44-1-session-launcher": {
+      "height": 1708,
+      "width": 2588
+    },
+    "release-notes/v0-44-1-settings": {
+      "height": 1240,
+      "width": 1624
+    },
+    "release-notes/v0-44-1-tailscale-host": {
+      "height": 1243,
+      "width": 1760
+    },
     "session-list/controls": {
       "height": 1166,
       "width": 1656
@@ -410,7 +430,7 @@
       "width": 1866
     },
     "session-list/statuses": {
-      "height": 738,
+      "height": 699,
       "width": 1368
     },
     "session-list/trash-button": {
@@ -422,20 +442,20 @@
       "width": 1424
     },
     "start-a-session/checkout-setup": {
-      "height": 977,
-      "width": 2254
+      "height": 742,
+      "width": 1984
     },
     "start-a-session/destination": {
-      "height": 1300,
-      "width": 2278
+      "height": 1169,
+      "width": 1606
     },
     "start-a-session/effort-and-permissions": {
-      "height": 995,
-      "width": 2542
+      "height": 899,
+      "width": 1630
     },
     "start-a-session/harness-and-model": {
-      "height": 704,
-      "width": 2542
+      "height": 1047,
+      "width": 2124
     },
     "start-a-session/host-menu": {
       "height": 771,
@@ -446,27 +466,27 @@
       "width": 1572
     },
     "start-a-session/launch-button": {
-      "height": 542,
-      "width": 1904
+      "height": 496,
+      "width": 1047
     },
     "start-a-session/new-button": {
       "height": 256,
       "width": 1336
     },
     "start-a-session/recent-setups": {
-      "height": 795,
-      "width": 1928
+      "height": 755,
+      "width": 1168
     },
     "start-a-session/search": {
-      "height": 760,
-      "width": 2426
+      "height": 938,
+      "width": 2406
     },
     "start-a-session/search-name": {
-      "height": 382,
-      "width": 2426
+      "height": 627,
+      "width": 2378
     },
     "start-a-session/yolo-confirmation": {
-      "height": 714,
+      "height": 780,
       "width": 1873
     },
     "stop-restart-resume/header-actions": {
