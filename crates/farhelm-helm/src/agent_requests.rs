@@ -2089,14 +2089,12 @@ async fn create_for_agent(
             // cannot silently change what the user approved.
             let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
             composition_incarnation = Some(claim.incarnation);
-            normalize_launch_workspace_trust(
-                state,
-                &client,
-                launch,
-                &mut resolved.resolution.cwd,
-                false,
-            )
-            .await?
+            let launch = normalize_launch_workspace_trust(state, launch).await?;
+            launch
+                .pin_trusted_approval_cwd(&client, &mut resolved.resolution.cwd)
+                .await
+                .context(ReadOnlyPhase("checking the launch folder for approval"))?;
+            launch
         }
     };
     // Transfer the same metadata across the trust boundary. The one launch
@@ -2226,19 +2224,12 @@ async fn create_checkout_for_agent(
     ) {
         return Err(error);
     }
-    let mut resolution = resolved.resolution;
+    let resolution = resolved.resolution;
     let repo = resolution
         .github_repo
         .clone()
         .expect("managed destination selected");
-    let launch = normalize_launch_workspace_trust(
-        state,
-        &client,
-        resolution.launch,
-        &mut resolution.cwd,
-        true,
-    )
-    .await?;
+    let launch = normalize_launch_workspace_trust(state, resolution.launch).await?;
     // Fresh intent resolves trust before its original-wrapper check. Keep
     // this order, and carry this exact launch past preview and approval.
     let mut resolution = crate::agent_launch::Resolution {
@@ -3937,7 +3928,10 @@ async fn clone_for_agent(
         .agent_selection()
         .is_some_and(|selection| selection.wrapper_prefix.is_some());
     crate::yolo_guard::check_agent_wrapper(state, host, &mode, agent_wrapper_supplied).await?;
-    let mode = normalize_launch_workspace_trust(state, &client, mode, &mut cwd, false).await?;
+    let mode = normalize_launch_workspace_trust(state, mode).await?;
+    mode.pin_trusted_approval_cwd(&client, &mut cwd)
+        .await
+        .context(ReadOnlyPhase("checking the clone folder for approval"))?;
     // The source's title is copied VERBATIM, empty string included: a clone
     // that let the target derive a title from the directory would silently
     // rename the copy, which is the one thing a user reading two rows side by
@@ -4476,7 +4470,6 @@ async fn launch_environment_for_agent(
     let launch = crate::workspace_trust::configured_launch_workspace_trust(
         plan.launch,
         &state.store.resolve_checkout_config(None).await?,
-        plan.repo.is_some(),
     )?;
     let shown = launch.as_launch().clone();
     let request = crate::sessions::CreateReq::for_agent_environment(
@@ -9604,9 +9597,9 @@ mod tests {
         assert_eq!(created[0].launch.as_ref(), Some(&launch));
     }
 
-    /// A copied managed source cannot authorize trust at another destination.
-    /// The real clone path must preserve the remaining launch words, query
-    /// only the selected target when needed, and ignore the source trust bit.
+    /// Clone composes from the current switch, including a plain directory
+    /// and a source with the opposite choice. The destination host pins the
+    /// directory shown for a trusted approval.
     #[farhelm_testtrace::test]
     async fn agent_clone_normalizes_trust_for_the_target_before_dispatch() {
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
@@ -9628,7 +9621,7 @@ mod tests {
             };
             let source_launch = crate::launches::compile(selection.clone()).unwrap();
             let mut expected_selection = selection;
-            expected_selection.workspace_trust = (enabled && managed).then_some(true);
+            expected_selection.workspace_trust = enabled.then_some(true);
             let expected = crate::launches::compile(expected_selection).unwrap();
             let mut source = session("source", 1);
             source.cwd = "/source-checkout".into();
@@ -10995,7 +10988,7 @@ mod tests {
                     permission_flags: None,
                     wrapper_prefix: None,
                     container: None,
-                    workspace_trust: (enabled && managed).then_some(true),
+                    workspace_trust: enabled.then_some(true),
                 })
                 .unwrap();
                 let request = AgentVerb::Create {
@@ -11103,10 +11096,9 @@ mod tests {
         }
     }
 
-    /// Destination ownership belongs to the connection that answered the
-    /// composition read. Test the final dispatch boundary separately from
-    /// approval's reconnect check: even a previously approved launch must
-    /// refuse a successor connection rather than reuse the old trust answer.
+    /// A trusted directory answer belongs to the connection that checked it.
+    /// Even after approval, dispatch refuses a successor connection that
+    /// could have a different directory at that path.
     #[farhelm_testtrace::test]
     async fn ordinary_agent_create_dispatch_rechecks_the_composition_incarnation() {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
@@ -11136,15 +11128,13 @@ mod tests {
             .await
             .unwrap();
         let (claim, client) = crate::sessions::host_client(&h.state, resolved.host).unwrap();
-        let launch = normalize_launch_workspace_trust(
-            &h.state,
-            &client,
-            resolved.resolution.launch,
-            &mut resolved.resolution.cwd,
-            false,
-        )
-        .await
-        .unwrap();
+        let launch = normalize_launch_workspace_trust(&h.state, resolved.resolution.launch)
+            .await
+            .unwrap();
+        launch
+            .pin_trusted_approval_cwd(&client, &mut resolved.resolution.cwd)
+            .await
+            .unwrap();
         let resolved = ResolvedCreate {
             host: resolved.host,
             host_name: resolved.host_name,
@@ -11216,27 +11206,26 @@ mod tests {
         );
     }
 
-    /// Trust follows the canonical managed directory that justified it,
-    /// not a symlink's meaning at some later approval. A real owned alias
-    /// is repointed while the card waits; both create and clone must still
-    /// dispatch the original canonical target and the shown trusted launch.
+    /// Plain folders also need to keep the trusted destination shown for
+    /// approval. Repoint a real symlink while the card waits and verify both
+    /// Create and Clone dispatch the original directory with the shown trust.
     #[cfg(unix)]
     #[farhelm_testtrace::test]
-    async fn trusted_agent_create_and_clone_pin_the_managed_alias_before_approval() {
+    async fn trusted_agent_create_and_clone_pin_a_plain_alias_before_approval() {
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
 
         for cloning in [false, true] {
             let directory = tempfile::tempdir().unwrap();
-            let managed = directory.path().join("managed");
-            let ordinary = directory.path().join("ordinary");
+            let original = directory.path().join("original");
+            let replacement = directory.path().join("replacement");
             let alias = directory.path().join("selected-alias");
-            std::fs::create_dir(&managed).unwrap();
-            std::fs::create_dir(&ordinary).unwrap();
-            std::os::unix::fs::symlink(&managed, &alias).unwrap();
-            let canonical = std::fs::canonicalize(&managed).unwrap();
-            let canonical_ordinary = std::fs::canonicalize(&ordinary).unwrap();
+            std::fs::create_dir(&original).unwrap();
+            std::fs::create_dir(&replacement).unwrap();
+            std::os::unix::fs::symlink(&original, &alias).unwrap();
+            let canonical = std::fs::canonicalize(&original).unwrap();
+            let canonical_replacement = std::fs::canonicalize(&replacement).unwrap();
             assert_eq!(std::fs::canonicalize(&alias).unwrap(), canonical);
             let selected = alias.to_str().unwrap().to_string();
             let canonical_text = canonical.to_str().unwrap().to_string();
@@ -11272,7 +11261,9 @@ mod tests {
                     membership_only: true,
                 } = message
                 else {
-                    panic!("trust composition must request ownership only: {message:?}");
+                    panic!(
+                        "trusted approval must check the directory without listing it: {message:?}"
+                    );
                 };
                 assert_eq!(cwd, peer_selected);
                 assert_eq!(
@@ -11286,7 +11277,7 @@ mod tests {
                         parent: None,
                         children: vec![],
                         truncated: false,
-                        managed_checkout: true,
+                        managed_checkout: false,
                     })
                     .await
                     .unwrap();
@@ -11305,8 +11296,8 @@ mod tests {
                 };
                 assert_eq!(
                     std::fs::canonicalize(&peer_alias).unwrap(),
-                    canonical_ordinary,
-                    "premise: the original alias now points outside the managed checkout"
+                    canonical_replacement,
+                    "premise: the alias now points to a different plain folder"
                 );
                 assert_eq!(
                     cwd, peer_canonical,
@@ -11387,7 +11378,7 @@ mod tests {
             };
             assert_eq!(
                 cwd, canonical_text,
-                "approval must name the checked managed directory"
+                "approval must name the checked directory"
             );
             assert_eq!(launch, expected);
             assert!(!task.is_finished());
@@ -11396,10 +11387,10 @@ mod tests {
                 "the peer must still be waiting for approval's mutation"
             );
             std::fs::remove_file(&alias).unwrap();
-            std::os::unix::fs::symlink(&ordinary, &alias).unwrap();
+            std::os::unix::fs::symlink(&replacement, &alias).unwrap();
             assert_eq!(
                 std::fs::canonicalize(&alias).unwrap(),
-                std::fs::canonicalize(&ordinary).unwrap()
+                std::fs::canonicalize(&replacement).unwrap()
             );
             assert_eq!(
                 answer_card(&h, "allow").await,
@@ -12340,10 +12331,9 @@ mod tests {
         ));
     }
 
-    /// Inheritance follows the destination's trust policy, not the parent's.
-    /// Exercise the real approval and dispatch path for every trust-capable
-    /// harness, including an Antigravity plain folder that needs no ownership
-    /// lookup. Settings changes during approval leave the card's choice intact.
+    /// Inherited spawn composes with current Settings even in a plain folder.
+    /// Approval freezes that choice for dispatch. Antigravity still resolves
+    /// its directory on the supervisor when it fills the launch argument.
     #[farhelm_testtrace::test]
     async fn inherited_spawn_normalizes_trust_before_approval_and_dispatch() {
         use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection};
@@ -12374,9 +12364,8 @@ mod tests {
                 let inherited = crate::launches::compile(selection.clone()).unwrap();
                 assert_eq!(inherited.yolo(), Some(harness.offers_only_yolo()));
                 let mut expected_selection = selection;
-                let managed_only = harness != LaunchHarness::Antigravity;
-                expected_selection.workspace_trust =
-                    (enabled && (managed || !managed_only)).then_some(true);
+                let pins_approval = harness != LaunchHarness::Antigravity;
+                expected_selection.workspace_trust = enabled.then_some(true);
                 let expected = crate::launches::compile(expected_selection).unwrap();
                 let (client_side, peer) = tokio::io::duplex(64 * 1024);
                 let (seen, browsed) =
@@ -12471,7 +12460,7 @@ mod tests {
                 );
                 assert_eq!(
                     *browsed.lock().unwrap(),
-                    if enabled && managed_only {
+                    if enabled && pins_approval {
                         vec!["/target-directory".to_string()]
                     } else {
                         vec![]

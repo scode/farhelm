@@ -2,8 +2,8 @@
 //! buttons, its failure line, and which agent it speaks for. They port the old `claude-trust.spec.ts` and the band's
 //! half of `workspace-trust.spec.ts` (reference commit `24bc0580`), whose cases are named on the tests that replace
 //! them. The rules every agent's band shares are tested on Claude's; Codex's and Muse's tests cover what is the agent's
-//! own (its words, its switch, its dismissal and its occurrences). Antigravity exercises those same actions in an
-//! ordinary directory, where the other hints are withheld.
+//! own (its words, its switch, its dismissal and its occurrences). Their fixtures and Antigravity's use ordinary
+//! directories so the hint cannot silently depend on checkout ownership.
 //!
 //! The window tests run the real main view over the helm client's fake, whose terminal streams the connection serves,
 //! and read what the window drew from GPUI's driver record of the frame. The open session is `a`, at the question of
@@ -81,11 +81,13 @@ fn claude_asking(key: &'static str) -> Fixture {
     session(key).at_claude_trust_question()
 }
 
-/// The session filed under `key` launched as Codex, at the workspace-trust question in the helm fixture's checkout.
+/// An ordinary directory at Codex's own workspace-trust question.
 fn codex_asking(key: &'static str) -> Fixture {
     session(key)
         .launch(launched("codex"))
         .at_workspace_trust_question()
+        .unmanaged()
+        .not_launched_as_checkout()
 }
 
 /// The same for Muse.
@@ -93,6 +95,8 @@ fn muse_asking(key: &'static str) -> Fixture {
     session(key)
         .launch(launched("muse"))
         .at_workspace_trust_question()
+        .unmanaged()
+        .not_launched_as_checkout()
 }
 
 /// Antigravity's question in an ordinary directory. Clear both checkout ownership and launch provenance so neither
@@ -748,7 +752,7 @@ fn a_dont_show_again_while_another_preference_save_is_out_says_why(cx: &mut Test
 // ---- Which agent asks -----------------------------------------------------------------------------------------------
 
 /// The flag-based agents' explanation after their lead (the old `AgentTrustBand`'s).
-const FLAG: &str = "Farhelm can answer it for managed checkouts through a command-line flag. It's off by default \
+const FLAG: &str = "Farhelm can answer it through a command-line flag. It's off by default \
                     because repository hooks, settings and commands are then trusted.";
 
 /// The agent the band names decides whose switch it advertises and whose dismissal it stores, so a session must never
@@ -819,6 +823,8 @@ fn only_a_sessions_own_launch_names_the_agent_asking() {
 /// show again sends `agent`'s dismissal field alone, and with it stored the band stays away while `a` pushed at
 /// `other`'s question shows `other`'s.
 fn a_flag_agents_band_is_its_own(cx: &mut TestAppContext, agent: Agent, other: Agent, copy: &str) {
+    let row: SessionRow = serde_json::from_value((agent.asking)("a").entry().value).unwrap();
+    assert!(row.info.working_copy.is_none(), "premise: plain directory");
     let mut trust = open_as(cx, agent);
     trust.shown();
     assert_eq!(
@@ -882,7 +888,7 @@ fn codexs_band_is_its_own(cx: &mut TestAppContext) {
         cx,
         CODEX,
         MUSE,
-        &format!("Codex asks about trust for this checkout. {FLAG}"),
+        &format!("Codex asks about trust for this folder. {FLAG}"),
     );
 }
 
@@ -893,7 +899,7 @@ fn muses_band_is_its_own(cx: &mut TestAppContext) {
         cx,
         MUSE,
         CODEX,
-        &format!("Muse asks about trust for this checkout. {FLAG}"),
+        &format!("Muse asks about trust for this folder. {FLAG}"),
     );
 }
 
@@ -901,11 +907,6 @@ fn muses_band_is_its_own(cx: &mut TestAppContext) {
 /// × lasts for the current question, and the saved dismissal leaves Codex's hint available.
 #[gpui::test]
 fn antigravitys_band_shows_in_an_ordinary_directory(cx: &mut TestAppContext) {
-    let row: SessionRow = serde_json::from_value(antigravity_asking("a").entry().value).unwrap();
-    assert!(
-        row.info.working_copy.is_none(),
-        "the premise: no managed checkout"
-    );
     a_flag_agents_band_is_its_own(
         cx,
         ANTIGRAVITY,

@@ -176,9 +176,9 @@ impl TrustAgent {
     pub(super) fn label(self) -> &'static str {
         match self {
             TrustAgent::Claude => "Answer Claude's \"trust this folder?\" for new checkouts",
-            TrustAgent::Codex => "Answer Codex's folder-trust question for managed checkouts",
-            TrustAgent::Muse => "Answer Muse's workspace-trust question for managed checkouts",
-            TrustAgent::Pi => "Approve Pi project resources for managed checkouts",
+            TrustAgent::Codex => "Answer Codex's folder-trust question",
+            TrustAgent::Muse => "Answer Muse's workspace-trust question",
+            TrustAgent::Pi => "Approve Pi project resources",
             TrustAgent::Antigravity => "Skip Antigravity's workspace trust question",
         }
     }
@@ -207,19 +207,16 @@ impl TrustAgent {
                  agent they start with."
             }
             TrustAgent::Codex => {
-                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes a command-line trust \
-                 override to Codex. Folders outside managed checkouts keep Codex's own trust behavior. Codex's saved \
-                 configuration is unchanged."
+                "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
+                 launch. Codex keeps its saved configuration."
             }
             TrustAgent::Muse => {
-                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes Muse's trust option \
-                 for that launch. Folders outside managed checkouts keep Muse's own trust behavior. Muse's saved \
-                 configuration is unchanged."
+                "In folders you choose and in managed checkouts, Farhelm passes Muse's trust option for that launch. \
+                 Muse keeps its saved configuration."
             }
             TrustAgent::Pi => {
-                "For folders Farhelm clones, including agent-requested checkouts, Farhelm passes Pi's option to \
-                 approve project settings and extensions for that launch. Folders outside managed checkouts keep \
-                 Pi's normal resource approval. Pi's saved configuration is unchanged."
+                "In folders you choose and in managed checkouts, Farhelm tells Pi to approve project settings and \
+                 extensions for that launch. Pi keeps its saved configuration."
             }
             TrustAgent::Antigravity => {
                 "For plain folders and managed checkouts, Farhelm passes Antigravity's --settings option for that \
@@ -315,8 +312,10 @@ impl TrustAgent {
     /// Whether the discovery hint applies only to folders Farhelm checked out.
     pub(crate) fn managed_checkouts_only(self) -> bool {
         match self {
-            TrustAgent::Claude | TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi => true,
-            TrustAgent::Antigravity => false,
+            TrustAgent::Claude => true,
+            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
+                false
+            }
         }
     }
 
@@ -326,7 +325,7 @@ impl TrustAgent {
     /// reference commit `24bc0580`.
     pub(crate) fn band_words(self) -> Option<BandWords> {
         // The flag-based agents' explanation after their lead.
-        const FLAG: &str = "Farhelm can answer it for managed checkouts through a command-line flag. It's off by \
+        const FLAG: &str = "Farhelm can answer it through a command-line flag. It's off by \
                             default because repository hooks, settings and commands are then trusted.";
         match self {
             TrustAgent::Claude => Some(BandWords {
@@ -339,17 +338,17 @@ impl TrustAgent {
                 dismiss_help: "Stop showing this note for every session; Settings can turn it back on",
             }),
             TrustAgent::Codex => Some(BandWords {
-                lead: "Codex asks about trust for this checkout. ",
+                lead: "Codex asks about trust for this folder. ",
                 rest: FLAG,
                 settings: "Settings",
-                settings_help: "Open Settings at the Codex managed-checkout trust switch",
+                settings_help: "Open Settings at the Codex folder-trust switch",
                 dismiss_help: "Stop showing this Codex note for every session; Settings can turn it back on",
             }),
             TrustAgent::Muse => Some(BandWords {
-                lead: "Muse asks about trust for this checkout. ",
+                lead: "Muse asks about trust for this folder. ",
                 rest: FLAG,
                 settings: "Settings",
-                settings_help: "Open Settings at the Muse managed-checkout trust switch",
+                settings_help: "Open Settings at the Muse workspace-trust switch",
                 dismiss_help: "Stop showing this Muse note for every session; Settings can turn it back on",
             }),
             TrustAgent::Antigravity => Some(BandWords {

@@ -95,7 +95,7 @@ clears any choice it cannot take, and the launcher tells you when it does. You c
 choosing an agent. If choosing an agent replaces a permission you chose with a riskier mode, a red banner says so and
 offers **Undo**, including on your first agent choice. [Supported agents](/docs/agents/) lists what
 each agent offers. To answer directory-trust questions automatically, use the
-[agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts). To run something that is not one
+[agent trust settings](/docs/using/start-a-session/#workspace-trust). To run something that is not one
 of these agents, start [Bash or Zsh, after the agent chips,](/docs/agents/shells/) or use the **Command**
 tab for a [custom command](/docs/agents/custom-commands/).
 
@@ -350,41 +350,6 @@ that host. Choosing a different checkout directory likewise discards the old spa
 repository. Unused spares go with the repository cache after 30 days. Leave `.farhelm-spares` to Farhelm;
 [uninstalling](/docs/get-started/uninstall/) keeps it alongside your other checkout data.
 
-### Trust in managed checkouts
-
-Codex, Muse Code and Pi have their own trust switches under **Settings → Agents**, all off by default. Each
-applies on every host to directories Farhelm manages, including checkouts an agent requests. Enabling one lets the repository's own hooks,
-settings and commands run as if you had approved them. Farhelm passes an argument when starting the agent; it leaves
-the agent's saved configuration alone. Directories outside managed checkouts keep the agent's own trust behavior.
-These switches apply to the launcher's **Agent** tab; [custom commands](/docs/agents/custom-commands/) keep their own
-arguments.
-
-Antigravity's switch also applies to directories you choose yourself. See [Antigravity workspace
-trust](/docs/agents/antigravity/#workspace-trust).
-
-The current setting applies when you start a session or use **Clone**, **Restart with** or **Replace with** in a
-directory it covers. Plain **Restart** and **Replace** reuse the trust carried by the saved launch. See
-[Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
-of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
-
-On the **Claude Code** page, you can **Answer Claude's "trust this folder?" for new checkouts**. This is off by default and
-applies to future managed checkouts on every host, including ones an agent requests or that start with another agent.
-Directories you choose yourself still get Claude's question.
-
-There is no supported Claude switch for this. Farhelm edits Claude's own settings file on the session's host, normally
-`~/.claude.json`, and removes that directory's trust key when the checkout moves to the trash. The edit is best effort:
-a Claude session exiting at the same instant can lose either program's update, and a future Claude version can change
-how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
-trust allows the repository's own Claude hooks and commands to run.
-
-While Claude, Codex or Muse asks its trust question in a managed checkout, or Antigravity asks in any directory, a
-note appears above the terminal if that agent's switch is off. Its **Settings** button (**Settings and caveats** for
-Claude) opens the agent's Settings page at its trust switch. × hides the note
-until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
-other agents' notes alone. To bring one back, turn on the hint switch on the agent's page. You still answer
-the current question in the terminal. Pi has a trust switch without a hint. The Codex, Muse and Antigravity hints
-apply to sessions started from the **Agent** tab.
-
 ### Checkout management
 
 Each host can have a checkout directory of its own in its [settings](/docs/using/manage-hosts/#host-settings).
@@ -400,6 +365,41 @@ A host given its own command there keeps it whatever **Settings** says.
 Farhelm owns the managed checkouts it makes, the directory they go into, their prepared checkouts and their trash. Work in a checkout as usual,
 but do not restore a backup or filesystem snapshot over them, and keep them on an ordinary filesystem rather than one
 like FAT: Farhelm does not detect such changes.
+
+<span id="trust-in-managed-checkouts"></span>
+
+## Workspace trust
+
+Codex, Muse Code and Pi have their own trust switches under **Settings → Agents**, all off by default. Each applies in
+directories you choose and in managed checkouts on any host. Enabling one lets the repository's hooks, settings and
+commands run as if you had approved them. Farhelm passes an argument for the launch and the agent keeps its saved
+configuration. The switches apply to the launcher's **Agent** tab. [Custom commands](/docs/agents/custom-commands/)
+supply their own arguments.
+
+See [Antigravity workspace trust](/docs/agents/antigravity/#workspace-trust) for that agent's switch.
+
+The current setting applies when you start a session or use **Clone**, **Restart with** or **Replace with**.
+Plain **Restart** and **Replace** reuse the trust carried by the saved launch. See
+[Stop, restart, and resume](/docs/using/stop-restart-resume/) for those actions. Muse's YOLO mode grants trust regardless
+of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
+
+On the **Claude Code** page, you can **Answer Claude's "trust this folder?" for new checkouts**. This is off by default and
+applies to future managed checkouts on every host, including ones an agent requests or that start with another agent.
+Directories you choose yourself still get Claude's question.
+
+There is no supported Claude switch for this. Farhelm edits Claude's own settings file on the session's host, normally
+`~/.claude.json`, and removes that directory's trust key when the checkout moves to the trash. The edit is best effort:
+a Claude session exiting at the same instant can lose either program's update, and a future Claude version can change
+how the file works without notice. Read the caution in Settings before turning it on. As with answering Yes yourself,
+trust allows the repository's own Claude hooks and commands to run.
+
+While Codex, Muse or Antigravity asks its trust question in any directory, or Claude asks in a managed checkout, a
+note appears above the terminal if that agent's switch is off. Its **Settings** button (**Settings and caveats** for
+Claude) opens the agent's Settings page at its trust switch. × hides the note
+until the question leaves the screen, and **Don't show again** stops that agent's note for every session, leaving the
+other agents' notes alone. To bring one back, turn on the hint switch on the agent's page. You still answer
+the current question in the terminal. Pi has a trust switch without a hint. The Codex, Muse and Antigravity hints
+apply to sessions started from the **Agent** tab.
 
 ## When a launch fails
 

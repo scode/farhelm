@@ -110,6 +110,8 @@ pub(crate) mod header;
 mod hook_band;
 #[cfg(test)]
 pub(crate) use hook_band::golden as hook_band_golden;
+#[cfg(test)]
+pub(crate) use trust_band::golden as trust_band_golden;
 mod retired;
 pub(crate) mod trust_band;
 pub(crate) mod unavailable;

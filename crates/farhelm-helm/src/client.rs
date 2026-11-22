@@ -3300,11 +3300,10 @@ impl SupervisorClient {
         }
     }
 
-    /// Resolve launch ownership without listing unrelated children. The path
-    /// and membership are one target-side observation; callers granting trust
-    /// must dispatch this canonical path, so an alias cannot change its target
-    /// while approval waits.
-    pub async fn managed_checkout_for_cwd(&self, cwd: &str) -> anyhow::Result<(String, bool)> {
+    /// Check a launch directory on its own host without listing children.
+    /// Trusted approval cards dispatch this canonical path so a symlink
+    /// cannot redirect the launch during the wait for Allow.
+    pub async fn canonical_launch_directory(&self, cwd: &str) -> anyhow::Result<String> {
         let req_id = self.req_id();
         match self
             .request(
@@ -3317,12 +3316,8 @@ impl SupervisorClient {
             )
             .await?
         {
-            ControlMsg::DirectoryListing {
-                cwd,
-                managed_checkout,
-                ..
-            } => Ok((cwd, managed_checkout)),
-            other => Err(wrong_reply("BrowseDirectory membership", &other)),
+            ControlMsg::DirectoryListing { cwd, .. } => Ok(cwd),
+            other => Err(wrong_reply("BrowseDirectory path check", &other)),
         }
     }
 

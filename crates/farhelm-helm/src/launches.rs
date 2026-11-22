@@ -729,10 +729,10 @@ pub(crate) fn workspace_trust_enabled(
     }
 }
 
-/// An enabled managed-only harness needs proof from the target supervisor
-/// that the chosen folder belongs to a Farhelm checkout.
+/// These trust mechanisms carry the directory shown on the approval card to
+/// dispatch. Antigravity already resolves its directory in the supervisor.
 #[warn(clippy::wildcard_enum_match_arm)]
-pub(crate) fn workspace_trust_requires_managed_checkout(harness: LaunchHarness) -> bool {
+pub(crate) fn workspace_trust_pins_approval_cwd(harness: LaunchHarness) -> bool {
     match harness {
         LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => true,
         LaunchHarness::Antigravity

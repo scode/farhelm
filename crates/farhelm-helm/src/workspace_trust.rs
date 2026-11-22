@@ -30,6 +30,25 @@ impl TrustResolvedLaunch {
     pub(crate) fn into_launch(self) -> SessionLaunch {
         self.0
     }
+
+    /// Freeze the directory that an agent-requested approval card will show.
+    /// A checked path binds trust to the shown destination across the wait for
+    /// Allow. The lookup uses the same host connection as the approval and
+    /// does not consult checkout ownership to grant trust.
+    pub(crate) async fn pin_trusted_approval_cwd(
+        &self,
+        client: &SupervisorClient,
+        cwd: &mut String,
+    ) -> anyhow::Result<()> {
+        if self.0.agent_selection().is_some_and(|selection| {
+            selection.workspace_trust == Some(true)
+                && launches::workspace_trust_pins_approval_cwd(selection.harness)
+        }) {
+            *cwd = crate::sessions::within_host_read_bound(client.canonical_launch_directory(cwd))
+                .await?;
+        }
+        Ok(())
+    }
 }
 
 /// Choose the no-trust policy only when this launch has no workspace-trust knob.
@@ -55,53 +74,19 @@ pub(crate) fn try_without_workspace_trust(
     }
 }
 
-/// Apply Settings to a new composition, consulting target-host ownership only
-/// when it can change the answer. An off switch always clears incoming trust
-/// and needs no directory read; ordinary default-off creates keep their
-/// existing admission and failure path. Explicit fresh intent is already
-/// known to be managed, even before its directory exists. A managed answer
-/// replaces the caller's cwd with the exact canonical path that supplied
-/// trust, so approval cannot later dispatch through a repointed alias.
+/// Apply current Settings to a new composition. A supported launch uses its
+/// agent's switch in every directory. Commands and unsupported agents keep
+/// their words without reading Settings.
 pub(crate) async fn normalize_launch_workspace_trust(
     state: &AppState,
-    client: &SupervisorClient,
     launch: SessionLaunch,
-    cwd: &mut String,
-    fresh_checkout: bool,
 ) -> anyhow::Result<TrustResolvedLaunch> {
     let launch = match try_without_workspace_trust(launch) {
         Ok(resolved) => return Ok(resolved),
         Err(launch) => launch,
     };
     let config = state.store.resolve_checkout_config(None).await?;
-    let managed = if fresh_checkout {
-        true
-    } else if needs_managed_checkout_lookup(&launch, &config) {
-        // This canonical ownership answer belongs to the pinned destination
-        // supervisor. Neither the configured root nor source provenance
-        // proves that an arbitrary existing cwd is a managed checkout.
-        let (canonical_cwd, managed) = client.managed_checkout_for_cwd(cwd).await?;
-        if managed {
-            *cwd = canonical_cwd;
-        }
-        managed
-    } else {
-        false
-    };
-    configured_launch_workspace_trust(launch, &config, managed)
-}
-
-/// Off switches and user-authored settings cannot gain trust from a lookup.
-/// Antigravity already allows plain folders, so only managed-only agents need
-/// a supervisor read for a destination that is not known to be a fresh checkout.
-pub(crate) fn needs_managed_checkout_lookup(
-    launch: &SessionLaunch,
-    config: &crate::checkout_config::ResolvedCheckoutConfig,
-) -> bool {
-    launch.agent_selection().is_some_and(|selection| {
-        launches::workspace_trust_requires_managed_checkout(selection.harness)
-            && trust_enabled_for_selection(selection, config)
-    })
+    configured_launch_workspace_trust(launch, &config)
 }
 
 /// The setting can contribute trust only when it does not override the
@@ -115,20 +100,16 @@ fn trust_enabled_for_selection(
 }
 
 /// Resolve the setting into the selection while preserving non-trust argv.
-/// Fresh creates use this with their root/hook snapshot; approved agent
-/// launches use it once before the card and carry that result to dispatch.
-/// Restart with checks ownership for its live session's fixed cwd through the
-/// same identity-checked read as New. Commands retain their literal words.
+/// Fresh creates use the same Settings snapshot as their checkout and
+/// post-clone command. Agent-requested launches carry the choice shown on the
+/// card through dispatch. Commands retain their literal words.
 pub(crate) fn configured_launch_workspace_trust(
     launch: SessionLaunch,
     config: &crate::checkout_config::ResolvedCheckoutConfig,
-    managed: bool,
 ) -> anyhow::Result<TrustResolvedLaunch> {
-    let trust = launch.agent_selection().and_then(|selection| {
-        ((managed || !launches::workspace_trust_requires_managed_checkout(selection.harness))
-            && trust_enabled_for_selection(selection, config))
-        .then_some(true)
-    });
+    let trust = launch
+        .agent_selection()
+        .and_then(|selection| trust_enabled_for_selection(selection, config).then_some(true));
     launches::with_workspace_trust(launch, trust)
         .map(TrustResolvedLaunch)
         .map_err(invalid_request)
@@ -242,39 +223,36 @@ mod tests {
                 workspace_trust: None,
             };
             let bare = launches::compile(selection.clone()).unwrap();
-            for managed in [false, true] {
-                assert!(!needs_managed_checkout_lookup(&bare, &config));
-                let resolved = configured_launch_workspace_trust(bare.clone(), &config, managed)
-                    .unwrap()
-                    .into_launch();
-                assert_eq!(
-                    resolved.agent_selection().unwrap().workspace_trust,
-                    expected
+            let resolved = configured_launch_workspace_trust(bare.clone(), &config)
+                .unwrap()
+                .into_launch();
+            assert_eq!(
+                resolved.agent_selection().unwrap().workspace_trust,
+                expected
+            );
+            selection.workspace_trust = expected;
+            assert_eq!(resolved, launches::compile(selection).unwrap());
+            let start = resolved.start_argv().unwrap();
+            if expected.is_some() {
+                let marker = start.iter().position(|word| word == MARKER).unwrap();
+                assert_eq!(start[marker - 1], "--settings");
+                assert!(
+                    start
+                        .iter()
+                        .position(|word| word == "--")
+                        .is_none_or(|index| marker < index)
                 );
-                selection.workspace_trust = expected;
-                assert_eq!(resolved, launches::compile(selection.clone()).unwrap());
-                let start = resolved.start_argv().unwrap();
-                if expected.is_some() {
-                    let marker = start.iter().position(|word| word == MARKER).unwrap();
-                    assert_eq!(start[marker - 1], "--settings");
-                    assert!(
-                        start
-                            .iter()
-                            .position(|word| word == "--")
-                            .is_none_or(|index| marker < index)
-                    );
-                } else {
-                    assert_eq!(
-                        resolved, bare,
-                        "the caller's settings survive byte for byte"
-                    );
-                }
+            } else {
                 assert_eq!(
-                    launches::with_workspace_trust(resolved, None).unwrap(),
-                    bare,
-                    "clearing the opt-in preserves the complete original start and resume"
+                    resolved, bare,
+                    "the caller's settings survive byte for byte"
                 );
             }
+            assert_eq!(
+                launches::with_workspace_trust(resolved, None).unwrap(),
+                bare,
+                "clearing the opt-in preserves the complete original start and resume"
+            );
         }
     }
 }
