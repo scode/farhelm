@@ -66,7 +66,7 @@ use std::collections::{HashMap, HashSet};
 
 use farhelm_proto::provisioning::{ProvisioningOperation, ProvisioningView, RunStatus};
 use farhelm_proto::ui_channel::{Collection, HostView, PREFERENCES_KEY, Preferences};
-use gpui::{App, Context, EntityId, Global, Subscription, Window};
+use gpui::{App, Context, Subscription, Window};
 
 use super::progress;
 use super::update;
@@ -419,38 +419,18 @@ impl State {
     }
 }
 
-/// [`State`] as an app global, tagged with the entity id of the operation store it was made under.
-#[derive(Default)]
-struct Kept {
-    store: Option<EntityId>,
-    state: State,
-}
-
-impl Global for Kept {}
+/// The rail and attention list observe status independently of progress and uninstall notices.
+type Kept = super::SessionState<State>;
 
 /// What is kept for the current UI session; `None` while the window is inert or when nothing was kept under it yet.
 fn kept(cx: &App) -> Option<&State> {
-    let store = super::current_operations_id(cx)?;
-    cx.try_global::<Kept>()
-        .filter(|kept| kept.store == Some(store))
-        .map(|kept| &kept.state)
+    Kept::read(cx)
 }
 
 /// Apply `change` to the current UI session's state, starting it from empty when it was made under another session,
 /// and store it only when it changed, so the global's observers redraw only then. Nothing while the window is inert.
 fn change(cx: &mut App, change: impl FnOnce(&mut State)) {
-    let Some(store) = super::current_operations_id(cx) else {
-        return;
-    };
-    let before = kept(cx);
-    let mut state = before.cloned().unwrap_or_default();
-    change(&mut state);
-    if before != Some(&state) {
-        cx.set_global(Kept {
-            store: Some(store),
-            state,
-        });
-    }
+    Kept::change(cx, change);
 }
 
 /// Whether host `host`'s rail avatar shows the setup or Update warning (SPEC.md, "Session list": "A setup or Update

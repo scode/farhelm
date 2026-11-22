@@ -145,7 +145,7 @@ use std::collections::HashMap;
 use farhelm_proto::provisioning::ProvisioningView;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use gpui::{
-    AnyElement, App, Context, Div, EntityId, FocusHandle, FontWeight, InteractiveElement,
+    AnyElement, App, Context, Div, EntityId, FocusHandle, FontWeight, Global, InteractiveElement,
     IntoElement, ParentElement, Render, Role, ScrollHandle, SharedString,
     StatefulInteractiveElement, Styled, Subscription, WeakEntity, Window, div,
     prelude::FluentBuilder as _, px,
@@ -160,7 +160,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId};
 use crate::local_time::{self, Zone};
-use crate::operations::{Failure, OpKey, Work};
+use crate::operations::{Command, Failure, NotStarted, OpKey, Outcome, Work};
 use crate::render_count;
 use crate::session::{self, PerSession};
 use crate::theme::{self, Palette, Token, metrics};
@@ -1068,6 +1068,86 @@ fn listed(host: i64, cx: &App) -> Option<HostView> {
 /// its submodules, which own those globals.
 fn current_operations_id(cx: &App) -> Option<EntityId> {
     session::current_operations(cx).map(|operations| operations.entity_id())
+}
+
+/// Host-panel state belongs to the operation store that first observed it.
+/// Each payload type is a separate global so unrelated changes wake only its observers.
+struct SessionState<T> {
+    store: EntityId,
+    value: T,
+}
+
+impl<T: 'static> Global for SessionState<T> {}
+
+impl<T: 'static> SessionState<T> {
+    /// A reset hides state tagged with the previous operation store.
+    fn read(cx: &App) -> Option<&T> {
+        Self::for_store(current_operations_id(cx)?, cx)
+    }
+
+    /// Both reads and edits check the recorded owner against the store they use.
+    fn for_store(store: EntityId, cx: &App) -> Option<&T> {
+        cx.try_global::<Self>()
+            .filter(|state| state.store == store)
+            .map(|state| &state.value)
+    }
+}
+
+impl<T: Clone + Default + PartialEq + 'static> SessionState<T> {
+    /// Start from the new store's default on its first edit. Later edits only
+    /// publish when the value changes, so observers can redraw on publication.
+    fn change(cx: &mut App, change: impl FnOnce(&mut T)) {
+        let Some(store) = current_operations_id(cx) else {
+            return;
+        };
+        let before = Self::for_store(store, cx);
+        let mut value = before.cloned().unwrap_or_default();
+        change(&mut value);
+        if before != Some(&value) {
+            cx.set_global(Self { store, value });
+        }
+    }
+}
+
+/// The panel clears its line at admission and supplies its own wording for
+/// a busy preference save or a refusal from the helm.
+enum PermanentAnswer {
+    Admitted,
+    Busy,
+    Refused(HostText),
+}
+
+/// Save a confirmation's permanent answer under the same key Settings uses.
+/// A reset retires the store and leaves its generic connection notice to explain the loss.
+fn save_permanent_answer(
+    make_command: fn() -> Result<Command, farhelm_helm_client::PathError>,
+    show: fn(PermanentAnswer, &mut App),
+    cx: &mut App,
+) {
+    let Some(operations) = session::current_operations(cx) else {
+        return;
+    };
+    let command = match make_command() {
+        Ok(command) => command,
+        Err(error) => {
+            tracing::debug!(?error, "the permanent answer's preference not built");
+            return;
+        }
+    };
+    let started = operations.update(cx, |operations, cx| {
+        operations.start(&OpKey::preferences(), command, cx, move |settled, cx| {
+            if let Outcome::Refused(refusal) = &settled.outcome {
+                show(PermanentAnswer::Refused(refusal.words.clone()), cx);
+            }
+        })
+    });
+    match started {
+        Ok(()) => show(PermanentAnswer::Admitted, cx),
+        Err(NotStarted::Busy(_)) => show(PermanentAnswer::Busy, cx),
+        Err(not_started) => {
+            tracing::debug!(?not_started, "the permanent answer's preference not sent")
+        }
+    }
 }
 
 /// Whether a session launch is in flight anywhere in the operation store: what this module's host actions (Add host's

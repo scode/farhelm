@@ -63,9 +63,9 @@ use farhelm_proto::provisioning::{
     ProvisioningOperation, ProvisioningView, RunStatus, StepStatus, StepView,
 };
 use gpui::{
-    AnyElement, App, EntityId, FontWeight, Global, InteractiveElement as _, IntoElement,
-    ParentElement as _, Role, SharedString, StatefulInteractiveElement as _, Styled as _, Window,
-    div, prelude::FluentBuilder as _, px, svg,
+    AnyElement, App, FontWeight, InteractiveElement as _, IntoElement, ParentElement as _, Role,
+    SharedString, StatefulInteractiveElement as _, Styled as _, Window, div,
+    prelude::FluentBuilder as _, px, svg,
 };
 
 use crate::assets::{self, Icon};
@@ -137,46 +137,13 @@ pub(crate) fn fold(seen: &mut HashMap<i64, Seen>, host: i64, run_id: &str) {
     }
 }
 
-/// The [`Seen`] records of the UI session whose operation store is `store`, as an app global ([`follow_current`]).
-#[derive(Default)]
-struct Kept {
-    store: Option<EntityId>,
-    seen: HashMap<i64, Seen>,
-}
-
-impl Global for Kept {}
+/// The progress clock and fold state are kept together under one store's host IDs.
+type Kept = super::SessionState<HashMap<i64, Seen>>;
 
 /// The current UI session's records, by host id; empty while the window is inert, before the first follow, and right
 /// after a reset, until the panel follows the new session's store.
 pub(crate) fn seen_now(cx: &App) -> HashMap<i64, Seen> {
-    super::current_operations_id(cx)
-        .and_then(|store| {
-            cx.try_global::<Kept>()
-                .filter(|kept| kept.store == Some(store))
-        })
-        .map(|kept| kept.seen.clone())
-        .unwrap_or_default()
-}
-
-/// Change the current UI session's records with `change`, starting them over when they were made under another
-/// session, and store them only when they changed, as [`super::status`] stores its state, so the global's observers
-/// (none yet) would hear only of a change. Nothing while the window is inert.
-fn change_current(cx: &mut App, change: impl FnOnce(&mut HashMap<i64, Seen>)) {
-    let Some(store) = super::current_operations_id(cx) else {
-        return;
-    };
-    let before = cx
-        .try_global::<Kept>()
-        .filter(|kept| kept.store == Some(store))
-        .map(|kept| &kept.seen);
-    let mut seen = before.cloned().unwrap_or_default();
-    change(&mut seen);
-    if before != Some(&seen) {
-        cx.set_global(Kept {
-            store: Some(store),
-            seen,
-        });
-    }
+    Kept::read(cx).cloned().unwrap_or_default()
 }
 
 /// [`follow`] the current store's host progress into the current UI session's records, at the ticker's time of day.
@@ -194,12 +161,12 @@ pub(crate) fn follow_current(cx: &mut App) {
         .into_iter()
         .cloned()
         .collect();
-    change_current(cx, |seen| follow(seen, &runs, now));
+    Kept::change(cx, |seen| follow(seen, &runs, now));
 }
 
 /// [`fold`] host `host`'s run `run_id` in the current UI session's records, as its Collapse does.
 pub(crate) fn fold_current(host: i64, run_id: &str, cx: &mut App) {
-    change_current(cx, |seen| fold(seen, host, run_id));
+    Kept::change(cx, |seen| fold(seen, host, run_id));
 }
 
 // ---- Which runs show, and what they open ----------------------------------------------------------------------------

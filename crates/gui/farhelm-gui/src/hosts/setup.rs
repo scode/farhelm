@@ -92,7 +92,7 @@ use crate::components::{Button, HoverHelp, Role, Tier, copy_button, with_hover_h
 use crate::focus::{self, Mark};
 use crate::host_text::{self, HostSentence, HostText};
 use crate::layers;
-use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
+use crate::operations::{Command, OpKey, Outcome, Work};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
 use crate::settings::Refused;
@@ -893,39 +893,21 @@ fn settle_sandbox_rerun(offer: Offer, skips: bool, window: AnyWindowHandle, cx: 
 /// While another preference save is in flight (from Settings, the templates dialog or a tunnel consent) the store refuses
 /// this one, which sends nothing and says so on the same line, so the user is not asked again later with no word why.
 fn stop_asking(cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let command = match crate::settings::skip_host_setup_command() {
-        Ok(command) => command,
-        Err(error) => {
-            tracing::debug!(?error, "the permanent answer's preference not built");
-            return;
-        }
-    };
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::preferences(), command, cx, |settled, cx| {
-            if let Outcome::Refused(refusal) = &settled.outcome {
-                let store = super::current_operations_id(cx);
-                show(cx, |lines| {
-                    lines.stop_asking = store.map(|store| (store, refusal.words.clone()))
-                });
-            }
-        })
-    });
-    match started {
-        Ok(()) => show(cx, |lines| lines.stop_asking = None),
-        Err(NotStarted::Busy(_)) => {
+    use super::PermanentAnswer;
+
+    super::save_permanent_answer(
+        crate::settings::skip_host_setup_command,
+        |answer, cx| {
+            let words = match answer {
+                PermanentAnswer::Admitted => None,
+                PermanentAnswer::Busy => Some(HostText::from_host(Refused::WORDS)),
+                PermanentAnswer::Refused(words) => Some(words),
+            };
             let store = super::current_operations_id(cx);
-            let words = HostText::from_host(Refused::WORDS);
-            show(cx, |lines| {
-                lines.stop_asking = store.map(|store| (store, words))
-            });
-        }
-        Err(not_started) => {
-            tracing::debug!(?not_started, "the permanent answer's preference not sent")
-        }
-    }
+            show(cx, |lines| lines.stop_asking = store.zip(words));
+        },
+        cx,
+    );
 }
 
 /// What the Hosts panel's line shows: a setup refused after the user moved on from it, by its host-add key (the words
