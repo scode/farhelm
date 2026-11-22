@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.44.0 - 2026-11-22
 
-**DRAFT release notes - not yet finalized**
-
 ### 🚀 Added
 
 - Farhelm can now enable conversation tracking (e.g. so 'restart' works and allows you to resume a conversation) for Antigravity and Grok. Previously this was a manual installation step because it requires modifying the agent configuration globally - they don't support enabling the necessary hooks just for the purpose of a single agent invocation. Now, it will prompt you to enable this when you launch a session unless you've turned it off (and you can shut it up forever with one click if you don't want it). (#4483, #4495, #4513)
@@ -16,11 +14,11 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 - Session launcher dialog has been significantly revamped (hopefully for the better!). (#4433, #4436, #4438, #4442, #4460, #4461)
 - Settings dialog has been improved somewhat. Still needs work, but should be a bit more pleasant. (#4434, #4435, #4437, #4439)
-- The setting to automatically cause agents to "trust" the folders you launch sessions in (to avoid the annoying "trust this folder?" prompts), are now more widely applied across agent types - and all agent launches, not just those using managed GitHub checkouts. Note that for some agents, this will cause an accumulation of settings entries as the set of unique project directories you launch into with farhelm over time increases. (#4567, #4572, #4583)
+- The setting to automatically cause agents to "trust" the folders you launch sessions in (to avoid the annoying "trust this folder?" prompts), are now more widely applied across agent types - and all agent launches, not just those using managed GitHub checkouts. As a consequence, for agents like Claude where this requires changing on-disk configuration settings to mention specific directories, a consequence is that Farhelm will cause an accumulation of unique project directories you launch into over time. (#4567, #4572, #4583)
 
 ### 🔧 Fixes worth highlighting
 
-- Adding remote hosts that are running tailscale ssh should now work, as well as other ssh servers that don't properly respect and propagate the exit code of the program that got run. This does not mean we directly integrate with Tailscale yet (Farhelm does not run "tailscale ssh"), but it means that regular ssh to a tailscale hostname should now work. (#4617)
+- Adding remote hosts that are running tailscale ssh should now work, as well as other ssh servers that don't properly respect and propagate the exit code of the program that got run. For the specific case of Tailscale, you can now also mark a host as tailscale (see the other release note). (#4617)
 
 <details>
 <summary>All changes</summary>
