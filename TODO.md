@@ -394,6 +394,19 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Attach files pasted from a Wayland file manager.** A terminal paste can ignore copied files or type their displayed
+  paths. In the vendored Wayland `clipboard.rs`, read `text/uri-list` before image or text, as SPEC.md's “Attachments”
+  requires. Accept only local `file:` URLs. Keep ordinary paste working when the list has only web links or invalid
+  entries by reading the next available flavor from the captured offer. Cancel the paste if that offer has expired. Keep
+  the vendor patch and its tree in sync, and test both a file offer and a browser link offered as URI and plain text.
+
+- **Use the desktop's reduced-motion setting for the attention cue and other motion.** On Linux the attention cue can
+  disappear when the desktop portal and Farhelm's startup setting disagree. `layers/cue.rs` starts a flight from the
+  startup value in `ticker.rs`, while GPUI can jump the flight to its transparent last frame. Follow the toolkit's
+  preference everywhere and remove the separate desktop startup read. Use the stationary flash from SPEC.md's “Status”
+  while reduced motion is on, including during a live change. Make ongoing cursor and status animations pause and resume
+  with the preference while clocks and one-shot deadlines keep running. Test a preference change in an open window.
+
 - **Show the main terminal when a remembered shell tab cannot attach.** Reopening a session can leave it stuck
   reconnecting to a remembered shell tab whose terminal the supervisor cannot read. Fall back to the main terminal after
   an explicit initial refusal, even if the shell tab remains listed. The terminal stream currently uses the same detach

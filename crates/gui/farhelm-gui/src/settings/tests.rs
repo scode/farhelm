@@ -3718,6 +3718,29 @@ fn topic_input(cx: &mut VisualTestContext) -> crate::components::TextInputState 
     })
 }
 
+/// Linux Ctrl+F belongs to the focused field even when the caret cannot move. Bubbling at that boundary would
+/// focus Settings search and send the next typed character there.
+#[cfg(target_os = "linux")]
+#[gpui::test]
+fn ctrl_f_keeps_focus_in_a_settings_field_at_its_end(cx: &mut TestAppContext) {
+    let (mut helm, cx, _) = open_rail(cx, &Preferences::default());
+    show_ntfy(&mut helm, cx, ntfy("https://ntfy.sh", "", "default", false));
+    fill(cx, "ntfy-topic", "ab");
+    let topic = topic_input(cx);
+    assert!(cx.update(|window, cx| topic.focus_handle(cx).is_focused(window)));
+
+    keys(cx, "ctrl-a ctrl-f");
+    cx.simulate_input("x");
+    settle(cx);
+    assert_eq!(cx.update(|_, cx| topic.text(cx)).as_ref(), "axb");
+
+    keys(cx, "ctrl-e ctrl-f");
+    assert!(cx.update(|window, cx| topic.focus_handle(cx).is_focused(window)));
+    cx.simulate_input("y");
+    settle(cx);
+    assert_eq!(cx.update(|_, cx| topic.text(cx)).as_ref(), "axby");
+}
+
 /// SPEC_impl.md, "Drafts": while a save is in flight the value on screen is the one sent, and the bound field's tests
 /// include "a keystroke while saving". This form binds its fields to its draft itself (the drafts module's
 /// `DraftInput` saves one field per request), so the same legs are tested here: an edit taken while saving would be
