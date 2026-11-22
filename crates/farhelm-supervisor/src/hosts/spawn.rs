@@ -109,7 +109,8 @@ const _: () = assert!(DEFAULT_JOURNAL_CAP <= terminal_host::protocol::MAX_JOURNA
 /// The host checks the spec and refuses one that breaks its rules (an empty
 /// argv, a relative working directory, a NUL byte, a cap out of range) with
 /// its own one-line reason, which [`SpawnError::Refused`] carries.
-#[derive(Debug, Clone, PartialEq, Eq)]
+/// The environment can hold credentials, so the spec has no debug formatter.
+#[derive(Clone, PartialEq, Eq)]
 pub struct ChildSpec {
     /// The program and its arguments; `argv[0]` is the program.
     pub argv: Vec<OsString>,

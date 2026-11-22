@@ -607,6 +607,16 @@ impl Supervisor {
             error,
             left: HostLeft::Nothing,
         })?;
+        // Tabs inherit the recipe values without composing an agent command.
+        crate::recipe_credentials::RecipeCredentials::read(&crate::recipe_credentials::host_file(
+            &self.state_dir,
+        ))
+        .await
+        .map_err(|error| TabStartFailure::Unwind {
+            error,
+            left: HostLeft::Nothing,
+        })?
+        .inject(&mut child_env);
         let child = ChildSpec {
             argv: argv.into_iter().map(OsString::from).collect(),
             cwd: PathBuf::from(cwd),

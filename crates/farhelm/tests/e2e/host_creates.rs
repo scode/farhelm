@@ -357,16 +357,20 @@ async fn the_host_holds_no_credential_or_marker() {
     end_runtime(&host, host_pid).await;
 }
 
-/// Managed GitHub values must reach the login shell and every later spawn,
+/// Managed GitHub and recipe values must reach every later spawn,
 /// including Restart, without becoming durable launch input or host argv.
-/// Existing agents keep their environment; removing the file restores the
-/// ordinary host environment for new children. A corrupt file refuses before
-/// starting a tab and leaves no extra host or launch record to recover.
+/// The GitHub witness also covers the login shell. Existing agents keep
+/// their environment and removing a file restores the ordinary values.
+/// Invalid credentials refuse a spawn without leaving a host or launch record.
 #[farhelm_testtrace::test]
 async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     const FIRST: &str = "fictional-managed-github-first";
     const SECOND: &str = "fictional-managed-github-second";
     const AMBIENT: &str = "fictional-unmanaged-github";
+    const RECIPE_FIRST: &str = "fictional-first-recipe-token";
+    const RECIPE_SECOND: &str = "fictional-second-recipe-token";
+    const RECIPE_AMBIENT: &str = "fictional-unmanaged-recipe-token";
+    const RECIPE_KEY: &str = "ANTHROPIC_AUTH_TOKEN";
     let owned = farhelm_teststate::tempdir().unwrap();
     let shell_witness = owned.path().join("shell-token");
     let agent_witness = owned.path().join("agent-token");
@@ -391,12 +395,37 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
             launch_env: vec![
                 ("HOME".into(), owned.path().to_string_lossy().into_owned()),
                 ("GH_TOKEN".into(), AMBIENT.into()),
+                (RECIPE_KEY.into(), RECIPE_AMBIENT.into()),
             ],
             ..host_seams()
         },
     )
     .await;
     let token_path = farhelm_supervisor::github_token::host_file(h.state.path());
+    let recipe_path = farhelm_supervisor::recipe_credentials::host_file(h.state.path());
+    let write_recipe = |token: &str| {
+        // Match the uploader's atomic replacement so active terminals
+        // cannot see data in the process of being written.
+        let staged = recipe_path.with_extension("staged");
+        std::fs::write(
+            &staged,
+            serde_json::to_vec(&farhelm_supervisor::recipe_credentials::RecipeCredentials {
+                env: [(RECIPE_KEY.into(), token.into())].into(),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::rename(staged, &recipe_path).unwrap();
+    };
+    let check_recipe = |host: &HostTerminal, expected: &str| {
+        assert_eq!(
+            environ(host.status().child_pid)
+                .get(RECIPE_KEY)
+                .map(String::as_str),
+            Some(expected)
+        );
+    };
+    write_recipe(RECIPE_FIRST);
     std::fs::write(&token_path, format!(" {FIRST}\n")).unwrap();
     let session = create_resumable_session_on(
         &h.client,
@@ -409,6 +438,7 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     .await;
     let original = agent_host(&h, &session.id).await;
     wait_for_screen(&original, "GITHUB-AGENT-READY").await;
+    check_recipe(&original, RECIPE_FIRST);
     assert_eq!(
         wait_for_file(&agent_witness, WAIT_SECS).await,
         format!("{FIRST}\n").as_bytes()
@@ -434,6 +464,7 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     let replacement = owned.path().join("replacement");
     std::fs::write(&replacement, SECOND).unwrap();
     std::fs::rename(&replacement, &token_path).unwrap();
+    write_recipe(RECIPE_SECOND);
     let tab = h.client.open_tab(&session.id).await.unwrap();
     let tab_host = h.sup.tab_host_for_test(&session.id, &tab.id).await.unwrap();
     wait_for_liveness(&tab_host, "the GitHub tab's live shell", |liveness| {
@@ -442,6 +473,8 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     .await;
     crate::host_restarts::type_line(&tab_host, "printf 'GITHUB-TAB-%s\\n' READY").await;
     wait_for_screen(&tab_host, "GITHUB-TAB-READY").await;
+    check_recipe(&tab_host, RECIPE_SECOND);
+    check_recipe(&original, RECIPE_FIRST);
     assert_eq!(
         environ(tab_host.status().child_pid)
             .get("GH_TOKEN")
@@ -462,6 +495,7 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     let restarted = agent_host(&h, &session.id).await;
     assert_ne!(restarted.socket(), original.socket());
     wait_for_screen(&restarted, "GITHUB-AGENT-READY").await;
+    check_recipe(&restarted, RECIPE_SECOND);
     assert_eq!(
         std::fs::read_to_string(&agent_witness).unwrap(),
         format!("{FIRST}\n{SECOND}\n")
@@ -474,12 +508,14 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     );
 
     std::fs::remove_file(&token_path).unwrap();
+    std::fs::remove_file(&recipe_path).unwrap();
     let unmanaged = h.client.open_tab(&session.id).await.unwrap();
     let unmanaged_host = h
         .sup
         .tab_host_for_test(&session.id, &unmanaged.id)
         .await
         .unwrap();
+    check_recipe(&unmanaged_host, RECIPE_AMBIENT);
     assert_eq!(
         environ(unmanaged_host.status().child_pid)
             .get("GH_TOKEN")
@@ -490,54 +526,58 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
     let records = std::fs::read_dir(h.state.path().join("launch"))
         .unwrap()
         .count();
-    std::fs::write(&token_path, format!("{SECOND}\0bad")).unwrap();
-    let refusal = h
-        .client
-        .open_tab(&session.id)
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(!refusal.contains(SECOND));
-    assert_eq!(
-        host_sockets(&h),
-        before,
-        "a corrupt token starts no tab host"
-    );
-    assert_eq!(
-        std::fs::read_dir(h.state.path().join("launch"))
-            .unwrap()
-            .count(),
-        records,
-        "a refused tab leaves no launch artifact"
-    );
-    let refusal = h
-        .client
-        .create_session(
-            &owned.path().to_string_lossy(),
-            "/bin/sleep 600",
-            None,
-            80,
-            24,
-        )
-        .await
-        .unwrap_err()
-        .to_string();
-    assert!(!refusal.contains(SECOND));
-    assert_eq!(
-        host_sockets(&h),
-        before,
-        "a corrupt token starts no agent host"
-    );
-    assert_eq!(
-        std::fs::read_dir(h.state.path().join("launch"))
-            .unwrap()
-            .count(),
-        records,
-        "refusal unwinds its launch artifacts"
-    );
+    for (path, bytes, reason, marker) in [
+        (
+            &token_path,
+            format!("{SECOND}\0bad"),
+            "GitHub token file contains NUL",
+            SECOND,
+        ),
+        (
+            &recipe_path,
+            format!(r#"{{"env":{{"{RECIPE_KEY}":"{RECIPE_SECOND}"}}"#),
+            "recipe credentials file is invalid",
+            RECIPE_SECOND,
+        ),
+    ] {
+        // The healthy file is absent so only the file under test can
+        // explain the refusal. Neither attempt may leave launch evidence.
+        std::fs::write(path, bytes).unwrap();
+        let tab = h.client.open_tab(&session.id).await.unwrap_err();
+        assert!(tab.to_string().contains(reason), "{tab}");
+        assert!(!tab.to_string().contains(marker));
+        assert_eq!(host_sockets(&h), before, "no tab host started");
+        assert_eq!(
+            std::fs::read_dir(h.state.path().join("launch"))
+                .unwrap()
+                .count(),
+            records
+        );
+        let create = h
+            .client
+            .create_session(
+                &owned.path().to_string_lossy(),
+                "/bin/sleep 600",
+                None,
+                80,
+                24,
+            )
+            .await
+            .unwrap_err();
+        assert!(create.to_string().contains(reason), "{create}");
+        assert!(!create.to_string().contains(marker));
+        assert_eq!(host_sockets(&h), before, "no agent host started");
+        assert_eq!(
+            std::fs::read_dir(h.state.path().join("launch"))
+                .unwrap()
+                .count(),
+            records
+        );
+        std::fs::remove_file(path).unwrap();
+    }
     let stored = stored_row(&h, &session.id).await.unwrap();
     let persisted = serde_json::to_string(&stored.launch).unwrap();
-    for marker in [FIRST, SECOND] {
+    for marker in [FIRST, SECOND, RECIPE_FIRST, RECIPE_SECOND] {
         assert!(
             !persisted.contains(marker),
             "the launch must not persist the token"
