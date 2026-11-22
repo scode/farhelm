@@ -106,7 +106,7 @@ pub fn tunnel_and_open(
         return Ok(Pressed::Sent);
     }
     // No warning over an answer already on its way: it would only end in a refusal of the second answer.
-    if answering(&id, cx) {
+    if super::answering(&id, cx) {
         return Ok(Pressed::Nothing);
     }
     // An earlier warning's Allow closes the warning before its consent save comes back: until it does, a press would
@@ -126,7 +126,7 @@ pub fn tunnel_and_open(
             // under way when it ended still lands here). The answer bar's pause is not checked again: it guards a press
             // aimed at a card that moved, and this answer comes from the warning the user answered for this card, as the
             // old app's prepared card went on.
-            Ok(()) if waiting(&id, cx) => {
+            Ok(()) if super::waiting(&id, cx) => {
                 if let Err(not_started) = send(&id, session, cx) {
                     tracing::debug!(?not_started, "Tunnel and open not sent after the warning");
                 }
@@ -166,19 +166,8 @@ fn request_subject(id: &str, cx: &App) -> Option<Subject> {
     let store = session::current_store(cx)?;
     let id = id.to_owned();
     Some(Subject::when(store, move |store, _| {
-        store.collections().get::<PendingApproval>(&id).is_none()
+        !super::waiting_in(store, &id)
     }))
-}
-
-/// Whether the request `id` still waits.
-fn waiting(id: &str, cx: &App) -> bool {
-    session::current_store(cx).is_some_and(|store| {
-        store
-            .read(cx)
-            .collections()
-            .get::<PendingApproval>(id)
-            .is_some()
-    })
 }
 
 /// Whether a save of the preferences is in flight, the tunnel consent's among them.
@@ -187,16 +176,6 @@ fn saving_preferences(cx: &App) -> bool {
         operations
             .read(cx)
             .in_flight(&OpKey::preferences())
-            .is_some()
-    })
-}
-
-/// Whether an answer to the request `id` is in flight, from any surface.
-fn answering(id: &str, cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations
-            .read(cx)
-            .in_flight(&OpKey::approval(id))
             .is_some()
     })
 }

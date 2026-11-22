@@ -681,7 +681,8 @@ pub fn send(
 }
 
 /// What the reply to the command shown as `shown` says, as [`send`] hands it on: the body of any 2xx, or the refusal
-/// in the store's words ([`refusal_words`]). Split from [`send`] so the wording is tested without a channel.
+/// in the store's words. Share the operation's reply classification and
+/// keep command errors here because they arrive without a reply.
 ///
 /// Words only, unlike an operation's [`Refusal`]: what fails here is not always a reply (a lost command, and for
 /// [`read`] a body that does not decode, have no status, so a status here would be made up), and the refusals a
@@ -694,10 +695,9 @@ pub(crate) fn answer(
     shown: &str,
 ) -> Result<Option<Value>, HostText> {
     let reply = result.map_err(|error| HostText::from_host(error.to_string()))?;
-    if (200..300).contains(&reply.status) {
-        Ok(reply.body)
-    } else {
-        Err(refusal_words(reply.body, reply.status, shown))
+    match Outcome::from_reply(reply, shown) {
+        Outcome::Done(body) | Outcome::Accepted(body) => Ok(body),
+        Outcome::Refused(refusal) => Err(refusal.words),
     }
 }
 

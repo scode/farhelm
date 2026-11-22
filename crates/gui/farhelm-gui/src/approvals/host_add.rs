@@ -10,7 +10,7 @@
 //!
 //! The dialog itself is settings-and-hosts' ([`crate::hosts::add`]); this module is what that dialog holds for an
 //! agent's request: who asked, the answer under the request's own operation key, and the words for what came of it.
-//! The answers are work in the operation store under [`OpKey::approval`], the key the card's own answers use, so an
+//! The answers run under [`OpKey::approval`](crate::operations::OpKey::approval), the key the card's own answers use, so an
 //! answer from the dialog and one from the card exclude each other, and the first pressed wins.
 //!
 //! A refused answer, or an Allow the helm did not confirm, shows in the dialog's own error line, where the user is
@@ -26,8 +26,7 @@ use gpui::{
 use super::answers::{self, Arming};
 use super::model::Requester;
 use crate::host_text::{self, HostText};
-use crate::operations::{NotStarted, OpKey, Outcome, Settled};
-use crate::session;
+use crate::operations::{NotStarted, Outcome, Settled};
 use crate::theme::{self, metrics};
 
 /// What the dialog's error line says when the helm answered an Allow with anything but its bodiless acceptance (the 204
@@ -87,26 +86,14 @@ impl AgentRequest {
         })
     }
 
-    /// The operation key both the dialog's and the card's answers to this request run under.
-    pub fn key(&self) -> OpKey {
-        OpKey::approval(&self.id)
-    }
-
     /// Whether the helm still holds the request: it is in the pushed approvals.
     pub fn waiting(&self, cx: &App) -> bool {
-        session::current_store(cx).is_some_and(|store| {
-            store
-                .read(cx)
-                .collections()
-                .get::<PendingApproval>(&self.id)
-                .is_some()
-        })
+        super::waiting(&self.id, cx)
     }
 
     /// Whether an answer to the request is in flight, from the dialog or the card.
     pub fn answering(&self, cx: &App) -> bool {
-        session::current_operations(cx)
-            .is_some_and(|operations| operations.read(cx).in_flight(&self.key()).is_some())
+        super::answering(&self.id, cx)
     }
 
     /// Whether answers are paused now (the answer bar's pause after the waiting list changed).

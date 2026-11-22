@@ -12,6 +12,13 @@
 //! card answers through that dialog; [`tunnel`], a link card's Tunnel and open in the Mac app; and [`region`], which
 //! places the expanded card in the window, over open dialogs, with the other waiting requests listed below it.
 
+use farhelm_proto::approvals::PendingApproval;
+use gpui::App;
+
+use crate::operations::OpKey;
+use crate::session;
+use crate::store::HelmStore;
+
 pub mod answers;
 pub mod card;
 pub mod host_add;
@@ -32,3 +39,25 @@ mod model_tests;
 pub(crate) mod region_tests;
 #[cfg(test)]
 mod tunnel_tests;
+
+/// Check the store that owns a request. A consent warning watches its bound
+/// store for removal of that request.
+fn waiting_in(store: &HelmStore, id: &str) -> bool {
+    store.collections().get::<PendingApproval>(id).is_some()
+}
+
+/// Read the current waiting list when a dialog or card is about to answer.
+fn waiting(id: &str, cx: &App) -> bool {
+    session::current_store(cx).is_some_and(|store| waiting_in(store.read(cx), id))
+}
+
+/// Every surface answering this request shares one operation key, so a
+/// pending answer on a card also makes the same request busy in a dialog.
+fn answering(id: &str, cx: &App) -> bool {
+    session::current_operations(cx).is_some_and(|operations| {
+        operations
+            .read(cx)
+            .in_flight(&OpKey::approval(id))
+            .is_some()
+    })
+}
