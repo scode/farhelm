@@ -180,11 +180,20 @@ impl SystemTransport {
     /// whose identity the handshake can update. Containers need the current
     /// registry to resolve their place and the place's Podman probe.
     async fn access(&self, host: &HostRow) -> anyhow::Result<HostAccess> {
-        match (host.kind, &self.store) {
-            (crate::store::HostKind::Podman, Some(store)) => {
-                crate::access::resolve_host_access(store, host.id, &self.places).await
+        use crate::store::HostKind;
+        // Exhaustive over host kinds (AGENTS.md, "Code rules"): a new kind must decide whether its dial needs the
+        // registry, rather than inherit the row-only path from a wildcard.
+        match host.kind {
+            HostKind::Podman => match &self.store {
+                Some(store) => {
+                    crate::access::resolve_host_access(store, host.id, &self.places).await
+                }
+                // Fixtures without a registry; `host_access` refuses a container row.
+                None => crate::access::host_access(host),
+            },
+            HostKind::Local | HostKind::Ssh | HostKind::Tensorlake => {
+                crate::access::host_access(host)
             }
-            _ => crate::access::host_access(host),
         }
     }
 
