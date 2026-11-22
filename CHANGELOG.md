@@ -4,8 +4,6 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 
 ## v0.44.1 - 2026-11-22
 
-**DRAFT release notes - not yet finalized**
-
 ### 🚀 Added
 
 - Farhelm can now enable conversation tracking (e.g. so 'restart' works and allows you to resume a conversation) for Antigravity and Grok. Previously this was a manual installation step because it requires modifying the agent configuration globally - they don't support enabling the necessary hooks just for the purpose of a single agent invocation. Now, it will prompt you to enable this when you launch a session unless you've turned it off (and you can shut it up forever with one click if you don't want it). (#4483, #4495, #4513)
@@ -21,6 +19,7 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 ### 🔧 Fixes worth highlighting
 
 - Adding remote hosts that are running tailscale ssh should now work, as well as other ssh servers that don't properly respect and propagate the exit code of the program that got run. For the specific case of Tailscale, you can now also mark a host as tailscale (see the other release note). (#4617)
+- A couple of bugfixes to uninstalls and shutdowns of remote macOS hosts that would previously require you to re-try an uninstall, or prevent clean shutdown on e.g. updates. (#4651, #4652)
 
 <details>
 <summary>All changes</summary>
