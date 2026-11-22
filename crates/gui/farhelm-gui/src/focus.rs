@@ -1213,18 +1213,13 @@ fn reveal_focused(window: &mut Window, cx: &mut App) {
 /// Bring a drawn control into its scrolling regions without changing focus. This also prepares a popover whose
 /// anchor is clipped, so it can open beside its own control in the next frame.
 pub(crate) fn reveal_control(target: &FocusHandle, window: &mut Window, cx: &mut App) {
+    if !is_drawn(target, window, cx) {
+        return;
+    }
     let Some(state) = state(window, cx) else {
         return;
     };
     let state = state.read(cx);
-    // The root contains every element drawn in the frame on screen, overlays included, and nothing else.
-    if !state
-        .root
-        .upgrade()
-        .is_some_and(|root| root.contains(target, window))
-    {
-        return;
-    }
     let Some(entry) = state
         .controls
         .iter()
@@ -1429,10 +1424,10 @@ fn walk_through(
 ) -> bool {
     let container = &through.container;
     // A place no longer drawn has no position in the order.
-    let place = through.place.as_ref().filter(|place| {
-        root_handle(window, cx).is_some_and(|root| root.contains(place, window))
-            && !container.contains(place, window)
-    });
+    let place = through
+        .place
+        .as_ref()
+        .filter(|place| is_drawn(place, window, cx) && !container.contains(place, window));
     let on_place = place.is_some_and(|place| place.contains_focused(window, cx));
     if !on_place && !container.contains_focused(window, cx) {
         return false;
@@ -1705,7 +1700,7 @@ pub(crate) fn return_to(
         ReturnTo::Control(control)
             if match layers::top_container(window, cx) {
                 Some(top) => top.contains(&control, window),
-                None => root_handle(window, cx).is_some_and(|root| root.contains(&control, window)),
+                None => is_drawn(&control, window, cx),
             } =>
         {
             (Some(control), None)
