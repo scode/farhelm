@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`sticky-tmp-parent-refusal`](reports/sticky-tmp-parent-refusal.report.md) landed 2026-11-21 in #4386, #4389: make the test recorder and deflake refuse another account's sticky parent directory, matching their docs, and close its triage outcome
 - [`installer-expect-hyphen-value`](reports/installer-expect-hyphen-value.report.md) landed 2026-11-21 in #4385: accept a hyphen-leading `--expect` value in `farhelm internal install` with a CLI-boundary test, and close its triage outcome
 - [`launcher-folder-refusal-order`](reports/launcher-folder-refusal-order.report.md) landed 2026-11-21 in #4387: classify a launcher folder refusal by the earliest refusal phrase so path text cannot misname it, and close its triage outcome
 - [`spare-builder-fifo-release`](reports/spare-builder-fifo-release.report.md) landed 2026-11-21 in #4390: keep the spare-builder test's named-pipe release from hanging when its reader exited, and close its triage outcome
