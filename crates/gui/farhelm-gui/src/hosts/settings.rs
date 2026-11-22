@@ -253,8 +253,7 @@ impl Field {
         }
     }
 
-    /// The stored raw value, if the host has one: what the field starts from (an unset one as empty), and what saving it
-    /// untouched sends back.
+    /// The stored raw value the field starts from. An unset value opens as empty.
     fn stored(self, view: &HostView) -> Option<&str> {
         match self {
             Field::Destination => view.destination.as_deref(),
@@ -664,9 +663,14 @@ impl HostSettingsDialog {
         }
     }
 
-    /// Save the open `field` as typed. Success closes it; a refusal stays in its draft, which the field's row draws.
+    /// Save the open `field` as typed. Success closes it and a refusal stays on the row. An untouched alias closes
+    /// like Cancel because sending its old value could undo a rename still waiting for the host's locks.
     fn save_field(&mut self, field: Field, window: &mut Window, cx: &mut Context<Self>) {
         if self.editing != Some(field) || self.input(field).draft().is_saving() {
+            return;
+        }
+        if field == Field::Alias && !self.input(field).draft().is_touched() {
+            self.cancel(window, cx);
             return;
         }
         // Each press leaves only its own line: a launch refusal replaces a busy line from an earlier press, and a press

@@ -583,6 +583,29 @@ fn the_alias_saves_and_clears_and_escape_closes_only_its_field(cx: &mut TestAppC
     assert_eq!(body, json!({ "alias": null }));
 }
 
+/// Saving an untouched alias closes its editor without sending the old value. An agent's rename may still be waiting
+/// for the host's locks when the user presses Save, so following pushed values alone cannot protect it.
+#[gpui::test]
+fn saving_an_untouched_alias_closes_it_without_writing(cx: &mut TestAppContext) {
+    let (mut helm, cx) = open_build_box(cx);
+    push_build_box(&mut helm, |host| host.alias = Some("old alias".into()), cx);
+    click(cx, "host-settings-edit-alias");
+    assert_eq!(editing(cx), Some(Field::Alias));
+    assert!(field_focused(cx, Field::Alias));
+    let editor = dialog(cx);
+    cx.update(|_, cx| {
+        let draft = editor.read(cx).alias.draft();
+        assert_eq!(draft.value(), "old alias");
+        assert!(!draft.is_touched());
+    });
+
+    click(cx, "host-settings-alias-save");
+    assert!(helm.commands().is_empty(), "no stale alias was sent");
+    assert!(any_open(cx), "host settings stay open");
+    assert_eq!(editing(cx), None);
+    assert_eq!(focused_id(cx).as_deref(), Some("host-settings-edit-alias"));
+}
+
 /// Why this matters: the local host takes an alias too (SPEC.md, "Topology": "the local host can carry one too"), and
 /// the row must then name it by that alias rather than "Local (this machine)"; it has no destination, so its details
 /// show no destination line, aliased or not (`sidebar.spec.ts`, "aliasing the local host shows it in the host panel").

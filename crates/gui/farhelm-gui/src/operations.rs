@@ -476,7 +476,7 @@ fn next_number() -> u64 {
 
 /// One command to the helm, with the work it does and how a refusal without words names it. Built where its feature
 /// lives, keeping today's API semantics for its route; nothing here knows any route.
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, PartialEq)]
 pub struct Command {
     work: Work,
     method: Method,
@@ -486,6 +486,18 @@ pub struct Command {
     /// app's `api::diagnostic_url` hid a session's. Such an id (a host's uuid, a session's own id) is long and
     /// meaningless to the user.
     shown: String,
+}
+
+impl std::fmt::Debug for Command {
+    /// Keep routing and operation context available for diagnostics. The same command can carry a credential body.
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Command")
+            .field("work", &self.work)
+            .field("method", &self.method)
+            .field("path", &self.path)
+            .field("shown", &self.shown)
+            .finish_non_exhaustive()
+    }
 }
 
 impl Command {
@@ -518,6 +530,27 @@ impl Command {
     /// The route the command goes to, query included: what a feature's tests check its own commands by.
     pub fn path(&self) -> &ApiPath {
         &self.path
+    }
+}
+
+#[cfg(test)]
+mod command_tests {
+    use super::*;
+
+    /// A GUI command can carry secrets before it reaches the channel. Debug output keeps the operation and route
+    /// useful for diagnosing a failed save without disclosing any request body fields.
+    #[test]
+    fn command_debug_omits_the_request_body() {
+        let command = Command::new(
+            Work::Save,
+            Method::Post,
+            ApiPath::api(&["credentials"]).unwrap(),
+            Some(serde_json::json!({ "token": "sample-private-token" })),
+            "POST /api/credentials",
+        );
+        let debug = format!("{command:?}");
+        assert!(debug.contains("work: Save") && debug.contains("/api/credentials"));
+        assert!(!debug.contains("sample-private-token") && !debug.contains("body:"));
     }
 }
 
