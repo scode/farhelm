@@ -5,7 +5,7 @@ use farhelm_helm_client::Method;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::LaunchHarness;
 use farhelm_proto::ui_channel::Preferences;
-use gpui::{KeyDownEvent, Keystroke, TestAppContext, VisualTestContext, px, size};
+use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::json;
 
 use super::{Entry, Target, catalog, fold, highlights};
@@ -16,7 +16,7 @@ use crate::settings::tests::{
 };
 use crate::settings::{Choice, Section, SettingsDialog, decide_tunnels_for_opened};
 use crate::test_support::{
-    any_open, click, focused_id, frame, keys, label, select_all_text, settle,
+    any_open, click, focused_id, frame, keys, label, press, select_all_text, settle,
 };
 
 /// Focus search through the Settings-only binding. A simulated edit could otherwise reach a different control.
@@ -49,16 +49,6 @@ fn type_query(cx: &mut VisualTestContext, query: &str) {
     cx.simulate_input(query);
     settle(cx);
     assert!(drawn(cx, "settings-search-heading"));
-}
-
-fn repeat(cx: &mut VisualTestContext, chord: &'static str) {
-    cx.simulate_event(KeyDownEvent {
-        native_key: None,
-        keystroke: Keystroke::parse(chord).unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
 }
 
 fn heading(cx: &mut VisualTestContext) -> Option<String> {
@@ -278,7 +268,7 @@ fn escape_restores_the_prior_section_and_close_controls_close(cx: &mut TestAppCo
     keys(cx, "escape");
     assert_eq!(heading(cx).as_deref(), Some("Appearance"));
     assert!(search_focused(cx));
-    repeat(cx, "escape");
+    press(cx, "escape", true);
     assert!(any_open(cx), "one physical Escape only clears the search");
     keys(cx, "escape");
     assert!(!any_open(cx));
@@ -409,7 +399,7 @@ fn repeated_search_enter_leaves_the_post_clone_command_untouched(cx: &mut TestAp
     );
     keys(cx, "enter");
     assert!(cx.update(|window, cx| field.read(cx).focused(window, cx)));
-    repeat(cx, "enter");
+    press(cx, "enter", true);
     assert_eq!(cx.update(|_, cx| field.read(cx).text(cx)), "echo fixture");
 }
 

@@ -938,13 +938,7 @@ fn a_held_enter_in_the_model_field_does_nothing(cx: &mut TestAppContext) {
         "other",
         "the premise: the model field has the typed text"
     );
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse("enter").unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
+    test_support::press(cx, "enter", true);
     assert!(any_open(cx));
     assert_eq!(
         draft(cx).agent.model.as_deref(),

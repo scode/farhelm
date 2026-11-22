@@ -8,7 +8,7 @@
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ui_channel::{CollectionChanges, CollectionState, HostView};
-use gpui::{Keystroke, VisualTestContext};
+use gpui::VisualTestContext;
 use serde_json::json;
 
 use super::draft::{LaunchDraft, Tab};
@@ -420,13 +420,7 @@ fn a_held_enter_in_a_field_never_launches(cx: &mut gpui::TestAppContext) {
             .is_focused(window)),
         "the premise: the Name field has focus"
     );
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: Keystroke::parse("enter").unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
+    test_support::press(cx, "enter", true);
     assert!(
         creates(&mut helm, cx).is_empty(),
         "a held Enter sent nothing"
@@ -452,13 +446,7 @@ fn a_held_enter_on_the_closed_host_button_never_launches(cx: &mut gpui::TestAppC
             .is_focused(window)),
         "the premise: Enter will reach the closed host button"
     );
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: Keystroke::parse("enter").unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
+    test_support::press(cx, "enter", true);
     assert!(creates(&mut helm, cx).is_empty(), "a repeat did not launch");
     assert!(any_open(cx), "the launcher stayed open");
     assert!(!super::view_tests::has_node(cx, "launcher-host-list"));

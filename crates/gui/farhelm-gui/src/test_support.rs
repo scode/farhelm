@@ -13,9 +13,9 @@
 //! window, so "exactly one" needs only the "at least one" half, which the rules give wherever SPEC.md requires it.
 //!
 //! For behavior tests, [`open`] is the harness: a window built the way the app builds its own, and step helpers
-//! ([`keys`], [`click`], [`redraw`], [`advance`], [`settle`]) that each end with [`check`], so a test written with them
-//! runs the invariant checks after every step without having to remember to. A test that drives the window some other
-//! way (a raw key event, a mouse move, a scroll, a resize) calls [`settle`] or [`check`] itself after its step. A test
+//! ([`keys`], [`press`], [`release`], [`click`], [`redraw`], [`advance`], [`settle`]) that each end with [`check`],
+//! so a test written with them runs the invariant checks after every step. A test that drives the window with its
+//! own input, a mouse move, a scroll or a resize calls [`settle`] or [`check`] itself after its step. A test
 //! that needs a root view [`open`]'s scene cannot give (one with state of its own, or action handlers on the root
 //! element, where an action dispatched with nothing else focused still reaches them) builds that view through
 //! [`root::attach`] and [`root::wrap`] and opens it with [`open_view`], or [`another_window`] for a second window, so
@@ -224,6 +224,29 @@ pub fn check(cx: &mut VisualTestContext) {
 pub fn settle(cx: &mut VisualTestContext) {
     cx.run_until_parked();
     check(cx);
+}
+
+/// Send a raw key-down with no native or IME data. Set `held` to
+/// exercise auto-repeat at the current focus. Settle the event's own
+/// work so tests can inspect it before sending the release.
+pub(crate) fn press(cx: &mut VisualTestContext, chord: &'static str, held: bool) {
+    cx.simulate_event(gpui::KeyDownEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse(chord).unwrap(),
+        is_held: held,
+        prefer_character_input: false,
+    });
+    settle(cx);
+}
+
+/// Send the matching raw key-up and settle its effects. GPUI can turn
+/// the release of Enter or Space into a click on the focused control.
+pub(crate) fn release(cx: &mut VisualTestContext, chord: &'static str) {
+    cx.simulate_event(gpui::KeyUpEvent {
+        native_key: None,
+        keystroke: gpui::Keystroke::parse(chord).unwrap(),
+    });
+    settle(cx);
 }
 
 /// Redraw after a change the scene's draw function reads from a plain cell, which notifies nothing, and check.
@@ -1172,7 +1195,9 @@ mod self_tests {
         VisualTestContext, Window, div,
     };
 
-    use super::{Scene, advance, another_window, click, keys, open, redraw, settle};
+    use super::{
+        Scene, advance, another_window, click, keys, open, press, redraw, release, settle,
+    };
     use crate::components::{Button, HoverHelp, Role};
     use crate::focus::Mark;
     use crate::layers::{self, Anchor, Popover};
@@ -1269,6 +1294,26 @@ mod self_tests {
         let (cx, anchor) = scene(cx, false);
         break_unchecked(cx, &anchor);
         keys(cx, "a");
+    }
+
+    /// A test can stop after key-down to inspect focus before releasing the
+    /// key, so the press step must check the window on its own.
+    #[gpui::test]
+    #[should_panic(expected = "invariant broken")]
+    fn press_checks(cx: &mut TestAppContext) {
+        let (cx, anchor) = scene(cx, false);
+        break_unchecked(cx, &anchor);
+        press(cx, "a", false);
+    }
+
+    /// A raw key-up may be its own test step. It must check the window
+    /// even when GPUI has no matching press to turn into a click.
+    #[gpui::test]
+    #[should_panic(expected = "invariant broken")]
+    fn release_checks(cx: &mut TestAppContext) {
+        let (cx, anchor) = scene(cx, false);
+        break_unchecked(cx, &anchor);
+        release(cx, "a");
     }
 
     /// [`click`] checks after the click is handled: here the click itself breaks the invariant.

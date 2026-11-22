@@ -250,15 +250,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
   `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
 
-  - `gui-controls-repeat-shared-rendering.md`. Share the absolute two-pixel focus-ring element across
-    `components/button.rs:1163–1200`, `select.rs:414–427`, `radio_group.rs:775–787,840–852,900–912,953–965`,
-    `menu_item.rs:312–326`, `list_row.rs:125–136`, `tab_strip.rs:240–256`, `copy_field.rs:288–299`,
-    `checkbox.rs:240–251` and `mod.rs:545–558` (all under `components/`). Pass insets and color, and keep corner styling
-    and ring visibility with each control. Share initial ASCII-letter capitalization for validation messages in
-    `components/custom_flags.rs:156–162`, `settings/recipes/editor.rs:125–131` and `templates/fields.rs:540–546`. Keep
-    punctuation and non-ASCII input intact.
-  - `gui-focus-checks-repeat-drawn-predicate.md`. In `focus.rs:761–765,1228–1234,1427–1431,1684–1688`, route repeated
-    current-frame root and focus-handle checks through `is_drawn`, keeping layer-specific conditions at each caller.
   - `approval-views-repeat-status-lookups.md`. In `approvals/host_add.rs:95–110` and
     `approvals/tunnel.rs:173–182,194–202`, share one approval-row lookup and one in-progress operation lookup by request
     ID in the approvals module.
@@ -317,21 +308,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     sequence's Enter lookup still uses retained names. Share the Base name/Fixed name radio and help in
     `templates/editor/rows.rs:652–678` and `templates/save_panel.rs:308–340`, passing each control's ID, selection and
     handler. Share the typed `GET /api/launch-catalog` request and decode in `templates/dialog.rs:766–789` and
-    `launcher/view.rs:477–500`, keeping retries, failure display and quick-launch continuation local. Share physical
-    keypad digit lookup for macOS keycodes and XKB names in the input mapping crate (`templates/armed.rs:84,186–194`,
-    `crates/gui/farhelm-input-mapping/src/keys.rs:218–244`). Keep the terminal's logical-character check and operator
-    mapping.
-  - `terminal-repeats-modifier-mapping.md`. Share the drag-selection modifier test and display name (Option on macOS,
-    Shift on Linux) between `terminal/drag_notice.rs:108–113` and `terminal/attached.rs:3717–3722`. In
-    `terminal/attached.rs:1942–1948,3522–3531`, share the five-field GPUI-to-terminal modifier conversion, with mouse
-    input calling `.bits()` on the result.
-  - `trash-repeats-animation-and-focus-wiring.md`. Share the ticker handle and redraw counter in `trash.rs:777–810` and
-    `components/spinner.rs:42–74`, deriving spinner steps modulo eight. In `trash/dialog.rs:185–191,239–245`, share
-    confirm/cancel focus restoration to the host Delete control or Delete all footer, taking the caller's mark.
-  - `control-tests-repeat-simulated-key-events.md`. Share simulated press/release helpers that construct the same
-    events, park the executor and check invariants. Move the component helpers to test support for the radio and
-    approval tests. See `components/tests/radio_group.rs:265–274`, `components/tests/mod.rs:76–97`,
-    `approvals/region_tests.rs:1447–1463` and `test_support.rs:221–227`.
+    `launcher/view.rs:477–500`, keeping retries, failure display and quick-launch continuation local.
   - `session-list-tests-repeat-frame-and-request-helpers.md`. Paths in this item are under `session_list/`. Share the
     mouse move, vertical pixel scroll and settle in `list_tests.rs:57–67` and `lifecycle_tests.rs:1707–1717`. Put the
     debug-bounds drawn predicate from `host_rail/tests.rs:1543–1546` and `menu_tests.rs:128–131` beside the existing
@@ -346,8 +323,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
 
   Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
-  Plan: `plans/queue/helpers-terminal-and-controls.md`. Plan: `plans/queue/helpers-hosts-and-sessions.md`. Plan:
-  `plans/queue/helpers-launcher-and-templates.md`.
+  Plan: `plans/queue/helpers-hosts-and-sessions.md`. Plan: `plans/queue/helpers-launcher-and-templates.md`.
 
 - **Report remote command status in-band, not through ssh's exit status.** Tailscale SSH on a Mac reports exit status 0
   for every command (tailscale/tailscale#18256, still open on 2026-11-17), so adding such a Mac fails at the first probe

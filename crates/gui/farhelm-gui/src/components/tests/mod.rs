@@ -18,12 +18,11 @@
 //! (`components/spinner.rs`); neither draws a control. `menu_keys.rs` tests a toggled menu's shared key handlers
 //! (`components/menu_keys.rs`), which draw nothing either. A new control's tests go in a new file here, declared below.
 //!
-//! This file holds only the step helpers that tests of more than one component use: reading the tooltip and waiting
-//! out the hover delay, sending a key's press and release separately (GPUI's keyboard click happens on the release),
-//! sending keys and then drawing a frame, holding a key down for its repeats, reading what an element's subtree
-//! painted, and pressing every key a scroll stop takes; and the two fixtures the scroll box's and the dialog body's
-//! scroll stop tests share (numbered lines of content, and an element's role and name, which the focus stop's tests
-//! read too). A fixture that one component's tests use stays in that component's file.
+//! This file holds the steps that tests of more than one component use: waiting out the hover delay, reading a tooltip
+//! or an element's painted text, driving a scroll stop, and drawing a frame after key input. The raw key-down and
+//! key-up steps live in `test_support`, since other tests also inspect the press separately from GPUI's release click.
+//! The scroll box and dialog tests share the numbered lines and the role and name of a scroll stop. Fixtures that
+//! only one component's tests use stay in that component's file.
 
 mod button;
 mod checkbox;
@@ -60,7 +59,7 @@ use gpui::{
 use crate::components::Role;
 
 use crate::layers;
-use crate::test_support::{advance, bounds, check, frame, keys, redraw};
+use crate::test_support::{advance, bounds, frame, keys, press, redraw, release};
 
 /// The text of the tooltip showing now, if any.
 fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
@@ -71,29 +70,6 @@ fn tooltip(cx: &mut VisualTestContext) -> Option<gpui::SharedString> {
 /// Wait out the hover delay on the executor's clock, the way a pointer resting on a control does, and check.
 fn wait_hover_delay(cx: &mut VisualTestContext) {
     advance(cx, layers::HOVER_DELAY);
-}
-
-/// Press `chord` (with `held`, as an auto-repeat of a key already down), as the platform reports a key-down.
-fn press(cx: &mut VisualTestContext, chord: &'static str, held: bool) {
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse(chord).unwrap(),
-        is_held: held,
-        prefer_character_input: false,
-    });
-    cx.run_until_parked();
-    check(cx);
-}
-
-/// Release `chord`. GPUI turns the release of an Enter or Space pressed on a focused element into a click, which only a
-/// test that sends the release can see.
-fn release(cx: &mut VisualTestContext, chord: &'static str) {
-    cx.simulate_event(gpui::KeyUpEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse(chord).unwrap(),
-    });
-    cx.run_until_parked();
-    check(cx);
 }
 
 /// [`press`] and then [`release`] `chord`, as a real key does, drawing the owner's new state after each half, so a
@@ -109,18 +85,6 @@ fn stroke(cx: &mut VisualTestContext, chord: &'static str, held: bool) {
 fn press_and_draw(cx: &mut VisualTestContext, keystrokes: &str) {
     keys(cx, keystrokes);
     redraw(cx);
-}
-
-/// Press `chord` as an auto-repeat of a key already down, and check.
-fn held_key(cx: &mut VisualTestContext, chord: &'static str) {
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse(chord).unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    cx.run_until_parked();
-    check(cx);
 }
 
 /// What the element drawn under `id` painted in `nodes`, the driver record of one frame: the strings its subtree
