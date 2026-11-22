@@ -272,7 +272,7 @@ use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
 use super::disclosure::{self, Hidden};
 use super::files::{FileLinks, StatusShown};
 use super::tunnels::{self, TunnelPill, Tunnels};
-use super::{CellMetrics, CursorPhase, TerminalView, style};
+use super::{CellMetrics, CursorPhase, SelectionModifier, TerminalView, style};
 use crate::actions::{self, KeyOwner};
 use crate::assets::TERMINAL_FONT;
 use crate::components::{
@@ -1944,7 +1944,6 @@ fn program_input(
     composition: &mut Composition,
 ) -> KeyRoute {
     let keystroke = &event.keystroke;
-    let modifiers = keystroke.modifiers;
     let native = event.native_key.as_ref().map(|native| NativeKey {
         identity: match &native.identity {
             NativeKeyIdentity::Xkb(name) => NativeIdentity::Xkb(name.as_ref()),
@@ -1954,13 +1953,7 @@ fn program_input(
     });
     let key = KeyDown {
         native,
-        modifiers: farhelm_input_mapping::Modifiers {
-            control: modifiers.control,
-            alt: modifiers.alt,
-            shift: modifiers.shift,
-            platform: modifiers.platform,
-            function: modifiers.function,
-        },
+        modifiers: input_modifiers(keystroke.modifiers),
         key: &keystroke.key,
         key_char: keystroke.key_char.as_deref(),
         is_held: event.is_held,
@@ -3701,8 +3694,9 @@ fn report_button(button: MouseButton) -> Option<i8> {
     }
 }
 
-/// The input mapping's modifier bits for GPUI's `modifiers`, which a mouse report carries.
-fn modifier_bits(modifiers: Modifiers) -> u8 {
+/// Preserve all five GPUI modifier fields for the terminal input mapper. Key routing can inspect
+/// Fn, while mouse reports use the mapper's four wire bits.
+fn input_modifiers(modifiers: Modifiers) -> farhelm_input_mapping::Modifiers {
     farhelm_input_mapping::Modifiers {
         control: modifiers.control,
         alt: modifiers.alt,
@@ -3710,7 +3704,11 @@ fn modifier_bits(modifiers: Modifiers) -> u8 {
         platform: modifiers.platform,
         function: modifiers.function,
     }
-    .bits()
+}
+
+/// The input mapping's modifier bits for GPUI's `modifiers`, which a mouse report carries.
+fn modifier_bits(modifiers: Modifiers) -> u8 {
+    input_modifiers(modifiers).bits()
 }
 
 /// The modes that let a running program take pointer input. A retained exit frame
@@ -3902,15 +3900,6 @@ struct SelectGesture {
 /// `altClickMovesCursor`, which compared the events' timestamps against 500 ms): a slower Alt-press is a selection.
 const ALT_CLICK_WINDOW: Duration = Duration::from_millis(500);
 
-/// Whether a press holds this platform's modifier that forces a local selection over mouse reporting: Option on a
-/// Mac, Shift elsewhere (SPEC.md's selection paragraph; the old app's `pressForcesSelection`).
-fn forces_selection(modifiers: Modifiers) -> bool {
-    match actions::THIS_PLATFORM {
-        Platform::Mac => modifiers.alt,
-        Platform::Linux => modifiers.shift,
-    }
-}
-
 /// Lines a drag-scroll step moves for a pointer `distance` pixels past the screen's edge (negative above it): at least
 /// one, and up to [`DRAG_SCROLL_MAX_LINES`] at [`DRAG_SCROLL_MAX_DISTANCE`] or farther, the old app's
 /// `updateDragScroll`.
@@ -3984,7 +3973,8 @@ impl AttachedTerminal {
         };
         let (mode, _) = program_mouse_state(view.read(cx).state);
         let tracking = mode != MouseMode::Off;
-        let forced = forces_selection(event.modifiers);
+        let forced =
+            SelectionModifier::for_platform(actions::THIS_PLATFORM).is_held(event.modifiers);
         let link = if event.button == MouseButton::Left {
             self.pressed_link(event.position, cx)
         } else {

@@ -23,6 +23,7 @@ use gpui::{
     Point, Render, SharedString, Size, StatefulInteractiveElement, Styled, Window, div, point, px,
 };
 
+use super::SelectionModifier;
 use crate::components::{HoverHelp, Role, with_hover_help};
 use crate::theme::{self, metrics};
 
@@ -103,16 +104,6 @@ pub(crate) const fn copy_hint(kind: AgentKind) -> Option<&'static str> {
     }
 }
 
-/// The key that forces Farhelm's own selection under mouse reporting on `platform`, as the notice names it: the one
-/// the terminal's forcing rule reads (`forces_selection` in `attached.rs`), so the notice never names a key that does
-/// nothing.
-fn forcing_key(platform: Platform) -> &'static str {
-    match platform {
-        Platform::Mac => "Option",
-        Platform::Linux => "Shift",
-    }
-}
-
 /// The notice's words (the old `dragCopyNoticeText`): the agent's own instruction when it has one (`hint`, from
 /// [`copy_hint`]) or the generic advice, then the way to copy with Farhelm instead, which is the same for every
 /// program.
@@ -120,7 +111,7 @@ pub(crate) fn text(hint: Option<&str>, platform: Platform) -> String {
     let first = hint.unwrap_or(GENERIC_FIRST);
     format!(
         "{first} Or hold {} while dragging to select and copy here.",
-        forcing_key(platform)
+        SelectionModifier::for_platform(platform).label()
     )
 }
 

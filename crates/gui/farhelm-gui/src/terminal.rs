@@ -48,8 +48,8 @@ use farhelm_input_mapping::pointer::Geometry;
 use farhelm_proto::grid::GridInput;
 use gpui::{
     App, Bounds, ContentMask, Context, Element, ElementId, FontFeatures, GlobalElementId,
-    InspectorElementId, IntoElement, LayoutId, PathBuilder, Pixels, Render, ShapedLine, Size,
-    TextAlign, TextRun, Window, fill, font, point, px, size,
+    InspectorElementId, IntoElement, LayoutId, Modifiers, PathBuilder, Pixels, Render, ShapedLine,
+    Size, TextAlign, TextRun, Window, fill, font, point, px, size,
 };
 
 use crate::assets::TERMINAL_FONT;
@@ -57,6 +57,39 @@ use crate::components::ScrollbarLines;
 use crate::render_count;
 use crate::theme::{TERMINAL, TerminalColor};
 use style::{ResolvedStyle, Underline};
+
+/// The key that gives a drag to Farhelm when the terminal program has mouse reporting enabled.
+/// The gesture and the drag-copy notice use the same platform choice so the notice always names
+/// the key that actually takes over the drag.
+enum SelectionModifier {
+    Option,
+    Shift,
+}
+
+impl SelectionModifier {
+    /// Option on macOS and Shift on Linux, as specified for terminal selection in SPEC.md.
+    fn for_platform(platform: Platform) -> Self {
+        match platform {
+            Platform::Mac => Self::Option,
+            Platform::Linux => Self::Shift,
+        }
+    }
+
+    fn label(self) -> &'static str {
+        match self {
+            Self::Option => "Option",
+            Self::Shift => "Shift",
+        }
+    }
+
+    /// The forcing key still takes over when another modifier is held with it.
+    fn is_held(self, modifiers: Modifiers) -> bool {
+        match self {
+            Self::Option => modifiers.alt,
+            Self::Shift => modifiers.shift,
+        }
+    }
+}
 
 /// The terminal's text size in whole points, within the old app's range.
 ///
