@@ -427,41 +427,21 @@ const REFUSED_LEAD_IN: &str = "Farhelm refused this action: ";
 /// permanent answer all save there, and their work outlives the views that started it, so one can still be in flight
 /// while this question is open.
 fn stop_asking(cx: &mut App) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let command = match crate::settings::skip_host_remove_command() {
-        Ok(command) => command,
-        Err(error) => {
-            tracing::debug!(?error, "the permanent answer's preference not built");
-            return;
-        }
-    };
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::preferences(), command, cx, |settled, cx| {
-            if let Outcome::Refused(refusal) = &settled.outcome {
-                let line = stop_asking_line().host(&refusal.words);
-                let store = super::current_operations_id(cx);
-                show(cx, |lines| {
-                    lines.stop_asking = store.map(|store| (store, line))
-                });
-            }
-        })
-    });
-    match started {
-        Ok(()) => show(cx, |lines| lines.stop_asking = None),
-        Err(NotStarted::Busy(_)) => {
-            let line = stop_asking_line().text(Refused::WORDS);
+    use super::PermanentAnswer;
+
+    super::save_permanent_answer(
+        crate::settings::skip_host_remove_command,
+        |answer, cx| {
+            let line = match answer {
+                PermanentAnswer::Admitted => None,
+                PermanentAnswer::Busy => Some(stop_asking_line().text(Refused::WORDS)),
+                PermanentAnswer::Refused(words) => Some(stop_asking_line().host(&words)),
+            };
             let store = super::current_operations_id(cx);
-            show(cx, |lines| {
-                lines.stop_asking = store.map(|store| (store, line))
-            });
-        }
-        // A reset retired the store: the generic connection-lost notice is the report.
-        Err(not_started) => {
-            tracing::debug!(?not_started, "the permanent answer's preference not sent")
-        }
-    }
+            show(cx, |lines| lines.stop_asking = store.zip(line));
+        },
+        cx,
+    );
 }
 
 /// The start of the panel's line about the permanent answer's preference, under its own id.

@@ -51,9 +51,8 @@ use farhelm_helm_client::{ApiPath, Method, PathError};
 use farhelm_proto::provisioning::{PlanSteps, ProvisioningOperation, ProvisioningView, RunStatus};
 use farhelm_proto::ui_channel::HostView;
 use gpui::{
-    AnyElement, AnyWindowHandle, App, AppContext as _, Context, EntityId, Global,
-    InteractiveElement as _, IntoElement, ParentElement as _, Role, Styled as _, Subscription,
-    Window, div, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Context, InteractiveElement as _,
+    IntoElement, ParentElement as _, Role, Styled as _, Subscription, Window, div, px,
 };
 use serde::Deserialize;
 use serde_json::json;
@@ -418,39 +417,25 @@ struct Owed {
     superseded: Option<String>,
 }
 
-/// The notices of one UI session: those owed by host id, and the one shown, the newest. Tagged with the entity id of
-/// the operation store they were made under ([`notices`]).
+/// The notices of one UI session: those owed by host id, and the one shown, the newest.
 #[derive(Clone, Default, PartialEq)]
 struct Notices {
-    store: Option<EntityId>,
     owed: HashMap<i64, Owed>,
     shown: Option<Notice>,
 }
 
-impl Global for Notices {}
+/// The Hosts panel can observe uninstall notices without subscribing to other state.
+type KeptNotices = super::SessionState<Notices>;
 
 /// The current UI session's notices; `None` while the window is inert or when nothing was kept under it.
 fn notices(cx: &App) -> Option<&Notices> {
-    let store = super::current_operations_id(cx)?;
-    cx.try_global::<Notices>()
-        .filter(|notices| notices.store == Some(store))
+    KeptNotices::read(cx)
 }
 
 /// Apply `change` to the current UI session's notices, starting from none when they were made under another session,
 /// and store them only when they changed, so the Hosts panel redraws only then. Nothing while the window is inert.
 fn change(cx: &mut App, change: impl FnOnce(&mut Notices)) {
-    let Some(store) = super::current_operations_id(cx) else {
-        return;
-    };
-    let before = notices(cx);
-    let mut after = before.cloned().unwrap_or(Notices {
-        store: Some(store),
-        ..Notices::default()
-    });
-    change(&mut after);
-    if before != Some(&after) {
-        cx.set_global(after);
-    }
+    KeptNotices::change(cx, change);
 }
 
 /// Owe `plan`'s host its removal notice, replacing any notice owed it before.
@@ -555,7 +540,7 @@ pub(crate) fn show_notice_for_golden(name: &str, kept: &str, cx: &mut App) {
 /// Redraw the Hosts panel whenever the notices change, for as long as it keeps the subscription: the global notifies no
 /// view by itself.
 pub(super) fn observe_notices(cx: &mut Context<super::HostsPanel>) -> Subscription {
-    cx.observe_global::<Notices>(|_, cx| cx.notify())
+    cx.observe_global::<KeptNotices>(|_, cx| cx.notify())
 }
 
 /// The removal notice the Hosts panel draws above its rows (`.uninstall-notice`), or `None` while none shows: one line,

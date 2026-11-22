@@ -399,6 +399,16 @@ fn tunnel_lines<'a>(
     std::iter::once(health).chain(forwards)
 }
 
+/// The generic provider line describes the direction alone. The host-specific
+/// line can also distinguish starting a stopped container from resuming it.
+fn lifecycle_infinitive(direction: &LifecycleDirection, starting: bool) -> &'static str {
+    match (direction, starting) {
+        (LifecycleDirection::Suspending, _) => "suspend",
+        (LifecycleDirection::Resuming, true) => "start",
+        (LifecycleDirection::Resuming, false) => "resume",
+    }
+}
+
 /// [`evidence`] for `host`: a machine's change ("Asked Tensorlake to resume at …") and its deletion ("Farhelm is
 /// deleting this sandbox, its files and its snapshots", or the failure and Retry, then the helm's reason) are worded
 /// for the host's provider. A stopped container's start has its own verb even though the lifecycle direction is
@@ -422,11 +432,7 @@ pub(crate) fn host_evidence(
         ) => line.text(format!(
             "Asked {} to {} at {}; waiting for confirmation",
             ProviderUi(provider).lifecycle_asked(),
-            match (direction, starting) {
-                (LifecycleDirection::Suspending, _) => "suspend",
-                (LifecycleDirection::Resuming, true) => "start",
-                (LifecycleDirection::Resuming, false) => "resume",
-            },
+            lifecycle_infinitive(direction, *starting),
             local_time::stamp(requested_at / 1000, zone)
         )),
         (HostStateView::Deleting { failure }, Some(provider)) => {
@@ -602,10 +608,7 @@ pub(crate) fn evidence(
             ..
         } => line.text(format!(
             "Asked the environment provider to {} at {}; waiting for confirmation",
-            match direction {
-                LifecycleDirection::Suspending => "suspend",
-                LifecycleDirection::Resuming => "resume",
-            },
+            lifecycle_infinitive(direction, false),
             local_time::stamp(requested_at / 1000, zone)
         )),
         HostStateView::Stopped {

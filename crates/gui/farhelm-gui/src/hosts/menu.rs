@@ -515,10 +515,7 @@ impl Render for HostMenu {
                 // The mark of this click, taken before the menu closes. Closing the menu returns focus to its
                 // toggle, which the confirmation then returns focus to when it closes.
                 let mark = Mark::take(cx);
-                let layer = menu.upgrade().and_then(|menu| menu.read(cx).layer);
-                if let Some(layer) = layer {
-                    layers::close(layer, window, cx);
-                }
+                close(&menu, window, cx);
                 super::remove::start(host, &mark, window, cx);
             })
         });
