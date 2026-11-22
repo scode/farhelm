@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`golden-changes-page`](reports/golden-changes-page.report.md) landed 2026-11-21 in #4457, #4458, #4462: write a page of only the changed and new golden pictures (reference, new, differing pixels) after every run that finds any, and describe one visual-review procedure built on it
 - [`triage-bookkeeping`](reports/triage-bookkeeping.report.md) landed 2026-11-21 in #4465, #4466, #4470: execute the 45 discard outcomes from the 2026-11-21 triage, and turn the 17 duplicated-code findings into one Near term TODO entry that keeps their detail
 - [`triage-spec-text`](reports/triage-spec-text.report.md) landed 2026-11-21 in #4467, #4471, #4479: write the accepted current behavior from the 2026-11-21 triage outcomes into SPEC.md and SPEC_impl.md
 - [`triage-gui-sessions`](reports/triage-gui-sessions.report.md) landed 2026-11-21 in #4469, #4477, #4481, #4486, #4492: execute the 2026-11-21 triage outcomes for the desktop app's session list, sidebar, attention list and notices, in grouped PRs
