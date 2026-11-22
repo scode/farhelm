@@ -100,6 +100,7 @@ fn cells_of_one_style_share_a_run_and_default_blanks_are_left_out() {
         row,
         &CellRow {
             wraps: false,
+            wide_wrap_padding: false,
             runs: vec![
                 CellRun {
                     col: 0,
@@ -170,6 +171,43 @@ fn non_ascii_cells_are_runs_of_their_own() {
         runs,
         vec![(0, 1, "a"), (1, 2, "界"), (3, 1, "e\u{301}"), (4, 1, "b")]
     );
+}
+
+/// The same uncovered last column can be either wrap padding or a printed default space.
+/// Attach and scrollback must preserve the distinction even though both rows send the same runs.
+#[test]
+fn screen_and_history_distinguish_wide_wrap_padding_from_a_printed_space() {
+    let mut emulator = emulator(4, 6, 100, "abc界\r\nabc 界".as_bytes());
+    let visible = screen(&emulator);
+    assert!(visible.lines[0].wraps && visible.lines[2].wraps);
+    assert_eq!(visible.lines[0].runs, visible.lines[2].runs);
+    assert!(visible.lines[0].wide_wrap_padding);
+    assert!(!visible.lines[2].wide_wrap_padding);
+
+    feed(&mut emulator, b"\r\n\r\n\r\n\r\n\r\n");
+    let history = HistoryCursor::new().read(&emulator, 0, usize::MAX);
+    assert_eq!(history.cols, 4);
+    assert_eq!(history.lines[0], visible.lines[0]);
+    assert_eq!(history.lines[2], visible.lines[2]);
+}
+
+/// Deleting a wide character's continuation and inserting a blank can place the wide head immediately before
+/// a wrap placeholder. Giving the head both columns would hide the padding on the wire.
+#[test]
+fn shifted_wide_head_stops_before_the_wrap_padding() {
+    let emulator = emulator(5, 3, 100, "ab界語\x1b[1;4H\x1b[P\x1b[1;1H\x1b[@".as_bytes());
+    let first = &emulator.term().grid()[Line(0)];
+    assert!(first[Column(3)].flags.contains(Flags::WIDE_CHAR));
+    assert!(
+        first[Column(4)]
+            .flags
+            .contains(Flags::WRAPLINE | Flags::LEADING_WIDE_CHAR_SPACER)
+    );
+    let visible = screen(&emulator);
+    let first = &visible.lines[0];
+    assert!(first.wide_wrap_padding);
+    let last = first.runs.last().unwrap();
+    assert_eq!((last.col, last.width, last.text.as_str()), (3, 1, "界"));
 }
 
 /// An emoji that a variation selector (VS16) makes two cells wide is
@@ -802,6 +840,7 @@ fn history_packs_into_bounded_contiguous_messages() {
     let lines: Vec<CellRow> = (0..2000)
         .map(|_| CellRow {
             wraps: false,
+            wide_wrap_padding: false,
             runs: vec![CellRun {
                 col: 0,
                 width: 100,
@@ -843,6 +882,7 @@ fn history_packs_into_bounded_contiguous_messages() {
 fn binary_packing_counts_exact_envelopes_rows_and_shared_links() {
     let row = CellRow {
         wraps: true,
+        wide_wrap_padding: false,
         runs: vec![CellRun {
             col: 0,
             width: 1000,

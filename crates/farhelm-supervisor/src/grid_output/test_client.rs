@@ -175,6 +175,7 @@ pub(crate) fn row_text(row: &CellRow) -> String {
 fn resolve(row: &Row, links: &[Link]) -> CellRow {
     CellRow {
         wraps: row.wraps,
+        wide_wrap_padding: row.wide_wrap_padding,
         runs: row
             .runs
             .iter()

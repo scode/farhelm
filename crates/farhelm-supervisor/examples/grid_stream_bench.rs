@@ -89,7 +89,11 @@ impl Workload {
                 })
                 .collect(),
         };
-        CellRow { wraps: false, runs }
+        CellRow {
+            wraps: false,
+            wide_wrap_padding: false,
+            runs,
+        }
     }
 }
 

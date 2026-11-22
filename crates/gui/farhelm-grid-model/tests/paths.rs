@@ -300,6 +300,26 @@ fn path_cells_map_through_wide_combining_and_wrapped_cells() {
     }
 }
 
+/// Printed paths can wrap before a wide character. Coloring the wrap padding must leave the recognized path intact,
+/// while a real space in the same column splits the token.
+#[test]
+fn path_recognition_joins_over_styled_padding_only() {
+    for padding in [false, true] {
+        let model = lines(vec![
+            (
+                9,
+                json!({"w":true,"p":padding,"r":[[0,8,"src/img/",[0,-1,-1]],[8,1," ",[0,-1,2]]]}),
+            ),
+            (9, row(false, &[(0, 2, "界"), (2, 3, ".rs")])),
+        ]);
+        let path = "src/img/界.rs".to_owned();
+        for line in [0, 1] {
+            assert_eq!(paths(&model, line).contains(&path), padding);
+        }
+        assert!(model.path_link_at(Position { line: 0, col: 8 }).is_none());
+    }
+}
+
 /// Replaces "paths cut near the right edge join through soft wraps and program breaks". The same text links whole
 /// through a terminal wrap and through a program's own line break, which TUIs pad after the head and indent before
 /// the tail; neither padding nor indentation belongs in the path, and both shapes give the same endpoints from

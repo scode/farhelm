@@ -84,6 +84,8 @@ impl GridRun {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct GridRow {
     pub wraps: bool,
+    /// The last column may carry a style, but text and link detection omit it.
+    pub wide_wrap_padding: bool,
     pub runs: Vec<GridRun>,
 }
 
@@ -94,6 +96,7 @@ impl GridRow {
     fn resolve(row: Row, links: &[Arc<Link>]) -> Self {
         Self {
             wraps: row.wraps,
+            wide_wrap_padding: row.wide_wrap_padding,
             runs: row
                 .runs
                 .into_iter()
@@ -111,6 +114,11 @@ impl GridRow {
     /// The boundary after the last transmitted cell, before implicit blanks.
     pub fn end(&self) -> u16 {
         self.runs.last().map_or(0, |run| run.col + run.width)
+    }
+
+    /// The boundary after this row's selectable columns, at its original width.
+    fn text_columns(&self, cols: u16) -> u16 {
+        cols.saturating_sub(u16::from(self.wide_wrap_padding))
     }
 
     /// Text between cell boundaries, preserving blanks and the received text.

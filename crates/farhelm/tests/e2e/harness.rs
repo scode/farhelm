@@ -3034,6 +3034,7 @@ mod tests {
         };
         let row = Row {
             wraps: false,
+            wide_wrap_padding: false,
             runs: vec![run(0, 2, "界"), run(3, 1, ">")],
         };
         assert_eq!(grid_row_text(&row), "界 >");

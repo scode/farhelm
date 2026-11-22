@@ -254,9 +254,14 @@ impl GridModel {
         mut visit: impl FnMut(u16, u16, &str),
     ) -> Option<u16> {
         let (cols, row) = self.selection_line(line)?;
+        let text_end = row.text_columns(cols);
         let mut col = 0;
         for run in &row.runs {
-            let end = run.col + run.width;
+            if run.col >= text_end {
+                break;
+            }
+            let end = (run.col + run.width).min(text_end);
+            let width = end - run.col;
             let concealed = blank_concealed && run.style.flags & style_flags::HIDDEN != 0;
             let blank_end = if concealed { end } else { run.col };
             for blank in col..blank_end {
@@ -267,15 +272,14 @@ impl GridModel {
                 continue;
             }
             if run.is_plain_flow() {
-                for offset in 0..run.width {
+                for offset in 0..width {
                     let byte = usize::from(offset);
                     visit(run.col + offset, 1, &run.text[byte..byte + 1]);
                 }
             } else {
-                visit(run.col, run.width, &run.text);
+                visit(run.col, width, &run.text);
             }
         }
-        let text_end = cols - u16::from(self.pads_wide_wrap(line, cols, row));
         for blank in col..text_end {
             visit(blank, 1, " ");
         }
@@ -352,14 +356,12 @@ impl GridModel {
                 ),
                 SelectionMode::Column => (left.min(cols), right.min(cols)),
             };
-            let mut text = row.text(from, to);
+            let mut text = row.text(from, to.min(row.text_columns(cols)));
             let continues = mode == SelectionMode::Linear
                 && self.wraps_after(number, row)
                 && number != end.line;
             if !continues {
                 text.truncate(text.trim_end_matches(' ').len());
-            } else if to == cols && self.pads_wide_wrap(number, cols, row) {
-                text.pop();
             }
             if join_next && let Some(last) = lines.last_mut() {
                 last.push_str(&text);
@@ -369,21 +371,5 @@ impl GridModel {
             join_next = continues;
         }
         lines.join("\n").replace('\u{00a0}', " ")
-    }
-
-    /// Distinguish the emulator's unused wrap-padding cell from a space the
-    /// program actually printed. A two-cell non-ASCII run on the next row
-    /// cannot fit in that last cell, so only the uncovered padding is omitted.
-    pub(crate) fn pads_wide_wrap(&self, number: u64, cols: u16, row: &GridRow) -> bool {
-        self.wraps_after(number, row)
-            && row.end() < cols
-            && number
-                .checked_add(1)
-                .and_then(|next| self.line(next))
-                .is_some_and(|(_, next)| {
-                    next.runs
-                        .first()
-                        .is_some_and(|run| run.col == 0 && run.width == 2 && !run.is_plain_flow())
-                })
     }
 }

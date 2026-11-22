@@ -120,7 +120,7 @@ fn write_links(out: &mut Vec<u8>, links: &[Link]) {
 /// while foreground and background omit their default representation.
 fn write_row(out: &mut Vec<u8>, row: &Row) {
     out.extend_from_slice(&(row.binary_len() as u32).to_le_bytes());
-    out.push(u8::from(row.wraps));
+    out.push(u8::from(row.wraps) | (u8::from(row.wide_wrap_padding) << 1));
     out.extend_from_slice(&(row.runs.len() as u16).to_le_bytes());
     for run in &row.runs {
         let mut metadata = run.style.flags;
@@ -283,11 +283,15 @@ impl<'a> Reader<'a> {
         let mut body = Reader {
             rest: self.take(len)?,
         };
-        let wraps = match body.u8()? {
-            0 => false,
-            1 => true,
-            _ => return Err(bound!("binary wraps is not 0 or 1")),
-        };
+        let flags = body.u8()?;
+        if flags & !0b11 != 0 {
+            return Err(bound!("unknown binary row flags"));
+        }
+        let wraps = flags & 1 != 0;
+        let wide_wrap_padding = flags & 2 != 0;
+        if wide_wrap_padding && !wraps {
+            return Err(bound!("wide-wrap padding requires a soft wrap"));
+        }
         let count = usize::from(body.u16()?);
         if count > usize::from(cols) || count > body.rest.len() / 8 {
             return Err(bound!("binary run count {count} exceeds bounds"));
@@ -339,7 +343,11 @@ impl<'a> Reader<'a> {
             });
         }
         body.finish()?;
-        let row = Row { wraps, runs };
+        let row = Row {
+            wraps,
+            wide_wrap_padding,
+            runs,
+        };
         row.validate(cols, links)?;
         Ok(row)
     }

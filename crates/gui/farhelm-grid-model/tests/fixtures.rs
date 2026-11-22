@@ -71,6 +71,7 @@ fn prefix(message: &GridOutput) -> GridModel {
 fn owned(row: &farhelm_proto::grid::Row, links: &[Link]) -> GridRow {
     GridRow {
         wraps: row.wraps,
+        wide_wrap_padding: row.wide_wrap_padding,
         runs: row
             .runs
             .iter()

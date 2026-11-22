@@ -476,6 +476,7 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
             }
             rows.push(Row {
                 wraps: next() & 1 != 0,
+                wide_wrap_padding: false,
                 runs,
             });
         }
@@ -503,6 +504,7 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
             y: 0,
             row: Row {
                 wraps: false,
+                wide_wrap_padding: false,
                 runs: vec![
                     Run {
                         style: Style {
@@ -524,6 +526,28 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
         }],
     };
     add_valid("optional-fields".into(), probe.clone());
+    // History carries its row width independently of the current frame. These rows tie the padding flag to that
+    // width so the desktop's replay fixture can check the flag survives decoding and storage.
+    add_valid(
+        "wide-wrap-padding".into(),
+        GridOutput::History {
+            first: 0,
+            cols: 4,
+            rows: vec![
+                Row {
+                    wraps: true,
+                    wide_wrap_padding: true,
+                    runs: vec![run(0, 3, "abc")],
+                },
+                Row {
+                    wraps: false,
+                    wide_wrap_padding: false,
+                    runs: vec![run(0, 2, "界")],
+                },
+            ],
+            links: Vec::new(),
+        },
+    );
     add_valid(
         "frame-bar".into(),
         GridOutput::Frame {
@@ -550,6 +574,7 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
             cols: 1,
             rows: vec![Row {
                 wraps: false,
+                wide_wrap_padding: false,
                 runs: vec![Run {
                     link: Some(0),
                     ..run(0, 1, "\u{feff}a")
@@ -629,7 +654,14 @@ fn binary_fixture_cases() -> Vec<BinaryFixture> {
             34u32.to_le_bytes().to_vec(),
             "truncated",
         ),
-        ("invalid-wraps", 20, vec![0], vec![2], "wraps"),
+        (
+            "invalid-wraps",
+            20,
+            vec![0],
+            vec![2],
+            "wide-wrap padding requires a soft wrap",
+        ),
+        ("unknown-row-flags", 20, vec![0], vec![5], "row flags"),
         (
             "huge-run-count",
             21,
@@ -957,6 +989,22 @@ fn write_binary_grid_fixtures() {
     }
 }
 
+/// A padded row is always a soft wrap. Reject impossible flags at the sender as well as when receiving bytes.
+#[farhelm_testtrace::test]
+fn padding_without_a_soft_wrap_cannot_be_encoded() {
+    let mut row: Row = serde_json::from_str(r#"{"w":true,"p":true,"r":[]}"#).unwrap();
+    let history = |row| GridOutput::History {
+        first: 0,
+        cols: 4,
+        rows: vec![row],
+        links: Vec::new(),
+    };
+    assert!(history(row.clone()).encode().is_ok());
+    row.wraps = false;
+    let error = history(row).encode().unwrap_err();
+    assert!(error.to_string().contains("padding requires a soft wrap"));
+}
+
 /// The protocol has one encoding for each kind. Serde remains useful for
 /// semantic descriptions, but accepting their JSON on the wire would hide
 /// a mismatched sender after a protocol bump.
@@ -1108,7 +1156,11 @@ fn one_row(y: u16, runs: Vec<Run>, links: Vec<Link>) -> Either {
     Either::Out(GridOutput::Rows {
         rows: vec![ScreenRow {
             y,
-            row: Row { wraps: false, runs },
+            row: Row {
+                wraps: false,
+                wide_wrap_padding: false,
+                runs,
+            },
         }],
         links,
     })
@@ -1150,6 +1202,7 @@ fn history_at(first: u64, cols: u16, count: usize) -> Either {
         rows: vec![
             Row {
                 wraps: false,
+                wide_wrap_padding: false,
                 runs: Vec::new(),
             };
             count
@@ -1162,7 +1215,11 @@ fn history_row(cols: u16, runs: Vec<Run>) -> Either {
     Either::Out(GridOutput::History {
         first: 0,
         cols,
-        rows: vec![Row { wraps: false, runs }],
+        rows: vec![Row {
+            wraps: false,
+            wide_wrap_padding: false,
+            runs,
+        }],
         links: Vec::new(),
     })
 }
@@ -1540,6 +1597,7 @@ fn message_size_limits_are_inclusive_and_enforced_on_both_sides() {
     // although every row is valid on its own.
     let wide = Row {
         wraps: false,
+        wide_wrap_padding: false,
         runs: (0..GRID_MAX_DIMENSION)
             .map(|col| run(col, 1, "x"))
             .collect(),
@@ -1639,6 +1697,7 @@ fn screen_rows(entries: &[(u16, u16)]) -> GridOutput {
                 y,
                 row: Row {
                     wraps: false,
+                    wide_wrap_padding: false,
                     runs: if width == 0 {
                         Vec::new()
                     } else {
@@ -1719,6 +1778,7 @@ fn the_documented_attach_sequence_and_live_updates_pass_the_stream_check() {
             cols: GRID_MAX_DIMENSION,
             rows: vec![Row {
                 wraps: false,
+                wide_wrap_padding: false,
                 runs: vec![run(0, GRID_MAX_DIMENSION, &"h".repeat(1000))],
             }],
             links: Vec::new(),
