@@ -379,7 +379,7 @@ pub(crate) fn draw(
         strip(BAND_ID, palette)
             .when(shows, |band| {
                 band.child(copy(COPY_ID, words.lead, words.rest, palette))
-                    .child(actions(&weak, key, agent, &words, state))
+                    .child(actions(&weak, key, agent, &words, &state.settings))
             })
             .children(failed.filter(|_| failure).map(|words| {
                 div()
@@ -461,9 +461,9 @@ fn actions(
     key: &str,
     agent: TrustAgent,
     words: &BandWords,
-    state: &TrustBand,
+    focus: &FocusHandle,
 ) -> impl IntoElement {
-    let opener = state.settings.clone();
+    let opener = focus.clone();
     let settings = Button::new(
         SETTINGS_ID,
         words.settings,
@@ -471,7 +471,7 @@ fn actions(
         Role::Button,
     )
     .tier(Tier::Primary)
-    .focus(&state.settings)
+    .focus(focus)
     .on_click(move |_, window, cx| {
         let mark = Mark::take(cx);
         settings::open_at_agent_trust(agent, &opener, &mark, window, cx);
@@ -503,4 +503,22 @@ fn actions(
         });
     });
     action_row().child(settings).child(dismiss).child(hide)
+}
+
+/// Show the production explanation and actions at a terminal pane's width.
+/// Tests of the live band exercise the question and Settings read separately.
+#[cfg(test)]
+pub(crate) fn golden(agent: TrustAgent, key: &str, focus: &FocusHandle, cx: &App) -> AnyElement {
+    let words = agent.band_words().expect("this agent shows a trust hint");
+    let palette = theme::palette(cx);
+    strip(BAND_ID, palette)
+        .child(copy(COPY_ID, words.lead, words.rest, palette))
+        .child(actions(
+            &WeakEntity::new_invalid(),
+            key,
+            agent,
+            &words,
+            focus,
+        ))
+        .into_any_element()
 }

@@ -663,9 +663,9 @@ trusts the workspace for the run. Muse 1.4.14 or later receives per-launch `Sess
 plugin installation or edits to Muse's own configuration. The conversation becomes known at the first prompt, and
 Restart resumes its reported UUID with `muse resume <conversation-id>`, keeping the launch's permission flags. A
 supported Muse that cannot report still launches; without a captured conversation Restart explains why it is
-unavailable. Muse's managed-checkout trust setting adds `--trust-workspace` when Farhelm composes an agent launch into a
-managed checkout. With it off, Farhelm adds no trust flag; YOLO or vendor configuration may still grant trust. Muse
-follows the agent-version support rule under "Supported user environments".
+unavailable. Muse's trust setting adds `--trust-workspace` when Farhelm composes an agent launch in any directory. With
+it off, YOLO or Muse's own configuration can still grant trust. Muse follows the agent-version support rule under
+"Supported user environments".
 
 OpenCode is an agent type. Its model is optional and uses OpenCode's configured default when omitted. For an explicit
 choice, Farhelm suggests `opencode/glm-5.3-flash`, `opencode/grok-4.5`, `opencode/grok-4.6`, `opencode/glm-5.3`,
@@ -1120,21 +1120,21 @@ agent choice is independent of that destination:
   with a non-YOLO default is remembered. The last wrapper prefix from a successful user agent launch is remembered per
   agent type, helm-wide; a launch without one clears that agent's remembered prefix. Switching agent types loads the new
   type's remembered prefix. Agent-origin launches and command launches do not change this memory. Workspace trust for
-  Codex, Muse and Pi comes from separate off-by-default Settings switches for managed checkouts (below). There is no
-  per-launch trust choice, and the old remembered trust value is neither read nor written. Those switches add per-launch
-  trust arguments without writing vendor trust state; the separate opt-in for Claude managed checkouts below is the one
-  exception. Without an override, the harness retains its own trust behavior; Codex, Muse, Claude, and Cursor may still
-  ask for directory trust (Cursor even with `--force`). Farhelm does not send answers to their terminal prompts. "Reset
-  choices" returns permissions and the wrapper prefix to their remembered values, and a recent setup's saved choices
-  override them when used. A recent setup's historical trust value is ignored. The launch-composer search matches
-  harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort words offered by that harness and
-  model plus `effort:default`, bare `yolo` and `guarded` plus the `perms:` choices for those modes, custom, own setting
-  and supported approval modes, host and name actions, folders and recent setups. On the Agent tab, Guarded and YOLO can
-  also be chosen before a harness, by their bare words or `perms:` choices. Other permission actions are offered only
-  when the selected harness can represent them; own setting is offered only on Cursor. The Command tab offers no
-  permission actions. `name:foo` applies the entire value as the session name. `host:foo` filters host choices, and
-  `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI is
-  `Local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
+  Codex, Muse and Pi comes from separate off-by-default Settings switches that apply in any directory (below). There is
+  no per-launch trust choice, and the old remembered trust value is neither read nor written. Those switches add
+  per-launch trust arguments without writing vendor trust state; the separate opt-in for Claude managed checkouts below
+  is the one exception. Without an override, the harness retains its own trust behavior; Codex, Muse, Claude, and Cursor
+  may still ask for directory trust (Cursor even with `--force`). Farhelm does not send answers to their terminal
+  prompts. "Reset choices" returns permissions and the wrapper prefix to their remembered values, and a recent setup's
+  saved choices override them when used. A recent setup's historical trust value is ignored. The launch-composer search
+  matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort words offered by that
+  harness and model plus `effort:default`, bare `yolo` and `guarded` plus the `perms:` choices for those modes, custom,
+  own setting and supported approval modes, host and name actions, folders and recent setups. On the Agent tab, Guarded
+  and YOLO can also be chosen before a harness, by their bare words or `perms:` choices. Other permission actions are
+  offered only when the selected harness can represent them; own setting is offered only on Cursor. The Command tab
+  offers no permission actions. `name:foo` applies the entire value as the session name. `host:foo` filters host
+  choices, and `host:local` selects the helm-local host even if it has an alias. The default local host label in the GUI
+  is `Local (this machine)`. Accepting a result applies it and clears the box while keeping focus there, except custom
   moves focus to its flags editor. With no row highlighted, Enter on an empty field launches only a complete, valid
   selection through the ordinary Launch path; an incomplete attempt says why beside Launch, as does a refused Launch
   press, and the greyed-out button's hover names what is missing. Enter when the launcher itself has focus uses that
@@ -1775,16 +1775,14 @@ shared values when opened. A failed Don't show again save restores the band with
 still shown; leaving the session drops the error. If the corrective settings read also fails, only the save error
 appears until trust is known to be off again, without the normal explanation or its actions.
 
-The Settings pages for Codex, Muse and Pi each offer their own off-by-default, all-hosts trust switch. Each applies only
-when Farhelm composes an agent launch into a managed checkout, including a checkout an agent requests and an existing
-managed checkout selected for New, Clone, Restart with or Replace with. An inherited spawn recomputes trust for its
-destination under the same rule as clone, rather than retaining its parent's trust choice. Codex receives a per-launch
-trusted directory override, Muse receives `--trust-workspace`, and Pi receives `--approve` for project settings and
-extensions. These switches never edit the agent's saved configuration. Their help states that the repository's hooks,
-settings and commands may then run as if the user had approved them. Ordinary user-selected directories receive no trust
-override, even when the client or a cloned source carries an old trust choice. Plain Restart and plain Replace keep
-their stored launch. Settings changes affect newly composed attempts; an accepted fresh-checkout retry retains its
-original trust choice, and an ordinary keyed retry whose resolved launch changes may refuse the reused key.
+The Settings pages for Codex, Muse and Pi each offer their own off-by-default, all-hosts trust switch. New, Clone,
+Restart with, Replace with and agent-requested launches apply the current setting in any directory. An inherited spawn
+reads Settings under the same rule as Clone. Codex receives a per-launch trusted directory override, Muse receives
+`--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent keeps its saved
+configuration. The help explains that the repository's hooks, settings and commands may run as if the user had approved
+them. Plain Restart and plain Replace keep the stored launch. An accepted fresh-checkout retry retains its original
+trust choice. An ordinary keyed retry whose resolved launch changes may refuse the reused key. This includes a retry
+across the workspace-trust upgrade if the original attempt used a symlink and stored its canonical path.
 
 Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
 ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument trusts the
@@ -1792,13 +1790,12 @@ canonical working directory on the session's host. It replaces the saved trust l
 settings file alone. Custom permission options supplying `--settings` or `--settings=...` take precedence. Plain Restart
 and Replace reuse the saved launch. Literal Command launches supply their own arguments.
 
-Codex and Muse show the same nonmodal discovery hint while their recognized trust question is current in a managed
-checkout's agent terminal, their switch is off, and their own hint has not been dismissed. Antigravity follows the same
-rule in any directory when the session has an Antigravity agent launch. The hint names the agent, offers Settings at its
-switch on the agent's Settings page and Don't show again, and has an occurrence-only ×. Each shared dismissal is
-independent and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a switch but no
-hint band: its project-resource approval is not currently recognized as a trust question. Older stored session snapshots
-default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
+Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
+the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers
+Settings at its switch on the agent's Settings page and Don't show again, and has an occurrence-only ×. Each shared
+dismissal is independent and reversible beside its switch. Failed settings reads never count as an off switch. Pi has a
+switch but no hint band: its project-resource approval is not currently recognized as a trust question. Older stored
+session snapshots default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
 When the selected installed host has no checkout folder in effect, the launcher's managed-checkout destination offers
 the same explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed
@@ -4502,9 +4499,9 @@ shell and show the command with no Permissions row. For the other launch types, 
 YOLO or Custom, the vendor's guarded mode name, Approve, Smart approve, Chat, or Unknown for a launch predating
 classification. Own setting explains that Farhelm treats it as YOLO. A command launch's Asserted YOLO or Asserted not
 YOLO is explicitly the agent's unchecked claim, never Farhelm's verdict. Stored workspace trust has its own Trusted
-workspace or Not trusted chip; trusted managed-checkout wording names Settings as the source. Permission flags remain a
-separate, fully wrapped fact. Prompt cards use the same chip presentation; template cards keep their stored permission
-labels and YOLO assertions without interpreting an omitted permission as own setting.
+workspace or Not trusted chip. The trusted chip names Settings as the source. Permission flags remain a separate, fully
+wrapped fact. Prompt cards use the same chip presentation; template cards keep their stored permission labels and YOLO
+assertions without interpreting an omitted permission as own setting.
 
 A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
 button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.
@@ -4590,8 +4587,8 @@ refused without a suffix. A base name's invalid or over-long candidate is also r
 that loses its approved directory reports the conflict and never submits another create automatically. Keyed recovery
 precedes any new name preview. `farhelm spawn` and `farhelm agent clone` do not request fresh checkouts; spawn refuses a
 checkout template. `--inherit-agent` is exclusive with every launch flag. `--trust` is no longer accepted for create,
-spawn, or template writes; managed-checkout trust follows Settings. A command flag repeated or contradicted (`--yolo`
-with `--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
+spawn, or template writes. Workspace trust follows Settings. A command flag repeated or contradicted (`--yolo` with
+`--no-yolo`) is refused rather than resolved by order. The removed selectors `--profile` and `--profile-id`, and
 `farhelm agent restart --mode`, are refused with a message naming what replaced them, and `--agent` given something that
 is not an agent type is refused with the list of agent types. While its retry record is retained, a retry under an
 idempotency key is matched by the request as the agent sent it, not by what that request resolved to. Retrying
@@ -5623,12 +5620,12 @@ unsafe rendering of remote input by the helm or GUI, secret disclosure, or viola
 
 Only what the user explicitly selects in the GUI may affect the GUI's future defaults and suggestions: the remembered
 permission mode and the recent setups the New dialog offers. Each is recorded from the user's own selection in the
-request that succeeded, never from what a host replies or lists, with the one exception below. A supervisor's create
-reply, the settings a plain Replace copies from a listed row, and anything an agent creates do not qualify, because none
-of them is a choice the user made in the GUI. A choice is still recorded only once its create succeeds; the host's
-success decides whether it is recorded, never what. The exception: when opt-in managed-checkout trust applies to an
-existing folder, the helm records the host's canonical path for that folder. The same path is used for the launch so the
-folder selected for trust stays the same through approval and dispatch.
+request that succeeded, never from what a host replies or lists. A supervisor's create reply, the settings a plain
+Replace copies from a listed row, and anything an agent creates do not qualify, because none of them is a choice the
+user made in the GUI. A choice is still recorded only once its create succeeds; the host's success decides whether it is
+recorded. When an agent asks to create or clone a trusted Codex, Muse or Pi session, the approval card and the launch
+use the same canonical directory from the target host. A changed symlink cannot redirect the trusted launch while it
+waits for approval.
 
 Failures or malicious behavior from a remote host must not disrupt unrelated hosts or ordinary helm/GUI controls, apart
 from the explicitly permitted operations above and the exceptions below. Supervisors need sensible recovery from

@@ -19,6 +19,23 @@ pub(super) fn hook_setup_hint(_: &SceneState, _: &mut Window, cx: &mut App) -> A
         .into_any_element()
 }
 
+/// Both flag-based trust hints use the words shown in an ordinary folder.
+pub(super) fn flag_agent_trust_hints(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    use crate::settings::TrustAgent;
+
+    div()
+        .w(px(740.))
+        .flex()
+        .flex_col()
+        .gap(px(12.))
+        .children(
+            [(TrustAgent::Codex, "a"), (TrustAgent::Muse, "b")].map(|(agent, key)| {
+                crate::session_pane::trust_band_golden(agent, key, &cx.focus_handle(), cx)
+            }),
+        )
+        .into_any_element()
+}
+
 /// The open session's details bar for every kind of status and host it draws differently, from a fake helm's snapshot:
 /// running on the local host (`Local (this machine)`, the red laptop), waiting on a remote that left its mark at the
 /// cloud, exited with a stop annotation, interrupted (the amber ended color), a launch failure whose long detail ends in

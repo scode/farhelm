@@ -22,7 +22,7 @@ had approved them.
 
 For that launch, the session's working directory replaces Antigravity's saved list of trusted directories. Farhelm
 leaves your saved settings file alone. If you already pass `--settings` through **Custom** permission flags, that option
-takes precedence. See [when Farhelm applies trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts).
+takes precedence. See [when Farhelm applies trust settings](/docs/using/start-a-session/#workspace-trust).
 
 ## Set up Restart
 

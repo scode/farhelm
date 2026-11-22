@@ -56,7 +56,7 @@
 use crate::manager;
 use crate::workspace_trust::{
     TrustResolvedLaunch, configured_launch_workspace_trust, normalize_launch_workspace_trust,
-    retain_stored_launch_workspace_trust, try_without_workspace_trust,
+    retain_stored_launch_workspace_trust,
 };
 use crate::{
     AppState, CreateExtras, SupervisorClient, SupervisorError, aggregate, http_error, launches,
@@ -559,8 +559,8 @@ pub(crate) async fn browse_directory(
         return http_error(error);
     }
     if req.membership_only {
-        return match within_host_read_bound(client.managed_checkout_for_cwd(&req.cwd)).await {
-            Ok((cwd, _managed)) => axum::Json(BrowseDirectoryBody {
+        return match within_host_read_bound(client.canonical_launch_directory(&req.cwd)).await {
+            Ok(cwd) => axum::Json(BrowseDirectoryBody {
                 cwd,
                 parent: None,
                 children: Vec::new(),
@@ -1997,7 +1997,7 @@ async fn create_session_request(
         None => {
             let mode = ordinary_mode
                 .expect("fresh and agent requests returned or took their own launch above");
-            normalize_launch_workspace_trust(state, &client, mode, &mut req.cwd, false).await?
+            normalize_launch_workspace_trust(state, mode).await?
         }
     };
     let named_start = req
@@ -2628,7 +2628,7 @@ async fn create_fresh_session_resolved(
             // An agent's approval already fixed this trust choice. Reading
             // Settings again here must not change the approved launch.
             Some(mode) => mode,
-            None => configured_launch_workspace_trust(create_mode(&mut req)?, &config, true)?,
+            None => configured_launch_workspace_trust(create_mode(&mut req)?, &config)?,
         };
         Ok((github_checkout, mode))
     }
@@ -2889,8 +2889,7 @@ mod workspace_trust_tests {
             config_revision: 1,
         };
         let approved =
-            crate::workspace_trust::configured_launch_workspace_trust(launch, &settings, true)
-                .unwrap();
+            crate::workspace_trust::configured_launch_workspace_trust(launch, &settings).unwrap();
         let trusted = approved.as_launch().clone();
         assert_eq!(
             trusted.agent_selection().unwrap().workspace_trust,
@@ -2995,11 +2994,11 @@ mod workspace_trust_tests {
         }
     }
 
-    /// The setting is scoped to the harness and its eligible destinations.
-    /// Only Antigravity can opt in for an ordinary folder. Disabled or
-    /// ineligible compositions remove any trust carried by the source.
+    /// The agent's switch decides each new launch. An inherited or obsolete
+    /// trust bit cannot override today's setting, and the compiled launch
+    /// still carries the evidence the YOLO guard verifies.
     #[test]
-    fn settings_supply_workspace_trust_for_eligible_destinations() {
+    fn settings_supply_workspace_trust_for_new_launches() {
         for enabled in [false, true] {
             let config = crate::checkout_config::ResolvedCheckoutConfig {
                 keep_spare: true,
@@ -3013,41 +3012,33 @@ mod workspace_trust_tests {
                 config_revision: 0,
             };
             for harness in LaunchHarness::ALL.iter().copied() {
-                for managed in [false, true] {
-                    let selection = LaunchSelection {
-                        harness,
-                        model: None,
-                        effort: None,
-                        permissions: None,
-                        permission_flags: None,
-                        wrapper_prefix: None,
-                        container: None,
-                        workspace_trust: harness.offers_workspace_trust().then_some(true),
-                    };
-                    let launch = launches::compile(selection).unwrap();
-                    let normalized =
-                        configured_launch_workspace_trust(launch, &config, managed).unwrap();
-                    assert_eq!(
-                        normalized
-                            .as_launch()
-                            .agent_selection()
-                            .unwrap()
-                            .workspace_trust,
-                        (enabled
-                            && (managed || harness == LaunchHarness::Antigravity)
-                            && harness.offers_workspace_trust())
-                        .then_some(true),
-                        "{harness:?}, setting {enabled}, managed {managed}",
-                    );
-                    assert_eq!(
-                        launches::compile(
-                            normalized.as_launch().agent_selection().unwrap().clone()
-                        )
+                let selection = LaunchSelection {
+                    harness,
+                    model: None,
+                    effort: None,
+                    permissions: None,
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    container: None,
+                    workspace_trust: harness.offers_workspace_trust().then_some(true),
+                };
+                let launch = launches::compile(selection).unwrap();
+                let normalized = configured_launch_workspace_trust(launch, &config).unwrap();
+                assert_eq!(
+                    normalized
+                        .as_launch()
+                        .agent_selection()
+                        .unwrap()
+                        .workspace_trust,
+                    (enabled && harness.offers_workspace_trust()).then_some(true),
+                    "{harness:?}, setting {enabled}",
+                );
+                assert_eq!(
+                    launches::compile(normalized.as_launch().agent_selection().unwrap().clone())
                         .unwrap(),
-                        *normalized.as_launch(),
-                        "the selection must still prove the exact launch to the YOLO guard",
-                    );
-                }
+                    *normalized.as_launch(),
+                    "the selection must still prove the exact launch to the YOLO guard",
+                );
             }
         }
     }
@@ -3055,7 +3046,7 @@ mod workspace_trust_tests {
     /// The switches have different vendor mechanisms and caveats. Enabling
     /// one must not authorize another harness through a shared trust bit.
     #[test]
-    fn managed_workspace_trust_settings_remain_independent() {
+    fn workspace_trust_settings_remain_independent() {
         for (enabled_harness, codex_trust, muse_trust, pi_trust) in [
             (LaunchHarness::Codex, true, false, false),
             (LaunchHarness::Muse, false, true, false),
@@ -3499,37 +3490,11 @@ async fn resolve_and_restart_session(
         launches::named_start(launch, value.clone()).map_err(invalid_request)?;
     }
     let (claim, client) = route_active_session(state, key).await?;
-    // Only the trust-capable branch reads Settings or checkout identity. Plain
-    // restart carries no replacement launch, and literal commands stay intact.
-    let with = if let Some(launch) = with {
-        Some(match try_without_workspace_trust(launch) {
-            Ok(resolved) => resolved,
-            Err(launch) => {
-                let config = state.store.resolve_checkout_config(None).await?;
-                let managed =
-                    if crate::workspace_trust::needs_managed_checkout_lookup(&launch, &config) {
-                        let session = manager::drain_sessions(&client, claim.host)
-                            .await?
-                            .sessions
-                            .into_iter()
-                            .map(store::CachedRow::into_info)
-                            .find(|session| session.id == id)
-                            .ok_or_else(|| {
-                                invalid_request("the session to restart no longer exists".into())
-                            })?;
-                        // Live membership can outlast a replaced checkout, including
-                        // for a borrower. Use the same identity-checked read as New.
-                        // Restart cannot change cwd; the supervisor's recorded-cwd
-                        // check pins its launch to the canonical path independently.
-                        client.managed_checkout_for_cwd(&session.cwd).await?.1
-                    } else {
-                        false
-                    };
-                configured_launch_workspace_trust(launch, &config, managed)?
-            }
-        })
-    } else {
-        None
+    // Restart with composes for the session's recorded directory. Plain
+    // Restart carries no replacement launch and replays the stored choice.
+    let with = match with {
+        Some(launch) => Some(normalize_launch_workspace_trust(state, launch).await?),
+        None => None,
     };
     let named_start = conversation
         .map(|value| {
@@ -3569,7 +3534,7 @@ struct RestartSpec {
     named_start: Option<farhelm_proto::NamedConversationStart>,
 }
 
-/// Guard and send a restart on the same connection used to resolve its trust.
+/// Guard and send a restart on the same connection that supplied its host claim.
 ///
 /// Replacement launches arrive only after an explicit workspace policy; this
 /// boundary still owns the existing YOLO check and reply publication. Borrowing
@@ -4876,9 +4841,8 @@ async fn replace_session_inner(
     // `do_create_session` validates it against the launch mode.
     let prompt = with.as_mut().and_then(|body| body.prompt.take());
     let (mode, cwd, title, cols, rows) = match (with, with_mode) {
-        (Some(mut with), Some(mode)) => {
-            let mode = normalize_launch_workspace_trust(state, &client, mode, &mut with.cwd, false)
-                .await?;
+        (Some(with), Some(mode)) => {
+            let mode = normalize_launch_workspace_trust(state, mode).await?;
             (mode, with.cwd, with.title, with.cols, with.rows)
         }
         // The two halves travel together: `with_mode` is `Some` exactly

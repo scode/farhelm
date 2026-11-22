@@ -11,11 +11,9 @@ specific to Pi.
 ## Gotchas and quirks
 
 - Pi never asks before running commands or changing files, which is why YOLO is its only permission choice. Its switch
-  in [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts) approves the project's own settings
-  and extensions. It is off by default and applies across hosts: each new launch in a directory Farhelm manages gets
-  `--approve`, without changing Pi's saved configuration. Those project resources may run commands as if you had
-  approved them. Directories outside managed checkouts keep Pi's own project-approval behavior; this setting does not
-  add approval prompts for the agent's actions.
+  in [agent trust settings](/docs/using/start-a-session/#workspace-trust) approves the project's settings and extensions
+  in any directory. Farhelm passes `--approve` for the launch and Pi keeps its saved configuration. Approved resources
+  can run commands.
 - **Restart** becomes available once Pi has saved the conversation, after its first reply. After `/new`, restart no
   longer resumes the old conversation, and resumes the new one once Pi has saved it.
 - Restart refuses, rather than starting fresh, when the conversation's file has gone missing or now holds a different

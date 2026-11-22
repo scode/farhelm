@@ -97,7 +97,7 @@ always asks.
 
 Choose your agent under **Agents**. Every agent has a page, including agents with no settings to configure. Agents with
 a directory-trust switch have it on their own page, alongside the switch for their hint above the terminal where
-available. [Trust in managed checkouts](/docs/using/start-a-session/#trust-in-managed-checkouts)
+available. [Workspace trust](/docs/using/start-a-session/#workspace-trust)
 
 [Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart) have their own **Set up
 conversation hooks on all hosts** switches. **Show the hook setup prompt and hint** restores the offer in the launcher

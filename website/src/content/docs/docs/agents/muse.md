@@ -39,15 +39,9 @@ verified, so they may look idle while Muse waits for you.
   default. Your approval rules, sandbox settings and later mode switches still matter; see
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **YOLO** on Muse's status line and
   show a YOLO shield; this is best effort, not a check of your approval or sandbox settings.
-- Muse's switch in [agent trust settings](/docs/using/start-a-session/#trust-in-managed-checkouts) can skip its
-  directory-trust question for directories Farhelm manages, on every host. It is off by default. Farhelm passes a trust
-  argument for each new launch without changing Muse's saved configuration; trusting the directory allows the
-  repository's own hooks, settings and commands to run as if you had approved them. While the switch is off and Muse
-  asks this in a managed checkout, a
-  [note above the session's terminal](/docs/using/start-a-session/#trust-in-managed-checkouts) says Farhelm can answer
-  it, and its **Settings** opens Muse Code's page at its trust switch. Sessions started from the **Command** tab show no
-  note.
-- YOLO also makes Muse trust the session's directory. Turning the setting off cannot take back trust granted by YOLO or
-  Muse's own configuration. Directories outside managed checkouts keep Muse's own trust behavior.
+- Muse's [workspace-trust switch](/docs/using/start-a-session/#workspace-trust) applies in any directory. Farhelm passes
+  a trust argument for the launch and Muse keeps its saved configuration.
+- YOLO also makes Muse trust the session's directory. Muse's own configuration can grant trust independently of the
+  switch.
 
 For what survives closing Farhelm or rebooting a host, see [What survives what](/docs/how-it-works/what-survives-what/).

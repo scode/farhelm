@@ -800,6 +800,36 @@ pub(super) fn settings_claude_setup(state: &SceneState, window: &mut Window, cx:
     );
 }
 
+/// Codex's trust and hint switches show how the opt-in applies to any folder.
+pub(super) fn settings_codex_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(farhelm_proto::LaunchHarness::Codex),
+        window,
+        cx,
+    );
+}
+
+/// Muse's page explains its per-launch flag and its own hint switch.
+pub(super) fn settings_muse_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(farhelm_proto::LaunchHarness::Muse),
+        window,
+        cx,
+    );
+}
+
+/// Pi's setting approves project resources in any folder and has no hint switch.
+pub(super) fn settings_pi_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene(
+        state,
+        crate::settings::Section::Agent(farhelm_proto::LaunchHarness::Pi),
+        window,
+        cx,
+    );
+}
+
 /// Antigravity's trust applies to ordinary directories, which its help and hint switch explain.
 pub(super) fn settings_antigravity_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     use farhelm_proto::LaunchHarness;

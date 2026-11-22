@@ -6554,22 +6554,14 @@ enum TrustComposeSurface {
     ReplaceWith,
 }
 
-/// Exercise the real route against a pinned peer, asserting both reusable
-/// and named-start argv. The splice serves live session reads itself, so
-/// the peer sees only ownership lookup and the mutation under test. Returning
-/// a different canonical path proves that granted trust pins a new destination,
-/// while an unmanaged reply leaves the caller's spelling alone. Restart keeps
-/// its recorded cwd, but must still consult the identity-checked ownership read.
+/// Exercise the real routes with an ordinary directory. The peer expects the
+/// mutation first to catch a reintroduced ownership lookup. Both the reusable
+/// launch and named start carry the trust choice from Settings.
 async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
     use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
 
-    for (enabled, managed, incoming_trust) in [
-        (false, false, Some(true)),
-        (false, true, Some(true)),
-        (true, false, Some(true)),
-        (true, true, Some(false)),
-    ] {
+    for enabled in [false, true] {
         let selection = LaunchSelection {
             harness: LaunchHarness::Codex,
             model: None,
@@ -6578,35 +6570,24 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             permission_flags: None,
             wrapper_prefix: None,
             container: None,
-            workspace_trust: incoming_trust,
+            workspace_trust: Some(!enabled),
         };
         let mut final_selection = selection.clone();
-        final_selection.workspace_trust = (enabled && managed).then_some(true);
+        final_selection.workspace_trust = enabled.then_some(true);
         let expected = crate::launches::compile(final_selection).unwrap();
         let expected_named =
             crate::launches::named_start(&expected, "named-target".into()).unwrap();
-        let destination = if enabled && managed {
-            "/managed-canonical"
-        } else {
-            "/destination"
-        };
+        let destination = "/destination";
         let mut source = rest_harness::session("source", 1);
         source.cwd = "/source".into();
         source.launch = crate::launches::compile(selection.clone()).unwrap();
         source.invocation = source.launch.display_command();
         source.agent_kind = farhelm_proto::AgentKind::Codex;
         source.restart_offer = farhelm_proto::RestartOffer::Resume;
-        // Restart borrowers retain membership even when a replacement folder
-        // makes the identity-checked read return false. The wire reply below
-        // models that supervisor observation without a second identity mechanism.
-        if managed || matches!(surface, TrustComposeSurface::RestartWith) {
-            source.working_copy = Some(farhelm_proto::WorkingCopyInfo {
-                id: "managed-root".into(),
-                repo: farhelm_proto::parse_github_repo("acme/repo").unwrap(),
-                canonical_path: source.cwd.clone(),
-                origin_session_id: "checkout-origin".into(),
-            });
-        }
+        assert!(
+            source.working_copy.is_none(),
+            "premise: the source is a plain folder"
+        );
         let (client_side, peer_side) = tokio::io::duplex(64 * 1024);
         let (harness, local) = spliced_replace_harness(client_side, vec![source]).await;
         let fleet = harness.fleet.clone();
@@ -6617,47 +6598,6 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
             handshake(&mut reader, &mut writer, "supervisor")
                 .await
                 .unwrap();
-            if enabled {
-                let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-                let ControlMsg::BrowseDirectory {
-                    req_id,
-                    cwd,
-                    membership_only,
-                } = message
-                else {
-                    panic!("enabled setting must resolve destination ownership first: {message:?}");
-                };
-                assert_eq!(
-                    cwd,
-                    if matches!(surface, TrustComposeSurface::RestartWith) {
-                        "/source"
-                    } else {
-                        "/destination"
-                    }
-                );
-                assert!(
-                    membership_only,
-                    "composition must request ownership without enumeration"
-                );
-                writer
-                    .write_control(&ControlMsg::DirectoryListing {
-                        req_id,
-                        cwd: if matches!(surface, TrustComposeSurface::RestartWith) {
-                            "/source"
-                        } else if managed {
-                            "/managed-canonical"
-                        } else {
-                            "/ordinary-canonical"
-                        }
-                        .into(),
-                        parent: Some("/".into()),
-                        children: vec![],
-                        truncated: false,
-                        managed_checkout: managed,
-                    })
-                    .await
-                    .unwrap();
-            }
             let message = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
             let (req_id, launch, named_start, restarting) = match message {
                 ControlMsg::CreateSession {
@@ -6669,7 +6609,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
                 } if !matches!(surface, TrustComposeSurface::RestartWith) => {
                     assert_eq!(
                         cwd, destination,
-                        "only granted trust pins the canonical destination"
+                        "direct launches keep the submitted directory"
                     );
                     (req_id, launch, named_start, false)
                 }
@@ -6687,10 +6627,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
                     "expected {surface:?} dispatch, not an extra browse or another mutation: {other:?}"
                 ),
             };
-            assert_eq!(
-                launch, expected,
-                "{surface:?}, enabled {enabled}, managed {managed}"
-            );
+            assert_eq!(launch, expected, "{surface:?}, enabled {enabled}");
             assert_eq!(
                 named_start,
                 Some(expected_named),
@@ -6784,23 +6721,22 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
     }
 }
 
-/// Old-client trust cannot grant trust to an ordinary folder or revoke
-/// the managed-checkout setting on a new create, including GUI Clone.
+/// New and GUI Clone compose trust from Settings in an ordinary directory.
+/// A legacy client's contrary choice cannot override the switch.
 #[farhelm_testtrace::test]
 async fn create_normalizes_workspace_trust_at_destination_dispatch() {
     assert_codex_trust_dispatch(TrustComposeSurface::Create).await;
 }
 
 /// Restart with composes fresh choices for the source's fixed folder.
-/// A borrower's stale membership after folder replacement must not grant trust:
-/// the identity-checked reply, not membership or the client's bit, decides.
+/// The setting applies even though the source has no managed checkout.
 #[farhelm_testtrace::test]
 async fn restart_with_normalizes_workspace_trust_before_named_resume() {
     assert_codex_trust_dispatch(TrustComposeSurface::RestartWith).await;
 }
 
-/// Replace with may change folders, so only the new destination's ownership
-/// can supply trust; source deletion still follows successful admission.
+/// Replace with applies the current setting to the new directory. Source
+/// deletion still follows successful admission of the replacement.
 #[farhelm_testtrace::test]
 async fn replace_with_normalizes_workspace_trust_before_create_and_delete() {
     assert_codex_trust_dispatch(TrustComposeSurface::ReplaceWith).await;

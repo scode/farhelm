@@ -206,6 +206,8 @@ linux/session-details-copy-warning--dark.png 747274a067fb5632032cc0aa4b719c74029
 linux/session-details-copy-warning--light.png e3b6157e59bc6799ee2a0af27602023f73b38461
 linux/session-environment-unavailable--dark.png 3b051db88432699700c0f52df5a243d058414fd0
 linux/session-environment-unavailable--light.png d87b73c986ea82145d6b41620af3d54bce9e8004
+linux/session-flag-agent-trust-hints--dark.png 67eab72067c70e0a9c4e8fc07371862b123e7795
+linux/session-flag-agent-trust-hints--light.png 5ed95007084281bcb978c29ab9fb2691fdcd924b
 linux/session-hook-setup-hint--dark.png b489d9a0dee82db386caab2db38d377d6f72f910
 linux/session-hook-setup-hint--light.png 7e44bb3fd6ca4cf7d385a7822f10ffaa8f94aa6a
 linux/session-interrupted-card--dark.png 9af1847a8512cd90eb3a58b97f15ff9d12c3af60
@@ -254,6 +256,8 @@ linux/settings-checkouts-edited--dark.png 3e880ee2e81dbe84e57a7525d3d00ebc6dd763
 linux/settings-checkouts-edited--light.png d9fe6fc904c382b580c8073b74b44a16c133bb3a
 linux/settings-claude--dark.png 984143a50784fd970f026dd2bb168ed10b934f13
 linux/settings-claude--light.png 9558d88858ed674058c78e27bb790bd7bc7fd7e0
+linux/settings-codex--dark.png 9213f232ac134c4204eba4630793235f912585c8
+linux/settings-codex--light.png ce42e4b53ef2201575642d2c74c76673c62bca9c
 linux/settings-containers--dark.png 46bebb668e00fd731935eca34f290121a16087cf
 linux/settings-containers--light.png 59db739eb3456059bc8a63acf52f47a9dba21d70
 linux/settings-containers-question--dark.png 38917f590a8231db2e5328f61646acc5dbb07e9b
@@ -268,10 +272,14 @@ linux/settings-grok--dark.png 1ed639b43bdbe87cc088bf17f7cde119a324ce90
 linux/settings-grok--light.png c31a8d715117e9fefbc0ffa0f0239ee59246fe59
 linux/settings-hosts--dark.png 7eea32215dba6671b90cec20e6bd9a2e945def94
 linux/settings-hosts--light.png 7279d4bab53b6b6b4663dc3e82676072965d3ff6
+linux/settings-muse--dark.png b69f6b4aceff3b6c3efdddbc813e311c2164dd3a
+linux/settings-muse--light.png b02710404e4d8d8bc508f8db1a8fe66cb70a8c50
 linux/settings-notifications--dark.png 981eb3929756588721a0236b3e6e05d1b0f45900
 linux/settings-notifications--light.png d51f401cc8c7ad8dd7006bdf04b303d4c82c5653
 linux/settings-notifications-edited--dark.png d5e06fadd5c51a8e48a946044abf6e4baf5af534
 linux/settings-notifications-edited--light.png d376872b850be3df7da9f64660111bc3b1649281
+linux/settings-pi--dark.png 2a36334997956a35c128398b6f84f63bb0cef9f3
+linux/settings-pi--light.png 6dd69b9071fe93ef4dde719ebd8d7c794fe63a1e
 linux/settings-recipe-editor--dark.png 6d8bac8620a7042344d2b4438001ca740cbe9433
 linux/settings-recipe-editor--light.png 24a1298bab42a7189b724e80e1d6ad95b47a8626
 linux/settings-recipe-editor-delete--dark.png e6d2af07e6fd1e61b3c3ea761ab2f5a08cfa6946

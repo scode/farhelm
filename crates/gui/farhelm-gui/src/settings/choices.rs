@@ -272,8 +272,8 @@ impl Choice {
             Choice::ShowClaudeTrustHint => {
                 "Show the hint when Claude asks about a managed checkout"
             }
-            Choice::ShowCodexTrustHint => "Show the hint when Codex asks about a managed checkout",
-            Choice::ShowMuseTrustHint => "Show the hint when Muse asks about a managed checkout",
+            Choice::ShowCodexTrustHint => "Show the hint when Codex asks about folder trust",
+            Choice::ShowMuseTrustHint => "Show the hint when Muse asks about folder trust",
             Choice::ShowAntigravityTrustHint => {
                 "Show the hint when Antigravity asks about workspace trust"
             }
@@ -312,10 +312,10 @@ impl Choice {
                 "Show a note above the terminal when Claude asks whether to trust a new managed checkout"
             }
             Choice::ShowCodexTrustHint => {
-                "Show a note above the terminal when Codex asks about trust in a managed checkout"
+                "Show a note above the terminal when Codex asks whether to trust the folder"
             }
             Choice::ShowMuseTrustHint => {
-                "Show a note above the terminal when Muse asks about trust in a managed checkout"
+                "Show a note above the terminal when Muse asks whether to trust the folder"
             }
             Choice::ShowAntigravityTrustHint => {
                 "Show a note above the terminal when Antigravity asks whether to trust the folder"

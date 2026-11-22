@@ -3533,22 +3533,19 @@ exposes one switch and its dismissal; the original Claude route retains its exac
 use the existing save-order funnel, and dismissals use the sparse per-field preference queue, including pending-write
 overlays on fresh reads.
 
-The helm resolves these settings into an agent selection before compilation. The compiler remains pure so the YOLO guard
-can still reproduce a launch exactly. Fresh checkout intent already proves managed ownership and freezes the whole
-resolved launch in its existing create fingerprint. For an existing directory, managed-only trust uses the pinned target
-host's bounded `BrowseDirectory` reply in its default-off `membership_only` mode. Protocol 55 adds that mode and its
-required `managed_checkout` reply boolean: the supervisor canonicalizes the accepted cwd and reads allocated registry
-ancestors using the same component predicate as admission. Each matching ancestor must also pass the existing recorded
-directory-identity comparison; the database lock is released before these filesystem observations. A missing, replaced
-or unconfirmed-remount directory supplies no managed membership. The focused mode skips child enumeration and the
-picker's printable-label restriction, preserving ordinary launch support for unreadable directory listings and
-control-character paths. When trust is granted, the helm carries that canonical cwd through approval, dispatch and
-history; a submitted symlink cannot redirect the trusted launch during an approval wait. Disabled and unmanaged
-destinations keep their submitted spelling. Plain Restart and Replace retain their stored launch behavior. The session
-list is not an ownership inventory, since nested memberships project only their innermost checkout. The read grants no
-lease; ordinary create admission still validates the destination. A missing ownership field would silently change trust
-behavior, so protocol skew refuses the peer until its ordinary supervisor update rather than treating an old reply as
-unmanaged. The normal skew-aware update path remains unchanged.
+The helm resolves these settings into an agent selection for any directory before compilation. The compiler remains pure
+so the YOLO guard can reproduce a launch exactly. A fresh checkout freezes the whole resolved launch in its existing
+create fingerprint. For an agent's Create, Spawn or Clone into an existing directory with Codex, Muse or Pi trust
+enabled, the helm asks the pinned target supervisor for the canonical directory. The card and dispatch use that same
+path so a symlink cannot redirect the trusted launch during the wait for Allow. Direct launches go through ordinary
+supervisor directory admission. Plain Restart and Replace keep the stored launch and its trust choice.
+
+Protocol 55 adds the `membership_only` mode of `BrowseDirectory` and the required `managed_checkout` reply boolean. The
+focused mode skips child enumeration and the picker’s printable-label restriction. The supervisor canonicalizes the
+directory and checks allocated registry ancestors against their recorded directory identities. It releases the database
+lock before those filesystem observations. A missing, replaced or unconfirmed-remount directory supplies no membership.
+The launcher's advisory path check and the helm's trusted approval path both use the canonical directory. Ordinary
+create admission still validates the directory when the session launches.
 
 `SessionInfo.workspace_trust_prompt` is separate from the retained Claude-only flag. The ticker reads workspace trust
 through the harness integration seam, independently of its activity reading. The flag defaults false in older cached
@@ -3557,8 +3554,8 @@ captured 0.159.0 folder-access menu (`waiting-trust`) and the reported Quit vari
 derived from that capture): the Back choice requires `esc back`, and Quit requires `esc quit`. Muse uses captured
 1.4.10-R6427.1 and 1.4.14 startup trust menus. Antigravity uses the captured 1.5.13 trust menu and current confirmation
 footer. These readers require the dialog's choices and current footer. The GUI attributes the shared flag to the
-session's structured launch. Its read and draw paths share the same directory scope check, which allows Antigravity
-outside managed checkouts. Pi uses its project-resource approval flag without a trust recognizer.
+session's structured launch. The read and draw paths apply to the recognized question in every directory. Pi uses its
+project-resource approval flag without a trust recognizer.
 
 Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
 lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
@@ -4428,28 +4425,28 @@ no path values are stored in the notice.
   both are scoped to the launches that actually carry the injected flags rather than to Codex launches in general: on
   those, Codex prints a hook-trust warning line above its composer, and with trust bypassed any hook the user has in
   that same configuration home but has not trusted runs too. The same bypass covers a trusted project's own `.codex/`
-  hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's managed-checkout Codex trust setting
-  or the user's own answer to Codex's trust prompt), and on an injected launch they then run without Codex's per-hook
-  review. That is accepted because trusting a workspace already hands its Codex configuration, MCP servers included, the
-  ability to run commands, and because skipping injection there would drop conversation identity, and so resume, for
-  trusted checkouts. It is accepted only until hook installation becomes an explicit step surfaced to the user, where
-  the user is told what is being installed and accepts specific hooks; after that, launches no longer pass the
-  per-launch bypass. Codex fires `SessionStart` at the first prompt rather than at process start, so a Codex session's
-  identity arrives only once the user has typed something, where Claude's arrives at startup. Muse also reports at the
-  first prompt. The flags go where the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch");
-  nothing reads the rest of the command. Only a legacy session, from before launch kinds, still gets the previous
-  release's injection, appended after its argv, and for it these invocation shapes disqualify a launch, which is skipped
-  with a logged reason rather than made to work: an argv that already carries `--settings` (Claude honors only the last
-  one, so injecting ours would silently drop the user's), an argv already steering Codex's own hook configuration (a
-  second bypass flag risks a rejected command line, and the `hooks.`/`features.hooks` tables are the user's once they
-  touch them), an argv already configuring Muse's `hooks` or `hooks.*` through `-c` (those settings belong to the user),
-  and — for any of these vendors — an argv containing a bare `--` (our flags would become prompt text).
-  `FARHELM_AGENT_HOOKS` in the supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off
-  wholesale or per kind, read once at supervisor start and carried as a seam value. It also gates Farhelm's setup of
-  Grok's and Antigravity's persistent hook files. Without an accepted report, a new session cannot be restarted; no
-  nearby record can supply a substitute identity. `website/src/content/docs/docs/how-it-works/agent-hook-injection.md`
-  is the user-facing account of the same mechanism. The injected command line outlives the binary that wrote it, so it
-  is part of what newer binaries keep accepting (see "What running sessions hold across versions").
+  hooks: Codex loads a project's hooks only once the folder is trusted (Farhelm's Codex trust setting or the user's own
+  answer to Codex's trust prompt), and on an injected launch they then run without Codex's per-hook review. That is
+  accepted because trusting a workspace already hands its Codex configuration, MCP servers included, the ability to run
+  commands, and because skipping injection there would drop conversation identity, and so resume, for trusted checkouts.
+  It is accepted only until hook installation becomes an explicit step surfaced to the user, where the user is told what
+  is being installed and accepts specific hooks; after that, launches no longer pass the per-launch bypass. Codex fires
+  `SessionStart` at the first prompt rather than at process start, so a Codex session's identity arrives only once the
+  user has typed something, where Claude's arrives at startup. Muse also reports at the first prompt. The flags go where
+  the launch's `{farhelm_args}` stands (see "Launch kinds: one resolved launch"); nothing reads the rest of the command.
+  Only a legacy session, from before launch kinds, still gets the previous release's injection, appended after its argv,
+  and for it these invocation shapes disqualify a launch, which is skipped with a logged reason rather than made to
+  work: an argv that already carries `--settings` (Claude honors only the last one, so injecting ours would silently
+  drop the user's), an argv already steering Codex's own hook configuration (a second bypass flag risks a rejected
+  command line, and the `hooks.`/`features.hooks` tables are the user's once they touch them), an argv already
+  configuring Muse's `hooks` or `hooks.*` through `-c` (those settings belong to the user), and — for any of these
+  vendors — an argv containing a bare `--` (our flags would become prompt text). `FARHELM_AGENT_HOOKS` in the
+  supervisor's environment — `all`, `none`, or a comma list of kinds — turns injection off wholesale or per kind, read
+  once at supervisor start and carried as a seam value. It also gates Farhelm's setup of Grok's and Antigravity's
+  persistent hook files. Without an accepted report, a new session cannot be restarted; no nearby record can supply a
+  substitute identity. `website/src/content/docs/docs/how-it-works/agent-hook-injection.md` is the user-facing account
+  of the same mechanism. The injected command line outlives the binary that wrote it, so it is part of what newer
+  binaries keep accepting (see "What running sessions hold across versions").
 
   Claude's, Codex's and Muse's Stop hooks carry no instructions announcement: only SessionStart adds that context.
   Sessions launched before Stop was injected retain their old argv until relaunch. For Codex, a pending clear in one of
@@ -5182,10 +5179,10 @@ stored launches, including plain Restart and Replace; new composition uses true 
 without the field continues to decode.
 
 Antigravity true adds `--settings` with the canonical-directory JSON slot. Its all-hosts switch applies to structured
-launches in plain folders as well as managed checkouts, so New and Restart with need no checkout ownership lookup for
-it. Claude's on-disk trust setup and the managed-only switches retain their own paths. Custom `--settings` and
-`--settings=...` options take precedence over Farhelm's opt-in. The resolved selection then omits trust, including on
-approval cards. A bare `--` ends the Custom options, so the compiled trust option goes before that token.
+launches in plain folders as well as managed checkouts. The supervisor resolves the directory when it fills the slot.
+Custom `--settings` and `--settings=...` options take precedence over Farhelm's opt-in. The resolved selection then
+omits trust, including on approval cards. A bare `--` ends the Custom options, so the compiled trust option goes before
+that token.
 
 Schema 25 resets schema-24 composer history for the same reason. Schema 24 retained only the timestamp attached to its
 sequence eviction cutoff, which cannot be converted into a safe timestamp/ID frontier when sequence and clock order

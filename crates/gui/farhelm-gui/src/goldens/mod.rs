@@ -742,6 +742,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "session-flag-agent-trust-hints",
+        size: (780., 240.),
+        draw: flag_agent_trust_hints,
+        setup: no_setup,
+    },
+    Scene {
         name: "session-details-copy-warning",
         size: (644., 102.),
         draw: session_details_copy_warning,
@@ -1266,6 +1272,24 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_claude_setup,
+    },
+    Scene {
+        name: "settings-codex",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_codex_setup,
+    },
+    Scene {
+        name: "settings-muse",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_muse_setup,
+    },
+    Scene {
+        name: "settings-pi",
+        size: (800., 830.),
+        draw: empty,
+        setup: settings_pi_setup,
     },
     Scene {
         name: "settings-antigravity",
