@@ -8116,8 +8116,15 @@ impl Supervisor {
         // state directory already reclaimed (one that plants a host as soon
         // as the socket appears would otherwise race it). Bounded by its
         // budget; what it cannot settle is left for the next start.
-        self.reclaim_orphaned_hosts(self.timeouts.orphan_reclaim)
-            .await;
+        // The recorded scope retries need no host discovery, so let both cleanups start within the same budget.
+        // A stalled scan cannot prevent a scope check, and a stalled scope manager cannot delay the bind past
+        // the existing reclaim bound.
+        let reclaim_budget = self.timeouts.orphan_reclaim;
+        let reclaim_deadline = tokio::time::Instant::now() + reclaim_budget;
+        tokio::join!(
+            self.reclaim_orphaned_hosts(reclaim_budget),
+            self.retry_pending_scope_cleanups(reclaim_deadline),
+        );
         // Holding the lock proves any existing socket file is a leftover
         // from a dead supervisor (the lock dies with its process), so
         // removing it is safe. Do this unconditionally: an existence check

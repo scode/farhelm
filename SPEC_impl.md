@@ -141,6 +141,14 @@ row, so nothing in Farhelm lists or deletes it, and it runs until it is stopped 
 the socket the warning names), after which the next start clears its record. The rule is in "Terminal host", under the
 startup reclaim of orphaned hosts.
 
+Approved startup retry: failed Restart cleanup after session deletion. If Restart cannot confirm that the replacement's
+recorded Linux scope is gone after losing its session row, it records the session ID and launch generation in
+`supervisor.db`. The replacement's launch record can then go as soon as its terminal host is confirmed ended. Before
+binding its socket and while holding the state-directory lock, the supervisor retries these explicit cleanup obligations
+even with an empty session table. It derives each scope name from the recorded identity and retires its obligation when
+the teardown is confirmed. Invalid session IDs cannot name a scope and are discarded. The retry runs alongside host
+reclaim within the same startup budget. Unconfirmed cleanup stays recorded for the next supervisor start.
+
 ## Session IDs in logs
 
 Session IDs must not inject log lines or use invisible or direction-changing characters to disguise the ID shown in
@@ -2101,7 +2109,8 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   reachable by its record.
 
   A restart that finds its row deleted when it confirms sweeps the new agent's tree and ends both hosts. Its error names
-  any unconfirmed cleanup. It keeps the new host record in that case. The row's scope selection is lost on deletion.
+  any unconfirmed cleanup. The replacement's host record can go once the host is confirmed ended and either the tree was
+  swept or its unresolved scope cleanup was written to `supervisor.db`. See "Cleanup on quit" for the startup retry.
 
   A restarted agent's runtime is published only before an orderly stop gathers the host terminals, as a create's is. The
   session's host tabs keep running across a Restart, but while the session is off the session map for the Restart's

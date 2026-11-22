@@ -317,15 +317,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   temporary outage keeps retrying. Route pending upload notices to the terminal the app ends up showing, and keep the
   shell tab available for a deliberate selection.
 
-- **Retain failed Restart cleanup when the session was deleted.** When Delete removes the session row while Restart is
-  launching its replacement, `tear_down_relaunch_deleted_meanwhile` reports an unconfirmed replacement scope and keeps
-  the replacement's host record. That record carries the socket and starter identity, while the deleted row held the
-  scope selection. Startup can remove the record after finding the host gone even if its scope still holds a detached
-  descendant. Preserve the unresolved scope selection across row removal and supervisor restart. Retry cleanup using the
-  session and generation's derived scope name, and retire the obligation once the scope is confirmed gone. Cover a gone
-  host with an unconfirmed scope that becomes checkable on a later start. Plan:
-  `plans/queue/restart-deleted-cleanup.md`.
-
 - **Apply host identity rules to Podman places.** If an SSH alias starts reaching another machine or account, a Delete
   can see no container there and forget a live one on the original host. Two aliases for the same machine and account
   can also both appear usable for new containers. Use one stable machine/account identity for both outcomes. Record it

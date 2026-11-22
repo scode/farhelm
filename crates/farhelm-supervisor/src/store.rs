@@ -90,7 +90,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 37;
+pub const SCHEMA_VERSION: i64 = 38;
 
 /// The supervisor remembers its owner even with no live helm connection.
 pub(crate) struct StoredHelmOwner {
@@ -1854,7 +1854,12 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
              CREATE TRIGGER session_notifications_follow_sessions
                  AFTER DELETE ON sessions
                  BEGIN DELETE FROM session_notifications WHERE session_id = OLD.id; END;
-             PRAGMA user_version = 37;
+             CREATE TABLE pending_scope_cleanups (
+                 session_id TEXT NOT NULL,
+                 generation INTEGER NOT NULL,
+                 PRIMARY KEY (session_id, generation)
+             ) STRICT;
+             PRAGMA user_version = 38;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2647,6 +2652,22 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
             .context("migrating schema from version 36 to 37")?;
         version = 37;
     }
+    if version == 37 {
+        // Cleanup can outlive its session row. Keep the identity here so a gone terminal host cannot
+        // erase the evidence of a scope that still needs checking.
+        conn.execute_batch(
+            "BEGIN;
+             CREATE TABLE IF NOT EXISTS pending_scope_cleanups (
+                 session_id TEXT NOT NULL,
+                 generation INTEGER NOT NULL,
+                 PRIMARY KEY (session_id, generation)
+             ) STRICT;
+             PRAGMA user_version = 38;
+             COMMIT;",
+        )
+        .context("migrating schema from version 37 to 38")?;
+        version = 38;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -3382,6 +3403,59 @@ impl SessionStore {
         Ok(SessionStore {
             conn: crate::db::Db::new(conn, "session db"),
         })
+    }
+
+    /// Record a scope the supervisor could not confirm gone after its session row was deleted.
+    /// The generation identifies the replacement launch, so recording the same obligation twice is harmless.
+    pub(crate) async fn record_pending_scope_cleanup(
+        &self,
+        session_id: &str,
+        generation: i64,
+    ) -> anyhow::Result<()> {
+        let session_id = session_id.to_owned();
+        self.conn
+            .call("recording pending scope cleanup", move |conn| {
+                conn.execute(
+                    "INSERT INTO pending_scope_cleanups (session_id, generation)
+                     VALUES (?1, ?2) ON CONFLICT(session_id, generation) DO NOTHING",
+                    rusqlite::params![session_id, generation],
+                )?;
+                Ok(())
+            })
+            .await
+    }
+
+    /// Read startup's explicit cleanup obligations. They have no foreign key to sessions because Delete
+    /// has already taken those rows away.
+    pub(crate) async fn pending_scope_cleanups(&self) -> anyhow::Result<Vec<(String, i64)>> {
+        self.conn
+            .call("listing pending scope cleanups", |conn| {
+                let mut rows = conn.prepare(
+                    "SELECT session_id, generation FROM pending_scope_cleanups
+                     ORDER BY session_id, generation",
+                )?;
+                let pending = rows.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?;
+                Ok(pending.collect::<rusqlite::Result<_>>()?)
+            })
+            .await
+    }
+
+    /// Retire the exact generation whose scope is settled or whose identity cannot name a scope.
+    pub(crate) async fn retire_pending_scope_cleanup(
+        &self,
+        session_id: &str,
+        generation: i64,
+    ) -> anyhow::Result<()> {
+        let session_id = session_id.to_owned();
+        self.conn
+            .call("retiring pending scope cleanup", move |conn| {
+                conn.execute(
+                    "DELETE FROM pending_scope_cleanups WHERE session_id = ?1 AND generation = ?2",
+                    rusqlite::params![session_id, generation],
+                )?;
+                Ok(())
+            })
+            .await
     }
 
     /// Persist a freshly created session's metadata.
@@ -8195,6 +8269,83 @@ mod tests {
             Some(&host)
         );
         assert!(migrated.is_sealed().await.unwrap());
+    }
+
+    /// A version 37 database keeps its session rows and gains the same empty cleanup table as a new database.
+    /// The fixture removes the only table added at version 38 before setting the old stamp.
+    #[farhelm_testtrace::test]
+    async fn schema_37_gains_pending_scope_cleanups_without_changing_sessions() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let fresh = SessionStore::open(&path, true).await.expect("fresh store");
+        fresh
+            .insert_session(launching_row("existing"), None)
+            .await
+            .expect("seed session");
+        let before = fresh
+            .session("existing")
+            .await
+            .expect("read session")
+            .expect("fixture row");
+        let fresh_columns = columns_of(&path);
+        drop(fresh);
+
+        {
+            let conn = Connection::open(&path).expect("open migration fixture");
+            conn.execute_batch("DROP TABLE pending_scope_cleanups; PRAGMA user_version = 37;")
+                .expect("create the version 37 layout");
+        }
+        let migrated = SessionStore::open(&path, true)
+            .await
+            .expect("migrate from 37");
+        assert_eq!(columns_of(&path), fresh_columns);
+        let after = migrated
+            .session("existing")
+            .await
+            .expect("read migrated session")
+            .expect("preserved row");
+        assert_eq!(
+            (after.id, after.generation, after.terminal_address),
+            (before.id, before.generation, before.terminal_address)
+        );
+        assert!(
+            migrated
+                .pending_scope_cleanups()
+                .await
+                .expect("list obligations")
+                .is_empty()
+        );
+    }
+
+    /// A deleted session needs no live row for cleanup. Two generations remain distinct even when one write is
+    /// retried, and confirming one cleanup must leave the other intact.
+    #[farhelm_testtrace::test]
+    async fn pending_scope_cleanups_are_idempotent_and_retire_by_generation() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let id = uuid::Uuid::new_v4().to_string();
+        let store = SessionStore::open(&path, true).await.expect("open");
+        for generation in [4, 3, 4] {
+            store
+                .record_pending_scope_cleanup(&id, generation)
+                .await
+                .expect("record");
+        }
+        drop(store);
+
+        let store = SessionStore::open(&path, true).await.expect("reopen");
+        assert_eq!(
+            store.pending_scope_cleanups().await.expect("list"),
+            [(id.clone(), 3), (id.clone(), 4)]
+        );
+        store
+            .retire_pending_scope_cleanup(&id, 4)
+            .await
+            .expect("retire generation 4");
+        assert_eq!(
+            store.pending_scope_cleanups().await.expect("list"),
+            [(id, 3)]
+        );
     }
 
     /// A migrated database and a freshly created one must end up with the
