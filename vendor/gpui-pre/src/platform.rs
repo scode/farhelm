@@ -2732,6 +2732,10 @@ pub struct WindowOptions {
 pub struct WindowParams {
     pub bounds: Bounds<Pixels>,
 
+    /// Zoom from the supplied restore bounds before the native window is shown.
+    #[cfg(target_os = "macos")]
+    pub open_zoomed: bool,
+
     /// The titlebar configuration of the window
     #[cfg_attr(feature = "wayland", allow(dead_code))]
     pub titlebar: Option<TitlebarOptions>,

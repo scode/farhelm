@@ -1713,6 +1713,8 @@ impl Window {
             handle,
             WindowParams {
                 bounds: window_bounds.get_bounds(),
+                #[cfg(target_os = "macos")]
+                open_zoomed: matches!(window_bounds, WindowBounds::Maximized(_)),
                 titlebar,
                 kind,
                 is_movable,
@@ -1763,7 +1765,11 @@ impl Window {
 
         match window_bounds {
             WindowBounds::Fullscreen(_) => platform_window.toggle_fullscreen(),
-            WindowBounds::Maximized(_) => platform_window.zoom(),
+            WindowBounds::Maximized(_) => {
+                // AppKit already zoomed before showing the window.
+                #[cfg(not(target_os = "macos"))]
+                platform_window.zoom();
+            }
             WindowBounds::Windowed(_) => {}
         }
 
