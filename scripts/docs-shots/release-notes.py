@@ -218,3 +218,100 @@ SHOTS += [
         max_width=480,
     ),
 ]
+
+# --- v0.44.1 --------------------------------------------------------------------------------------------------------
+
+LAUNCHER_PARK = "id:launcher-destination-heading"
+SETTINGS_PARK = "id:settings-frame-title"
+
+
+def hook_setup_prompt(bridge):
+    """Show the choices offered on a first Grok pick without saving consent or launching."""
+    bridge.click("id:new-session-button")
+    bridge.click("id:launcher-harness-Grok")
+    bridge.wait("id:hook-setup-consent")
+    bridge.wait("id:prompt-confirm")
+
+
+def tailscale_host(bridge):
+    """Show the Tailscale route on an Add host draft before Farhelm contacts the destination."""
+    bridge.click("id:host-rail-add")
+    bridge.fill("id:add-host-destination", "build-node")
+    bridge.click("id:add-host-tailscale")
+
+
+def antigravity_trust(bridge):
+    """Show the trust switch with the selected navigation row so readers can find it in Settings."""
+    bridge.click("id:app-settings-toggle")
+    bridge.scroll_into_view("id:settings-section-antigravity")
+    bridge.click("id:settings-section-antigravity")
+    bridge.wait("id:settings-antigravity-trust")
+
+
+def launcher_layout(bridge):
+    """Show the wide launcher before typing, with the form and recent setups visible together."""
+    bridge.click("id:new-session-button")
+    bridge.wait("id:launcher-search")
+    bridge.wait("id:launcher-recent-0")
+
+
+def settings_layout(bridge):
+    """Use Appearance to show the new navigation, pinned page heading and side-by-side theme previews."""
+    bridge.click("id:app-settings-toggle")
+    bridge.click("id:settings-section-appearance")
+    bridge.wait("id:settings-appearance-Light")
+
+
+SHOTS += [
+    Shot(
+        "v0-44-1-conversation-hooks",
+        hook_setup_prompt,
+        ["id:launcher-launch", "id:prompt"],
+        park=LAUNCHER_PARK,
+        annotations=[
+            Callout("id:prompt-confirm", "Lets Restart resume Grok conversations on all hosts.", side="bottom",
+                    dy=34),
+        ],
+    ),
+    Shot(
+        "v0-44-1-tailscale-host",
+        tailscale_host,
+        ["id:add-host"],
+        park="id:add-host-frame-title",
+        annotations=[
+            Callout("id:add-host-tailscale", "Verifies the SSH host key that this node advertises on your tailnet.",
+                    side="left"),
+        ],
+    ),
+    Shot(
+        "v0-44-1-antigravity-trust",
+        antigravity_trust,
+        [SETTINGS_PARK, "id:settings-section-antigravity", "id:settings-antigravity-trust"],
+        park=SETTINGS_PARK,
+        annotations=[
+            Callout("id:settings-antigravity-trust", "Answers Antigravity's workspace trust question for new sessions.",
+                    side="right"),
+        ],
+    ),
+    Shot(
+        "v0-44-1-session-launcher",
+        launcher_layout,
+        ["id:launcher"],
+        park=LAUNCHER_PARK,
+        annotations=[
+            Callout("id:launcher-search", "Start here to find a host, agent, directory or template.", side="top"),
+            # The form starts beside Recent. Keep the callout on the far side of that column.
+            Callout("id:launcher-recent-0", "A recent setup fills in the form.", side="left"),
+        ],
+    ),
+    Shot(
+        "v0-44-1-settings",
+        settings_layout,
+        ["id:settings"],
+        park=SETTINGS_PARK,
+        annotations=[
+            Callout("id:settings-appearance-Light", "Compare color themes here before choosing one.", side="bottom"),
+        ],
+        max_height=620,
+    ),
+]

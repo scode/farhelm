@@ -1,0 +1,29 @@
+{
+  "screenshots": [
+    {
+      "entry": 4513,
+      "name": "release-notes/v0-44-1-conversation-hooks",
+      "alt": "The session launcher asks whether to set up Restart for Grok and offers Set up and launch."
+    },
+    {
+      "entry": 4638,
+      "name": "release-notes/v0-44-1-tailscale-host",
+      "alt": "Add host with Tailscale host checked and a node name entered as the SSH destination."
+    },
+    {
+      "entry": 4356,
+      "name": "release-notes/v0-44-1-antigravity-trust",
+      "alt": "The Antigravity page in Settings with the switch to skip the workspace trust question."
+    },
+    {
+      "entry": 4433,
+      "name": "release-notes/v0-44-1-session-launcher",
+      "alt": "The redesigned session launcher with a command field above the form and recent setups beside it."
+    },
+    {
+      "entry": 4434,
+      "name": "release-notes/v0-44-1-settings",
+      "alt": "Settings with grouped navigation on the left and light and dark previews on the Appearance page."
+    }
+  ]
+}
