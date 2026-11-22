@@ -32,6 +32,9 @@ plugin at `~/.gemini/config/plugins/farhelm/` on each machine where it starts An
 or sandbox. **Restart** becomes available after your first prompt, once Antigravity reports the conversation. Outside
 Farhelm the hooks run and send Antigravity its expected empty reply.
 
+A session started while the setting was off cannot be restarted, and a note above its terminal says so. Turn the setting
+on and start a new session.
+
 To remove the hooks, turn the setting off, delete that plugin directory from the machines where it was installed, and
 start a new Antigravity process. If you previously set up hooks by hand, you can remove the old `farhelm` entry from
 `~/.gemini/config/hooks.json` separately. You can open a conversation by ID with the setting off.
@@ -39,8 +42,8 @@ start a new Antigravity process. If you previously set up hooks by hand, you can
 ## Find a conversation ID
 
 In the main Antigravity conversation, run `/help` and look for **Conversation** on the **General** tab. Enter that ID in
-the session launcher's **Conversation ID** field when you want to open that conversation directly. See
-[Stop, restart, and resume](/docs/using/stop-restart-resume/).
+**Conversation ID**, under **More options** in the session launcher, when you want to open that conversation directly.
+See [Stop, restart, and resume](/docs/using/stop-restart-resume/).
 
 ## Gotchas and quirks
 

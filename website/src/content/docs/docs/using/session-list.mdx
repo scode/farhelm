@@ -105,6 +105,10 @@ list shows only its newest 500, and across all your hosts it shows at most 500. 
 **Send feedback** in the notice opens the [feedback dialog](/docs/using/send-feedback/) if you need that many or think a
 bug caused it. The notice says **Resolved** once the list fits again.
 
+It also tells you when a Delete finished only after Farhelm stopped waiting for it, naming the host and, when one was
+left behind, the checkout's directory and why. If Farhelm could not read your login shell's `PATH` when it started, a
+notice says that programs it starts, such as ssh, used the `PATH` the app started with, and offers **Send feedback**.
+
 ## What the statuses mean
 
 <Screenshot
@@ -156,7 +160,7 @@ each type Farhelm does not recognize as safe.
 Farhelm plays a bell when a session starts waiting, a ding-dong when an agent asks for your approval, and a short chime
 when an SSH host asks you to sign in. You can also turn on a soft pluck when an agent finishes its turn and becomes idle.
 Open **Settings** from the gear at the foot of the navigation rail and choose **Notifications** to turn each sound on
-or off under **Sounds**. Farhelm remembers your choices.
+or off under **Sounds**; the play button beside each one lets you hear it first. Farhelm remembers your choices.
 
 The session you have open stays quiet while you are looking at its window. Waiting and finished-turn sounds follow the
 sessions in your current list; changing the host or status it shows does not beep for a session already waiting. New

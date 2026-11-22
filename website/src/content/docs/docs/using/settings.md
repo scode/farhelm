@@ -6,8 +6,8 @@ sidebar:
 ---
 
 The gear at the foot of the [navigation rail](/docs/using/manage-hosts/), the column of icons down the left edge of the
-sidebar, opens Settings at **Sessions**. The section list stays beside the page as you scroll. The page heading tells
-you where its settings apply.
+sidebar, opens Settings at **Sessions**. The section list groups its sections under **General**, **Where sessions run**
+and **Agents**, and stays beside the page as you scroll. The page heading tells you where its settings apply.
 
 Switches outside forms save as soon as you change them. A dot beside a field or section marks an unsaved change. Use
 **Save** or **Discard** at the bottom of the dialog. Your drafts stay while you move between sections. If you close with
@@ -23,12 +23,11 @@ The sections below follow the order in Settings.
 
 ## Sessions
 
-**Color terminal frames by host** colors each terminal's frame to match its host's icon. **Name sessions on quick
-launch** offers to name a session while its agent starts
-([Launch templates](/docs/using/launch-templates/#quick-launch)). **Skip session confirmations** makes stop, delete,
-replace, restart and closing a shell tab act on the first click
+**Skip session confirmations** makes stop, delete, replace, restart and closing a shell tab act on the first click
 ([Stop, restart, and resume](/docs/using/stop-restart-resume/#stop-or-delete)); it does not change the host questions
-below, the YOLO question, or the trash's questions.
+below, the YOLO question, or the trash's questions. **Name sessions on quick launch** offers to name a session while its
+agent starts ([Launch templates](/docs/using/launch-templates/#quick-launch)). **Color terminal frames by host** colors
+each terminal's frame to match its host's icon.
 
 ## Appearance
 

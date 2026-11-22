@@ -57,7 +57,8 @@ existing host.
 
 With no session open, the **Host** menu starts on the machine you are using, listed as **Local (this machine)**. A host
 that is not connected right now shows its state next to its name, such as "Unreachable, retrying", and you cannot launch
-on it until it is back. [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
+on it until it is back. A suspended sandbox or a stopped container is the exception: launching there wakes it first
+([When a launch fails](#when-a-launch-fails)). [Add a remote host](/docs/get-started/add-a-remote-host/) covers adding hosts.
 
 The directory field starts at the directory of your last agent launch on that host, or at the host's home directory if
 you have not launched an agent there yet; a launch into a new managed checkout, a new container or a new sandbox does not count. With
@@ -66,7 +67,8 @@ host's directory, unless you typed or picked one yourself. With **Folder** chose
 directory on a connected host: if it does not exist there, or is not a directory, a warning under the field names the
 host. You can still launch; the host checks the directory again when you do.
 
-**Browse**, at the end of the address, lists the directories under the current path one level at a time. Choosing one of
+The directory shares one address field with the **Host** menu at its start. The folder button at the end of that field
+(**Browse**) lists the directories under the current path one level at a time. Choosing one of
 the directory list's entries fills the field without
 launching. **Local home** also switches the host to **Local (this machine)**. With the list open, Escape closes the list
 first. **Name** (optional) names the session in the session list; leave it empty and Farhelm picks a name.
@@ -111,9 +113,10 @@ your agents start, custom commands, and plain **Replace** do not change what it 
 
 ## Continue a conversation you know
 
-If you know an agent conversation's id, enter it in the launcher to continue that conversation instead of starting
-fresh. This works in New, Clone and Replace with, for an agent in an existing directory. Pi and OMP ask for a session
-file instead; use its absolute path or a path relative to the session directory, without spaces or `~`.
+If you know an agent conversation's id, open **More options** on the **Agent** tab and enter it in **Conversation ID**
+(**Session ID** for Goose and OpenCode, **Chat ID** for Cursor) to continue that conversation instead of starting fresh.
+This works in New, Clone and Replace with, for an agent in an existing directory. Pi and OMP ask for a **Session file**
+instead; use its absolute path or a path relative to the session directory, without spaces or `~`.
 
 The choice applies to this start only. Templates and recent setups do not save it, and a later Clone starts fresh.
 Farhelm does not check whether the conversation exists; a mistyped id is handled by the agent. Goose, Cursor and
@@ -125,7 +128,7 @@ whose id Farhelm never learned, see [Restart with](/docs/using/stop-restart-resu
 For agents that accept one, **Initial prompt** supplies the first message when the session starts. The box accepts
 multiple lines, and Enter adds a line without launching. Restart, Clone and Replace do not send the message again;
 Clone and Replace with open with it cleared. Picking a recent setup leaves a message you have already typed alone.
-Goose, Pi and custom commands have no initial-prompt box, and Muse cannot combine one with a conversation id.
+Goose, Pi, Bash, Zsh and custom commands have no initial-prompt box, and Muse cannot combine one with a conversation id.
 
 To reuse a message for new sessions, save it in a [launch template](/docs/using/launch-templates/).
 
@@ -186,7 +189,8 @@ Matching setups can show even when the selected host is disconnected or you alre
 one restores the recipe and where it runs. The next launch creates a fresh sandbox or container. If the recipe or
 container host has been removed, choose another before launching.
 
-In **Replace with…**, these setups are disabled because the replacement stays in the existing environment.
+In **Replace with…**, these setups are disabled because the replacement stays in the existing environment. Enter on a
+highlighted setup there replaces the session you opened it from, so its key reads **⏎ Replace**.
 
 To start another session like one you already have, choose **Clone** from that session's menu instead. It opens the
 launcher with that session's choices already filled in. [Stop, restart, and resume](/docs/using/stop-restart-resume/)
@@ -265,7 +269,9 @@ can also type `gh:owner/repo` in the command field and choose **Managed checkout
 repositories you have launched or cloned before, but it does not search GitHub, so type a new one in full.
 
 On an existing connected host, the launcher shows the directory the clone will go into before launch, and the launch
-button waits until it does. A new container or sandbox picks its directory inside once it is ready.
+button waits until it does. A new container or sandbox picks its directory inside once it is ready. On a suspended
+sandbox or a stopped container, the launcher says the directory is picked once the host is ready, and one **Launch**
+wakes the host, picks the directory and starts the session.
 [Quick launch](/docs/using/launch-templates/#quick-launch) creates that directory directly: marking the template means
 you have chosen to start it without seeing the path first. Giving it a number key makes the same choice.
 Each checkout gets a new directory of its own, named after the repository and numbered (`farhelm-1`, `farhelm-2`, and so
@@ -384,8 +390,10 @@ Plain **Restart** and **Replace** reuse the trust carried by the saved launch. S
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
 On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default and applies
-in directories you choose and in managed checkouts on every host. Farhelm also adds Claude trust to new checkouts
-that start with another agent while the switch is on.
+in directories you choose and in managed checkouts on every host. It never marks your home directory or the root
+directory as trusted, because Claude would then trust everything inside them; a session started there shows a short
+note in its terminal, and Claude asks as usual. Farhelm also adds Claude trust to new checkouts that start with another
+agent while the switch is on.
 
 Farhelm edits the Claude settings that the login shell selects on the session's host, normally `~/.claude.json`.
 A wrapper that changes the directory or selects a different Claude configuration can still leave Claude asking.
@@ -415,10 +423,11 @@ status shows error; the agent's page in [Supported agents](/docs/agents/) says w
 then quits shows exited. [Read the session list](/docs/using/session-list/) explains each status.
 
 A launch on a suspended [sandbox](/docs/using/tensorlake-sandboxes/#suspend-and-resume) resumes it first, and a launch
-on a stopped container starts it first. The launcher shows **Resuming** or **Starting** while Farhelm waits for the host
-to reconnect, then starts the session. This works the same for **Restart with**, **Replace with** and a
-[quick launch](/docs/using/launch-templates/#quick-launch). If the host cannot be resumed, or is suspended again before
-it reconnects, the launcher comes back with your choices and says the session was not launched.
+on a stopped container starts it first. The launcher closes, and a small status at the bottom of the window says the
+host is resuming or starting and that the session starts when it is ready; you can keep working meanwhile. This works
+the same for **Restart with**, **Replace with** and a [quick launch](/docs/using/launch-templates/#quick-launch). If the
+host cannot be resumed, is suspended again before it reconnects, or does not reconnect within about a minute, the
+launcher comes back with your choices and says the session was not launched.
 
 If the host does not answer within 20 seconds, the launcher comes back without **Not launched.** and says the request is
 still being carried out: the session may still start and appear in the session list. Your choices stay in the launcher.

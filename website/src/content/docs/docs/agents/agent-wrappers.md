@@ -5,11 +5,11 @@ sidebar:
   order: 60
 ---
 
-To run a known agent through a wrapper, choose the agent in the session launcher's **Agent** tab and enter a **Wrapper
-prefix**, such as `with-endpoint --profile work --`. Farhelm puts those words before the command it would otherwise run,
-including on resume. It still chooses the agent's arguments, reads its status, and follows its conversation where that
-agent supports it. The wrapper must run that agent and pass its arguments and environment through. Farhelm takes your
-word for that; it cannot check what the wrapper actually does.
+To run a known agent through a wrapper, choose the agent in the session launcher's **Agent** tab, open **More options**
+at the bottom of the form, and enter a **Wrapper prefix**, such as `with-endpoint --profile work --`. Farhelm puts those
+words before the command it would otherwise run, including on resume. It still chooses the agent's arguments, reads its
+status, and follows its conversation where that agent supports it. The wrapper must run that agent and pass its
+arguments and environment through. Farhelm takes your word for that; it cannot check what the wrapper actually does.
 
 The prefix runs through Bash, on the host or inside the session's container. `~`, variables, globs and shell operators
 have their usual Bash meaning; `with-endpoint --profile "$PROFILE" --`, for example, reads `PROFILE` when the session
@@ -173,7 +173,9 @@ wearing the session marker with no other claim on it. All of those additionally 
 shell wears its own tab marker, which keeps it out of the agent reap — and, when a tab is closed, including by Stop or
 Delete, earns it a SIGHUP alongside the SIGTERM: an interactive shell ignores SIGTERM and exits on the hangup its
 terminal closing would have sent, so a tab close ends inside the grace instead of waiting for the SIGKILL. Agents never
-carry a tab marker and are never hung up.
+carry a tab marker and are never hung up. A Bash or Zsh session is the exception: Stop, Stop and suspend, and the
+teardown in Delete and Replace hang up everything they reap, a wrapper prefix included, so the shell can save its
+history on the way out.
 
 Where this launch recorded a cgroup scope, the manager is still there, and that unit still exists, the scope is killed
 first: SIGTERM to everything in it, up to five seconds for the unit to retire on its own (the wait ends the moment it

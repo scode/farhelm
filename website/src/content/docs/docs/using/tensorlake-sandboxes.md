@@ -263,8 +263,9 @@ sandbox with them. **Delete sandbox** in **Hosts** always deletes the whole sand
 
 Open **Add host** and choose **Tensorlake sandbox**. Enter a **Name**, which is how Farhelm shows the host, and choose a
 **Recipe**. **New recipe…** opens the same editor inside this dialog, with **Cancel** and **Save** in its footer. Choose
-**Save** to save the recipe and return to the host form. The selected recipe's summary shows its size, base, packages
-and tunnels. Farhelm generates the sandbox's name; **Name** is the name you see on the host and its sessions.
+**Save** to save the recipe and return to the host form. Recipes that only work for containers are listed as
+unavailable, with the reason. The selected recipe's summary shows its size, base, packages and tunnels. Farhelm
+generates the sandbox's name; **Name** is the name you see on the host and its sessions.
 
 Choose **Continue**, review the size and numbered setup steps, then **Create sandbox**. **Back** lets you change the
 name or recipe before creating anything. The confirmation groups billing, the pricing link and the 24-hour idle limit
@@ -299,9 +300,10 @@ removes Farhelm's token file, leaving any Git authentication you configured your
 
 Suspending keeps a sandbox's processes, files and sessions intact, and stops its CPU and memory billing; snapshot
 storage still bills. To suspend a sandbox host, choose **Suspend** in its `⋯` menu in **Hosts**. Farhelm checks the
-host's sessions first and suspends at once only when none of their agents is working. Otherwise, or when it cannot check
-them, it asks first, with focus on **Cancel**, because suspending freezes any agent still at work. The host shows
-**Suspending…** while Tensorlake suspends it, then **Suspended**.
+host's sessions first and suspends at once only when none of them is working, shells included. Otherwise, or when it
+cannot check them, it asks first, with focus on **Cancel**, because suspending freezes anything still at work until you
+resume the host. While a session launch on the host is in progress, its **Suspend** and **Resume** are unavailable. The
+host shows **Suspending…** while Tensorlake suspends it, then **Suspended**.
 
 A suspended host has **Resume** on its row in **Hosts** and in its menu, and an open session on it offers **Resume
 host**. Resume does not ask. Farhelm shows **Resuming…**, then **Connecting** until it can reach the host again, and the
