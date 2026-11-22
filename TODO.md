@@ -377,7 +377,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   one funnel, so this is a contained change. Decided 2026-11-17 over detecting Tailscale and refusing the host. Finish
   with a real end-to-end add of a Mac that has Tailscale SSH on, since Tailscale SSH on macOS has other open problems.
   Findings, upstream status and every place that reads exit statuses:
-  `lore/2026-11-17-tailscale-ssh-macos-exit-status.md`.
+  `lore/2026-11-17-tailscale-ssh-macos-exit-status.md`. Plan: `plans/queue/in-band-host-command-status.md`.
 
 - **Use the Tailscale SSH wrapper for Tailscale hosts.** If the user is using Tailscale, use the `tailscale ssh` wrapper
   instead of relying on the user manually getting known hosts initialized, so Farhelm can immediately use any Tailscale
@@ -462,7 +462,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   launches. Launches for the same recipe and place must still join an active Rebuild and receive its outcome, even while
   old images remain recorded. Coordinate source selection with the job registry and release any source guard before
   awaiting the rebuild's publication. Test both a failure with a usable fallback and a launch concurrent with Rebuild.
-  Deferred from the Podman triage plan because preserving active-job joining exceeds the original size gate.
+  Deferred from the Podman triage plan because preserving active-job joining exceeds the original size gate. Plan:
+  `plans/queue/keep-images-on-failed-rebuild.md`.
 
 - **Apply host identity rules to Podman places.** If an SSH alias starts reaching another machine or account, a Delete
   can see no container there and forget a live one on the original host. Two aliases for the same machine and account
@@ -476,7 +477,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   container is absent, the helm cannot distinguish a removed container from a changed route. Decide how users can clear
   those rows without assuming the current endpoint is the original one. Cover both the retargeted alias and the
   duplicate place in tests and update SPEC. The Podman triage plan deferred the pair together because the older-row
-  behavior is unsettled.
+  behavior is unsettled. Plan: `plans/queue/podman-place-host-identity.md`.
 
 ### Tensorlake
 
