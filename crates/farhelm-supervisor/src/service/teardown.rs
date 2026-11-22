@@ -530,7 +530,7 @@ impl Supervisor {
         }
         let reaped = reap_process_tree(
             &self.seams.scopes,
-            units,
+            units.with_main_launch(&entry.info.launch),
             root_identity.into_iter().chain(host_roots),
             session_id,
             &SweepTarget::WholeSession,

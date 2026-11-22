@@ -4708,7 +4708,9 @@ no path values are stored in the notice.
   direct-member snapshot, or mark it unavailable; membership can change before systemd delivers the signal, and nested
   cgroup members are not included in that diagnostic snapshot.
 
-  The sweep sends SIGTERM, allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
+  The sweep sends SIGTERM, with SIGHUP as well for tab shells and first-class Bash or Zsh launches. The launch scope
+  uses the same signal policy, so an interactive shell can save its history even when its scope makes the sweep
+  unnecessary. The sweep allows a short grace, quiesces with SIGSTOP, re-enumerates, sends SIGKILL, and polls for
   confirmed disappearance. PID/start-time revalidation narrows reuse races; it does not make the separate identity read
   and signal syscall atomic or guarantee globally unique start timestamps. `systemd-run --user --scope` cgroup scopes
   provide containment on Linux (M3): where a functional systemd user manager exists — probed by actually running a

@@ -2071,6 +2071,8 @@ submission and focus-return behavior.
   session confirmations are skipped (below). A tab that cannot be closed does not prevent the other tabs from closing;
   the reply names the failed tabs and the client shows that notice. Restart and an agent exiting on its own leave tabs
   running. Tabs can be opened after Stop; another Stop closes them too.
+- **Shell exit history.** Stop, Stop and suspend, and the session teardown in Delete and Replace give Bash or Zsh a
+  hangup so the shell can save history on exit.
 - **Restart** relaunches the agent in the same working directory and resumes the session's own conversation (see
   Durability for the exact promise). Confirmed 2026-10-03: Restart always means the conversation is preserved. It is
   offered only when Farhelm knows the session's agent type, has captured its conversation, and can resume it: an agent
