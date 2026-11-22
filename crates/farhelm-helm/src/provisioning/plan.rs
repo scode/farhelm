@@ -36,6 +36,19 @@ impl Serialize for ProvisioningTarget {
                 value.serialize_field("kind", "local")?;
                 value.end()
             }
+            // Expose the opt-in setting in the confirmation without carrying
+            // a second value that could disagree with the frozen route.
+            Self::Remote(RemoteRoute::Ssh {
+                destination,
+                access: crate::ssh::SshAccessKind::Tailscale,
+            }) => {
+                use serde::ser::SerializeStruct as _;
+                let mut value = serializer.serialize_struct("ProvisioningTarget", 3)?;
+                value.serialize_field("kind", "ssh")?;
+                value.serialize_field("destination", destination)?;
+                value.serialize_field("tailscale", &true)?;
+                value.end()
+            }
             Self::Remote(route) => route.serialize(serializer),
         }
     }

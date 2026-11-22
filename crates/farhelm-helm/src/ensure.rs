@@ -63,6 +63,8 @@ struct EnsureFile {
 struct EnsureHost {
     ssh: String,
     #[serde(default)]
+    tailscale: bool,
+    #[serde(default)]
     remote_farhelm: Option<String>,
     #[serde(default)]
     remote_state_dir: Option<String>,
@@ -73,7 +75,7 @@ struct EnsureHost {
 /// Runs BEFORE the helm serves anything, so the guarantee is true for the
 /// first request rather than eventually. Idempotent by construction: a
 /// destination already in the registry is left EXACTLY as it is, including
-/// its `remote_farhelm`/`remote_state_dir` and its learned identity.
+/// its remote paths, Tailscale mode and learned identity.
 ///
 /// That last point is the one deliberate narrowing of the word "upsert",
 /// and it is worth being explicit about because it is the case a reader
@@ -117,6 +119,7 @@ pub(crate) async fn ingest(store: &HelmStore, path: &Path) -> anyhow::Result<()>
                 .into_iter()
                 .map(|host| StoreEnsureHost {
                     destination: host.ssh,
+                    tailscale: host.tailscale,
                     remote_farhelm: host.remote_farhelm,
                     remote_state_dir: host.remote_state_dir,
                 })
@@ -255,6 +258,7 @@ mod tests {
                 entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
                 kind: HostKind::Ssh,
                 destination: Some(destination.to_string()),
+                tailscale: false,
                 alias: None,
                 remote_farhelm: farhelm.map(str::to_string),
                 remote_state_dir: state_dir.map(str::to_string),
@@ -313,7 +317,7 @@ mod tests {
             r#"{
                 // the build box
                 hosts: [
-                    { ssh: "user@build", remote_farhelm: "/opt/farhelm" },
+                    { ssh: "user@build", remote_farhelm: "/opt/farhelm", tailscale: true },
                     { ssh: "user@spare", remote_state_dir: "/srv/state" },
                 ],
             }"#,
@@ -329,12 +333,14 @@ mod tests {
             .expect("build host registered");
         assert_eq!(build.remote_farhelm.as_deref(), Some("/opt/farhelm"));
         assert_eq!(build.remote_state_dir, None);
+        assert!(build.tailscale);
         let spare = rows
             .iter()
             .find(|row| row.destination.as_deref() == Some("user@spare"))
             .expect("spare host registered");
         assert_eq!(spare.remote_farhelm, None);
         assert_eq!(spare.remote_state_dir.as_deref(), Some("/srv/state"));
+        assert!(!spare.tailscale);
     }
 
     /// Restarting a helm with the same ensure file must be a no-op, not a
@@ -355,10 +361,18 @@ mod tests {
         )
         .await;
         ingest(&store, &path).await.expect("first ingest");
+        assert!(
+            store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| !row.tailscale)
+        );
 
         let edited = write_file(
             &dir,
-            r#"{ hosts: [{ ssh: "user@build", remote_farhelm: "/usr/bin/farhelm" }] }"#,
+            r#"{ hosts: [{ ssh: "user@build", remote_farhelm: "/usr/bin/farhelm", tailscale: true }] }"#,
         )
         .await;
         ingest(&store, &edited).await.expect("second ingest");
@@ -371,6 +385,10 @@ mod tests {
             .into_iter()
             .find(|row| row.destination.as_deref() == Some("user@build"))
             .expect("still registered exactly once");
+        assert!(
+            !row.tailscale,
+            "startup input cannot switch an existing host's route"
+        );
         assert_eq!(
             row.remote_farhelm.as_deref(),
             Some("/opt/farhelm"),

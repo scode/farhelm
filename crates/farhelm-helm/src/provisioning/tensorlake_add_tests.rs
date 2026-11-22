@@ -2823,6 +2823,7 @@ async fn copied_supervisor_state_refuses_before_installation() {
         .probe(ProbeRequest {
             target: ProbeDestination::Ssh {
                 destination: row.destination.clone().unwrap(),
+                tailscale: None,
             },
             remote_farhelm: None,
             remote_state_dir: None,

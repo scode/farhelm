@@ -338,10 +338,33 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 98;
+pub(crate) const SCHEMA_VERSION: i64 = 99;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
+/// Preserve ordinary OpenSSH behavior for pre-existing registry entries.
+const TAILSCALE_MODE_COLUMN: (&str, &str) = (
+    "tailscale",
+    "tailscale INTEGER NOT NULL DEFAULT 0 CHECK (tailscale IN (0, 1))",
+);
+
+/// Some historical fixtures start with newer columns already present.
+fn add_missing_host_columns(
+    tx: &rusqlite::Transaction<'_>,
+    columns: &[(&str, &str)],
+) -> anyhow::Result<()> {
+    for (name, definition) in columns {
+        let exists: bool = tx.query_row(
+            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = ?1",
+            [name],
+            |row| row.get(0),
+        )?;
+        if !exists {
+            tx.execute_batch(&format!("ALTER TABLE hosts ADD COLUMN {definition};"))?;
+        }
+    }
+    Ok(())
+}
 
 mod environment_history;
 mod podman;
@@ -1127,6 +1150,8 @@ pub struct HostRow {
     /// its disposable lifecycle, not a session inventory or a permission grant.
     pub session_owned: bool,
     pub destination: Option<String>,
+    /// Explicit host-key and routing policy for an ordinary SSH host. The mode travels with every dial.
+    pub tailscale: bool,
     /// An optional user-facing label. When present it replaces the derived
     /// destination or local label everywhere except the details view.
     pub alias: Option<String>,
@@ -1174,6 +1199,14 @@ pub struct HostRow {
 }
 
 impl HostRow {
+    /// Registry SSH hosts use the stored mode. Managed hosts retain their provider's own access policy.
+    pub(crate) fn ssh_access(&self) -> Option<crate::ssh::SshAccessKind> {
+        match self.kind {
+            HostKind::Ssh if self.tailscale => Some(crate::ssh::SshAccessKind::Tailscale),
+            kind => kind.ssh_access(),
+        }
+    }
+
     /// Decode the current resource binding without changing its storage shape.
     /// The provider handle keeps the saved ID and pending-create evidence that
     /// deletion needs after the resource's name has stopped resolving.
@@ -1256,6 +1289,7 @@ type RawHostRow = (
     // The execution endpoint recorded with a new container's first create.
     Option<String>,
     Option<u32>,
+    bool,
 );
 
 /// Which command authority an approval grants to the requesting installation.
@@ -1983,6 +2017,8 @@ impl ListSort {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct EnsureHost {
     pub destination: String,
+    /// Applied only on insert, as with the entry's remote paths.
+    pub tailscale: bool,
     pub remote_farhelm: Option<String>,
     pub remote_state_dir: Option<String>,
 }
@@ -2002,6 +2038,11 @@ pub enum HostStoreError {
     /// second lookup.
     #[error("a host is already registered at destination {0:?}")]
     DuplicateDestination(String),
+    /// A probe or setup dialed through a different SSH mode from the current row.
+    #[error("host {0} changed its Tailscale setting; probe it again")]
+    SshModeChanged(HostId),
+    #[error("the Tailscale setting is only available for SSH hosts")]
+    SshModeManaged,
     /// A destination that cannot be handed to `ssh` as a destination at
     /// all: empty, or shaped like an option (a leading `-`).
     ///
@@ -2353,7 +2394,7 @@ fn alias_collision(
 /// that window; passing the dialed configuration back into the transaction
 /// is what CLOSES it, since the check and the write then happen together.
 ///
-/// All three fields, not just `destination`: `remote_farhelm` and
+/// The route mode travels with `destination`. `remote_farhelm` and
 /// `remote_state_dir` select WHICH supervisor answers on that destination,
 /// so editing either can change the identity a dial reaches just as surely
 /// as retargeting the host. `None` throughout is the reserved local row's
@@ -2361,13 +2402,14 @@ fn alias_collision(
 ///
 /// Deliberately a value snapshot rather than a row revision counter: the
 /// registry has no revision column, and adding one would mean every future
-/// writer of any of these three columns had to remember to bump it — a
+/// writer of these columns had to remember to bump it — a
 /// convention with the same failure mode this type exists to remove.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DialedAs {
     pub destination: Option<String>,
     pub remote_farhelm: Option<String>,
     pub remote_state_dir: Option<String>,
+    pub tailscale: bool,
 }
 
 impl DialedAs {
@@ -2378,6 +2420,7 @@ impl DialedAs {
             destination: row.destination.clone(),
             remote_farhelm: row.remote_farhelm.clone(),
             remote_state_dir: row.remote_state_dir.clone(),
+            tailscale: row.tailscale,
         }
     }
 }
@@ -3182,7 +3225,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 98;",
+              PRAGMA user_version = 99;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             podman_place_claims_schema = podman::PLACE_CLAIMS_SCHEMA,
@@ -3194,6 +3237,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("adding the environment seal record")?;
         // Append after the seal, matching the later migration's column order.
         podman::migrate_container_place_identity(&tx)?;
+        add_missing_host_columns(&tx, &[TAILSCALE_MODE_COLUMN])
+            .context("adding the Tailscale SSH mode")?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -5191,6 +5236,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 98")?;
         version = 98;
     }
+    if version == 98 {
+        add_missing_host_columns(&tx, &[TAILSCALE_MODE_COLUMN])
+            .context("adding the Tailscale SSH mode")?;
+        tx.execute_batch("PRAGMA user_version = 99;")
+            .context("migrating helm.db to schema version 99")?;
+        version = 99;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -5455,7 +5507,7 @@ fn read_identity_and_config(
     host: HostId,
 ) -> anyhow::Result<Option<(Option<String>, DialedAs)>> {
     tx.query_row(
-        "SELECT host_identity, destination, remote_farhelm, remote_state_dir \
+        "SELECT host_identity, destination, remote_farhelm, remote_state_dir, tailscale \
          FROM hosts WHERE id = ?1",
         rusqlite::params![host],
         |r| {
@@ -5465,6 +5517,7 @@ fn read_identity_and_config(
                     destination: r.get(1)?,
                     remote_farhelm: r.get(2)?,
                     remote_state_dir: r.get(3)?,
+                    tailscale: r.get(4)?,
                 },
             ))
         },
@@ -7006,7 +7059,7 @@ impl HelmStore {
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
                      tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking, session_owned \
                      , environment_provider, place_host, podman_container_id, podman_user, podman_home, podman_uid,
-                     podman_pending_create_at, podman_place_machine_id, podman_place_uid FROM hosts ORDER BY id ASC",
+                     podman_pending_create_at, podman_place_machine_id, podman_place_uid, tailscale FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
                     let raw: Vec<RawHostRow> = stmt
@@ -7044,6 +7097,7 @@ impl HelmStore {
                                 r.get(29)?,
                                 r.get(30)?,
                                 r.get(31)?,
+                                r.get(32)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -7084,6 +7138,7 @@ impl HelmStore {
                                 podman_pending_create_at,
                                 podman_place_machine_id,
                                 podman_place_uid,
+                                tailscale,
                             )| {
                                 let host_kind =
                                     HostKind::from_columns(&kind, tensorlake_sandbox.as_deref(), environment_provider.as_deref())?;
@@ -7109,6 +7164,7 @@ impl HelmStore {
                                     session_owned,
                                     entry_uuid: decode_entry_uuid(entry_uuid)?,
                                     destination,
+                                    tailscale,
                                     alias,
                                     remote_farhelm,
                                     remote_state_dir,
@@ -7218,9 +7274,23 @@ impl HelmStore {
         remote_farhelm: Option<&str>,
         remote_state_dir: Option<&str>,
     ) -> anyhow::Result<HostId> {
+        self.add_ssh_host_with_mode(destination, remote_farhelm, remote_state_dir, false)
+            .await
+    }
+
+    /// Register the connection policy in the same insert as the SSH destination.
+    pub(crate) async fn add_ssh_host_with_mode(
+        &self,
+        destination: &str,
+        remote_farhelm: Option<&str>,
+        remote_state_dir: Option<&str>,
+        tailscale: bool,
+    ) -> anyhow::Result<HostId> {
         let conn = self.conn.clone();
         let destination = destination.to_string();
-        if !destination_is_usable(&destination) {
+        if !destination_is_usable(&destination)
+            || (tailscale && crate::ssh::tailscale::destination_host(&destination).is_err())
+        {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination,
             )));
@@ -7245,14 +7315,14 @@ impl HelmStore {
                     // for a decode step to choose between. See
                     // `host_kind_sql!` for why it is spliced, not bound.
                     concat!(
-                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid) \
+                        "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid, tailscale) \
                          VALUES ('",
                         host_kind_sql!(ssh),
-                        "', ?1, ?2, ?3, ?4) ON CONFLICT (destination) WHERE kind = '",
+                        "', ?1, ?2, ?3, ?4, ?5) ON CONFLICT (destination) WHERE kind = '",
                         host_kind_sql!(ssh),
                         "' DO NOTHING"
                     ),
-                    rusqlite::params![destination, remote_farhelm, remote_state_dir, uuid::Uuid::new_v4().to_string()],
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, uuid::Uuid::new_v4().to_string(), tailscale],
                 )
                 .context("inserting ssh host")?;
             if inserted == 0 {
@@ -7577,7 +7647,30 @@ impl HelmStore {
         host_identity: Option<&str>,
         new_entry: Option<&NewHostEntry>,
     ) -> anyhow::Result<(HostId, bool)> {
-        if !destination_is_usable(destination) {
+        self.register_probed_ssh_host_with_mode(
+            destination,
+            remote_farhelm,
+            remote_state_dir,
+            host_identity,
+            new_entry,
+            false,
+        )
+        .await
+    }
+
+    /// Write the probed paths and identity only if the route still matches the registered host.
+    pub(crate) async fn register_probed_ssh_host_with_mode(
+        &self,
+        destination: &str,
+        remote_farhelm: Option<&str>,
+        remote_state_dir: Option<&str>,
+        host_identity: Option<&str>,
+        new_entry: Option<&NewHostEntry>,
+        tailscale: bool,
+    ) -> anyhow::Result<(HostId, bool)> {
+        if !destination_is_usable(destination)
+            || (tailscale && crate::ssh::tailscale::destination_host(destination).is_err())
+        {
             return Err(anyhow::Error::new(HostStoreError::InvalidDestination(
                 destination.to_string(),
             )));
@@ -7604,12 +7697,12 @@ impl HelmStore {
                         new_entry_conflict(&tx, &destination, entry)?;
                     }
                     let alias = new_entry.as_ref().and_then(NewHostEntry::alias);
-                    let existing: Option<(HostId, Option<String>, bool, HostKind)> = tx
+                    let existing = tx
                         .query_row(
                             concat!(
                                 "SELECT id, host_identity, \
                                  (remote_farhelm IS NULL OR remote_state_dir IS NULL), \
-                                 kind, tensorlake_sandbox, environment_provider FROM hosts \
+                                 kind, tensorlake_sandbox, environment_provider, tailscale FROM hosts \
                                  WHERE kind = '",
                                 host_kind_sql!(ssh),
                                 "' AND destination = ?1"
@@ -7624,13 +7717,17 @@ impl HelmStore {
                                 ).map_err(|error| rusqlite::Error::FromSqlConversionFailure(
                                     3, rusqlite::types::Type::Text, error.into(),
                                 ))?;
-                                Ok((row.get(0)?, row.get(1)?, row.get(2)?, kind))
+                                Ok((row.get::<_, HostId>(0)?, row.get::<_, Option<String>>(1)?,
+                                    row.get::<_, bool>(2)?, kind, row.get::<_, bool>(6)?))
                             },
                         )
                         .optional()
                         .context("looking up a discovered ssh destination")?;
 
-                    let (host, inserted) = if let Some((host, recorded, unfinished, kind)) = existing {
+                    let (host, inserted) = if let Some((host, recorded, unfinished, kind, stored_mode)) = existing {
+                        if stored_mode != tailscale {
+                            return Err(anyhow::Error::new(HostStoreError::SshModeChanged(host)));
+                        }
                         kind.require_discovered_install_admission(host, unfinished)?;
                         if let (Some(recorded), Some(reported)) = (&recorded, &host_identity)
                             && recorded != reported
@@ -7688,11 +7785,11 @@ impl HelmStore {
                         tx.execute(
                     concat!(
                         "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, \
-                         host_identity, entry_uuid, alias) VALUES ('",
+                         host_identity, entry_uuid, alias, tailscale) VALUES ('",
                         host_kind_sql!(ssh),
-                        "', ?1, ?2, ?3, ?4, ?5, ?6)"
+                        "', ?1, ?2, ?3, ?4, ?5, ?6, ?7)"
                     ),
-                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity, uuid::Uuid::new_v4().to_string(), alias],
+                    rusqlite::params![destination, remote_farhelm, remote_state_dir, host_identity, uuid::Uuid::new_v4().to_string(), alias, tailscale],
                 )
                 .context("inserting the discovered ssh host")?;
                         (tx.last_insert_rowid(), true)
@@ -7817,6 +7914,9 @@ impl HelmStore {
                         // aborts the uncommitted transaction, so the batch
                         // stays all-or-nothing.
                         if !already_registered {
+                            if entry.tailscale && crate::ssh::tailscale::destination_host(&entry.destination).is_err() {
+                                return Err(anyhow::Error::new(HostStoreError::InvalidDestination(entry.destination.clone())));
+                            }
                             require_usable_remote_paths(
                                 entry.remote_farhelm.as_deref(),
                                 entry.remote_state_dir.as_deref(),
@@ -7829,10 +7929,10 @@ impl HelmStore {
                         let inserted = tx
                     .execute(
                         concat!(
-                            "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid) \
+                            "INSERT INTO hosts (kind, destination, remote_farhelm, remote_state_dir, entry_uuid, tailscale) \
                              VALUES ('",
                             host_kind_sql!(ssh),
-                            "', ?1, ?2, ?3, ?4) ON CONFLICT (destination) WHERE kind = '",
+                            "', ?1, ?2, ?3, ?4, ?5) ON CONFLICT (destination) WHERE kind = '",
                             host_kind_sql!(ssh),
                             "' DO NOTHING"
                         ),
@@ -7840,7 +7940,8 @@ impl HelmStore {
                             entry.destination,
                             entry.remote_farhelm,
                             entry.remote_state_dir,
-                            uuid::Uuid::new_v4().to_string()
+                            uuid::Uuid::new_v4().to_string(),
+                            entry.tailscale,
                         ],
                     )
                     .with_context(|| {
@@ -7953,13 +8054,21 @@ impl HelmStore {
             )]
             let current: Option<(String, Option<String>, Option<String>, Option<String>, bool)> = tx
                 .query_row(
-                    "SELECT kind, alias, tensorlake_sandbox, environment_provider, destination IS NOT ?2
+                    "SELECT kind, alias, tensorlake_sandbox, environment_provider, destination IS NOT ?2, tailscale
                      FROM hosts WHERE id = ?1",
                     rusqlite::params![host, destination],
-                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)),
+                    |r| {
+                        if r.get::<_, bool>(5)?
+                            && crate::ssh::tailscale::destination_host(&destination).is_err()
+                        {
+                            return Ok(Err(HostStoreError::InvalidDestination(destination.clone())));
+                        }
+                        Ok(Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?)))
+                    },
                 )
                 .optional()
-                .context("looking up host before updating its destination")?;
+                .context("looking up host before updating its destination")?
+                .transpose()?;
             let current = match current {
                 Some((kind, alias, sandbox, provider, retargeted)) => Some((
                     HostKind::from_columns(&kind, sandbox.as_deref(), provider.as_deref())?,
@@ -8028,6 +8137,59 @@ impl HelmStore {
         })
         .await
         .context("update ssh destination task panicked")?
+    }
+
+    /// Change the policy only on the entry the caller parked.
+    /// A host with Podman resources cannot change its route because those resources still belong to its old endpoint.
+    pub(crate) async fn set_ssh_tailscale(
+        &self,
+        row: &HostRow,
+        tailscale: bool,
+    ) -> anyhow::Result<bool> {
+        let host = row.id;
+        let entry = row.entry_uuid.clone();
+        self.conn
+            .call("change Tailscale SSH mode task panicked", move |conn| {
+                let tx = conn.transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+                let (kind, destination, old_mode) = tx
+                    .query_row(
+                        "SELECT kind, destination, tailscale FROM hosts WHERE id = ?1 AND entry_uuid = ?2
+                         AND tensorlake_sandbox IS NULL AND environment_provider IS NULL",
+                        rusqlite::params![host, entry],
+                        |row| Ok((row.get::<_, String>(0)?, row.get::<_, Option<String>>(1)?, row.get::<_, bool>(2)?)),
+                    )
+                    .optional()?
+                    .ok_or(HostStoreError::HostNotFound(host))?;
+                if HostKind::from_columns(&kind, None, None)? != HostKind::Ssh {
+                    return Err(HostStoreError::SshModeManaged.into());
+                }
+                if old_mode == tailscale {
+                    return Ok(false);
+                }
+                let destination = destination.context("an SSH host has no destination")?;
+                if tailscale && crate::ssh::tailscale::destination_host(&destination).is_err() {
+                    return Err(HostStoreError::InvalidDestination(destination).into());
+                }
+                podman::refuse_referenced_place(&tx, host)?;
+                tx.execute("DELETE FROM podman_place_claims WHERE host_id = ?1", [host])?;
+                tx.execute(
+                    "UPDATE hosts SET tailscale = ?2 WHERE id = ?1",
+                    rusqlite::params![host, tailscale],
+                )?;
+                tx.commit().context("committing Tailscale SSH mode")?;
+                Ok(true)
+            })
+            .await
+    }
+
+    /// Refuse a change that would disturb existing container resources before
+    /// parking the host. The transaction checks ownership again before writing.
+    pub(crate) async fn check_ssh_tailscale_edit(&self, host: HostId) -> anyhow::Result<()> {
+        self.conn
+            .call("check Tailscale SSH edit task panicked", move |conn| {
+                podman::refuse_referenced_place(conn, host)
+            })
+            .await
     }
 
     /// Replace one host's optional alias and report whether its canonical
@@ -16566,6 +16728,7 @@ mod tests {
         let ensured = store
             .ensure_ssh_hosts(vec![EnsureHost {
                 destination: "ensured@host".to_string(),
+                tailscale: false,
                 remote_farhelm: None,
                 remote_state_dir: None,
             }])
@@ -16614,6 +16777,7 @@ mod tests {
             store
                 .ensure_ssh_hosts(vec![EnsureHost {
                     destination: "ensured@host".to_string(),
+                    tailscale: false,
                     remote_farhelm: Some("another-farhelm".to_string()),
                     remote_state_dir: None,
                 }])
@@ -17082,16 +17246,63 @@ mod tests {
         .expect("read schema")
     }
 
-    /// Undo schemas 97 and 98 (the container place claims and each container's recorded machine and account), newest
-    /// first. Every fixture that rewinds a fresh database below schema 97 and then compares its schema with a fresh
-    /// one runs this before dropping older host columns: the place columns sit last in a fresh `hosts` table, and left
-    /// in place they would end up ahead of the older columns the migration ladder appends again. Fixtures that do not
-    /// compare schemas can leave them, since the 97 and 98 steps accept a table and columns that already exist.
-    const REWIND_CONTAINER_PLACE_IDENTITY: &str = "ALTER TABLE hosts DROP COLUMN podman_place_uid;
+    /// Drop the latest host columns, newest first, before rewinding older migrations that append host columns.
+    /// Schema comparisons pin column ordering as well as the set of columns, so these must be added back by migration.
+    const REWIND_CONTAINER_PLACE_IDENTITY: &str = "ALTER TABLE hosts DROP COLUMN tailscale;
+             ALTER TABLE hosts DROP COLUMN podman_place_uid;
              ALTER TABLE hosts DROP COLUMN podman_place_machine_id;
              DROP TABLE podman_place_claims;";
 
-    /// Historical fixtures rewind the environment columns added in schemas 83, 89, 97 and 98 before removing older
+    /// Old SSH rows must keep their access policy across the upgrade. An explicit
+    /// Tailscale choice made on the migrated database must survive another open.
+    #[farhelm_testtrace::test]
+    async fn schema_99_defaults_existing_ssh_to_user_config_and_keeps_the_opt_in() {
+        let (dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("build@node.example", None, None)
+            .await
+            .unwrap();
+        let before = store.list_hosts().await.unwrap();
+        let fresh_schema = schema_objects(&store.conn.lock());
+        store
+            .conn
+            .lock()
+            .execute_batch("ALTER TABLE hosts DROP COLUMN tailscale; PRAGMA user_version = 98;")
+            .unwrap();
+        assert!(
+            store
+                .conn
+                .lock()
+                .prepare("SELECT tailscale FROM hosts")
+                .is_err()
+        );
+        drop(store);
+
+        let path = dir.path().join("helm.db");
+        let store = HelmStore::open(&path).await.unwrap();
+        let after = store.list_hosts().await.unwrap();
+        assert_eq!(after, before);
+        assert_eq!(schema_objects(&store.conn.lock()), fresh_schema);
+        let row = after.iter().find(|row| row.id == host).unwrap();
+        assert_eq!(
+            row.ssh_access(),
+            Some(crate::ssh::SshAccessKind::UserConfig)
+        );
+        assert!(store.set_ssh_tailscale(row, true).await.unwrap());
+        drop(store);
+
+        let store = HelmStore::open(&path).await.unwrap();
+        let row = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap();
+        assert_eq!(row.ssh_access(), Some(crate::ssh::SshAccessKind::Tailscale));
+    }
+
+    /// Historical fixtures rewind the environment and SSH policy columns before removing older
     /// host columns. Leaving a newer column in place changes its final position when the migration ladder appends the
     /// older columns again.
     fn rewind_environment_host_columns(conn: &Connection) {
@@ -20023,6 +20234,7 @@ mod tests {
         assert_eq!(planted, 1, "test premise: the pre-rule values were planted");
         let tilde = |destination: &str| EnsureHost {
             destination: destination.to_string(),
+            tailscale: false,
             remote_farhelm: Some("~/.local/bin/farhelm".to_string()),
             remote_state_dir: Some("~/state".to_string()),
         };
@@ -20047,6 +20259,7 @@ mod tests {
             .ensure_ssh_hosts(vec![
                 EnsureHost {
                     destination: "fresh-good@host".to_string(),
+                    tailscale: false,
                     remote_farhelm: None,
                     remote_state_dir: None,
                 },
@@ -20135,11 +20348,13 @@ mod tests {
                     .ensure_ssh_hosts(vec![
                         EnsureHost {
                             destination: format!("ensure-good-{index}@host"),
+                            tailscale: false,
                             remote_farhelm: None,
                             remote_state_dir: None,
                         },
                         EnsureHost {
                             destination: format!("ensure-bad-{index}@host"),
+                            tailscale: false,
                             remote_farhelm: None,
                             remote_state_dir: Some(rejected.to_string()),
                         },
@@ -21245,11 +21460,13 @@ mod tests {
             .ensure_ssh_hosts(vec![
                 EnsureHost {
                     destination: "ensure-clean@host".to_string(),
+                    tailscale: false,
                     remote_farhelm: None,
                     remote_state_dir: None,
                 },
                 EnsureHost {
                     destination: "Ensure Name".to_string(),
+                    tailscale: false,
                     remote_farhelm: None,
                     remote_state_dir: None,
                 },
@@ -21287,11 +21504,13 @@ mod tests {
             .ensure_ssh_hosts(vec![
                 EnsureHost {
                     destination: "ensure-clean@host".to_string(),
+                    tailscale: false,
                     remote_farhelm: None,
                     remote_state_dir: None,
                 },
                 EnsureHost {
                     destination: "this machine".to_string(),
+                    tailscale: false,
                     remote_farhelm: None,
                     remote_state_dir: None,
                 },
@@ -21357,6 +21576,7 @@ mod tests {
         let added = store
             .ensure_ssh_hosts(vec![EnsureHost {
                 destination: "Pre Existing Name".to_string(),
+                tailscale: false,
                 remote_farhelm: None,
                 remote_state_dir: None,
             }])

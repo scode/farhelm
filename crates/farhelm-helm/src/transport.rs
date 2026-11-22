@@ -176,12 +176,63 @@ impl SystemTransport {
         }
     }
 
-    /// Fresh access for every dial and release, with a row-only seam for
-    /// fixtures which have no registry. Never cache an editable destination.
+    /// A standalone dial uses the actor's exact row, which is also the row
+    /// whose identity the handshake can update. Containers need the current
+    /// registry to resolve their place and the place's Podman probe.
     async fn access(&self, host: &HostRow) -> anyhow::Result<HostAccess> {
-        match &self.store {
-            Some(store) => crate::access::resolve_host_access(store, host.id, &self.places).await,
-            None => crate::access::host_access(host),
+        match (host.kind, &self.store) {
+            (crate::store::HostKind::Podman, Some(store)) => {
+                crate::access::resolve_host_access(store, host.id, &self.places).await
+            }
+            _ => crate::access::host_access(host),
+        }
+    }
+
+    /// Ask an already selected local master to exit without leaving a child behind if it stalls.
+    async fn exit_master(&self, host: HostId, args: Vec<String>) {
+        let output = tokio::process::Command::new(&self.ssh_program)
+            .args(args)
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::piped())
+            .kill_on_drop(true)
+            .output();
+        match tokio::time::timeout(RELEASE_TIMEOUT, output).await {
+            Ok(Ok(output)) => tracing::debug!(
+                host,
+                status = %output.status,
+                stderr = %String::from_utf8_lossy(&output.stderr).trim(),
+                "asked a shared ssh connection to exit"
+            ),
+            Ok(Err(error)) => warn!(host, %error, "could not run ssh -O exit"),
+            Err(_) => warn!(
+                host,
+                "ssh -O exit did not finish within {RELEASE_TIMEOUT:?}"
+            ),
+        }
+    }
+
+    /// Retire every generation of this destination. Looking up the daemon's
+    /// current view could miss a master that used previous keys or a different proxy.
+    async fn exit_tailscale_masters(&self, host: HostId, destination: &str) {
+        let sockets = match crate::ssh::tailscale::shared_sockets(&self.state_dir, destination) {
+            Ok(sockets) => sockets,
+            Err(error) => {
+                warn!(host, %error, "could not find shared Tailscale SSH connections");
+                return;
+            }
+        };
+        let released = tokio::time::timeout(RELEASE_TIMEOUT * 2, async {
+            for socket in sockets {
+                match crate::ssh::ssh_exact_control_exit_args(destination, &socket) {
+                    Ok(args) => self.exit_master(host, args).await,
+                    Err(error) => warn!(host, %error, "could not build the ssh -O exit command"),
+                }
+            }
+        })
+        .await;
+        if released.is_err() {
+            warn!(host, "timed out retiring Tailscale SSH masters");
         }
     }
 }
@@ -210,13 +261,9 @@ impl HostTransport for SystemTransport {
             let Some(sign_in) = &self.sign_in else {
                 return Ok(());
             };
-            if !host
-                .kind
-                .ssh_access()
-                .is_some_and(crate::ssh::SshAccessKind::asks_user)
-            {
+            let Some(kind) = host.ssh_access().filter(|kind| kind.asks_user()) else {
                 return Ok(());
-            }
+            };
             let destination = host
                 .destination
                 .as_deref()
@@ -226,6 +273,7 @@ impl HostTransport for SystemTransport {
                 .establish(
                     &self.ssh_program,
                     destination,
+                    kind,
                     &attempt,
                     deadline,
                     on_question,
@@ -236,10 +284,7 @@ impl HostTransport for SystemTransport {
 
     fn sign_in_unavailable(&self, host: &HostRow) -> Option<String> {
         if self.sign_in.is_some()
-            && host
-                .kind
-                .ssh_access()
-                .is_some_and(crate::ssh::SshAccessKind::asks_user)
+            && host.ssh_access() == Some(crate::ssh::SshAccessKind::UserConfig)
         {
             crate::ssh::sign_in_unavailable(
                 &self.state_dir,
@@ -272,13 +317,15 @@ impl HostTransport for SystemTransport {
                         host.remote_farhelm.as_deref().unwrap_or("farhelm"),
                         host.remote_state_dir.as_deref(),
                     );
-                    let mut lowered = route.command(
-                        &self.state_dir,
-                        crate::access::ConnectionPolicy::Shared(
-                            crate::ssh::SharedConnection::Supervisor,
-                        ),
-                        crate::access::RemoteCommand::Argv(&argv),
-                    )?;
+                    let mut lowered = route
+                        .command(
+                            &self.state_dir,
+                            crate::access::ConnectionPolicy::Shared(
+                                crate::ssh::SharedConnection::Supervisor,
+                            ),
+                            crate::access::RemoteCommand::Argv(&argv),
+                        )
+                        .await?;
                     if lowered.program == std::path::Path::new("ssh") {
                         lowered.program = self.ssh_program.clone();
                     }
@@ -326,23 +373,25 @@ impl HostTransport for SystemTransport {
         host: &'a HostRow,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + 'a>> {
         Box::pin(async move {
-            let (dest, kind) = match self.access(host).await {
-                Ok(HostAccess::Remote(RemoteRoute::Ssh {
-                    destination,
-                    access,
-                })) => (destination, access),
-                // Container exec borrows its place's master. Its own child is
-                // already closed by the actor hold, and closing the master
-                // would disconnect the place and every sibling environment.
-                Ok(HostAccess::Local | HostAccess::Remote(RemoteRoute::PodmanExec { .. })) => {
-                    return;
-                }
-                Err(error) => {
-                    warn!(host = host.id, error = %format!("{error:#}"), "could not build the ssh -O exit command");
-                    return;
-                }
+            // Teardown names the row whose master is being retired, even if
+            // a newer registry row has since been published.
+            let Some(kind) = host.ssh_access() else {
+                // A container borrows its place's master. Closing it would
+                // disconnect the place and every sibling environment.
+                return;
             };
-            let access = match crate::ssh::SshAccess::prepare(kind, &self.state_dir, &dest).await {
+            let Some(dest) = host.destination.as_deref() else {
+                warn!(
+                    host = host.id,
+                    "could not close shared SSH connections without a destination"
+                );
+                return;
+            };
+            if kind == crate::ssh::SshAccessKind::Tailscale {
+                self.exit_tailscale_masters(host.id, dest).await;
+                return;
+            }
+            let access = match crate::ssh::SshAccess::prepare(kind, &self.state_dir, dest).await {
                 Ok(access) => access,
                 Err(error) => {
                     warn!(host = host.id, %error, "could not resolve shared SSH access");
@@ -354,7 +403,7 @@ impl HostTransport for SystemTransport {
                 crate::ssh::SharedConnection::Provisioning,
             ] {
                 let args = match crate::ssh::ssh_control_exit_args(
-                    &dest,
+                    dest,
                     &self.state_dir,
                     connection,
                     &access,
@@ -366,30 +415,7 @@ impl HostTransport for SystemTransport {
                         continue;
                     }
                 };
-                let output = tokio::process::Command::new(&self.ssh_program)
-                    .args(args)
-                    .stdin(Stdio::null())
-                    .stdout(Stdio::null())
-                    .stderr(Stdio::piped())
-                    .kill_on_drop(true)
-                    .output();
-                match tokio::time::timeout(RELEASE_TIMEOUT, output).await {
-                    Ok(Ok(output)) => tracing::debug!(
-                        host = host.id,
-                        ?connection,
-                        status = %output.status,
-                        stderr = %String::from_utf8_lossy(&output.stderr).trim(),
-                        "asked a shared ssh connection to exit"
-                    ),
-                    Ok(Err(error)) => {
-                        warn!(host = host.id, ?connection, %error, "could not run ssh -O exit")
-                    }
-                    Err(_) => warn!(
-                        host = host.id,
-                        ?connection,
-                        "ssh -O exit did not finish within {RELEASE_TIMEOUT:?}"
-                    ),
-                }
+                self.exit_master(host.id, args).await;
             }
         })
     }
@@ -1095,6 +1121,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".into(),
             kind: HostKind::Ssh,
             destination: Some("fixture".into()),
+            tailscale: false,
             alias: None,
             remote_farhelm: None,
             remote_state_dir: None,
@@ -1284,6 +1311,7 @@ mod tests {
         HostRow {
             kind: HostKind::Tensorlake,
             destination: Some("sbx@sbx.sandbox.tensorlake.ai".into()),
+            tailscale: false,
             podman: None,
             tensorlake: Some(crate::store::TensorlakeBinding {
                 sandbox: "sbx".into(),

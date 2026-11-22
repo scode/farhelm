@@ -66,7 +66,7 @@ pub(crate) enum BaseRoute {
 impl BaseRoute {
     /// Run on an ordinary place using the same argv and SSH lowering as
     /// supervisor access. A place borrows its supervisor's existing master.
-    pub(crate) fn command(
+    pub(crate) async fn command(
         &self,
         control_dir: &Path,
         payload: RemoteCommand<'_>,
@@ -84,15 +84,18 @@ impl BaseRoute {
             Self::Ssh {
                 destination,
                 access,
-            } => RemoteRoute::Ssh {
-                destination: destination.clone(),
-                access: *access,
+            } => {
+                RemoteRoute::Ssh {
+                    destination: destination.clone(),
+                    access: *access,
+                }
+                .command(
+                    control_dir,
+                    ConnectionPolicy::Shared(SharedConnection::Supervisor),
+                    payload,
+                )
+                .await
             }
-            .command(
-                control_dir,
-                ConnectionPolicy::Shared(SharedConnection::Supervisor),
-                payload,
-            ),
         }
     }
 }
@@ -257,9 +260,9 @@ impl RemoteRoute {
         }
     }
 
-    /// Lower each parsing layer exactly once. Local Podman receives literal
-    /// argv. Remote Podman adds the SSH login shell around that same argv.
-    pub(crate) fn command(
+    /// Prepare access before lowering the literal argv. Local Podman receives it directly.
+    /// Remote Podman adds the SSH login shell around the same argv, including its place's access policy.
+    pub(crate) async fn command(
         &self,
         control_dir: &Path,
         policy: ConnectionPolicy,
@@ -270,7 +273,7 @@ impl RemoteRoute {
                 destination,
                 access,
             } => {
-                let access = SshAccess::resolve(*access, control_dir)?;
+                let access = SshAccess::prepare(*access, control_dir, destination).await?;
                 Ok(ProcessCommand {
                     program: "ssh".into(),
                     scrub_environment: false,
@@ -305,7 +308,7 @@ impl RemoteRoute {
                         destination,
                         access,
                     } => {
-                        let access = SshAccess::resolve(*access, control_dir)?;
+                        let access = SshAccess::prepare(*access, control_dir, destination).await?;
                         let mut remote = vec![
                             "sh".into(),
                             "-c".into(),
@@ -387,7 +390,6 @@ pub(crate) fn host_access(row: &HostRow) -> anyhow::Result<HostAccess> {
                 .clone()
                 .context("an SSH host has no destination")?,
             access: row
-                .kind
                 .ssh_access()
                 .context("an SSH host has no access policy")?,
         }),
@@ -442,7 +444,9 @@ pub(crate) fn base_route(row: &HostRow) -> anyhow::Result<BaseRoute> {
                 .destination
                 .clone()
                 .context("an SSH place has no destination")?,
-            access: SshAccessKind::UserConfig,
+            access: row
+                .ssh_access()
+                .context("an SSH place has no access policy")?,
         }),
         HostKind::Tensorlake | HostKind::Podman => {
             anyhow::bail!("an environment cannot hold containers")
@@ -556,7 +560,7 @@ mod tests {
     /// SSH must reconstruct exactly the same Podman argv the local route
     /// executes. The inner script survives its own shell layer unchanged.
     #[farhelm_testtrace::test]
-    fn local_and_nested_exec_preserve_each_argv_layer() {
+    async fn local_and_nested_exec_preserve_each_argv_layer() {
         let script = "printf '%s\\n' \"$HOME\"; echo 'literal quote'";
         let local = container_route(BaseRoute::Local)
             .command(
@@ -564,6 +568,7 @@ mod tests {
                 ConnectionPolicy::Shared(SharedConnection::Provisioning),
                 RemoteCommand::Script(script),
             )
+            .await
             .unwrap();
         assert_eq!(local.program, Path::new("/usr/bin/podman"));
         assert_eq!(
@@ -599,6 +604,7 @@ mod tests {
             ConnectionPolicy::OneShot,
             RemoteCommand::Script(script),
         )
+        .await
         .unwrap();
         let separator = nested.args.iter().position(|arg| arg == "--").unwrap();
         assert_eq!(nested.args[separator + 1], "place's $host");
@@ -621,7 +627,7 @@ mod tests {
     /// A container proxy must expire independently of the Podman client.
     /// Ordinary SSH retains its invocation without the environment deadline.
     #[farhelm_testtrace::test]
-    fn environment_stdio_is_unconditional_and_inner_exec_is_quoted() {
+    async fn environment_stdio_is_unconditional_and_inner_exec_is_quoted() {
         let route = container_route(BaseRoute::Local);
         let access = HostAccess::Remote(route.clone());
         let argv = access.stdio_argv("/program's $bin", Some("/state's $dir"));
@@ -632,6 +638,7 @@ mod tests {
                 ConnectionPolicy::OneShot,
                 RemoteCommand::Argv(&argv),
             )
+            .await
             .unwrap();
         let script = process.args.last().unwrap();
         let words = shell_words::split(script).unwrap();

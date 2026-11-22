@@ -960,6 +960,7 @@ async fn private_script_input_preserves_proxy_bytes_and_cleans_its_file() {
         &BaseRoute::Local,
         &argv,
     )
+    .await
     .unwrap();
     assert!(
         description

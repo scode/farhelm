@@ -5422,6 +5422,7 @@ mod tests {
     fn host_view(id: i64, name: &str, kind: &'static str, state: HostStateView) -> HostView {
         HostView {
             id,
+            tailscale: false,
             entry_uuid: format!("{id:08x}-0000-4000-8000-000000000000"),
             kind: kind.to_string(),
             tensorlake: None,

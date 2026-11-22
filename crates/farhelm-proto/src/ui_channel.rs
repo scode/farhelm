@@ -895,6 +895,9 @@ pub struct HostView {
     /// distinction is not cosmetic: it is what tells a client which rows
     /// offer edit and remove at all, and what removing one does.
     pub kind: String,
+    /// An ordinary SSH host whose route and host-key verification come from Tailscale.
+    #[serde(default)]
+    pub tailscale: bool,
     /// Session launch ownership changes the resource's lifecycle, not its
     /// inclusion in Hosts or its ordinary diagnostics and update eligibility.
     #[serde(default)]

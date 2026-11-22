@@ -218,24 +218,6 @@ pub(super) fn migrate_container_place_identity(
     )
 }
 
-/// Some historical fixtures start with newer columns already present.
-fn add_missing_host_columns(
-    tx: &rusqlite::Transaction<'_>,
-    columns: &[(&str, &str)],
-) -> anyhow::Result<()> {
-    for (name, definition) in columns {
-        let exists: bool = tx.query_row(
-            "SELECT count(*) != 0 FROM pragma_table_info('hosts') WHERE name = ?1",
-            [name],
-            |row| row.get(0),
-        )?;
-        if !exists {
-            tx.execute_batch(&format!("ALTER TABLE hosts ADD COLUMN {definition};"))?;
-        }
-    }
-    Ok(())
-}
-
 /// Validate recorded coordinates as input, including a hand-edited database.
 /// Unknown provider spellings are refused by the shared kind decoder first.
 #[allow(clippy::too_many_arguments)]
@@ -413,9 +395,9 @@ impl HelmStore {
                 "SELECT host_identity IS NOT NULL AND host_identity IS ?4
                         AND remote_farhelm IS ?5 AND remote_state_dir IS ?6 FROM hosts
                  WHERE id = ?1 AND entry_uuid = ?2 AND destination IS ?3
-                   AND tensorlake_sandbox IS NULL AND environment_provider IS NULL",
+                   AND tailscale IS ?7 AND tensorlake_sandbox IS NULL AND environment_provider IS NULL",
                 rusqlite::params![host, entry, dialed_as.destination, verified_supervisor,
-                    dialed_as.remote_farhelm, dialed_as.remote_state_dir],
+                    dialed_as.remote_farhelm, dialed_as.remote_state_dir, dialed_as.tailscale],
                 |row| row.get(0),
             ).optional()?;
             let Some(owns_supervisor) = owns_supervisor else {
@@ -429,7 +411,7 @@ impl HelmStore {
             }
             let twin = tx.query_row(
                 "SELECT host.id, host.kind, host.destination, host.alias,
-                        host.entry_uuid, host.remote_farhelm, host.remote_state_dir, host.host_identity
+                        host.entry_uuid, host.remote_farhelm, host.remote_state_dir, host.host_identity, host.tailscale
                  FROM podman_place_claims AS claim JOIN hosts AS host ON host.id = claim.host_id
                  WHERE claim.machine_id = ?1 AND claim.uid = ?2 AND claim.host_id != ?3",
                 rusqlite::params![identity.machine_id, identity.uid, host],
@@ -439,6 +421,7 @@ impl HelmStore {
                         destination: row.get(2)?,
                         remote_farhelm: row.get(5)?,
                         remote_state_dir: row.get(6)?,
+                        tailscale: row.get(8)?,
                     }, row.get::<_, Option<String>>(7)?)),
             ).optional()?;
             let displaced = if let Some((owner, kind, alias, entry, dialed_as, supervisor)) = twin {

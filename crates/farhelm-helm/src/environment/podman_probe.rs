@@ -255,7 +255,7 @@ impl SystemPlaceCommands {
     /// Both input policies use the same route and scrubbing. Keeping this
     /// description separate lets tests inspect every actual argv layer without
     /// starting an SSH connection or a container.
-    fn process(
+    async fn process(
         &self,
         route: &BaseRoute,
         argv: &[String],
@@ -269,7 +269,9 @@ impl SystemPlaceCommands {
             "farhelm-place-command".into(),
         ];
         clean.extend_from_slice(argv);
-        let mut process = route.command(&self.control_dir, RemoteCommand::Argv(&clean))?;
+        let mut process = route
+            .command(&self.control_dir, RemoteCommand::Argv(&clean))
+            .await?;
         if let BaseRoute::Ssh { .. } = route {
             // Quiet user config must not erase the mux refusal before a
             // failed fallback login. Other SSH sharing options stay intact.
@@ -290,7 +292,7 @@ impl SystemPlaceCommands {
         input: Option<&[u8]>,
         timeout: Duration,
     ) -> anyhow::Result<crate::provisioning::CommandResult> {
-        let mut command = self.process(route, argv)?.command();
+        let mut command = self.process(route, argv).await?.command();
         command
             .stdin(if input.is_some() {
                 Stdio::piped()
@@ -351,7 +353,7 @@ impl SystemPlaceCommands {
 /// Provider tests inspect the exact system runner's complete process argv,
 /// including SSH wrapping, without starting a process or using ambient PATH.
 #[cfg(test)]
-pub(super) fn lowered_command_for_test(
+pub(super) async fn lowered_command_for_test(
     control_dir: &Path,
     route: &BaseRoute,
     argv: &[String],
@@ -360,6 +362,7 @@ pub(super) fn lowered_command_for_test(
         control_dir: control_dir.into(),
     }
     .process(route, argv)
+    .await
 }
 
 /// Model the shell's admission before passing argv to a scripted engine.
@@ -486,12 +489,31 @@ impl PodmanPlaces {
             .update_ssh_destination_changed(host, destination)
             .await?
         {
-            let mut cache = self.cache.lock().unwrap();
-            cache.probes.remove(&host);
-            cache.refreshing.remove(&host);
-            self.changed.notify_waiters();
+            self.invalidate_route(host);
         }
         Ok(())
+    }
+
+    /// Serializes with probe publication just like a destination edit. Both can change the endpoint.
+    pub(crate) async fn set_ssh_tailscale(
+        &self,
+        store: &HelmStore,
+        row: &HostRow,
+        tailscale: bool,
+    ) -> anyhow::Result<()> {
+        let _published = self.claim_publication.lock().await;
+        if store.set_ssh_tailscale(row, tailscale).await? {
+            self.invalidate_route(row.id);
+        }
+        Ok(())
+    }
+
+    /// Called under claim publication so an in-flight probe loses its permit before the edit is visible.
+    fn invalidate_route(&self, host: HostId) {
+        let mut cache = self.cache.lock().unwrap();
+        cache.probes.remove(&host);
+        cache.refreshing.remove(&host);
+        self.changed.notify_waiters();
     }
 
     /// Read locally without waiting on a host. A changed endpoint has no current
@@ -766,6 +788,23 @@ impl PodmanPlaces {
                 host,
                 permit,
             };
+            let Ok(row) = current_row(&store, host).await else {
+                return;
+            };
+            // A place check can start its own shared SSH connection. Wait for
+            // a route edit, then check that this probe still owns its permit.
+            let lock = service
+                .manager
+                .get()
+                .and_then(Weak::upgrade)
+                .map(|manager| manager.ssh_route_lock(host));
+            let _routing = match (row.kind, lock) {
+                (crate::store::HostKind::Ssh, Some(lock)) => Some(lock.read_owned().await),
+                _ => None,
+            };
+            if !refreshing.is_current(&service.cache.lock().unwrap()) {
+                return;
+            }
             let Ok(row) = current_row(&store, host).await else {
                 return;
             };

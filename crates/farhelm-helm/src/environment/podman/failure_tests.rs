@@ -1190,9 +1190,12 @@ async fn cold_build_sends_exact_proxy_values_only_as_private_input() {
     );
     drop(artifact);
     let directory = tempfile::tempdir().unwrap();
-    let state = f.commands.state.lock().unwrap();
+    let (calls, inputs) = {
+        let state = f.commands.state.lock().unwrap();
+        (state.calls.clone(), state.inputs.clone())
+    };
     assert!(
-        !state.inputs.is_empty(),
+        !inputs.is_empty(),
         "the real provider must use the input seam"
     );
     // The expected script is independent of the code that serializes it.
@@ -1209,13 +1212,14 @@ line'
             access: crate::ssh::SshAccessKind::UserConfig,
         },
     ];
-    for argv in &state.calls {
+    for argv in &calls {
         for route in &routes {
             let process = crate::environment::podman_probe::lowered_command_for_test(
                 directory.path(),
                 route,
                 argv,
             )
+            .await
             .unwrap();
             assert!(
                 !process
@@ -1234,7 +1238,7 @@ line'
     }
     let mut bootstrap = false;
     let mut imported = false;
-    for (argv, input) in &state.inputs {
+    for (argv, input) in &inputs {
         assert_eq!(argv.last().map(String::as_str), Some(PRIVATE_SCRIPT));
         let input = std::str::from_utf8(input).unwrap();
         assert!(

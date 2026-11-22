@@ -42,6 +42,7 @@ pub(crate) fn host(id: i64, kind: &str, state: HostStateView) -> HostView {
     let destination = (!local).then(|| "dev@build-box.invalid".to_owned());
     HostView {
         id,
+        tailscale: false,
         entry_uuid: String::new(),
         kind: kind.to_owned(),
         is_session_owned: false,

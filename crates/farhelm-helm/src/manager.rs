@@ -909,7 +909,15 @@ type ProvisionLocks = HashMap<HostId, Arc<tokio::sync::Mutex<()>>>;
 /// hosts with actors and are removed when the host leaves the registry. The
 /// map keeps a worker replacement from handing out a fresh mutex while a
 /// handler still holds the previous lock across a host edit or cache write.
-type CacheLocks = HashMap<HostId, Arc<tokio::sync::Mutex<()>>>;
+type CacheLocks = HashMap<HostId, HostLocks>;
+
+/// A route can be read during provisioning planning without monopolizing
+/// the cache writer or blocking admission of an independent confirmed run.
+#[derive(Default)]
+struct HostLocks {
+    write: Arc<tokio::sync::Mutex<()>>,
+    ssh_route: Arc<tokio::sync::RwLock<()>>,
+}
 
 /// A held per-host provisioning lock (`ConnectionManager::host_provision_lock`).
 ///
@@ -1648,6 +1656,7 @@ fn reconfigured(before: &HostRow, after: &HostRow) -> bool {
     before.destination != after.destination
         || before.remote_farhelm != after.remote_farhelm
         || before.remote_state_dir != after.remote_state_dir
+        || before.tailscale != after.tailscale
 }
 
 impl ConnectionManager {
@@ -2769,7 +2778,7 @@ impl ConnectionManager {
     /// host's session list. Provisioning runs use
     /// [`Self::host_provision_lock`] instead, which registry edits take first.
     ///
-    /// `None` until a host has had an actor, or after its removal. A stopped
+    /// `None` until a registered row first needs a lock, or after its removal. A stopped
     /// actor does not discard the lock: a later replacement must still wait
     /// for existing writers. The guard is OWNED so a caller can hold it
     /// across the awaits its own transaction needs.
@@ -2782,8 +2791,22 @@ impl ConnectionManager {
             .lock()
             .expect("cache lock map mutex poisoned")
             .get(&host)
-            .cloned()?;
+            .map(|locks| Arc::clone(&locks.write))?;
         Some(cache_lock.lock_owned().await)
+    }
+
+    /// Hold a route stable while a probe or detached sign-in can start its
+    /// own master. A mode change takes this exclusively before retiring old masters.
+    /// Keep it with the cache lock so both survive actor replacement.
+    /// Call only with the ID of a registry row, including before its first actor is installed.
+    pub(crate) fn ssh_route_lock(&self, host: HostId) -> Arc<tokio::sync::RwLock<()>> {
+        self.cache_locks
+            .lock()
+            .expect("host lock map mutex poisoned")
+            .entry(host)
+            .or_default()
+            .ssh_route
+            .clone()
     }
 
     /// Return the cache-write lock for a host, creating it on the first actor
@@ -2793,7 +2816,8 @@ impl ConnectionManager {
             .lock()
             .expect("cache lock map mutex poisoned")
             .entry(host)
-            .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(())))
+            .or_default()
+            .write
             .clone()
     }
 
@@ -5022,7 +5046,7 @@ impl HostActor {
         // Every process connection can report a connected marker, including
         // local container exec. Until then, its exit can explain an early
         // failure. An opened socket is already waiting for the hello.
-        if progress.ssh.is_none() && row.kind.ssh_access().is_none() {
+        if progress.ssh.is_none() && row.ssh_access().is_none() {
             self.advance_attempt(progress, ConnectionStage::WaitingForHello);
         }
         // `start_for_host`, not `start`: this connection is the ONE path an
@@ -6529,6 +6553,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000002".into(),
             kind: HostKind::Ssh,
             destination: Some("diagnostic.example".into()),
+            tailscale: false,
             alias: None,
             remote_farhelm: Some("/opt/farhelm fixture".into()),
             remote_state_dir: Some("/state/fixture's data".into()),
@@ -7384,6 +7409,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind,
             destination: destination.map(str::to_string),
+            tailscale: false,
             alias: None,
             remote_farhelm: None,
             remote_state_dir: None,
@@ -13918,6 +13944,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Local,
             destination: None,
+            tailscale: false,
             alias: None,
             remote_farhelm: None,
             remote_state_dir: None,
@@ -13981,6 +14008,7 @@ mod tests {
             entry_uuid: "00000000-0000-4000-8000-000000000001".to_string(),
             kind: HostKind::Ssh,
             destination: Some("remote.example".to_string()),
+            tailscale: false,
             alias: None,
             remote_farhelm: None,
             remote_state_dir: None,

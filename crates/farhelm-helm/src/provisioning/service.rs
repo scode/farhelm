@@ -213,6 +213,8 @@ enum ProbeRegistration {
     },
     Ssh {
         destination: String,
+        /// Preserve the route that proved the supervisor identity or produced this install plan.
+        tailscale: bool,
         remote_farhelm: Option<String>,
         remote_state_dir: Option<String>,
         /// Set only for an add from the add host dialog
@@ -810,11 +812,16 @@ impl ProvisioningService {
                     ProbeRegistration::Local,
                 ))
             }
-            ProbeDestination::Ssh { destination } => {
+            ProbeDestination::Ssh { destination, .. } => {
                 if !crate::store::destination_is_usable(destination) {
                     return Err(anyhow::Error::new(ProvisioningRequestError::InvalidProbe(
                         format!("{destination:?} is not a usable ssh destination"),
                     )));
+                }
+                if access == crate::ssh::SshAccessKind::Tailscale
+                    && let Err(error) = crate::ssh::tailscale::destination_host(destination)
+                {
+                    return Err(ProvisioningRequestError::InvalidProbe(error.to_string()).into());
                 }
                 let new_entry = request
                     .new_entry
@@ -824,6 +831,7 @@ impl ProvisioningService {
                     .map_err(anyhow::Error::new)?;
                 let registration = ProbeRegistration::Ssh {
                     destination: destination.clone(),
+                    tailscale: access == crate::ssh::SshAccessKind::Tailscale,
                     remote_farhelm: request.remote_farhelm.clone(),
                     remote_state_dir: request.remote_state_dir.clone(),
                     new_entry,
@@ -880,7 +888,7 @@ impl ProvisioningService {
         // path EQUAL to the stored one is not new input either: the host
         // row's own set up action sends its stored paths back.
         let stored = match &request.target {
-            ProbeDestination::Ssh { destination } => self
+            ProbeDestination::Ssh { destination, .. } => self
                 .store
                 .list_hosts()
                 .await?
@@ -948,16 +956,35 @@ impl ProvisioningService {
         {
             return Err(ProvisioningRequestError::Refused(reason).into());
         }
-        // A destination this helm knows as a Tensorlake host is reached
-        // with Farhelm's key, whichever form of the request named it.
-        let access = stored
-            .as_ref()
-            .and_then(|row| row.kind.ssh_access())
-            .unwrap_or(crate::ssh::SshAccessKind::UserConfig);
-        let registered_host = stored.as_ref().map(|row| row.id);
-        if let Some(row) = stored {
-            request.remote_farhelm = request.remote_farhelm.or(row.remote_farhelm);
-            request.remote_state_dir = request.remote_state_dir.or(row.remote_state_dir);
+        let requested_mode = match request.target {
+            ProbeDestination::Ssh { tailscale, .. } => tailscale,
+            _ => None,
+        };
+        if let (Some(row), Some(requested_mode)) = (&stored, requested_mode)
+            && row.tailscale != requested_mode
+        {
+            return Err(ProvisioningRequestError::Refused(
+                "Change the Tailscale mode for this host in Host settings, then probe it again."
+                    .into(),
+            )
+            .into());
+        }
+        // Registry SSH hosts keep their chosen mode. A Tensorlake host still uses Farhelm's key.
+        let access = stored.as_ref().and_then(HostRow::ssh_access).unwrap_or(
+            if requested_mode == Some(true) {
+                crate::ssh::SshAccessKind::Tailscale
+            } else {
+                crate::ssh::SshAccessKind::UserConfig
+            },
+        );
+        let _planning = self.lock_ssh_plan(stored.as_ref()).await?;
+        if let Some(row) = &stored {
+            request.remote_farhelm = request
+                .remote_farhelm
+                .or_else(|| row.remote_farhelm.clone());
+            request.remote_state_dir = request
+                .remote_state_dir
+                .or_else(|| row.remote_state_dir.clone());
         }
         let from_agent = request
             .new_entry
@@ -977,7 +1004,7 @@ impl ProvisioningService {
             self.store.check_new_entry(destination, entry).await?;
         }
         if let Some(setup) = &self.setup_sign_in {
-            setup.prepare(&target.transport, registered_host).await?;
+            setup.prepare(&target.transport, stored.as_ref()).await?;
         }
         // Discovery comes FIRST, on every transport including the local
         // one: a running supervisor answers the protocol hello and is
@@ -1302,6 +1329,7 @@ impl ProvisioningService {
             }
             ProbeRegistration::Ssh {
                 destination,
+                tailscale,
                 remote_farhelm,
                 remote_state_dir,
                 new_entry,
@@ -1326,12 +1354,13 @@ impl ProvisioningService {
                     .transpose()?
                     .or_else(|| remote_state_dir.clone());
                 self.store
-                    .register_probed_ssh_host(
+                    .register_probed_ssh_host_with_mode(
                         destination,
                         farhelm.as_deref(),
                         state_dir.as_deref(),
                         discovered_identity,
                         new_entry.as_ref(),
+                        *tailscale,
                     )
                     .await?
             }
@@ -1635,6 +1664,7 @@ impl ProvisioningService {
             .await
             .expect("the provisioning planning semaphore is never closed");
         let row = self.host_row(host).await?;
+        let _planning = self.lock_ssh_plan(Some(&row)).await?;
         // Update can discover and adopt install coordinates too. It cannot
         // replace the provider's initial copied-state admission check.
         if row.kind.environment_provider().is_some()
@@ -1657,7 +1687,7 @@ impl ProvisioningService {
         let original_target = self.probe_target_for_row(&row).await?;
         if interactive && let Some(setup) = &self.setup_sign_in {
             setup
-                .prepare(&original_target.transport, Some(host))
+                .prepare(&original_target.transport, Some(&row))
                 .await?;
         }
         let observation = self
@@ -1980,6 +2010,7 @@ impl ProvisioningService {
             .acquire()
             .await
             .expect("the provisioning planning semaphore is never closed");
+        let _planning = self.lock_ssh_plan(Some(&row)).await?;
         let plan = self.uninstall_plan(host, &row, true).await?;
         let probe_id = uuid::Uuid::new_v4().to_string();
         let confirmation = plan.confirmation();
@@ -2007,14 +2038,14 @@ impl ProvisioningService {
     async fn sign_in_for_uninstall(
         &self,
         target: &ProvisioningTarget,
-        host: HostId,
+        row: &HostRow,
         pending_reply: bool,
     ) -> anyhow::Result<()> {
         if let Some(setup) = &self.setup_sign_in {
             if pending_reply {
-                setup.prepare(target, Some(host)).await?;
+                setup.prepare(target, Some(row)).await?;
             } else {
-                setup.establish_for_run(target, host).await?;
+                setup.establish_for_run(target, row.id).await?;
             }
         }
         Ok(())
@@ -2062,7 +2093,7 @@ impl ProvisioningService {
         let (dialed, state_dir) = match &client {
             Some(client) => {
                 require_no_running_sessions(client).await?;
-                self.sign_in_for_uninstall(&target.transport, host, pending_reply)
+                self.sign_in_for_uninstall(&target.transport, row, pending_reply)
                     .await?;
                 if !pending_reply && self.setup_sign_in.is_some() {
                     // The sessions connection can keep serving while the setup connection waits for a code.
@@ -2159,7 +2190,7 @@ impl ProvisioningService {
                         )));
                     }
                 }
-                self.sign_in_for_uninstall(&target.transport, host, pending_reply)
+                self.sign_in_for_uninstall(&target.transport, row, pending_reply)
                     .await?;
                 if !pending_reply && self.setup_sign_in.is_some() {
                     let current = self.manager.status(host);
@@ -2470,7 +2501,16 @@ impl ProvisioningService {
             Some(host_write) => host_write,
             None => self.manager.host_provision_lock(host).await,
         };
-        if let Err(error) = self.host_row(host).await {
+        let current_mode = self.host_row(host).await.and_then(|row| {
+            if let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { access, .. }) =
+                &pending.plan.target
+                && row.tailscale != (*access == crate::ssh::SshAccessKind::Tailscale)
+            {
+                return Err(crate::store::HostStoreError::SshModeChanged(host).into());
+            }
+            Ok(())
+        });
+        if let Err(error) = current_mode {
             {
                 let mut memory = self.memory.lock().await;
                 memory.busy.remove(&host);
@@ -2536,6 +2576,14 @@ impl ProvisioningService {
         run_task: RunTask,
         deleted: Option<&crate::environment::Destroyed>,
     ) -> anyhow::Result<bool> {
+        let row = self.host_row(host).await?;
+        // Finish a registered SSH probe before it can recreate the just-deleted
+        // row from its discovery reply or write private pins after cleanup.
+        let _routing = if row.kind == HostKind::Ssh {
+            Some(self.manager.ssh_route_lock(host).write_owned().await)
+        } else {
+            None
+        };
         let serialized = self.manager.host_write_lock(host).await;
         self.store.remove_host_row(host, deleted).await?;
         let task = self.forget_host_memory(host).await;
@@ -2546,6 +2594,7 @@ impl ProvisioningService {
             let _ = task.await;
         }
         let stopped = self.manager.stop_actor(host).await;
+        self.forget_tailscale_keys(&row).await;
         self.delivery.forget(host);
         self.manager.forget_cache_lock(host);
         drop(serialized);
@@ -2555,6 +2604,33 @@ impl ProvisioningService {
     /// Test composition and Tensorlake hooks must use this service's backend.
     pub(crate) fn credential_delivery(&self) -> Arc<CredentialDelivery> {
         Arc::clone(&self.delivery)
+    }
+
+    /// The same state directory used for provisioning SSH access and the local supervisor.
+    pub(crate) fn helm_state_dir(&self) -> &Path {
+        &self.layout.local_state_dir
+    }
+
+    /// Release a former route's private snapshots after its durable edit.
+    /// Both removal and uninstall come through this service.
+    pub(crate) async fn forget_tailscale_keys(&self, row: &HostRow) {
+        let Some(destination) = row.destination.as_deref().filter(|_| row.tailscale) else {
+            return;
+        };
+        let result = async {
+            // After a removal or retarget the destination is available again.
+            // Once another registered Tailscale entry owns it, keep its pins.
+            if self.store.list_hosts().await?.iter().any(|current| {
+                current.tailscale && current.destination.as_deref() == Some(destination)
+            }) {
+                return Ok(());
+            }
+            crate::ssh::tailscale::forget_keys(self.helm_state_dir(), destination).await
+        }
+        .await;
+        if let Err(error) = result {
+            tracing::warn!(host = row.id, %error, "could not clean up Tailscale host keys");
+        }
     }
 
     /// Drop process-local progress, pending confirmation ids and the busy
@@ -3637,6 +3713,26 @@ impl ProvisioningService {
         ProvisioningRuns { runs }
     }
 
+    /// Planning can open a shared SSH connection before it returns. Keep a
+    /// registered plan on the same side of a route edit as its network work.
+    async fn lock_ssh_plan(
+        &self,
+        row: Option<&HostRow>,
+    ) -> anyhow::Result<Option<tokio::sync::OwnedRwLockReadGuard<()>>> {
+        let Some(row) = row.filter(|row| row.kind == HostKind::Ssh) else {
+            return Ok(None);
+        };
+        let guard = self.manager.ssh_route_lock(row.id).read_owned().await;
+        let current = self.host_row(row.id).await?;
+        if row.entry_uuid != current.entry_uuid || DialedAs::of(row) != DialedAs::of(&current) {
+            return Err(ProvisioningRequestError::Refused(
+                "The SSH connection settings changed. Start the check again.".into(),
+            )
+            .into());
+        }
+        Ok(Some(guard))
+    }
+
     pub(super) async fn host_row(&self, host: HostId) -> anyhow::Result<HostRow> {
         self.store
             .list_hosts()
@@ -3736,6 +3832,7 @@ fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {
                 .destination
                 .clone()
                 .context("an ssh host row has no destination")?,
+            tailscale: row.tailscale,
             remote_farhelm: row.remote_farhelm.clone(),
             remote_state_dir: row.remote_state_dir.clone(),
             new_entry: None,
