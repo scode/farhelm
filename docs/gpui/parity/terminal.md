@@ -392,12 +392,12 @@ old line counted those running at once, because uploads now run one at a time),
 `a_closed_tab_reports_its_cut_off_uploads_in_the_agent_terminal` (uploads cut off by a reconnect: here a terminal goes
 away whole, when its tab closes, its session is left or the window's connection resets, while a stream's own reconnect
 keeps its uploads running) and `a_failure_and_a_cut_off_upload_outlive_their_terminal` (an upload failure staying on
-screen across a reconnect, and leaving mid-upload and reopening). The strip's look has no captured scene yet: new scenes
-are app scenes, not committed goldens (the maintainer's decision, 2026-11-15), and an app scene would have to paste or
-drop a file into the running app, which the bridge has no command for (headless Linux gives the app no clipboard
-either), so it waits for such a command. A terminal that goes away hands its lines to the session's agent terminal, so
-after a reset, or once a tab closes, the failures still on a tab's strip show in the agent terminal, not in the tab. The
-zero-byte file and the file name full of URL syntax are the helm client's:
+screen across a reconnect; an upload cut off by leaving its session is reported as a notice instead). The strip's look
+has no captured scene yet: new scenes are app scenes, not committed goldens (the maintainer's decision, 2026-11-15), and
+an app scene would have to paste or drop a file into the running app, which the bridge has no command for (headless
+Linux gives the app no clipboard either), so it waits for such a command. A terminal that goes away hands its lines to
+the session's agent terminal, so after a reset, or once a tab closes, the failures still on a tab's strip show in the
+agent terminal, not in the tab. The zero-byte file and the file name full of URL syntax are the helm client's:
 crates/farhelm-helm-client/src/transfers/tests.rs `upload_streams_the_whole_file_with_its_content_length` (an empty
 file's empty body, the proposed name percent-encoded in the query) and crates/farhelm-proto/src/ui_channel/path.rs
 `query_values_are_encoded_on_their_own` (a value's `&` and `=` encoded, so a name cannot add a parameter). Superseded:

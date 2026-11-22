@@ -1414,8 +1414,9 @@ added only where SPEC.md requires one, and each is drawn in an existing style. N
 text. An interrupted upload carries the host-supplied names as `HostText`; the banner draws them with the app's words in
 a `HostSentence` and stays posted across resets until dismissed. The banner stack scrolls when it reaches half the
 window's content height, leaving the workspace and every Dismiss reachable. New banners scroll into view without moving
-keyboard focus. The session rows' bells with their lists and the rail's notices panel draw the records pushed by the
-helm. The one sound owner decides when to play the three status chimes.
+keyboard focus. The session rows' bells with their lists and the rail's notices panel are not its surfaces: they draw
+the notification records the helm keeps and pushes, straight from the store, with no notice-center step, and the three
+status sounds (chimes) are decided by the one sound owner, not here.
 
 Enforced by the review gate.
 
