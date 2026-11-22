@@ -4,7 +4,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight 442cce] `remove-own-setting-permission.md` — Remove "Agent's own setting" permission mode, treat unproven launches as YOLO, and offer guarded Replace
 - [in-flight 523946] `codex-recipe-credentials-at-launch.md` — Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
-- [pending] `claude-trust-home-dir-policy.md` — Skip Claude workspace trust in home, its parents, and root, fail closed on unusable HOME, and align Settings and docs
+- [in-flight 50bdca] `claude-trust-home-dir-policy.md` — Skip Claude workspace trust in home, its parents, and root, fail closed on unusable HOME, and align Settings and docs
 - [pending] `stop-and-suspend-timeout-feedback.md` — Distinguish Stop and suspend's 20-second reply notice from supervisor timeouts in helm and desktop app
 - [pending] `tensorlake-lifecycle-sandbox-identity.md` — Refuse Tensorlake Suspend and Resume without a confirmed sandbox and persist recovered IDs under the provisioning lock
 - [pending] `tensorlake-leftovers-discovery-failure.md` — Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
