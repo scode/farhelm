@@ -1381,7 +1381,8 @@ fn an_agents_host_add_arriving_leaves_a_typed_add_host_draft_alone(cx: &mut Test
     settle(cx);
     assert!(opened.is_some(), "premise: the ordinary Add host opened");
     type_text(cx, "user@manualdraft.invalid");
-    keys(cx, "tab");
+    // The Tailscale host checkbox sits between the destination and the alias.
+    keys(cx, "tab tab");
     assert!(alias_focused(cx), "premise: Tab reached the alias");
     type_text(cx, "manualalias");
     let typed = (

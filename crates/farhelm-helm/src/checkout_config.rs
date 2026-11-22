@@ -3621,6 +3621,9 @@ mod tests {
                  ALTER TABLE hosts DROP COLUMN yolo_without_asking;
                  ALTER TABLE hosts DROP COLUMN links_without_asking;
                  ALTER TABLE hosts DROP COLUMN local_links_without_asking;
+                 -- Schema 99 added each SSH host's Tailscale mode, the newest host
+                 -- column, so it comes off first.
+                 ALTER TABLE hosts DROP COLUMN tailscale;
                  -- Schemas 97 and 98 added container place claims and each
                  -- container's recorded machine and account, newer than the seal.
                  ALTER TABLE hosts DROP COLUMN podman_place_uid;

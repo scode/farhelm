@@ -291,10 +291,10 @@ An ordinary SSH entry can opt into **Tailscale host** in Add host or Host settin
 available as `tailscale: true` in `--ensure-hosts` and the host registration API. The helm resolves the node through
 Tailscale on its own machine. A destination can be a node name, a full Tailscale DNS name, or a Tailscale IP address,
 with an optional SSH login. The peer must advertise the host key its SSH server presents. A peer running only an
-ordinary SSH server may have no advertised key. With the option enabled, the helm checks the advertised keys, leaves
-the user's known-hosts files untouched, and reports an actionable error if Tailscale cannot verify the host. The
-user's SSH credentials and interactive sign-in still apply. Changing the setting reconnects the host and keeps its
-registry identity and sessions. If the host still owns Podman resources, its SSH route is protected from edits.
+ordinary SSH server may have no advertised key. With the option enabled, the helm checks the advertised keys, leaves the
+user's known-hosts files untouched, and reports an actionable error if Tailscale cannot verify the host. The user's SSH
+credentials and interactive sign-in still apply. Changing the setting reconnects the host and keeps its registry
+identity and sessions. If the host still owns Podman resources, its SSH route is protected from edits.
 
 Whenever a surface uses a host's **short name**, it derives it from that host alone: an explicit alias exactly as
 stored, otherwise `Local` for the local host, otherwise the first label of its SSH hostname. For that last case it
