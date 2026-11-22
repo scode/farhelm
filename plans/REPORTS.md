@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`test-worker-staging-lock`](reports/test-worker-staging-lock.report.md) landed 2026-11-22 in #4575, #4584: stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
 - [`pace-bulk-metadata-changes`](reports/pace-bulk-metadata-changes.report.md) landed 2026-11-22 in #4579: raise the helm's limit on queued window commands (derived from the 500-row listing cap) so a metadata change to many marked sessions no longer resets the window
 - [`bulk-actions-bound-to-drawn`](reports/bulk-actions-bound-to-drawn.report.md) landed 2026-11-22 in #4578: make the marked bar's Stop and Delete act on the sessions and Skip session confirmations setting the bar showed, as the single-row menu does
 - [`interrupted-upload-notices`](reports/interrupted-upload-notices.report.md) landed 2026-11-22 in #4589, #4594: post a notice in the notice center when the open session is no longer the one a file was still uploading to, so an interrupted upload is never lost unseen
