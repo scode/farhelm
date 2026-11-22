@@ -177,17 +177,29 @@ async fn error_message(mut response: reqwest::Response, key: &ApiKey) -> String 
     clean_message(&String::from_utf8_lossy(&bytes), key)
 }
 
-/// The text half of [`error_message`], separate so tests can pin it.
+/// Bound the displayed text without allocating a copy of a successful status
+/// body. Replace the API key before truncation so a key across the display
+/// boundary is still redacted.
 pub(crate) fn clean_message(raw: &str, key: &ApiKey) -> String {
-    let raw = if key.expose().is_empty() {
-        raw.to_string()
-    } else {
-        raw.replace(key.expose(), "[API key]")
-    };
-    let words: Vec<&str> = raw.split_whitespace().collect();
-    words
-        .join(" ")
+    let secret = key.expose();
+    let mut parts = raw.splitn(if secret.is_empty() { 1 } else { usize::MAX }, secret);
+    let first = parts.next().unwrap_or_default();
+    let redacted = first
         .chars()
+        .chain(parts.flat_map(|part| "[API key]".chars().chain(part.chars())));
+    let mut saw_word = false;
+    let mut separator = false;
+    redacted
+        .flat_map(|c| {
+            if c.is_whitespace() {
+                separator = saw_word;
+                [None, None]
+            } else {
+                saw_word = true;
+                [std::mem::take(&mut separator).then_some(' '), Some(c)]
+            }
+        })
+        .flatten()
         .filter(|c| !farhelm_proto::text::is_presentation_unsafe(*c))
         .take(MAX_ERROR_CHARS)
         .collect()
@@ -213,7 +225,19 @@ impl TensorlakeApi for HttpTensorlake {
         sandbox: &str,
     ) -> Result<SandboxInfo, TensorlakeError> {
         let url = self.url(&["sandboxes", sandbox]);
-        self.json(Method::GET, url, key, None, CALL_TIMEOUT).await
+        let mut info: SandboxInfo = self.json(Method::GET, url, key, None, CALL_TIMEOUT).await?;
+        // Tensorlake can send user-facing diagnostics in successful status replies too.
+        for message in [
+            &mut info.error_details,
+            &mut info.termination_reason,
+            &mut info.pending_reason,
+        ]
+        .into_iter()
+        .flatten()
+        {
+            *message = clean_message(message, key);
+        }
+        Ok(info)
     }
 
     async fn create_sandbox(

@@ -177,9 +177,11 @@ impl SshKeyStore {
                 dir.display()
             )
         };
+        // Metadata alone cannot tell whether the helm account can open the private half.
         if !tokio::fs::metadata(&private_key_path)
             .await
             .is_ok_and(|meta| meta.is_file())
+            || tokio::fs::File::open(&private_key_path).await.is_err()
         {
             return Err(unreadable());
         }

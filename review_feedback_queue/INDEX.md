@@ -69,10 +69,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
-  Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
-  act on the existing sandbox.
-
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
   cause the remaining answer to save or discard a different template draft.
 
@@ -148,17 +144,6 @@ consequences.
 
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
-
-- [`sandbox-termination-poll-exceeds-phase-deadline.md`](sandbox-termination-poll-exceeds-phase-deadline.md) — Sandbox
-  deletion can exceed its stated termination-polling allowance because each lookup receives a fresh timeout beyond the
-  phase's remaining time.
-
-- [`sandbox-status-diagnosis-bypasses-cleaning.md`](sandbox-status-diagnosis-bypasses-cleaning.md) — Accepted sandbox
-  failure descriptions bypass normal cleaning and redaction before reaching clients. An actual provider description
-  containing a credential remains unverified after investigation.
-
-- [`unreadable-sandbox-ssh-key-reports-ready.md`](unreadable-sandbox-ssh-key-reports-ready.md) — A damaged or unreadable
-  saved SSH key pair can still be presented as ready, postponing the failure until later sandbox operations.
 
 - [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
   suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The

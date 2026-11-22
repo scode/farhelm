@@ -394,6 +394,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Keep Tensorlake Suspend and Resume tied to the sandbox Farhelm created.** A failed setup can leave a sandbox name
+  reserved before Farhelm sends Create. Refuse Suspend and Resume when the host has neither a saved sandbox ID nor an
+  outstanding create. An outstanding create permits a name lookup. Save the resolved ID and clear the outstanding marker
+  together before sending any mutation, then use the ID for status polls and retries. Keep the existing provider
+  deadline across the lookup and mutation. Let the local write finish under the host's provisioning lock, since
+  cancelling its wait can leave the SQLite write running after that lock is released. Cover both verbs on a failed row
+  and confirm a retry uses the saved ID after recovery.
+
 - **Keep all sandbox leftovers visible when Tensorlake discovery fails.** During unfinished cleanup, a failed refresh
   can replace the previously listed sandboxes with the cleanup rows alone. Have the helm report the discovery failure
   alongside the current cleanup snapshot, and keep the last discovered rows in Settings. Use the sandbox ID to show one

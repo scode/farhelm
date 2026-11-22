@@ -1,50 +1,5 @@
 # Triage outcomes
 
-## sandbox-termination-poll-exceeds-phase-deadline.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed. `tensorlake/hosts.rs` `wait_until_terminated` checks the 30 s deadline only after each lookup,
-  and each lookup gets its own 20 s `REMOVAL_CALL_TIMEOUT`. Basis: SPEC_impl.md, Tensorlake hosts: "it polls until
-  Tensorlake reports it terminated (at most 30 seconds, ...)". The fix is to bound each poll by the remaining time (or
-  wrap the loop in the deadline). There is effectively one shape.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## sandbox-status-diagnosis-bypasses-cleaning.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed on main. `error_details` and `termination_reason` from successful status JSON go straight into
-  displayed errors (`tensorlake/lifecycle.rs` ~225, `tensorlake/hosts.rs` 97/476/515, `build.rs` ~1535), bypassing
-  `http.rs` cleaning, which is applied only to non-2xx bodies. Basis: SPEC_impl.md, Tensorlake account: "Server messages
-  are kept for display, bounded, whitespace-collapsed, stripped of presentation-unsafe characters, and have the key
-  replaced should a server echo it." The fix is to route these display strings through the existing cleaner with the
-  key. Caveat: this counts `error_details` as a "server message", which I consider a plain reading. If the coordinator
-  disagrees, move it to DECIDE together with provider-error-cleaning-can-miss-transformed-secret.md.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## unreadable-sandbox-ssh-key-reports-ready.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed. `tensorlake/ssh_key.rs` `read` checks only the private key's metadata (`is_file`) and reads
-  only the public half. The trigger is external damage only. Basis: SPEC_impl.md, Tensorlake account: "A key directory
-  without a readable pair is reported, never regenerated". The fix is to open the private key for reading (discard the
-  contents, never log them) and return the existing "incomplete or unreadable" message.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
 ## trailing-environment-history-admits-agent-origin.md
 
 - Outcome: `fix code`.
@@ -120,26 +75,6 @@
   principle. Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a
   changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file
   and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## tensorlake-lifecycle-falls-back-to-unowned-name.md
-
-- Outcome: `fix spec+code`.
-- Assessment: If Tensorlake host setup failed because a same-named sandbox already existed, the failed host still offers
-  Suspend/Resume, which then acts on that unrelated sandbox and changes its state and billing. Verified:
-  tensorlake/lifecycle.rs ~132 `binding.sandbox_id.as_deref().unwrap_or(&binding.sandbox)` falls back to the name
-  without an ownership check. SPEC.md (~337) states the ownership rule for removal only: "A row with neither a saved
-  sandbox ID nor an outstanding create request is removed without touching a same-name sandbox."
-- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
-  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
-  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
-  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
-  please try to separate them by area of code so there is a good chance of them running concurrently."
-- Completion criteria: Apply the recommendation: Yes. Fix spec+code: refuse without ownership facts, and use the
-  canonical ID after a permitted lookup (small). If the fix turns out not to be straightforward, or needs significant
-  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
-  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
-  item back to the maintainer. Remove the feedback file and its index entry.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
 ## successful-suspend-flashes-connecting.md

@@ -659,26 +659,30 @@ pub(super) async fn wait_until_terminated(
     sandbox: &str,
     id: &str,
 ) -> anyhow::Result<()> {
-    let deadline = tokio::time::Instant::now() + TERMINATION_WAIT;
-    loop {
-        match bounded(api.get_sandbox(key, id)).await {
-            Ok(info) if info.status == SandboxStatus::Terminated => return Ok(()),
-            Err(TensorlakeError::NotFound { .. }) => return Ok(()),
-            Ok(_) => {}
-            Err(error) => return Err(api_failure("check on", sandbox, error)),
+    let polls = async {
+        loop {
+            match bounded(api.get_sandbox(key, id)).await {
+                Ok(info) if info.status == SandboxStatus::Terminated => return Ok(()),
+                Err(TensorlakeError::NotFound { .. }) => return Ok(()),
+                Ok(_) => {}
+                Err(error) => return Err(api_failure("check on", sandbox, error)),
+            }
+            tokio::time::sleep(TERMINATION_POLL).await;
         }
-        if tokio::time::Instant::now() + TERMINATION_POLL > deadline {
-            return Err(refusal(
+    };
+    // Each API call keeps its own bound. The phase deadline also cuts off a poll that started near its end.
+    tokio::time::timeout(TERMINATION_WAIT, polls)
+        .await
+        .unwrap_or_else(|_| {
+            Err(refusal(
                 ErrorKind::Unavailable,
                 format!(
                     "Tensorlake has not finished terminating sandbox {sandbox} after {} \
                      seconds; remove the host again in a moment",
                     TERMINATION_WAIT.as_secs()
                 ),
-            ));
-        }
-        tokio::time::sleep(TERMINATION_POLL).await;
-    }
+            ))
+        })
 }
 
 /// One API call under [`REMOVAL_CALL_TIMEOUT`]; running out of time is a
