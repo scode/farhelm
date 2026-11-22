@@ -335,51 +335,16 @@ impl GridModel {
     /// Append `line`'s cells to `into`, a blank for each uncovered column and nothing for the emulator's unused
     /// wide-wrap pad; return its width, `None` when the line is not shown.
     fn read_cells(&self, line: u64, into: &mut CellText) -> Option<u16> {
-        let (cols, row) = self.selection_line(line)?;
-        let blanks = |into: &mut CellText, from: u16, to: u16| {
-            for col in from..to {
-                into.push(
-                    " ",
-                    Owner {
-                        line,
-                        col,
-                        end: col + 1,
-                    },
-                );
-            }
-        };
-        let mut col = 0;
-        for run in &row.runs {
-            blanks(into, col, run.col);
-            if run.is_plain_flow() {
-                for (offset, col) in (run.col..).enumerate().take(run.text.len()) {
-                    into.push(
-                        &run.text[offset..=offset],
-                        Owner {
-                            line,
-                            col,
-                            end: col + 1,
-                        },
-                    );
-                }
-            } else {
-                into.push(
-                    &run.text,
-                    Owner {
-                        line,
-                        col: run.col,
-                        end: run.col + run.width,
-                    },
-                );
-            }
-            col = run.col + run.width;
-        }
-        blanks(
-            into,
-            col,
-            cols - u16::from(self.pads_wide_wrap(line, cols, row)),
-        );
-        Some(cols)
+        self.walk_cells(line, false, |col, width, text| {
+            into.push(
+                text,
+                Owner {
+                    line,
+                    col,
+                    end: col + width,
+                },
+            );
+        })
     }
 
     /// Paths on `line`'s soft-wrapped logical line that touch `line`; none when that line spans more rows than

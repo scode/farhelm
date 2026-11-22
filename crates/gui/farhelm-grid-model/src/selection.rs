@@ -241,47 +241,59 @@ impl GridModel {
         (first, last)
     }
 
-    /// Map a bounded text window to UTF-16 cell owners, omitting unused wide-wrap padding.
-    /// Printed URL detection blanks concealed runs so they break a match without joining the text on either side.
-    /// Word selection reads the original text, including concealed runs.
+    /// Visit the text of each cell in a shown line and return its original width.
+    ///
+    /// Selection and printed-link detection need the same cell boundaries even though they count different text
+    /// units. Uncovered columns yield spaces, plain runs yield one character per column and indivisible runs yield
+    /// their full text and width. The emulator's unused wide-wrap padding contributes no text. Callers that hide
+    /// concealed text receive a space for each of its columns so a match cannot bridge across it.
+    pub(crate) fn walk_cells(
+        &self,
+        line: u64,
+        blank_concealed: bool,
+        mut visit: impl FnMut(u16, u16, &str),
+    ) -> Option<u16> {
+        let (cols, row) = self.selection_line(line)?;
+        let mut col = 0;
+        for run in &row.runs {
+            let end = run.col + run.width;
+            let concealed = blank_concealed && run.style.flags & style_flags::HIDDEN != 0;
+            let blank_end = if concealed { end } else { run.col };
+            for blank in col..blank_end {
+                visit(blank, 1, " ");
+            }
+            col = end;
+            if concealed {
+                continue;
+            }
+            if run.is_plain_flow() {
+                for offset in 0..run.width {
+                    let byte = usize::from(offset);
+                    visit(run.col + offset, 1, &run.text[byte..byte + 1]);
+                }
+            } else {
+                visit(run.col, run.width, &run.text);
+            }
+        }
+        let text_end = cols - u16::from(self.pads_wide_wrap(line, cols, row));
+        for blank in col..text_end {
+            visit(blank, 1, " ");
+        }
+        Some(cols)
+    }
+
+    /// Map a bounded text window to UTF-16 cell owners. Word selection includes concealed text, while printed URL
+    /// detection blanks it so a match cannot join the text on either side.
     pub(crate) fn word_cells(&self, first: u64, last: u64, blank_concealed: bool) -> Vec<WordCell> {
         let mut cells = Vec::new();
         for line in first..=last {
-            let Some((cols, row)) = self.selection_line(line) else {
-                continue;
-            };
-            let mut col = 0;
-            let blank = |cells: &mut Vec<WordCell>, from: u16, to: u16| {
-                cells.extend((from..to).map(|col| WordCell {
+            let _ = self.walk_cells(line, blank_concealed, |col, width, text| {
+                cells.extend(text.encode_utf16().map(|unit| WordCell {
                     position: Position { line, col },
-                    width: 1,
-                    unit: 32,
+                    width,
+                    unit,
                 }));
-            };
-            for run in &row.runs {
-                blank(&mut cells, col, run.col);
-                if blank_concealed && run.style.flags & style_flags::HIDDEN != 0 {
-                    blank(&mut cells, run.col, run.col + run.width);
-                } else if run.is_plain_flow() {
-                    cells.extend(run.text.bytes().enumerate().map(|(offset, byte)| WordCell {
-                        position: Position {
-                            line,
-                            col: run.col + offset as u16,
-                        },
-                        width: 1,
-                        unit: u16::from(byte),
-                    }));
-                } else {
-                    cells.extend(run.text.encode_utf16().map(|unit| WordCell {
-                        position: Position { line, col: run.col },
-                        width: run.width,
-                        unit,
-                    }));
-                }
-                col = run.col + run.width;
-            }
-            let end = cols - u16::from(self.pads_wide_wrap(line, cols, row));
-            blank(&mut cells, col, end);
+            });
         }
         cells
     }
