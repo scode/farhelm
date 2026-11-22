@@ -37,7 +37,7 @@ use gpui::{
 };
 use serde::Serialize;
 
-use super::{Editor, FIELD_GAP, NAME_KIND_HELP, SMALL_LINE_HEIGHT, Text, with_editor};
+use super::{Editor, FIELD_GAP, SMALL_LINE_HEIGHT, Text, with_editor};
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, TextInput, Tier,
     capitalize_validation, option_heading,
@@ -52,6 +52,7 @@ use crate::launcher::model::{ModelOption, OLDER_MODELS, model_options};
 use crate::templates::apply::install_identity;
 use crate::templates::dialog::TemplatesDialog;
 use crate::templates::fields::{Field, effort_options, permission_options};
+use crate::templates::{NAME_KIND_HELP, name_kind_control};
 use crate::theme::{self, Palette, metrics};
 
 /// `.templates-set-field`: the gap between a field's controls and its ✕.
@@ -705,27 +706,10 @@ impl Rows<'_> {
     fn session_name(&self) -> Vec<AnyElement> {
         let fixed = self.editor.draft.fields.name_kind == Some(TemplateNameKind::Fixed);
         let weak = self.weak.clone();
-        let kind = [
-            (None, "Base name"),
-            (Some(TemplateNameKind::Fixed), "Fixed name"),
-        ]
-        .into_iter()
-        .fold(
-            RadioGroup::new(
-                "templates-name-kind",
-                "Session name kind",
-                HoverHelp::tooltip(format!("Session name kind. {NAME_KIND_HELP}")),
-                Role::Group,
-            ),
-            |group, (value, text)| {
-                group.option(RadioOption::new(
-                    text,
-                    HoverHelp::tooltip(format!("Session name: {text}. {NAME_KIND_HELP}")),
-                    value,
-                ))
-            },
+        let kind = name_kind_control(
+            "templates-name-kind",
+            fixed.then_some(TemplateNameKind::Fixed),
         )
-        .chosen(Some(fixed.then_some(TemplateNameKind::Fixed)))
         .on_change(move |kind, window, cx| {
             let kind = *kind;
             with_editor(&weak, window, cx, |editor, window, cx| {

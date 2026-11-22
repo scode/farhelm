@@ -53,7 +53,6 @@ use std::collections::HashMap;
 use std::rc::Rc;
 use std::time::Duration;
 
-use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::{LaunchCatalogModel, LaunchTemplate};
 use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::prelude::FluentBuilder as _;
@@ -75,8 +74,9 @@ use crate::components::{
 };
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{self, HostSentence, HostText};
+use crate::launcher::read_model_catalog;
 use crate::layers::{self, Anchor, Dialog, Dismissal, LayerId, Popover};
-use crate::operations::{self, Command, OpKey, Outcome};
+use crate::operations::{Command, OpKey, Outcome};
 use crate::prompt::{self, Answer, Question};
 use crate::session;
 use crate::theme::{self, metrics};
@@ -793,25 +793,17 @@ impl TemplatesDialog {
         if self.catalog_requested {
             return;
         }
-        let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
-            return;
-        };
         self.catalog_requested = true;
         let weak = cx.weak_entity();
-        operations::read::<Vec<LaunchCatalogModel>>(
-            path,
-            "GET /api/launch-catalog",
-            cx,
-            move |answer, cx| {
-                let Ok(catalog) = answer else {
-                    return;
-                };
-                let _ = weak.update(cx, |dialog, cx| {
-                    dialog.catalog = Some(catalog);
-                    cx.notify();
-                });
-            },
-        );
+        read_model_catalog(cx, move |answer, cx| {
+            let Ok(catalog) = answer else {
+                return;
+            };
+            let _ = weak.update(cx, |dialog, cx| {
+                dialog.catalog = Some(catalog);
+                cx.notify();
+            });
+        });
     }
 
     /// One row of the list (`li` of `.templates-list`): the bolt, the number-key button, and the template's name over

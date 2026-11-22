@@ -49,7 +49,6 @@
 use std::rc::Rc;
 use std::time::Duration;
 
-use farhelm_helm_client::ApiPath;
 use farhelm_proto::launcher::LaunchCatalogModel;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
@@ -68,6 +67,7 @@ use super::draft::{
     remembered_permission,
 };
 use super::launch::{self, Request};
+use super::read_model_catalog;
 use super::request::{Account, Recipes, Refusal, SELECT_REPOSITORY, Target};
 use super::words::agent_note;
 use crate::components::{
@@ -86,7 +86,7 @@ use crate::store::HelmStore;
 use crate::templates::checkout_name;
 use crate::templates::save_panel::SavePanel;
 use crate::theme::{self, metrics};
-use crate::{operations, session, ticker};
+use crate::{session, ticker};
 use changed::Changed;
 
 mod browse;
@@ -493,36 +493,27 @@ fn prepared(
 /// ([`after_reads`]). The callback holds the launcher weakly, as `operations::send` asks. Returns whether the read was
 /// sent; it is not without a UI session, or if the constant path ever failed to build.
 fn read_catalog(launcher: WeakEntity<Launcher>, cx: &mut App) -> bool {
-    let Ok(path) = ApiPath::api(&["launch-catalog"]) else {
-        return false;
-    };
-    operations::read::<Vec<LaunchCatalogModel>>(
-        path,
-        "GET /api/launch-catalog",
-        cx,
-        move |answer, cx| {
-            let waited = launcher
-                .update(cx, |launcher, cx| {
-                    match answer {
-                        Ok(catalog) => launcher.catalog = Some(catalog),
-                        Err(error) => launcher.catalog_error = Some(error),
-                    }
-                    // The new model rows affect preselection. Any explicit keyboard target still follows its row.
-                    cx.notify();
-                    std::mem::take(&mut launcher.waiting_batches)
-                })
-                .unwrap_or_default();
-            for (window, batch) in waited {
-                let _ = cx.update_window(window, |_, window, cx| {
-                    let _ =
-                        launcher.update(cx, |launcher, cx| launcher.apply_now(batch, window, cx));
-                });
-            }
-            if let Some(launcher) = launcher.upgrade() {
-                after_reads(launcher, cx);
-            }
-        },
-    )
+    read_model_catalog(cx, move |answer, cx| {
+        let waited = launcher
+            .update(cx, |launcher, cx| {
+                match answer {
+                    Ok(catalog) => launcher.catalog = Some(catalog),
+                    Err(error) => launcher.catalog_error = Some(error),
+                }
+                // The new model rows affect preselection. Any explicit keyboard target still follows its row.
+                cx.notify();
+                std::mem::take(&mut launcher.waiting_batches)
+            })
+            .unwrap_or_default();
+        for (window, batch) in waited {
+            let _ = cx.update_window(window, |_, window, cx| {
+                let _ = launcher.update(cx, |launcher, cx| launcher.apply_now(batch, window, cx));
+            });
+        }
+        if let Some(launcher) = launcher.upgrade() {
+            after_reads(launcher, cx);
+        }
+    })
 }
 
 /// Run `launcher`'s [`Launcher::after_reads`] (a quick launch's second half) once both its reads have answered, the

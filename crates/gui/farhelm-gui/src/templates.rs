@@ -84,17 +84,50 @@ mod shortcuts_tests;
 mod summary_tests;
 
 use farhelm_helm_client::Collections;
-use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_proto::launcher::{LaunchTemplate, TemplateNameKind};
 use farhelm_proto::ui_channel::{Availability, Collection, PREFERENCES_KEY, Preferences};
 use gpui::{AnyWindowHandle, App, FocusHandle, IntoElement, Window};
 
-use crate::components::HoverHelp;
+use crate::components::{HoverHelp, RadioGroup, RadioOption, Role};
 use crate::focus::{Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{Anchor, LayerId};
 use crate::session;
 
 pub use dialog::Hint;
+
+/// The session name's two kinds explained, under the name and in the control's hover help.
+const NAME_KIND_HELP: &str = "Base name: used as-is when free, otherwise numbered (app-review-2, -3, …). \
+                             Fixed name: used exactly; a clash is reported.";
+
+/// The shared session-name choice. Base name is stored as an absent kind. Each surface gives the control its own
+/// identity and attaches the edit to its own draft.
+fn name_kind_control(
+    id: &'static str,
+    kind: Option<TemplateNameKind>,
+) -> RadioGroup<Option<TemplateNameKind>> {
+    [
+        (None, "Base name"),
+        (Some(TemplateNameKind::Fixed), "Fixed name"),
+    ]
+    .into_iter()
+    .fold(
+        RadioGroup::new(
+            id,
+            "Session name kind",
+            HoverHelp::tooltip(format!("Session name kind. {NAME_KIND_HELP}")),
+            Role::Group,
+        ),
+        |group, (value, text)| {
+            group.option(RadioOption::new(
+                text,
+                HoverHelp::tooltip(format!("Session name: {text}. {NAME_KIND_HELP}")),
+                value,
+            ))
+        },
+    )
+    .chosen(Some(kind))
+}
 
 /// Names in the helm's order for suggestions and name checks. A missing or unavailable snapshot cannot tell Tab
 /// what to complete or a save whether a name is free.
