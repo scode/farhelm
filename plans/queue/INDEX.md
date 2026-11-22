@@ -3,7 +3,6 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight 05f015] `triage-gui-misc.md` — execute the 2026-11-21 triage outcomes for the desktop app's launcher, templates, settings, Hosts panel and terminal view, in grouped PRs
-- [landing 058ebf] `triage-supervisor.md` — execute the 2026-11-21 triage outcomes for the supervisor (session lifecycle, shell sessions, cleanup), in grouped PRs
 - [in-flight d98641] `triage-tensorlake.md` — execute the 2026-11-21 triage outcomes for Tensorlake sandboxes, in grouped PRs
 - [pending] `launch-wakes-suspended-host.md` — make one press of Launch resume (or start) a suspended or stopped sandbox or container and create the session, as the browser app did
 - [in-flight 442cdc] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)

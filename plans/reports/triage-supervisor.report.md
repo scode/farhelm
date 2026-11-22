@@ -296,3 +296,98 @@ code. Landing validation is a separate step. The source reviews strengthened pro
 confirmation, retained-launch and tab assertions, and the distinction between an accepted test premise and a passing
 outcome. The no-change and partial dispositions above reflect the agreed small-fix and harness gates. The report had a
 separate cold read for whether the decisions are understandable and suitable for the public repository.
+
+### Landing
+
+#### What landed with it
+
+The plan's eight PRs (#4520, #4527, #4529, #4530, #4534, #4538, #4543, #4546) merged alone in this round, with a landing
+fix, #4552. Since the executor based the stack, main had gained the helm triage, the Podman triage, the exited-terminal
+scrollback fix, the status-icon hover change, managed checkouts in a session's own sandbox or container, and docs and
+planning changes. None of them changes supervisor code. Both sides edited SPEC.md, SPEC_impl.md and the protocol crate's
+doc comments, but in different paragraphs, and neither changes the protocol or a database schema. The new "Session
+deleted" notice from the helm triage covers only a Delete that finished, so a Delete this plan now refuses stays listed
+with its refusal message, the same way any refused Delete already did. Every one of the eight commits conflicted with
+main in the shared triage files (the outcome ledger, its archive and the review queue index), since the helm and Podman
+triage had moved their own entries. The landing rebuilt those files as main plus each commit's own change and checked
+that each commit's other changes are exactly what its PR showed.
+
+An independent reviewer read the stack against the triage decisions, the specs and what main gained. It found no
+blocker:
+
+- **Triage outcomes.** All 63 are carried out as decided and moved to the archive, each naming its PR. The partly
+  deferred Restart cleanup outcome, its TODO follow-up, and the no-change and discarded outcomes hold up.
+- **Behavior.** Stop gets faster for Bash and Zsh sessions, since the shell now leaves on the hangup instead of sitting
+  out the grace period, and the terminal host still survives Stop. Agents keep their graceful SIGTERM handling. The
+  waits the plan adds are bounded, and the process checks handle zombies and reused process ids. The new refusals (a
+  Delete whose recorded tab scope cannot be checked, a failed Restart reported as unconfirmed) are what triage decided.
+- **Coverage.** A lost terminal socket no longer counts as proof that a terminal host has ended, so every path that ends
+  one now checks its process: Delete, Restart, undoing a failed create, closing a tab, and the cleanup of leftover hosts
+  when the supervisor starts. The executor's runs were targeted selections, so the reviewer asked for the full
+  supervisor and end-to-end suites before merging. The landing ran the whole Rust workspace suite except the desktop app
+  (below), and it passed.
+
+#### Fixes made while landing
+
+All in [#4552](https://github.com/scode/farhelm/pull/4552/changes), tests, a spec sentence and formatting only:
+
+- **A check that could never fail.** The end-to-end test of a host whose process cannot be ended asserted that the
+  supervisor's error lacked a sentence only the helm ever writes. That line is gone. It was not one of the plan's
+  stronger assertions; the test still checks that the launching record, the pending create reservation and the listed
+  session are kept.
+- **A test named for more than it checks.** `delete_refuses_a_recorded_tab_scope_the_manager_cannot_check`, as the
+  report's recorded selections name it, drives the supervisor's process cleanup step (the reap) directly. A real Delete
+  refuses earlier, when it prepares its teardown. The test is renamed
+  `a_recorded_tab_scope_the_manager_cannot_check_fails_the_reap`.
+- **A spec sentence.** SPEC_impl.md's sentence on a restart that failed without confirming its cleanup now lists an
+  unconfirmed scope cleanup, as the rest of its paragraph and the code do.
+- **Formatting on main.** Main carried the release-highlights dialog's source unformatted, which failed the formatting
+  check; it is formatted.
+
+#### Checks
+
+The plan changes how the supervisor stops, deletes, closes tabs in and restarts sessions, and many supervisor and
+end-to-end tests, and the executor's own runs were targeted selections. So the landing ran the whole Rust workspace
+suite except the desktop app, both lint runs and the desktop app's end-to-end smoke test, which drives Stop, Delete and
+Replace through a real supervisor. Those ran on a separate arm64 Linux test worker; the small checks ran locally on
+x86_64.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `74fa4873-9d08-4143-804b-ed6a946af90a`): all 8262 passed, the real Podman environment
+  test among them. The run keeps passing tests' output only as a bounded head and tail; neither shows a runtime skip
+  message, and the middle of the output is not retained.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker,
+  not through the recorder: passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `7d511671-b557-442b-a15c-6d23c45d2384`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed. `cargo fmt --all -- --check` failed on main's
+  unformatted release-highlights dialog, outside the plan; the landing fix formats it.
+
+After the landing fix (#4552):
+
+- `cargo nextest run -p farhelm-supervisor -p farhelm --lib --test e2e` limited to the two tests the fix changes, on the
+  test worker (recorder run `9ae70bf7-0e92-473d-a73f-2bb4c8baec1f`): both passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` and `dprint check`, locally: passed.
+
+The rest of the first runs still applies to the fix, which changes only those two tests, a spec sentence and the
+dialog's formatting.
+
+Skipped: the desktop app's own tests and lint runs, since neither the plan nor the fix touches the desktop app (the
+release-highlights dialog the fix reformats is in the GUI library, which the clippy run above lints); the GUI reference
+screenshots, since nothing either changes draws; a real Bash or Zsh history write on Stop, which no suite covers end to
+end (the plan's tests check the hangup reaches the shell); macOS, since no Mac was part of this landing; CI, which runs
+only on demand.
+
+#### Things you should know that the report does not say
+
+- The report marks the outcome for Delete with a recorded tab scope that cannot be checked as fixed, and the fix is in.
+  But the refusal a real Delete makes in that case ("could not enumerate this session's systemd scopes. The session was
+  kept") has no test; the only test drives the later refusal in the process cleanup step. A test of Delete itself would
+  close that gap and would be a reasonable follow-up.
+- The changelog fragment for terminal recovery and cleanup says Delete checks a host "even if its socket has
+  disappeared", an internal word, and does not mention that tab close and Restart get the same check. Release curation
+  should reword it.
