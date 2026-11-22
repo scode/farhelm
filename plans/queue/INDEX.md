@@ -3,7 +3,7 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [complete] `helpers-terminal-and-controls.md` — consolidate duplicated terminal input mapping, keypad digit lookup, control focus rings, focus checks, trash animation and control test helpers without changing behavior
-- [in-flight b3042b] `helpers-hosts-and-sessions.md` — consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior (after `triage-gui-misc.md`)
+- [complete] `helpers-hosts-and-sessions.md` — consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior (after `triage-gui-misc.md`)
 - [in-flight bcf2a9] `helpers-launcher-and-templates.md` — consolidate duplicated launcher, template and golden-scene fixture helpers without changing behavior (after `triage-gui-misc.md`, `launch-wakes-suspended-host.md`)
 - [complete] `in-band-host-command-status.md` — read the result of every host setup command from a tagged status line the command prints, not from ssh's exit status, so a Mac with Tailscale SSH can be added and failed steps never pass as success
 - [in-flight dd06a8] `keep-images-on-failed-rebuild.md` — keep a container recipe's working images until a Rebuild succeeds, while launches during a Rebuild still wait for its outcome
