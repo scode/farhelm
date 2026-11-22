@@ -1,33 +1,5 @@
 # Triage outcomes
 
-## orphan-cleanup-overlay-forgets-failed-discovery.md
-
-- Outcome: `fix code`.
-- Assessment: helm tensorlake/orphans.rs ~121–133 returns Ok(unfinished rows) on a failed discovery. GUI
-  settings/tensorlake_sandboxes.rs ~219 `answered` replaces `rows` and clears `failure`. Basis: SPEC.md (~556): "A
-  failed read shows its reason and keeps earlier rows rather than claiming an empty result." Fix: keep the earlier rows
-  and show the discovery failure beside the cleanup rows. There is a small shape choice: the helm signals the failure
-  separately, or the GUI merges.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
-## untagged-sandbox-leftover-labelled-another-helm.md
-
-- Outcome: `fix code`.
-- Assessment: Confirmed. orphans.rs ~151 and ~210 use `creator(&name) != Some(tag)`, which is true when `creator`
-  returns None. Basis: SPEC.md ~551: "**from another helm** when its name carries another helm's tag." The fix shows the
-  label only for `Some(other)`.
-- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
-  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
-- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
-  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
-  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
-- Execution: planned in `plans/queue/triage-tensorlake.md`.
-
 ## sandbox-termination-poll-exceeds-phase-deadline.md
 
 - Outcome: `fix code`.

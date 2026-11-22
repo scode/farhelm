@@ -69,10 +69,6 @@ consequences.
 
 ## High priority: material UX degradation
 
-- [`orphan-cleanup-overlay-forgets-failed-discovery.md`](orphan-cleanup-overlay-forgets-failed-discovery.md) — When
-  discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
-  retrying the failed read.
-
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
@@ -134,9 +130,6 @@ consequences.
   block the GUI while another application supplies clipboard data.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
-
-- [`untagged-sandbox-leftover-labelled-another-helm.md`](untagged-sandbox-leftover-labelled-another-helm.md) — A
-  leftover sandbox whose name has no helm tag is labelled as another helm's.
 
 - [`browser-shard-failure-sweeps-running-siblings.md`](browser-shard-failure-sweeps-running-siblings.md) — An early
   shard exception can clean up workers that sibling shards are still using. Additional reviewed scope: A Rust runner
