@@ -1076,10 +1076,11 @@ mod tests {
     /// A tiny POSIX executable controls descriptor order and blocks on its
     /// own stdin, so tests observe a real readiness boundary instead of sleep.
     /// The script ignores SSH argv; only this transport instance uses it.
+    /// Its random state path fits both SSH control sockets and has no SSH wildcards.
     fn fake_ssh(body: &str) -> (tempfile::TempDir, PathBuf) {
         use std::os::unix::fs::PermissionsExt as _;
 
-        let directory = tempfile::tempdir().unwrap();
+        let directory = tempfile::tempdir_in("/tmp").unwrap();
         let program = directory.path().join("ssh-fixture");
         std::fs::write(&program, format!("#!/bin/sh\n{body}\n")).unwrap();
         std::fs::set_permissions(&program, std::fs::Permissions::from_mode(0o700)).unwrap();
@@ -1359,7 +1360,8 @@ mod tests {
     /// running.
     #[farhelm_testtrace::test]
     async fn releasing_a_sandbox_exits_both_shared_masters() {
-        let log = tempfile::tempdir().unwrap();
+        // The stand-in shell writes to a quoted path with a known-safe spelling.
+        let log = tempfile::tempdir_in("/tmp").unwrap();
         let log_path = log.path().join("argv");
         let (directory, program) = fake_ssh(&format!(
             "printf '%s\\n' \"$@\" >> '{}'\nprintf 'END\\n' >> '{}'\nexit 255",

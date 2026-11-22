@@ -2191,7 +2191,16 @@ async fn setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host() {
         panic!("ordinary recovery offer")
     };
     f.harness.manager.note_sealed(host);
-    let state_before = f.harness.manager.state(host);
+    let before = f
+        .harness
+        .manager
+        .status(host)
+        .expect("the legacy host has an actor");
+    assert!(
+        matches!(before.state, HostState::Deleting { .. }),
+        "{:?}",
+        before.state
+    );
     let refusal = f
         .service
         .start_add(ProvisionRequest { probe_id })
@@ -2201,10 +2210,24 @@ async fn setup_of_a_sealed_sandbox_is_refused_before_it_takes_the_host() {
         format!("{refusal:#}").contains("being deleted"),
         "{refusal:#}"
     );
+    let after = f
+        .harness
+        .manager
+        .status(host)
+        .expect("the legacy host keeps its actor");
+    assert_eq!(after.state, before.state, "the seal stays visible");
+    // The seal overlays state, while a hold still advances the actor's incarnation.
     assert_eq!(
-        f.harness.manager.state(host),
-        state_before,
-        "no setup hold replaced the host's state"
+        after.incarnation, before.incarnation,
+        "setup took a connection hold"
+    );
+    assert!(
+        !retains_run(&f.service, host).await,
+        "no run remains after refusal"
+    );
+    assert!(
+        !f.service.memory.lock().await.busy.contains(&host),
+        "setup released its claim"
     );
     assert!(
         f.backend_events().is_empty(),

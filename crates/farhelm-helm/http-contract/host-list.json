@@ -284,6 +284,17 @@
     {
       "alias": "alias11",
       "destination": "user@host11",
+      "environment": {
+        "name": "farhelm-host-k7q2-host11-m3x9",
+        "place_name": null,
+        "target": {
+          "kind": "environment",
+          "recipe": "rust-dev",
+          "place": { "kind": "tensorlake_account" }
+        },
+        "tunnels": null,
+        "credential_warning": null
+      },
       "id": 11,
       "identity": "identity11",
       "incarnation": 4,
