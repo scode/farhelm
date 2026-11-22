@@ -10,8 +10,9 @@
 //! The fleet is the sidebar's menu fixture (`session_list::menu_tests::snapshot`) with Skip session confirmations on,
 //! so a row menu's Stop and Delete go out without a question, plus host1, the one connected host, for the launch. Every
 //! launch is the smallest complete draft ([`command_draft`]), or its YOLO-asserted twin. The fake answers commands only
-//! when told, and in the order they were sent, as the helm does, so each test holds the create's reply until the moment
-//! it means to test, and nothing sent after it can be answered first.
+//! when told, and answers ordered commands in the order they were sent, as the helm does, so each test holds the
+//! create's reply until the moment it means to test, and no ordered command sent after it can be answered first. The
+//! row menu's Stop and Delete are unordered: the helm may answer them while the create still waits, and so may a test.
 
 use farhelm_helm_client::Method;
 use farhelm_proto::ui_channel::{Collection, CollectionState};
