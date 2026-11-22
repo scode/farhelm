@@ -57,8 +57,9 @@ was there.
 3. Read each shard's `summary.txt` like a recorded run: the user manager's state, Podman and its image, self-ssh, then
    nextest's summary, failures and any runtime `SKIPPED` lines. A failed shard's run directories come back as
    `runs.tar.gz`; keep them as evidence. Shards run through the recorder's generic mode, because its nextest mode does
-   not take an archive; say so when reporting, with every shard's run ID. Use a fresh `--out` for each run to preserve
-   earlier shard results. Individual partitions may be empty. The command fails if every partition is empty, any shard
+   not take an archive; say so when reporting, with every shard's run ID. Give each run a fresh `--out`: every shard
+   fails on a directory that already holds shard results, and without `--staged` that happens only after staging has
+   uploaded about 1 GB. Individual partitions may be empty. The command fails if every partition is empty, any shard
    fails, or required evidence cannot be retrieved.
 
 How it works, and why: the test binaries have absolute paths compiled in (fixture directories, `CARGO_BIN_EXE_*`, the
