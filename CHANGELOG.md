@@ -2,7 +2,9 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
-## v0.44.0 - 2026-11-22
+## v0.44.1 - 2026-11-22
+
+**DRAFT release notes - not yet finalized**
 
 ### 🚀 Added
 
@@ -43,6 +45,7 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 - Sessions and terminals that Farhelm starts on a recipe host pick up the recipe's Claude Code credentials at launch, and Restart picks up rotated credentials. A Claude process you start outside Farhelm no longer receives them. A base image can override the recipe's endpoint in Claude's settings, so **None** is the credential choice for images configured to send requests elsewhere. (#4593)
 - Every model family now has a launcher shorthand, including `composer`, `glm-flash` and `grok`. When the chosen agent does not offer the model you typed, the explanation is shorter and names the alternative when there is only one. (#4353)
 - Hover outlines now mark controls you can press. Status icons and timestamps show their tooltips without the outline. (#4517)
+- On a remote mac host, we now configure launchd with a 60 second shutdown timeout to ensure there is (in practice) always enough time for clean shutdown on uninstall or upgrades. A remote Mac set up before this release gets the longer timeout at its first Update, which stops the running supervisor with the old timeout. (#4652)
 
 #### 🔧 Fixed
 
@@ -106,6 +109,7 @@ Notable user-facing changes in each stable release of Farhelm. Release candidate
 - When the helm starts with a relative remote path in its ensure-hosts file, the warning now describes the recovery steps to correct the file, remove the host and restart the helm. (#4371)
 - The installed Mac app now pauses automatic app updates when it cannot read your saved update setting. You can still check for updates yourself. (#4407)
 - The installer no longer fails when the installed Mac app updates an older Farhelm installation that has no installation ID. (#4385)
+- Uninstalling Farhelm from a remote Mac no longer fails its first attempt with "launchd job ... is still loaded" while the supervisor is running. Update for a remote Mac could fail the same way and is fixed too. (#4651)
 
 </details>
 
