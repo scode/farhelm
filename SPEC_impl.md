@@ -8005,15 +8005,15 @@ bootout, which is launchd's default `ExitTimeOut`. A single check right after bo
 attempt.
 
 That default cut the supervisor's orderly stop (up to about 14 seconds by design) short, so the plist sets `ExitTimeOut`
-to 60 seconds. Linux relies on systemd's 90-second default stop timeout; launchd records any larger value as 60 (macOS
-26 and 27), so 60 is the most a Mac can get. Update and uninstall poll the job, every 0.2 seconds for the first ten
-polls and then once a second, until 75 seconds have passed since bootout by the wall clock, so that launchd's own kill
-always comes first; their SSH command bounds include that wait. A job loaded from an older plist keeps launchd's default
-until an Update reloads it, and that Update's bootout still stops it under the old timeout. launchd.plist(5) ties
-`ExitTimeOut` to system shutdown as well, so a remote Mac's shutdown or reboot may wait for the orderly stop too, as
-systemd's does on Linux; that effect was not measured. Neither path uses `launchctl disable`, whose persistent override
-would prevent a later setup from starting the job. Launchd actions are explicit members of the same frozen action list
-as Linux actions, without a separate service-manager abstraction.
+to 60 seconds. The Linux unit sets systemd's 90-second default stop timeout explicitly; launchd records any larger value
+as 60 (macOS 26 and 27), so 60 is the most a Mac can get. Update and uninstall poll the job, every 0.2 seconds for the
+first ten polls and then once a second, until 75 seconds have passed since bootout by the wall clock, so that launchd's
+own kill always comes first; their SSH command bounds include that wait. A job loaded from an older plist keeps
+launchd's default until an Update reloads it, and that Update's bootout still stops it under the old timeout.
+launchd.plist(5) ties `ExitTimeOut` to system shutdown as well, so a remote Mac's shutdown or reboot may wait for the
+orderly stop too, as systemd's does on Linux; that effect was not measured. Neither path uses `launchctl disable`, whose
+persistent override would prevent a later setup from starting the job. Launchd actions are explicit members of the same
+frozen action list as Linux actions, without a separate service-manager abstraction.
 
 Every remote Darwin `stat` call uses the system `/usr/bin/stat` regardless of PATH, including uninstall.
 
@@ -8261,6 +8261,16 @@ them and every session whenever an explicit UPDATE restarts the supervisor. Limi
 preserves the same ownership model as running `farhelm supervisor run` manually: stopping the supervisor detaches
 management, while the terminals continue to own the session processes until the user deletes them, the host reboots, or
 Farhelm is uninstalled from the host, which ends the terminal hosts on purpose.
+
+The unit sets `TimeoutStopSec=90`, systemd's own default, so the supervisor's orderly stop (about 14 seconds by design)
+keeps that grace even on a user manager whose `DefaultTimeoutStopSec=` was lowered, and so the helm can size its wait
+from a known number. UPDATE's `systemctl --user restart` blocks for the stop, so its SSH bound is the ordinary 30-second
+command bound plus those 90 seconds; UNINSTALL's stop step adds the same 90 seconds to its own bound. Uninstall's stop
+runs after the reload that forgets the unit file, so systemd applies the manager's default there, normally also 90
+seconds; a host that raised its default can outlast the helm's bound and fail the step into a retry. Before this,
+Update's restart had only the 30-second command bound, and uninstall's whole stop step 70 seconds shared with stopping
+the terminal hosts, so a supervisor still inside systemd's grace could fail either step at the helm (Update past about
+30 seconds of stopping, uninstall past roughly 65).
 
 The Linux supervisor unit also sets `UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID`. The kill
 sweep claims every process carrying a session's markers and has no exemption for the supervisor. A tab's startup file

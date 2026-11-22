@@ -20,24 +20,65 @@ use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-/// The uninstall stop step's bound on Linux (a Mac adds its bootout wait in
-/// [`MAC_STOP_SUPERVISOR_TIMEOUT`]): [`COMMAND_TIMEOUT`] for its systemd and
-/// cleanup commands, plus the time this build's
+/// What the uninstall stop step needs on either platform apart from waiting
+/// for the service manager to stop the supervisor: [`COMMAND_TIMEOUT`] for
+/// its service-manager and cleanup commands, plus the time this build's
 /// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
 /// seconds for starting that program and its runtime on a loaded host. The
 /// remote `farhelm` may come from another release, whose bound is not part of
 /// the command's stable contract; the ten seconds are also the margin for
 /// that.
-pub(super) const STOP_SUPERVISOR_TIMEOUT: Duration = COMMAND_TIMEOUT
+const STOP_STEP_BASE_TIMEOUT: Duration = COMMAND_TIMEOUT
     .saturating_add(farhelm_supervisor::hosts::stop::COMMAND_BUDGET)
     .saturating_add(Duration::from_secs(10));
-/// [`STOP_SUPERVISOR_TIMEOUT`] for a remote Mac, plus the longest the stop
-/// may wait for launchd to drop the booted-out job
-/// ([`super::macos::BOOTOUT_WAIT`]), which covers the supervisor's whole
-/// orderly-stop grace. Without it the helm would cut the SSH command off
-/// while launchd is still, correctly, letting the supervisor finish.
+/// The uninstall stop step's bound on Linux: [`STOP_STEP_BASE_TIMEOUT`] plus
+/// the longest `systemctl --user stop` may block while systemd lets the
+/// supervisor finish its orderly stop
+/// ([`crate::units::SUPERVISOR_STOP_GRACE`]). Uninstall's stop runs after
+/// the reload that forgets the unit file, so systemd applies the manager's
+/// `DefaultTimeoutStopSec=`, which is that same 90 seconds unless the host
+/// changed it; a host that raised it can still outlast this bound, failing
+/// the step into a retry. Before this allowance the whole step had 70
+/// seconds, shared between the stop and stopping the terminal hosts, so a
+/// supervisor that took most of systemd's 90 seconds to stop failed uninstall
+/// at the helm while systemd was still, correctly, waiting.
+pub(super) const STOP_SUPERVISOR_TIMEOUT: Duration =
+    STOP_STEP_BASE_TIMEOUT.saturating_add(crate::units::SUPERVISOR_STOP_GRACE);
+/// The bound of a Linux `systemctl --user restart` of the supervisor:
+/// [`COMMAND_TIMEOUT`] for the start half (the unit is `Type=simple`, so
+/// starting returns at once) and the SSH round trip, plus the stop grace
+/// ([`crate::units::SUPERVISOR_STOP_GRACE`]) for the stop half. Before this
+/// the restart had only [`COMMAND_TIMEOUT`], so a supervisor that took more
+/// than about 30 seconds to stop failed Update at the helm.
+///
+/// Update writes the unit and reloads the manager before restarting, so the
+/// unit's own `TimeoutStopSec=` is the one in force even when the host's
+/// previous unit predates it. The podman environment's restart of its
+/// in-container supervisor reloads nothing first, so a unit an older build
+/// installed there stops under the manager's default, normally the same 90
+/// seconds.
+pub(super) const RESTART_SUPERVISOR_TIMEOUT: Duration =
+    COMMAND_TIMEOUT.saturating_add(crate::units::SUPERVISOR_STOP_GRACE);
+// The helm must never give up on a Linux restart or stop before systemd
+// itself would, and needs room beyond systemd's grace for the SSH round trip
+// and the step's other commands. Both bounds once sat below the grace, so a
+// supervisor still inside it failed Update or uninstall at the helm.
+const _: () = assert!(
+    RESTART_SUPERVISOR_TIMEOUT.as_secs()
+        >= crate::units::SUPERVISOR_STOP_GRACE.as_secs() + COMMAND_TIMEOUT.as_secs()
+);
+const _: () = assert!(
+    STOP_SUPERVISOR_TIMEOUT.as_secs()
+        >= crate::units::SUPERVISOR_STOP_GRACE.as_secs() + STOP_STEP_BASE_TIMEOUT.as_secs()
+);
+/// The uninstall stop step's bound on a remote Mac:
+/// [`STOP_STEP_BASE_TIMEOUT`] plus the longest the stop may wait for launchd
+/// to drop the booted-out job ([`super::macos::BOOTOUT_WAIT`]), which covers
+/// the supervisor's whole orderly-stop grace. Without it the helm would cut
+/// the SSH command off while launchd is still, correctly, letting the
+/// supervisor finish.
 pub(super) const MAC_STOP_SUPERVISOR_TIMEOUT: Duration =
-    STOP_SUPERVISOR_TIMEOUT.saturating_add(super::macos::BOOTOUT_WAIT);
+    STOP_STEP_BASE_TIMEOUT.saturating_add(super::macos::BOOTOUT_WAIT);
 /// Update's start step on a remote Mac: [`COMMAND_TIMEOUT`] for its
 /// inspection and bootstrap, plus the bootout wait, as in
 /// [`MAC_STOP_SUPERVISOR_TIMEOUT`].
@@ -3151,10 +3192,11 @@ impl ProvisioningBackend for SystemBackend {
         unit: &str,
     ) -> Result<ActionOutcome, BackendFailure> {
         let unit = crate::ssh::shell_quote(unit);
-        self.require_shell(
+        self.require_shell_within(
             target,
             &format!("systemctl --user restart -- {unit}"),
             "restarting the supervisor unit",
+            RESTART_SUPERVISOR_TIMEOUT,
         )
         .await?;
         Ok(ActionOutcome::Completed)

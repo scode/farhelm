@@ -14,13 +14,28 @@
 
 use anyhow::{Context as _, bail};
 use std::path::Path;
+use std::time::Duration;
 
 /// The supervisor unit provisioning installs on a host.
 pub const SUPERVISOR_UNIT_NAME: &str = "farhelm-supervisor.service";
 
+/// How long systemd lets a stopping supervisor run after SIGTERM before it
+/// SIGKILLs it (the unit's `TimeoutStopSec=`).
+///
+/// This is systemd's own default, written out so that the supervisor's
+/// orderly stop (about 14 seconds by design) gets it even on a user manager
+/// whose `DefaultTimeoutStopSec=` was lowered, and so that the helm can size
+/// its SSH bound for Update's restart from a known number rather than from
+/// whatever the host's manager happens to use. It applies only while the
+/// unit file is loaded: uninstall reloads the manager after removing the file
+/// and before the stop, so that stop runs under the manager's default, which
+/// is the same 90 seconds unless the host changed it.
+pub const SUPERVISOR_STOP_GRACE: Duration = Duration::from_secs(90);
+
 /// The supervisor unit as reviewed, with `@…@` placeholders for the two
-/// paths [`SupervisorUnitInputs`] supplies plus the `@PATH@` this module
-/// derives from the program's.
+/// paths [`SupervisorUnitInputs`] supplies, the `@PATH@` this module derives
+/// from the program's, and `@TIMEOUT_STOP_SEC@` from
+/// [`SUPERVISOR_STOP_GRACE`].
 const SUPERVISOR_UNIT_TEMPLATE: &str = include_str!("../units/farhelm-supervisor.service.in");
 
 /// The tail of the supervisor unit's search path, after the directory its
@@ -99,6 +114,10 @@ pub fn render_supervisor_unit(inputs: &SupervisorUnitInputs) -> anyhow::Result<S
             ("@FARHELM@", &farhelm),
             ("@STATE_DIR@", &systemd_arg(inputs.state_dir)?),
             ("@PATH@", &environment_value(&components.join(":"))),
+            (
+                "@TIMEOUT_STOP_SEC@",
+                &SUPERVISOR_STOP_GRACE.as_secs().to_string(),
+            ),
         ],
     ))
 }
@@ -586,9 +605,10 @@ mod tests {
     ///
     /// The template IS the lifecycle policy — `KillMode=process` is what
     /// keeps a supervisor restart from killing the terminals it manages,
-    /// `WantedBy=default.target` is what makes the unit start at all — and
-    /// a substring test would stay green while any of those directives
-    /// silently disappeared. The expectation is written out by hand rather
+    /// `WantedBy=default.target` is what makes the unit start at all,
+    /// `TimeoutStopSec=` is the grace the helm's restart and stop bounds are
+    /// sized against (`SUPERVISOR_STOP_GRACE`) — and a substring test would
+    /// stay green while any of those directives silently disappeared. The expectation is written out by hand rather
     /// than derived from the template so that a mistake in the renderer
     /// cannot update the implementation and the expectation together.
     #[farhelm_testtrace::test]
@@ -611,6 +631,7 @@ mod tests {
                 "Environment=\"PATH=/home/u/.local/bin:/usr/local/bin:/usr/bin:/bin\"\n",
                 "UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID\n",
                 "KillMode=process\n",
+                "TimeoutStopSec=90\n",
                 "Restart=on-failure\n",
                 "\n",
                 "[Install]\n",
