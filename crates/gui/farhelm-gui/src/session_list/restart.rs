@@ -39,9 +39,8 @@ use serde_json::json;
 
 use super::{menu, outcome};
 use crate::components::{HoverHelp, Tier};
-use crate::operations::{Command, OpKey, Outcome, Work};
+use crate::operations::{Command, NotStarted, OpKey, Outcome, Work};
 use crate::prompt::{Answer, Question};
-use crate::session;
 
 // ---- Whether Restart is offered, and the words that say so -----------------------------------------------------------
 
@@ -293,18 +292,14 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
     if menu::refuse_for_host_change(key, Work::Restart, cx) {
         return;
     }
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command(key, stop_if_running) else {
-        tracing::warn!("a session key that cannot be a path segment was not restarted");
-        return;
-    };
     // A successful reply that published a terminal lets the recovery card give way before the listing catches up.
     // If the supervisor could not publish the new terminal, its reply keeps the card in place.
     let session = key.to_owned();
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+    let started = super::start_request(
+        &OpKey::session(key),
+        command(key, stop_if_running),
+        cx,
+        move |settled, cx| {
             if let Outcome::Done(body) = &settled.outcome {
                 let terminal_missing = body
                     .as_ref()
@@ -313,10 +308,14 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
                     .unwrap_or_default();
                 crate::session_pane::card::restart_finished(&session, terminal_missing, cx);
             }
-        })
-    });
+        },
+    );
     match started {
         Ok(()) => outcome::start_clock(key, Work::Restart, cx),
+        Err(NotStarted::Retired) => {}
+        Err(NotStarted::Path(_)) => {
+            tracing::warn!("a session key that cannot be a path segment was not restarted");
+        }
         Err(refused) => tracing::debug!(?refused, "a Restart was not sent"),
     }
 }
@@ -328,9 +327,7 @@ pub(crate) fn send(key: &str, stop_if_running: bool, cx: &mut App) {
 /// relaunches the agent and the supervisor moves the viewer to the new terminal with a detach that reconnects, so the
 /// card would announce an outage the user just asked for (`session_pane.rs`).
 pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations.read(cx).in_flight(&OpKey::session(key)) == Some(Work::Restart)
-    })
+    outcome::in_flight(key, cx) == Some(Work::Restart)
 }
 
 #[cfg(test)]

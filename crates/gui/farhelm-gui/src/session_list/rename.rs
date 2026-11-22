@@ -80,7 +80,7 @@ use crate::theme::{self, metrics};
 use crate::{local_state, session};
 
 use super::SessionList;
-use super::groups;
+use super::{groups, outcome};
 
 /// Open the Rename editor for the session the helm files under `key`, on top of everything else in `window`. The one
 /// opener: the row menu's Rename item calls it, and so does the shortcut ([`open_for_selected`]).
@@ -150,8 +150,7 @@ fn open_returning(
     cx: &mut App,
 ) -> Option<LayerId> {
     let store = session::current_store(cx)?;
-    let operations = session::current_operations(cx)?;
-    if let Some(work) = operations.read(cx).in_flight(&OpKey::session(key)) {
+    if let Some(work) = outcome::in_flight(key, cx) {
         tracing::debug!(?work, "rename not opened: the session has work in flight");
         return None;
     }

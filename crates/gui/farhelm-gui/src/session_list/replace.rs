@@ -48,7 +48,7 @@ use super::{SessionList, delete, menu, outcome, selection};
 use crate::components::{HoverHelp, Tier};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, HelmMarker, OpKey, Outcome, Settled, Work};
+use crate::operations::{Command, HelmMarker, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::theme;
 use crate::{local_state, session};
@@ -335,23 +335,22 @@ fn start(key: &str, sent: Sent, window: AnyWindowHandle, cx: &mut App) -> bool {
     if menu::refuse_for_host_change(key, Work::Replace, cx) {
         return false;
     }
-    let Some(operations) = session::current_operations(cx) else {
-        return false;
-    };
-    let Ok(command) = command(key, sent.guard, sent.consent) else {
-        tracing::warn!("a session key that cannot be a path segment was not replaced");
-        return false;
-    };
     let source = key.to_owned();
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
-            settle_sent(&source, sent, window, settled, cx)
-        })
-    });
+    let started = super::start_request(
+        &OpKey::session(key),
+        command(key, sent.guard, sent.consent),
+        cx,
+        move |settled, cx| settle_sent(&source, sent, window, settled, cx),
+    );
     match started {
         Ok(()) => {
             outcome::start_clock(key, Work::Replace, cx);
             true
+        }
+        Err(NotStarted::Retired) => false,
+        Err(NotStarted::Path(_)) => {
+            tracing::warn!("a session key that cannot be a path segment was not replaced");
+            false
         }
         Err(refused) => {
             tracing::debug!(?refused, "a Replace was not sent");
@@ -427,9 +426,7 @@ pub(crate) fn settle(source: &str, settled: &Settled, cx: &mut App) {
 
 /// Whether `key` has a Replace in flight.
 pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations.read(cx).in_flight(&OpKey::session(key)) == Some(Work::Replace)
-    })
+    outcome::in_flight(key, cx) == Some(Work::Replace)
 }
 
 /// The line under `row`'s lines while its Replace has waited two seconds or more: [`outcome::wait_line`]'s "Replacing

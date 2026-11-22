@@ -435,8 +435,9 @@ pub(crate) fn kept(cx: &App) -> Option<(bool, usize)> {
     })
 }
 
-/// The work in flight on `key` in the current UI session's operation store.
-fn in_flight(key: &str, cx: &App) -> Option<Work> {
+/// The work sent or held on `key` in the current UI session's operation store.
+/// Each action interprets only the kinds of work it presents or refuses.
+pub(super) fn in_flight(key: &str, cx: &App) -> Option<Work> {
     session::current_operations(cx)?
         .read(cx)
         .in_flight(&OpKey::session(key))
