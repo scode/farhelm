@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`helpers-hosts-and-sessions`](reports/helpers-hosts-and-sessions.report.md) landed 2026-11-22 in #4597, #4601, #4605, #4610, #4612, #4614, #4619: consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior
 - [`helpers-launcher-and-templates`](reports/helpers-launcher-and-templates.report.md) landed 2026-11-22 in #4607, #4608, #4611, #4615, #4616, #4618, #4620, #4621: consolidate duplicated launcher, template and golden-scene fixture helpers without changing behavior
 - [`in-band-host-command-status`](reports/in-band-host-command-status.report.md) landed 2026-11-22 in #4617, #4629: read the result of every host setup command from a tagged status line the command prints, not from ssh's exit status, so a Mac with Tailscale SSH can be added and failed steps never pass as success
 - [`keep-images-on-failed-rebuild`](reports/keep-images-on-failed-rebuild.report.md) landed 2026-11-22 in #4624: keep a container recipe's working images until a Rebuild succeeds, while launches during a Rebuild still wait for its outcome
