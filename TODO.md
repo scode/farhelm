@@ -394,15 +394,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session and generation's derived scope name, and retire the obligation once the scope is confirmed gone. Cover a gone
   host with an unconfirmed scope that becomes checkable on a later start.
 
-- **Keep deflake evidence tied to the selected revision's prerequisites.** Running the current deflake driver with an
-  older `--base` uses that revision's recorder with today's battery list and system tmux. Before the pinned tmux
-  removal, the driver ran the selected revision's `scripts/build-pinned-tmux-ci.sh` and passed `--tmux required` for
-  workspace nextest, workspace doctests, Playwright and the old desktop smoke test. It passed `--tmux none` for desktop
-  nextest and desktop doctests. Without required mode the historical recorder warns and continues after a mismatch.
-  Decide which historical batteries and bases the current driver supports. For a pre-removal base, verify either
-  enforcement of its pin and phase requirements or refusal with an explanation before any tests run. For a current base,
-  verify the system-tmux path. Plan: `plans/queue/deflake-historical-base-prereqs.md`.
-
 - **Protect a test worker's checkout before staging.** The SSH driver copies tools, syncs and prunes source, and
   snapshots the result before `with-lock.sh` takes the execution lock. A second request can change the first run's
   checkout even when the worker then refuses it as busy. Hold ownership across staging and execution or stage in an

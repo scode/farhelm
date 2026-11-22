@@ -13,6 +13,10 @@ run is over when every battery has executed once and every failure it produced h
 handed a fix. "Repeat until I say stop" means: when a run ends, start another one against the same base, and keep
 excluding what earlier runs found.
 
+The driver requires the base to contain the commit that introduced its current batteries and preparation steps. It
+refuses an older base or a side branch missing that commit before creating run state. Preparation rechecks the commit
+before checking out the sweep worktree.
+
 ## Requirements
 
 **The agent must be cheap.** Inference is spent only on decisions: is this failure a flake or a deterministic

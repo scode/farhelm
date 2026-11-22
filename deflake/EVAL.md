@@ -67,7 +67,8 @@ this is an evaluation of the tooling:
    repository, so it reaches no GitHub service. Do not push, do not run any `gh` command. For these throwaway commits,
    this deviation replaces the ordinary PR, test and reviewer gates: run only `dprint check` on covered edited files,
    no additional tests and no cold commit-message reader. If dprint covers none of a fix's files, do not substitute
-   another check. These exceptions apply only to the eval subject's commits.
+   another check. For a fixture fix, read `.agents/test-authoring.md` and skip the reading list for the omitted gates,
+   including `.agents/validation.md`. These exceptions apply only to the eval subject's commits.
 4. Do not modify anything under deflake/ except deflake/known-flakes.txt.
 5. Never touch any other checkout or anything under ~/.local/state/farhelm. The driver's own state under
    /tmp/farhelm-tmp/deflake is fine.

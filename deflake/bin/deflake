@@ -2,11 +2,12 @@
 """Drive a full-suite flake-discovery sweep so an agent only wakes on events.
 
 The sweep is a fixed sequence of the AGENTS.md finishing-work batteries, run
-one after another in a detached git worktree pinned at a base commit. A detached
-daemon owns the whole sweep; the agent starts it, then blocks on `deflake wait`,
-which returns only when there is an event to act on. Everything mechanical
-(running phases, collecting failures, rerunning each failed test to classify
-it, excluding known flakes) happens without inference. The requirements this
+one after another in a detached git worktree pinned at a base commit. The
+driver refuses bases without the current sweep's prerequisites before creating
+run state. A detached daemon owns the whole sweep. The agent starts it, then
+blocks on `deflake wait`, which returns only when there is an event to act on.
+Running phases, collecting failures, rerunning failed tests and excluding
+known flakes happen without inference. The requirements this
 serves are in deflake/SPEC.md; the agent-side protocol is in deflake/AGENTS.md.
 
 Subcommands:
@@ -59,6 +60,10 @@ from typing import Callable
 # ---------------------------------------------------------------------------
 
 KNOWN_FLAKES_FILE = pathlib.Path("deflake") / "known-flakes.txt"
+# The last change to the sweep's batteries and preparation steps removed
+# the Dioxus batteries. Raise this floor when a driver change makes older
+# revisions incompatible with the current sweep.
+SWEEP_BASE_FLOOR = "1eb4e37517d2164d2bd35753dfcbad3f03545451"
 CLASSIFICATION_RERUNS = 3
 # Wall-clock caps handed to the recorder per phase. They are hard limits on a
 # runaway phase, not budgets: a phase that hits one produces a `phase-error`
@@ -72,6 +77,43 @@ STALL_SECONDS = 30 * 60
 EXCERPT_LIMIT = 6000
 WAIT_POLL_SECONDS = 5
 DEFAULT_MAX_WAIT = 540
+
+
+class BaseRevisionError(ValueError):
+    """A base whose commit or compatibility could not be established."""
+
+
+def resolve_sweep_base(checkout: pathlib.Path, revision: str, *, floor: str = SWEEP_BASE_FLOOR) -> str:
+    """Resolve one jj revision and require the history the current sweep expects.
+
+    The driver uses today's batteries and preparation against the selected
+    revision's recorder. A side branch without the floor may require a
+    different sweep regardless of its date.
+    """
+    floor_note = f"The sweep floor {floor} introduced the current test batteries and preparation steps."
+    resolved = subprocess.run(
+        ["jj", "--ignore-working-copy", "log", "-r", revision, "--no-graph", "-T", "commit_id"],
+        cwd=checkout, capture_output=True, text=True,
+    )
+    commit = resolved.stdout.strip()
+    if resolved.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        reason = resolved.stderr.strip() or "expected one commit"
+        raise BaseRevisionError(f"could not resolve base revision {revision!r}: {reason}\n{floor_note}")
+
+    ancestry = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", floor, commit],
+        cwd=checkout, capture_output=True, text=True,
+    )
+    if ancestry.returncode == 0:
+        return commit
+    if ancestry.returncode == 1:
+        raise BaseRevisionError(
+            f"base revision {revision!r} resolved to {commit}, which lacks the required commit. {floor_note}"
+        )
+    reason = ancestry.stderr.strip() or f"git exited {ancestry.returncode}"
+    raise BaseRevisionError(
+        f"could not verify ancestry of base revision {revision!r} ({commit}): {reason}\n{floor_note}"
+    )
 
 
 def state_root(environment: dict[str, str] | None = None) -> pathlib.Path:
@@ -944,7 +986,14 @@ class Daemon:
         the build outputs before the run is reported as over.
         """
         self.run.update_status(status="preparing", sweep=0)
-        if not self.prepare():
+        try:
+            prepared = self.prepare()
+            prepare_error = self.prepare_cleanup_error
+        except BaseRevisionError as error:
+            prepared = False
+            prepare_error = str(error)
+            self.say(prepare_error)
+        if not prepared:
             if self.stop_requested and not self.prepare_cleanup_failed:
                 # A stop during preparation is the operator's choice, not
                 # a tooling failure; report it as such. A failed deletion is
@@ -952,10 +1001,9 @@ class Daemon:
                 # despite the stop, so its failure is real, and finish() will
                 # not report it a second time.
                 return "stopped"
-            # A failed deletion carries its reason in the event, since it is
-            # something the agent must relay (a symlink to replace, a build
-            # to kill) rather than a build log to read.
-            details = {"error": self.prepare_cleanup_error} if self.prepare_cleanup_error else {}
+            # Deletion and base refusals carry their reasons in the event so
+            # the agent can relay what stopped preparation from starting.
+            details = {"error": prepare_error} if prepare_error else {}
             self.run.emit("prepare-failed", note="workspace preparation failed; see daemon.log and phases/prepare-*.log",
                           log=str(self.run.path / "daemon.log"), **details)
             return "failed"
@@ -1108,12 +1156,7 @@ class Daemon:
         # change id, or any revset works) and git owns the tree; the
         # checkout's jj view never sees or snapshots it.
         log = self.run.phases / "prepare-workspace.log"
-        resolved = subprocess.run(["jj", "--ignore-working-copy", "log", "-r", self.base, "--no-graph",
-                                   "-T", "commit_id"], cwd=self.checkout, capture_output=True, text=True)
-        commit = resolved.stdout.strip()
-        if resolved.returncode != 0 or not re.fullmatch(r"[0-9a-f]{40}", commit):
-            self.say(f"could not resolve base revision {self.base!r}: {resolved.stderr.strip()}")
-            return False
+        commit = resolve_sweep_base(self.checkout, self.base)
         if not (self.workspace / ".git").exists():
             self.workspace.parent.mkdir(parents=True, exist_ok=True)
             # A worktree registration left behind by a deleted directory would
@@ -1330,6 +1373,11 @@ def resolve_run(checkout: pathlib.Path) -> RunDir:
 
 
 def cmd_start(args: argparse.Namespace, checkout: pathlib.Path) -> int:
+    try:
+        commit = resolve_sweep_base(checkout, args.base)
+    except BaseRevisionError as error:
+        print(f"deflake: {error}", file=sys.stderr)
+        return 1
     root = prepare_state_root()
     lock_path = root / "daemon.lock"
     lock = os.open(lock_path, os.O_CREAT | os.O_RDWR, 0o600)
@@ -1353,12 +1401,12 @@ def cmd_start(args: argparse.Namespace, checkout: pathlib.Path) -> int:
 
     daemon_log = (run.path / "daemon.log").open("ab")
     # One sweep tree per checkout, so two agents in sibling checkouts never
-    # share build outputs or a base commit; the daemon lock still allows only
-    # one sweep at a time on the machine.
+    # share build outputs or a base commit. Pass the checked commit so ref
+    # movement between start and prepare cannot change what gets swept.
     workspace = root / "workspaces" / checkout_key(checkout)
     daemon = subprocess.Popen(
         [sys.executable, os.path.abspath(__file__), "_daemon", str(run.path), str(checkout), str(workspace),
-         args.base, "1" if args.repeat else "0", args.only or "", args.profile],
+         commit, "1" if args.repeat else "0", args.only or "", args.profile],
         stdin=subprocess.DEVNULL, stdout=daemon_log, stderr=daemon_log, start_new_session=True, cwd=checkout,
     )
     # Write the pidfile here, before returning: a `wait` issued in the same
@@ -1526,7 +1574,8 @@ def main(argv: list[str]) -> int:
     sub = parser.add_subparsers(dest="command", required=True)
     start = sub.add_parser("start", help="detach a sweep daemon")
     start.add_argument("--repeat", action="store_true", help="start the next sweep when one finishes, until stopped")
-    start.add_argument("--base", default="main", help="jj revision the sweep runs against (default: main)")
+    start.add_argument("--base", default="main",
+                       help=f"jj revision whose history includes the sweep floor {SWEEP_BASE_FLOOR} (default: main)")
     start.add_argument("--only", help="comma-separated phase names to run instead of the full sweep (driver smoke tests)")
     start.add_argument("--profile", choices=PROFILES, default="full",
                        help="'eval' runs narrow, fast selections to exercise the driver and protocol; never a real run")

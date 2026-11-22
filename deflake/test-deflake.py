@@ -17,6 +17,7 @@ import json
 import os
 import pathlib
 import stat
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -46,6 +47,69 @@ def load_driver():
 
 D = load_driver()
 TestId = D.TestId
+
+
+class SweepBase(unittest.TestCase):
+    """Keep test evidence on revisions that support the driver's batteries."""
+
+    def setUp(self):
+        """Give date-independent ancestry checks a floor and a side branch."""
+        temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(temporary.cleanup)
+        self.checkout = pathlib.Path(temporary.name)
+        self.git("init", "--quiet")
+        self.parent = self.commit("old prerequisites")
+        self.floor = self.commit("current prerequisites")
+        self.tip = self.commit("newer code")
+        self.git("checkout", "--quiet", "--detach", self.parent)
+        self.side = self.commit("side branch")
+        subprocess.run(
+            ["jj", "git", "init", "--colocate"], cwd=self.checkout,
+            check=True, capture_output=True, text=True,
+        )
+
+    def git(self, *args):
+        """Write unsigned fixture history independent of the user's Git identity and signing."""
+        return subprocess.check_output(
+            ["git", "-c", "user.name=Fixture", "-c", "user.email=fixture@example.test",
+             "-c", "commit.gpgsign=false", *args],
+            cwd=self.checkout, text=True,
+        ).strip()
+
+    def commit(self, message):
+        """Create a history edge without adding unrelated test data."""
+        self.git("commit", "--quiet", "--allow-empty", "-m", message)
+        return self.git("rev-parse", "HEAD")
+
+    def test_accepts_floor_and_descendant(self):
+        """A selected revision starts at the floor or carries it in its ancestry."""
+        self.assertEqual(self.git("rev-parse", f"{self.tip}~1"), self.floor)
+        for commit in (self.floor, self.tip):
+            with self.subTest(commit=commit):
+                self.assertEqual(D.resolve_sweep_base(self.checkout, commit, floor=self.floor), commit)
+
+    def test_refuses_pre_floor_history_and_side_branch(self):
+        """A commit made later still needs the floor's preparation steps."""
+        self.assertEqual(self.git("rev-parse", f"{self.side}~1"), self.parent)
+        for commit in (self.parent, self.side):
+            with self.subTest(commit=commit):
+                with self.assertRaises(D.BaseRevisionError) as caught:
+                    D.resolve_sweep_base(self.checkout, commit, floor=self.floor)
+                self.assertIn(f"resolved to {commit}", str(caught.exception))
+                self.assertIn(f"sweep floor {self.floor}", str(caught.exception))
+                self.assertIn("batteries and preparation steps", str(caught.exception))
+
+    def test_refuses_unknown_base(self):
+        """A typo fails resolution before the driver can decide ancestry."""
+        revision = "absent-base"
+        with self.assertRaisesRegex(D.BaseRevisionError, f"(?s)could not resolve.*'absent-base'.*sweep floor {self.floor}"):
+            D.resolve_sweep_base(self.checkout, revision, floor=self.floor)
+
+    def test_refuses_unverifiable_floor(self):
+        """An incomplete checkout cannot establish support for a base."""
+        missing = "f" * 40
+        with self.assertRaisesRegex(D.BaseRevisionError, f"(?s)could not verify.*sweep floor {missing}"):
+            D.resolve_sweep_base(self.checkout, self.tip, floor=missing)
 
 
 class KnownFlakesFormat(unittest.TestCase):
