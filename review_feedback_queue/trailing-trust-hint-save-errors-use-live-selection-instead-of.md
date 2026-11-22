@@ -24,3 +24,16 @@ with a visible error on another session conditional on stale callback delivery, 
 coverage: none. L27 concerns resetting a different, occurrence-only dismissal.
 
 Review evidence is retained under run `4d6e9e3b-26c2-4fd0-aeb6-997bfc824377` as `recovery_contract/l28`.
+
+Update at `66ad3aaa95ef03a2130e2d0194d58353912ae9da`: re-confirmed at
+`crates/gui/farhelm-gui/src/session_pane/trust_band.rs:272-310,465-475` with three additional details: (1) if live
+selection becomes `None` before the click runs, `hide_everywhere` returns early at line 273 and silently drops the
+dismissal without sending `PUT /api/preferences`; (2) line 300 calls `self.read(cx)`, which targets live `read_for`
+rather than the drawn session/agent; and (3) `Known::failed` (`trust_band.rs:128`) is keyed only by session key
+`Option<(String, SharedString)>` without `TrustAgent`, and `follow()` (`trust_band.rs:222-229`) clears it only when the
+session key changes, so switching the same session to another agent's trust prompt (for example via Replace) can display
+the earlier agent's save error under the new agent's band. Fix: bind `key` in the `DISMISS_ID` click handler and key
+`Known::failed` by `(String, TrustAgent, SharedString)`.
+
+Extended under run `34570dac-b635-4682-a942-3a3fc1728e12` as `g17-trust-gui-and-goldens/f4` (suggested bucket: other;
+confidence: confirmed).
