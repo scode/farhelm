@@ -1046,8 +1046,8 @@ systemd or SSH substrate ran.
   network. It is bash 3.2-safe, so it also runs under macOS's `/bin/bash`.
 - `dprint check`
 - `python3 -B scripts/test-record-test-run.py` and `python3 -B deflake/test-deflake.py` cover the recorder and deflake
-  tooling, including state-root ownership checks and retention of a nested run after outer temporary directory cleanup.
-  Changes to the deflake driver also run `deflake/EVAL.md`.
+  tooling, including state-root ownership, sweep base ancestry and retention of a nested run after outer temporary
+  directory cleanup. Changes to the deflake driver also run `deflake/EVAL.md`.
 - `python3 -B scripts/test-summarize-test-runs.py` and `python3 -B scripts/test-test-run-summary.py` cover evidence
   accounting, including CLI ledger selection, separate class and cause counts and retaining valid runs when a ledger is
   unavailable. Run them when the summary command or its classifiers change.

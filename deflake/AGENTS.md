@@ -39,7 +39,8 @@ never open a PR for review or merge one.
 ### Changing the deflake tooling (before changing `deflake/bin/deflake`, `deflake/AGENTS.md`, or the recorder interfaces the driver depends on)
 
 A change to the driver or to `deflake/AGENTS.md` is validated with the end-to-end procedure in `deflake/EVAL.md`, a few
-minutes with a low-power delegate. Read `deflake/EVAL.md` and `deflake/SPEC.md` in full before making the change.
+minutes with a low-power delegate. Read `deflake/EVAL.md` and `deflake/SPEC.md` in full before making the change. Raise
+the driver's base floor when its phases, preparation steps or required recorder interface make older bases incompatible.
 
 Fence: validate such a change with `deflake/EVAL.md` before calling it done.
 
@@ -48,7 +49,7 @@ Fence: validate such a change with `deflake/EVAL.md` before calling it done.
 - Confirm the checkout has no active jjstack (an empty working copy on main, or a stack the user has said to build on).
   The flake PRs go on a linear stack; if one already exists, they go on top of it, and say so.
 - Fetch and make sure local `main` is at origin's main. The sweep runs against `main` unless the user names another
-  base.
+  base. The driver refuses a base missing the current sweep's prerequisite commit. Relay that refusal and stop.
 - Do NOT prebuild anything, run gates, or read test files. The driver prepares its own worktree.
 - Only one sweep can run on the machine at a time. If `start` reports that another daemon holds the lock, another
   agent's sweep is running; tell the user and stop rather than waiting for it or stopping it.
