@@ -1167,6 +1167,33 @@ fn enter_on_a_harness_chip_chooses_it_and_presses_launch(cx: &mut TestAppContext
     );
 }
 
+/// A one-time conversation selector belongs to its chosen harness. Leaving for Bash and then pressing Enter on a
+/// different harness must perform a fresh start, even though that Enter both selects and launches.
+#[gpui::test]
+fn enter_after_a_shell_switch_starts_a_fresh_conversation(cx: &mut TestAppContext) {
+    let mut start = LaunchDraft::new(Some(1), "~".into(), None);
+    start.edit_folder("/src/app".into());
+    start.choose_harness(LaunchHarness::Claude, None, None);
+    let earlier = "bc8385c0-f860-4764-a51b-9f6c4d3e94f0";
+    start.edit_conversation(earlier.into());
+    let (mut helm, cx) = launcher_on(cx, start);
+    assert_eq!(draft(cx).active_conversation(), Some(earlier));
+    click_in_body(cx, "launcher-shells-Bash");
+    assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Bash));
+    assert!(super::launch_tests::creates(&mut helm, cx).is_empty());
+    keys(cx, "shift-tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("launcher-harness-OpenCode"));
+    keys(cx, "enter");
+    let sent = super::launch_tests::creates(&mut helm, cx);
+    let [created] = &sent[..] else {
+        panic!("one fresh create, got {sent:?}")
+    };
+    let body = created.body.as_ref().expect("create has a body");
+    let selection: LaunchSelection = serde_json::from_value(body["launch"].clone()).unwrap();
+    assert_eq!(selection.harness, LaunchHarness::OpenCode);
+    assert!(body["conversation"].is_null());
+}
+
 /// Choosing Custom opens its flags editor and moves focus into it, and the editor shows the words the flags parse to,
 /// or why they do not. Enter on the Custom segment only chooses: a Custom choice has no flags yet, so launching from it
 /// could only fail. Specified, on Codex: Enter on the focused Custom segment chooses Custom, says nothing beside Launch

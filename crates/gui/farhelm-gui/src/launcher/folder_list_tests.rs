@@ -132,6 +132,53 @@ fn focus_folder(cx: &mut VisualTestContext) {
     );
 }
 
+/// Replace with can retire its source, so a history reply that drops the displayed choice cannot turn its Enter
+/// into a submit. The replacement becomes keyboard-accessible after the no-highlight frame is presented.
+#[gpui::test]
+fn a_history_reply_cannot_turn_folder_enter_into_replace_before_presentation(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, cx) = super::entry_tests::window_with(cx, Some("a"));
+    assert!(cx.update(|window, cx| super::entry::open_replace_with("a", window, cx)));
+    settle(cx);
+    let reads = history_reads(&mut helm, cx);
+    let [(read, path)] = &reads[..] else {
+        panic!("one history read, got {reads:?}")
+    };
+    assert!(path.ends_with("host=9"), "{path}");
+    focus_folder(cx);
+    keys(cx, "down");
+    test_support::show_next_frame(cx);
+    assert_eq!(
+        name_of(cx, "launcher-folder-0").as_deref(),
+        Some("Reset folder to home")
+    );
+    assert_eq!(
+        super::view_tests::selected_state(cx, "launcher-folder-0"),
+        Some(true)
+    );
+
+    helm.reply(*read, 200, Some(history(&["/src/recent"])));
+    settle(cx);
+    assert_eq!(
+        name_of(cx, "launcher-folder-0").as_deref(),
+        Some("/src/recent")
+    );
+    assert_eq!(
+        super::view_tests::selected_state(cx, "launcher-folder-0"),
+        Some(false)
+    );
+    // Raw input sees the drawn frame without presenting it, as with a queued key behind the reply.
+    cx.simulate_keystrokes("enter");
+    let replace = "/api/sessions/a/replace";
+    assert!(super::launch_tests::sent_to(&mut helm, cx, replace).is_empty());
+    keys(cx, "enter");
+    assert_eq!(
+        super::launch_tests::sent_to(&mut helm, cx, replace).len(),
+        1
+    );
+}
+
 /// The launcher reads the chosen host's history when it opens, and focusing the folder field lists its recent folders
 /// under the Recent heading, then Home and Local home under Reset, each named for assistive technology. Why: SPEC.md,
 /// "Working directory": the folder field's dropdown offers "up to eight Recent folders, newest first", "Reset with Home
