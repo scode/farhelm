@@ -3413,6 +3413,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-checkout-on-suspended-host",
+      "title": "Managed checkout allocation when the selected host is suspended",
+      "reference": null
+    },
+    {
       "golden": "settings-recipe-editor-delete-anyway",
       "title": "Recipe Delete after an unconfirmed image save, asking to delete anyway",
       "reference": null

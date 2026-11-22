@@ -39,16 +39,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
-  resumes it and waits for a fresh connection, as the browser app did; the GPUI app refuses and asks the user to resume
-  (interim, decided 2026-11-17). Tensorlake suspends an idle sandbox after 30 minutes, including once the app quits, so
-  this is the usual first launch after a break. Scoped at the migration's end at about 660 production and 1,340 test
-  lines: the launcher's wake over pushed host state (Resume, wait for a fresh connection within the same minute, retry
-  while another operation holds the host, fail on a new suspension), the preparation pill, the fresh-checkout folder
-  allocation once the host is ready, quick launch, and "this launch is waking that host" refusing Hosts' Suspend, Resume
-  and Settings and a session's own Suspend and Resume. The old app's 13 launch-after-wake cases (tensorlake-lifecycle)
-  are the spec. Design the wake with an opus consult. Plan: `plans/queue/launch-wakes-suspended-host.md`.
-
 - **One slow host holds up every other action for up to 20 seconds.** The desktop app sends its commands to the helm one
   at a time, each starting when the previous one has answered. Saving a replacement credential (delivered to every host,
   at most 20 seconds per host) and deleting from Trash (at most 20 seconds per host) can therefore keep every later

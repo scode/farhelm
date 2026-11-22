@@ -10,7 +10,7 @@ use crate::focus::Mark;
 use crate::host_text::HostSentence;
 use crate::hosts::identity::display_name;
 use crate::hosts::offers::HostKind;
-use crate::launcher::draft::{Install, Mode};
+use crate::launcher::draft::{Install, LaunchDraft, Mode};
 use crate::launcher::pill::WakePill;
 use crate::launcher::view::{Launcher, SourceConsent};
 use crate::layers::{self, PillId};
@@ -66,7 +66,7 @@ impl Wake {
 /// cannot show as the future session's create failure or leave a false error under Hosts.
 pub(in crate::launcher) fn start(
     launcher: Entity<Launcher>,
-    mode: &Mode,
+    draft: &LaunchDraft,
     host: &HostView,
     consent: SourceConsent,
     mark: Mark,
@@ -84,7 +84,7 @@ pub(in crate::launcher) fn start(
     let name = display_name(host);
     let pill = cx.new(|_| WakePill::new(name, stopped));
     let shown = layers::show_launch_pill(pill.into(), window, cx);
-    let source = match mode {
+    let source = match &draft.mode {
         Mode::ReplaceWith { source } => Some(source.clone()),
         Mode::RestartWith(restart) => Some(restart.source.clone()),
         Mode::New | Mode::Clone => None,
@@ -98,7 +98,11 @@ pub(in crate::launcher) fn start(
             wake: Some(Wake {
                 install: Install::of(host),
                 source,
-                wait: ResumeWait::new(&host.state, cx.background_executor().now()),
+                wait: ResumeWait::new(
+                    &host.state,
+                    cx.background_executor().now(),
+                    draft.checkout.is_some(),
+                ),
                 key,
                 window: window.window_handle(),
                 mark,

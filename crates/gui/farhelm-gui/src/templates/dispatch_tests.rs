@@ -31,6 +31,9 @@ use super::sequence::{self, Binding, Refusal};
 use super::shortcuts::Bindings;
 use super::summary::Part;
 use crate::actions::{QUICK_LAUNCH_CHORD, QUICK_SWITCHER_CHORD, SEQUENCE_PREFIX_CHORD};
+use crate::launcher::checkout_tests::{
+    connect_checkout_host, create_woken_checkout, hold_woken_preview, woken_checkout_reply,
+};
 use crate::launcher::environment_launch_tests::{self, answer_except, answer_with};
 use crate::launcher::environment_tests::{account, built_json, ready_key};
 use crate::launcher::launch_tests::{creates_answering, creates_answering_with, is_status};
@@ -582,6 +585,23 @@ fn begin_suspended_quick_launch(
     cx: &mut TestAppContext,
     destination: Option<TemplateDestination>,
 ) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
+    begin_template_wake(
+        cx,
+        TemplateFields {
+            destination,
+            ..runs_true()
+        },
+        false,
+    )
+}
+
+/// Press the marked template or its number key against an actual suspended destination. No preview or create
+/// can precede Resume, even when the template already carries a managed checkout and a base name.
+fn begin_template_wake(
+    cx: &mut TestAppContext,
+    fields: TemplateFields,
+    numbered: bool,
+) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
     let (mut helm, connection) = started(cx);
     let mut hosts = fixture_hosts(&[0, 11]);
     hosts.entries[1].value["name"] = json!("שלום\u{202e}box");
@@ -591,13 +611,16 @@ fn begin_suspended_quick_launch(
     let snapshot = vec![
         listing(&[], &[]),
         hosts,
-        marked(Some("paused")),
+        if numbered {
+            bound(None, &[("1", "paused")])
+        } else {
+            marked(Some("paused"))
+        },
         templates_with(template(
             "paused",
             TemplateFields {
                 host: Some("identity12".into()),
-                destination,
-                ..runs_true()
+                ..fields
             },
         )),
     ];
@@ -606,9 +629,16 @@ fn begin_suspended_quick_launch(
     test_support::check_store(&connection, &snapshot, cx);
     let (_, cx) = test_support::open_view(cx, MainView::new);
     settle(cx);
-    chord(cx);
+    if numbered {
+        number_key(cx, 1);
+    } else {
+        chord(cx);
+    }
     let sent = answer_except(&mut helm, cx, |command| {
-        command.path == "/api/sessions" || command.path.ends_with("/resume")
+        matches!(
+            command.path.as_str(),
+            "/api/sessions" | PREVIEW | "/api/hosts/12/resume"
+        )
     });
     let [resume] = &sent[..] else {
         panic!("one Resume expected, got {sent:?}")
@@ -845,6 +875,77 @@ fn folder_history_after_wake() -> serde_json::Value {
         "folders": [],
         "checkout_config_revision": 1,
     })
+}
+
+/// Each shortcut authorizes the base name's suffix search on the awakened connection. The first folder is
+/// taken, so only the second fresh preview may send a create.
+fn a_checkout_shortcut_numbers_its_base_after_wake(cx: &mut TestAppContext, numbered: bool) {
+    let fields = TemplateFields {
+        destination: Some(TemplateDestination::Github("acme/bar".into())),
+        name: Some("review".into()),
+        ..runs_true()
+    };
+    let (mut helm, cx, mut host, resume) = begin_template_wake(cx, fields, numbered);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let first = hold_woken_preview(&mut helm, cx, &host, "review");
+    first.reply(&mut helm, 409, json!(TAKEN));
+    settle(cx);
+    let second = hold_woken_preview(&mut helm, cx, &host, "review-2");
+    let create = create_woken_checkout(&mut helm, cx, &host, second, "bar-review-2");
+    assert_eq!(create.body.as_ref().unwrap()["title"], "review-2");
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. The test refused the create")
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
+/// The marked template launches under its own numbered name without reopening the form.
+#[gpui::test]
+fn the_marked_checkout_wakes_the_host_and_numbers_its_name(cx: &mut TestAppContext) {
+    a_checkout_shortcut_numbers_its_base_after_wake(cx, false);
+}
+
+/// The number key keeps the same allocation authority as the marked template through the wake.
+#[gpui::test]
+fn a_number_key_checkout_wakes_the_host_and_numbers_its_name(cx: &mut TestAppContext) {
+    a_checkout_shortcut_numbers_its_base_after_wake(cx, true);
+}
+
+/// A host dropping out before the new preview answers is a visible launch refusal. A late ready preview
+/// cannot silently re-arm the spent shortcut.
+#[gpui::test]
+fn a_woken_checkout_shortcut_returns_if_the_host_drops_out_during_preview(cx: &mut TestAppContext) {
+    let destination = TemplateDestination::Github("acme/bar".into());
+    let (mut helm, cx, mut host, resume) = begin_suspended_quick_launch(cx, Some(destination));
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    connect_checkout_host(&mut helm, cx, &mut host);
+    let preview = hold_woken_preview(&mut helm, cx, &host, "");
+    let late = woken_checkout_reply(&host, "bar-1");
+    push_waking_host(
+        &mut helm,
+        cx,
+        &mut host,
+        HostStateView::Unreachable {
+            cause: "Connection lost".into(),
+            last_error: "The test disconnected the host".into(),
+        },
+    );
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. The host became unavailable before the session could launch")
+    );
+    assert!(label(cx, "launcher-launch").is_some());
+    assert!(label(cx, "launch-wake").is_none());
+    preview.reply(&mut helm, 200, late);
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty());
 }
 
 /// A quick launch being prepared holds the launch slot, and SPEC.md keeps the launcher busy then as during a launch:

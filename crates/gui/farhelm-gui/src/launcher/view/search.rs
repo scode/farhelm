@@ -52,7 +52,7 @@ use gpui::{
 use super::Launcher;
 use super::field_list::{Drawn, FieldList, step};
 use super::host_name_with_phase;
-use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, recent_hover, wrapper_tail};
+use super::recents::{KEEPS_ENVIRONMENT, RecentRefusal, RecentSurface, recent_hover, wrapper_tail};
 use crate::assets::{Icon, TERMINAL_FONT};
 use crate::components::{HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chip};
 use crate::focus::{self, Mark};
@@ -315,19 +315,21 @@ impl Launcher {
             return Some(words.to_owned());
         }
         let stale = match row {
-            Row::Recent { entry, .. } => match self.recent_refusal(entry, cx)? {
-                RecentRefusal::Retired => return Some(RETIRED_CONTAINER_REASON.to_owned()),
-                RecentRefusal::KeepsEnvironment => return Some(KEEPS_ENVIRONMENT.to_owned()),
-                RecentRefusal::Stale => true,
-                // Not reached: `held_by_row` refused above what Restart with holds.
-                RecentRefusal::Held => {
-                    debug_assert!(
-                        false,
-                        "a held destination is refused before the setup is looked at"
-                    );
-                    false
+            Row::Recent { entry, .. } => {
+                match self.recent_refusal(entry, RecentSurface::Search, cx)? {
+                    RecentRefusal::Retired => return Some(RETIRED_CONTAINER_REASON.to_owned()),
+                    RecentRefusal::KeepsEnvironment => return Some(KEEPS_ENVIRONMENT.to_owned()),
+                    RecentRefusal::Stale => true,
+                    // Not reached: `held_by_row` refused above what Restart with holds.
+                    RecentRefusal::Held => {
+                        debug_assert!(
+                            false,
+                            "a held destination is refused before the setup is looked at"
+                        );
+                        false
+                    }
                 }
-            },
+            }
             Row::Folder(path) => !self.launch_history(cx).is_some_and(|history| {
                 history
                     .folders
@@ -513,7 +515,7 @@ impl Launcher {
             // The empty pane's fill, as a click on its row makes it: it never launches, from Enter here either (the old
             // search row did not). `search_row_refusal` has already said why a setup cannot be taken.
             Row::Recent { entry, .. } => {
-                let _ = self.take_recent(&entry, window, cx);
+                let _ = self.take_recent(&entry, RecentSurface::Search, window, cx);
             }
             // A managed checkout of the repository, as the repository field's pick makes it (`checkout`).
             Row::Github(repo) => self.pick_repository(repo, window, cx),

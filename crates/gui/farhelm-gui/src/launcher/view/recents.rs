@@ -32,6 +32,13 @@ pub(super) enum RecentRefusal {
     KeepsEnvironment,
 }
 
+/// Only the empty command pane can use a verified checkout setup retained across suspension.
+#[derive(Clone, Copy)]
+pub(super) enum RecentSurface {
+    CommandPane,
+    Search,
+}
+
 impl Launcher {
     /// The draft's filter for the recent setups: its agent type, model and effort, and its permission only when the
     /// user chose it (`recents`' module docs).
@@ -48,7 +55,7 @@ impl Launcher {
     /// Up to three setups matching the draft, each named by the place where it ran. The command pane can still
     /// show those choices in Restart with, where it draws them disabled.
     pub(super) fn recent_rows(&self, cx: &App) -> Vec<(LaunchHistoryEntry, HostText)> {
-        let Some(history) = self.recent_history(cx) else {
+        let Some(history) = self.command_pane_history(cx) else {
             return Vec::new();
         };
         let destination = match &self.draft.checkout {
@@ -70,6 +77,7 @@ impl Launcher {
     pub(super) fn recent_refusal(
         &self,
         entry: &LaunchHistoryEntry,
+        surface: RecentSurface,
         cx: &App,
     ) -> Option<RecentRefusal> {
         if entry.selection.container.is_some() {
@@ -77,7 +85,7 @@ impl Launcher {
         }
         // The row was drawn from the history as it was; a host change since has dropped that history, and with it the
         // row's claim to this host's folders.
-        if !self.recent_offered(entry, cx) {
+        if !self.recent_offered(entry, surface, cx) {
             return Some(RecentRefusal::Stale);
         }
         // Both lists show the reason before taking a held row and still check it again at dispatch.
@@ -93,10 +101,11 @@ impl Launcher {
     pub(super) fn take_recent(
         &mut self,
         entry: &LaunchHistoryEntry,
+        surface: RecentSurface,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Result<(), RecentRefusal> {
-        if let Some(refusal) = self.recent_refusal(entry, cx) {
+        if let Some(refusal) = self.recent_refusal(entry, surface, cx) {
             return Err(refusal);
         }
         // A recent setup carries its place (SPEC.md, "Creation": recipe and place together): a new environment's

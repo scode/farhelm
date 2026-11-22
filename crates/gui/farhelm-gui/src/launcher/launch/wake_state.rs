@@ -11,6 +11,10 @@ use farhelm_proto::ui_channel::HostStateView;
 pub(super) const CONNECTION_BUDGET: Duration = Duration::from_secs(60);
 pub(super) const BUSY_RETRY: Duration = Duration::from_secs(1);
 
+/// A checkout that never saw its new connection cannot have allocated a folder or started a session. Keep the
+/// established checkout refusal even though the desktop app has only one connection wait.
+const CHECKOUT_CONNECTION_TIMEOUT: &str = "The host resumed, but this window did not see it connect within 60 seconds. The session was not launched; try again.";
+
 /// Which evidence the wake still needs. Ready retains the destination hold through the hidden launcher’s
 /// folder-default or preview wait.
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -161,6 +165,7 @@ pub(super) struct ResumeWait {
     pub(super) phase: Phase,
     watch: Watch,
     budget: Budget,
+    checkout: bool,
     retry_at: Option<Instant>,
     /// A push can precede its reply. Retain the observed failure in case an accepted or busy reply follows.
     /// A terminal command refusal supplies its own more specific diagnosis instead.
@@ -176,13 +181,14 @@ enum ObservationFailure {
 }
 
 impl ResumeWait {
-    pub(super) fn new(state: &HostStateView, now: Instant) -> Self {
+    pub(super) fn new(state: &HostStateView, now: Instant, checkout: bool) -> Self {
         let mut budget = Budget::new(now);
         budget.pause(now);
         Self {
             phase: Phase::Asking,
             watch: Watch::new(state),
             budget,
+            checkout,
             retry_at: None,
             pending_failure: None,
         }
@@ -241,6 +247,8 @@ impl ResumeWait {
         if remaining.is_zero() {
             let reason = if self.phase == Phase::Busy {
                 "The host stayed busy with another operation for 60 seconds; try again when it finishes"
+            } else if self.checkout {
+                CHECKOUT_CONNECTION_TIMEOUT
             } else {
                 "The host resumed but did not connect within 60 seconds; try again when it connects"
             };

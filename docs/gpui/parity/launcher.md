@@ -1262,8 +1262,10 @@ later (Deviations, the first bullet).
 Case: its 13 cases of a launch that resumes its suspended host first (lines 216 to 630 and 1131 to 1835 at the pin); its
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
-The desktop launcher resumes a host before launching in an existing folder. The remaining managed-checkout cases depend
-on obtaining a fresh preview after the wake.
+All 13 cases are covered by deterministic fake-helm tests in `launcher::wake_tests`, `launcher::checkout_tests` and
+`templates::dispatch_tests`. A recent checkout setup can be pressed while suspended after the open launcher read it on
+the same verified installation. The history read requires a connection. The old browser fixture simulated suspension in
+the page while its helm still had a connected host.
 
 ## Deviations
 

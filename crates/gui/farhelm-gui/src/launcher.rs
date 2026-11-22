@@ -60,7 +60,7 @@ mod yolo;
 #[cfg(test)]
 mod browse_tests;
 #[cfg(test)]
-mod checkout_tests;
+pub(crate) mod checkout_tests;
 #[cfg(test)]
 mod custom_flags_tests;
 #[cfg(test)]

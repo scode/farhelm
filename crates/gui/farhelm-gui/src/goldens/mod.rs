@@ -1020,6 +1020,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_wake_setup,
     },
     Scene {
+        name: "launcher-checkout-on-suspended-host",
+        size: (1080., 900.),
+        draw: session_lists_then,
+        setup: launcher_waking_checkout_setup,
+    },
+    Scene {
         name: "launcher-host-menu",
         size: (1080., 1160.),
         draw: session_lists_then,

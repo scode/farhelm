@@ -8,7 +8,9 @@
 //! - **Per host connection.** The history is read for the chosen host on the connection the launcher sees it on
 //!   ([`HistoryKey`]): when the launcher opens, and again whenever the host or its connection changes. The helm answers
 //!   only for a connected host, from what its live connection claims, so a registry row retargeted onto another
-//!   installation never offers the replaced one's folders.
+//!   installation never offers the replaced one's folders. When the same verified installation suspends during an
+//!   opening, its already-read managed-checkout setups can still fill the command pane. The new connection supplies
+//!   their exact preview. Folder history, defaults and search still require a current connection.
 //! - **Latest wins.** An answer is kept only while the launcher still names the key it was asked about; a key change
 //!   drops the old answer at once, so the list never shows a moment of another host's folders, and a late answer for an
 //!   earlier key never replaces a newer one. Reads are not held one at a time, as the folder check's are: the helm
@@ -36,6 +38,7 @@
 
 use farhelm_helm_client::ApiPath;
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
+use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::HostStateView;
 use gpui::{App, Context};
 
@@ -43,13 +46,16 @@ use super::super::draft::{FolderDefault, Install};
 use super::super::entry::session_folder;
 use super::super::recents::{merged, remembered_folder};
 use super::Launcher;
+use super::recents::RecentSurface;
 use crate::{local_state, operations};
 
 /// What one history read is about: the host, and the connection the launcher saw it on.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 struct HistoryKey {
-    host: i64,
+    install: Install,
     incarnation: u64,
+    /// The connected identity agreed with the recorded identity when this history was asked for.
+    verified: bool,
 }
 
 /// The launcher's history read: what it last asked about, and its answer while still current.
@@ -72,9 +78,14 @@ impl Launcher {
     /// or it is not connected (the helm would refuse the read).
     fn history_key(&self, cx: &App) -> Option<HistoryKey> {
         let view = self.chosen_host(cx)?;
-        matches!(view.state, HostStateView::Connected { .. }).then_some(HistoryKey {
-            host: view.id,
+        let HostStateView::Connected { identity, .. } = &view.state else {
+            return None;
+        };
+        Some(HistoryKey {
+            install: Install::of(view),
             incarnation: view.incarnation,
+            verified: identity == &view.identity
+                && identity.as_deref().is_some_and(|id| !id.is_empty()),
         })
     }
 
@@ -83,11 +94,18 @@ impl Launcher {
     /// launcher's.
     pub(super) fn follow_history(&mut self, cx: &mut Context<Self>) {
         let key = self.history_key(cx);
+        // Several disconnected hosts have the same absent read key. Test installation ownership before
+        // the early return so switching between them cannot keep a different installation's answer.
+        if key.is_none() && !self.retains_checkout_setups(cx) {
+            self.history.answered = None;
+        }
         if key == self.history.asked {
             return;
         }
-        self.history.asked = key;
-        self.history.answered = None;
+        self.history.asked = key.clone();
+        if key.is_some() {
+            self.history.answered = None;
+        }
         self.history.failed = None;
         // The folder list belongs to this history. The command field can also offer rows from other sources.
         self.drop_folder_highlight();
@@ -99,7 +117,7 @@ impl Launcher {
 
     /// Read `key`'s history.
     fn send_history_read(&mut self, key: HistoryKey, cx: &mut Context<Self>) {
-        let host = key.host.to_string();
+        let host = key.install.host.to_string();
         let Ok(path) =
             ApiPath::api(&["launch-history"]).and_then(|path| path.with_query(&[("host", &host)]))
         else {
@@ -114,7 +132,9 @@ impl Launcher {
                 let _ = launcher.update(cx, |launcher, cx| {
                     // An answer for a key the launcher has moved past is dropped here, so a late one never replaces
                     // the answer for the key asked since.
-                    if launcher.history.asked != Some(key) {
+                    if launcher.history.asked.as_ref() != Some(&key)
+                        || launcher.history_key(cx).as_ref() != Some(&key)
+                    {
                         return;
                     }
                     match answer {
@@ -181,18 +201,74 @@ impl Launcher {
         )
     }
 
+    /// Carry a verified answer through Suspend so the same installation's repository setup can still be chosen.
+    /// Both the registry identity and the connection that answered the original read must be known.
+    fn retains_checkout_setups(&self, cx: &App) -> bool {
+        let Some(((key, _), host)) = self.history.answered.as_ref().zip(self.chosen_host(cx))
+        else {
+            return false;
+        };
+        key.verified
+            && key.install == Install::of(host)
+            && (self.draft.can_wake(host)
+                || matches!(
+                    host.state,
+                    HostStateView::TensorlakeChanging {
+                        direction: LifecycleDirection::Suspending,
+                        ..
+                    }
+                ))
+    }
+
+    /// Preserve only repository choices in the command pane while the same installed host can wake.
+    /// A retained reply is never a source of working directories or preview authority.
+    fn suspended_checkout_setups(&self, cx: &App) -> Option<&LaunchHistoryReply> {
+        let host = self.chosen_host(cx)?;
+        (self.draft.can_wake(host) && self.retains_checkout_setups(cx))
+            .then(|| self.history.answered.as_ref().map(|(_, reply)| reply))
+            .flatten()
+    }
+
+    /// The empty command pane can take a retained setup during suspension. Search and folder controls continue
+    /// to use the connected history through `recent_history`.
+    pub(super) fn command_pane_history(&self, cx: &App) -> Option<LaunchHistoryReply> {
+        let Some(history) = self.suspended_checkout_setups(cx) else {
+            return self.recent_history(cx);
+        };
+        let mut reply = merged(
+            Some(history),
+            self.history.environment.as_deref().unwrap_or_default(),
+        )?;
+        reply
+            .launches
+            .retain(|entry| entry.target.is_some() || entry.github_repo.is_some());
+        reply.folders.clear();
+        Some(reply)
+    }
+
     /// Whether `entry` is still among the recent setups' history as it stands, so a row drawn from an earlier one (the
     /// host changed under it) is not taken.
-    pub(super) fn recent_offered(&self, entry: &LaunchHistoryEntry, cx: &App) -> bool {
+    pub(super) fn recent_offered(
+        &self,
+        entry: &LaunchHistoryEntry,
+        surface: RecentSurface,
+        cx: &App,
+    ) -> bool {
         match &entry.target {
             Some(_) => self
                 .history
                 .environment
                 .as_ref()
                 .is_some_and(|entries| entries.contains(entry)),
-            None => self
-                .launch_history(cx)
-                .is_some_and(|history| history.launches.contains(entry)),
+            None => {
+                self.launch_history(cx)
+                    .is_some_and(|history| history.launches.contains(entry))
+                    || (matches!(surface, RecentSurface::CommandPane)
+                        && entry.github_repo.is_some()
+                        && self
+                            .suspended_checkout_setups(cx)
+                            .is_some_and(|history| history.launches.contains(entry)))
+            }
         }
     }
 
@@ -244,8 +320,8 @@ impl Launcher {
         }
     }
 
-    /// Whether a history read for the chosen host is out, or can be asked for: a connected host. A host that is not
-    /// connected has no history to wait for (its launch is refused for the host itself).
+    /// Whether the host's current connection can supply a history read. An existing-folder wake checks again once
+    /// the host connects, if the original press still needs a folder default.
     pub(super) fn history_wanted(&self, cx: &App) -> bool {
         self.history_key(cx).is_some()
     }
@@ -256,7 +332,7 @@ impl Launcher {
         self.history
             .answered
             .as_ref()
-            .filter(|(answered, _)| *answered == key)
+            .filter(|(answered, _)| answered == &key)
             .map(|(_, reply)| reply)
     }
 }
