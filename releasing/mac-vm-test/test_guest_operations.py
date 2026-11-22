@@ -64,6 +64,8 @@ class ManagedOperationsTests(unittest.TestCase):
 Remove must preserve the live supervisor and installed resources, whereas
 Uninstall must remove them. Both retain the database, so swapped menu actions
 or a destructive cleanup cannot be accepted from a model's success claim.
+Remove closes its SSH connection, so the remote stdio proxy may exit while
+the supervisor and terminal hosts keep running. Uninstall still counts it.
 """
         before = {'service': {'LoadState': 'loaded', 'ActiveState': 'active', 'SubState': 'running', 'MainPID': '71'},
                   'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
@@ -96,6 +98,14 @@ or a destructive cleanup cannot be accepted from a model's success claim.
                     self.assertNotIsInstance(caught.exception, EffectFailure)
         require_remote_host_effect('remote-host-remove', before, before)
         require_remote_host_effect('remote-host-uninstall', before, uninstalled)
+        connected = dict(before, farhelm_pids=[71, 80, 81], stdio_proxy_pids=[81])
+        disconnected = dict(before, stdio_proxy_pids=[])
+        require_remote_host_effect('remote-host-remove', connected, disconnected)
+        with self.assertRaisesRegex(EffectFailure, 'Remove changed'):
+            require_remote_host_effect('remote-host-remove', connected, dict(disconnected, farhelm_pids=[71]))
+        with self.assertRaisesRegex(EffectFailure, 'terminal hosts running'):
+            require_remote_host_effect('remote-host-uninstall', connected,
+                                       dict(uninstalled, farhelm_pids=[81], stdio_proxy_pids=[81]))
         for check, after in (('remote-host-remove', uninstalled), ('remote-host-uninstall', before)):
             with self.subTest(swapped=check), self.assertRaises(RuntimeError):
                 require_remote_host_effect(check, before, after)
@@ -120,9 +130,10 @@ not-found/inactive properties make that an acceptable absence observation.
 
 The fixture home is reached through a symlink while the fictional procfs
 reports resolved executable paths, as the kernel does. The process scan counts
-the supervisor and a terminal host whose binary was already deleted, and skips
-an unrelated process, a vanished one, an unreadable link and non-process
-entries. A damaged database reads as no session ids rather than failing.
+the supervisor, a terminal host whose binary was already deleted and an SSH
+proxy. Only the exact proxy invocation gets a role in the receipt. Unrelated
+processes, unreadable links and non-process entries are skipped. A damaged
+database reads as no session ids rather than failing.
 """
         real_home = self.root / 'remote-home-real'
         home = self.root / 'remote-home'
@@ -137,12 +148,15 @@ entries. A damaged database reads as no session ids rather than failing.
             connection.execute('CREATE TABLE sessions (id TEXT, token TEXT)')
             connection.executemany('INSERT INTO sessions VALUES (?, ?)', [('session-b', 'x'), ('session-a', 'y')])
         proc = self.root / 'proc'
-        lib = real_home / '.local/lib/farhelm'
+        lib = real_home.resolve() / '.local/lib/farhelm'
         for name, target in (('71', lib / 'farhelm'), ('80', str(lib / 'farhelm') + ' (deleted)'),
+                             ('81', lib / 'farhelm'),
                              ('90', '/usr/bin/sleep'), ('95', None), ('self', lib / 'farhelm')):
             (proc / name).mkdir(parents=True)
             if target is not None:
                 (proc / name / 'exe').symlink_to(target)
+        (proc / '80' / 'cmdline').write_bytes(b'farhelm\0internal\0stdio-like\0')
+        (proc / '81' / 'cmdline').write_bytes(b'farhelm\0internal\0stdio\0--state-dir\0/private\0')
         namespace = {}
         exec(compile(remote_host_payload(), 'remote-host-payload', 'exec'), namespace)
         shipped = namespace['remote_host_snapshot']
@@ -155,13 +169,14 @@ entries. A damaged database reads as no session ids rather than failing.
         self.assertEqual(snapshot['binary_sha256'], hashlib.sha256(b'binary').hexdigest())
         self.assertEqual(snapshot['unit_sha256'], hashlib.sha256(b'unit').hexdigest())
         self.assertTrue(snapshot['database_present'])
-        self.assertEqual(snapshot['farhelm_pids'], [71, 80])
+        self.assertEqual(snapshot['farhelm_pids'], [71, 80, 81])
+        self.assertEqual(snapshot['stdio_proxy_pids'], [81])
         self.assertEqual(snapshot['session_ids'], ['session-a', 'session-b'])
         # A link that cannot be read (here a directory, as for a process whose
         # link the kernel will not show this user) is skipped.
         (proc / '97' / 'exe').mkdir(parents=True)
         with mock.patch('subprocess.run', side_effect=[reply(0, b'255\n'), reply(0, loaded)]):
-            self.assertEqual(shipped(home, proc)['farhelm_pids'], [71, 80])
+            self.assertEqual(shipped(home, proc)['farhelm_pids'], [71, 80, 81])
         for damage in (b'', b'not a database'):
             with self.subTest(damage=damage):
                 (real_home / '.local/state/farhelm/supervisor.db').write_bytes(damage)

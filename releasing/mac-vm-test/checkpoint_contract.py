@@ -190,12 +190,26 @@ Remove that changed the host. The import records it as a product failure.
 """
 
 
+def _resources_preserved_by_remove(snapshot):
+    """Compare the managed host across closure of the helm's SSH connection.
+
+The remote stdio proxy belongs to that connection. Its exit is compatible
+with an unchanged supervisor, terminal hosts and other remote resources.
+Earlier snapshots have no proxy classification and compare every PID.
+"""
+    resources = dict(snapshot)
+    proxy_pids = resources.pop('stdio_proxy_pids', ())
+    resources['farhelm_pids'] = set(resources['farhelm_pids']).difference(proxy_pids)
+    return resources
+
+
 def require_remote_host_effect(check, before, after):
     """Distinguish forgetting a host from uninstalling its managed resources.
 
 Both menu checks must start with a real provisioned host and readable retained
 data, with the process scan seeing its running supervisor; otherwise the
-premise failed (RuntimeError). Remove must leave the host exactly as it was.
+premise failed (RuntimeError). Remove must preserve the managed host while
+closing its own connection.
 Uninstall must remove the service and files completely, with no supervisor
 or terminal host left running, while keeping the data: the same session ids in
 its database. A contradiction after a valid start is an `EffectFailure`.
@@ -215,7 +229,8 @@ independent SSH observations cannot establish.
     # database keeps the file but loses the sessions it held.
     if not after['data_present'] or not after['database_present'] or after['session_ids'] != before['session_ids']:
         raise EffectFailure('remote menu action lost the retained data directory or database')
-    if check == 'remote-host-remove' and before != after:
+    if (check == 'remote-host-remove'
+            and _resources_preserved_by_remove(before) != _resources_preserved_by_remove(after)):
         raise EffectFailure('Remove changed remote resources or the running supervisor')
     if check == 'remote-host-uninstall' and (
             after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']

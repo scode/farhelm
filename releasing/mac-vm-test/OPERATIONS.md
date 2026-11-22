@@ -145,11 +145,12 @@ They establish user-manager readiness, service state/PID, binary and unit hashes
 database presence, and the pids of every process running Farhelm's private binary (found from each process's `exe` link,
 so a terminal host whose binary was already deleted still counts, and matched against the resolved lib path too; links
 the SSH user cannot read are skipped, since Farhelm's own processes run as that user), plus the session ids in the kept
-database, read read-only. Remove must preserve the snapshot before the host is re-added through native UI; Uninstall
-must remove the service/unit and lib, and leave no Farhelm process running, while retaining the data with the same
-session ids, after the remote session is stopped through Farhelm. A probe never uninstalls, stops a service or repairs
-state. Native captures still establish the actual menu, disappearance, recovered session, uninstall plan and kept-data
-completion notice.
+database, read read-only. The probe records the PIDs of SSH stdio proxies separately without exporting their command
+lines. Remove closes that connection, so its proxy may exit. All other snapshot resources must match before the host is
+re-added through native UI. Uninstall must remove the service/unit and lib and leave no Farhelm process running,
+including proxies, while retaining the data with the same session ids, after the remote session is stopped through
+Farhelm. A probe never uninstalls, stops a service or repairs state. Native captures still establish the actual menu,
+disappearance, recovered session, uninstall plan and kept-data completion notice.
 
 After an override update, the candidate's own native update control must name the exact public latest release after a
 fresh Check for updates. Its accessibility text is sufficient when the provider cannot expose the tooltip in an image;
