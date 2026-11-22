@@ -274,15 +274,6 @@ consequences.
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
 
-- [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
-  can clear a draft prompt that selecting the same shell by hand would keep.
-
-- [`shell-template-hides-incompatible-permissions.md`](shell-template-hides-incompatible-permissions.md) — The template
-  editor says a shell has no approvals while retaining incompatible approvals that block saving.
-
-- [`shell-template-approval-misstates-permission.md`](shell-template-approval-misstates-permission.md) — Approval cards
-  can say a shell template has no permissions while saving a concrete incompatible setting.
-
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.
 

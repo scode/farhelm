@@ -609,7 +609,7 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
 /// active kind uses.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LauncherState {
-    /// One-time create input; templates may fill it, session prefills cannot.
+    /// The draft's one-time prompt. Templates can fill it, and another launch type can leave it dormant.
     pub prompt: Option<String>,
     pub kind: Option<LauncherKind>,
     pub harness: Option<LaunchHarness>,
@@ -777,9 +777,6 @@ pub fn apply_template(
                 next.wrapper_prefix = selection.wrapper_prefix;
                 next.container = selection.container;
                 next.workspace_trust = selection.workspace_trust;
-                if !agent.supports_initial_prompt(false) {
-                    next.prompt = None;
-                }
             }
             LauncherKind::Command if agent.is_shell() => {
                 return Err(refuse(

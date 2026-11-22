@@ -2601,6 +2601,11 @@
       "reference": "approval-card"
     },
     {
+      "golden": "approval-shell-template",
+      "title": "An approval card showing the stored permission and flags of a Bash template",
+      "reference": null
+    },
+    {
       "golden": "terminal-styles",
       "title": "Terminal text styles, colors and box drawing",
       "reference": null
@@ -2896,6 +2901,11 @@
     {
       "golden": "template-wrapper-help",
       "title": "The Wrapper prefix help in a launch template",
+      "reference": null
+    },
+    {
+      "golden": "template-shell-permissions",
+      "title": "The Templates editor showing an incompatible Bash permission and its stored flags",
       "reference": null
     },
     {

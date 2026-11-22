@@ -500,9 +500,30 @@ impl Rows<'_> {
         let fields = &self.editor.draft.fields;
         let options = permission_options(fields.agent);
         if options.is_empty() {
-            // A template may carry a permission when its type is changed
-            // to a shell. Leave its field removable without offering a mode.
-            return vec![div().child("None (shell)").into_any_element()];
+            // Keep a stored mode and its words visible beside the field's existing refusal.
+            // The user can remove the incompatible field or switch back to an agent.
+            let mode = crate::templates::summary::permission_label(
+                fields.agent,
+                fields.permissions.flatten(),
+            );
+            let stored = div()
+                .id("templates-incompatible-permission-mode")
+                .role(Role::Label)
+                .aria_label(mode.clone())
+                .child(mode);
+            let mut controls = vec![
+                self.labelled(Field::Permissions.label(), stored)
+                    .into_any_element(),
+            ];
+            if let Some(words) = &fields.permission_flags {
+                let text = HostText::from_host(farhelm_proto::join_permission_flags(words));
+                controls.push(
+                    HostSentence::new("templates-incompatible-permission-flags")
+                        .mono(&text)
+                        .into_any_element(),
+                );
+            }
+            return controls;
         }
         let mut controls = vec![self.choice(
             Field::Permissions,

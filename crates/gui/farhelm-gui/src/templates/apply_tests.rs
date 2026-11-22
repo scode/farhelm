@@ -451,9 +451,8 @@ fn an_older_model_template_applies_its_inferred_agent_to_the_draft() {
     }
 }
 
-/// A template that switches to an agent that cannot take an initial prompt clears the dormant prompt, as the shared
-/// fold says, while one that sets its own prompt replaces it. This is the one place the replay writes the fold's
-/// result directly, so both directions are pinned.
+/// Applying a template for a program that cannot receive the initial prompt leaves it dormant, as a hand edit does.
+/// An explicit prompt edit still replaces it, and switching back makes the text eligible for the next request.
 #[test]
 fn the_prompt_follows_the_shared_fold() {
     let fixture = Fixture::new();
@@ -470,18 +469,21 @@ fn the_prompt_follows_the_shared_fold() {
     fixture.apply(&mut draft, &[message]).unwrap();
     assert_eq!(draft.prompt, "from the template");
 
-    let pi = template(
-        "pi",
-        TemplateFields {
-            agent: Some(LaunchHarness::Pi),
-            ..TemplateFields::default()
-        },
-    );
-    fixture.apply(&mut draft, &[pi]).unwrap();
-    assert_eq!(
-        draft.prompt, "",
-        "Pi takes no initial prompt, so the template's switch drops it"
-    );
+    for harness in [LaunchHarness::Bash, LaunchHarness::Zsh, LaunchHarness::Pi] {
+        let unsupported = template(
+            "switch",
+            TemplateFields {
+                agent: Some(harness),
+                ..TemplateFields::default()
+            },
+        );
+        fixture.apply(&mut draft, &[unsupported]).unwrap();
+        assert_eq!(draft.agent.harness, Some(harness));
+        assert_eq!(draft.prompt, "from the template");
+        assert_eq!(draft.active_prompt(), None);
+        draft.choose_harness(LaunchHarness::Codex, Some(&fixture.catalog), None);
+        assert_eq!(draft.active_prompt(), Some("from the template"));
+    }
 }
 
 /// SPEC.md: an initial prompt "survives unrelated template applications", and a template that sets it, to the empty

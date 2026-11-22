@@ -13,6 +13,18 @@ pub(super) fn approval_card(_: &SceneState, _: &mut Window, cx: &mut App) -> Any
     approval_scene(approval_spawn(), 660., cx)
 }
 
+/// A proposed shell template shows the incompatible mode and flag words that the write would store.
+pub(super) fn shell_template_approval(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
+    let mut approval = approval_spawn();
+    approval.action = farhelm_proto::approvals::ApprovalAction::TemplateWrite {
+        name: "shell-profile".into(),
+        replaces_existing: false,
+        fields: super::templates::shell_template_fields(),
+        host_name: None,
+    };
+    approval_scene(approval, 660., cx)
+}
+
 /// The same spawn at the old minimum window's card width, from a host with a long name: labels stacked over their
 /// values, the From line wrapping with its ID and Copy ID under the title, and the answer buttons wrapping onto lines of
 /// their own, each "Always allow" button shrinking and wrapping its host name inside the card rather than running past

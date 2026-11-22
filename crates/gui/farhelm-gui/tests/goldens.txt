@@ -10,6 +10,8 @@ linux/approval-card--dark.png f922f298d571bfa8dc994ebf985ce893ba0af67f
 linux/approval-card--light.png 05fca6b3357b23c99d06317a5581fe8107057305
 linux/approval-card-narrow--dark.png 24b688798e1b9aaaee6f6994767a97d97d6760a9
 linux/approval-card-narrow--light.png 08344ddbb54229baeb2f2ede2584400b7c7872b6
+linux/approval-shell-template--dark.png ff016df400320203ddc8a28b01060b315b47be75
+linux/approval-shell-template--light.png 4f7023ee0f4c206226a44372aeabd3a5e703fec4
 linux/attention-cue-flash--dark.png 2f4dc627b20f1f9378f6f55bc8ed3b216bb6c6d1
 linux/attention-cue-flash--light.png 535cf23653405c3303f423ef3d926779a52b75c0
 linux/attention-cue-flight--dark.png 60665294fa1a15be4aa4c921d4ab412f63d091dd
@@ -326,6 +328,8 @@ linux/template-leave-question--dark.png f3080076945370faef126cf54fe54eff70da1761
 linux/template-leave-question--light.png c13070c6e984629a2fc195dfa07e35754d9bb17e
 linux/template-number-menu--dark.png f8f56631065eb646a945ef65068da1bc3b723294
 linux/template-number-menu--light.png 6d590d5d603bfb1650df480d1e9475b8a797abb1
+linux/template-shell-permissions--dark.png 99e55beaccfc1cebbd119f4a15b11d032941cb48
+linux/template-shell-permissions--light.png 6c50b5b1ea832b62173a92c64fddf8c481da0c1a
 linux/template-wrapper-help--dark.png b9868c394e91ceba6aed64b1717a33c5a35e260d
 linux/template-wrapper-help--light.png e83c1de9988b0e729cab003d92e4d6f6c595350e
 linux/templates-dialog--dark.png 6a015f53a2387ec4cb6f297840923946a66cfad6

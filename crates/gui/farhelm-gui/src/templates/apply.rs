@@ -16,8 +16,8 @@
 //! - [`apply`] takes one batch (one `tl:` pick, one shortcut press, one completed sequence) and applies all of it or
 //!   none of it. The fold decides; the replay only repeats what the fold accepted.
 //! - The few things that have no hand edit are set directly: the session name's kind, a retired container choice's
-//!   removal, and the initial prompt the fold leaves (it can clear a dormant prompt when a template switches to an
-//!   agent that cannot take one). A writer that put the folded state straight into the draft would be a second
+//!   removal, and the initial prompt the fold leaves, including one kept dormant by a different launch type.
+//!   A writer that put the folded state straight into the draft would be a second
 //!   application path, and it would skip every side effect the hand edits carry.
 //!
 //! Ported from the old app at reference commit `24bc0580`: `launcher_snapshot`, `remove_matching_held_fields`,
@@ -227,8 +227,7 @@ pub fn apply(
             last_switch = Some((draft.clone(), template.fields.permissions.is_some()));
         }
     }
-    // The fold's final prompt, including a dormant one it cleared because a template switched to an agent that cannot
-    // take one (the old app's `apply_template_prompt`). There is no hand edit that clears a prompt as a side effect.
+    // Keep the fold's final prompt in the draft. The active launch decides whether it can send it.
     if let Some(last) = cleaned.last() {
         let prompt = last.applied.prompt.clone().unwrap_or_default();
         if draft.prompt != prompt {
