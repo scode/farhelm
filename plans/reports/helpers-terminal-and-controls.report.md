@@ -77,3 +77,69 @@ Passed with no open findings. Each draft received an independent source review a
 clarified which modifier bits mouse reports carry, found a template row that needed the common capitalization rule, and
 preserved Trash dismissal when the host button has disappeared. The final draft adds the matching launcher and shortcut
 test callers found during review. Two harness self-tests verify the invariant check after a single key press or release.
+
+### Landing
+
+#### What landed with it
+
+No other plan landed in this round. The plan's seven PRs (#4595, #4596, #4599, #4602, #4604, #4606, #4613) landed with a
+landing fix, #4622. Since the plan's work was written, main had gained the wide-glyph terminal fix, which does not touch
+the terminal's input handling, the drag notice, the key mapping or any control this plan shares. The rebase conflicted
+only in TODO.md, in the shared entry several plans edit; the landing applied exactly this plan's edits to main's
+version, and the entry stays for the other plans' remaining items.
+
+An independent reviewer traced every shared helper back to the copies it replaced and found no blocker: focus rings keep
+each control's insets, colors, corners and visibility; keypad codes and modifier mapping are unchanged; spinners keep
+their phases, including under Reduce Motion; Trash restores focus as before; the validation text rule is byte-identical;
+and the shared test helpers wait and check exactly as the copies did.
+
+#### Fixes made while landing
+
+In [#4622](https://github.com/scode/farhelm/pull/4622/changes), two lint failures the plan left (its report lists no
+clippy run): a small internal type behind the drag-selection key needed a change the linter requires, and an unused
+import left over from moving Trash's focus handling is gone. Neither changes behavior.
+
+#### Checks
+
+The plan refactors the desktop window's code without changing what it does, so the landing ran the GUI library's and
+key-mapping crate's tests, the lint runs, the end-to-end smoke test and every reference screenshot. The worker runs were
+on a separate arm64 Linux test worker, the rest locally on x86_64.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo nextest run -p farhelm-gui -p farhelm-input-mapping`, on the test worker (recorder run
+  `32524423-d789-4fa9-a1e0-98c86686870e`): all 3334 passed.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker, not through the recorder: failed with two errors in
+  the plan's code, which the landing fix corrects; the desktop app's clippy runs did not start after that failure.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `7d76e053-912b-4f3a-8c9f-5661635b3c87`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `9237947b-b9db-4ef8-8433-33be9e2da95e`):
+  passed: every reference scene matched.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix (#4622):
+
+- `cargo nextest run -p farhelm-gui -p farhelm-input-mapping`, on the test worker (recorder run
+  `d74149c4-008d-4a60-aa20-0906dc1a1d92`): all 3334 passed.
+- `cargo clippy --all-targets -- -D warnings` and both desktop app clippy runs (with and without `--features agent`), on
+  the test worker: passed.
+- `cargo fmt --all -- --check`, locally: passed.
+
+The smoke test and reference screenshots above still apply: the fix changes no behavior or drawing.
+
+Skipped: the Rust workspace suite outside the GUI crates and the desktop app's own tests, since nothing else changed;
+macOS, since no Mac was part of this landing (the Option-or-Shift rule takes the platform as an input, so its Mac case
+compiles and is tested on Linux, but nothing that builds only on a Mac was compiled); CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- One focus check still has its own code on purpose. When focus moves into a newly opened dialog and the window has
+  gone, that check gives up, where the shared check would keep waiting for a frame. This is what the report means by
+  "the window must still exist for that move"; the plan expected a case like this.
+- Two test files still build an Enter press by hand, identical to the new shared helper; switching them over is a small
+  optional follow-up. The other hand-built key events differ on purpose.
+- A code comment on the shared capitalization rule says the previous browser app also left leading punctuation and
+  non-ASCII letters unchanged. The only support for that in the repository is one notice-formatting function from that
+  app, so the comment may overstate the history; softening it is a possible follow-up.
