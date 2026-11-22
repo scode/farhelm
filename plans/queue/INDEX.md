@@ -2,7 +2,7 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [complete] `wide-glyph-padding-cells.md` — keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
+- [landing 0c6043] `wide-glyph-padding-cells.md` — keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
 - [complete] `helpers-terminal-and-controls.md` — consolidate duplicated terminal input mapping, keypad digit lookup, control focus rings, focus checks, trash animation and control test helpers without changing behavior
 - [in-flight b3042b] `helpers-hosts-and-sessions.md` — consolidate duplicated helpers in the Hosts panel, approvals, Settings, the session list and the session pane without changing behavior (after `triage-gui-misc.md`)
 - [in-flight bcf2a9] `helpers-launcher-and-templates.md` — consolidate duplicated launcher, template and golden-scene fixture helpers without changing behavior (after `triage-gui-misc.md`, `launch-wakes-suspended-host.md`)
