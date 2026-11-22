@@ -28,6 +28,10 @@ delete), `releasing/changelog.d/`, and `plans/`. Adding a schema version to the 
 never counts either: two plans that each append the next migration step (with its fresh-schema statements, version stamp
 and historical-schema fixtures) only collide at the end of the ladder, and whichever lands second renumbers its step at
 rebase (`.agents/careful-rebase.md`). Two plans that change the same table or column still conflict on that ground.
+Bumping the wire protocol version (`PROTOCOL_VERSION` in `farhelm-proto`) never counts for the same reason: two plans
+that each take the next number only collide on the constant, the test that pins it and the comments and spec sentences
+that cite the number, and whichever lands second moves past main's number at rebase (`.agents/careful-rebase.md`). Two
+plans that change the same message variant, struct or field still conflict on that ground.
 
 Skipping a plan for a conflict does not, on its own, hold back newer candidates that conflict with it: a burst of small
 plans may go ahead of a big one that touches what they touch. What bounds the big one's wait is its pass count, which

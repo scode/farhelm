@@ -128,8 +128,10 @@ Then, for each `[complete]` plan in queue order:
 2. Fetch, and rebase its stack onto `main@origin` as a careful rebase. Conflicts in the shared bookkeeping files listed
    under `plans/.agents/executing.md`, "Picking: "pick a plan to execute", "execute the next plan"" are mechanical: keep
    both sides. When this plan and something already on main each added a database schema version, renumber this plan's
-   step per `.agents/careful-rebase.md`, whether or not the rebase reported a conflict. Main has moved since the review
-   before step 1 if an earlier plan just landed; check what that plan changed against this one again.
+   step per `.agents/careful-rebase.md`, whether or not the rebase reported a conflict; likewise when each bumped the
+   wire protocol version, move this plan's bumps past main's latest number per the same file, judging from the plan's
+   diff before the rebase. Main has moved since the review before step 1 if an earlier plan just landed; check what that
+   plan changed against this one again.
 3. Confirm no PR in the stack touches `plans/`.
 4. Run the checks the rebase calls for, per `AGENTS.md`, "Tests and validation", and `.agents/validation.md`. When the
    maintainer has asked for boats, the SSH test worker or Tensorlake in this flow, run the slow suites there per
