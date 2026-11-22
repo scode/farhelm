@@ -157,6 +157,26 @@ impl TrashDialog {
         self.close.clone()
     }
 
+    /// Give focus to the button that owns this question, using the caller's
+    /// input mark so an older move cannot take focus from a newer action.
+    /// A dismissal takes a fresh mark only if the opener is still present.
+    fn focus_delete_opener(
+        &self,
+        host: Option<i64>,
+        mark: Option<Mark>,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let opener = match host {
+            Some(id) => self.host_deletes.get(&id),
+            None => Some(&self.delete_all),
+        };
+        if let Some(opener) = opener {
+            let mark = mark.unwrap_or_else(|| Mark::take(cx));
+            focus::focus_in_layer(opener, &mark, window, cx);
+        }
+    }
+
     /// Ask to delete everything on `host` (its "Delete all on"), or on every reachable host (`None`, Delete all), as the
     /// state is now: nothing opens while the registry is unread, a trash delete of this window's runs, or the guards
     /// leave nothing to delete. The question returns focus to the button that asked it when cancelled, so that button
@@ -182,13 +202,7 @@ impl TrashDialog {
             return;
         };
         let mark = Mark::take(cx);
-        let opener = match host {
-            Some(id) => self.host_deletes.get(&id).cloned(),
-            None => Some(self.delete_all.clone()),
-        };
-        if let Some(opener) = opener {
-            focus::focus_in_layer(&opener, &mark, window, cx);
-        }
+        self.focus_delete_opener(host, Some(mark), window, cx);
         let dialog = cx.weak_entity();
         let button = self.button.clone();
         let inline = prompt::ask_inline(
@@ -236,13 +250,7 @@ impl TrashDialog {
             return Dismissal::Close;
         };
         self.asked = None;
-        let opener = match host {
-            Some(id) => self.host_deletes.get(&id).cloned(),
-            None => Some(self.delete_all.clone()),
-        };
-        if let Some(opener) = opener {
-            focus::focus_in_layer(&opener, &Mark::take(cx), window, cx);
-        }
+        self.focus_delete_opener(host, None, window, cx);
         cx.notify();
         Dismissal::Stay
     }

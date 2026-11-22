@@ -20,10 +20,7 @@
 
 use std::f32::consts::TAU;
 
-use gpui::{
-    App, AppContext as _, Context, Entity, Hsla, Pixels, Styled as _, Subscription, Svg,
-    Transformation, Window, radians, svg,
-};
+use gpui::{App, Context, Hsla, Pixels, Styled as _, Svg, Transformation, Window, radians, svg};
 
 use crate::assets::Icon;
 use crate::ticker;
@@ -35,33 +32,16 @@ const STEPS: u8 = 8;
 /// otherwise: a live animation handle keeps the ticker's timer firing ten times a second, which an inactive window has
 /// no use for. One handle serves every glyph the view draws, since they all show the same step.
 ///
-/// The step is counted from the ticker's notifications of the turn's own entity: the ticker notifies it once per tick
-/// and nothing else does, so the count is the number of ticks it has seen. The holding view observes that entity and
-/// redraws on every step. Dropping the [`Spinner`] drops the turn, which ends both the ticks and the redraws.
+/// The spinner shows one step per delivered tick, looping after eight steps.
 pub struct Spinner {
-    turn: Entity<Turn>,
-    _redraw: Subscription,
-}
-
-/// The entity the ticker notifies on each tick: the step it has reached, and the animation handle that keeps the ticks
-/// coming. See [`Spinner`].
-struct Turn {
-    step: u8,
-    _animating: ticker::Animating,
-    _ticks: Subscription,
+    ticks: ticker::AnimationTicks,
 }
 
 impl Spinner {
     /// A spinner starting at its first step, redrawing the view `cx` belongs to on every step.
     pub fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Spinner {
-        let turn = cx.new(|cx| Turn {
-            step: 0,
-            _animating: ticker::animate(window, cx),
-            _ticks: cx.observe_self(|turn: &mut Turn, _| turn.step = (turn.step + 1) % STEPS),
-        });
         Spinner {
-            _redraw: cx.observe(&turn, |_, _, cx| cx.notify()),
-            turn,
+            ticks: ticker::AnimationTicks::start(window, cx),
         }
     }
 
@@ -69,7 +49,7 @@ impl Spinner {
     /// the shipped app, where the host sets reduced motion at startup before any turn exists. A turn already past its
     /// first step when reduced motion is set stays at that step.
     pub fn step(&self, cx: &App) -> u8 {
-        self.turn.read(cx).step
+        (self.ticks.count(cx) % u64::from(STEPS)) as u8
     }
 }
 
