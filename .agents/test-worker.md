@@ -34,16 +34,17 @@ before it installs the source and takes the run through completion. The install 
 reaches a held lock fails and names the holder, leaving the running checkout and tools intact.
 
 Assume the worker can be reset to a fresh image at any time. Nothing on it is precious: every run syncs the working copy
-again, and a lost `target/` only makes the next build cold. Before each run the driver checks a marker the bootstrap
-writes last, holding a hash of `scripts/test-worker/remote/bootstrap.sh`; when it is missing (a fresh worker) or names
-another version of the script, the run bootstraps first, which takes a few minutes. `bootstrap` also runs on its own.
-Setup calls queue behind each other. Setup needs exclusive use of the worker and immediately names the active runs if
-tests are already running. A run arriving during setup waits up to five minutes before reporting that setup is busy. The
-detached controller closes its lock descriptors in the test command, so a surviving test subprocess cannot keep other
-checkouts from bootstrapping. Bootstrap installs the packages the Rust suite and the GPUI app need, rootless Podman with
-the exact production base image, tmux, Mutter, Mesa's software renderer, Bun, a static BusyBox, an OpenSSH server and
-passwordless self-ssh for the second-host tests, lingering for the account's systemd user manager, and rustup (the
-toolchain follows `rust-toolchain.toml` on first use). It needs Ubuntu 24.04 or newer and passwordless sudo.
+again, and a lost `target/` only makes the next build cold. Before each run the worker checks, under its setup lock, a
+marker the bootstrap writes last, holding a hash of `scripts/test-worker/remote/bootstrap.sh`; when it is missing (a
+fresh worker) or names another version of the script, the run bootstraps first, which takes a few minutes. `bootstrap`
+also runs on its own. Setup calls queue behind each other. Setup needs exclusive use of the worker and immediately names
+the active runs if tests are already running. A run arriving during setup waits up to five minutes before reporting that
+setup is busy. The detached controller closes its lock descriptors in the test command, so a surviving test subprocess
+cannot keep other checkouts from bootstrapping. Bootstrap installs the packages the Rust suite and the GPUI app need,
+rootless Podman with the exact production base image, tmux, Mutter, Mesa's software renderer, Bun, a static BusyBox, an
+OpenSSH server and passwordless self-ssh for the second-host tests, lingering for the account's systemd user manager,
+and rustup (the toolchain follows `rust-toolchain.toml` on first use). It needs Ubuntu 24.04 or newer and passwordless
+sudo.
 
 ## Running
 
