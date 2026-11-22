@@ -277,6 +277,27 @@ async fn pin_corrects_ancestors_once_and_keeps_version_zero_resume(case: PinCase
         pid: 900_011,
         start: 11,
     };
+    if transcript_path.is_some() {
+        // A rejected first report must leave the launch unpinned and
+        // preserve the previous identity before any verified report.
+        let before = observe_claude_pin(&sup, id).await;
+        let nested = state.path().join("nested.jsonl");
+        std::fs::write(
+            &nested,
+            "{\"source\":\"SYSTEM\",\"type\":\"SYSTEM_MESSAGE\"}\n",
+        )
+        .unwrap();
+        let mut report = positional_pin_report(case, "unverified-parent", &[parent, higher]);
+        report.transcript_path = Some(serde_json::json!(nested));
+        let error = sup.report_conversation(id, report).await.unwrap_err();
+        assert_eq!(error.kind, ErrorKind::Conflict);
+        assert!(
+            error
+                .message
+                .contains("does not verify a main conversation")
+        );
+        assert_eq!(observe_claude_pin(&sup, id).await, before);
+    }
     sup.report_conversation(id, claude_pin_report("child", &[child, parent, higher]))
         .await
         .unwrap();

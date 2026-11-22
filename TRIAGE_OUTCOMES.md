@@ -861,25 +861,6 @@
   Fix in a batch: await a cancelled JoinError before opening the gate.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## tab-retry-test-measures-observation-time.md
-
-- Outcome: `other`.
-- Assessment: None directly. The test for the retry delay after a failed tab close does not time the retry itself, so a
-  retry that came too early could still pass. Verified: Still present (`e2e/host_tabs.rs`
-  `a_failed_tab_end_is_retried_by_the_reap_after_its_backoff`): the ≥900 ms check measures from the close's reply until
-  cleanup is observed, and the fault hook records only a count. A false pass needs an early retry followed by slow
-  observation. Never observed.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard. A correct fix needs timestamps at the retry-scheduling boundary or a deterministic clock, which is more work
-  than the gap is worth.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
 ## suspended-plan-test-erases-its-suspension-premise.md
 
 - Outcome: `other`.
@@ -932,62 +913,6 @@
   policy.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## grid-text-omits-blank-columns.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tests only. The e2e transcript helper glues styled runs together and drops the blank columns
-  between them. "fake-agent starting" reads as "fake-agentstarting", and a trailing prompt blank disappears. Verified:
-  Confirmed. `harness.rs` `grid_text` joins `run.text` and ignores `run.col`. `grid_output.rs` `trim_default_blanks`
-  trims default-style spaces and drops blank runs, so the gaps really are missing from what the helper sees. The
-  helper's doc says "Rows keep their trailing blanks", which is false. No current assertion was found to fail.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code: rebuild the gaps from run columns and correct the doc. This is the shared root of
-  grid-row-is-not-program-line and argv-grid-wrap-witness, and a coordinate-aware helper would also remove their routes.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## kicked-input-test-local-filter.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tests only. Three takeover tests check that a displaced viewer's keystrokes never reach the
-  agent. The test client discards those keystrokes locally before sending them, so the supervisor's ownership guard is
-  never exercised. Verified: Confirmed. `harness.rs` `send_keys` returns quietly when `send_grid_input` refuses, and
-  `helm client.rs` ~L4142 refuses a channel that has already detached. In the lease test (`session_lifecycle.rs`
-  ~L407-418) the client waits for Detached first, so the local drop always happens. The shipped supervisor guard itself
-  is correct.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code. The test is meant to guard a security property (the supervisor enforcing input ownership regardless of
-  the client), and it no longer does. Use a raw connection as the file describes.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## final-stack-drop-claim-window.md
-
-- Outcome: `other`.
-- Assessment: Maintainer tests only. The restart-gap tab test drops its supervisor and builds a new one immediately. In
-  a narrow window the new one comes up read-only, and the test then fails on the wrong refusal text. Verified: Still
-  present (`tab_lifecycle_edges.rs` ~L62-68 has no `retire_supervisor` barrier). The window is source-supported, but no
-  flake has been observed.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  Fix the code: use the existing `retire_supervisor` helper. Tiny.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
 ## trailing-http-golden-omits-populated-environment.md
 
 - Outcome: `other`.
@@ -1023,23 +948,6 @@
   Fix the code (assert the raw hold or incarnation, or narrow the docstring). Discarding is also reasonable.
 - Execution: planned in `plans/queue/triage-tensorlake.md`.
 
-## trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md
-
-- Outcome: `other`.
-- Assessment: None. An integrated test of Delete killing an unmarked tmux tab shell and its background job was removed
-  while old tmux tabs were still served. Verified: that legacy branch is gone on main (`other_pane_roots` no longer
-  exists, and old terminals are ended at startup). Host-path tests cover an unmarked child, but not the shell plus
-  HUP-immune job combination.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
 ## trailing-checkout-status-borrower-reload-keeps-origin-runtime.md
 
 - Outcome: `other`.
@@ -1054,22 +962,6 @@
   behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   discard, or batch (abort the origin runtime before reload and fix the comment)
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md
-
-- Outcome: `other`.
-- Assessment: None. Tests of the Delete guard and Stop for a lone surviving old tmux tab were removed while old tmux
-  terminals were still served. Verified: the record itself says this is obsolete at the tip. Old terminals are now ended
-  at startup, and the tmux driver is removed.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  discard
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md
@@ -1207,22 +1099,6 @@
   fix code (UPDATE the existing row to sealed=2 and match the CHECK error). Tiny.
 - Execution: planned in `plans/queue/triage-supervisor.md`.
 
-## trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md
-
-- Outcome: `other`.
-- Assessment: None directly. A tab whose shell exited must vanish from listings and refuse attach right away, while
-  Close can still destroy it. No host-tab test checks the window before the reap. Verified: no such test in
-  crates/farhelm/tests/e2e/host_tabs.rs on main (test list :282-1281). SPEC_impl.md:2027 "hidden at once" still applies.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code (port to a host tab without auto-reap)
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
 ## secret-handling-tests-omit-output-assertions.md
 
 - Outcome: `other`.
@@ -1339,43 +1215,6 @@
   feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
   fix code (after the reply, push a different stored value and assert the switch follows it)
 - Execution: planned in `plans/queue/triage-gui-misc.md`.
-
-## antigravity-first-refused-pin-test.md
-
-- Outcome: `other`.
-- Assessment: None. Antigravity tests never check that a rejected first callback (before any verified one) leaves the
-  session's process pin and identity untouched. Verified: e2e/hook_identity.rs
-  `antigravity_manual_hook_captures_and_restart_passes_the_conversation` exercises rejected transcripts only after a
-  verified Stop. The only pre-verification case is an unsupported event. claude_pin.rs has no Antigravity rejection
-  case. SPEC_impl.md ~4505 requires rejection "before committing any pin or identity change". The production code was
-  reported correct and I did not re-trace it.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code (add a first-callback child transcript, then assert no pin or identity and that a later main Stop still
-  captures). Discard is also reasonable, since Antigravity is not a first-class harness.
-- Execution: planned in `plans/queue/triage-supervisor.md`.
-
-## shell-session-e2e.md
-
-- Outcome: `other`.
-- Assessment: None directly. No end-to-end test starts a Bash or Zsh session through the normal structured launch path
-  into a live terminal, so a regression between launcher and terminal could go unnoticed. Verified:
-  e2e/structured_launches.rs ~92-94 makes shells `unreachable!` in the vendor fixture and skips them at ~131, ~157, ~174
-  and ~309. No other runtime test uses `LaunchHarness::Bash` or `LaunchHarness::Zsh`.
-- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
-  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
-  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
-  concurrently."
-- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
-  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
-  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
-  fix code (one e2e case per shell: launch, Running/Idle, missing-program Error)
-- Execution: planned in `plans/queue/triage-supervisor.md`.
 
 ## trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md
 

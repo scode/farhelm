@@ -23,7 +23,7 @@
 use crate::agent_listing_real_stack::await_local_host;
 use crate::harness::*;
 use crate::host_terminals::host_process;
-use farhelm_proto::grid::{GridInput, GridOutput, GridStreamCheck, Row, ScreenRow};
+use farhelm_proto::grid::{GridInput, GridOutput, GridStreamCheck, ScreenRow};
 use farhelm_supervisor::store::TerminalKind;
 use std::path::{Path, PathBuf};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -287,7 +287,7 @@ impl GridScreen {
                 self.rows.resize(usize::from(*rows), String::new());
                 for ScreenRow { y, row } in std::mem::take(&mut self.pending) {
                     if let Some(slot) = self.rows.get_mut(usize::from(y)) {
-                        *slot = row_text(&row);
+                        *slot = grid_row_text(&row);
                     }
                 }
             }
@@ -301,21 +301,6 @@ impl GridScreen {
     fn text(&self) -> String {
         self.rows.join("\n")
     }
-}
-
-/// A row's text with each run at its column, blanks between them as spaces.
-fn row_text(row: &Row) -> String {
-    let mut text = String::new();
-    let mut column = 0u32;
-    for run in &row.runs {
-        while column < u32::from(run.col) {
-            text.push(' ');
-            column += 1;
-        }
-        text.push_str(&run.text);
-        column += u32::from(run.width);
-    }
-    text
 }
 
 /// The two messages a client sends to type `line` and press Enter: the

@@ -147,9 +147,6 @@ consequences.
   — The regression that promises to cancel a Restart caller during history encoding can instead let that caller finish
   normally, without rejecting the failed cancellation premise.
 
-- [`tab-retry-test-measures-observation-time.md`](tab-retry-test-measures-observation-time.md) — The retry regression
-  can accept cleanup observed after 900 ms without proving that the retry itself waited for the required delay.
-
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
 
@@ -179,23 +176,10 @@ consequences.
   does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
   package-manager trigger remains unverified after investigation.
 
-- [`grid-text-omits-blank-columns.md`](grid-text-omits-blank-columns.md) — The new test helper can turn visibly
-  separated terminal text into a different string. A test searching that transcript for the displayed text may then time
-  out or match text that was never contiguous on screen. No currently failing assertion was identified.
-
 - [`reboot-concurrency-early-release.md`](reboot-concurrency-early-release.md) — The reboot tests do not keep their
   integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
   that permit, another fixture can be admitted during the preceding fixture's teardown. No permanent process leakage is
   established.
-
-- [`kicked-input-test-local-filter.md`](kicked-input-test-local-filter.md) — A takeover regression assertion lets the
-  client discard the displaced viewer's attempted keystrokes before the supervisor sees them. Passing therefore does not
-  establish the supervisor's input ownership enforcement.
-
-- [`final-stack-drop-claim-window.md`](final-stack-drop-claim-window.md) — A very narrow setup race can make the
-  converted restart-gap tab test fail even when tab opening behaves correctly. Ordinary overlap between the test's
-  supervisors is not this race: both share the same process's live ownership claim. The possible consequence is a
-  maintainer-test false failure only.
 
 - [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
   runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
@@ -249,17 +233,9 @@ consequences.
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md)
-  — Unmarked tab-shell cleanup loses its integrated regression oracle. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-checkout-status-borrower-reload-keeps-origin-runtime.md`](trailing-checkout-status-borrower-reload-keeps-origin-runtime.md)
   — borrower reload fixture retains a competing origin runtime. Abbreviated collection; confidence, proposed dismissals
   and unresolved consequences are preserved in the entry.
-
-- [`trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md`](trailing-lone-surviving-old-tab-loses-its-guard-and-stop-regression-oracles.md)
-  — lone surviving old tab loses its guard and Stop regression oracles. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md`](trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md)
   — failed-spec test accepts an attempted host start as never started. Abbreviated collection; confidence, proposed
@@ -300,10 +276,6 @@ consequences.
 - [`trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md`](trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md)
   — Migrated seal CHECK assertion accepts a duplicate-key failure. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md`](trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md)
-  — Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
   typed for a quick-launch sequence goes to the underlying terminal while the sequence stays armed.
@@ -350,9 +322,6 @@ consequences.
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
 
-- [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
-  despite recording a process identity from a rejected first callback.
-
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.
 
@@ -376,9 +345,6 @@ consequences.
 
 - [`shell-stop-suspend-error-names-agent.md`](shell-stop-suspend-error-names-agent.md) — A partial Stop and suspend
   failure can say an agent stopped after stopping Bash or Zsh.
-
-- [`shell-session-e2e.md`](shell-session-e2e.md) — No end-to-end test starts a first-class Bash or Zsh session through
-  its normal launch path.
 
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
   the Templates leave question as inline, although the app centers it.
