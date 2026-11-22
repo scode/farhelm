@@ -37107,3 +37107,46 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Fixed. Save closes an untouched alias field without sending a write that could undo a concurrent rename.
   Recorded in jj change `kuywoxqs`, bookmark `plan/triage-gui-misc/06-hosts-settings-and-containers`,
   [draft PR #4556](https://github.com/scode/farhelm/pull/4556/changes).
+
+## trailing-ui-stopped-container-waiting-place-offers-suspend.md
+
+- Outcome: `fix code`.
+- Assessment: In Hosts, a stopped container whose container host is disconnected offers Suspend. Choosing it asks a
+  pointless question and is then refused with "use Resume", which the menu does not offer. Verified: In the GPUI app,
+  hosts/offers.rs:379-389 `lifecycle_of` falls through to Suspend for `Stopped { waiting_for_place: true }`, because
+  `resumable` (:395-404) excludes it. The session list treats the same state as "changing", with no action
+  (session_list/environment.rs:198-210). The spec says nothing about which action to offer here.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: Yes. Fix the code: return None for that state. If the fix turns out not
+  to be straightforward, or needs significant additional complexity, stop and bring it back to the maintainer. Size
+  gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog
+  fragment); over that, execution blocks and brings the item back to the maintainer. Remove the feedback file and its
+  index entry.
+- Execution: Fixed. The Hosts menu withholds lifecycle actions from a stopped container while its container host is
+  unavailable. Recorded in jj change `rltwqxyx`, bookmark `plan/triage-gui-misc/06b-container-views`,
+  [draft PR #4563](https://github.com/scode/farhelm/pull/4563/changes).
+
+## trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md
+
+- Outcome: `fix code`.
+- Assessment: In Settings → Containers, one failing container host hides every other host's leftover containers. A
+  failed Refresh also wipes the rows shown before. Verified: podman.rs `listing` returns 502 for the whole list on any
+  error, by design ("a partial list would claim that the hosts not yet asked have no leftovers"). GUI
+  settings/containers.rs ~255/499 replaces the rows with the error. SPEC.md (~5251) says the section follows "the
+  sandbox-leftovers pattern", whose failed read "keeps earlier rows".
+- Decision: returned from Q8 as not straightforward; on the follow-up page the maintainer picked "Keep earlier rows
+  only" (2026-11-21 fewest-questions triage, main ca62397de). Maintainer's note on execution: "yes we definitely need to
+  batch these in a much smaller set of plans. please try to separate them by area of code so there is a good chance of
+  them running concurrently."
+- Completion criteria: GUI only: a failed Refresh of Settings → Containers leftovers keeps the rows shown before and
+  adds the error, as the sandbox-leftovers pattern SPEC cites does. A failing host still fails the whole read (no
+  per-host results). Size gate: about 100 lines of diff (code, tests and docs, not counting this ledger, the queue
+  removal or a changelog fragment); over that, execution blocks and brings the item back to the maintainer. Remove the
+  feedback file and its index entry.
+- Execution: Fixed as decided. A failed discovery keeps the last successful rows beside the error. A successful read
+  replaces them. The helm still reports a failed whole-list read. Recorded in jj change `rltwqxyx`, bookmark
+  `plan/triage-gui-misc/06b-container-views`, [draft PR #4563](https://github.com/scode/farhelm/pull/4563/changes).

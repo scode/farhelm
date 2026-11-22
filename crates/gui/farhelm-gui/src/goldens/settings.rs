@@ -729,7 +729,7 @@ fn containers_scene(
     );
 }
 
-/// Wait for the fake leftover read before taking a picture of the inline question.
+/// Wait for the fake leftover read before showing its row, a later refresh error and the inline Delete question.
 struct ContainerQuestion(Rc<Cell<bool>>);
 
 pub(super) fn settings_containers_question_setup(

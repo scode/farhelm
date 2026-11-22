@@ -128,13 +128,10 @@ fn a_suspended_host_is_not_offered_update_or_rerun() {
     }
 }
 
-/// Why this matters: Resume is a stopped or suspended machine's way back, so the menu and the row offer it exactly
-/// where the old row's `offers_resume` did, and never on a stopped container whose container host is gone (nothing to
-/// start yet); with work in flight on the host the old item was disabled. Specified: a stopped container with its
-/// place available is offered Resume, available; one waiting for its place is offered Suspend instead, as the old menu
-/// offered it wherever Resume was not; a suspended sandbox with work in flight is offered Resume, unavailable.
+/// A stopped container can Resume once its container host is available. While it waits it has nothing to start or
+/// suspend, so Hosts offers neither action. A suspended sandbox with work in flight still has a disabled Resume.
 #[test]
-fn resume_is_offered_where_the_old_row_offered_it() {
+fn stopped_containers_offer_resume_only_when_their_place_is_available() {
     let stopped = |waiting_for_place| HostStateView::Stopped {
         start_failed: None,
         waiting_for_place,
@@ -145,8 +142,7 @@ fn resume_is_offered_where_the_old_row_offered_it() {
     );
     assert_eq!(
         offers(&host(5, "podman", stopped(true)), None, false).lifecycle,
-        Some((Lifecycle::Suspend, true)),
-        "nothing to resume yet, so the old menu's Suspend"
+        None
     );
     let suspended = HostStateView::Suspended {
         observed_at: 0,

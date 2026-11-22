@@ -374,15 +374,19 @@ impl Lifecycle {
 }
 
 /// The provider lifecycle command `host` offers in its phase, whatever is in flight on it: Resume where it is
-/// [`resumable`] or between states, Suspend in every other phase but a deletion, and nothing on a host with no provider
-/// ([`HostKind::provider`]). The Hosts panel's Suspend asks it again before asking and before sending, since the phase
-/// can change while the activity read or the question is out (`super::lifecycle`).
+/// [`resumable`] or between states, and Suspend on the other provider phases that allow it. A stopped container whose
+/// container host is unavailable has no lifecycle action, just as on the session list. The Hosts panel checks the offer
+/// again before asking and before sending, since the phase can change during the activity read or confirmation.
 pub(super) fn lifecycle_of(host: &HostView) -> Option<Lifecycle> {
     HostKind::of(host).provider()?;
     match &host.state {
         // Any deletion, a failed one included, unlike `deleting` in [`offers`], which is a deletion under way only:
         // the old menu withheld Suspend and Resume on every deletion, so Retry or Delete is a failed one's only remedy.
         HostStateView::Deleting { .. } => None,
+        HostStateView::Stopped {
+            waiting_for_place: true,
+            ..
+        } => None,
         HostStateView::TensorlakeChanging { .. } => Some(Lifecycle::Resume),
         state if resumable(state) => Some(Lifecycle::Resume),
         _ => Some(Lifecycle::Suspend),
