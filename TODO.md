@@ -479,6 +479,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   duplicate place in tests and update SPEC. The Podman triage plan deferred the pair together because the older-row
   behavior is unsettled. Plan: `plans/queue/podman-place-host-identity.md`.
 
+- **Diagnose why Muse Code 1.4.24 runs a turn without sending a conversation report.** During the `harness-drift-tests`
+  live run on Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no
+  conversation report arrived and no hook log was written before teardown. If that holds in ordinary use, Farhelm cannot
+  offer to resume Muse conversations on Restart. Find out why the callback did not fire and fix or adapt Farhelm's Muse
+  integration.
+
+- **Verify Restart actually resumes the same conversation in harness drift tests.** The `harness-drift-tests` Restart
+  check currently verifies only that the CLI relaunches with Farhelm's saved resume arguments and accepts fresh
+  unsubmitted input in the composer, so it would pass even if an agent silently opened a brand-new conversation instead
+  of resuming. Update the drift tests for all eight tracked agents (Claude Code, Codex, Antigravity, Goose, Grok, Muse
+  Code, OMP, Pi) to prove the resumed session actually stayed in turn 1's conversation — for example by checking turn
+  1's history or recall and confirming the post-resume hook reports the same conversation ID.
+
+- **Follow up on the compiled pixel-diff generator decision for the golden changes page.** During `golden-changes-page`
+  execution, the queue approved moving pixel decoding, comparison, and orange-highlight generation from Python into the
+  compiled golden test program (about 2 seconds vs 28 seconds for 68 changed pictures, and 6 seconds vs 112 seconds for
+  all 328). Revisit whether to keep the compiled path, and check whether this change is why a planning session had to
+  wait about 30 minutes for mockups because it needed to build Rust code, or whether that wait was unrelated.
+
 ### Tensorlake
 
 - **Deliver recipe credentials through the agent's launch environment instead of its settings files.** Today Farhelm
@@ -521,9 +540,101 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   says there is no checkpoint policy), auto-vacuum, and page size. Decide whether the long-lived stores need explicit
   settings or a periodic maintenance step as they grow. Plan: `plans/queue/sqlite-compaction-settings.md`.
 
-- **Extend real harness drift tests.** Exercise conversation rotation in more installed agents, verify the identity
-  shown after Restart, check that subagent reports are rejected, and cover permission and question prompts and
-  additional model and effort flags.
+### Drift test feature coverage
+
+- **Drift tests: base launch, Codex process isolation, and Cursor/OpenCode interactive turns.** Verify that Codex's
+  `--no-daemon` keeps hooks and commands inside the session's process tree and still launches cleanly when hooks are
+  disabled, verify Cursor's default launch without a permission flag ("Agent's own setting"), and send a real prompt to
+  Cursor and OpenCode to confirm interactive turns work under Farhelm's terminal host (today both stop at the initial
+  TUI or trust screen).
+
+- **Drift tests: model selection across all supporting agents.** Add live model-flag coverage for Cursor (`--model auto`
+  and catalog models) and OpenCode (`--model opencode/<id>`), cover Goose, Pi, and OMP with both
+  `--provider openrouter --model <id>` and no explicit provider, validate current catalog model IDs across Claude,
+  Codex, Antigravity, and Muse (rather than only `haiku` or one model), and verify each CLI actually selects the
+  requested model rather than silently ignoring it.
+
+- **Drift tests: reasoning effort selection.** Add live coverage for Muse (`--reasoning-effort`) and Goose
+  (`GOOSE_THINKING_EFFORT`), which currently have zero drift-test coverage, and exercise non-`low` effort values
+  (especially `off`, `minimal`, `xhigh`, and `max`, which vendors rename or drop) across Claude, Codex, Antigravity, Pi,
+  and OMP, confirming each CLI accepts and applies the requested effort.
+
+- **Drift tests: permission modes and custom permission flags.** Cover YOLO launch flags on Claude, Codex, Antigravity,
+  Grok, Muse, and OMP (currently only Guarded is exercised for those six); Goose's `approve`, `smart_approve`, and
+  `chat` modes (`GOOSE_MODE`); OMP's `Approve` mode (`--approval-mode always-ask`); Cursor's "Agent's own setting"; and
+  custom permission flags surviving Restart (including Antigravity's `--settings` and `--` argument ordering).
+
+- **Drift tests: initial prompt delivery via launch arguments.** Cover all eight agents that accept a launch-time prompt
+  (Claude, Codex, Cursor, Muse, OMP, and Grok via `-- <prompt>`; OpenCode via `--prompt=<prompt>`; Antigravity via
+  `--prompt-interactive=<prompt>`), including leading-dash and multiline prompts, proving each starts interactively,
+  submits the prompt automatically, does not re-send it on Restart, and works with a named conversation start where
+  supported.
+
+- **Drift tests: one-time named conversation starts.** Cover starting a session on a named conversation ID or file
+  across all ten agents — especially Cursor's `--resume <chat-id>` and OpenCode's `--session <session-id>`, which have
+  no drift coverage today — plus relative and absolute session file paths on Pi and OMP, verifying capture on tracked
+  agents and Goose clearing prior capture.
+
+- **Drift tests: conversation capture timing, Stop/UserPromptSubmit hooks, and hooks-disabled mode.** Verify
+  `restart_readiness` timing (pre-prompt on Claude and Goose, first-prompt on Codex, Muse, Grok, and Antigravity,
+  first-reply on Pi and OMP), end-to-end `Stop` and Grok `UserPromptSubmit` hook payloads through Farhelm's own hooks,
+  OMP's 256-byte title-slot prelude, hook invisibility in the TUI (including Antigravity's `{}` stdout), and disabling
+  hooks via `FARHELM_AGENT_HOOKS=none` (including Goose's resume-time disable and Codex keeping `--no-daemon`).
+
+- **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
+  the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)
+  and Antigravity (`plugins/farhelm/{plugin.json,hooks.json}`) are discovered and invoked by the real CLIs inside
+  Farhelm to capture conversations, and exit cleanly and silently when the CLIs run outside Farhelm.
+
+- **Drift tests: in-session conversation rotation.** Wire the existing standalone Claude `/clear`, Codex `/new`, and
+  Codex `/clear` checks into the drift runner (running Codex `/clear` end-to-end through Farhelm's own hook so pending
+  withdrawal and `Stop` confirmation are tested), and add live rotation coverage for Muse (`/clear`, `/new`), Pi
+  (`/new`, `/fork`, `/resume`), OMP (`/new`, `/fork`, `/resume`), Grok (`/new`), and Antigravity, proving Restart
+  resumes the rotated conversation.
+
+- **Drift tests: subagent and nested-agent report rejection.** Wire Claude's standalone shelled-out `claude -p` test
+  into the drift runner and add live coverage for both native subagents and shelled-out nested agents across all six
+  foreground-ownership harnesses (Claude, Codex, Muse, OMP, Grok, Antigravity), proving child invocations cannot replace
+  or corrupt the foreground session's conversation ID.
+
+- **Drift tests: workspace trust pre-trust settings.** Assert that enabling workspace trust actually prevents the trust
+  prompt from appearing on Codex, Muse, and Antigravity (instead of silently answering a prompt that still appeared),
+  and add live coverage for Antigravity's per-launch `--settings '{"trustedWorkspaces":[...]}'`, Pi's `--approve` and
+  `--no-approve` with a project-local config or extension, Claude's `.claude.json` pre-trust edit in an isolated config
+  directory, and Codex's explicit untrusted setting.
+
+- **Drift tests: terminal screen status and dialog detection.** Verify live anchored `Running` and `Idle` readings on
+  Claude, Codex, and Muse (catching silent fallback to generic change-counting when vendor TUI layout drifts), live
+  workspace-trust prompt detection on an untrusted directory for Claude, Codex, Muse, and Antigravity, and live
+  in-conversation `Waiting` approval/question dialogs and `Unknown` overlays (such as model pickers) on Claude and
+  Codex.
+
+- **Drift tests: permission-mode status-line footer detection.** Verify Farhelm's live screen-footer classifier reports
+  YOLO vs non-YOLO accurately on both YOLO and Guarded launches for Claude, Grok, and Muse, and YOLO on `--force`
+  launches for Cursor, catching vendor footer wording or layout drift.
+
+- **Drift tests: `$farhelm` instructions pointer delivery.** Verify all six supporting agents (Claude, Codex, Muse via
+  `SessionStart` hook stdout; Goose via MCP `initialize` instructions; Pi and OMP via `--append-system-prompt`) actually
+  receive the `$farhelm` instructions pointer in model context, and that disabling instructions omits it without
+  breaking conversation hooks.
+
+- **Drift tests: running-agent prompt delivery via bracketed paste.** Verify live Claude and Codex TUIs enable terminal
+  bracketed paste mode, and that Farhelm's bracketed-paste plus Enter (Claude) or Tab (Codex) submits cleanly at idle,
+  preserves multiline prompts without premature submission, and queues cleanly while busy.
+
+- **Drift tests: environment and recipe credential delivery.** Using isolated Claude (`CLAUDE_CONFIG_DIR`) and Codex
+  (`CODEX_HOME`) directories and a local loopback stub HTTP endpoint (zero API cost), verify real Claude and Codex CLIs
+  still honor Farhelm's generated credential configuration and send requests to the configured `base_url` with the
+  expected auth header.
+
+- **Drift tests: wrapper prefixes and declared command launches.** Verify shell (`bash -c`) and `env` wrapper prefixes
+  and declared command launches (`{farhelm_args}`, `{cwd}`, `{codex:trusted-cwd}`) end to end across agents,
+  specifically proving conversation capture and Restart survive `exec`-based wrappers on Grok and OMP and resident
+  wrappers on Claude, Codex, Muse, and Antigravity.
+
+- **Drift tests: remote `BROWSER` opener integration.** Verify how real agent CLIs on Linux — especially Codex and
+  Claude Code, which differ in whether they accept a command template or only a single executable path — invoke
+  Farhelm's remote `BROWSER` opener.
 
 ### Trivial
 
@@ -534,6 +645,25 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session and trashes it when the last session using it is deleted, and then a separate Folder field repeating the path,
   all in the narrow middle column, which makes the Destination box very tall.) Plan:
   `plans/queue/launcher-managed-checkout-compact.md`.
+
+- **Verify `https://farhelm.io/whats-new.json` is served without a redirect after the first website deploy.** The
+  installed Mac app fetches upgrade highlights from `https://farhelm.io/whats-new.json` with redirects disallowed; if
+  the live site redirects that URL, the app silently skips the What's new dialog and retries on every launch. Once the
+  website is deployed with the feed, confirm it responds directly without a redirect (the stable release pre-promotion
+  feed check should also catch this).
+
+- **Scrub link-local and tailnet addresses in agent screen-capture privacy guards.** Neither the screen-capture script
+  (`scripts/capture-agent-screens.py`) nor the Rust screen-fixture privacy check treats link-local addresses
+  (`169.254.0.0/16`) or tailnet/CGNAT addresses (`100.64.0.0/10`) as private, so a captured screen showing one could
+  reach a committed fixture. Teach both guards to scrub or refuse both ranges and add tests.
+
+- **Decide which button is primary on the launcher's hook setup prompt.** When starting a Grok or Antigravity session
+  with automatic Restart hook setup turned off in Settings → Agents, the launcher shows a prompt asking whether to let
+  Farhelm install its hook files into that agent's configuration so **Restart** can resume conversations. Currently
+  **Launch without** is styled as the primary button and **Set up and launch** is the secondary button (chosen during
+  `agent-hook-setup` because the prompt asks consent to modify the agent's saved configuration). Revisit when planning
+  whether **Set up and launch** should be the primary button instead (or keep **Launch without** primary), and update
+  the prompt and its golden screenshots if changed.
 
 ## Mid term
 
