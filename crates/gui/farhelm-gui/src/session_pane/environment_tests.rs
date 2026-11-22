@@ -52,8 +52,8 @@ fn left(cx: &mut gpui::VisualTestContext, id: &str) -> f32 {
 /// pending Resume survives switching and excludes its competing actions"). Specified: for a connected sandbox session,
 /// Suspend is drawn just left of Stop with the provider's help, and Stop's help is "The sandbox keeps running and
 /// billing until you suspend or delete it."; once suspended the control reads Resume with the help "Resume this
-/// environment; preserved processes continue", a click on Stop, Restart, Replace or either caret opens and sends
-/// nothing (no restart or replace either) while Delete still asks; Resume sends `POST /api/hosts/2/resume` with no
+/// environment; preserved processes continue", a click on the plain Stop, Restart or Replace opens and sends
+/// nothing while Delete still asks. Resume sends `POST /api/hosts/2/resume` with no
 /// question, on the session's key, the control is named "Resuming…" with its label still
 /// "Resume", and Delete and Clone open nothing while it is pending; after the helm's 504 at its bound, with the host
 /// pushed resuming, they still open nothing; once the host is connected, Suspend is back and Delete asks again.
@@ -93,8 +93,6 @@ fn the_header_suspends_and_resumes_beside_stop(cx: &mut TestAppContext) {
         "session-header-stop",
         "session-header-restart",
         "session-header-replace",
-        "session-header-restart-options",
-        "session-header-replace-options",
     ] {
         test_support::click(cx, frozen);
         assert!(!any_layer(cx), "{frozen} opens nothing while suspended");
@@ -223,12 +221,10 @@ fn the_headers_suspend_asks_after_its_read(cx: &mut TestAppContext) {
     );
 }
 
-/// The old header withheld the whole Restart and Replace splits while the environment was frozen, and a caret menu
-/// opened just before the environment froze must not open the launcher on it either. Specified: with the Replace caret's
-/// menu opened on a connected sandbox session, the host is pushed suspended; the menu's Replace with… then opens no
-/// launcher.
+/// A menu opened before a provider transition must honor the live phase. This catches a stale Replace with action
+/// entering the launcher while another surface is already suspending the host.
 #[gpui::test]
-fn a_caret_menu_opened_before_a_freeze_opens_no_launcher(cx: &mut TestAppContext) {
+fn a_caret_menu_opened_before_suspending_opens_no_launcher(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
     let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
     pending(&mut fake);
@@ -239,13 +235,37 @@ fn a_caret_menu_opened_before_a_freeze_opens_no_launcher(cx: &mut TestAppContext
     );
     push_host(
         &mut fake,
-        &environment_host(Provider::Sandbox, suspended_at(0)),
+        &environment_host(Provider::Sandbox, changing(LifecycleDirection::Suspending)),
         cx,
     );
     test_support::click(cx, "session-header-replace-options-with");
     assert!(
         !crate::session_list::tests::launcher_drawn(cx),
-        "no launcher on a frozen environment"
+        "no launcher while another surface suspends the environment"
+    );
+}
+
+/// Plain Replace still needs the running supervisor. Its edited form can be opened and can then wake the host
+/// once the user accepts its source warning.
+#[gpui::test]
+fn the_suspended_replacement_caret_offers_the_launcher(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, suspended_at(0));
+    let (mut fake, cx) = open(cx, &[(idle("a"), 0)], false, &host);
+    pending(&mut fake);
+    test_support::click(cx, "session-header-replace");
+    assert!(!any_layer(cx), "plain Replace remains disabled");
+    test_support::click(cx, "session-header-replace-options");
+    assert!(drawn(cx, "session-header-replace-options-menu"));
+    test_support::click(cx, "session-header-replace-options-plain");
+    assert!(
+        drawn(cx, "session-header-replace-options-menu"),
+        "plain action left its menu open"
+    );
+    test_support::click(cx, "session-header-replace-options-with");
+    assert!(crate::session_list::tests::launcher_drawn(cx));
+    assert!(
+        pending(&mut fake).is_empty(),
+        "opening the launcher sends no lifecycle command"
     );
 }
 

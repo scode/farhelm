@@ -214,7 +214,11 @@ impl Launcher {
         };
         let host = view.id;
         let install = Install::of(view);
-        let selected = local_state::selected(cx);
+        // A hidden wake already accepted what the selection meant at its press. Later navigation can move focus,
+        // but cannot change the launch's working directory.
+        let selected = (!super::super::launch::waking(cx))
+            .then(|| local_state::selected(cx))
+            .flatten();
         let collections = self.store.read(cx).collections();
         let folder = if let Some(folder) = session_folder(collections, selected.as_deref(), host) {
             Some(folder)

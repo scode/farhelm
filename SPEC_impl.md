@@ -6862,11 +6862,12 @@ already-running sandbox with an already-connected actor skips recovery, preservi
 failure releases the hold. The helm marks the one lifecycle refusal that waiting can clear, another operation holding
 the host's provisioning lock, with the helm-only `x-farhelm-host-busy` header, the same for every provider
 (`HOST_BUSY_HEADER` in `crates/farhelm-proto/src/http.rs`), so a launch waking its host can retry on it and on nothing
-else. The desktop launcher does not wake a suspended host yet: such a host is not launchable there until the launcher's
-environments work brings resume-before-create (`crates/gui/farhelm-gui/src/launcher/request.rs`). The attention
-classifier treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning
-progress and unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host
-eligibility; stopped forwards during a lifecycle hold do not report a live tunnel failure.
+else. The desktop launcher owns the wake per window. It sends the ordinary Resume and waits for pushed host state on the
+same installation before it sends the create. It retries only the busy marker, once a second within the shared 60-second
+budget. The accepted request and the provider's subsequent Resuming phase pause that budget. The attention classifier
+treats a routine lifecycle transition as neither a Problem nor an Update, while independent provisioning progress and
+unseen setup warnings keep their existing precedence. Tunnel failures retain their connected-host eligibility; stopped
+forwards during a lifecycle hold do not report a live tunnel failure.
 
 An explicit Suspend keeps a saved time for the current pause. With no saved time or a newer Running observation, it
 records its own completion time even when Tensorlake is already paused. Timing and attribution are best effort. A resume

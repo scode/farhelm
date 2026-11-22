@@ -180,15 +180,19 @@ impl ProviderUi {
         }
     }
 
-    /// The state clause of the refusal for a launch on an existing environment that is paused or stopped. The caller
-    /// draws the host's name as host text before it and adds the advice to resume it in Hosts, ending with the action
-    /// its launcher mode was trying to take; that advice must not imply that pressing Launch starts the machine itself.
-    /// `stopped` names a stopped environment as stopped, the way its Hosts row labels it: Stopped is never labelled
-    /// Suspended (SPEC.md, "Container sessions").
-    pub(crate) fn suspended_launch_state(self, stopped: bool) -> &'static str {
+    /// The provider diagnosed a new failure while a launch waited for its existing host to wake. Match the remedy
+    /// for the initiating phase so starting a stopped container never says it failed to resume frozen processes.
+    pub(crate) fn wake_failed(self, stopped: bool) -> &'static str {
         match (self.0, stopped) {
-            (ProviderKind::Tensorlake | ProviderKind::Podman, false) => " is suspended.",
-            (ProviderKind::Tensorlake | ProviderKind::Podman, true) => " is stopped.",
+            (ProviderKind::Tensorlake, _) => {
+                "Tensorlake could not resume this host; check its details"
+            }
+            (ProviderKind::Podman, true) => {
+                "The container host could not start this container; check its details"
+            }
+            (ProviderKind::Podman, false) => {
+                "The container host could not resume this container; check its details"
+            }
         }
     }
 

@@ -273,6 +273,11 @@ pub fn open_replace_with(session: &str, window: &mut Window, cx: &mut App) -> bo
     let Some(row) = store.read(cx).collections().get::<SessionRow>(session) else {
         return false;
     };
+    if crate::session_list::environment::of_key(session, cx)
+        .is_some_and(|host| !host.permits_launch_preparation())
+    {
+        return false;
+    }
     let draft = LaunchDraft::replace_with(session, &row.info, Some(row.host));
     let mark = Mark::take(cx);
     open(draft, &mark, window, cx).is_some()
@@ -301,7 +306,10 @@ pub fn open_restart_with(session: &str, window: &mut Window, cx: &mut App) -> bo
     let Some(row) = store.read(cx).collections().get::<SessionRow>(session) else {
         return false;
     };
-    if restart_with_reason(row).is_some() {
+    if restart_with_reason(row).is_some()
+        || crate::session_list::environment::of_key(session, cx)
+            .is_some_and(|host| !host.permits_launch_preparation())
+    {
         return false;
     }
     let Some(draft) = LaunchDraft::restart_with(session, &row.info, Some(row.host)) else {

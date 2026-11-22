@@ -195,6 +195,12 @@ impl<'a> Environment<'a> {
         crate::hosts::offers::resumable(&self.host.state)
     }
 
+    /// An edited restart or replacement can wake a resumable host before it talks to the supervisor. An environment
+    /// changing state, waiting for its container host, or being deleted cannot prepare a new launch.
+    pub(crate) fn permits_launch_preparation(self) -> bool {
+        !self.frozen() || self.resumable()
+    }
+
     /// Whether the environment is between states, so neither Suspend nor Resume is offered: the provider is changing it
     /// (SPEC.md: "Neither transition offers a competing lifecycle action"), it is stopped and waiting for its place, or
     /// it is being deleted.

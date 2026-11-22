@@ -1,5 +1,6 @@
-//! The two display-only reports a hidden launcher leaves at the bottom of the window: the progress pill while a slow
-//! launch waits for its reply, and the "Started" report for a launch that succeeded without opening its session.
+//! The display-only reports a hidden launcher leaves at the bottom of the window. Preparation starts as the user
+//! presses Launch on a resumable host. The ordinary progress pill takes over once the create has waited two seconds.
+//! A launch that succeeded without opening its session leaves a brief "Started" report.
 //!
 //! SPEC.md, "Creation": "after about two seconds, a small pending pill appears at the bottom of the window with a
 //! spinner, Launching (Restarting or Replacing for those modes), the captured host's name, the session name when
@@ -8,7 +9,7 @@
 //! `LaunchProgress` (`launch_progress.rs`) and its `started_report` (`list/view.rs`) at reference commit `24bc0580`,
 //! with their `.launch-progress-pill` styles (`app.css` around line 6548). Here's the TLDR:
 //!
-//! - **One slot.** Both go through the layer manager's launch pill (`layers::show_launch_pill`), which places it centered
+//! - **One slot.** Each goes through the layer manager's launch pill (`layers::show_launch_pill`), which places it centered
 //!   20 pixels above the window's bottom edge, keeps it from taking focus or the pointer, and lets a later report
 //!   replace an earlier one. [`super::launch`] decides when each shows and takes it down.
 //! - **Captured words.** The progress pill names what the request names: the host and the name as they were at the
@@ -220,7 +221,7 @@ impl Render for StartedReport {
     }
 }
 
-/// The capsule both reports are drawn in, under `id`: `.launch-progress-pill .launch-progress`'s border, fill, shadow
+/// The capsule each report is drawn in, under `id`: `.launch-progress-pill .launch-progress`'s border, fill, shadow
 /// and padding, with the old 12-pixel text in `--fg-0`.
 fn capsule(id: &'static str, palette: &theme::Palette) -> gpui::Stateful<gpui::Div> {
     div()
@@ -236,4 +237,50 @@ fn capsule(id: &'static str, palette: &theme::Palette) -> gpui::Stateful<gpui::D
         .shadow(dialog_shadow(palette))
         .text_size(metrics::TEXT_SM)
         .text_color(theme::color(palette.fg_0))
+}
+/// Preparation before the create travels to its host. This capsule never takes input or focus, so a switcher or a
+/// different session can stay open while the destination wakes.
+pub(super) struct WakePill {
+    host: HostText,
+    starting: bool,
+    spinner: Option<Spinner>,
+}
+
+impl WakePill {
+    pub(super) fn new(host: HostText, starting: bool) -> Self {
+        Self {
+            host,
+            starting,
+            spinner: None,
+        }
+    }
+}
+
+impl Render for WakePill {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let spins = ticker::is_active(window, cx);
+        if spins != self.spinner.is_some() {
+            self.spinner = spins.then(|| Spinner::start(window, cx));
+        }
+        let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
+        let palette = theme::palette(cx);
+        let words = HostSentence::new("launch-wake-label")
+            .text(if self.starting {
+                "Starting "
+            } else {
+                "Resuming "
+            })
+            .host(&self.host)
+            .text(", then connecting… the session starts when it's ready");
+        capsule("launch-wake", palette)
+            .role(Role::Status)
+            .aria_label(words.accessible_name())
+            .flex()
+            .flex_row()
+            .items_center()
+            .gap(px(GAP))
+            .min_w_0()
+            .child(spinner_icon(step, px(SPINNER), theme::color(palette.fg_0)))
+            .child(div().min_w_0().overflow_hidden().child(words))
+    }
 }

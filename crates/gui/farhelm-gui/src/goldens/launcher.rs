@@ -5,7 +5,7 @@ use farhelm_proto::launcher::{LaunchTemplate, TemplateFields};
 use farhelm_proto::tensorlake::SshKeyStatus;
 use farhelm_proto::ui_channel::{Collection, CollectionState, HelmMarker, KeyedEntry, Preferences};
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
-use gpui::{App, Entity, Window, point, px};
+use gpui::{App, AppContext as _, Entity, Window, point, px};
 use serde_json::json;
 
 use super::{SceneState, fleet, session_list_scene_preferring};
@@ -14,6 +14,66 @@ use crate::launcher::environment_tests::{account, recipe_json};
 use crate::session_list::SessionList;
 use crate::session_list::tests::{preferences_state, session};
 use crate::test_support::{click_before_redraw, meta};
+
+/// Show the temporary capsule with the launcher hidden and the fake's Resume still outstanding.
+pub(super) fn launcher_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::launcher::view_tests::fixture_hosts;
+    use crate::session_list::tests::{listing, preferences};
+    window.set_driver_enabled(true);
+    crate::ticker::set_reduced_motion(true, cx);
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = crate::session::start(handle, events, None, cx);
+    let hosts = fixture_hosts(&[0, 11]);
+    helm.connect(vec![listing(&[], &[]), preferences(&[], None), hosts]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    state.after.set(Some(open_wake_launcher));
+    state
+        .after_capture
+        .set(Some(super::session_list::disconnect_pending_launch));
+}
+
+/// Use the same visible launcher press that hides the form and starts Resume.
+fn open_wake_launcher(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use farhelm_proto::ui_channel::{HostStateView, HostView};
+    let Some(store) = crate::session::current_store(cx) else {
+        state.after.set(Some(open_wake_launcher));
+        return;
+    };
+    let host = store
+        .read(cx)
+        .collections()
+        .get::<HostView>(&HostView::key(12))
+        .expect("the fixture lists its suspended host");
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
+    let mut draft = crate::launcher::launch_tests::command_draft();
+    draft.choose_host(12, "~".into());
+    draft.edit_folder("/home/user/work".into());
+    let mark = crate::focus::Mark::take(cx);
+    assert!(crate::launcher::view::open(draft, &mark, window, cx).is_some());
+    state.after.set(Some(press_wake_launcher));
+}
+
+/// The capture waits for the actual launch button and then for the wake it opens.
+fn press_wake_launcher(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    if click_control(window, cx, "launcher-launch") {
+        assert!(crate::launcher::launch::waking(cx));
+    } else {
+        state.after.set(Some(press_wake_launcher));
+    }
+}
 
 /// Which launcher interaction must settle before capture.
 #[derive(Clone, Copy, PartialEq, Eq)]

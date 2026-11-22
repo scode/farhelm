@@ -292,6 +292,8 @@ pub enum Note {
     /// box as one plain line in the warning ink, as the box's own refusal is, where the old launcher said why a
     /// template did not apply (`view::search`), and cleared by the next press of Launch as by an edit.
     Refusal(HostSentence),
+    /// The host could not be prepared for this launch. Drawn beside Launch as a complete pre-create refusal.
+    WakeRefusal(HostSentence),
 }
 
 /// How long a quick launch's banner stays once its templates applied, unless an edit takes it away first: the old
@@ -391,6 +393,9 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
+        if self.begin_host_wake(SourceConsent::default(), mark, window, cx) {
+            return true;
+        }
         // The launcher is never drawn, so the history is asked for, and the default settled, here; only while Launch
         // waits for it, as the old app's quick launch did. A managed checkout's quick launch must not read it: the
         // answer's configuration revision would make the preview it waits for stale, and it would be shown instead.
@@ -1183,21 +1188,20 @@ impl Launcher {
     /// launcher did: restarting then would quietly keep the session's old model while the field shows another.
     fn refusal(&self, cx: &App) -> Option<Refusal> {
         if crate::hosts::host_change_in_flight(cx) {
-            return Some(Refusal::Plain(launch::HOST_CHANGE_IN_FLIGHT.to_owned()));
+            return Some(Refusal(launch::HOST_CHANGE_IN_FLIGHT.to_owned()));
         }
         if self.source_busy(cx) {
-            return Some(Refusal::Plain(SOURCE_BUSY.to_owned()));
+            return Some(Refusal(SOURCE_BUSY.to_owned()));
         }
         if self.save_panel.is_some() {
-            return Some(Refusal::Plain(TEMPLATE_PANEL_OPEN.to_owned()));
+            return Some(Refusal(TEMPLATE_PANEL_OPEN.to_owned()));
         }
         let hosts = self.hosts(cx);
         if matches!(self.draft.mode, Mode::RestartWith(_)) && self.model_pending(cx) {
-            return self.draft.host_refusal(&hosts).or_else(|| {
-                Some(Refusal::Plain(
-                    "Choose a model before restarting".to_owned(),
-                ))
-            });
+            return self
+                .draft
+                .host_refusal(&hosts)
+                .or_else(|| Some(Refusal("Choose a model before restarting".to_owned())));
         }
         let recipes = Recipes::for_draft(&self.draft, self.store.read(cx).collections());
         let target = Target {
@@ -1212,7 +1216,7 @@ impl Launcher {
             return self
                 .draft
                 .place_refusal(target)
-                .or_else(|| Some(Refusal::Plain(SELECT_REPOSITORY.to_owned())));
+                .or_else(|| Some(Refusal(SELECT_REPOSITORY.to_owned())));
         }
         self.draft
             .launch_refusal(target, self.live_launch(cx).as_ref())
@@ -1388,6 +1392,9 @@ impl Launcher {
         self.sandbox = None;
         // A press speaks for itself: a quick launch's or a shortcut's refusal said before it would hide its reason.
         self.note = None;
+        if self.begin_host_wake(source, mark, window, cx) {
+            return;
+        }
         let hosts = self.hosts(cx);
         let mut request = self.request(confirm_yolo, source, cx);
         // A billed environment asks first ("Create a sandbox for this session?"), and its answer submits again.
@@ -2579,7 +2586,11 @@ impl Render for Launcher {
                 ),
                 _ => None,
             };
-        let alert = alert.map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
+        let alert = match &self.note {
+            Some(Note::WakeRefusal(reason)) => Some(reason.clone()),
+            _ => alert,
+        }
+        .map(|sentence| refusal_alert("launcher-refusal", sentence, palette));
         // What a press of Launch has to say, in the old footer's order: the warning about what it stops of its source
         // first (Replace with's, or Restart with's while the agent works), then the YOLO question or the sandbox
         // question while one is up (a submit retires both before it can raise either), else the refusal. The warning
@@ -2665,10 +2676,7 @@ impl Render for Launcher {
             palette.on_accent_dim
         };
         let help = match &refusal {
-            Some(Refusal::Plain(words)) => HoverHelp::tooltip(words.clone()),
-            Some(reason @ Refusal::ResumeHost { .. }) => {
-                HoverHelp::sentence(reason.append_to(HostSentence::new("launcher-launch-help")))
-            }
+            Some(Refusal(words)) => HoverHelp::tooltip(words.clone()),
             None => HoverHelp::tooltip(match self.draft.mode {
                 // The old stop-first wording while the agent works, so the help never contradicts "Stop and restart".
                 Mode::RestartWith(_) if self.source_working(cx) => {
@@ -2743,7 +2751,7 @@ impl Launcher {
     /// the words in bold). A template refusal note sits below the command field (`view::search`).
     fn note_element(&self, palette: &theme::Palette) -> Option<AnyElement> {
         let sentence = match self.note.as_ref()? {
-            Note::Refusal(_) => return None,
+            Note::Refusal(_) | Note::WakeRefusal(_) => return None,
             Note::Banner(sentence) => sentence,
         };
         Some(
@@ -2798,5 +2806,74 @@ pub(super) fn host_name_with_phase(host: &HostView) -> HostText {
         name
     } else {
         HostText::from_host(format!("{} ({})", name.raw(), phase::words(&host.state)))
+    }
+}
+impl Launcher {
+    /// A visible press or ready quick-launch shortcut authorizes waking its existing destination. The draft's other
+    /// refusal checks still run first so a missing argument or invalid destination cannot start the host.
+    fn begin_host_wake(
+        &mut self,
+        source: SourceConsent,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if launch::waking(cx) || self.refusal(cx).is_some() {
+            return false;
+        }
+        let Some(host) = self
+            .chosen_host(cx)
+            .filter(|host| self.draft.can_wake(host))
+            .cloned()
+        else {
+            return false;
+        };
+        if self.draft.folder_default_waiting() && self.settle_folder_default(cx) {
+            self.sync_fields(window, cx);
+        }
+        if !launch::wake::start(
+            cx.entity(),
+            &self.draft.mode,
+            &host,
+            source,
+            mark,
+            window,
+            cx,
+        ) {
+            return false;
+        }
+        self.waiting_batches.clear();
+        if let Some(layer) = self.layer.take() {
+            layers::close(layer, window, cx);
+        }
+        true
+    }
+
+    /// A fresh connection has arrived. Use the regular folder/default/preview pipeline with the launch's original
+    /// permission and focus mark. A hidden launcher that waits after this retains its wake's destination hold.
+    pub(in crate::launcher) fn continue_after_wake(
+        &mut self,
+        source: SourceConsent,
+        mark: Mark,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if self.draft.folder_default_waiting() {
+            return self.start_or_wait_for_folder(mark, window, cx);
+        }
+        self.submit_or_wait_for_preview(source, mark, window, cx)
+    }
+
+    /// An unsuccessful preparation has sent no create. Use the complete refusal wording and the normal notice or
+    /// frame restoration, keyed to the original press.
+    pub(in crate::launcher) fn wake_refused(
+        &mut self,
+        reason: HostSentence,
+        cx: &mut Context<Self>,
+    ) {
+        self.folder_wait = None;
+        self.disarm_checkout_launch();
+        self.note = Some(Note::WakeRefusal(reason));
+        cx.notify();
     }
 }

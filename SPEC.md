@@ -359,15 +359,12 @@ Suspend requires a connected host after the activity read and a complete listing
 connected host with a pending or failed session refresh still asks before suspending. An offline or unknown host asks
 even when its cached listing is empty. Suspension preserves running processes and sessions. A session on a suspended
 host says **&lt;host&gt; is suspended; this session continues when it resumes** and offers **Resume host**. Farhelm does
-not suspend automatically. For now the desktop app refuses a launch on a suspended host and asks you to resume it in
-Hosts first. Resuming before the create is planned.
+not suspend automatically.
 
-Once implemented, a launch on a suspended host resumes it first and waits for a fresh connection. While another
+A launch in an existing folder on a suspended host resumes it first and waits for a fresh connection. While another
 operation on that host (a Suspend or Resume from elsewhere, setup, an update) holds it, the launch keeps asking within
 the same minute it allows for the connection, and a Resume that finishes elsewhere meanwhile is enough. If the host is
-suspended again while the launch waits, the launch fails at once and says so. Any other refusal fails it at once. For a
-fresh GitHub checkout, the folder is allocated once the host is ready and the session starts without a second press.
-Only a fresh preview on the new connection can authorize that create.
+suspended again while the launch waits, the launch fails at once and says so. Any other refusal fails it at once.
 
 An explicit Suspend shows **Suspending…**, with a spinner and how long ago Tensorlake was asked, until Tensorlake
 confirms suspension. Only then does the host show **Suspended**, with Farhelm's own completion time. A request that
@@ -383,10 +380,9 @@ The Suspend confirmation is titled **Suspend &lt;host&gt;?**, with its explanati
 **Suspend** in the footer. Its close control, Escape and Cancel dismiss without suspending. The sandbox name, recipe and
 resources use the normal subdued details styling in Hosts.
 
-Once launches resume a suspended host (above), the session launcher shows its own **Resuming** preparation through both
-the Tensorlake call and reconnection, including quick launch. Both existing-directory and fresh-checkout launches say
-the session starts when the host is ready. A failed preparation says the session was not launched. A host another
-surface is suspending or resuming remains unavailable to this launcher.
+The session launcher shows its own **Resuming** preparation through the provider call and reconnection, including quick
+launch. It says the session starts when the host is ready. A failed preparation says the session was not launched. A
+host another surface is suspending or resuming remains unavailable for a new launch.
 
 Environment supervisor connections use a two-minute input-silence limit. The helm sends a lightweight heartbeat every 30
 seconds independently of session refreshes or storage work. If the helm vanishes while the gateway keeps its connection
@@ -1467,17 +1463,16 @@ other. Suspend and Resume are not changes to the host registry: from Hosts or fr
 Stop question (Stop and suspend), they are refused only while this window's own launch targets or is waking that same
 host, and their buttons are disabled for exactly that. Launches on other hosts and host changes elsewhere proceed while
 one is pending, and a launch on that host is left to the launcher's availability rule below and to the host's own
-lifecycle lock. Preparation and required confirmations remain modal until the launch is submitted. A failure or
-follow-up question restores the same launcher with its draft if the user has not moved on since submitting it. Otherwise
-a notice offers it, and the launcher returns when the user opens that notice (see [Keyboard focus](#keyboard-focus)).
-Whether such a notice keeps New and other launches refused until it is opened is not settled yet. Switching to a session
-on another host does not change the submitted launch's destination. The acted-on session's progress, actions, terminal
-attachment and row outcome settle as soon as the reply arrives; only the launcher's return depends on the user. Once
-launches resume a suspended host ("Topology"), successfully waking a suspended sandbox continues to create without
-revealing the launcher, restoring its page isolation or waiting for another dialog. A fresh GitHub checkout then waits
-for this window to see the woken host connect, for at most 60 seconds. When that runs out, nothing is created: the
-launcher returns with its draft and says the window did not see the host connect, and a connection that shows up later
-creates nothing. The wait for the checkout's preview that follows is not part of that limit.
+lifecycle lock. Required confirmations remain modal until the launch is submitted. A failure or follow-up question
+restores the same launcher with its draft if the user has not moved on since submitting it. Otherwise a notice offers
+it, and the launcher returns when the user opens that notice (see [Keyboard focus](#keyboard-focus)). Whether such a
+notice keeps New and other launches refused until it is opened is not settled yet. Switching to a session on another
+host does not change the submitted launch's destination. The acted-on session's progress, actions, terminal attachment
+and row outcome settle as soon as the reply arrives. The accepted press keeps the launcher hidden through the wake (see
+"Topology"). Once the host reconnects, a launch in an existing folder continues directly to the create with the focus
+and selection the user has now. The wait shares a 60-second budget across busy retries and connection waiting. An
+accepted Resume and the provider's subsequent **Resuming** phase pause that budget. On expiry the launcher returns with
+its draft and explains why it did not start. A later connection cannot start the expired launch.
 
 Once the request has waited about two seconds, a small pill at the bottom of the window shows a spinner and a status:
 Launching, Restarting or Replacing, the captured host's name and elapsed seconds, updated about once a second, including
@@ -5315,14 +5310,14 @@ whole container. Suspend and Resume affect any leftover sessions too.
 
 A container host reboot stops the container while retaining its files. Whenever the helm finds a container Stopped while
 connected to its container host, it attempts one automatic start. This also covers an external `podman stop` or
-out-of-memory kill. Stopped has its own state and is never labelled Suspended. Until launches can resume an environment,
-a launch on a stopped container that offers Resume is refused the way a suspended one is, naming the container stopped
-and asking to resume it in Hosts. While starting, the ordinary unavailable card explains that Farhelm is starting the
-container again. A failed start shows the reason and offers Resume. Successful start brings back its supervisor with
-ordinary session classification. A host reboot interrupts sessions last known live, while known exits keep their
-outcome. A container stopped and started on the same host boot returns ended sessions through ordinary exit
-classification. Captured resumable conversations offer Restart, and agents never restart automatically. A helm restart
-reconnects running containers and leaves paused containers paused.
+out-of-memory kill. Stopped has its own state and is never labelled Suspended. A launch in an existing folder on a
+stopped container that offers Resume starts it and waits for a fresh connection. Its preparation pill says **Starting**.
+While starting, the ordinary unavailable card explains that Farhelm is starting the container again. A failed start
+shows the reason and offers Resume. Successful start brings back its supervisor with ordinary session classification. A
+host reboot interrupts sessions last known live, while known exits keep their outcome. A container stopped and started
+on the same host boot returns ended sessions through ordinary exit classification. Captured resumable conversations
+offer Restart, and agents never restart automatically. A helm restart reconnects running containers and leaves paused
+containers paused.
 
 Session metadata names **&lt;recipe&gt; container on &lt;host&gt;**, with a container mark distinct from the sandbox
 cube. The launch action's accessible name names the new container and its host. Its session-owned host appears in Hosts,

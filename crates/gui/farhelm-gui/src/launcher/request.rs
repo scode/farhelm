@@ -12,8 +12,8 @@
 //! which field to fix. Two departures from the old order, both on purpose: a command the shared command-launch rule
 //! refuses is refused here for New, Clone and Replace with too (the old app left it to the helm, which refuses the same
 //! way), and Restart with's "launch settings changed" check is a reason like the others rather than a check made only
-//! at the press. A suspended host is not launchable yet: resuming it before the create (SPEC.md, "Topology")
-//! comes with the launcher's resume-before-create work.
+//! at the press. A resumable host can accept the press. Its actual request body still needs the fresh connection
+//! that the launcher's wake obtains (SPEC.md, "Topology").
 //!
 //! The bodies are `farhelm_proto::session_requests`' types, built only from a draft that passes
 //! [`LaunchDraft::launch_refusal`]. What the old app's bodies carried for its retry keys is gone: the GUI sends none
@@ -56,8 +56,7 @@ use super::draft::{
     RestartBaseline, Tab, repo_identifier,
 };
 use crate::environment_ui::ProviderUi;
-use crate::host_text::{HostSentence, HostText};
-use crate::hosts::identity::display_name;
+use crate::host_text::HostSentence;
 use crate::hosts::offers::{HostKind, resumable};
 
 /// What a launch is checked against besides the draft: the hosts as the store holds them, the model catalog and the
@@ -218,28 +217,13 @@ pub const FOLDER_DEFAULT_WAITING: &str = "Wait for this host's last folder befor
 pub const UNVERIFIED_HOST: &str =
     "The host installation is not verified; a checkout cannot be created";
 
-/// A reason the launcher cannot send a request. Keep the chosen host's name separate from the app's advice so the
-/// alert and its hover can both escape it and isolate its direction.
-pub(super) enum Refusal {
-    Plain(String),
-    ResumeHost {
-        name: HostText,
-        state: &'static str,
-        advice: &'static str,
-    },
-}
+/// An app-written reason a launch cannot start, shared by its button's help and inline refusal.
+pub(super) struct Refusal(pub(super) String);
 
 impl Refusal {
     /// Append the reason after any lead the surface needs, such as "Not launched. ".
     pub(super) fn append_to(&self, line: HostSentence) -> HostSentence {
-        match self {
-            Self::Plain(words) => line.text(words.clone()),
-            Self::ResumeHost {
-                name,
-                state,
-                advice,
-            } => line.host(name).text(*state).text(*advice),
-        }
+        line.text(self.0.clone())
     }
 }
 
@@ -249,7 +233,7 @@ impl LaunchDraft {
     /// puts before its own waits (a `gh:` query not yet picked).
     pub(super) fn place_refusal(&self, target: Target<'_>) -> Option<Refusal> {
         match &self.target {
-            Some(environment) => environment_refusal(environment, target).map(Refusal::Plain),
+            Some(environment) => environment_refusal(environment, target).map(Refusal),
             None => self.host_refusal(target.hosts),
         }
     }
@@ -266,7 +250,7 @@ impl LaunchDraft {
         live: Option<&SessionLaunch>,
     ) -> Option<Refusal> {
         self.place_refusal(target)
-            .or_else(|| self.draft_refusal(target, live).map(Refusal::Plain))
+            .or_else(|| self.draft_refusal(target, live).map(Refusal))
     }
 
     /// The draft's own reasons, after the place has been found usable. None of these name host values.
@@ -281,7 +265,10 @@ impl LaunchDraft {
         }
         // A default for an installation the host row no longer names is about to be decided again (while drawing), so
         // it waits as a pending one does, even in the frame before that.
-        if self.folder_default_waiting() || self.default_moved(target.hosts) {
+        if self.default_moved(target.hosts)
+            || (self.folder_default_waiting()
+                && !target.hosts.iter().any(|host| self.can_wake(host)))
+        {
             return Some(FOLDER_DEFAULT_WAITING.to_owned());
         }
         match self.tab {
@@ -411,29 +398,27 @@ impl LaunchDraft {
         }
     }
 
-    /// The target host's reason, if it has one: it must be in the store and connected (SPEC.md: the host picker lists
-    /// unavailable hosts with their phase, and a create against one cannot go anywhere). Restart with holds the
-    /// source's host, so its wording names that host rather than asking for another (the old app's words). A suspended
-    /// or stopped environment instead names the explicit Resume the desktop app needs before any launch.
+    /// A press can wake an existing environment in a resumable phase. An ordinary disconnected host still needs its
+    /// own recovery first, and a new environment launch has no existing destination to resume.
+    pub(super) fn can_wake(&self, host: &HostView) -> bool {
+        self.target.is_none()
+            && self.host == Some(host.id)
+            && resumable(&host.state)
+            && HostKind::of(host).provider().is_some()
+    }
+
+    /// The target host's refusal, if it is neither connected nor available to wake. Restart with holds its source's
+    /// host, so its remedy cannot ask the user to select another.
     pub(super) fn host_refusal(&self, hosts: &[HostView]) -> Option<Refusal> {
         let view = self
             .host
             .and_then(|id| hosts.iter().find(|host| host.id == id));
-        let connected =
-            view.is_some_and(|host| matches!(host.state, HostStateView::Connected { .. }));
-        if let Some(host) = view
-            && resumable(&host.state)
-            && let Some(provider) = HostKind::of(host).provider()
-        {
-            return Some(Refusal::ResumeHost {
-                name: display_name(host),
-                state: ProviderUi(provider)
-                    .suspended_launch_state(matches!(host.state, HostStateView::Stopped { .. })),
-                advice: self.resume_host_advice(),
-            });
-        }
         let words = match (&self.mode, view) {
-            (_, Some(_)) if connected => None,
+            (_, Some(host))
+                if matches!(host.state, HostStateView::Connected { .. }) || self.can_wake(host) =>
+            {
+                None
+            }
             (Mode::RestartWith(_), None) => Some(
                 "The source host installation cannot be confirmed; close and reopen restart with"
                     .to_owned(),
@@ -446,16 +431,14 @@ impl LaunchDraft {
                 Some("Choose a connected host before launching".to_owned())
             }
         };
-        words.map(Refusal::Plain)
+        words.map(Refusal)
     }
 
-    /// Resume is a separate action in Hosts. Name what this launcher will do after the host comes back.
-    fn resume_host_advice(&self) -> &'static str {
-        match self.mode {
-            Mode::New | Mode::Clone => " Resume it in Hosts, then launch.",
-            Mode::RestartWith(_) => " Resume it in Hosts, then restart.",
-            Mode::ReplaceWith { .. } => " Resume it in Hosts, then replace.",
-        }
+    /// Request builders require an actual connection even when the press is allowed to wake the host.
+    fn connected_host<'a>(&self, hosts: &'a [HostView]) -> Option<&'a HostView> {
+        hosts.iter().find(|host| {
+            self.host == Some(host.id) && matches!(host.state, HostStateView::Connected { .. })
+        })
     }
 
     /// The Agent tab as the launch it would send: `None` without an agent type. The flags and the wrapper are taken
@@ -600,13 +583,7 @@ impl LaunchDraft {
         if self.target.is_some() || self.launch_refusal(target, None).is_some() {
             return None;
         }
-        let host = self.host?;
-        // The refusal check has found this host connected, so its connection number is a real one.
-        let incarnation = target
-            .hosts
-            .iter()
-            .find(|view| view.id == host)
-            .map(|view| view.incarnation);
+        let host = self.connected_host(target.hosts)?;
         let (cwd, name, expected_incarnation, github_checkout) = match self.checkout_launch(target)
         {
             // A managed checkout starts in the previewed folder, on the connection the preview was taken on, with the
@@ -627,12 +604,12 @@ impl LaunchDraft {
             None => (
                 self.folder.value().clone(),
                 self.name.value().clone(),
-                incarnation,
+                Some(host.incarnation),
                 None,
             ),
         };
         let mut body = self.create_request(cwd, name);
-        body.host = Some(host);
+        body.host = Some(host.id);
         body.expected_incarnation = expected_incarnation;
         body.github_checkout = github_checkout;
         Some(body)
@@ -746,6 +723,7 @@ impl LaunchDraft {
         if self.launch_refusal(target, live).is_some() {
             return None;
         }
+        self.connected_host(target.hosts)?;
         let (with, with_command) = match self.restart_edit()? {
             RestartBaseline::Agent(selection) => (Some(selection), None),
             RestartBaseline::Command(command) => (None, Some(command)),

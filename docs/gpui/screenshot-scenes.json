@@ -3408,6 +3408,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-resuming-host",
+      "title": "Launch preparation while a suspended host resumes",
+      "reference": null
+    },
+    {
       "golden": "settings-recipe-editor-delete-anyway",
       "title": "Recipe Delete after an unconfirmed image save, asking to delete anyway",
       "reference": null

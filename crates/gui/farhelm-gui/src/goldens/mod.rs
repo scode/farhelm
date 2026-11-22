@@ -1014,6 +1014,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_new_setup,
     },
     Scene {
+        name: "launcher-resuming-host",
+        size: (940., 540.),
+        draw: session_lists_then,
+        setup: launcher_wake_setup,
+    },
+    Scene {
         name: "launcher-host-menu",
         size: (1080., 1160.),
         draw: session_lists_then,

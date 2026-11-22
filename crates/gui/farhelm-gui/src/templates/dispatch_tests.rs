@@ -17,8 +17,8 @@ use std::time::Duration;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind, TemplateDestination, TemplateFields};
 use farhelm_proto::ui_channel::{
-    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostView,
-    KeyedEntry, Preferences,
+    Availability, Collection, CollectionChanges, CollectionMeta, CollectionState, HostStateView,
+    HostView, KeyedEntry, Preferences,
 };
 use farhelm_proto::{LaunchHarness, LaunchTarget, Place};
 use gpui::{TestAppContext, VisualTestContext};
@@ -37,11 +37,12 @@ use crate::launcher::launch_tests::{creates_answering, creates_answering_with, i
 use crate::launcher::request::container_reason;
 use crate::launcher::view::BANNER_SHOWS_FOR;
 use crate::launcher::view_tests::fixture_hosts;
+use crate::launcher::wake_tests::push as push_waking_host;
 use crate::launcher::yolo_tests::refuse_for_yolo;
 use crate::launcher::{self, launch};
 use crate::main_view::MainView;
 use crate::notices::{self, Notice};
-use crate::session_list::host_rail::tests::node;
+use crate::session_list::host_rail::tests::{node, within};
 use crate::session_list::tests::{listing, painted, preferences_state, session};
 use crate::test_support::{self, any_open, focused_id, frame, keys, label, meta, settle, started};
 use crate::{focus, local_state};
@@ -575,19 +576,18 @@ fn a_draft_the_launcher_refuses_is_shown_with_its_reason(cx: &mut TestAppContext
     );
 }
 
-/// Quick launch shares the launcher's suspended-host refusal. A shortcut must reveal the named host's Resume advice
-/// without silently resuming it or sending a create, with the ordinary "Not launched." prefix kept.
-#[gpui::test]
-fn a_suspended_quick_launch_asks_to_resume_its_named_host(cx: &mut TestAppContext) {
+/// Hold the shortcut's Resume open so a test can advance the host separately from the command reply. Templates
+/// with an explicit folder can create as soon as the host connects. The others need a fresh history read.
+fn begin_suspended_quick_launch(
+    cx: &mut TestAppContext,
+    destination: Option<TemplateDestination>,
+) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
     let (mut helm, connection) = started(cx);
     let mut hosts = fixture_hosts(&[0, 11]);
     hosts.entries[1].value["name"] = json!("שלום\u{202e}box");
     let host: HostView = serde_json::from_value(hosts.entries[1].value.clone()).unwrap();
     assert_eq!(host.identity.as_deref(), Some("identity12"));
-    assert!(matches!(
-        host.state,
-        farhelm_proto::ui_channel::HostStateView::Suspended { .. }
-    ));
+    assert!(matches!(host.state, HostStateView::Suspended { .. }));
     let snapshot = vec![
         listing(&[], &[]),
         hosts,
@@ -596,7 +596,7 @@ fn a_suspended_quick_launch_asks_to_resume_its_named_host(cx: &mut TestAppContex
             "paused",
             TemplateFields {
                 host: Some("identity12".into()),
-                destination: Some(TemplateDestination::Folder("~".into())),
+                destination,
                 ..runs_true()
             },
         )),
@@ -610,21 +610,241 @@ fn a_suspended_quick_launch_asks_to_resume_its_named_host(cx: &mut TestAppContex
     let sent = answer_except(&mut helm, cx, |command| {
         command.path == "/api/sessions" || command.path.ends_with("/resume")
     });
-    assert!(sent.is_empty(), "nothing was launched or resumed: {sent:?}");
-    assert_eq!(
-        refusal(cx).as_deref(),
-        Some("Not launched. שלום<U+202E>box is suspended. Resume it in Hosts, then launch.")
-    );
+    let [resume] = &sent[..] else {
+        panic!("one Resume expected, got {sent:?}")
+    };
+    assert_eq!(resume.path, "/api/hosts/12/resume");
+    assert!(!any_open(cx));
+    (helm, cx, host, resume.clone())
+}
+
+/// The tests with an explicit folder all authorize a complete launch at the shortcut.
+fn begin_folder_wake(
+    cx: &mut TestAppContext,
+) -> (FakeHelm, &mut VisualTestContext, HostView, FakeCommand) {
+    begin_suspended_quick_launch(cx, Some(TemplateDestination::Folder("~".into())))
+}
+
+/// A shortcut authorizes Resume and keeps the launcher out of sight. Once connected, the usual quick-launch
+/// success path selects the session and opens its naming editor.
+#[gpui::test]
+fn a_suspended_quick_launch_resumes_then_opens_its_naming_editor(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_folder_wake(cx);
     assert!(
-        crate::session_list::host_rail::tests::texts_within(&frame(cx), "launcher-refusal-words")
+        crate::session_list::host_rail::tests::texts_within(&frame(cx), "launch-wake")
             .iter()
             .any(|text| crate::host_text::tests::paints_isolated(&text.text, "שלום<U+202E>box")),
-        "the host name cannot reorder the refusal's advice"
+        "the host name cannot reorder the pill's words"
+    );
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    push_waking_host(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::session_list::environment_tests::connected(),
+    );
+    let launched = creates(&mut helm, cx);
+    let [create] = &launched[..] else {
+        panic!("one create expected, got {launched:?}")
+    };
+    assert_eq!(create.body.as_ref().unwrap()["host"], 12);
+    assert!(!any_open(cx));
+    let made = session("n").host(12);
+    push(&mut helm, cx, listing(&["n"], std::slice::from_ref(&made)));
+    helm.reply(create.id, 200, Some(made.entry().value));
+    settle(cx);
+    assert_eq!(
+        cx.update(|_, cx| local_state::selected(cx)).as_deref(),
+        Some("n")
+    );
+    assert!(cx.debug_bounds("rename-field").is_some());
+    assert!(
+        within(&frame(cx), "rename-title")
+            .iter()
+            .any(|node| node.flags.focused),
+        "the naming editor took focus in its title field"
+    );
+}
+
+/// The hidden launch must leave input with the switcher the user opens during Resume, even when its create
+/// succeeds. The switcher read is behind Resume on the same channel.
+#[gpui::test]
+fn a_suspended_quick_launch_leaves_the_switcher_in_control(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_folder_wake(cx);
+    keys(cx, QUICK_SWITCHER_CHORD);
+    assert!(cx.debug_bounds("quick-switcher").is_some());
+    let search_focused = |cx: &mut VisualTestContext| {
+        within(&frame(cx), "quick-switcher-search")
+            .iter()
+            .any(|node| node.flags.focused)
+    };
+    assert!(search_focused(cx), "the switcher's field took focus");
+    assert!(label(cx, "launch-wake").is_some());
+    let reads = helm.commands();
+    let [read] = &reads[..] else {
+        panic!("only the switcher read should be queued, got {reads:?}");
+    };
+    assert_eq!(read.path, "/api/sessions?sort=activity");
+    helm.reply(resume.id, 200, None);
+    helm.reply(
+        read.id,
+        200,
+        Some(json!({ "sessions": [], "total": 0, "truncated": false })),
+    );
+    settle(cx);
+    push_waking_host(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::session_list::environment_tests::connected(),
+    );
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create expected, got {sent:?}");
+    };
+    let made = session("n").host(12);
+    push(&mut helm, cx, listing(&["n"], std::slice::from_ref(&made)));
+    helm.reply(create.id, 200, Some(made.entry().value));
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty());
+    assert!(cx.debug_bounds("quick-switcher").is_some());
+    assert!(search_focused(cx), "the switcher's field kept focus");
+    assert_eq!(cx.update(|_, cx| local_state::selected(cx)), None);
+    assert!(label(cx, "launcher-launch").is_none());
+    assert!(cx.debug_bounds("rename-field").is_none());
+}
+
+/// The capsule during a wake represents preparation. Refusing the sole authorized create returns the quick
+/// launch's draft while the user is still waiting for it.
+#[gpui::test]
+fn a_suspended_quick_launch_returns_after_its_one_create_is_refused(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_folder_wake(cx);
+    test_support::advance(cx, Duration::from_secs(3));
+    assert!(is_status(cx, "launch-wake"));
+    assert!(label(cx, "launch-progress").is_none());
+    assert!(helm.commands().is_empty());
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    push_waking_host(
+        &mut helm,
+        cx,
+        &mut host,
+        crate::session_list::environment_tests::connected(),
+    );
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create expected, got {sent:?}");
+    };
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. The test refused the create")
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
+/// The shortcut omitted a folder, so its one deferred default comes from history on the awakened installation.
+/// Keep that read unanswered to exercise the boundary before sending a create.
+fn wake_to_folder_history(
+    helm: &mut FakeHelm,
+    cx: &mut VisualTestContext,
+    host: &mut HostView,
+) -> FakeCommand {
+    push_waking_host(
+        helm,
+        cx,
+        host,
+        crate::session_list::environment_tests::connected(),
+    );
+    let sent = answer_except(helm, cx, |command| {
+        command.path == "/api/sessions" || command.path == "/api/launch-history?host=12"
+    });
+    let [history] = &sent[..] else {
+        panic!("one history read expected, got {sent:?}");
+    };
+    assert_eq!(history.path, "/api/launch-history?host=12");
+    assert!(label(cx, "launch-wake").is_some());
+    history.clone()
+}
+
+/// A successful read on the new connection names a different folder from the one in the session the user opens
+/// during Resume. The original press authorized the history default, so navigation cannot redirect it.
+#[gpui::test]
+fn a_suspended_quick_launch_keeps_its_folder_default_when_selection_moves(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_suspended_quick_launch(cx, None);
+    assert_eq!(cx.update(|_, cx| local_state::selected(cx)), None);
+    let mut sessions = listing(&["other"], &[session("other").host(12).cwd("/srv/other")]);
+    sessions.entries[0].value["host_identity"] = json!(host.identity);
+    push(&mut helm, cx, sessions);
+    test_support::click(cx, "session-row-other");
+    assert_eq!(
+        cx.update(|_, cx| local_state::selected(cx)).as_deref(),
+        Some("other")
     );
     assert_eq!(
-        crate::launcher::view_tests::launch_help(cx).as_deref(),
-        Some("שלום<U+202E>box is suspended. Resume it in Hosts, then launch.")
+        cx.update(|_, cx| {
+            let store = crate::session::current_store(cx).expect("the test opened a helm");
+            launcher::entry::session_folder(store.read(cx).collections(), Some("other"), 12)
+        })
+        .as_deref(),
+        Some("/srv/other"),
+        "the later selection is a valid folder default on this installation"
     );
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    answer_except(&mut helm, cx, |_| false);
+    let history = wake_to_folder_history(&mut helm, cx, &mut host);
+    helm.reply(history.id, 200, Some(folder_history_after_wake()));
+    settle(cx);
+    let sent = creates(&mut helm, cx);
+    let [create] = &sent[..] else {
+        panic!("one create expected, got {sent:?}");
+    };
+    assert_eq!(create.body.as_ref().unwrap()["cwd"], "/srv/last-work");
+    helm.reply(create.id, 409, Some(json!("The test refused the create")));
+    settle(cx);
+}
+
+/// A host can drop out while its fresh folder history is in flight. The original quick launch comes back with
+/// its reason, and the late history cannot send a create.
+#[gpui::test]
+fn a_suspended_quick_launch_returns_if_the_host_drops_out_during_history(cx: &mut TestAppContext) {
+    let (mut helm, cx, mut host, resume) = begin_suspended_quick_launch(cx, None);
+    helm.reply(resume.id, 200, None);
+    settle(cx);
+    let history = wake_to_folder_history(&mut helm, cx, &mut host);
+    push_waking_host(
+        &mut helm,
+        cx,
+        &mut host,
+        HostStateView::Unreachable {
+            cause: "Connection lost".into(),
+            last_error: "The test disconnected the host".into(),
+        },
+    );
+    assert_eq!(
+        refusal(cx).as_deref(),
+        Some("Not launched. The host became unavailable before the session could launch")
+    );
+    assert!(label(cx, "launch-wake").is_none());
+    helm.reply(history.id, 200, Some(folder_history_after_wake()));
+    settle(cx);
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
+/// History on the awakened installation includes a recent plain-folder launch, which New inherits.
+fn folder_history_after_wake() -> serde_json::Value {
+    json!({
+        "launches": [{
+            "host": 12, "github_repo": null, "canonical_cwd": "/srv/last-work", "cwd": "/srv/last-work",
+            "selection": { "harness": "codex" }, "created_at": 1, "creation_seq": null,
+        }],
+        "folders": [],
+        "checkout_config_revision": 1,
+    })
 }
 
 /// A quick launch being prepared holds the launch slot, and SPEC.md keeps the launcher busy then as during a launch:

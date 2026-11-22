@@ -1079,12 +1079,14 @@ fn current_operations_id(cx: &App) -> Option<EntityId> {
 /// session's Restart and Replace), besides the environment create below. `false` in an inert window, which has no
 /// store and starts nothing anyway.
 ///
-/// An environment create the launcher still waits on counts too (`launcher::launch::environment_create_running`): its
+/// A launch waking an existing host counts through hidden preparation. An environment create the launcher still waits
+/// on counts too (`launcher::launch::environment_create_running`): its
 /// operation key clears on the helm's 202, while the launch goes on for minutes, so the launcher's wait for it is what
 /// keeps launches and host-registry changes exclusive for the whole create (SPEC.md, "Launches and changes to the host
 /// registry still exclude each other").
 pub(crate) fn launch_in_flight(cx: &App) -> bool {
-    crate::launcher::launch::environment_create_running(cx)
+    crate::launcher::launch::waking(cx)
+        || crate::launcher::launch::environment_create_running(cx)
         || session::current_operations(cx)
             .is_some_and(|operations| operations.read(cx).any_in_flight(Work::creates_a_session))
 }
