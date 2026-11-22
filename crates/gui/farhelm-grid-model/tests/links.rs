@@ -129,32 +129,67 @@ fn the_url_search_crosses_a_padded_middle_row() {
     }
 }
 
-/// Generated OSC identities continue from the last text run, even when a separate color run paints the padding.
-/// A separate identity on the next row would split its label across what is really one linked stretch.
+/// The previous row's padding stays outside copy, words, and links even when an erase shortens the next glyph.
+/// Generated OSC identities continue from the last text run so the link keeps its whole visible label.
 #[test]
 fn osc_continuation_looks_past_the_styled_padding_run() {
-    let model = model(
-        4,
-        vec![
-            json!({"w":true,"p":true,"r":[[0,3,"abc",[0,-1,-1],0],[3,1," ",[0,-1,2]]]}),
-            json!({"w":false,"r":[[0,2,"界",[0,-1,-1],1]]}),
-        ],
-        vec![
-            json!(["1_alacritty", "https://example.test"]),
-            json!(["2_alacritty", "https://example.test"]),
-        ],
-    );
-    let above = model.link_at(Position { line: 0, col: 2 }).unwrap();
-    let below = model.link_at(Position { line: 1, col: 0 }).unwrap();
-    assert_eq!(
-        above.kind,
-        LinkKind::Osc {
-            id: "1_alacritty".into()
-        }
-    );
-    assert_eq!(below.kind, above.kind);
-    assert_eq!(above.ranges[0].end.col, 3);
-    assert!(model.link_at(Position { line: 0, col: 3 }).is_none());
+    for (next, width) in [
+        (json!({"w":false,"r":[[0,2,"界",[0,-1,2],1]]}), 2),
+        (
+            json!({"w":false,"r":[[0,1,"界",[0,-1,2],1],[1,1," ",[0,-1,1]]]}),
+            1,
+        ),
+    ] {
+        let model = model(
+            4,
+            vec![
+                json!({"w":true,"p":true,"r":[[0,3,"abc",[0,-1,2],0],[3,1," ",[0,-1,2]]]}),
+                next,
+            ],
+            vec![
+                json!(["1_alacritty", "https://example.test"]),
+                json!(["2_alacritty", "https://example.test"]),
+            ],
+        );
+        let above = model.link_at(Position { line: 0, col: 2 }).unwrap();
+        let below = model.link_at(Position { line: 1, col: 0 }).unwrap();
+        assert_eq!(
+            above.kind,
+            LinkKind::Osc {
+                id: "1_alacritty".into()
+            }
+        );
+        assert_eq!(below.kind, above.kind);
+        assert_eq!(above.ranges[0].end.col, 3);
+        assert_eq!(
+            below.ranges[0].end,
+            Position {
+                line: 1,
+                col: width
+            }
+        );
+        assert!(model.link_at(Position { line: 0, col: 3 }).is_none());
+        assert!(
+            model
+                .link_at(Position {
+                    line: 1,
+                    col: width
+                })
+                .is_none()
+        );
+        let word = model.word_range(Position { line: 0, col: 2 }).unwrap();
+        assert_eq!(
+            word.end,
+            Position {
+                line: 1,
+                col: width
+            }
+        );
+        assert_eq!(
+            model.selection_text(word.start, word.end, word.mode),
+            "abc界"
+        );
+    }
 }
 
 /// The wire allows a link run to cover the last column. Its padded cell must not reappear as a false mismatch

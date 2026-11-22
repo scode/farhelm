@@ -2617,7 +2617,7 @@
     },
     {
       "golden": "terminal-wide-glyphs",
-      "title": "Background color through the last column of a wide-character wrap",
+      "title": "Background colors at a wide-character wrap and after erasing half a wide glyph",
       "reference": null
     },
     {
