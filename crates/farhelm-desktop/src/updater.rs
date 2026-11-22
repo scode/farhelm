@@ -55,10 +55,6 @@ const SITE_URL: &str = "https://get.farhelm.io";
 /// chain remain the same as an ordinary update.
 const LATEST_OVERRIDE_ENV: &str = "FARHELM_DESKTOP_UPDATE_LATEST";
 
-/// The command the reinstall notice tells the user to run: the installer
-/// over TLS, which needs no key, so it works however far behind this app is.
-const REINSTALL_COMMAND: &str = "curl -fsSL https://get.farhelm.io/install.sh | sh";
-
 /// The largest `/latest` answer accepted: one tag and a newline.
 const LATEST_MAX_BYTES: usize = 256;
 
@@ -109,7 +105,7 @@ const EXPECT_ENV: &str = "FARHELM_INSTALL_EXPECT";
 
 // ===== What the updater publishes ==========================================
 
-use farhelm_gui::update_readout::Activity;
+use farhelm_gui::update_readout::{Activity, REINSTALL_COMMAND, upgrade_floor_reinstall_tooltip};
 
 /// The updater's whole published state.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -585,25 +581,20 @@ pub fn readout(state: &UpdaterState) -> farhelm_gui::update_readout::Readout {
     let Some(reason) = state.reinstall else {
         return readout;
     };
-    let advice = match reason {
-        ReinstallReason::Verification => {
-            "This Farhelm can no longer verify its updates, so it cannot update itself."
-        }
-        ReinstallReason::UpgradeFloor => {
-            "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit Farhelm, and run farhelm uninstall first; your data stays on disk but may not carry over cleanly."
-        }
+    // The command ends the hover so punctuation cannot be mistaken for part of it.
+    let tooltip = match reason {
+        ReinstallReason::Verification => format!(
+            "This Farhelm can no longer verify its updates, so it cannot update itself. {} \
+             Reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
+            readout.tooltip
+        ),
+        ReinstallReason::UpgradeFloor => upgrade_floor_reinstall_tooltip(&readout.tooltip),
     };
     // Shown whatever the updater is doing: this app can no longer update
     // itself, and nothing else on screen would say so.
     farhelm_gui::update_readout::Readout {
         needs_reinstall: true,
-        // The notice leads, and the command goes last with nothing after
-        // it, because the user retypes it from a hover: trailing
-        // punctuation would read as part of it.
-        tooltip: format!(
-            "{advice} {} Reinstall it by running this in a terminal: {REINSTALL_COMMAND}",
-            readout.tooltip
-        ),
+        tooltip,
         ..readout
     }
 }

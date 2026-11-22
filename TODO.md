@@ -250,16 +250,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
   `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
 
-  - `desktop-startup-update-duplicates.md`. In desktop `bundle.rs:214–241` and `updater.rs:339–346,367–397`, share the
-    detached bundle wait-and-open helper with explicit wait limits and opener arguments. Keep the reopen marker and
-    update environment with their callers. In desktop `lib.rs:574–585,600–609`, share the hello discovery predicate
-    while the two startup waits keep their own child checks, deadlines and errors. In desktop
-    `window_state.rs:144–151,175–183`, share the 320×240 minimum and fits-one-monitor checks. Leave position and
-    centering to each platform. In desktop `updater.rs:1394–1405` and `updater/advisories.rs:84–99`, share the stable
-    SemVer predicate that excludes prerelease and build metadata, with each parser keeping its diagnostics. In desktop
-    `updater.rs:432–445,2558–2575`, have production and the file-backed test rig use one constructor for the three
-    state-file closures. Move the peer text escaping and empty/whitespace wording from desktop `local_host.rs:38–51` and
-    GUI `update_readout.rs:301–317` next to the shared escaping routines.
   - `terminal-grid-row-traversal-duplicated.md`. In
     `crates/gui/farhelm-grid-model/src/{paths.rs:335–383,selection.rs:241–281}`, both row walks fill gaps, split plain
     runs, keep other runs' widths and drop wide-wrap padding. Share a walker yielding column, width and text. Keep byte
@@ -308,8 +298,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `goldens/other_dialogs.rs:235–253,282–299,332–350`, `goldens/templates.rs:52–69,129–167,208–228` and
     `goldens/settings.rs:122–183`. Share the session fixture's title and `TEST_NOW` activity/seen timestamps while
     scenes supply their status (`goldens/session_list.rs:42–47,114–119,154–160`, `goldens/other_dialogs.rs:112–117`,
-    `goldens/mod.rs:301–307`). Move the upgrade-floor reinstall hover formatter into GUI `update_readout` so
-    `goldens/desktop.rs:371–384` and desktop `updater.rs:588–609` use the same words.
+    `goldens/mod.rs:301–307`).
   - `session-list-actions-repeat-admission-and-progress.md`. In `session_list/`, share operation admission across
     `menu.rs:601–615`, `environment.rs:625–642`, `restart.rs:278–306`, `stop.rs:226–247`, `delete.rs:366–392`,
     `environment_delete.rs:242–267` and `replace.rs:319–346`. The helper takes the command result and completion, finds
@@ -362,8 +351,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     `retired_tests.rs:119–129` and `host_rail/tests.rs:182–188`.
 
   Read the original findings with `git show 510f3b93721ee2393bd803d2cf91d73654415fbb:review_feedback_queue/<file>`.
-  Plan: `plans/queue/helpers-desktop-startup.md`. Plan: `plans/queue/helpers-terminal-and-controls.md`. Plan:
-  `plans/queue/helpers-hosts-and-sessions.md`. Plan: `plans/queue/helpers-launcher-and-templates.md`.
+  Plan: `plans/queue/helpers-terminal-and-controls.md`. Plan: `plans/queue/helpers-hosts-and-sessions.md`. Plan:
+  `plans/queue/helpers-launcher-and-templates.md`.
 
 - **Report remote command status in-band, not through ssh's exit status.** Tailscale SSH on a Mac reports exit status 0
   for every command (tailscale/tailscale#18256, still open on 2026-11-17), so adding such a Mac fails at the first probe

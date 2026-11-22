@@ -368,21 +368,6 @@ pub(super) fn version_readout_menu_setup(state: &SceneState, window: &mut Window
     );
 }
 
-/// The reinstall readout's hover words exactly as `farhelm_desktop::updater::readout` builds them for an idle updater
-/// that cannot install the newer release (`ReinstallReason::UpgradeFloor`): the advice, the idle hover for this build,
-/// then the reinstall command, last with nothing after it because the user retypes it. This is the longest of the
-/// reinstall notices, so it shows best that the whole of it, command included, fits the hover. Copied rather than
-/// called, since this crate cannot depend on the desktop crate (it depends on this one), so a change to that wording
-/// should be copied here.
-fn reinstall_tooltip() -> String {
-    format!(
-        "This installation cannot update to the newer release. Stop local sessions and their terminal tabs, quit \
-         Farhelm, and run farhelm uninstall first; your data stays on disk but may not carry over cleanly. {} \
-         Reinstall it by running this in a terminal: curl -fsSL https://get.farhelm.io/install.sh | sh",
-        update_readout::idle_tooltip(farhelm_proto::BUILD_VERSION, true)
-    )
-}
-
 /// `content` at the scene's top left, leaving the rest of the scene free for a menu or hover help beside it.
 fn top_left(content: AnyElement) -> AnyElement {
     div()
@@ -395,6 +380,7 @@ fn top_left(content: AnyElement) -> AnyElement {
 
 /// One row, the check button with the reinstall warning, at the scene's top left, with room under it and to its right
 /// for its hover, so the card is not pushed back by the window's edge (in the app it reaches over the main view).
+/// The upgrade-floor refusal exercises the longest reinstall guidance, including the command.
 pub(super) fn version_readout_tooltip(
     state: &SceneState,
     _: &mut Window,
@@ -405,7 +391,9 @@ pub(super) fn version_readout_tooltip(
         || {
             let readout = Readout {
                 needs_reinstall: true,
-                tooltip: reinstall_tooltip(),
+                tooltip: update_readout::upgrade_floor_reinstall_tooltip(
+                    &update_readout::idle_tooltip(farhelm_proto::BUILD_VERSION, true),
+                ),
                 ..golden_readout(Activity::Idle, false)
             };
             vec![(readout, None)]

@@ -39,7 +39,7 @@
 //!   folded-away account segment holds a presentation-unsafe character: the fold would then hide the escape of a
 //!   character the copy holds. Hover help, accessible description and the copied bytes keep the raw value, as
 //!   "{value} — click to copy" with the value escaped. A value that would show nothing shows the old marker instead
-//!   (`(empty)`, or `(whitespace only: N characters)`; [`placeholder`]), so neither field is ever an unnamed sliver of
+//!   (`(empty)`, or `(whitespace only: N characters)`; [`blank_placeholder`]), so neither field is ever an unnamed sliver of
 //!   a button.
 //! - **A copy that holds hidden characters says so above the bar.** When the bytes a click copied hold a character
 //!   the screen shows escaped (`<U+202E>`, a line break), the clipboard does not hold what the field reads like, and a
@@ -65,6 +65,7 @@
 //! helm answers the query naming a newly opened session, say), the pane draws no bar.
 
 use farhelm_helm_client::Collections;
+use farhelm_proto::text::blank_placeholder;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
 use gpui::{
     App, AppContext as _, Div, Entity, FontWeight, InteractiveElement as _, IntoElement,
@@ -183,7 +184,7 @@ pub(crate) struct CopyValue {
     pub(crate) shown: HostText,
     /// The value as the session recorded it: what a click copies, and what the hover help and description name.
     pub(crate) raw: HostText,
-    /// What the field draws and is named instead of `shown` when that would show nothing ([`placeholder`]).
+    /// What the field draws and is named when `shown` would be blank ([`blank_placeholder`]).
     pub(crate) placeholder: Option<SharedString>,
 }
 
@@ -321,26 +322,11 @@ impl CopyValue {
     /// A field showing `shown` (or its marker, when it would show nothing) and copying `raw`.
     fn new(shown: String, raw: &str) -> Self {
         CopyValue {
-            placeholder: placeholder(&shown),
+            placeholder: blank_placeholder(&shown).map(SharedString::from),
             shown: HostText::from_host(shown),
             raw: HostText::from_host(raw),
         }
     }
-}
-
-/// The app's words for a value that would show nothing: `(empty)` for an empty one, `(whitespace only: N
-/// characters)` for one of ordinary blanks alone; `None` for anything else. The old app's `display_peer` markers, which
-/// its directory field showed. A presentation-unsafe blank (a line break) shows as its escape, so it counts as
-/// something shown. The old command field had no marker and showed an empty command as nothing at all; here it takes
-/// the same markers, since a button that shows and is named with nothing is no use to anyone.
-pub(crate) fn placeholder(shown: &str) -> Option<SharedString> {
-    if shown.is_empty() {
-        return Some("(empty)".into());
-    }
-    shown
-        .chars()
-        .all(|ch| ch.is_whitespace() && !farhelm_proto::text::is_presentation_unsafe(ch))
-        .then(|| format!("(whitespace only: {} characters)", shown.chars().count()).into())
 }
 
 /// The open session's copy fields' confirmations, the one state the bar keeps. The pane makes one with each terminal it

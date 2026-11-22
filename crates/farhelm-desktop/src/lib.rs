@@ -1616,7 +1616,7 @@ fn local_supervisor_refusal(
         } => {
             // Our build and the local remedy are app-authored on this path.
             // Their original line breaks belong to the native alert's structure.
-            let peer_build = crate::local_host::display_peer(peer_build);
+            let peer_build = farhelm_proto::text::escaped_or_placeholder(peer_build);
             let our_build = our_build.as_str();
             let remediation = remediation.as_str();
             let mismatch = format!(
