@@ -1707,10 +1707,10 @@ The host label is **&lt;recipe&gt; sandbox**, with the cube mark in session meta
 and a pause-marked **Suspended** badge. The row menu offers Suspend/Resume and explains that Clone creates a new
 sandbox. Plain Stop ends the chosen agent and tabs but keeps its sandbox running and billing. Its inline question says
 so and offers **Stop and suspend** as well. That action finishes ordinary Stop before requesting host Suspend; a failed
-or incomplete Stop does not suspend. If the two have not finished within 20 seconds, the answer says the action carries
-on and suspends the sandbox only once Stop has finished cleanly. The row and its host then show how it ended. The row
-menu always offers Stop and suspend, so it remains reachable when ordinary confirmations are skipped. Delete's
-confirmations are never skipped.
+or incomplete Stop prevents that action from suspending the sandbox. If the two have not finished within 20 seconds, the
+answer says that the action may or may not still be running and that suspension requires a clean Stop. The row and its
+host show the current state. The row menu always offers Stop and suspend, so it remains reachable when ordinary
+confirmations are skipped. Delete's confirmations are never skipped.
 
 Agents in a sandbox session act only within their own sandbox, and agents elsewhere launch sandboxes only behind a card
 that always asks; [Agents and environments](#agents-and-environments) has the rules. The helm enforces them at the

@@ -64,7 +64,9 @@ use crate::{
 };
 use anyhow::Context;
 use axum::extract::{Path as AxPath, Query, State};
+use axum::http::HeaderValue;
 use axum::response::IntoResponse;
+use farhelm_proto::ui_channel::HelmMarker;
 use farhelm_proto::{ErrorKind, LaunchRequest, SessionLaunch};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -3715,12 +3717,11 @@ pub(crate) async fn rename_session(
 /// suspend (`crate::tensorlake::lifecycle::suspend` and `resume`,
 /// `sandbox::stop_and_suspend`), which can wait far longer than the bound: a
 /// Tensorlake Resume up to two minutes, a container's change on its container
-/// host's commands, and Stop and suspend's Stop on the supervisor with no
-/// limit of its own (decided by the migration's orchestrator on 2026-11-15,
-/// in place of the accepted form, since their outcome already lands in the
-/// pushed host state). A change still running at the bound carries on, and
-/// the host's state in the hosts and session lists shows how it ended. Stop
-/// and suspend takes one bound over both of its halves.
+/// host's commands, and Stop and suspend can spend the whole bound on Stop.
+/// The host's state in the hosts and session lists shows the result of the
+/// lifecycle change. Stop and suspend has one bound over both steps and
+/// marks the deadline reply so the client can distinguish it from a Stop
+/// timeout reported by the supervisor.
 ///
 /// So are both of the user's environment Deletes and the Retry of a failed
 /// destruction (`DELETE /api/sessions/{id}` with `delete_environment_session`
@@ -3784,7 +3785,18 @@ pub(crate) async fn within_host_reply_bound_saying(
     work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
     timed_out: String,
 ) -> axum::response::Response {
-    await_host_reply(tokio::spawn(work), timed_out).await
+    await_host_reply(tokio::spawn(work), timed_out, None).await
+}
+
+/// Stop and suspend needs to distinguish the helm's expired wait from a 504
+/// returned by the Stop itself. Only the reply owned by this wait gets the
+/// marker.
+async fn within_host_reply_bound_marked(
+    work: impl std::future::Future<Output = axum::response::Response> + Send + 'static,
+    timed_out: String,
+    marker: HelmMarker,
+) -> axum::response::Response {
+    await_host_reply(tokio::spawn(work), timed_out, Some(marker)).await
 }
 
 /// A tab request polls here inline, so it is still cancellable until a timeout
@@ -3796,6 +3808,7 @@ async fn await_host_reply(
     + Unpin
     + 'static,
     timed_out: String,
+    timeout_marker: Option<HelmMarker>,
 ) -> axum::response::Response {
     match tokio::time::timeout(HOST_REPLY_BOUND, &mut task).await {
         Ok(Ok(response)) => response,
@@ -3803,16 +3816,23 @@ async fn await_host_reply(
         Ok(Err(join)) => http_error(anyhow::anyhow!("the request's task was cancelled: {join}")),
         Err(_elapsed) => {
             tokio::spawn(log_late_failure(task));
-            http_error(anyhow::Error::new(SupervisorError::helm(
+            let mut response = http_error(anyhow::Error::new(SupervisorError::helm(
                 ErrorKind::Timeout,
                 timed_out,
-            )))
+            )));
+            if let Some(marker) = timeout_marker {
+                let (name, value) = marker.header();
+                response
+                    .headers_mut()
+                    .insert(name, HeaderValue::from_static(value));
+            }
+            response
         }
     }
 }
 
-/// Wait for work whose caller was already told it is still running, and log
-/// its reply if that reply is not a success: nobody else will ever see it.
+/// Keep the eventual failure of work that outlasted the helm's reply bound.
+/// The caller already has its reply, so only the helm's log gets the reason.
 async fn log_late_failure(
     task: impl std::future::Future<Output = Result<axum::response::Response, tokio::task::JoinError>>,
 ) {
@@ -3822,7 +3842,7 @@ async fn log_late_failure(
     let response = match task.await {
         Ok(response) => response,
         Err(join) => {
-            tracing::warn!(%join, "a request the helm had already answered as still running ended abnormally");
+            tracing::warn!(%join, "a request ended abnormally after the helm's deadline reply");
             return;
         }
     };
@@ -3840,7 +3860,7 @@ async fn log_late_failure(
     tracing::warn!(
         %status,
         reply = %text,
-        "a request the helm had already answered as still running ended without success"
+        "a request ended without success after the helm's deadline reply"
     );
 }
 
@@ -5192,6 +5212,7 @@ pub(crate) async fn open_tab(
             })
         }),
         "the host did not answer in time and the request to open the tab is still being carried out".into(),
+        None,
     )
     .await
 }
@@ -5223,6 +5244,7 @@ pub(crate) async fn close_tab(
             })
         }),
         "the host did not answer in time and the request to close the tab is still being carried out".into(),
+        None,
     )
     .await
 }
