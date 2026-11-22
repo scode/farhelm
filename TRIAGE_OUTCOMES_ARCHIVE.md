@@ -36956,3 +36956,42 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Discarded as already fixed by #4433. Main groups the agent and shell chips before Model and the catalog
   warning. Recorded in jj change `mwlsuynm`, bookmark `plan/triage-gui-misc/04-launcher`,
   [draft PR #4545](https://github.com/scode/farhelm/pull/4545/changes).
+
+## checkout-status-bypasses-host-text.md
+
+- Outcome: `fix code`.
+- Assessment: `crates/gui/farhelm-gui/src/launcher/view/checkout.rs:1198` draws `Err(words)` through `words.raw()` in
+  `status_line`, a plain text child. `scan_error` (:1193) is drawn the same way as a plain string. No spoofing route is
+  shown, but the type rule is explicit. Basis: SPEC_impl.md "host text" (~1161-1166): "The only element that can draw it
+  escapes hidden characters and isolates text direction ... its raw value, used for editing and operations." The fix is
+  to draw it through `HostSentence`/the host-text element, as the neighbouring setup refusal already does (:1100).
+- Decision: recorded under the clearly-settled rule (`review_feedback_queue/.agents/triage.md`, "Preparing each item")
+  without asking (fewest-questions triage, 2026-11-21, against main ca62397de). The maintainer can revise it.
+- Completion criteria: fix the code so it matches the quoted rule, with a test where practical. Size gate: about 100
+  lines of diff (code, tests and docs, not counting this ledger, the queue removal or a changelog fragment); over that,
+  execution blocks and brings the item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Fixed. Repository discovery errors draw host text and expose the same escaped accessible spelling. The
+  helm's own scan summary remains app text. Recorded in jj change `plvvrryn`, bookmark
+  `plan/triage-gui-misc/04b-launcher-results`, [draft PR #4548](https://github.com/scode/farhelm/pull/4548/changes).
+
+## launcher-stale-search-selection-fails-silently.md
+
+- Outcome: `fix code`.
+- Assessment: In the launcher, pressing Enter on a recent setup that has gone stale does nothing, and choosing a host
+  that has vanished clears the search as if it worked. Neither says why. Verified: not re-traced. The reviewer reports
+  it as source-confirmed. The in-flight `launcher-command-field.md` keeps today's behavior ("Taking a row ... does
+  exactly what taking that recent setup, template or search row does today"), so the plan does not cover it.
+- Decision: Q8 (fix the code), the maintainer wrote: "approve as listed for any where the fix is straight forward and
+  does not involve significant additional complexity. For any where that is not true, please come back to me in the next
+  update on this page." This item was judged straightforward. (2026-11-21 fewest-questions triage page (main
+  ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans.
+  please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Apply the recommendation: fix code with the launcher's existing stale-result warning, after the
+  launcher plan lands. Otherwise discard. If the fix turns out not to be straightforward, or needs significant
+  additional complexity, stop and bring it back to the maintainer. Size gate: about 100 lines of diff (code, tests and
+  docs, not counting this ledger, the queue removal or a changelog fragment); over that, execution blocks and brings the
+  item back to the maintainer. Remove the feedback file and its index entry.
+- Execution: Deferred to the Plan follow-up in Near term, “Explain stale launcher choices.” The handler, spec and real
+  golden needed about 146 changed lines after consolidation, above the per-outcome gate. Recorded in jj change
+  `plvvrryn`, bookmark `plan/triage-gui-misc/04b-launcher-results`,
+  [draft PR #4548](https://github.com/scode/farhelm/pull/4548/changes).

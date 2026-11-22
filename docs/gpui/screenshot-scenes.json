@@ -2854,6 +2854,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-repository-refusal",
+      "title": "New session showing a repository search failure with the hidden character spelled out",
+      "reference": null
+    },
+    {
       "golden": "launcher-narrow",
       "title": "A narrow launcher with template results under the command field",
       "reference": null

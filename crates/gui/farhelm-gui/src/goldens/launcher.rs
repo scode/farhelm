@@ -24,6 +24,7 @@ enum LauncherScene {
     RememberedWrapper,
     ShellWrapper,
     ShellWrapperNote,
+    RepositoryRefusal,
     Results,
     Restart,
     Replace,
@@ -64,6 +65,15 @@ pub(super) fn launcher_shell_wrapper_note_setup(
     cx: &mut App,
 ) {
     setup(state, LauncherScene::ShellWrapperNote, window, cx);
+}
+
+/// An escaped host-authored failure beneath the command field that asked for a repository search.
+pub(super) fn launcher_repository_refusal_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    setup(state, LauncherScene::RepositoryRefusal, window, cx);
 }
 
 /// Capture a typed query against the open host catalog and file history, with a source already applied to the form.
@@ -278,7 +288,17 @@ fn answer_new_reads(
         .iter_mut()
         .find_map(|kept| kept.downcast_mut::<FakeHelm>())
         .expect("the New scene keeps its fake helm");
+    let mut repository_answered = false;
     for command in helm.commands() {
+        if scene == LauncherScene::RepositoryRefusal && command.path == "/api/github-repositories" {
+            helm.reply(
+                command.id,
+                504,
+                Some(json!("The build host could not check acme\u{202e}/tools")),
+            );
+            repository_answered = true;
+            continue;
+        }
         let body = if command.path == "/api/launch-catalog" {
             Some(
                 json!([{ "id": "sonnet", "harness": "claude", "efforts": ["low", "medium", "high"] }]),
@@ -304,7 +324,12 @@ fn answer_new_reads(
     let recent = nodes
         .iter()
         .find(|node| node.element_id.as_deref() == Some("launcher-recent-0"));
-    if !catalog_drawn || (scene != LauncherScene::Narrow && !catalog_template) {
+    // Query scenes can return here with the results pane already replacing the template list.
+    let shows_templates = !matches!(
+        scene,
+        LauncherScene::Narrow | LauncherScene::RepositoryRefusal
+    );
+    if !catalog_drawn || (shows_templates && !catalog_template) {
         state.after.set(Some(answer_new_reads));
     } else if environment {
         state.after.set(Some(open_host_menu));
@@ -332,8 +357,15 @@ fn answer_new_reads(
         state.after.set(Some(choose_yolo));
     } else if scene == LauncherScene::HookSetup {
         state.after.set(Some(pick_grok));
-    } else if scene == LauncherScene::Narrow {
-        state.after.set(Some(type_launcher_query));
+    } else if matches!(
+        scene,
+        LauncherScene::Narrow | LauncherScene::RepositoryRefusal
+    ) {
+        if scene == LauncherScene::RepositoryRefusal && repository_answered {
+            state.after.set(Some(wait_for_launcher_results));
+        } else {
+            state.after.set(Some(type_launcher_query));
+        }
     } else {
         let Some(recent) = recent else {
             state.after.set(Some(answer_new_reads));
@@ -436,15 +468,26 @@ fn type_launcher_query(
     window: &mut Window,
     cx: &mut App,
 ) {
-    let narrow = launcher_scene(state) == LauncherScene::Narrow;
     let launcher = entry::open_launcher(window, cx).expect("the launcher is open for typing");
     let field = launcher.read(cx).search_for_golden();
     assert!(
         field.focus_handle(cx).is_focused(window),
         "the command editor is ready for the query"
     );
-    field.edit_for_golden(if narrow { "tl:" } else { "build" }, window, cx);
-    state.after.set(Some(wait_for_launcher_results));
+    let (query, stage): (&str, super::AfterDrawn) = match launcher_scene(state) {
+        LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
+        LauncherScene::RepositoryRefusal => ("gh:acme", answer_new_reads),
+        _ => ("build", wait_for_launcher_results),
+    };
+    if field.text(cx).as_ref() != query {
+        field.edit_for_golden(query, window, cx);
+    } else if launcher_scene(state) == LauncherScene::RepositoryRefusal {
+        // The real repository read is debounced on the renderer's simulated clock.
+        state
+            .advance_clock
+            .set(Some(std::time::Duration::from_millis(160)));
+    }
+    state.after.set(Some(stage));
 }
 
 /// The frame must include the actual results and the pane only when there is room for both columns.
@@ -454,6 +497,15 @@ fn wait_for_launcher_results(
     window: &mut Window,
     _: &mut App,
 ) {
+    if launcher_scene(state) == LauncherScene::RepositoryRefusal {
+        if !window.driver_nodes().iter().any(|node| {
+            node.element_id.as_deref() == Some("launcher-search-repository-note")
+                && !node.visible_bounds.is_empty()
+        }) {
+            state.after.set(Some(wait_for_launcher_results));
+        }
+        return;
+    }
     let shown = |id: &str| {
         window
             .driver_nodes()

@@ -536,7 +536,8 @@ fn suggestions_are_read_after_typing_and_enter_picks_one(cx: &mut TestAppContext
 }
 
 /// A valid typed pair stays selectable when discovery fails (SPEC.md, as above). Specified: with the read refused, the
-/// list still offers the typed pair, the failure is said under the field, and picking it chooses it.
+/// list still offers the typed pair, the failure is escaped both on screen and in its accessible name, and picking
+/// the typed pair chooses it. Hidden characters in a refusal must stay visible even while discovery is unavailable.
 #[gpui::test]
 fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
     let (mut helm, cx) = checkout_open(cx);
@@ -545,9 +546,18 @@ fn a_typed_pair_is_chosen_when_discovery_fails(cx: &mut TestAppContext) {
     test_support::advance(cx, Duration::from_millis(160));
     let reads = to(&sent(&mut helm, cx), REPOSITORIES);
     assert_eq!(reads.len(), 1, "the premise: the read is out");
-    helm.reply(reads[0].id, 504, Some(json!("the host timed out")));
+    helm.reply(reads[0].id, 504, Some(json!("the host\u{202e} timed out")));
     settle(cx);
-    assert!(name_of(cx, "launcher-repository-note").is_some());
+    let shown = "the host<U+202E> timed out";
+    assert_eq!(
+        name_of(cx, "launcher-repository-note").as_deref(),
+        Some(shown)
+    );
+    assert!(
+        crate::session_list::tests::painted(&test_support::frame(cx))
+            .iter()
+            .any(|line| line == shown)
+    );
     test_support::click(cx, "launcher-repository-option-acme/qux");
     assert_eq!(
         draft(cx).checkout.and_then(|checkout| checkout.repo),

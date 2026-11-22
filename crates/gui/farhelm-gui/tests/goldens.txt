@@ -138,6 +138,8 @@ linux/launcher-new-container--dark.png 221641032df8f02a042e4ba49d61c6f05d6c37d5
 linux/launcher-new-container--light.png 8646b1cd4e76ef6317f3255153f3c5f32f2aa9be
 linux/launcher-replace-with--dark.png e221c4ae679dd1e560193f08d108b05da9b1e891
 linux/launcher-replace-with--light.png 1910f962733a8caf8260305a5e328e8b8463ac7a
+linux/launcher-repository-refusal--dark.png 1fc7535e09efed1043b626548cadc37119667031
+linux/launcher-repository-refusal--light.png cd4bc786fcd9eb725e58fd4ff6896f1f4808defd
 linux/launcher-restart-with--dark.png 9c9e64b4c1ab4adc2ed1abdf15a038c1d601c5c5
 linux/launcher-restart-with--light.png c478210f6325a38c0153405a069ed51aaee69b2b
 linux/launcher-shell-wrapper--dark.png 4d989293e8857e9009ac598fe4de3afe747a0fbb

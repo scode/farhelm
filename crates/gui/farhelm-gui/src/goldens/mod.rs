@@ -140,6 +140,8 @@ struct SceneState {
     after: Rc<Cell<Option<AfterDrawn>>>,
     /// Some controls only draw after a dialog opens. Keep settling until this hover can use its real bounds.
     hover: Rc<Cell<Option<&'static str>>>,
+    /// Advancing the clock can run tasks that borrow the app. Request this from staging and advance outside its draw.
+    advance_clock: Rc<Cell<Option<std::time::Duration>>>,
 }
 
 /// The view a scene is drawn in: the window's ground, then the scene, centered, with the layer manager's overlay.
@@ -1028,6 +1030,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_results_setup,
     },
     Scene {
+        name: "launcher-repository-refusal",
+        size: (1080., 1040.),
+        draw: session_lists_then,
+        setup: launcher_repository_refusal_setup,
+    },
+    Scene {
         name: "launcher-restart-with",
         size: (1080., 1160.),
         draw: session_lists_then,
@@ -1604,6 +1612,9 @@ fn settle(
                     rest_pointer_at(&state, edge, window, cx);
                 }
             })?;
+            if let Some(delay) = cx.update(|cx| view.read(cx).state.advance_clock.take()) {
+                cx.advance_clock(delay);
+            }
             // The draw takes the after-draw callback out of the slot. Check after its deferred effect has had
             // a chance to put the next step back, or a partly staged scene can appear ready.
             let ready = cx.update(|cx| {
@@ -1741,6 +1752,7 @@ fn render_capture(
             keep: Rc::new(RefCell::new(Vec::new())),
             after: Rc::new(Cell::new(None)),
             hover: Rc::new(Cell::new(None)),
+            advance_clock: Rc::new(Cell::new(None)),
         };
         let scene_view = cx.new(|cx| SceneView {
             scene,
