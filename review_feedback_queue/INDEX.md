@@ -147,32 +147,8 @@ consequences.
   — The regression that promises to cancel a Restart caller during history encoding can instead let that caller finish
   normally, without rejecting the failed cancellation premise.
 
-- [`child-hangup-masks-missing-stop-tree-sweep.md`](child-hangup-masks-missing-stop-tree-sweep.md) — The Stop regression
-  can credit the death of an unmarked descendant without distinguishing whether Stop swept that descendant or merely
-  killed its parent shell.
-
-- [`restart-test-counts-zombie-as-running-agent.md`](restart-test-counts-zombie-as-running-agent.md) — The Restart
-  regression can fail after correctly stopping the old agent because its observation mistakes an exited, unreaped
-  process for a running one.
-
-- [`restart-screen-captured-before-prompt-settles.md`](restart-screen-captured-before-prompt-settles.md) — Correct
-  terminal recovery can fail the restart regression because its expected screen is captured before the fixture finishes
-  writing the post-echo prompt.
-
 - [`tab-retry-test-measures-observation-time.md`](tab-retry-test-measures-observation-time.md) — The retry regression
   can accept cleanup observed after 900 ms without proving that the retry itself waited for the required delay.
-
-- [`last-output-fixture-readiness-precedes-trap.md`](last-output-fixture-readiness-precedes-trap.md) — The final-output
-  regression can reject correct output preservation because its agent has published readiness before installing the
-  exit-output trap.
-
-- [`host-preservation-test-can-select-starter-pid.md`](host-preservation-test-can-select-starter-pid.md) — The
-  reserved-session preservation regression can blame correct startup cleanup for a fixture launcher exiting normally,
-  because its readiness check can save that temporary launcher as the terminal-host process.
-
-- [`restart-test-types-before-safe-prompt-barrier.md`](restart-test-types-before-safe-prompt-barrier.md) — The restart
-  tests can overwrite their startup marker with early test input and then report a healthy supervisor restart as having
-  lost terminal contents.
 
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
@@ -211,10 +187,6 @@ consequences.
   integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
   that permit, another fixture can be admitted during the preceding fixture's teardown. No permanent process leakage is
   established.
-
-- [`stop-annotation-exit-witness.md`](stop-annotation-exit-witness.md) — The test can reject a successful Stop if its
-  immediate listing runs before the host runtime processes the exit record. This is a conditional source-confirmed race,
-  not an observed flake or frequency claim.
 
 - [`kicked-input-test-local-filter.md`](kicked-input-test-local-filter.md) — A takeover regression assertion lets the
   client discard the displaced viewer's attempted keystrokes before the supervisor sees them. Passing therefore does not
@@ -293,14 +265,6 @@ consequences.
   — failed-spec test accepts an attempted host start as never started. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md`](trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md)
-  — failed Restart loses the live-tab preservation regression oracle. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md`](trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md)
-  — deleted ambiguous-create test loses published-handle and pending-intent oracles. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-deleted-startup-error-artifact-readonly-oracle.md`](trailing-deleted-startup-error-artifact-readonly-oracle.md)
   — Deleted reload test loses read-only Error-artifact ownership oracle. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -324,10 +288,6 @@ consequences.
 - [`trailing-test-one-shot-sample-before-host-catch-up.md`](trailing-test-one-shot-sample-before-host-catch-up.md) —
   Persistence test can skip an uncaught-up host. Abbreviated collection; confidence, proposed dismissals and unresolved
   consequences are preserved in the entry.
-
-- [`trailing-removed-completed-keyed-create-reboot-replay-oracle.md`](trailing-removed-completed-keyed-create-reboot-replay-oracle.md)
-  — Deleting the kind test also removes the completed-create reboot retry oracle. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md)
   — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence,

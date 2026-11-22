@@ -897,13 +897,21 @@ async fn hosts_of_known_sessions_and_unreadable_hosts_are_left_at_start() {
             .expect("the record names its socket"),
     );
     let reserved_socket = std::path::absolute(reserved_socket).expect("an absolute socket");
-    wait_for_condition("the interrupted create's host runs", || async {
-        host_process(&reserved_socket)
+    // The starter and host share argv. Only the process that called listen
+    // appears as the peer of this socket, even before the starter exits.
+    wait_for_condition("the interrupted create's host listens", || async {
+        tokio::net::UnixStream::connect(&reserved_socket)
+            .await
             .map(drop)
-            .ok_or_else(|| "no host process yet".to_string())
+            .map_err(|error| error.to_string())
     })
     .await;
-    let reserved_pid = host_process(&reserved_socket).expect("the reserved session's host runs");
+    let peer = tokio::net::UnixStream::connect(&reserved_socket)
+        .await
+        .expect("connect to the reserved host")
+        .peer_cred()
+        .expect("the host peer");
+    let reserved_pid = u32::try_from(peer.pid().expect("the host peer pid")).unwrap();
     retire(state, sup, client).await;
     store_of(state)
         .await

@@ -221,7 +221,9 @@ async fn a_failed_restart_restores_the_stop_annotation_it_had_cleared() {
     let (session, _work) = resumable_basic_session(&h).await;
 
     h.client.stop_session(&session.id).await.expect("stop");
-    let stopped = listed(&h.client, &session.id).await;
+    // The host's exit record can arrive after the Stop reply.
+    let stopped = wait_for_non_live_status(&h.client, &session.id, 30).await;
+    assert!(matches!(stopped.status, SessionStatus::Exited { .. }));
     assert_eq!(stopped.annotation.as_deref(), Some("stopped by user"));
 
     // The launch directory becomes unwritable, so this restart's spec —
@@ -291,6 +293,8 @@ async fn a_repointed_working_directory_refuses_the_restart() {
     .await;
     wait_for_agent_ready(&h, &session.id).await;
     h.client.stop_session(&session.id).await.expect("stop");
+    let stopped = wait_for_non_live_status(&h.client, &session.id, 30).await;
+    assert!(matches!(stopped.status, SessionStatus::Exited { .. }));
 
     // The repoint.
     std::fs::remove_file(&link).expect("drop the old link");

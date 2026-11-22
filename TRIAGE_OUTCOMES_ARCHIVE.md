@@ -36027,3 +36027,191 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
   https://github.com/scode/farhelm/pull/4530/changes.
+
+## restart-test-counts-zombie-as-running-agent.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The Restart ordering test can falsely fail if the old grandchild is an exited but not
+  yet reaped process when the new host starts, because `kill -0` counts zombies as alive. Verified: e2e
+  host_terminals.rs:359-364 uses `kill -0` and expects " gone gone" (confirmed). The harness and production both treat
+  zombies as gone. No flake is recorded. The window depends on the orphan reaper and is likely short.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix code: check process state (Z counts as gone) in the wrapper.
+- Execution: Fixed the Restart ordering check to treat a zombie as already exited. jj change `krssouzm`, bookmark
+  `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## last-output-fixture-readiness-precedes-trap.md
+
+- Outcome: `other`.
+- Assessment: None. The test that a restart keeps the old program's last output can fail spuriously, because the fake
+  agent prints its ready marker before it installs the TERM trap that prints those last words. Verified: Confirmed on
+  main (`e2e/host_relaunches.rs` `history_agent_with`: `OLD_SCREEN_MARK` is printed before `trap ... TERM HUP`). The
+  test restarts immediately after seeing the marker. Not in FLAKES.md, and no observed flake.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Move the trap ahead of the marker in the fixture script (a one-line reorder).
+- Execution: Fixed the fixture so its readiness line follows installation of the exit trap. jj change `krssouzm`,
+  bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## restart-screen-captured-before-prompt-settles.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The orderly-restart test may capture its expected screen before the fake agent prints
+  its prompt, and so fail falsely. Verified: host_restarts.rs:316-322 waits only for "echo:before-restart" and then
+  captures `screen_tail` (confirmed). The fake agent writing the prompt separately is taken from the file. No flake is
+  recorded.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix code: wait for the prompt after the echo before capturing.
+- Execution: Fixed the screen comparison to wait for the fake agent's post-input prompt. jj change `krssouzm`, bookmark
+  `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## restart-test-types-before-safe-prompt-barrier.md
+
+- Outcome: `other`.
+- Assessment: None. The supervisor-restart survival tests type input after `FAKE-AGENT READY` rather than after the `> `
+  prompt. The fixture's own documentation says to wait for the prompt, because input echoed between CR and LF can
+  overwrite the marker row. Verified: Confirmed (`e2e/host_processes.rs` `a_host_agent_survives` waits for
+  `FAKE-AGENT READY` and then calls `type_line`. `fake_agent.rs` documents `> ` as the SAFE-TO-TYPE barrier). The rule
+  lives in fixture docs, not in a spec. No observed flake.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code. Wait for the documented `> ` barrier before typing.
+- Execution: Fixed both supervisor-process restart cases to wait for the fixture's prompt before typing. jj change
+  `krssouzm`, bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`,
+  https://github.com/scode/farhelm/pull/4534/changes.
+
+## trailing-failed-restart-loses-the-live-tab-preservation-regression-oracle.md
+
+- Outcome: `other`.
+- Assessment: A Restart that fails must leave the session's open shell tabs and their work running. The test proving
+  that went away with tmux. No test now opens a tab, makes a Restart fail, and checks the tab's shell survived.
+  Verified: crates/farhelm/tests/e2e/host_relaunches.rs on main: the only tabs are opened in the successful-Restart test
+  (:287) and the stop-during-restart helper (:375). The refused/unusable replacement tests (:595, :697) open no tab.
+  Production behavior was not alleged wrong. SPEC.md:2042 says "Restart ... leave[s] tabs running".
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (add a tab to an existing failed-replacement fixture and check its shell pid/identity survives)
+- Execution: Restored live tab preservation and input checks after a definitive failed Restart. jj change `krssouzm`,
+  bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## child-hangup-masks-missing-stop-tree-sweep.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The Stop test's background child would also die from the kernel's hangup when its
+  parent shell is killed, so the test cannot prove Stop swept the whole tree. Verified: Accepted from the file. A
+  hangup-immune fixture exists, and the Restart and Delete tests already use it (e2e host_terminals.rs:388-389).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch by switching Stop's test to the hangup-immune tree.
+- Execution: Used the existing hangup-immune fixture to prove Stop reaps the unmarked descendant. jj change `krssouzm`,
+  bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## host-preservation-test-can-select-starter-pid.md
+
+- Outcome: `other`.
+- Assessment: None. The test that startup reclaim leaves a reserved session's terminal host running can record the
+  short-lived first-stage launcher's PID and later fail when that launcher exits normally. Verified: Still present:
+  `host_process` (`e2e/host_terminals.rs`) returns the first `/proc` entry whose argv has `--socket <path>`, which also
+  matches the first stage. `/proc` lists PIDs in ascending order, so the lower-numbered first stage wins while both
+  processes exist. In practice, creating the second session first makes the overlap unlikely. Not in FLAKES.md.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code, small (wait until exactly one matching process remains, or match the daemon specifically).
+- Execution: Read the listening Unix socket's peer PID so the test observes the host after the starter forks. jj change
+  `krssouzm`, bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`,
+  https://github.com/scode/farhelm/pull/4534/changes.
+
+## stop-annotation-exit-witness.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tests only. A test lists the session immediately after Stop returns and expects "stopped by
+  user". The host's exit record can arrive after Stop returns, so the listing may still show the session live. Verified:
+  Confirmed. `restart_under_concurrency.rs` L223-225 lists immediately. In `sweep.rs` `stop_live_agent`, a comment
+  explicitly allows the exit record to lag. `status.rs` hides the annotation while the host still reads live. No flake
+  has been logged.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix the code: one line, `wait_for_dead_agent` before the assertion.
+- Execution: Waited for the host's exit to become visible before asserting Stop's annotation. jj change `krssouzm`,
+  bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`, https://github.com/scode/farhelm/pull/4534/changes.
+
+## trailing-removed-completed-keyed-create-reboot-replay-oracle.md
+
+- Outcome: `other`.
+- Assessment: None directly. Retrying a keyed create after a host reboot must return the original session, not start
+  another agent. The only test of that went away with the terminal-kind field removal. Verified: create_idempotency.rs
+  on main has only the never-launched reboot case (:839) and same-boot restart. No completed-create reboot retry.
+  SPEC.md keeps retry identity for the child's lifetime.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (restore the deleted sequence minus the kind fields)
+- Execution: Restored a completed create replay check after a simulated reboot with no surviving hosts. jj change
+  `krssouzm`, bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`,
+  https://github.com/scode/farhelm/pull/4534/changes.
+
+## trailing-deleted-ambiguous-create-test-loses-published-handle-and-pending-intent-oracles.md
+
+- Outcome: `other`.
+- Assessment: When a create fails and Farhelm can't tell whether the agent started, the session must stay listed and
+  reachable for Stop/Delete, and a retry with the same key must not be treated as finished. The host version of the test
+  only checks that a database row survives. Verified: host_creates.rs
+  `an_unusable_host_that_cannot_be_ended_keeps_the_launching_record` (~:1169) still calls an unkeyed `create_session`
+  and never lists the session or checks the reservation. Production is said to be correct (not re-verified in depth).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (add a key, assert listed and reservation still pending)
+- Execution: Extended the ambiguous create test to check the retained list entry and pending keyed reservation. jj
+  change `krssouzm`, bookmark `plan/triage-supervisor/05-restart-and-create-test-gaps`,
+  https://github.com/scode/farhelm/pull/4534/changes.
