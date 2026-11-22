@@ -342,7 +342,7 @@ impl HostTransport for SystemTransport {
                     return;
                 }
             };
-            let access = match crate::ssh::SshAccess::resolve(kind, &self.state_dir) {
+            let access = match crate::ssh::SshAccess::prepare(kind, &self.state_dir, &dest).await {
                 Ok(access) => access,
                 Err(error) => {
                     warn!(host = host.id, %error, "could not resolve shared SSH access");
