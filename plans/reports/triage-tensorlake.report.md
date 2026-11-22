@@ -110,3 +110,103 @@ All seven PRs passed their required independent Sol reviews and cold reads of th
 Settings discovery candidate. That candidate was deferred in full once review established the separate discovery and
 cleanup state required to preserve its rows. The rebase preserved the reviewed diff outside bookkeeping and the upstream
 change to the shared launch validation call.
+
+### Landing
+
+#### What landed with it
+
+The plan's seven PRs (#4536, #4544, #4549, #4554, #4555, #4559, #4566) landed in this round right after the desktop app
+triage plan, with a landing fix, #4571. Both plans were based on the same main, which had gained only queue bookkeeping
+since. Their SPEC.md, SPEC_impl.md and channel-type edits are in different places and agree; neither changes what goes
+over the wire. They did interact in one place (see "Fixes made while landing").
+
+An independent reviewer read the stack against the triage decisions, the specs and the Tensorlake harness rules, and
+found no blocker:
+
+- **Triage outcomes.** All 30 are accounted for: 26 fixed as decided, three deferred to "Plan follow-up" entries in
+  TODO.md, and one closed without a change: if Tensorlake's create reply is lost, the test runner can leave a sandbox
+  that needs cleaning up by hand, which the reviewer agreed is outside the plan's approved scope.
+- **Cross-plan.** The desktop plan keeps leftover containers listed when Refresh fails, in the app alone; this plan
+  deferred the Tensorlake version because there the helm itself replaces the list. That is consistent.
+- **Docs and tests.** The three agent instruction files about the Tensorlake harness were updated together, SPEC text
+  matches the helm's messages, and the new tests check their setup before acting.
+
+#### Fixes made while landing
+
+All in [#4571](https://github.com/scode/farhelm/pull/4571/changes):
+
+- **Two desktop launcher tests broke.** This plan gave a sandbox host in the helm's shared host-list test data an
+  environment, to pin that field's format. The desktop launcher's New and Clone tests check what happens on a sandbox
+  host with no environment, and use that same host for it. With the environment added, New preselected it and Clone
+  opened in the home folder instead of the session's folder. Only test data changed, not product behavior. The workspace
+  suite caught it, and both tests pass on the desktop plan alone. Their data now removes that host's environment, as its
+  own docs already said. The desktop app's own tests, which read the same data, still pass.
+- **The report and a changelog fragment overclaimed.** Both say Stop and suspend's message after a partial failure now
+  fits shells. The part about terminal tabs that could not be closed still comes from the supervisor and says "The agent
+  stopped", so the report's line is only partly true. The fragment now says so.
+- **A harness instruction was wrong.** It said a fresh `--out` merely preserves earlier results. In fact a rerun into a
+  used output directory fails every shard, and only after the runner has uploaded about 1 GB of test files, unless
+  `--staged` reuses an earlier upload. The line now says that.
+
+#### Checks
+
+This round landed the desktop app triage plan and the Tensorlake triage plan together, stacked in that order on main.
+The checks ran on the combined result: the desktop plan changes the GUI library widely and the Tensorlake plan changes
+the helm and its Tensorlake test harness, so the landing ran the Rust workspace suite, the lint runs, the end-to-end
+smoke test and the full set of GUI reference screenshots. The worker runs were on a separate arm64 Linux test worker;
+the rest ran locally on x86_64.
+
+On both plans as delivered, stacked onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `2a6c5499-13b5-4d21-afb9-5b091042da05`): 8278 of 8280 passed. The two failures were the
+  desktop launcher's New and Clone tests broken by the Tensorlake plan's change to shared test data (that plan's "Fixes
+  made while landing"). Narrowed locally: both passed on the desktop plan alone (run
+  `c9d7f253-749f-44c6-925a-4eac026c4f6a`) and failed with the Tensorlake plan added (run
+  `813271e6-59c9-45eb-85a9-abc60d2b35c4`).
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (`-p farhelm-desktop --all-targets`, with and without `--features agent`), on the test worker, not through
+  the recorder: passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `4bb63a13-d440-45fa-b532-fb5a776fa2bf`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `dbc90d25-7653-4d3f-ac84-510fd4b8c072`):
+  passed, the nine new scenes included.
+- The GUI screenshot-batch tests (`python3 -B scripts/test-gui-screenshot-batch.py`), locally: passed.
+- The Tensorlake harness's own checks (`deno check` and `deno test -A` on `scripts/tensorlake/rust-tests.ts` and
+  `sandbox-tests.ts`, and `shellcheck` on its two shell scripts; no sandbox), locally: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated environment), `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+After the landing fixes (#4570, #4571):
+
+- `cargo nextest run -p farhelm-gui --lib`, on the test worker (recorder run `2d36598c-3456-42f0-8d1a-9a000ee6b2d7`):
+  all 3280 passed, the two launcher tests among them. Narrowed first locally at the combined top with the fix (run
+  `4eefba0e-c50d-4d8d-b232-35bffc152685`): both passed.
+- `cargo nextest run -p farhelm-desktop`, the desktop app's own tests, on the test worker at the Tensorlake plan's top
+  with its fix (recorder run `a8d01b92-f47e-4b6f-813e-2decbe6ca87c`): all 184 passed. Its host listing reads the same
+  shared test data the Tensorlake plan changed, and the workspace run leaves the desktop app out.
+- `cargo clippy --all-targets -- -D warnings`, on the test worker: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+The rest of the first runs still applies: the fixes change only comments, one spec sentence, the launcher tests'
+fixture, a changelog fragment and a harness instruction line.
+
+Skipped: real Tensorlake sandbox runs, which spend cloud resources and were not needed for the helm logic the unit and
+contract tests cover; macOS, since no Mac was part of this landing; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+None of these is recorded anywhere else yet.
+
+- **A cheap first half of the deferred Suspend and Resume fix.** The deferred outcome is a host row left by a failed
+  setup, with no saved sandbox id and no create in progress, where Suspend or Resume then acts on another sandbox with
+  the same name, changing the state and billing of a sandbox Farhelm does not own. Refusing when both facts are missing
+  is about six lines and a test and closes exactly that case; the reviewer thought it worth doing soon.
+- **The supervisor's "The agent stopped" notice** is shown for shells on plain Stop too. It would fit with the desktop
+  plan's deferred entry about naming the program a Stop or Delete would end.
+- **An over-built rewrite.** The Tensorlake error-message cleaner's ten-line body was rewritten as a longer chain to
+  save allocations on small fields. It behaves the same, and restoring the old body would be simpler.
+- **Empty test partitions** are only tested against a stand-in for the Tensorlake command line. If real nextest reports
+  an empty partition differently from what the runner expects, a real run with more shards than test binaries could
+  report a failure where no test failed.
