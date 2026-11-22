@@ -7383,7 +7383,8 @@ maximized state while the compositor chooses placement. Fullscreen observations 
 maximize state, and a window restored maximized is not followed until it reports itself maximized. On macOS, GPUI
 positions the hidden window at its ordinary frame and calls AppKit's Zoom before showing it. That gives AppKit the frame
 to restore on the next Zoom. A window within two points of its display's visible area counts as maximized because GPUI
-checks for an exact match and a previous startup zoom came out a point short. A window sized by hand to fill the display
+checks for an exact match, and the zoom GPUI used to make after showing the window came out a point short (2026-11-14);
+whether the zoom before showing does the same has not been checked on a Mac. A window sized by hand to fill the display
 can therefore be remembered as zoomed. The window side (`crates/gui/farhelm-gui/src/desktop.rs`) only forwards what the
 window reports; the rules live in the desktop crate (`window_state.rs`'s `FrameKeeper`). Only the report the window
 settles on counts (macOS reports each step of a zoom's animation as an ordinary frame, which must not become the

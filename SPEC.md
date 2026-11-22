@@ -3883,10 +3883,10 @@ documentation's Keyboard shortcuts page lists both platform forms.
 
 The native desktop remembers its last ordinary window rectangle and whether it was maximized when it closed. On the next
 launch it restores that rectangle only when it fits on a currently connected display; otherwise it opens at a safe size
-centered on a current display. On macOS a maximized window first appears at its zoomed size, and Zoom returns it to the
-ordinary frame it opened from. On Wayland, which does not expose reliable global window positions, Farhelm keeps a
-usable saved size and the maximized state while leaving placement to the compositor. Native fullscreen is not persisted.
-The window cannot be made smaller than 720 by 560 logical pixels, the smallest size at which the session sidebar at its
+centered on a current display. On macOS a maximized window first appears at its zoomed size, and Zoom returns it to its
+remembered ordinary frame. On Wayland, which does not expose reliable global window positions, Farhelm keeps a usable
+saved size and the maximized state while leaving placement to the compositor. Native fullscreen is not persisted. The
+window cannot be made smaller than 720 by 560 logical pixels, the smallest size at which the session sidebar at its
 default width and the main pane still fit side by side.
 
 ## Durability and resume
