@@ -73,3 +73,13 @@ can collide there just as in the shared devbuild state:
 ```
 curl -fsSL https://raw.githubusercontent.com/scode/farhelm/main/scripts/devbuild-github.sh | FARHELM_DESKTOP_STATE_DIR=/tmp/farhelm-devbuild-state-<N> bash -s -- <N>
 ```
+
+NOTE: An unlanded target that bumps the wire protocol version (`PROTOCOL_VERSION` in `crates/farhelm-proto/src/lib.rs`)
+claims a number that is not settled yet. Two unlanded plans can take the same next number (picking no longer keeps them
+apart), and whichever lands second moves to the number after, so main, a later devbuild, or a release can end up using
+that number for a different wire. Builds that share a protocol number connect without a version refusal, so a peer on
+the target's build then fails inside the session or terminal stream (reconnect loops, for example) instead of being
+refused at the hello. The devbuild's own local supervisor is replaced at the next devbuild's first launch, so the
+exposure is the remote hosts it updated. When the target bumps the protocol, say so plainly when handing out the line,
+and say that any remote host the devbuild updates should get a landed build back (Update from the installed app, or from
+a devbuild of `main`) once testing is done.
