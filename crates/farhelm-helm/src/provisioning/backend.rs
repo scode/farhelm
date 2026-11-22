@@ -20,9 +20,9 @@ use tracing::warn;
 
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
-/// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd and
-/// cleanup commands (on a Mac, including the up to about 16-second wait for
-/// launchd to drop the booted-out job), plus the time this build's
+/// The uninstall stop step's bound on Linux (a Mac adds its bootout wait in
+/// [`MAC_STOP_SUPERVISOR_TIMEOUT`]): [`COMMAND_TIMEOUT`] for its systemd and
+/// cleanup commands, plus the time this build's
 /// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
 /// seconds for starting that program and its runtime on a loaded host. The
 /// remote `farhelm` may come from another release, whose bound is not part of
@@ -31,6 +31,18 @@ pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 pub(super) const STOP_SUPERVISOR_TIMEOUT: Duration = COMMAND_TIMEOUT
     .saturating_add(farhelm_supervisor::hosts::stop::COMMAND_BUDGET)
     .saturating_add(Duration::from_secs(10));
+/// [`STOP_SUPERVISOR_TIMEOUT`] for a remote Mac, plus the longest the stop
+/// may wait for launchd to drop the booted-out job
+/// ([`super::macos::BOOTOUT_WAIT`]), which covers the supervisor's whole
+/// orderly-stop grace. Without it the helm would cut the SSH command off
+/// while launchd is still, correctly, letting the supervisor finish.
+pub(super) const MAC_STOP_SUPERVISOR_TIMEOUT: Duration =
+    STOP_SUPERVISOR_TIMEOUT.saturating_add(super::macos::BOOTOUT_WAIT);
+/// Update's start step on a remote Mac: [`COMMAND_TIMEOUT`] for its
+/// inspection and bootstrap, plus the bootout wait, as in
+/// [`MAC_STOP_SUPERVISOR_TIMEOUT`].
+pub(super) const MAC_REFRESH_TIMEOUT: Duration =
+    COMMAND_TIMEOUT.saturating_add(super::macos::BOOTOUT_WAIT);
 /// `case` patterns, for a remote shell, matching exactly the diagnostics the
 /// supported `stat` implementations (GNU, uutils, BusyBox) print in the C
 /// locale for a path that does not exist. Only these excuse treating a lookup
@@ -3158,7 +3170,13 @@ impl ProvisioningBackend for SystemBackend {
     ) -> Result<ActionOutcome, BackendFailure> {
         require_remote(target, "starting the launchd supervisor")?;
         let script = super::macos::start_script(domain, label, plist, refresh)?;
-        self.require_shell(target, &script, "starting the launchd supervisor")
+        // Only a refresh boots out a running job and may wait out its stop.
+        let timeout = if refresh {
+            MAC_REFRESH_TIMEOUT
+        } else {
+            COMMAND_TIMEOUT
+        };
+        self.require_shell_within(target, &script, "starting the launchd supervisor", timeout)
             .await?;
         Ok(ActionOutcome::Completed)
     }
@@ -3180,7 +3198,7 @@ impl ProvisioningBackend for SystemBackend {
             target,
             &script,
             "stopping the launchd supervisor and its terminal hosts",
-            STOP_SUPERVISOR_TIMEOUT,
+            MAC_STOP_SUPERVISOR_TIMEOUT,
         )
         .await?;
         Ok(ActionOutcome::Completed)

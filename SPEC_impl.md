@@ -8001,10 +8001,19 @@ bootstraps the new plist. Rewriting a plist alone would leave launchd's old load
 returns as soon as it has sent SIGTERM, and launchd keeps listing the job for a while after. Measured over SSH on macOS
 26 and 27 with a throwaway job, it was still listed right after every successful bootout, even when the process exited
 at once, and gone 0.2 to 2.6 seconds later; launchd killed a process that ignored SIGTERM about five seconds after
-bootout. Both Update and uninstall therefore poll the job for at least 15 seconds before calling it still loaded. A
-single check right after bootout failed an uninstall's first attempt. Neither path uses `launchctl disable`, whose
-persistent override would prevent a later setup from starting the job. Launchd actions are explicit members of the same
-frozen action list as Linux actions, without a separate service-manager abstraction.
+bootout, which is launchd's default `ExitTimeOut`. A single check right after bootout failed an uninstall's first
+attempt.
+
+That default cut the supervisor's orderly stop (up to about 14 seconds by design) short, so the plist sets `ExitTimeOut`
+to 60 seconds. Linux relies on systemd's 90-second default stop timeout; launchd records any larger value as 60 (macOS
+26 and 27), so 60 is the most a Mac can get. Update and uninstall poll the job, every 0.2 seconds for the first ten
+polls and then once a second, until 75 seconds have passed since bootout by the wall clock, so that launchd's own kill
+always comes first; their SSH command bounds include that wait. A job loaded from an older plist keeps launchd's default
+until an Update reloads it, and that Update's bootout still stops it under the old timeout. launchd.plist(5) ties
+`ExitTimeOut` to system shutdown as well, so a remote Mac's shutdown or reboot may wait for the orderly stop too, as
+systemd's does on Linux; that effect was not measured. Neither path uses `launchctl disable`, whose persistent override
+would prevent a later setup from starting the job. Launchd actions are explicit members of the same frozen action list
+as Linux actions, without a separate service-manager abstraction.
 
 Every remote Darwin `stat` call uses the system `/usr/bin/stat` regardless of PATH, including uninstall.
 

@@ -163,6 +163,25 @@ impl OwnedMac {
         script
     }
 
+    /// Return the exit timeout launchd applies to the owned job, as
+    /// `launchctl print` reports it.
+    ///
+    /// The supervisor's orderly-stop grace rests on launchd honoring the
+    /// plist's `ExitTimeOut` and capping it at 60 (measured on macOS 26 and
+    /// 27). A macOS that ignored the key or lowered the cap would silently
+    /// bring back launchd's five-second SIGKILL; reading the applied value
+    /// here catches that.
+    async fn launchd_exit_timeout(&self) -> String {
+        let script = format!(
+            "{}\n[ \"$active\" = active ] || exit 1\nprintf '%s\\n' \"$job_output\" | awk '$1 == \"exit\" && $2 == \"timeout\" && $3 == \"=\" {{ print $4 }}'\n",
+            self.job_script()
+        );
+        self.shell(&script, "read the owned job's exit timeout")
+            .await
+            .trim()
+            .to_owned()
+    }
+
     /// Return the actual supervisor PID published by the owned launchd job.
     async fn supervisor_pid(&self) -> u32 {
         let script = format!(
@@ -330,7 +349,7 @@ impl OwnedMac {
                 &self.target,
                 &script,
                 "clean the owned Mac fixture",
-                super::super::backend::STOP_SUPERVISOR_TIMEOUT,
+                super::super::backend::MAC_STOP_SUPERVISOR_TIMEOUT,
             )
             .await
             .is_ok()
@@ -656,6 +675,7 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
         let processes = fixture.terminal_processes().await;
         let retained = MacTerminals { session: &session.id, tab: &tab.id, nonce: &nonce, identity: &identity, processes: &processes };
         mac_assert_survival(&fixture, &manager, host, retained, "initial setup survival").await;
+        assert_eq!(fixture.launchd_exit_timeout().await, "60", "launchd's exit timeout for the set-up job");
 
         let before_update = fixture.supervisor_pid().await;
         if let Some(update) = &update { *payloads.0.lock().unwrap() = update.clone(); }
@@ -675,6 +695,7 @@ async fn remote_macos_setup_update_crash_recovery_and_uninstall() {
             "verify the Update payload and signature").await;
         assert_eq!(hash.split_whitespace().next(), Some(expected.as_str()));
         mac_assert_survival(&fixture, &manager, host, retained, "Update survival").await;
+        assert_eq!(fixture.launchd_exit_timeout().await, "60", "launchd's exit timeout after Update reloaded the job");
 
         let incarnation = manager.status(host).unwrap().incarnation;
         let before_crash = fixture.supervisor_pid().await;
