@@ -16,10 +16,6 @@ consequences.
 - [`folder-suggestion-enter-can-submit-launcher.md`](folder-suggestion-enter-can-submit-launcher.md) — Enter on a
   visible folder suggestion can submit the launcher. A successful Replace with can retire the source session.
 
-- [`shell-lifecycle-approval-names-wrong-program.md`](shell-lifecycle-approval-names-wrong-program.md) — Agent-requested
-  Stop or Delete can ask approval to terminate an agent even though accepting the card terminates the shell and its
-  work.
-
 - [`template-delete-can-target-unshown-editor.md`](template-delete-can-target-unshown-editor.md) — Delete can remove a
   different template from the one shown. The old button can also suppress Undo.
 
@@ -293,20 +289,11 @@ consequences.
 - [`shell-template-clears-dormant-prompt.md`](shell-template-clears-dormant-prompt.md) — Applying a Bash or Zsh template
   can clear a draft prompt that selecting the same shell by hand would keep.
 
-- [`shell-wrapper-help-names-agent.md`](shell-wrapper-help-names-agent.md) — A shell’s wrapper field says it runs before
-  an agent command.
-
 - [`shell-picker-split-by-model.md`](shell-picker-split-by-model.md) — The model field can split the agent and shell
   choices, moving the Shells group as the selection changes.
 
 - [`shell-template-hides-incompatible-permissions.md`](shell-template-hides-incompatible-permissions.md) — The template
   editor says a shell has no approvals while retaining incompatible approvals that block saving.
-
-- [`host-suspend-warning-calls-shell-agent.md`](host-suspend-warning-calls-shell-agent.md) — Hosts calls an active Bash
-  or Zsh session an agent when asking to suspend.
-
-- [`shell-approval-command-facts-untested.md`](shell-approval-command-facts-untested.md) — Approval tests check that the
-  shell lacks a Permissions row but could miss a missing shell name or command.
 
 - [`shell-template-approval-misstates-permission.md`](shell-template-approval-misstates-permission.md) — Approval cards
   can say a shell template has no permissions while saving a concrete incompatible setting.

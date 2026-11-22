@@ -281,7 +281,7 @@ impl Rows<'_> {
             ],
             Field::Wrapper => self.text_row(
                 field,
-                "An empty input removes the wrapper. The prefix runs through Bash before Farhelm's agent command.",
+                "An empty input removes the wrapper. The prefix runs through Bash before the launch command.",
             ),
             Field::Prompt => self.text_row(
                 field,

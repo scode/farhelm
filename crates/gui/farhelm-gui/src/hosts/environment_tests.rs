@@ -13,8 +13,8 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::provisioning::{ProvisioningOperation, RunStatus};
 use farhelm_proto::recipes::RecipeSize;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionState, HostStateView, HostView, KeyedEntry, PREFERENCES_KEY,
-    TensorlakeHostView,
+    Collection, CollectionState, HostStateView, HostView, KeyedEntry, PREFERENCES_KEY, RefreshView,
+    SessionList, TensorlakeHostView,
 };
 use gpui::{TestAppContext, VisualTestContext, px, size};
 use serde_json::{Value, json};
@@ -26,7 +26,7 @@ use crate::hosts::tests::{
 };
 use crate::operations::{OpKey, Work};
 use crate::session;
-use crate::session_list::environment_tests::{idle, listing};
+use crate::session_list::environment_tests::{bash_session, idle, listing};
 use crate::session_list::host_rail::tests::hover_help;
 use crate::session_list::tests::{Fixture, session};
 use crate::test_support::{
@@ -926,27 +926,39 @@ fn suspend_goes_at_once_when_every_session_there_is_idle(cx: &mut TestAppContext
     assert_eq!(label(cx, "host-status-4").as_deref(), Some("Suspending…"));
 }
 
-/// Why this matters: suspending a machine where an agent works freezes it mid-task, and an incomplete or failed read,
+/// Why this matters: suspending a machine where a session works freezes it mid-task, and an incomplete or failed read,
 /// or a host that is not connected, proves nothing about that; the old question asked then, with Cancel focused first
 /// so a stray Enter keeps the machine running, and nothing went out before the answer.
 ///
-/// Specified: answered with a running session (which the Hosts panel's own list never shows), with a session whose
+/// Specified: answered with a running shell session, with a session whose
 /// status is unknown, with an idle session read stale, with an idle but truncated listing, with a failed read (503),
 /// and, with `gpubox` pushed connecting before the click, with an idle complete listing, Suspend asks "Suspend gpubox?"
-/// each time, with the line "An agent on gpubox is working, or its status could not be checked. Suspend keeps it as it
-/// is and it continues when you resume the host.", the answers Cancel and Suspend, and focus on Cancel; nothing is sent
+/// each time, with the same wording for shell and unknown session types and a statement that Suspend preserves
+/// running processes. Cancel holds focus and nothing is sent
 /// before the answer, and Cancel (clicked and Escape, in turn) sends nothing. The last question's Suspend sends
 /// `POST /api/hosts/4/suspend`.
 #[gpui::test]
-fn suspend_asks_when_an_agent_works_or_its_activity_is_unknown(cx: &mut TestAppContext) {
+fn suspend_asks_when_a_session_works_or_its_activity_is_unknown(cx: &mut TestAppContext) {
     let (mut helm, cx) = panel(cx, connected(), Vec::new());
     let unknown = session("u").status(json!({"state": "unknown"}));
+    let shell = bash_session("b").agent_kind("generic").invocation("bash");
+    let busy = listing(&on_gpubox([idle("a"), shell]), false);
+    let decoded: SessionList =
+        serde_json::from_value(busy.clone()).expect("a complete activity reply");
+    assert!(!decoded.truncated);
+    let bash = &decoded.sessions[1];
+    assert_eq!(bash.host, 4);
+    assert!(bash.info.launch.is_shell() && !bash.stale);
+    assert_eq!(bash.info.status, farhelm_proto::SessionStatus::Running);
+    assert!(cx.update(|_, cx| matches!(
+        super::listed(4, cx).map(|host| host.state),
+        Some(HostStateView::Connected {
+            refresh: RefreshView::Ok { .. },
+            ..
+        })
+    )));
     let cases = [
-        (
-            200,
-            listing(&on_gpubox([idle("a"), session("b")]), false),
-            "a running session",
-        ),
+        (200, busy, "a running shell session"),
         (
             200,
             listing(&on_gpubox([idle("a"), unknown]), false),
@@ -984,8 +996,8 @@ fn suspend_asks_when_an_agent_works_or_its_activity_is_unknown(cx: &mut TestAppC
         assert_eq!(
             label(cx, "host-suspend-line").as_deref(),
             Some(
-                "An agent on gpubox is working, or its status could not be checked. Suspend keeps it as it is and \
-                 it continues when you resume the host."
+                "A session on gpubox is working, or its status could not be checked. Suspend preserves running \
+                 processes. They continue when you resume the host."
             ),
             "{why}"
         );

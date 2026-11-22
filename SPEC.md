@@ -58,16 +58,18 @@ absolutely catastrophically major mistake with huge user impact."
 - **Launch**: what a session runs, as the user chose it in the launcher. The **Agent** tab starts an agent type Farhelm
   knows (Claude Code, Codex, and the other harnesses under Topology) or a Bash or Zsh shell. An **agent launch** carries
   that agent type's own choices, such as model and permissions. Custom permission flags replace Farhelm's permission
-  flags and always count as YOLO. An optional wrapper prefix places user-written Bash text before the agent command
-  Farhelm composes, without changing its agent type or other choices. Farhelm composes the command, and the command it
-  uses to resume a conversation, from those choices when the session is created (and again on Restart with), and stores
-  them; Replace and agent clone copy the stored commands rather than composing them anew, while Clone and Replace with
-  compose from the choices. A **command launch** is a command line the user writes, with the user's own assertion of
-  whether it bypasses safety checks (YOLO). A command launch may also declare that it runs a given agent type, which
-  buys that agent type's status reading and conversation reporting, and, with a resume command the user writes, Resume
-  (see Creation and Durability). A shell launch shares the Agent tab's launch path and may use a wrapper. It has no
-  agent settings or resume command. The optional agent type on a command launch only accepts agent programs. This spec
-  also calls an agent type a harness, after the vendor program behind it.
+  flags and always count as YOLO. An optional wrapper prefix puts user-written Bash text before the composed command and
+  keeps the selected launch type and its choices. Farhelm composes the command, and the command it uses to resume a
+  conversation, from those choices when the session is created (and again on Restart with), and stores them; Replace and
+  agent clone copy the stored commands rather than composing them anew, while Clone and Replace with compose from the
+  choices. A **command launch** is a command line the user writes, with the user's own assertion of whether it bypasses
+  safety checks (YOLO). A command launch may also declare that it runs a given agent type, which buys that agent type's
+  status reading and conversation reporting, and, with a resume command the user writes, Resume (see Creation and
+  Durability). A shell launch shares the Agent tab's launch path and may use a wrapper. It has no agent settings or
+  resume command. The optional agent type on a command launch only accepts agent programs. This spec also calls an agent
+  type a harness, after the vendor program behind it. Wording that also applies to Bash or Zsh names the shell or uses a
+  program-neutral term. A destructive prompt names the processes that are still running and says which ones the action
+  would stop.
 - **Launch template**: a named, partial set of launcher edits. Applying a template is exactly the same as making its
   edits by hand in the launcher, and nothing more: a template sets only the fields it contains, the result can be edited
   further before launching, and several templates can be applied one after another. A session records the launch that
@@ -351,8 +353,8 @@ on its own. A sandbox Tensorlake no longer has makes the host unreachable with t
 cannot answer at all (no key, an outage), Farhelm dials anyway rather than cutting off a sandbox that may be running.
 
 The hosts panel offers **Suspend** for Tensorlake hosts unless they are suspended, suspending or resuming, including
-when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when
-an agent on that host is working, its status is unknown or stale, or activity cannot be checked completely. Immediate
+when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when a
+session on that host is working, its status is unknown or stale, or activity cannot be checked completely. Immediate
 Suspend requires a connected host after the activity read and a complete listing with conclusive non-working statuses. A
 connected host with a pending or failed session refresh still asks before suspending. An offline or unknown host asks
 even when its cached listing is empty. Suspension preserves running processes and sessions. A session on a suspended
@@ -1063,12 +1065,12 @@ agent choice is independent of that destination:
   either shell as their launch type with `agent: bash` or `agent: zsh`. The wrapper prefix also applies to shells. The
   prefix is a shell-style word list placed before both start and resume commands, including before Goose's `env` words.
   Each word retains its quotes and escapes exactly as typed. At execution the words are joined with spaces, followed by
-  Farhelm's composed agent arguments as single-quoted literal words, and interpreted by non-login, non-interactive
+  Farhelm's composed launch arguments as single-quoted literal words, and interpreted by non-login, non-interactive
   `bash -c` on the host or inside the container. This gives the prefix full Bash expansion and operator meaning. Stored
   wrappers use the same interpretation without migration. The editor refuses empty prefixes, NUL and Farhelm placeholder
   words; placeholders are not substituted in a wrapper. Templates, remembered prefixes, approvals and fingerprints
   retain the raw words, and editors display them joined with spaces. Farhelm does not inspect the wrapper's behavior:
-  the user asserts that it runs the selected agent with Farhelm's arguments and environment passed through. A launch
+  the user asserts that it runs the selected program with Farhelm's arguments and environment passed through. A launch
   that needs custom agent arguments, a directory placeholder in the wrapper, or a separately written resume command is a
   command launch; visible permission vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`,
   `Smart approve`, `Chat`, and `YOLO`. Custom is offered for Claude, Antigravity, Codex, Grok, Muse, Cursor and OMP: the
@@ -4330,15 +4332,15 @@ replacing its own session would be killing itself mid-request, which is a design
 rather than answers by accident.
 
 `farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and checkout notices
-as the UI's Delete. Without the flag it refuses any agent or terminal tabs still alive; with it, the approval card names
-what would be stopped, and deletion is held to that displayed state just as a UI confirmation is. A session cannot
-delete itself: its relay holds its own request fence until the reply, while deletion must take that same fence before
-revoking its credential. Self-stop remains available. A delete also refuses a target with an agent command still in
-flight rather than waiting, so two sessions deleting each other cannot stall on each other's fences. A lost reply means
-outcome unknown; it never claims that the session survived.
+as the UI's Delete. Without the flag it refuses to delete a session whose main program or any terminal tab is still
+running. With the flag, the approval card names what would be stopped, and deletion is held to that displayed state just
+as a UI confirmation is. A session cannot delete itself: its relay holds its own request fence until the reply, while
+deletion must take that same fence before revoking its credential. Self-stop remains available. A delete also refuses a
+target with an agent command still in flight rather than waiting, so two sessions deleting each other cannot stall on
+each other's fences. A lost reply means outcome unknown; it never claims that the session survived.
 
-An approved `farhelm agent stop --session <id>` closes the session's terminal tabs as well as stopping its agent. Its
-approval card says so; this path needs no no-tabs precondition because the approval authorizes closing all tabs.
+An approved `farhelm agent stop --session <id>` stops the session's main program and closes all its terminal tabs. Its
+approval card describes both consequences. Approval lets this path close tabs even when the session has tabs open.
 
 NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
 that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI

@@ -90,7 +90,7 @@ impl Launcher {
                 "launcher-wrapper-row",
                 label_with_note(
                     WRAPPER_LABEL,
-                    labelled_note("runs through Bash before the agent command"),
+                    labelled_note("runs through Bash before the launch command"),
                     palette,
                 ),
                 self.launcher_input(
@@ -98,7 +98,7 @@ impl Launcher {
                     &self.wrapper,
                     WRAPPER_LABEL,
                     HoverHelp::tooltip(
-                        "Wrapper prefix: Bash text before Farhelm's agent command. Leave blank for none. Quotes and \
+                        "Wrapper prefix: Bash text before the launch command. Leave blank for none. Quotes and \
                          expansions keep their shell meaning. There are no placeholders.",
                     ),
                 )
