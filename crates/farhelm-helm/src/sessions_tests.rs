@@ -426,6 +426,27 @@ async fn environment_checkout_harness(
     (h, owned)
 }
 
+/// Read the next control frame a scripted environment peer receives.
+///
+/// The helm heartbeats every environment host with an empty data frame every
+/// 30 seconds, so a responder that decoded each frame as a control message
+/// would fail whenever a test outlived one interval (on a loaded machine,
+/// say). Only control frames carry the requests these tests answer or forbid.
+async fn next_control_frame<R: tokio::io::AsyncRead + Unpin>(
+    reader: &mut farhelm_proto::io::FrameReader<R>,
+) -> farhelm_proto::Frame {
+    loop {
+        let frame = reader
+            .read_frame()
+            .await
+            .unwrap()
+            .expect("environment peer remains connected");
+        if frame.kind == farhelm_proto::FrameKind::Control {
+            return frame;
+        }
+    }
+}
+
 /// Exercise the real preview/name retry and one accepted create with both
 /// an inherited default and the home fallback, on a registered environment.
 async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_root: &'static str) {
@@ -461,7 +482,7 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
         loop {
             let frame = tokio::select! {
                 _ = &mut finished => break,
-                frame = reader.read_frame() => frame.unwrap().expect("owned fixture remains connected"),
+                frame = next_control_frame(&mut reader) => frame,
             };
             let reply = match parse_control(&frame).unwrap() {
                 ControlMsg::GithubRepoSearch { req_id, root, .. } => {
@@ -610,7 +631,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
         handshake(&mut reader, &mut writer, "supervisor")
             .await
             .unwrap();
-        let frame = reader.read_frame().await.unwrap().unwrap();
+        let frame = next_control_frame(&mut reader).await;
         let ControlMsg::GithubCheckoutPreview { req_id, request } = parse_control(&frame).unwrap()
         else {
             panic!("expected checkout preview");
@@ -633,7 +654,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             })
             .await
             .unwrap();
-        let frame = reader.read_frame().await.unwrap().unwrap();
+        let frame = next_control_frame(&mut reader).await;
         let ControlMsg::CreateSession {
             req_id,
             github_checkout: Some(checkout),
@@ -655,7 +676,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             .await
             .unwrap();
 
-        let frame = reader.read_frame().await.unwrap().unwrap();
+        let frame = next_control_frame(&mut reader).await;
         let ControlMsg::DeleteSession {
             req_id, session_id, ..
         } = parse_control(&frame).unwrap()
@@ -676,7 +697,7 @@ async fn fresh_replace_on_a_session_owned_host_uses_its_home_without_setup() {
             .unwrap();
         tokio::select! {
             biased;
-            frame = reader.read_frame() => panic!("unexpected operation after replacement: {frame:?}"),
+            frame = next_control_frame(&mut reader) => panic!("unexpected operation after replacement: {frame:?}"),
             result = &mut finished => result.unwrap(),
         }
     });
