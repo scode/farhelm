@@ -129,10 +129,6 @@ consequences.
 - [`worker-allocation-precedes-ownership-ledger.md`](worker-allocation-precedes-ownership-ledger.md) — A created worker
   can fall outside cleanup when ledger writing fails or remote creation succeeds before the local request times out.
 
-- [`blocking-test-cleanup-prevents-async-listener-release.md`](blocking-test-cleanup-prevents-async-listener-release.md)
-  — A normal successful supervisor unit test waits for the five-second host-cleanup deadline and retains its state
-  directory because directory teardown blocks the same executor needed to release its aborted stand-in listener.
-
 - [`successful-suspend-flashes-connecting.md`](successful-suspend-flashes-connecting.md) — A confirmed sandbox
   suspension can briefly change back to Connecting during its status recheck, even though the sandbox remains suspended.
 
@@ -161,11 +157,6 @@ consequences.
 - [`package-repair-does-not-wait-for-dpkg-lock.md`](package-repair-does-not-wait-for-dpkg-lock.md) — The repair step
   does not share the package installer's lock-wait policy and could fail under contention. A supported concurrent
   package-manager trigger remains unverified after investigation.
-
-- [`reboot-concurrency-early-release.md`](reboot-concurrency-early-release.md) — The reboot tests do not keep their
-  integration permit through successor retirement and terminal cleanup. Under the explicit in-process/libtest use of
-  that permit, another fixture can be admitted during the preceding fixture's teardown. No permanent process leakage is
-  established.
 
 - [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
   runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
@@ -217,10 +208,6 @@ consequences.
 
 - [`trailing-provisioning-shared-environment-preparation-progress.md`](trailing-provisioning-shared-environment-preparation-progress.md)
   — Environment preparation stays on Select the recipe source in launch progress. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md)
-  — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)

@@ -36629,3 +36629,63 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   fix code (drain client output up to the echo before the negative assertion). Cheap.
 - Execution: Fixed the list-limit test to read the actual connection while all list permits remain held. jj change
   `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## blocking-test-cleanup-prevents-async-listener-release.md
+
+- Outcome: `other`.
+- Assessment: None in the product. One supervisor unit test (a record naming another session's host) likely spends an
+  extra 5 s in teardown and leaves its temp directory for the sweep, because the stand-in host's listener cannot be
+  cancelled while synchronous cleanup blocks the single-threaded runtime. Verified: host_terminals.rs:1271-1297 declares
+  `state` before `other`, and `TestHost::drop` only requests `task.abort()` (test_host.rs:104-109). The reviewer's
+  executor reasoning was not re-traced in Tokio. Unmeasured.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Fix code: an explicit async shutdown of the stand-in that unlinks its socket before the state directory
+  drops.
+- Execution: Fixed a misleading harness failure. The refusal test passed, but its own teardown logged an unconfirmed
+  shutdown and kept the state directory. The test now joins its cancelled listener, unlinks the socket, and verifies
+  that the directory was removed. jj change `unszrnxm`, bookmark `plan/triage-supervisor/08-test-harness-items`,
+  https://github.com/scode/farhelm/pull/4546/changes.
+
+## reboot-concurrency-early-release.md
+
+- Outcome: `other`.
+- Assessment: Maintainer tests only. Two reboot tests give back their in-process harness slot before their successor
+  supervisor and terminal hosts are gone. The only effect is under explicit single-process libtest runs. Verified: Still
+  present (`restart_with_resume.rs` ~L1452-1454, L1249; `session_rename.rs` L361). `harness.rs` ~L563 says the permit
+  caps harnesses only within one process and never coordinates nextest.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: Discard. It matters only for an unusual diagnostic run mode and leaks nothing.
+- Execution: No change. The early permit release affects only concurrent in-process diagnostic runs. The maintained
+  nextest runner isolates tests in separate processes, and the finding establishes no lost verdict or evidence. jj
+  change `unszrnxm`, bookmark `plan/triage-supervisor/08-test-harness-items`,
+  https://github.com/scode/farhelm/pull/4546/changes.
+
+## trailing-old-server-guard-loses-directory-in-consumed-restart.md
+
+- Outcome: `other`.
+- Assessment: None (maintainer machine). If an old-terminal e2e test fails during supervisor restart, the state
+  directory is deleted before the private tmux server guard runs, leaving an unreachable tmux server process behind.
+  Verified: harness.rs:1094-1118 on main still moves `state` into `restart_supervisor` and calls `retire_supervisor`
+  (which asserts) first. old_terminals.rs:28-32 `OldServer` holds only paths and the guard. The route is
+  source-confirmed and only fires on a test failure.
+- Decision: Q14, the maintainer picked "Fix only what corrupts evidence or crashes". (2026-11-21 fewest-questions triage
+  page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set
+  of plans. please try to separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Fix it if the bug crashes a documented command, loses or misattributes test or release evidence,
+  turns a real verdict into a harness failure, or lets private data into a fixture; otherwise make no change. Either way
+  remove the feedback file and its index entry, and say in the execution record which way it went. Recommendation for
+  reference: discard (failure-path only, maintainer-only leak; the old_terminals tests are themselves transitional), or
+  fix if cheap
+- Execution: No change. The leak is conditional on an already-failed retirement in a legacy tmux fixture. The original
+  test failure remains visible, with no demonstrated loss of recorded evidence. jj change `unszrnxm`, bookmark
+  `plan/triage-supervisor/08-test-harness-items`, https://github.com/scode/farhelm/pull/4546/changes.
