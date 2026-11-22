@@ -1208,7 +1208,9 @@ impl Launcher {
                     .role(Role::Status)
                     .aria_label("Folder")
                     .a11y_synthetic_children(|builder| {
-                        builder.parent_node().set_live(accesskit::Live::Polite)
+                        builder
+                            .parent_node()
+                            .set_live(gpui::accesskit::Live::Polite)
                     })
                     .flex()
                     .items_baseline()
