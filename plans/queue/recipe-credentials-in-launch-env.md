@@ -446,37 +446,58 @@ and token-variable name with `-c` at resume used the new bearer; passing the sam
 and resume is an acceptable way to make the delivered values win over a leftover file entry. If verification shows a
 stale setting can still win even then, block again with what you observed.
 
-## Blocked
+### 2026-11-22: answer to a blocked question
 
-Blocked on 2026-11-22 (claim 8c5649).
+The question, as the executor put it:
 
-### Keep tokenless Codex endpoints free of stale authorization
+> Blocked on 2026-11-22 (claim 8c5649).
+>
+> ### Keep tokenless Codex endpoints free of stale authorization
+>
+> Farhelm currently writes a recipe's Codex endpoint and optional token into Codex's settings. Credential delivery can
+> still overwrite a concurrent change the user or Codex just saved. The plan moves token values into the launch
+> environment to avoid that race. The previous decision kept the `farhelm` provider ID so Restart and opening a saved
+> conversation by ID would continue to work. Tokenless endpoints are also a supported recipe choice.
+>
+> I tested Codex 0.171.0 in an isolated terminal with a synthetic settings bearer and two loopback routes. When
+> Farhelm's proposed launch options named the delivered token's environment variable, fresh launches, a launch with a
+> selected profile, and reopening an older conversation all sent the new bearer to the new endpoint. For a tokenless
+> recipe, omitting the variable name left the stale settings bearer in effect. Codex sent it to the new endpoint.
+> Explicitly adding an empty bearer to the override sent an empty Authorization header, which can still break endpoints
+> that expect requests without that header. The same tokenless launch needs to work after Restart as well as from the
+> launcher.
+>
+> The one-time cleanup covers settings Farhelm recorded writing. Other settings can survive it, so relying on cleanup
+> alone would allow a leftover bearer to reach a different endpoint. Choosing a new provider ID again would break old
+> Codex conversations.
+> [Codex 0.171.0 resume implementation](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/app-server/src/config_manager.rs#L500-L565)
+>
+> Should this plan move Claude credentials now and defer the Codex migration, or expand it to find and verify a way to
+> isolate Codex's launch configuration while preserving saved conversations and regular settings? I recommend moving
+> Claude now. The first option keeps the existing settings-write race for Codex until a follow-up, while the second
+> keeps the vendors together and requires a broader compatibility change.
+>
+> Both tokenless cases used
+> `scripts/agent-tui.py start -- env -i … codex --no-daemon -c model_provider=farhelm -c 'model_providers.farhelm={…}'`
+> with isolated settings. Recorder run `c235a277-a9fb-497d-a323-ebb0538a8976` captured the stale bearer when the
+> override omitted the token field. Run `59601200-f69b-4179-99a6-a94f4a685ec5` captured the empty bearer with the field
+> explicitly set. The existing draft prepares child environment injection and contains no credential writer or Codex
+> override. [Draft #4558](https://github.com/scode/farhelm/pull/4558/changes)
 
-Farhelm currently writes a recipe's Codex endpoint and optional token into Codex's settings. Credential delivery can
-still overwrite a concurrent change the user or Codex just saved. The plan moves token values into the launch
-environment to avoid that race. The previous decision kept the `farhelm` provider ID so Restart and opening a saved
-conversation by ID would continue to work. Tokenless endpoints are also a supported recipe choice.
+The maintainer's answer:
 
-I tested Codex 0.171.0 in an isolated terminal with a synthetic settings bearer and two loopback routes. When Farhelm's
-proposed launch options named the delivered token's environment variable, fresh launches, a launch with a selected
-profile, and reopening an older conversation all sent the new bearer to the new endpoint. For a tokenless recipe,
-omitting the variable name left the stale settings bearer in effect. Codex sent it to the new endpoint. Explicitly
-adding an empty bearer to the override sent an empty Authorization header, which can still break endpoints that expect
-requests without that header. The same tokenless launch needs to work after Restart as well as from the launcher.
+### Answer: move Claude's credentials now and defer Codex
 
-The one-time cleanup covers settings Farhelm recorded writing. Other settings can survive it, so relying on cleanup
-alone would allow a leftover bearer to reach a different endpoint. Choosing a new provider ID again would break old
-Codex conversations.
-[Codex 0.171.0 resume implementation](https://github.com/openai/codex/blob/rust-v0.171.0/codex-rs/app-server/src/config_manager.rs#L500-L565)
+The landing monitor answered this block on the maintainer's behalf, under `plans/.agents/landing.md`, "Answering
+blocks". A later change of mind is a follow-up, not a reason to stop the plan.
 
-Should this plan move Claude credentials now and defer the Codex migration, or expand it to find and verify a way to
-isolate Codex's launch configuration while preserving saved conversations and regular settings? I recommend moving
-Claude now. The first option keeps the existing settings-write race for Codex until a follow-up, while the second keeps
-the vendors together and requires a broader compatibility change.
+Take the recommendation: this plan moves Claude's recipe credentials into the launch environment and leaves Codex's
+credential delivery as it is today, settings writes and the race included. Do not change Codex's provider ID, its
+settings writes or its cleanup in this plan, so saved Codex conversations, Restart and tokenless Codex endpoints keep
+working exactly as before.
 
-Both tokenless cases used
-`scripts/agent-tui.py start -- env -i … codex --no-daemon -c model_provider=farhelm -c 'model_providers.farhelm={…}'`
-with isolated settings. Recorder run `c235a277-a9fb-497d-a323-ebb0538a8976` captured the stale bearer when the override
-omitted the token field. Run `59601200-f69b-4179-99a6-a94f4a685ec5` captured the empty bearer with the field explicitly
-set. The existing draft prepares child environment injection and contains no credential writer or Codex override.
-[Draft #4558](https://github.com/scode/farhelm/pull/4558/changes)
+Record the Codex migration as a TODO entry in TODO.md's "### Plan follow-up", self-contained: the settings-write race it
+would remove, your finding that Codex 0.171.0 launch overrides cannot keep a leftover settings bearer away from a
+tokenless endpoint (an omitted token field keeps the stale bearer, an empty one sends an empty Authorization header),
+the constraint that the `farhelm` provider ID must stay for saved conversations, and the recorder runs above. Say in the
+report and the Claude changelog fragment that Codex is unchanged.
