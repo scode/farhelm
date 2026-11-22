@@ -108,11 +108,11 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    AnyElement, App, AppContext as _, Bounds, Context, Div, Element, ElementId, Entity,
-    FocusHandle, Global, GlobalElementId, InspectorElementId, InteractiveElement, IntoElement,
-    KeyDownEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent, ParentElement, Pixels,
-    ScrollHandle, StatefulInteractiveElement, Styled, Subscription, WeakEntity, WeakFocusHandle,
-    Window, WindowId, canvas, px,
+    AnyElement, AnyWindowHandle, App, AppContext as _, Bounds, Context, Div, Element, ElementId,
+    Entity, FocusHandle, Global, GlobalElementId, InspectorElementId, InteractiveElement,
+    IntoElement, KeyDownEvent, Keystroke, LayoutId, MouseButton, MouseDownEvent, ParentElement,
+    Pixels, ScrollHandle, StatefulInteractiveElement, Styled, Subscription, WeakEntity,
+    WeakFocusHandle, Window, WindowId, canvas, px,
 };
 
 use crate::actions::{
@@ -598,6 +598,27 @@ pub fn focus_in_layer(target: &FocusHandle, chosen: &Mark, window: &mut Window, 
             });
         }
         InLayer::Refuse => {}
+    }
+}
+
+/// Focus the caller's return target after closing an editor. Use the mark
+/// from the action that closed it or sent its save. A save reply can arrive
+/// without a window, so use the editor's stored window then. The focus
+/// coordinator can wait until the return target is drawn again.
+pub(crate) fn focus_after_editor_close(
+    target: &FocusHandle,
+    chosen: &Mark,
+    window: Option<&mut Window>,
+    owner: AnyWindowHandle,
+    cx: &mut App,
+) {
+    match window {
+        Some(window) => focus_in_layer(target, chosen, window, cx),
+        None => {
+            let _ = owner.update(cx, |_, window, cx| {
+                focus_in_layer(target, chosen, window, cx)
+            });
+        }
     }
 }
 

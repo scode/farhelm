@@ -31,10 +31,10 @@
 #[cfg(test)]
 mod tests;
 
-use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
+use farhelm_helm_client::{Collections, PathError};
 use gpui::{App, Context, EntityId, Pixels, px};
 
-use crate::operations::{Command, Work};
+use crate::operations::Command;
 use crate::session;
 use crate::session_list::queued_preference::QueuedPreference;
 use crate::session_list::selection;
@@ -68,13 +68,7 @@ pub(crate) fn stored(collections: &Collections) -> bool {
 /// `PUT /api/preferences` naming only `host_rail_open`: sparse, so it never puts back a stale copy of a field another
 /// client changed.
 fn command(expanded: bool) -> Result<Command, PathError> {
-    Ok(Command::new(
-        Work::Save,
-        Method::Put,
-        ApiPath::api(&["preferences"])?,
-        Some(serde_json::json!({ "host_rail_open": expanded })),
-        "PUT /api/preferences",
-    ))
+    crate::settings::preference_command(serde_json::json!({ "host_rail_open": expanded }))
 }
 
 /// The rail's expansion as this window shows it: the stored preference, or the choice waiting to be sent or being

@@ -24,14 +24,13 @@
 
 use std::collections::BTreeMap;
 
-use farhelm_helm_client::{ApiPath, Method, PathError};
+use farhelm_helm_client::PathError;
 use farhelm_proto::launcher::{LaunchTemplate, quick_launch_eligible};
 use farhelm_proto::ui_channel::{Availability, Collection, PREFERENCES_KEY, Preferences};
 use gpui::App;
-use serde_json::Value;
 
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Command, Work};
+use crate::operations::Command;
 use crate::session;
 
 /// The ten keys, in the order the menu offers them: 1 to 9, then 0 (SPEC.md: "one of ten shared keys, 1–9 then 0").
@@ -177,32 +176,12 @@ pub fn mark_write<'a>(
 /// The write that makes `marked` the ⚡ template, or clears the mark with `None`: a sparse patch of the preference
 /// row's `quick_launch_template` field.
 pub fn mark_command(marked: Option<&str>) -> Result<Command, PathError> {
-    patch(
-        "quick_launch_template",
-        marked.map_or(Value::Null, |name| Value::String(name.to_owned())),
-    )
+    crate::settings::preference_command(serde_json::json!({ "quick_launch_template": marked }))
 }
 
 /// The write that replaces the number keys with `keys`, whole.
 pub fn keys_command(keys: &BTreeMap<String, String>) -> Result<Command, PathError> {
-    let map = keys
-        .iter()
-        .map(|(key, name)| (key.clone(), Value::String(name.clone())))
-        .collect();
-    patch("template_shortcuts", Value::Object(map))
-}
-
-/// `PUT /api/preferences` naming only `field`, so the helm leaves every other preference as it is.
-fn patch(field: &str, value: Value) -> Result<Command, PathError> {
-    let mut body = serde_json::Map::new();
-    body.insert(field.to_owned(), value);
-    Ok(Command::new(
-        Work::Save,
-        Method::Put,
-        ApiPath::api(&["preferences"])?,
-        Some(Value::Object(body)),
-        "PUT /api/preferences",
-    ))
+    crate::settings::preference_command(serde_json::json!({ "template_shortcuts": keys }))
 }
 
 /// Whether `template` may be given ⚡: an agent launch needs an agent type, a command launch a nonblank command, judged

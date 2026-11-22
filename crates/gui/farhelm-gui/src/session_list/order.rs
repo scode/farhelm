@@ -58,7 +58,7 @@
 #[cfg(test)]
 mod tests;
 
-use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
+use farhelm_helm_client::{Collections, PathError};
 use farhelm_proto::ui_channel::Preferences;
 use gpui::{
     AnyElement, AppContext as _, Context, Entity, FocusHandle, FontWeight, InteractiveElement,
@@ -75,7 +75,7 @@ use crate::components::{
 };
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
-use crate::operations::{Command, Work};
+use crate::operations::Command;
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -200,23 +200,12 @@ impl Order {
 /// `PUT /api/preferences` naming only `list_sort`, set to `order`'s word: a sparse write, so it never puts back a stale
 /// copy of any other field.
 fn command(order: Order) -> Result<Command, PathError> {
-    preferences_write(serde_json::json!({ "list_sort": order.word() }))
+    crate::settings::preference_command(serde_json::json!({ "list_sort": order.word() }))
 }
 
 /// `PUT /api/preferences` naming only `compact`: sparse, as the order's write is.
 fn compact_command(compact: bool) -> Result<Command, PathError> {
-    preferences_write(serde_json::json!({ "compact": compact }))
-}
-
-/// A sparse `PUT /api/preferences` with `body`, the one route both of the menu's writes go through.
-fn preferences_write(body: serde_json::Value) -> Result<Command, PathError> {
-    Ok(Command::new(
-        Work::Save,
-        Method::Put,
-        ApiPath::api(&["preferences"])?,
-        Some(body),
-        "PUT /api/preferences",
-    ))
+    crate::settings::preference_command(serde_json::json!({ "compact": compact }))
 }
 
 /// Whether the helm stores the compact preference on in `collections`: unset (or no preference row yet) is off,
