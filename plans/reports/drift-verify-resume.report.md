@@ -57,3 +57,58 @@ The independent source reviewer found that Restart could acknowledge a queued re
 new acknowledgments could name a different conversation while Farhelm still offered the old resume command. The reviewer
 verified both fixes and checked the final prompt lengths and echo exclusion. The commit wording passed a separate cold
 read.
+
+### Landing
+
+#### What landed with it
+
+The plan's PR (#4628) landed third in this round, after the container image and Restart cleanup fixes and before the
+screen fixture scrubber. Nothing else in the round or on main since the plan was written touches the drift test or its
+runner, and the rebase conflicted only in TODO.md, where each plan removes its own entry.
+
+An independent reviewer found nothing to fix and confirmed the new check cannot pass by accident: the line the agent
+must print to show it remembers the test label appears in neither prompt, only a whole line counts (so an echoed prompt
+does not), such a line already on screen before the second turn is refused, and a conversation acknowledgment that named
+a new conversation would change the saved resume command and fail the test.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+The round landed changes to the helm's container recipe rebuilds and the supervisor's Restart cleanup, plus two test
+tools, so the landing ran the Rust workspace suite, the lint runs and the two tools' own tests, once, on the four plans
+stacked together. No desktop code changed (the new Rebuild wording in Settings and the launcher comes from the helm), so
+the desktop app's tests, the end-to-end smoke test and the reference screenshots were not run. The worker runs were on a
+separate arm64 Linux test worker with a systemd user manager, rootless Podman and SSH to itself; the rest ran locally.
+
+On the four plans as delivered, rebased onto main and stacked:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `03875ce4-e83a-47da-87cb-b3c4ee02da69`): 8349 of 8350 passed, none printed a runtime `SKIPPED`, and the 86 tests
+  marked ignored did not run, as on every run. The real Podman recipe build and launch test ran and passed. The one
+  failure was the supervisor test that refuses session titles with control characters, which timed out after ten seconds
+  waiting for its own create reply while the suite ran around it. It exercises neither supervisor startup nor Restart,
+  the parts of the supervisor the Restart cleanup plan changes, it is not a known flake, and it then passed 30 times in
+  a row on the same worker, each attempt a separate recorder run inside one worker session (worker session
+  `687080cb-021d-499c-a209-af6f89149001`). One timeout is not enough to record it as a flake.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed. Lints are not runtime tests, so they have no recorder run.
+- `python3 -B scripts/test-run-harness-drift.py`, `python3 -B scripts/test-capture-agent-screens.py`,
+  `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 scripts/check-agents-md.py`, locally: passed.
+
+Skipped: the real-agent harness drift tests, which spend vendor turns and run only when asked; macOS, since nothing in
+the round builds only on a Mac; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The report names only a Claude Code run as the follow-up, but more is unproven live. For Claude Code, Antigravity and
+  Muse the test now requires the acknowledgment after Restart to name the stored conversation, and none of the three has
+  passed that against the real agent; for Goose, Grok and Pi, the plain fresh-acknowledgment check has not run live
+  either. Those five were not in the live selection, so a real harness test run that selects them (and gives Claude Code
+  a trusted workspace) is what would prove them.
+- The new unit tests all exercise the stricter check (the acknowledgment names the stored conversation); none exercises
+  the plain fresh-acknowledgment check Goose, Grok, Pi and OMP use. Running the existing unit tests over both kinds
+  would close that gap.
