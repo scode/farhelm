@@ -338,7 +338,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 97;
+pub(crate) const SCHEMA_VERSION: i64 = 98;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -1253,6 +1253,9 @@ type RawHostRow = (
     Option<String>,
     Option<u32>,
     Option<i64>,
+    // The execution endpoint recorded with a new container's first create.
+    Option<String>,
+    Option<u32>,
 );
 
 /// Which command authority an approval grants to the requesting installation.
@@ -3179,7 +3182,7 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 97;",
+              PRAGMA user_version = 98;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
             podman_place_claims_schema = podman::PLACE_CLAIMS_SCHEMA,
@@ -3189,6 +3192,8 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         environment_history::migrate(&tx)?;
         tx.execute_batch(ADD_ENVIRONMENT_SEAL)
             .context("adding the environment seal record")?;
+        // Append after the seal, matching the later migration's column order.
+        podman::migrate_container_place_identity(&tx)?;
         tx.execute(
             "INSERT INTO helm_creation_build (singleton, build) VALUES (1, ?1)",
             [creation_build],
@@ -5179,6 +5184,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
             .context("migrating helm.db to schema version 97")?;
         version = 97;
     }
+    if version == 97 {
+        podman::migrate_container_place_identity(&tx)
+            .context("adding recorded container place identity")?;
+        tx.execute_batch("PRAGMA user_version = 98;")
+            .context("migrating helm.db to schema version 98")?;
+        version = 98;
+    }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to
         // release the write lock cleanly rather than leaving it to an
@@ -6993,7 +7005,8 @@ impl HelmStore {
                      links_without_asking, local_links_without_asking, entry_uuid, \
                      tensorlake_sandbox, tensorlake_sandbox_id, tensorlake_recipe, \
                      tensorlake_resources, tensorlake_suspended_at, tensorlake_pending_create_at, own_sessions_without_asking, session_owned \
-                     , environment_provider, place_host, podman_container_id, podman_user, podman_home, podman_uid, podman_pending_create_at FROM hosts ORDER BY id ASC",
+                     , environment_provider, place_host, podman_container_id, podman_user, podman_home, podman_uid,
+                     podman_pending_create_at, podman_place_machine_id, podman_place_uid FROM hosts ORDER BY id ASC",
                 )
                 .context("preparing host list query")?;
                     let raw: Vec<RawHostRow> = stmt
@@ -7029,6 +7042,8 @@ impl HelmStore {
                                 r.get(27)?,
                                 r.get(28)?,
                                 r.get(29)?,
+                                r.get(30)?,
+                                r.get(31)?,
                             ))
                         })
                         .context("querying hosts")?
@@ -7067,6 +7082,8 @@ impl HelmStore {
                                 container_home,
                                 container_uid,
                                 podman_pending_create_at,
+                                podman_place_machine_id,
+                                podman_place_uid,
                             )| {
                                 let host_kind =
                                     HostKind::from_columns(&kind, tensorlake_sandbox.as_deref(), environment_provider.as_deref())?;
@@ -7074,7 +7091,8 @@ impl HelmStore {
                                 let podman = podman::decode_binding(
                                     host_kind, tensorlake_sandbox.as_deref(), tensorlake_recipe.as_deref(),
                                     place_host, container_id, container_user, container_home, container_uid,
-                                    podman_pending_create_at, session_owned, remote_farhelm.is_some() || remote_state_dir.is_some(),
+                                    podman_pending_create_at, (podman_place_machine_id, podman_place_uid),
+                                    session_owned, remote_farhelm.is_some() || remote_state_dir.is_some(),
                                 )?;
                                 let tensorlake = tensorlake_binding(
                                     id,

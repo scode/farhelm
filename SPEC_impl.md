@@ -6097,9 +6097,11 @@ storage. A launch target carries recipe plus place as one choice. An environment
 name, ownership and provider-specific handle. Tensorlake retains its existing sandbox/create facts. Podman records its
 place host and canonical container identity, with the login user and uid needed for exec. Registration precedes lazy
 preparation, so a pending binding may lack all login coordinates while it has no container ID or admitted install paths.
-Preparation observes and atomically records the full login identity, prepared facts and pending-send marker before
-container creation is sent. Exec requires the canonical ID and complete login identity. Ownership is independent of
-session membership. User-owned environment hosts remain Tensorlake-only.
+Preparation atomically records the full login identity, prepared facts, pending-send marker and Podman place machine ID
+and UID before container creation is sent. A retry preserves the endpoint recorded by the first send. Already-sent
+bindings from before this change retain null place identity and their existing behavior. Exec requires the canonical ID
+and complete login identity. Ownership is independent of session membership. User-owned environment hosts remain
+Tensorlake-only.
 
 ### Environment rows and provider state
 
@@ -6223,11 +6225,20 @@ entry carries the cached check's readiness as `container_check` (checked time, w
 reason), and a check's start and its end bump the fleet feed, so the hosts collection brings both to a connected GUI.
 
 The probe reads the machine ID and numeric account from one command through that route. A successful identity
-observation claims the machine/account pair in the helm registry in one transaction, fenced to the observed host
-entry and destination. An entry with no containers, image records or helpers can replace its claim. If a twin has
-no references and lacks an ordinary supervisor identity claim, the entry that holds the supervisor claim can take
-its place claim. Fresh preparation requires a current place claim and respects the ordinary host actor's duplicate,
-mismatch and unverified identity refusals. Runtime capabilities for existing containers remain separate from admission.
+observation claims the machine/account pair in the helm registry in one transaction, fenced to the observed host entry
+and destination. An entry with no containers, image records or helpers can replace its claim. An unused twin yields to
+the verified ordinary owner when the twin lacks a recorded ordinary identity or has a current identity refusal. A
+duplicate hello naming the ordinary owner can verify that ownership while the owner's supervisor is down. Fresh
+preparation requires a current place claim and respects the ordinary host actor's duplicate, mismatch and unverified
+identity refusals. Runtime capabilities for existing containers remain separate from admission.
+
+Before a session container's first create, the binding records the current claim's machine ID and UID in the guarded
+pending-send write. Session create and lifecycle commands that check or remove a recorded container verify the bound
+identity in the same local or SSH shell that runs Podman. The shell compares a command-specific SHA-256 digest so the
+recorded machine ID stays at the helm. Its marker proves the check ran and matched before the exit status is used.
+Without that proof, an existence result leaves status and cleanup unanswered and recovery does not resend the create.
+Existing bindings with null identity retain their previous behavior. Recipe base pulls, helper starts, captures and
+cleanup use the durable place claim when present, which stays fixed while the recipe has artifacts.
 
 Lifecycle commands run on the place host. Wrap `podman run` and `podman start` in `systemd-run --user --scope --collect`
 with a reserved environment name and a per-attempt nonce. This keeps conmon and the container's network helper outside

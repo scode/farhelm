@@ -373,7 +373,11 @@ impl PlaceCommands for Commands {
         argv: &[String],
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
-        self.execute(argv, None, bound).await
+        use crate::environment::podman_probe::{TEST_PLACE_IDENTITY, simulate_verified_place};
+        simulate_verified_place(argv, TEST_PLACE_IDENTITY, |argv| {
+            self.execute(argv, None, bound)
+        })
+        .await
     }
 
     async fn run_with_input(

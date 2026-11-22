@@ -9,7 +9,7 @@ use super::recipes::{BuiltImage, PreparedImage, Recipe};
 use super::*;
 use crate::access::{BaseRoute, ContainerUser, RemoteCommand, RemoteRoute};
 use crate::provisioning::{CommandResult, ProvisioningTarget};
-use crate::store::HelmStore;
+use crate::store::{HelmStore, PodmanPlaceIdentity};
 use crate::tensorlake::build::{PodmanProgress, RecipeBuilds};
 use anyhow::Context as _;
 use farhelm_proto::recipes::RecipeBase;
@@ -117,6 +117,44 @@ struct ContainerInfo {
     labels: BTreeMap<String, String>,
 }
 
+/// Bind an engine command to the endpoint that owns its effects. Session
+/// containers carry the binding's original identity. Recipe commands can
+/// use the place claim, which stays fixed while their artifacts reference it.
+/// An already-sent legacy binding may have only the current route to use.
+#[derive(Clone, Copy)]
+struct PlaceTarget<'a> {
+    host: HostId,
+    identity: Option<&'a PodmanPlaceIdentity>,
+}
+
+impl<'a> PlaceTarget<'a> {
+    /// A newly admitted helper inherits the identity that backed admission.
+    fn claimed(host: HostId, identity: &'a PodmanPlaceIdentity) -> Self {
+        Self {
+            host,
+            identity: Some(identity),
+        }
+    }
+}
+
+impl From<HostId> for PlaceTarget<'_> {
+    fn from(host: HostId) -> Self {
+        Self {
+            host,
+            identity: None,
+        }
+    }
+}
+
+impl<'a> From<&'a crate::store::PodmanBinding> for PlaceTarget<'a> {
+    fn from(binding: &'a crate::store::PodmanBinding) -> Self {
+        Self {
+            host: binding.place_host,
+            identity: binding.place_identity.as_ref(),
+        }
+    }
+}
+
 /// Whether this host row records the container, at any place (a second SSH
 /// route can reach the same Podman storage): by canonical ID once recorded,
 /// since a later container may take a name the recorded one gave up, and by
@@ -201,13 +239,14 @@ impl Podman {
 
     /// Resolve the current route and executable at each operation boundary.
     /// argv is data, including user-selected image references and accounts.
-    async fn command(
+    async fn command<'a>(
         &self,
-        place: HostId,
+        place: impl Into<PlaceTarget<'a>> + Send,
         args: Vec<String>,
         bound: Duration,
     ) -> anyhow::Result<CommandResult> {
-        let (_, route, ready) = self.place(place).await?;
+        let place = place.into();
+        let (_, route, ready) = self.place(place.host).await?;
         let mut argv = vec![
             ready
                 .podman
@@ -216,14 +255,17 @@ impl Podman {
                 .to_owned(),
         ];
         argv.extend(args);
-        self.0.places.command(&route, &argv, bound).await
+        self.0
+            .places
+            .command(&route, &argv, place.identity, bound)
+            .await
     }
 
     /// Only a zero exit is a successful mutation or observation. Existence
     /// commands use their narrower 0/1 interpretation below instead.
-    async fn require(
+    async fn require<'a>(
         &self,
-        place: HostId,
+        place: impl Into<PlaceTarget<'a>> + Send,
         args: Vec<String>,
         bound: Duration,
     ) -> anyhow::Result<String> {
@@ -238,7 +280,7 @@ impl Podman {
     }
 
     /// Podman exists=1 is absence; a transport or storage error is unanswered.
-    async fn exists(&self, place: HostId, kind: &str, id: &str) -> anyhow::Result<bool> {
+    async fn exists(&self, place: PlaceTarget<'_>, kind: &str, id: &str) -> anyhow::Result<bool> {
         let output = self
             .command(
                 place,
@@ -258,7 +300,11 @@ impl Podman {
 
     /// An inspect failure never proves absence. Canonical IDs are validated
     /// before their use as durable cleanup or execution authority.
-    async fn inspect(&self, place: HostId, id: &str) -> anyhow::Result<Option<ContainerInfo>> {
+    async fn inspect(
+        &self,
+        place: PlaceTarget<'_>,
+        id: &str,
+    ) -> anyhow::Result<Option<ContainerInfo>> {
         if !self.exists(place, "container", id).await? {
             return Ok(None);
         }
@@ -315,7 +361,12 @@ impl Podman {
 
     /// Scope placement keeps conmon/network helpers outside the helm or SSH
     /// login cgroup. A nonce avoids colliding with a still-collected old scope.
-    async fn scoped(&self, place: HostId, name: &str, args: Vec<String>) -> anyhow::Result<String> {
+    async fn scoped(
+        &self,
+        place: PlaceTarget<'_>,
+        name: &str,
+        args: Vec<String>,
+    ) -> anyhow::Result<String> {
         let output = self.scoped_output(place, name, args).await?;
         anyhow::ensure!(
             output.code == Some(0),
@@ -329,11 +380,11 @@ impl Podman {
     /// A lost capture or an invalid successful reply must retain its owner.
     async fn scoped_output(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         name: &str,
         args: Vec<String>,
     ) -> anyhow::Result<CommandResult> {
-        let (_, route, ready) = self.place(place).await?;
+        let (_, route, ready) = self.place(place.host).await?;
         let mut argv = vec![
             "systemd-run".into(),
             "--user".into(),
@@ -352,7 +403,7 @@ impl Podman {
         argv.extend(args);
         self.0
             .places
-            .command(&route, &argv, Duration::from_secs(120))
+            .command(&route, &argv, place.identity, Duration::from_secs(120))
             .await
     }
 
@@ -448,7 +499,12 @@ impl Podman {
     /// Pause does not prevent whole-resource deletion. Revalidate ownership
     /// and confirm absence before callers discard any durable cleanup record.
     /// The removal also asks Podman to collect unused anonymous volumes.
-    async fn remove_container(&self, place: HostId, id: &str, role: &str) -> anyhow::Result<()> {
+    async fn remove_container(
+        &self,
+        place: PlaceTarget<'_>,
+        id: &str,
+        role: &str,
+    ) -> anyhow::Result<()> {
         if let Some(info) = self.inspect(place, id).await? {
             self.owned(&info, role).await?;
             self.require(
@@ -477,7 +533,7 @@ impl Podman {
     /// transport loss and successful replies that cannot be parsed stay pending.
     async fn run(
         &self,
-        place: HostId,
+        place: PlaceTarget<'_>,
         name: &str,
         role: &str,
         recipe: &str,
@@ -532,7 +588,7 @@ impl Podman {
     async fn commit(
         &self,
         recipe: &str,
-        place: HostId,
+        place: PlaceTarget<'_>,
         id: &str,
         tag: &str,
         artifact: &str,
@@ -562,7 +618,7 @@ impl Podman {
         // A lost reply can leave a real image. Record its fresh lookup tag
         // before sending commit, then replace it with immutable identity.
         let pending = tag.to_owned();
-        self.edit(recipe, place, move |state| {
+        self.edit(recipe, place.host, move |state| {
             state.retired_images.push(pending)
         })
         .await?;
@@ -585,7 +641,7 @@ impl Podman {
             // unknown. A completed Podman refusal can clear an absent tag.
             if definite_refusal(&output) && !self.exists(place, "image", tag).await? {
                 let pending = tag.to_owned();
-                self.edit(recipe, place, move |state| {
+                self.edit(recipe, place.host, move |state| {
                     state.retired_images.retain(|id| id != &pending)
                 })
                 .await?;
@@ -600,7 +656,7 @@ impl Podman {
         image_id(&image)?;
         let saved = image.clone();
         let pending = tag.to_owned();
-        self.edit(recipe, place, move |state| {
+        self.edit(recipe, place.host, move |state| {
             state.retired_images.retain(|id| id != &pending);
             state.retired_images.push(saved);
         })
@@ -718,8 +774,9 @@ impl Podman {
             .container_id
             .as_deref()
             .context("the container create has no confirmed identity")?;
+        let place = PlaceTarget::from(binding);
         let info = self
-            .inspect(binding.place_host, id)
+            .inspect(place, id)
             .await?
             .context("the container was deleted outside Farhelm")?;
         self.owned(&info, "session").await?;
@@ -744,21 +801,17 @@ impl Podman {
                 }
                 if verb == "start" {
                     self.scoped(
-                        binding.place_host,
+                        place,
                         &binding.name,
                         vec!["start".into(), "--".into(), id.into()],
                     )
                     .await?;
                 } else {
-                    self.require(
-                        binding.place_host,
-                        vec![verb.into(), "--".into(), id.into()],
-                        COMMAND,
-                    )
-                    .await?;
+                    self.require(place, vec![verb.into(), "--".into(), id.into()], COMMAND)
+                        .await?;
                 }
                 let status = self
-                    .inspect(binding.place_host, id)
+                    .inspect(place, id)
                     .await?
                     .context("the container disappeared during its lifecycle operation")?
                     .status;
@@ -778,7 +831,7 @@ impl Podman {
     /// recipe helpers go through guarded recipe cleanup.
     pub(crate) async fn delete_leftover(&self, place: HostId, id: &str) -> anyhow::Result<()> {
         canonical(id)?;
-        let Some(info) = self.inspect(place, id).await? else {
+        let Some(info) = self.inspect(place.into(), id).await? else {
             return Ok(());
         };
         let role = info
@@ -808,7 +861,7 @@ impl Podman {
             !recorded_host && !recorded_recipe && !live,
             "this container belongs to a host or recipe on this helm; delete it there"
         );
-        self.remove_container(place, id, role).await
+        self.remove_container(place.into(), id, role).await
     }
 
     /// An interrupted launch can leave a container without a session. Offer
@@ -1242,8 +1295,24 @@ impl EnvironmentProvider for Podman {
             None => None,
         };
         let target = current.container_id.as_deref().unwrap_or(&current.name);
+        // A pending create predating place identity deliberately retains its
+        // old behavior. Every first send needs a current place claim.
+        let observed;
+        let mut place = PlaceTarget::from(current);
+        if place.identity.is_none()
+            && current.pending_create_at.is_none()
+            && current.container_id.is_none()
+        {
+            observed = self.0.places.fresh(&self.0.store, place.host).await?;
+            place.identity = Some(
+                observed
+                    .identity
+                    .as_ref()
+                    .map_err(|reason| anyhow::Error::msg(*reason))?,
+            );
+        }
         let mut created = false;
-        let info = if let Some(info) = self.inspect(current.place_host, target).await? {
+        let info = if let Some(info) = self.inspect(place, target).await? {
             anyhow::ensure!(
                 current.container_id.is_some() || current.pending_create_at.is_some(),
                 "the reserved container name is already in use; the existing container was left untouched"
@@ -1281,14 +1350,15 @@ impl EnvironmentProvider for Podman {
                         crate::store::PodmanInstallGuard::of(&row)?,
                         sent,
                         &selected.image.facts,
-                        &selected.image.login
+                        &selected.image.login,
+                        place.identity
                     )
                     .await?,
                 "the container binding changed before create"
             );
             let result = self
                 .run(
-                    current.place_host,
+                    place,
                     &current.name,
                     "session",
                     &current.recipe,
@@ -1296,7 +1366,7 @@ impl EnvironmentProvider for Podman {
                     false,
                 )
                 .await;
-            let info = self.inspect(current.place_host, &current.name).await?;
+            let info = self.inspect(place, &current.name).await?;
             let info = match (result, info) {
                 (Ok(id), Some(info)) => {
                     anyhow::ensure!(info.id == id, "the created container identity changed");
@@ -1423,7 +1493,7 @@ impl EnvironmentProvider for Podman {
                 .container_id
                 .as_deref()
                 .context("the container create has no confirmed identity")?;
-            let Some(info) = self.inspect(binding.place_host, id).await? else {
+            let Some(info) = self.inspect(binding.into(), id).await? else {
                 return Ok(EnvironmentStatus::Missing(
                     "the container was deleted outside Farhelm; Delete its entry to remove it"
                         .into(),
@@ -1477,10 +1547,11 @@ impl EnvironmentProvider for Podman {
                 binding.host,
             )));
         }
+        let place = PlaceTarget::from(current);
         let id = if let Some(id) = &current.container_id {
             id.clone()
         } else {
-            match self.inspect(current.place_host, &current.name).await? {
+            match self.inspect(place, &current.name).await? {
                 Some(info) => {
                     self.owned(&info, "session").await?;
                     anyhow::ensure!(
@@ -1507,8 +1578,7 @@ impl EnvironmentProvider for Podman {
                 }
             }
         };
-        self.remove_container(current.place_host, &id, "session")
-            .await?;
+        self.remove_container(place, &id, "session").await?;
         Ok(Destroyed::Podman(ContainerDeleted::attest(binding.host)))
     }
 
@@ -1537,7 +1607,7 @@ impl EnvironmentProvider for Podman {
                 .as_str()
                 .or_else(|| item["ID"].as_str())
                 .context("Podman listed a container without an ID")?;
-            if let Some(info) = self.inspect(host, id).await? {
+            if let Some(info) = self.inspect(host.into(), id).await? {
                 let role = info
                     .labels
                     .get("farhelm.role")
