@@ -54,21 +54,12 @@ pub(super) fn templates_dialog_setup(state: &SceneState, window: &mut Window, cx
     // Templates button.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::templates::open(&opener, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The reference set's templates for the editor scenes (references `template-editor` and `template-number-menu`): a
@@ -191,22 +182,16 @@ fn open_template_editor(
     helm.connect(snapshot);
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
     let helm = Rc::new(RefCell::new(helm));
     let answering = helm.clone();
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::templates::open(&opener, &mark, window, cx);
-            if let Some(dialog) = layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx)
+            if let Some(dialog) =
+                layers::last_opened::<crate::templates::dialog::TemplatesDialog>(cx)
             {
-                dialog.update(cx, |dialog, cx| {
-                    dialog.open_template(template, window, cx)
-                });
+                dialog.update(cx, |dialog, cx| dialog.open_template(template, window, cx));
             }
         });
         let mut helm = answering.borrow_mut();
@@ -223,10 +208,6 @@ fn open_template_editor(
             }
         }
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// [`template_editor_setup`], then (reference `template-number-menu`) `codex-deep`'s number-key menu open over it, as
@@ -270,12 +251,7 @@ pub(super) fn template_launcher_setup(state: &SceneState, window: &mut Window, c
     let connection = session::start(handle, events, None, cx);
     helm.connect(editor_scene_collections());
     let handle = window.window_handle();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             crate::session_list::quick_switcher::open(
                 gpui::WeakEntity::new_invalid(),
@@ -285,10 +261,6 @@ pub(super) fn template_launcher_setup(state: &SceneState, window: &mut Window, c
             );
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// [`template_editor_setup`], then (reference `template-leave-question`) the name changed to `codex-deep-unsaved` and the

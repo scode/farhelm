@@ -98,12 +98,7 @@ fn host_add(
     // open once the connection has one, and only once.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::hosts::add::open(&opener, &mark, window, cx);
@@ -119,10 +114,6 @@ fn host_add(
             }
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The Add host dialog as an approval card opens it for an agent's host add (no reference screen: the old app's dialog
@@ -166,12 +157,7 @@ pub(super) fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Windo
     // Opened once the connection has its UI session, as Add host's own scene opens.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let arming = arming.clone();
         let request = request.clone();
         let _ = handle.update(cx, |_, window, cx| {
@@ -181,10 +167,6 @@ pub(super) fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Windo
             }
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The setup confirmation for the reference screens' plan (reference `host-add-setup-plan`), as a probe's plan opens it
@@ -198,22 +180,13 @@ pub(super) fn host_add_setup_plan_setup(state: &SceneState, window: &mut Window,
     )]);
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             let offer = crate::hosts::setup::tests::reference_offer(opener.clone(), mark);
             crate::hosts::setup::confirm(offer, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// Add host found a supervisor whose owner last connected three days ago.
@@ -244,20 +217,13 @@ pub(super) fn host_suspend_confirmation_setup(
     host.name = "Build sandbox".into();
     helm.connect(vec![crate::hosts::tests::hosts(&[host])]);
     let window = window.window_handle();
-    let opened = Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if connection.read(cx).session().is_some() && !opened.replace(true) {
-            window
-                .update(cx, |_, window, cx| {
-                    crate::hosts::show_suspend_question_for_golden(4, window, cx);
-                })
-                .unwrap();
-        }
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
+        window
+            .update(cx, |_, window, cx| {
+                crate::hosts::show_suspend_question_for_golden(4, window, cx);
+            })
+            .unwrap();
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The removal confirmation for the reference screens' `build-box` (reference `host-remove-confirmation`), as its menu's
@@ -276,21 +242,12 @@ pub(super) fn host_remove_confirmation_setup(
         &crate::hosts::tests::reference_hosts(),
     )]);
     let handle = window.window_handle();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             let _ = crate::hosts::remove::ask(2, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// Make the Hosts panel over a fake helm holding `listed` hosts, with Details on when `details` is; the scene draws it
@@ -470,14 +427,9 @@ fn with_sandbox_catalog(
     ]);
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = Cell::new(false);
     let helm = Rc::new(RefCell::new(helm));
     let answering = helm.clone();
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| open(&opener, window, cx));
         let mut helm = answering.borrow_mut();
         for read in helm.commands() {
@@ -486,10 +438,6 @@ fn with_sandbox_catalog(
             }
         }
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The Add host dialog on the Tensorlake sandbox kind with a key saved (against reference `host-add-dialog`, whose
@@ -914,22 +862,13 @@ pub(super) fn host_uninstall_confirmation_setup(
         &crate::hosts::tests::reference_hosts(),
     )]);
     let handle = window.window_handle();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             let view = crate::hosts::tests::reference_hosts().remove(1);
             crate::hosts::uninstall::confirm_for_golden(view, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// `build-box`'s uninstall running at its second of six steps, Details off (no reference): the running row opens by
@@ -976,23 +915,14 @@ pub(super) fn hosts_panel_uninstall_notice_setup(state: &SceneState, _: &mut Win
     let connection = session::start(handle, events, None, cx);
     helm.connect(vec![crate::hosts::tests::hosts(&listed)]);
     let panel = cx.new(HostsPanel::new);
-    let shown = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if shown.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        shown.set(true);
+    super::once_ui_session(state, helm, connection, cx, |cx| {
         crate::hosts::uninstall::show_notice_for_golden(
             "build-box",
             "/home/dev/.local/state/farhelm",
             cx,
         );
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(panel));
-    keep.push(Box::new(watch));
+    state.keep.borrow_mut().push(Box::new(panel));
 }
 
 /// The Hosts panel a scene's setup made, as [`hosts_panels`] draws it, in a column tall enough for a setup's nine
@@ -1102,13 +1032,8 @@ pub(super) fn host_settings_dialog_setup(state: &SceneState, window: &mut Window
     let handle = window.window_handle();
     // The scene's ring handle stands in for the menu's toggle, as it stands in for the gear in the Settings scenes.
     let opener = state.ring.clone();
-    let opened = Cell::new(false);
     let answering = helm.clone();
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::hosts::open_settings(2, &opener, &mark, window, cx);
@@ -1121,10 +1046,6 @@ pub(super) fn host_settings_dialog_setup(state: &SceneState, window: &mut Window
             }
         }
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// The host settings dialog, then (reference `host-settings-dialog-end`) its body scrolled to its end.

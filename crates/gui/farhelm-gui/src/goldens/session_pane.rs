@@ -9,7 +9,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::Collection;
 use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px};
 
-use super::SceneState;
+use super::{SceneState, session_at_age};
 
 /// The one-off hint appears above the terminal while the open Grok session has yet to report a conversation.
 pub(super) fn hook_setup_hint(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
@@ -63,12 +63,9 @@ pub(super) fn claude_trust_hint(state: &SceneState, _: &mut Window, cx: &mut App
 pub(super) fn session_details_bar_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let row = |key, title, state: serde_json::Value, ago: i64| {
-        session(key)
-            .title(title)
+    let row = |key, title, state: serde_json::Value, ago| {
+        session_at_age(key, title, ago)
             .status(state)
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
             .invocation("claude --model opus")
     };
     let state_of = |state: &str| serde_json::json!({ "state": state });
@@ -192,10 +189,7 @@ const HIDDEN_COMMAND: &str = "codex --prompt \u{202E}abc\n# tail";
 pub(super) fn session_details_copy_warning_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
-    let row = session("a")
-        .title("Refactor the API client")
-        .activity(TEST_NOW - 120)
-        .seen(Some(TEST_NOW - 120))
+    let row = session_at_age("a", "Refactor the API client", 120)
         .host(1)
         .host_name(crate::hosts::identity::LOCAL_NAME)
         .cwd("/home/user/src/widgets")

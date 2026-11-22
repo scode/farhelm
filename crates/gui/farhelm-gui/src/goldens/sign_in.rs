@@ -1,7 +1,7 @@
 //! SSH prompts over their own attention rows, using the production window owner and layer manager.
 
 use crate::hosts::tests::{connected, host, hosts};
-use crate::session_list::tests::{TEST_NOW, listing, preferences_state, session as row};
+use crate::session_list::tests::{listing, preferences_state};
 use crate::sign_in::tests::{questions, remote, startup_question};
 use crate::{local_time, session};
 use farhelm_helm_client::fake::FakeHelm;
@@ -10,7 +10,7 @@ use gpui::{
     AnyElement, App, AppContext as _, IntoElement, ParentElement as _, Styled as _, Window, div, px,
 };
 
-use super::{SceneState, session_lists_at};
+use super::{SceneState, session_at_age, session_lists_at};
 
 /// Two hosts share the frame. The left column pins both attention actions and the two key badges. The right pane
 /// keeps the unavailable session card's Sign in visible under the question.
@@ -26,13 +26,10 @@ fn setup(
     helm.connect(vec![
         listing(
             &["bench"],
-            &[row("bench")
+            &[session_at_age("bench", "Benchmark the release build", 900)
                 .host(3)
                 .host_name("bench-box")
-                .stale()
-                .activity(TEST_NOW - 900)
-                .seen(Some(TEST_NOW - 900))
-                .title("Benchmark the release build")],
+                .stale()],
         ),
         preferences_state(Preferences {
             welcome_seen: Some(true),

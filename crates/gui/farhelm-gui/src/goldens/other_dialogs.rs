@@ -4,7 +4,7 @@
 
 use crate::focus::{self, Mark};
 use crate::session_list::SessionList;
-use crate::session_list::tests::{TEST_NOW, preferences_state, session};
+use crate::session_list::tests::{TEST_NOW, preferences_state};
 use crate::theme;
 use crate::{session, test_support, ticker};
 use farhelm_helm_client::fake::FakeHelm;
@@ -20,8 +20,8 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use super::{
-    SceneState, fleet, rest_pointer_at, session_list_scene_holding, session_list_scene_opening,
-    session_list_then,
+    SceneState, fleet, rest_pointer_at, session_at_age, session_list_scene_holding,
+    session_list_scene_opening, session_list_then,
 };
 
 /// The Help menu, open beside the host rail foot's `?` button with its first item highlighted (reference `help-menu`):
@@ -180,12 +180,6 @@ fn alerting_notice() -> serde_json::Value {
 /// then leaves for an empty corner, so neither a hover fill nor a tooltip is in the picture ([`press_bell_b`]).
 pub(super) fn session_bell_list_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     window.set_driver_enabled(true);
-    let row = |key, title, ago: i64| {
-        session(key)
-            .title(title)
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
-    };
     let notifications = serde_json::json!([
         {
             "seq": 7,
@@ -208,11 +202,11 @@ pub(super) fn session_bell_list_setup(state: &SceneState, window: &mut Window, c
         },
     ]);
     let rows = [
-        row("a", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
-        row("b", "Release notes for 0.40", 5 * 60)
+        session_at_age("a", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
+        session_at_age("b", "Release notes for 0.40", 5 * 60)
             .cwd("/home/user/src/farhelm")
             .notifications(notifications, 6),
-        row("c", "Benchmark on the build box", 3 * 3_600).cwd("/home/user/bench"),
+        session_at_age("c", "Benchmark on the build box", 3 * 3_600).cwd("/home/user/bench"),
     ];
     session_list_scene_opening(state, &rows, Some("a"), cx);
     state.after.set(Some(press_bell_b));
@@ -274,22 +268,13 @@ pub(super) fn announcements_dialog_setup(state: &SceneState, window: &mut Window
     // The queue reaches the store after this setup returns. Open history once the connection has a UI session.
     let handle = window.window_handle();
     let opener = cx.focus_handle().tab_stop(true);
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let opener = opener.clone();
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::announcements::open_history(&opener, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// Both the conditional Help menu item and its history dialog need a previously shown announcement.
@@ -369,21 +354,12 @@ fn feedback_dialog_scene(
     // connection has a UI session, and only once.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::feedback::open(&opener, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// [`feedback_dialog_scene`] as the dialog first opens with nothing remembered (reference `feedback-dialog`).
@@ -420,21 +396,12 @@ pub(super) fn keyboard_shortcuts_dialog_setup(
     // session, and only once.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::shortcuts::open_from_menu(&opener, &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// A capable host's trash listing as the trash scenes answer it: `checkouts` (each its id, name, repository, archive

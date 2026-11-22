@@ -23,9 +23,9 @@ use gpui::{
 };
 
 use super::{
-    AfterDrawn, SceneState, defer_after, fleet, rest_pointer_at, session_list_scene,
-    session_list_scene_opening, session_list_scene_preferring, session_list_scene_with_listing,
-    session_list_then, session_lists_at,
+    AfterDrawn, SceneState, defer_after, fleet, rest_pointer_at, session_at_age,
+    session_list_scene, session_list_scene_opening, session_list_scene_preferring,
+    session_list_scene_with_listing, session_list_then, session_lists_at,
 };
 
 /// A fleet with every mark and line a row draws differently: running (selected, so its inverse colors are pinned),
@@ -41,19 +41,13 @@ pub(super) fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut Ap
 /// ink. Beside it, a stale exited row shows its ended words and its cause on one line, and an ordinary row on a
 /// connected host stays as it is.
 pub(super) fn session_list_selected_stale_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    let row = |key, title, ago: i64| {
-        session(key)
-            .title(title)
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
-    };
     let rows = [
-        row("g", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
-        row("f", "Benchmark on the build box", 3 * 3_600)
+        session_at_age("g", "Refactor the API client", 2 * 60).cwd("/home/user/src/api"),
+        session_at_age("f", "Benchmark on the build box", 3 * 3_600)
             .host(3)
             .stale()
             .cwd("/home/user/bench"),
-        row("h", "Profile the release build", 2 * 86_400)
+        session_at_age("h", "Profile the release build", 2 * 86_400)
             .host(3)
             .stale()
             .status(serde_json::json!({ "state": "exited", "exit_code": 1 }))
@@ -137,28 +131,22 @@ pub(super) fn host_rail_status_setup(state: &SceneState, _: &mut Window, cx: &mu
 /// exit with a code, an interruption and a launch error; and last a stale exited row, whose ended mark and clock show
 /// together.
 pub(super) fn session_list_compact_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    let row = |key, title, ago: i64| {
-        session(key)
-            .title(title)
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
-    };
     let exited =
         |code: serde_json::Value| serde_json::json!({ "state": "exited", "exit_code": code });
     let rows = [
-        row("a", "Refactor the API client", 5).host(1),
-        row("f", "Benchmark on the build box", 3_600)
+        session_at_age("a", "Refactor the API client", 5).host(1),
+        session_at_age("f", "Benchmark on the build box", 3_600)
             .host(3)
             .stale(),
-        row("e", "Release notes for 0.40", 2 * 3_600)
+        session_at_age("e", "Release notes for 0.40", 2 * 3_600)
             .status(exited(serde_json::Value::Null))
             .annotation("stopped by user"),
-        row("g", "Run the migration", 3 * 3_600).status(exited(serde_json::json!(17))),
-        row("h", "Profile the release build", 86_400)
+        session_at_age("g", "Run the migration", 3 * 3_600).status(exited(serde_json::json!(17))),
+        session_at_age("h", "Profile the release build", 86_400)
             .status(serde_json::json!({ "state": "interrupted" })),
-        row("i", "Bisect the flaky test", 2 * 86_400)
+        session_at_age("i", "Bisect the flaky test", 2 * 86_400)
             .status(serde_json::json!({ "state": "error", "detail": "cannot launch" })),
-        row("j", "Check the bench numbers", 3 * 86_400)
+        session_at_age("j", "Check the bench numbers", 3 * 86_400)
             .host(3)
             .stale()
             .status(exited(serde_json::json!(1))),
@@ -177,12 +165,8 @@ pub(super) fn session_list_compact_setup(state: &SceneState, _: &mut Window, cx:
 /// separator with its gap between the last pin and the first unpinned row. The helm serves the rows unpinned first, so
 /// the picture shows the list doing the grouping.
 pub(super) fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
-    let row = |key, title, ago: i64| {
-        session(key)
-            .title(title)
-            .status(serde_json::json!({ "state": "idle" }))
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
+    let row = |key, title, ago| {
+        session_at_age(key, title, ago).status(serde_json::json!({ "state": "idle" }))
     };
     let rows = [
         row("u", "Fix the flaky upload test", 14 * 60).cwd("/srv/ci/uploads"),
@@ -200,12 +184,9 @@ pub(super) fn session_list_pinned_setup(state: &SceneState, _: &mut Window, cx: 
 /// Show the guide through an expanded group's pin divider and the open-session stripe on a different, collapsed group.
 pub(super) fn session_list_groups_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     let row = |key, title, cwd, ago| {
-        session(key)
-            .title(title)
+        session_at_age(key, title, ago)
             .cwd(cwd)
             .status(serde_json::json!({ "state": "idle" }))
-            .activity(TEST_NOW - ago)
-            .seen(Some(TEST_NOW - ago))
     };
     let rows = [
         row("a", "Refactor the API client", "/home/user/src/api", 120).pinned(1),
@@ -852,21 +833,12 @@ pub(super) fn rename_dialog_setup(state: &SceneState, window: &mut Window, cx: &
     // The snapshot reaches the store from the connection's pump, on the executor, after this setup returns; the
     // editor needs it to seed its draft, so it opens once the connection has a UI session, and only once.
     let handle = window.window_handle();
-    let opened = std::cell::Cell::new(false);
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::session_list::rename::open("a", &mark, window, cx);
         });
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// [`session_lists_then`] in a column tall enough for the host status scene's six avatars above the rail's foot,

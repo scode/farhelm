@@ -141,14 +141,9 @@ fn settings_scene_with(
     // connection has a UI session, and only once.
     let handle = window.window_handle();
     let opener = state.ring.clone();
-    let opened = std::cell::Cell::new(false);
     let helm = Rc::new(RefCell::new(helm));
     let answering = helm.clone();
-    let watch = cx.observe(&connection, move |connection, cx| {
-        if opened.get() || connection.read(cx).session().is_none() {
-            return;
-        }
-        opened.set(true);
+    super::once_ui_session(state, helm, connection, cx, move |cx| {
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
             crate::settings::open_at(section, &opener, &mark, window, cx);
@@ -178,10 +173,6 @@ fn settings_scene_with(
             container_leftover,
         );
     });
-    let mut keep = state.keep.borrow_mut();
-    keep.push(Box::new(helm));
-    keep.push(Box::new(connection));
-    keep.push(Box::new(watch));
 }
 
 /// A later section in the same opening receives the same fake configuration as if it were the first.
