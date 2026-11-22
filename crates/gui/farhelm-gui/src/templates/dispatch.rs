@@ -205,6 +205,38 @@ pub(super) fn unavailable(cx: &App) -> Option<String> {
     })
 }
 
+/// Resolve a named pick against the current store. A reported read failure takes precedence over a missing name
+/// because the store can still hold templates from the last successful read.
+fn template_by_name(
+    name: &str,
+    refusal_id: &'static str,
+    cx: &App,
+) -> Result<LaunchTemplate, HostSentence> {
+    if let Some(error) = unavailable(cx) {
+        return Err(sentence(
+            refusal_id,
+            &[
+                Part::Words("Couldn't load templates: ".to_owned()),
+                Part::Host(error),
+                Part::Words("; search tl: and retry".to_owned()),
+            ],
+        ));
+    }
+    stored_templates(cx)
+        .into_iter()
+        .find(|template| template.name == name)
+        .ok_or_else(|| {
+            sentence(
+                refusal_id,
+                &[
+                    Part::Words("No template is named \"".to_owned()),
+                    Part::Host(name.to_owned()),
+                    Part::Words("\"; it may have been deleted".to_owned()),
+                ],
+            )
+        })
+}
+
 /// The edit a taken `tl:` row makes in the open launcher (`launcher::view::search`): the template the store holds
 /// under `name` when the batch applies, through [`apply::apply`] against the launcher's catalog, as a press of a
 /// template shortcut there is (SPEC.md: "`tl:name` in the search box offers templates by name, and accepting one
@@ -218,29 +250,7 @@ pub(crate) fn search_row_batch(
 ) -> impl FnOnce(&mut LaunchDraft, Catalog<'_>, &App) -> Result<BatchApplied, HostSentence> + 'static
 {
     move |draft, catalog, cx| {
-        if let Some(error) = unavailable(cx) {
-            return Err(sentence(
-                LAUNCHER_REFUSAL,
-                &[
-                    Part::Words("Couldn't load templates: ".to_owned()),
-                    Part::Host(error),
-                    Part::Words("; search tl: and retry".to_owned()),
-                ],
-            ));
-        }
-        let Some(template) = stored_templates(cx)
-            .into_iter()
-            .find(|template| template.name == name)
-        else {
-            return Err(sentence(
-                LAUNCHER_REFUSAL,
-                &[
-                    Part::Words("No template is named \"".to_owned()),
-                    Part::Host(name),
-                    Part::Words("\"; it may have been deleted".to_owned()),
-                ],
-            ));
-        };
+        let template = template_by_name(&name, LAUNCHER_REFUSAL, cx)?;
         apply_in_launcher(draft, &[template], catalog, cx)
     }
 }
@@ -302,29 +312,12 @@ pub fn pick_from_switcher(name: &str, window: &mut Window, cx: &mut App) {
     let Some(draft) = entry::new_prefill(cx) else {
         return;
     };
-    // New with the old switcher pick's refusal, for a pick that cannot apply at all.
-    let refused = |draft: LaunchDraft, parts: &[Part], window: &mut Window, cx: &mut App| {
-        let note = Note::Refusal(sentence(PAGE_REFUSAL, parts));
-        entry::open_with(draft, Some(note), window, cx);
-    };
-    if let Some(error) = unavailable(cx) {
-        let parts = [
-            Part::Words("Couldn't load templates: ".to_owned()),
-            Part::Host(error),
-            Part::Words("; search tl: and retry".to_owned()),
-        ];
-        return refused(draft, &parts, window, cx);
-    }
-    let Some(template) = stored_templates(cx)
-        .into_iter()
-        .find(|template| template.name == name)
-    else {
-        let parts = [
-            Part::Words("No template is named \"".to_owned()),
-            Part::Host(name.to_owned()),
-            Part::Words("\"; it may have been deleted".to_owned()),
-        ];
-        return refused(draft, &parts, window, cx);
+    let template = match template_by_name(name, PAGE_REFUSAL, cx) {
+        Ok(template) => template,
+        Err(refusal) => {
+            entry::open_with(draft, Some(Note::Refusal(refusal)), window, cx);
+            return;
+        }
     };
     // `on_page` above is all that keeps a pick off a refused launch waiting behind its notice: `open_with` would bring
     // that one back instead of opening this draft.

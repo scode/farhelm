@@ -60,7 +60,7 @@ use farhelm_proto::launcher::{
     LaunchCatalogModel, LaunchTemplate, TemplateDestination, TemplateFields,
     check_new_template_name, check_template_shape, quick_launch_eligible,
 };
-use farhelm_proto::ui_channel::{Availability, Collection, HostView};
+use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchPermission, LaunchTarget};
 use gpui::{
     AnyElement, AnyWindowHandle, App, Context, FocusHandle, FontWeight, InteractiveElement as _,
@@ -68,6 +68,7 @@ use gpui::{
     Styled as _, Subscription, WeakEntity, Window, div, px,
 };
 
+use super::available_names;
 use super::dialog::TemplatesDialog;
 use super::fields::{Draft, Field, duplicate_name, name_refusal};
 use super::shortcuts::{self, Bindings};
@@ -729,7 +730,7 @@ impl Editor {
         if let Some(reason) = self.draft.refusal(catalog) {
             return Some(said(reason));
         }
-        let names = stored_names(cx);
+        let names = available_names(cx);
         let names: Option<Vec<&str>> = names
             .as_ref()
             .map(|names| names.iter().map(String::as_str).collect());
@@ -1513,23 +1514,6 @@ fn delete_command(name: &str) -> Option<Command> {
         None,
         "DELETE /api/templates/[template]",
     ))
-}
-
-/// The names of the templates the helm pushed, or `None` while it reports the collection unavailable or before its
-/// first snapshot: a list that proves nothing about which names are free (see the module docs).
-pub(super) fn stored_names(cx: &App) -> Option<Vec<String>> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    match &collections.meta(Collection::Templates)?.availability {
-        Availability::Available => Some(
-            collections
-                .ordered::<LaunchTemplate>()
-                .into_iter()
-                .map(|template| template.name.clone())
-                .collect(),
-        ),
-        Availability::Unavailable { .. } => None,
-    }
 }
 
 /// `PUT /api/templates/{name}` with the template's fields, whole: the editor's save (and a new template's, with no

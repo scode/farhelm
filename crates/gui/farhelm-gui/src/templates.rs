@@ -83,7 +83,9 @@ mod shortcuts_tests;
 #[cfg(test)]
 mod summary_tests;
 
-use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
+use farhelm_helm_client::Collections;
+use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_proto::ui_channel::{Availability, Collection, PREFERENCES_KEY, Preferences};
 use gpui::{AnyWindowHandle, App, FocusHandle, IntoElement, Window};
 
 use crate::components::HoverHelp;
@@ -93,6 +95,27 @@ use crate::layers::{Anchor, LayerId};
 use crate::session;
 
 pub use dialog::Hint;
+
+/// Names in the helm's order for suggestions and name checks. A missing or unavailable snapshot cannot tell Tab
+/// what to complete or a save whether a name is free.
+fn available_names(cx: &App) -> Option<Vec<String>> {
+    let store = session::current_store(cx)?;
+    let collections = store.read(cx).collections();
+    match &collections.meta(Collection::Templates)?.availability {
+        Availability::Available => Some(names_in(collections)),
+        Availability::Unavailable { .. } => None,
+    }
+}
+
+/// Names in the helm's order from the retained snapshot. Sequence Enter resolves against these even when the
+/// latest read failed, while suggestions and name checks require [`available_names`].
+fn names_in(collections: &Collections) -> Vec<String> {
+    collections
+        .ordered::<LaunchTemplate>()
+        .into_iter()
+        .map(|template| template.name.clone())
+        .collect()
+}
 
 /// The ⚡ chord as the Templates dialog and its hover help name it on this platform (SPEC.md, "Quick launch": "Cmd+P on
 /// macOS or Ctrl+Shift+P elsewhere"). The old app, a web page that could not tell, printed both ("⌘P / Ctrl+Shift+P");

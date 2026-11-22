@@ -43,8 +43,6 @@
 //! and reads as the main row's digit (`actions::PhysicalKeyId::typed_in`).
 
 use farhelm_input_mapping::{NativeIdentity, Platform, physical_keypad_digit};
-use farhelm_proto::launcher::LaunchTemplate;
-use farhelm_proto::ui_channel::{Availability, Collection};
 use gpui::{
     AnyWindowHandle, App, AppContext as _, Context, DispatchPhase, Entity, FocusHandle, Global,
     IntoElement, KeyDownEvent, KeybindingKeystroke, Keystroke, MouseDownEvent, NativeKeyIdentity,
@@ -54,6 +52,7 @@ use gpui::{
 use super::dispatch::{self, Origin, Reference};
 use super::sequence::{Chip, Entry, Input, Outcome, Refusal, Sequence, printable};
 use super::shortcuts::{Bindings, Unread};
+use super::{available_names, names_in};
 use crate::actions::{
     self, Captured, PhysicalKey, QUICK_LAUNCH_LINUX, QUICK_LAUNCH_MAC, SEQUENCE_PREFIX_LINUX,
     SEQUENCE_PREFIX_MAC, TemplateNumberKey,
@@ -321,7 +320,7 @@ fn on_key(event: &KeyDownEvent, window: &mut Window, cx: &mut App) -> Captured {
             cx.notify();
         }),
         Key::Tab => {
-            let names = advisory_names(cx);
+            let names = available_names(cx);
             view.update(cx, |pill, cx| {
                 pill.sequence.tab(names.as_deref());
                 cx.notify();
@@ -427,7 +426,7 @@ pub(super) struct PillView {
 
 impl Render for PillView {
     fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let names = advisory_names(cx);
+        let names = available_names(cx);
         let shown = self.sequence.view(names.as_deref());
         let (label, hint) = if self.in_launcher {
             (APPLY_LABEL, APPLY_HINT)
@@ -462,33 +461,12 @@ impl Render for PillView {
     }
 }
 
-/// The template names for the candidates and Tab, in the helm's order, or `None` when there are none to offer: before
-/// the first snapshot, or while the helm says it could not read its templates (SPEC.md: Tab "does nothing while the
-/// advisory catalog is loading or unavailable").
-fn advisory_names(cx: &App) -> Option<Vec<String>> {
-    let store = session::current_store(cx)?;
-    let collections = store.read(cx).collections();
-    match &collections.meta(Collection::Templates)?.availability {
-        Availability::Available => Some(names_in(collections)),
-        Availability::Unavailable { .. } => None,
-    }
-}
-
 /// The template names Enter resolves against: whatever the store holds now, even while the helm says it could not
 /// read them again, since the names never gate Enter (SPEC.md) and the store keeps the last ones it had.
 fn current_names(cx: &App) -> Vec<String> {
     session::current_store(cx)
         .map(|store| names_in(store.read(cx).collections()))
         .unwrap_or_default()
-}
-
-/// Every template's name in `collections`, in the helm's order.
-fn names_in(collections: &farhelm_helm_client::Collections) -> Vec<String> {
-    collections
-        .ordered::<LaunchTemplate>()
-        .into_iter()
-        .map(|template| template.name.clone())
-        .collect()
 }
 
 /// The armed sequence's model, for tests that check what a key did to it.

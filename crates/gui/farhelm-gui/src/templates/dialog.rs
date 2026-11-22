@@ -63,6 +63,7 @@ use gpui::{
     WeakEntity, Window, div, px, svg,
 };
 
+use super::available_names;
 use super::editor::{self, DeleteKind, Editor, Ended};
 use super::fields::taken_refusal;
 use super::shortcuts::{self, Bindings, KEYS};
@@ -630,7 +631,7 @@ impl TemplatesDialog {
             // The copy is named over the stored names, or over none while the helm cannot read them (the save checks
             // the name again).
             Departure::Duplicate => {
-                let names = editor::stored_names(cx).unwrap_or_default();
+                let names = available_names(cx).unwrap_or_default();
                 let names: Vec<&str> = names.iter().map(String::as_str).collect();
                 self.editor
                     .as_ref()
@@ -681,7 +682,7 @@ impl TemplatesDialog {
         };
         let mut template = undo.template.clone();
         template.fields.workspace_trust = None;
-        let names = editor::stored_names(cx);
+        let names = available_names(cx);
         let names: Option<Vec<&str>> = names
             .as_ref()
             .map(|names| names.iter().map(String::as_str).collect());
