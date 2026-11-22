@@ -47,6 +47,9 @@ pub(crate) struct PodmanRecipeState {
     /// Bounded failure context is presentation only, never cache freshness or
     /// ownership. A later successful attempt clears it.
     pub(crate) last_failure: Option<String>,
+    /// A failed replacement can leave a fresh pair available for new launches.
+    /// Cleanup warnings and preparation failures do not have that meaning.
+    pub(crate) last_failure_from_rebuild: bool,
     pub(crate) image: Option<BuiltImage>,
     pub(crate) prepared: Option<PreparedImage>,
     /// Each field first records its fresh reserved name before run, then the

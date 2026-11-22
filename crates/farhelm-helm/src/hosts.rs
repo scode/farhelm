@@ -4273,12 +4273,13 @@ pub(crate) async fn recipe_places(State(state): State<Arc<AppState>>) -> axum::r
                 }
             }
             for place in recorded {
-                let mut view = state.recipe_builds().place_view(&name, &build, place);
+                let availability = places.iter().find(|current| current.place == place);
+                let usable = availability.is_some_and(|current| current.reason.is_none());
+                let mut view = state
+                    .recipe_builds()
+                    .place_view(&name, &build, place, usable);
                 if view.reason.is_none() {
-                    view.reason = places
-                        .iter()
-                        .find(|current| current.place == place)
-                        .and_then(|current| current.reason.clone());
+                    view.reason = availability.and_then(|current| current.reason.clone());
                 }
                 views.push(view);
             }

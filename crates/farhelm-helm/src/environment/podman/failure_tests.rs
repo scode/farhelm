@@ -837,6 +837,8 @@ fn same_image(left: &str, right: &str) -> bool {
 pub(crate) struct Progress {
     needed: std::sync::atomic::AtomicUsize,
     lines: Mutex<Vec<String>>,
+    /// A joiner must report an admitted job's step before the test releases it.
+    step_seen: Notify,
 }
 #[async_trait::async_trait]
 impl PreparationProgress for Progress {
@@ -846,6 +848,7 @@ impl PreparationProgress for Progress {
     }
     async fn step(&self, line: String) {
         self.lines.lock().unwrap().push(line);
+        self.step_seen.notify_one();
     }
 }
 
@@ -889,6 +892,130 @@ async fn cold_provider_success_establishes_build_install_and_reuse_premise() {
     let reused = f.prepare(&Progress::default()).await.unwrap();
     assert_eq!(f.commands.run_count(), runs, "fresh reuse cannot rebuild");
     drop(reused);
+}
+
+/// A launch must join a Rebuild even when the job holds the source guard and
+/// the old pair is still fresh. The real preparation stages then show whether
+/// a failed replacement preserves that pair and a successful one replaces it.
+#[farhelm_testtrace::test(flavor = "current_thread")]
+async fn launch_joins_rebuild_and_only_success_replaces_the_working_pair() {
+    for fail in [true, false] {
+        let f = Fixture::new().await;
+        drop(f.prepare(&Progress::default()).await.unwrap());
+        let before = f.recipe_state().await;
+        let software = before.image.unwrap();
+        let prepared = before.prepared.unwrap();
+        assert_eq!(prepared.source_image, software.id);
+        assert!(f.commands.image(&software.id).is_some());
+        assert!(f.commands.image(&prepared.id).is_some());
+        assert!(before.retired_images.is_empty());
+        let removed_before = f.commands.state.lock().unwrap().removed_images.len();
+        if fail {
+            f.commands.fail("prepare-commit");
+        }
+
+        let (recipe, _) = f.store.tensorlake_recipe_row("dev").await.unwrap().unwrap();
+        let provider = f.provider.clone();
+        let place = f.place;
+        let builds = provider.0.builds.clone();
+        let events = Arc::new(FleetEvents::new());
+        let (release, released) = tokio::sync::oneshot::channel();
+        let job = builds
+            .start_podman(
+                "dev",
+                place,
+                true,
+                events.clone(),
+                move |view, cancel| async move {
+                    let guard = provider.0.builds.lock_podman_use("dev", place).await?;
+                    build::enter(&view, &events, "Rebuild holds source selection");
+                    released.await?;
+                    drop(guard);
+                    provider
+                        .prepare_images("dev", &recipe, place, view, events, cancel, true)
+                        .await
+                },
+            )
+            .unwrap();
+        assert!(builds.podman_job("dev", place).is_some());
+
+        let progress = Progress::default();
+        let mut launch = std::pin::pin!(f.prepare(&progress));
+        tokio::select! {
+            result = &mut launch => panic!("launch returned before Rebuild settled: {:?}", result.err()),
+            seen = tokio::time::timeout(Duration::from_secs(5), progress.step_seen.notified()) => {
+                seen.expect("launch did not report the held Rebuild's progress");
+            }
+        }
+        assert_eq!(
+            progress.lines.lock().unwrap().as_slice(),
+            &["Rebuild holds source selection"]
+        );
+        assert!(job.borrow().result.is_none(), "Rebuild is still held");
+        release.send(()).unwrap();
+        let launched = launch.await;
+        let state = f.recipe_state().await;
+        let current = state.prepared.unwrap();
+        let source = state.image.unwrap();
+        assert_eq!(current.source_image, source.id);
+        assert!(
+            state.retired_images.is_empty(),
+            "unused retired images must be cleaned up"
+        );
+
+        if fail {
+            let error = launched
+                .err()
+                .expect("joined launch must receive the failed Rebuild");
+            let outcome = job.borrow().result.clone().unwrap().unwrap_err();
+            assert_eq!(error.to_string(), outcome);
+            assert_eq!(f.commands.failed().as_deref(), Some("prepare-commit"));
+            assert_eq!(source, software);
+            assert_eq!(current, prepared);
+            assert!(f.commands.image(&software.id).is_some());
+            assert!(f.commands.image(&prepared.id).is_some());
+            assert_eq!(
+                f.commands.state.lock().unwrap().removed_images.len() - removed_before,
+                2,
+                "the replacement software and its bootstrap layer were captured and cleaned up"
+            );
+
+            let (_, saved) = f.store.tensorlake_recipe_row("dev").await.unwrap().unwrap();
+            let view = builds.place_view("dev", &saved, Place::PodmanHost(place), true);
+            assert!(view.ready);
+            assert_eq!(
+                view.reason.as_deref(),
+                Some(
+                    format!("Rebuild failed: {outcome}. New sessions use the previous image.")
+                        .as_str()
+                )
+            );
+            let unavailable = builds.place_view("dev", &saved, Place::PodmanHost(place), false);
+            assert_eq!(unavailable.reason.as_deref(), Some(outcome.as_str()));
+            let runs = f.commands.run_count();
+            let retry = f.prepare(&Progress::default()).await.unwrap();
+            let PreparedArtifact::Podman(retry) = retry else {
+                panic!("expected a Podman artifact");
+            };
+            assert_eq!(retry.image, prepared);
+            assert_eq!(
+                f.commands.run_count(),
+                runs,
+                "a later launch reuses the fresh pair"
+            );
+        } else {
+            let PreparedArtifact::Podman(launched) = launched.unwrap() else {
+                panic!("expected a Podman artifact");
+            };
+            assert_ne!(source.id, software.id);
+            assert_ne!(current.id, prepared.id);
+            assert_eq!(launched.image, current);
+            assert!(state.last_failure.is_none());
+            assert!(f.commands.image(&software.id).is_none());
+            assert!(f.commands.image(&prepared.id).is_none());
+        }
+        f.commands.assert_ownership_accounted().await;
+    }
 }
 
 /// Every named mutator can fail after a helper exists. Real failure cleanup

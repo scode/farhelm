@@ -803,7 +803,7 @@ impl Podman {
         let live = info
             .labels
             .get("farhelm.recipe")
-            .is_some_and(|recipe| self.0.builds.podman_job_active(recipe, place));
+            .is_some_and(|recipe| self.0.builds.podman_job(recipe, place).is_some());
         anyhow::ensure!(
             !recorded_host && !recorded_recipe && !live,
             "this container belongs to a host or recipe on this helm; delete it there"
@@ -1045,6 +1045,26 @@ async fn deleting(
     .await
 }
 
+/// A launch reports the admitted job's progress and receives its outcome.
+/// The caller drops its source guard first, so the job can publish or clean up.
+async fn wait_for_preparation(
+    mut job: tokio::sync::watch::Receiver<PodmanProgress>,
+    progress: &dyn PreparationProgress,
+) -> anyhow::Result<()> {
+    loop {
+        let view = job.borrow_and_update().clone();
+        if !view.line.is_empty() {
+            progress.step(view.line).await;
+        }
+        if let Some(result) = view.result {
+            return result.map(|_| ()).map_err(anyhow::Error::msg);
+        }
+        job.changed()
+            .await
+            .context("container preparation ended without a result; retry the launch")?;
+    }
+}
+
 #[async_trait::async_trait]
 impl EnvironmentProvider for Podman {
     async fn rebuild_recipe(
@@ -1074,7 +1094,6 @@ impl EnvironmentProvider for Podman {
             true,
             Arc::clone(&events),
             move |progress, cancel| async move {
-                owner.0.places.fresh(&owner.0.store, place).await?;
                 owner
                     .prepare_images(&recipe_name, &recipe, place, progress, events, cancel, true)
                     .await
@@ -1115,6 +1134,11 @@ impl EnvironmentProvider for Podman {
             .collect())
     }
 
+    /// Prefer the live job to a recorded pair. The source guard protects a
+    /// chosen image until the new container reaches Running. Joiners release
+    /// it so a Rebuild can publish its replacement or clean up after a failure.
+    /// Subscribe before waiting for the guard, since retirement can hold it
+    /// until just before a failed Rebuild leaves the registry.
     async fn ensure_prepared(
         &self,
         name: &str,
@@ -1130,15 +1154,38 @@ impl EnvironmentProvider for Podman {
             recipe.base.supports(ProviderKind::Podman),
             "this recipe's base cannot run in a container"
         );
+        if let Some(job) = self.0.builds.podman_job(name, place) {
+            progress.needed().await;
+            wait_for_preparation(job, progress).await?;
+        }
         self.0.places.fresh(&self.0.store, place).await?;
         loop {
-            if self.fresh_image(name, place).await?.is_none() {
-                progress.needed().await;
+            let mut job = self.0.builds.podman_job(name, place);
+            if job.is_none() {
+                let guard = self.0.builds.lock_podman_use(name, place).await?;
+                let active = self.0.builds.podman_job(name, place);
+                let image = if active.is_none() {
+                    self.fresh_image(name, place).await
+                } else {
+                    Ok(None)
+                };
+                // Rebuild can be admitted while Podman checks existence.
+                job = active.or_else(|| self.0.builds.podman_job(name, place));
+                if job.is_none()
+                    && let Some(image) = image?
+                {
+                    return Ok(PreparedArtifact::Podman(PreparedContainer { image, guard }));
+                }
+            }
+            progress.needed().await;
+            let job = if let Some(job) = job {
+                job
+            } else {
                 let owner = self.clone();
                 let name_owned = name.to_owned();
                 let recipe = recipe.clone();
                 let events = events.clone();
-                let mut job = self.0.builds.start_podman(
+                self.0.builds.start_podman(
                     name,
                     place,
                     false,
@@ -1156,25 +1203,9 @@ impl EnvironmentProvider for Podman {
                             )
                             .await
                     },
-                )?;
-                loop {
-                    let view = job.borrow_and_update().clone();
-                    if !view.line.is_empty() {
-                        progress.step(view.line).await;
-                    }
-                    if let Some(result) = view.result {
-                        result.map_err(anyhow::Error::msg)?;
-                        break;
-                    }
-                    job.changed().await.context(
-                        "container preparation ended without a result; retry the launch",
-                    )?;
-                }
-            }
-            let guard = self.0.builds.lock_podman_use(name, place).await?;
-            if let Some(image) = self.fresh_image(name, place).await? {
-                return Ok(PreparedArtifact::Podman(PreparedContainer { image, guard }));
-            }
+                )?
+            };
+            wait_for_preparation(job, progress).await?;
         }
     }
 
