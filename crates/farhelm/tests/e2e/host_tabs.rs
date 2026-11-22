@@ -277,7 +277,8 @@ fn carries_markers(pid: u32) -> bool {
 /// the tab displaces both of "a"'s attachments as taken over. Closing the
 /// tab detaches "b" as tab-closed; the tab's host process, its socket, its
 /// record and its shell's processes are gone, the session lists no tab, and
-/// the agent's host runs on.
+/// the agent's host runs on. On a second tab, shell exit removes it from
+/// List and Attach before explicit Close ends its still-running host.
 #[farhelm_testtrace::test]
 async fn a_host_tab_beside_a_host_agent_opens_attaches_and_closes() {
     let home = farhelm_teststate::tempdir().expect("home");
@@ -372,6 +373,30 @@ async fn a_host_tab_beside_a_host_agent_opens_attaches_and_closes() {
         "the agent runs on: {:?}",
         agent.liveness()
     );
+
+    // The ticker is absent. Observe the exited shell while the host and
+    // its record are still live evidence for explicit Close.
+    let (client, id) = (&h.client, &session.id);
+    let tab = client.open_tab(id).await.unwrap();
+    let host = tab_host(&h.sup, id, &tab.id).await;
+    let pid = host.adopted_process().unwrap().pid;
+    let record = tab_record(h.state.path(), id, &tab.id);
+    assert!(host.live_root().unwrap().is_some());
+    type_line(&host, "exit").await;
+    let exited = |state: &Liveness| matches!(state, Liveness::Exited { .. });
+    wait_for_liveness(&host, "tab shell exit", exited).await;
+    assert!(!process_is_gone(pid) && record.exists());
+    assert!(listed_tabs(client, id).await.is_empty());
+    let target = TerminalSelector::Tab { id: tab.id.clone() };
+    let attaching = client.attach_terminal(id, COLS, ROWS, target, "exited");
+    let err = attaching.await.expect_err("the exited tab refuses Attach");
+    let refusal = err.downcast_ref::<SupervisorError>().unwrap();
+    assert_eq!(refusal.kind(), ErrorKind::NotFound);
+    client
+        .close_tab(id, &tab.id)
+        .await
+        .expect("close the exited tab");
+    assert!(process_is_gone(pid) && !record.exists());
     h.client.delete_session(&session.id).await.expect("delete");
 }
 
@@ -961,8 +986,8 @@ async fn serve_keeps_held_tab_runtimes_without_contacting_their_hosts() {
     retire(stack.state.path(), sup, client).await;
 }
 
-/// Closing a host tab, Stop and Delete each kill a process under
-/// the tab's shell that ignores SIGHUP and carries no marker.
+/// Closing a host tab, Stop and Delete each reach an unmarked shell's job
+/// even when that job ignores SIGHUP and carries no marker.
 ///
 /// Why: only a sweep rooted at the tab's child reaches such a process: the
 /// host's end only hangs the shell up, the marker sweep cannot see it, and
@@ -984,7 +1009,8 @@ async fn close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
         &format!(
             "tab=\"$FARHELM_TAB_ID\"\n\
              /usr/bin/env -i /bin/sh -c \"trap '' HUP; echo \\$\\$ > {dir}/$tab.tmp; mv {dir}/$tab.tmp {dir}/$tab.pid; exec /bin/sleep 1000\" &\n\
-             exec /bin/sh -i",
+             trap '' HUP\n\
+             exec /usr/bin/env -i HOME=\"$HOME\" /bin/sh -i",
             dir = shell_words::quote(jobs.to_str().unwrap()),
         ),
     );
@@ -1025,11 +1051,35 @@ async fn close_stop_and_delete_kill_a_hangup_immune_unmarked_job_of_a_tab() {
         .await
         .expect("a tab after Stop");
     let third_job = job(&third.id).await;
+    let _job_guard = PidKillGuard::arm(third_job);
+    let shell = tab_host(&h.sup, &session.id, &third.id).await;
+    let shell_pid = shell
+        .live_root()
+        .unwrap()
+        .expect("the tab shell is live")
+        .pid;
+    // Prove that even the root has exec'd out of the launch marker set.
+    wait_for_condition("the tab shell is unmarked and ignores hangup", || async {
+        let env = std::fs::read(format!("/proc/{shell_pid}/environ")).map_err(|e| e.to_string())?;
+        if env.starts_with(b"HOME=")
+            && !env.split(|b| *b == 0).any(|v| v.starts_with(b"FARHELM_"))
+            && ignores_hangup(shell_pid)
+        {
+            Ok(())
+        } else {
+            Err("expected a clean environment and ignored SIGHUP".into())
+        }
+    })
+    .await;
     assert!(
         !process_is_gone(third_job) && ignores_hangup(third_job) && !carries_markers(third_job),
         "premise: the post-Stop tab's job runs, ignores SIGHUP and carries no marker"
     );
     h.client.delete_session(&session.id).await.expect("delete");
+    assert!(
+        process_is_gone(shell_pid),
+        "Delete ended the unmarked shell"
+    );
     assert!(
         process_is_gone(third_job),
         "Delete killed the post-Stop tab's job"

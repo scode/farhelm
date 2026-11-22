@@ -158,26 +158,22 @@ pub(crate) fn append_transcript(grid: bool, seen: &mut Vec<u8>, bytes: &[u8]) {
 /// that point. A test that needs "after" waits for a marker unique to the
 /// step. A soft-wrapped screen row still ends in a newline (changed rows
 /// arrive one by one, so they cannot be joined), so a needle that crosses a
-/// wrap on screen is found only in history. Rows keep their trailing blanks,
-/// so a prompt such as the fake agent's `"> "` reads as it was drawn. A
-/// message that does not decode fails the test: a grid stream sends nothing
-/// else.
+/// wrap on screen is found only in history. The transcript preserves blank
+/// columns between styled runs. Trailing blanks omitted by the grid
+/// protocol are absent. A message that does not decode fails the test.
 pub(crate) fn grid_text(bytes: &[u8]) -> Vec<u8> {
     use farhelm_proto::grid::GridOutput;
-    let row_text = |row: &farhelm_proto::grid::Row| -> String {
-        row.runs.iter().map(|run| run.text.as_str()).collect()
-    };
     let mut text = String::new();
     match GridOutput::decode(bytes).expect("a grid stream sends only grid messages") {
         GridOutput::Rows { rows, .. } => {
             for row in &rows {
-                text.push_str(&row_text(&row.row));
+                text.push_str(&grid_row_text(&row.row));
                 text.push('\n');
             }
         }
         GridOutput::History { rows, .. } => {
             for row in &rows {
-                text.push_str(&row_text(row));
+                text.push_str(&grid_row_text(row));
                 if !row.wraps {
                     text.push('\n');
                 }
@@ -186,6 +182,22 @@ pub(crate) fn grid_text(bytes: &[u8]) -> Vec<u8> {
         _ => {}
     }
     text.into_bytes()
+}
+
+/// Follow the run columns to reconstruct omitted gaps, including after
+/// wide characters whose UTF-8 length does not tell us their cell width.
+pub(crate) fn grid_row_text(row: &farhelm_proto::grid::Row) -> String {
+    let mut text = String::new();
+    let mut column = 0;
+    for run in &row.runs {
+        text.extend(std::iter::repeat_n(
+            ' ',
+            u32::from(run.col).saturating_sub(column) as usize,
+        ));
+        text.push_str(&run.text);
+        column = run.end();
+    }
+    text
 }
 
 /// Test-only attachment operations with an explicit initial-replay boundary.
@@ -3007,6 +3019,25 @@ pub(crate) fn marked_pids(session_id: &str) -> Vec<u32> {
 mod tests {
     use super::*;
     use std::collections::VecDeque;
+
+    /// Omitting default blank cells from the wire must not join words in
+    /// a transcript match. The gap starts after the wide glyph's last cell.
+    #[farhelm_testtrace::test]
+    fn a_grid_row_keeps_the_gap_between_runs() {
+        use farhelm_proto::grid::{Row, Run, Style};
+        let run = |col, width, text: &str| Run {
+            col,
+            width,
+            text: text.to_owned(),
+            style: Style::PLAIN,
+            link: None,
+        };
+        let row = Row {
+            wraps: false,
+            runs: vec![run(0, 2, "界"), run(3, 1, ">")],
+        };
+        assert_eq!(grid_row_text(&row), "界 >");
+    }
 
     /// One scripted answer from the injectable listing seam.
     ///

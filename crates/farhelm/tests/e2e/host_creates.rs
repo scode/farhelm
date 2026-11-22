@@ -221,6 +221,27 @@ pub(crate) async fn end_runtime(host: &HostTerminal, pid: u32) {
 
 // ---- Creates --------------------------------------------------------------------
 
+/// A first-class Bash launch must reach a live interactive shell. Its
+/// private startup file and evaluated input distinguish it from the shim.
+#[farhelm_testtrace::test]
+async fn a_structured_bash_session_takes_input() {
+    let home = farhelm_teststate::tempdir().unwrap();
+    std::fs::write(home.path().join(".bashrc"), "echo BASH-SESSION-READY\n").unwrap();
+    let seams = crate::host_tabs::tab_seams(home.path());
+    let h = harness_with_seams(SupervisorTimeouts::default(), seams).await;
+    let selection = serde_json::from_str(r#"{"harness":"bash"}"#).unwrap();
+    let launch = farhelm_helm::compile_agent_launch(selection).unwrap();
+    let (client, cwd) = (&h.client, home.path().to_str().unwrap());
+    let creating = client.create_session_with_extras(cwd, launch, None, 80, 24, Default::default());
+    let id = creating.await.unwrap().id;
+    let (channel, mut seen, mut rx) = client.attach_live(&id, 80, 24).await.unwrap();
+    wait_for(&mut rx, &mut seen, "BASH-SESSION-READY", 15).await;
+    let input = b"echo BASH-ANSWER-$((40+2))\r".to_vec();
+    client.send_keys(channel, input).await;
+    wait_for(&mut rx, &mut seen, "BASH-ANSWER-42", 15).await;
+    client.delete_session(&id).await.unwrap();
+}
+
 /// A create starts its agent in a host and records it as a
 /// host row, and Stop's sweep ends the agent but never the host.
 ///

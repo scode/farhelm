@@ -61,12 +61,15 @@ async fn opening_a_tab_on_a_restart_gap_session_is_a_restart_first_conflict() {
 
     // End every terminal and reload: the row comes back terminal-less,
     // which is the restart gap PLAN_M2.md names.
-    drop(client);
-    drop(sup);
+    retire_supervisor(state.path(), sup, client).await;
     end_all_terminals(state.path()).await;
     let sup = supervisor_on(state.path())
         .await
         .expect("second supervisor");
+    assert!(
+        sup.owns_state_dir(),
+        "the replacement owns the state directory"
+    );
     let client = connect_client(&sup).await;
 
     let err = client
