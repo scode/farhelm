@@ -1170,14 +1170,14 @@ agent choice is independent of that destination:
 
 - Conversation selector: New, Clone and Replace with offer an optional one-time selector under **More options** for
   agent launches. Claude, Antigravity, Codex, Grok and Muse label it conversation id; Goose and OpenCode session id;
-  Cursor chat id; Pi and OMP session file. Empty preserves an ordinary fresh start. Selecting a different harness clears
-  the selector. The selector is not saved in templates, history, defaults or the session's reusable launch, so a later
-  Clone starts fresh. It is passed literally as one argument, without a shell or checking that the conversation exists.
-  Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes, backslashes, control characters and
-  oversized values are refused by the existing conversation-id checks. Session-file paths may be absolute or relative to
-  the session directory; a leading tilde is refused because it does not expand. New managed-checkout destinations and
-  command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm will not capture the named
-  conversation and later Restart will be unavailable.
+  Cursor chat id; Pi and OMP session file. Empty preserves an ordinary fresh start. Selecting a different agent type or
+  shell clears the selector. The selector is not saved in templates, history, defaults or the session's reusable launch,
+  so a later Clone starts fresh. It is passed literally as one argument, without a shell or checking that the
+  conversation exists. Leading dashes, reserved locator tokens and Farhelm placeholders, spaces, quotes, backslashes,
+  control characters and oversized values are refused by the existing conversation-id checks. Session-file paths may be
+  absolute or relative to the session directory; a leading tilde is refused because it does not expand. New
+  managed-checkout destinations and command launches refuse a selector. Goose, Cursor and OpenCode show that Farhelm
+  will not capture the named conversation and later Restart will be unavailable.
 - Initial prompt: the agent tab offers a multiline **Initial prompt** box that grows with its text up to a cap and then
   scrolls, above **More options** for supported agents. The label note says it sends once as the agent's first message.
   Hover help says that Restart, Clone and Replace do not send it again. Enter edits the message without launching.
