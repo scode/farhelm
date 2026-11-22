@@ -254,21 +254,21 @@ impl Sandboxes {
                 .text("Delete sandbox ")
                 .host(&name)
                 .text("?"),
-            Answer {
-                label: "Delete sandbox".into(),
-                help: HoverHelp::tooltip(
+            Answer::new(
+                "Delete sandbox",
+                HoverHelp::tooltip(
                     "Terminate this sandbox and delete its files, sessions and snapshots",
                 ),
-                tier: Tier::Danger,
-            },
+                Tier::Danger,
+            ),
             row,
         )
         .line("Its files, sessions and snapshots will be deleted.")
-        .cancel_answer(Answer {
-            label: "Cancel".into(),
-            help: HoverHelp::tooltip("Cancel: keep this sandbox"),
-            tier: Tier::Neutral,
-        })
+        .cancel_answer(Answer::new(
+            "Cancel",
+            HoverHelp::tooltip("Cancel: keep this sandbox"),
+            Tier::Neutral,
+        ))
         // Deleting a sandbox cannot be undone (SPEC.md, "Opening and closing": focus starts on Cancel then).
         .starts_on_cancel();
         self.question = Some(prompt::ask_inline(

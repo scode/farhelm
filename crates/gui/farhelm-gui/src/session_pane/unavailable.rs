@@ -544,14 +544,20 @@ fn resume_button(key: &str, offer: Offer, cx: &App) -> Button {
             "Resume host: this session continues when its host resumes",
         ),
     };
+    let launch_refusal = crate::launcher::launch::host_lifecycle_refusal(offer.host, cx);
     let key = key.to_owned();
-    Button::new(RESUME_ID, label, HoverHelp::tooltip(help), Role::Button)
-        .help_below()
-        .icon(Icon::Play)
-        .tier(tier)
-        .compact()
-        .disabled(menu::refused(&key, cx))
-        .on_click(move |_, _, cx| environment::resume(&key, offer.host, cx))
+    Button::new(
+        RESUME_ID,
+        label,
+        HoverHelp::tooltip(launch_refusal.unwrap_or(help)),
+        Role::Button,
+    )
+    .help_below()
+    .icon(Icon::Play)
+    .tier(tier)
+    .compact()
+    .disabled(menu::refused(&key, cx) || launch_refusal.is_some())
+    .on_click(move |_, _, cx| environment::resume(&key, offer.host, cx))
 }
 
 /// Whether `key`'s card shows a refused Resume itself (see [`draw`]), so the lines above the terminal leave it out

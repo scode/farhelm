@@ -470,6 +470,8 @@ struct RowInput<'a> {
     updatable: bool,
     /// The host's lifecycle offer ([`offers::Offers::lifecycle`]), which the inline Resume needs.
     lifecycle: Option<(offers::Lifecycle, bool)>,
+    /// Why a launch holds this host's lifecycle controls, independent of registry changes.
+    lifecycle_refusal: Option<&'static str>,
     /// The viewer's time zone for this frame, for the times the row's details give.
     zone: Zone,
     /// How long ago Farhelm asked the provider to change the host's machine, which its status gives after the changing
@@ -565,6 +567,9 @@ impl Render for HostsPanel {
                             sign_in: crate::sign_in::status(host, cx),
                             updatable: available,
                             lifecycle,
+                            lifecycle_refusal: crate::launcher::launch::host_lifecycle_refusal(
+                                host.id, cx,
+                            ),
                             zone,
                             asked_ago,
                         };
@@ -859,8 +864,13 @@ impl HostsPanel {
             (None, Some(status @ progress::Status::Lifecycle(_))) => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
-                    line.children(lifecycle::button(host, input.lifecycle, opener))
-                        .children(toggle),
+                    line.children(lifecycle::button(
+                        host,
+                        input.lifecycle,
+                        opener,
+                        input.lifecycle_refusal,
+                    ))
+                    .children(toggle),
                 )
                 .child(
                     div()
@@ -873,8 +883,13 @@ impl HostsPanel {
             (None, None) if input.asked_ago.is_some() => {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
-                    line.children(lifecycle::button(host, input.lifecycle, opener))
-                        .children(toggle),
+                    line.children(lifecycle::button(
+                        host,
+                        input.lifecycle,
+                        opener,
+                        input.lifecycle_refusal,
+                    ))
+                    .children(toggle),
                 )
                 .child(
                     div()
@@ -900,15 +915,20 @@ impl HostsPanel {
                 let opener = self.toggles.get(&id).map(|(_, focus)| focus.clone());
                 main.child(
                     // The inline Resume sits between the name and the phase, as the old row drew it.
-                    line.children(lifecycle::button(host, input.lifecycle, opener.clone()))
-                        .child(phase_status(
-                            host,
-                            input.asked_ago.as_deref(),
-                            pulse,
-                            palette,
-                        ))
-                        .children(update::button(host, input.updatable, opener))
-                        .children(toggle),
+                    line.children(lifecycle::button(
+                        host,
+                        input.lifecycle,
+                        opener.clone(),
+                        input.lifecycle_refusal,
+                    ))
+                    .child(phase_status(
+                        host,
+                        input.asked_ago.as_deref(),
+                        pulse,
+                        palette,
+                    ))
+                    .children(update::button(host, input.updatable, opener))
+                    .children(toggle),
                 )
             }
         };

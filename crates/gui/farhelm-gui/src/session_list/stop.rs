@@ -119,7 +119,8 @@ pub(crate) struct Frozen {
 /// Cancel says in its help what Cancel keeps, as the old row's did. For a session in its own environment
 /// (`environment`, its provider's words and its host's id) the consequence goes on to say what plain Stop leaves
 /// running, and the question offers Stop and suspend between Cancel and Confirm stop, sending it at once with the
-/// question's preconditions (`super::environment::stop_and_suspend`).
+/// question's preconditions (`super::environment::stop_and_suspend`). A launch on that host holds the alternate
+/// answer while leaving Confirm stop available.
 pub(crate) fn question(
     key: &str,
     row: &SessionRow,
@@ -175,7 +176,7 @@ pub(crate) fn question(
     .keeps_focus_on_empty_click();
     match environment {
         Some((_, host)) => question.alternative(
-            environment::stop_and_suspend_answer(program),
+            environment::stop_and_suspend_answer(program, host),
             move |frozen, _, cx| environment::stop_and_suspend(&frozen.key, host, frozen.guard, cx),
         ),
         None => question,

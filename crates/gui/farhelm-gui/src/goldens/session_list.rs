@@ -548,6 +548,143 @@ fn rest_on_terminal_tabs_stop(
     );
 }
 
+/// Show the Stop confirmation while a create still owns this window's destination. Its alternate answer needs to
+/// explain the wait without making ordinary Stop look unavailable.
+pub(super) fn stop_while_launching_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::session_list::environment_tests::{Provider, connected, environment_host, registry};
+
+    window.set_driver_enabled(true);
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    helm.connect(vec![
+        listing(&["a"], &[stop_while_launching_session()]),
+        preferences(&["a"], None),
+        registry(&host),
+    ]);
+    state.lists.borrow_mut().push(cx.new(SessionList::new));
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(helm));
+    keep.push(Box::new(connection));
+    state.after.set(Some(open_launch_for_stop));
+    state.after_capture.set(Some(disconnect_stop_launch));
+}
+
+/// Let the launcher and operation store release the pending create after the screenshot. Its reply must stay out
+/// until then so the launch still owns the host in the captured frame.
+fn disconnect_stop_launch(state: &SceneState) {
+    state
+        .keep
+        .borrow_mut()
+        .iter_mut()
+        .find_map(|item| item.downcast_mut::<FakeHelm>())
+        .expect("the Stop scene keeps its fake helm")
+        .break_channel();
+}
+
+/// The stopped session and the pending create share the same host.
+fn stop_while_launching_session() -> crate::session_list::tests::Fixture {
+    crate::session_list::environment_tests::bash_session("a")
+        .host(2)
+        .tabs(1)
+        .title("Build console")
+}
+
+/// Open the normal launcher after the fake helm's host list is readable.
+fn open_launch_for_stop(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::launcher::{launch_tests::command_draft, view};
+    use farhelm_proto::ui_channel::HostView;
+    if !session::current_store(cx).is_some_and(|store| {
+        store
+            .read(cx)
+            .collections()
+            .get::<HostView>(&HostView::key(2))
+            .is_some_and(|host| {
+                host.is_session_owned
+                    && host.environment.is_some()
+                    && matches!(
+                        host.state,
+                        farhelm_proto::ui_channel::HostStateView::Connected { .. }
+                    )
+            })
+    }) {
+        state.after.set(Some(open_launch_for_stop));
+        return;
+    }
+    let mut draft = command_draft();
+    draft.choose_host(2, "~".into());
+    draft.edit_folder("/home/user/work".into());
+    let mark = Mark::take(cx);
+    assert!(view::open(draft, &mark, window, cx).is_some());
+    state.after.set(Some(press_launch_for_stop));
+}
+
+/// Begin a create and leave its reply outstanding, so the question sees the real launch guard.
+fn press_launch_for_stop(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let Some(center) = window
+        .driver_nodes()
+        .iter()
+        .find(|node| node.element_id.as_deref() == Some("launcher-launch") && node.flags.click)
+        .map(|node| node.bounds.center())
+    else {
+        state.after.set(Some(press_launch_for_stop));
+        return;
+    };
+    crate::test_support::click_before_redraw(center, window, cx);
+    state.after.set(Some(show_stop_while_launching));
+}
+
+/// Draw the actual Stop question and rest on the held answer once its button exists.
+fn show_stop_while_launching(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    assert!(crate::launcher::launch::host_lifecycle_refusal(2, cx).is_some());
+    let row = serde_json::from_value(stop_while_launching_session().entry().value)
+        .expect("the listed shell session");
+    let question = crate::session_list::stop::question(
+        "a",
+        &row,
+        crate::session_list::stop::guard(&row),
+        Some((
+            crate::environment_ui::ProviderUi(farhelm_proto::ProviderKind::Tensorlake),
+            2,
+        )),
+    );
+    let mark = Mark::take(cx);
+    assert!(crate::prompt::ask(question, None, &mark, |_, _, _| {}, window, cx).is_some());
+    state.after.set(Some(rest_on_held_stop_and_suspend));
+}
+
+/// Let the same disabled button that users hover supply its tooltip in the capture.
+fn rest_on_held_stop_and_suspend(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    rest_pointer_on(
+        state,
+        "prompt-alternative-0",
+        |bounds| bounds.center(),
+        rest_on_held_stop_and_suspend,
+        window,
+        cx,
+    );
+}
+
 /// A pending Delete on the selected row (its spinner and "Stopping agent…" in place of the title, in the fill's ink)
 /// and a refused one on the idle row with new output (the helm's words under the row, in red). Motion is reduced, so
 /// the spinner holds its first step and the picture can settle. The refusal is answered before the pending Delete is

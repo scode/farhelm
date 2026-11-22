@@ -224,6 +224,28 @@ pub(super) fn busy(cx: &App) -> bool {
     matches!(held(cx), Some(Waiting::Reply | Waiting::Preparing))
 }
 
+/// The reason a host's Suspend and Resume controls wait while this window's launch targets that host.
+/// Host registry changes have a separate, window-wide exclusion. A draft for a new environment has no
+/// existing destination to hold.
+pub(crate) fn host_lifecycle_refusal(host: i64, cx: &App) -> Option<&'static str> {
+    targets_host(host, cx)
+        .then_some("A launch on this host is in progress; try again once it finishes")
+}
+
+/// Whether the hidden launcher is still submitting a launch to the existing host `host`.
+/// A draft waiting for the user behind its notice has released the destination.
+fn targets_host(host: i64, cx: &App) -> bool {
+    let Some(held) = cx
+        .try_global::<Slot>()
+        .and_then(|slot| slot.0.read(cx).held.read(cx))
+        .and_then(Option::as_ref)
+    else {
+        return false;
+    };
+    let draft = &held.launcher.read(cx).draft;
+    held.waiting == Waiting::Reply && draft.host == Some(host) && draft.target.is_none()
+}
+
 /// The run an accepted environment create waits on, by host id and run id, while the slot's launcher waits on one;
 /// `None` for every other wait. The progress pill reads it while it draws (`super::pill`), so the slot is its only
 /// record.

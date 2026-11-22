@@ -199,7 +199,7 @@ pub(crate) enum Presentation {
 }
 
 /// One of a question's answers, as its button shows it.
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct Answer {
     /// The button's label and accessible name.
     pub label: SharedString,
@@ -208,7 +208,11 @@ pub struct Answer {
     /// The button's tier: [`Tier::Danger`] for a destructive confirmation, [`Tier::Primary`] for an ordinary one,
     /// [`Tier::DangerOutline`] for a permanent answer beside a one-off danger answer.
     pub tier: Tier,
+    disabled_reason: Option<Rc<DisabledReason>>,
 }
+
+/// A live condition that can hold an answer as long as the reason applies.
+type DisabledReason = dyn Fn(&App) -> Option<&'static str>;
 
 /// The link a question carries ([`Question::link`]): app wording and an app URL, never a host's value.
 struct Link {
@@ -231,7 +235,23 @@ impl Answer {
             label: label.into(),
             help,
             tier,
+            disabled_reason: None,
         }
+    }
+
+    /// Recheck this answer's availability while the question is open. Other answers keep their own availability
+    /// because the condition can hold just one part of the operation, such as Suspend following Stop.
+    pub(crate) fn disabled_while(
+        mut self,
+        reason: impl Fn(&App) -> Option<&'static str> + 'static,
+    ) -> Self {
+        self.disabled_reason = Some(Rc::new(reason));
+        self
+    }
+
+    /// The reason to disable this button in the current frame and to reject a stale click when it is handled.
+    fn disabled_reason(&self, cx: &App) -> Option<&'static str> {
+        self.disabled_reason.as_ref().and_then(|reason| reason(cx))
     }
 }
 
@@ -808,11 +828,19 @@ impl<T: Clone + 'static> Prompt<T> {
         cx: &mut Context<Self>,
     ) {
         let unseen = self.wording != self.drawn_wording;
-        if self.answered
-            || self.in_flight
-            || (which == Which::Confirm && !self.question.confirm_enabled)
-            || (which != Which::Cancel && unseen)
-        {
+        let blocked = match which {
+            Which::Confirm => {
+                !self.question.confirm_enabled
+                    || self.question.confirm.disabled_reason(cx).is_some()
+            }
+            Which::Alternative(index) => self
+                .question
+                .alternatives
+                .get(index)
+                .is_some_and(|answer| answer.disabled_reason(cx).is_some()),
+            Which::Cancel => false,
+        };
+        if self.answered || self.in_flight || blocked || (which != Which::Cancel && unseen) {
             return;
         }
         self.clicked = clicked;
@@ -1023,14 +1051,15 @@ impl<T: Clone + 'static> Render for Prompt<T> {
         .busy(busy)
         .focus(&self.cancel_focus)
         .on_click(answer(Which::Cancel, cx));
+        let confirm_reason = question.confirm.disabled_reason(cx);
         let confirm = Button::new(
             "prompt-confirm",
             question.confirm.label.clone(),
-            question.confirm.help.clone(),
+            confirm_reason.map_or_else(|| question.confirm.help.clone(), HoverHelp::tooltip),
             Role::Button,
         )
         .tier(question.confirm.tier)
-        .disabled(!question.confirm_enabled)
+        .disabled(!question.confirm_enabled || confirm_reason.is_some())
         .busy(busy)
         .focus(&self.confirm_focus)
         .on_click(answer(Which::Confirm, cx));
@@ -1041,13 +1070,15 @@ impl<T: Clone + 'static> Render for Prompt<T> {
             .zip(&self.alternative_focus)
             .enumerate()
             .map(|(index, (alternative, focus))| {
+                let reason = alternative.disabled_reason(cx);
                 Button::new(
                     SharedString::from(format!("prompt-alternative-{index}")),
                     alternative.label.clone(),
-                    alternative.help.clone(),
+                    reason.map_or_else(|| alternative.help.clone(), HoverHelp::tooltip),
                     Role::Button,
                 )
                 .tier(alternative.tier)
+                .disabled(reason.is_some())
                 .busy(busy)
                 .focus(focus)
                 .on_click(answer(Which::Alternative(index), cx))

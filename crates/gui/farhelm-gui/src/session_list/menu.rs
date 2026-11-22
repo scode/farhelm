@@ -921,7 +921,9 @@ impl RowMenu {
         {
             let unavailable = environment::unavailable(&self.key, environment, cx);
             let captured = self.environment_frame.capture(target, unavailable, window);
-            self.environment_items(environment, row, unavailable, &captured)
+            let launch_refusal =
+                crate::launcher::launch::host_lifecycle_refusal(environment.host.id, cx);
+            self.environment_items(environment, row, unavailable, launch_refusal, &captured)
         } else {
             self.environment_frame.clear();
             Vec::new()
@@ -1291,6 +1293,7 @@ impl RowMenu {
         environment: Environment,
         row: &SessionRow,
         unavailable: bool,
+        launch_refusal: Option<&'static str>,
         captured: &crate::prompt::ShownAction<Actionable>,
     ) -> Vec<MenuItem> {
         let resume = environment.resumable();
@@ -1330,20 +1333,24 @@ impl RowMenu {
                 "session-menu-resume",
                 Icon::Play,
                 "Resume",
-                HoverHelp::tooltip(environment.ui.resume_help(stopped)),
+                HoverHelp::tooltip(
+                    launch_refusal.unwrap_or_else(|| environment.ui.resume_help(stopped)),
+                ),
                 Role::MenuItem,
             )
-            .description("Continue the environment's preserved processes")
+            .description(launch_refusal.unwrap_or("Continue the environment's preserved processes"))
             .on_click(item(false))
         } else {
             MenuItem::new(
                 "session-menu-suspend",
                 Icon::Pause,
                 "Suspend",
-                HoverHelp::tooltip(environment.ui.suspend_help()),
+                HoverHelp::tooltip(launch_refusal.unwrap_or_else(|| environment.ui.suspend_help())),
                 Role::MenuItem,
             )
-            .description("Freeze every process; everything continues on Resume")
+            .description(
+                launch_refusal.unwrap_or("Freeze every process; everything continues on Resume"),
+            )
             .on_click(item(false))
         };
         let mut items = vec![toggle.disabled(unavailable)];
@@ -1354,11 +1361,17 @@ impl RowMenu {
                     "session-menu-stop-and-suspend",
                     Icon::Stop,
                     "Stop and suspend",
-                    HoverHelp::tooltip(environment.ui.suspend_action(Some(program))),
+                    HoverHelp::tooltip(
+                        launch_refusal.map_or_else(
+                            || environment.ui.suspend_action(Some(program)),
+                            str::to_owned,
+                        ),
+                    ),
                     Role::MenuItem,
                 )
-                .description(format!(
-                    "End this session's {program} and tabs, then suspend the whole environment"
+                .description(launch_refusal.map_or_else(
+                    || format!("End this session's {program} and tabs, then suspend the whole environment"),
+                    str::to_owned,
                 ))
                 .danger()
                 .disabled(unavailable)

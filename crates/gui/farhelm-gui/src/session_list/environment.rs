@@ -67,10 +67,9 @@
 //! commands no longer held) until the push; the old app waited on the request itself and had no such gap. The helm's
 //! lifecycle lock still refuses a second Suspend or Resume meanwhile as busy.
 //!
-//! NOTE: Waiting on the launcher's environment work, and not drawn: refusing Suspend and Resume while this window's own
-//! launch targets or is waking the same host (SPEC.md, "Creation"; the old `LAUNCH_ON_THIS_HOST`, "A launch on this host
-//! is in progress; try again once it finishes"), since the launcher exposes no predicate for its pending target yet;
-//! meanwhile the helm's lifecycle lock refuses a collision as busy. The environment Delete is
+//! Suspend, Resume and Stop and suspend wait while this window's own launch targets the same host (SPEC.md,
+//! "Creation"). The launcher can claim the target while an activity read or question is open, so the request checks
+//! again when it sends. The environment Delete is
 //! [`super::environment_delete`]'s, and its bulk form `super::bulk`'s.
 //!
 //! A failed deletion's reason ends "Retry in Hosts finishes the deletion", the old words: the Hosts panel's menu offers
@@ -90,6 +89,7 @@ use super::status::HostLookup;
 use crate::components::{HoverHelp, Tier};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::hosts::identity::phase;
+use crate::launcher::launch::host_lifecycle_refusal;
 use crate::operations::{self, Command, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::session::{self, PerSession};
@@ -362,9 +362,12 @@ pub(super) fn held(key: &str, cx: &App) -> bool {
 }
 
 /// Whether `key`'s environment control is unavailable now: the session's commands are refused ([`menu::refused`]), or
-/// the environment is between states or has something pending.
+/// the environment is between states or has something pending, or a launch targets its host.
 pub(crate) fn unavailable(key: &str, environment: Environment, cx: &App) -> bool {
-    menu::refused(key, cx) || environment.changing() || pending(key, environment, cx).is_some()
+    menu::refused(key, cx)
+        || environment.changing()
+        || pending(key, environment, cx).is_some()
+        || host_lifecycle_refusal(environment.host.id, cx).is_some()
 }
 
 // ---- Asking and sending ---------------------------------------------------------------------------------------------
@@ -463,6 +466,9 @@ pub(crate) fn begin_shown(
             // Nothing else may redraw if the question does not open (the user moved on), and the control must not
             // stay drawn as reading.
             window.refresh();
+            if host_lifecycle_refusal(asked.host, cx).is_some() {
+                return;
+            }
             if asks {
                 ask(asked, ui, window, cx);
             } else {
@@ -525,13 +531,15 @@ fn activity_asks(listing: Option<&SessionList>, host: i64, cx: &App) -> bool {
 /// saying what it keeps running (the old `Controls`' question).
 pub(crate) fn question(asked: &Asked, ui: ProviderUi) -> Question<Asked> {
     let stop = asked.verb == Verb::StopAndSuspend;
+    let host = asked.host;
     Question::new(
         ui.suspend_title(stop),
         Answer::new(
             if stop { "Stop and suspend" } else { "Suspend" },
             HoverHelp::tooltip(ui.suspend_action(asked.stopped_program)),
             Tier::Danger,
-        ),
+        )
+        .disabled_while(move |cx| host_lifecycle_refusal(host, cx)),
         asked.clone(),
     )
     .line(format!(
@@ -564,7 +572,7 @@ pub(super) fn stop_note(ui: ProviderUi, program: &str) -> String {
 
 /// The Stop question's extra answer for an environment session: "Stop and suspend", with the old answer's help
 /// (`super::stop::question` sends [`stop_and_suspend`] from it).
-pub(super) fn stop_and_suspend_answer(program: &str) -> Answer {
+pub(super) fn stop_and_suspend_answer(program: &str, host: i64) -> Answer {
     Answer::new(
         "Stop and suspend",
         HoverHelp::tooltip(format!(
@@ -572,6 +580,7 @@ pub(super) fn stop_and_suspend_answer(program: &str) -> Answer {
         )),
         Tier::Danger,
     )
+    .disabled_while(move |cx| host_lifecycle_refusal(host, cx))
 }
 
 /// Send `key`'s Stop and suspend of its environment on host `host` with `guard`, the preconditions its Stop question
@@ -649,6 +658,9 @@ pub(crate) fn resume_command(host: i64) -> Result<Command, PathError> {
 
 /// Send `asked` through the operation store on its session's key. A session with a request in flight sends nothing.
 fn send(asked: Asked, cx: &mut App) {
+    if host_lifecycle_refusal(asked.host, cx).is_some() {
+        return;
+    }
     let Some(operations) = session::current_operations(cx) else {
         return;
     };
