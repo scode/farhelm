@@ -1254,8 +1254,8 @@ test-automation bridge that lets an agent drive the running app.
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
 frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur`,
-`wayland-drop-position`, `hitbox-occlusion` and `mixed-font-ellipsis` layers, and one addition to the bridge layer (an
-element's selected state).
+`wayland-drop-position`, `hitbox-occlusion`, `mixed-font-ellipsis` and `zoomed-open` layers, and one addition to the
+bridge layer (an element's selected state).
 
 ### What is here
 
@@ -1324,8 +1324,9 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `modified-notices`      | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
 | `hitbox-occlusion`      | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
 | `mixed-font-ellipsis`   | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line     |
+| `zoomed-open`           | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear           |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,652 added and 226 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,678 added and 232 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1402,6 +1403,9 @@ included.
   line with its actual fonts before painting it. This is also the layout used by the Recent setup destination in
   launcher search. The Farhelm template dialog test checks that the ellipsis falls within the visible summary and the
   accessible label retains the full text.
+- **zoomed-open.** A Mac window restored maximized used to appear at its ordinary size before AppKit zoomed it. GPUI now
+  gives AppKit the ordinary frame and zooms the window before showing it. AppKit saves that frame as the destination for
+  the next Zoom, which puts the window back where it was before it was maximized.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1452,6 +1456,8 @@ git apply --directory=vendor/gpui-pre-macos patches/gpui/modified-notices/gpui-p
 git apply --directory=vendor/gpui-agent patches/gpui/modified-notices/gpui-agent.patch
 git apply --directory=vendor/gpui-pre patches/gpui/hitbox-occlusion/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre patches/gpui/mixed-font-ellipsis/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/zoomed-open/gpui-pre-0.3.12.patch
+git apply --directory=vendor/gpui-pre-macos patches/gpui/zoomed-open/gpui-pre-macos-0.3.12.patch
 ```
 
 - Remove `vendor/gpui-agent/docs/`, `vendor/gpui-agent/scripts/`, `vendor/gpui-agent/patches/` and

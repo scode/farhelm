@@ -7380,17 +7380,18 @@ position counts only while the window is on it: a window last moved to another d
 the old app, which saved global positions, put it back on that display. On Wayland, which reports no global window
 positions, a reported position never replaces the remembered one, and restore keeps a usable saved size and the
 maximized state while the compositor chooses placement. Fullscreen observations never replace the last ordinary frame or
-maximize state, and a window restored maximized is not followed until it reports itself maximized. On macOS a window
-within two points of its display's visible area counts as maximized, because GPUI's own check wants an exact match and a
-window GPUI zoomed as it opened comes out a point short; the cost is that a window sized by hand to fill the display is
-remembered as zoomed. The window side (`crates/gui/farhelm-gui/src/desktop.rs`) only forwards what the window reports;
-the rules live in the desktop crate (`window_state.rs`'s `FrameKeeper`). Only the report the window settles on counts
-(macOS reports each step of a zoom's animation as an ordinary frame, which must not become the remembered one); it is
-written through a private sibling file and rename once the window has stayed unchanged for a second (so a drag is
-written once, when it ends), and the quit handler writes whatever is still pending: GPUI gives the quit handlers 200 ms
-in all, which rules out the old app's single write on close. A crash within about a second of a move or resize can lose
-that last change. The rename is atomic for readers but parent-directory durability across a machine crash is best
-effort. Failures warn without preventing startup.
+maximize state, and a window restored maximized is not followed until it reports itself maximized. On macOS, GPUI
+positions the hidden window at its ordinary frame and calls AppKit's Zoom before showing it. That gives AppKit the frame
+to restore on the next Zoom. A window within two points of its display's visible area counts as maximized because GPUI
+checks for an exact match and a previous startup zoom came out a point short. A window sized by hand to fill the display
+can therefore be remembered as zoomed. The window side (`crates/gui/farhelm-gui/src/desktop.rs`) only forwards what the
+window reports; the rules live in the desktop crate (`window_state.rs`'s `FrameKeeper`). Only the report the window
+settles on counts (macOS reports each step of a zoom's animation as an ordinary frame, which must not become the
+remembered one); it is written through a private sibling file and rename once the window has stayed unchanged for a
+second (so a drag is written once, when it ends), and the quit handler writes whatever is still pending: GPUI gives the
+quit handlers 200 ms in all, which rules out the old app's single write on close. A crash within about a second of a
+move or resize can lose that last change. The rename is atomic for readers but parent-directory durability across a
+machine crash is best effort. Failures warn without preventing startup.
 
 Every pre-window desktop refusal prints one plain `farhelm-desktop: ...` stderr line and exits 1, and on macOS also
 sends it to Console and a critical native alert so a Finder or Spotlight launch has a visible diagnostic.

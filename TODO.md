@@ -41,13 +41,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and Settings and a session's own Suspend and Resume. The old app's 13 launch-after-wake cases (tensorlake-lifecycle)
   are the spec. Design the wake with an opus consult. Plan: `plans/queue/launch-wakes-suspended-host.md`.
 
-- **A maximized Mac window grows into place on launch.** When the desktop app was maximized (zoomed) at quit, the next
-  launch restores that, but the window first appears at its ordinary size and then visibly animates to full size for
-  about a second. GPUI opens a maximized window at its ordinary frame and then asks macOS to zoom it, and that zoom
-  animates. Low priority. A fix probably means opening the window at the zoomed frame directly, or zooming without the
-  animation, in the vendored GPUI macOS code (with its patch file), while keeping the ordinary frame that Restore
-  returns to. Plan: `plans/queue/maximized-window-no-zoom-animation.md`.
-
 - **One slow host holds up every other action for up to 20 seconds.** The desktop app sends its commands to the helm one
   at a time, each starting when the previous one has answered. Saving a replacement credential (delivered to every host,
   at most 20 seconds per host) and deleting from Trash (at most 20 seconds per host) can therefore keep every later

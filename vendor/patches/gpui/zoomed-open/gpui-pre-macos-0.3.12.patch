@@ -1,0 +1,45 @@
+diff --git a/src/window.rs b/src/window.rs
+index 85b0739..feb83b0 100644
+--- a/src/window.rs
++++ b/src/window.rs
+@@ -993,6 +993,7 @@ impl MacWindow {
+         handle: AnyWindowHandle,
+         WindowParams {
+             bounds,
++            open_zoomed,
+             titlebar,
+             kind,
+             is_movable,
+@@ -1243,6 +1244,15 @@ impl MacWindow {
+             // content view above, and window creation runs on the main thread.
+             let tracking_view = &*native_view.cast::<NSView>();
+ 
++            if open_zoomed {
++                // AppKit remembers the frame it zooms from. Set the ordinary origin
++                // before zooming so Restore returns to that frame, and do both
++                // before a sheet, tab, or window can appear. Zoom can call the
++                // resize delegate synchronously, so leave window state unlocked.
++                let _: () = msg_send![native_window, setFrameTopLeftPoint: window_rect.origin];
++                let _: () = msg_send![native_window, zoom: ptr::null_mut::<AnyObject>()];
++            }
++
+             match kind {
+                 WindowKind::Normal | WindowKind::Floating => {
+                     if kind == WindowKind::Floating {
+@@ -1330,11 +1340,11 @@ impl MacWindow {
+                 let _: () = msg_send![native_window, orderFront: ptr::null_mut::<AnyObject>()];
+             }
+ 
+-            // Set the initial position of the window to the specified origin.
+-            // Although we already specified the position using `initWithContentRect_styleMask_backing_defer_screen_`,
+-            // the window position might be incorrect if the main screen (the screen that contains the window that has focus)
+-            //  is different from the primary screen.
+-            let _: () = msg_send![native_window, setFrameTopLeftPoint: window_rect.origin];
++            if !open_zoomed {
++                // AppKit can choose the wrong origin when the main screen differs
++                // from the primary screen, even with a content rectangle supplied.
++                let _: () = msg_send![native_window, setFrameTopLeftPoint: window_rect.origin];
++            }
+             {
+                 let mut window_state = window.0.lock();
+                 window_state.move_traffic_light();

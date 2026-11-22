@@ -396,10 +396,9 @@ const ZOOM_SLACK: Pixels = px(2.);
 
 /// Whether the window is maximized (zoomed, on macOS).
 ///
-/// On macOS GPUI answers this by comparing the window's size with the display's visible area exactly, and a window GPUI
-/// itself zoomed as it opened (a launch restoring a maximized window) comes out a point short of that area, so it read
-/// as not maximized, and the next save forgot that it was (seen on the test Mac, 2026-11-14: 1024 by 681 points on a
-/// 1024 by 682 visible area). Within [`ZOOM_SLACK`] of the visible area counts as zoomed here. The cost: a window the
+/// On macOS GPUI compares the window's size with the display's visible area exactly. A launch that restored a zoomed
+/// window came out a point short in a native check on 2026-11-14 (1024 by 681 points on a 1024 by 682 visible area).
+/// The next save forgot it was maximized. Within [`ZOOM_SLACK`] of the visible area counts as zoomed here. A window the
 /// user sizes by hand to fill the display within a point or two is remembered as zoomed, which reopens it the same
 /// size. Elsewhere GPUI's own answer stands.
 fn maximized(window: &Window, cx: &App) -> bool {
