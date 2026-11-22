@@ -2,5 +2,4 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`podman-place-host-identity`](reports/podman-place-host-identity.report.md) landed 2026-11-22 in #4632, #4635, #4636: record the machine and account each new container runs on, refuse twin container hosts for one machine and account, and never treat a container as deleted on a host that now reaches somewhere else
 - [`tailscale-ssh-hosts`](reports/tailscale-ssh-hosts.report.md) landed 2026-11-22 in #4637, #4638, #4639, #4640: add an explicit Tailscale host option on SSH hosts (Add host checkbox, Host settings toggle, `--ensure-hosts`) that verifies host keys via a private Farhelm-owned `known_hosts` file from `tailscale status --json` and uses `tailscale nc` in userspace networking
