@@ -1787,10 +1787,9 @@ impl Fleet<'_> {
     }
 }
 
-/// The UI channel pushes this window nothing while its own command runs, so during its Suspend of the open session's
-/// host the stream ends and the row still reads fresh: the reconnect card would show for the whole Suspend (seconds for
-/// a container, up to 20 for a sandbox) before "Session suspended" did. Holding it was decided by the
-/// sidebar-and-session-view area on 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold. Specified: with
+/// During Suspend the terminal stream can end before the pushed session row goes stale. The window's own request
+/// holds back the reconnect card during that gap. The sidebar-and-session-view area decided on the hold on
+/// 2026-11-16, extending the orchestrator's 2026-11-15 Restart hold. Specified: with
 /// a, on host 2, live, and its Suspend in flight on a's key (what the header and row send), a's `other` detach puts the
 /// stream into a reconnect (the premise) and no card is drawn; once the helm refuses it and the stream's next attempt
 /// fails, the card is drawn; with the stream still reconnecting (the premise before each check), a Stop and suspend on

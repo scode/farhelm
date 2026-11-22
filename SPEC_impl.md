@@ -367,9 +367,10 @@ Serial admission only works if every handler replies promptly, so every handler 
   launch) is an ordinary reply, with nothing registered.
 - Routes are converted as the work that first ports them needs them, not in a sweep.
 
-Every change a command causes is pushed before that command's reply. When the GUI sees "done", its store already shows
-the result, so the GUI needs no optimistic updates (the sidebar's width while the user moves it is the one exception,
-under "The store, and how views redraw").
+Fleet feed bumps can push changes while a command is running. When the command completes, the channel checks the
+collections again, sends any remaining changes, and immediately sends the reply. When the GUI sees "done", its store
+already shows the result, so the GUI needs no optimistic updates (the sidebar's width while the user moves it is the one
+exception, under "The store, and how views redraw").
 
 ### What is pushed, and how changes are found
 

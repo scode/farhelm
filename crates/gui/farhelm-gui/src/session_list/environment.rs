@@ -59,8 +59,8 @@
 //!   the row and the header as a lifecycle refusal does (`super::outcome`, with the action name before the helm's
 //!   words). The changing phase is `HostStateView::TensorlakeChanging` for every provider, despite its name: a
 //!   container's pause and unpause go through the helm's shared `environment::lifecycle::perform`, just as a sandbox's
-//!   do. Other windows are pushed it while the change runs; the window that asked gets it only with its command's
-//!   answer (a 504 included), since the UI channel pushes a window nothing while its own command runs.
+//!   do. The phase can arrive before the reply and hold other sessions even while the initiating session's request is
+//!   still out.
 //!
 //! NOTE: A container host first checks its container over SSH, before the helm pushes the changing phase. When that
 //! check alone outlasts the 20-second bound, the 504 arrives before any changing phase, and the session looks idle (its
