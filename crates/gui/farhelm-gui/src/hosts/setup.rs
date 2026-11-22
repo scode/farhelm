@@ -159,6 +159,8 @@ pub(crate) enum Target {
         /// The alias as typed in Add host (blank for none); a refusal puts it back there. The probe already sent it as
         /// the new entry's alias, and the helm's kept plan carries it, so the submission does not send it again.
         alias: String,
+        /// Preserve the exact mode if Add host reopens after a refusal.
+        tailscale: bool,
         /// The control that opened Add host, which gets focus back.
         opener: FocusHandle,
         /// The add began as an agent's request: a refusal reopens Add host still marked so ([`add::Seed::from_agent`]),
@@ -589,6 +591,7 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
         Target::New {
             destination,
             alias,
+            tailscale,
             opener,
             from_agent,
         } => window
@@ -596,6 +599,7 @@ fn reopen_new(offer: &Offer, problem: HostSentence, window: AnyWindowHandle, cx:
                 let seed = add::Seed {
                     destination: destination.clone(),
                     alias: alias.clone(),
+                    tailscale: *tailscale,
                     problem,
                     from_agent: *from_agent,
                 };

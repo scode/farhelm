@@ -553,7 +553,7 @@ pub(crate) fn start_host_change(cx: &mut VisualTestContext, change: HostChange) 
     let (key, command, path) = match change {
         HostChange::Probe => (
             OpKey::new_host_add(),
-            crate::hosts::add::probe_command("builder@example.test", "", false).unwrap(),
+            crate::hosts::add::probe_command("builder@example.test", "", false, false).unwrap(),
             "/api/hosts/probe",
         ),
         HostChange::Setup => (

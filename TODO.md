@@ -244,12 +244,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
-- **Use the Tailscale SSH wrapper for Tailscale hosts.** If the user is using Tailscale, use the `tailscale ssh` wrapper
-  instead of relying on the user manually getting known hosts initialized, so Farhelm can immediately use any Tailscale
-  host it has ssh access to without fighting ssh known hosts. Separate from, and orthogonal to, the in-band status entry
-  above. Not investigated yet, including how the wrapper fits Farhelm's non-interactive, connection-sharing ssh use.
-  Plan: `plans/queue/tailscale-ssh-hosts.md`.
-
 ### Plan follow-up
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane

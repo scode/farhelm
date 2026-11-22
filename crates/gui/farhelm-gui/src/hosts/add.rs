@@ -1,5 +1,6 @@
 //! The Add host dialog: an SSH destination and an optional alias, checked by the helm's probe before anything is
-//! added, or a Tensorlake sandbox created from a recipe ([`tensorlake`]).
+//! added, or a Tensorlake sandbox created from a recipe ([`tensorlake`]). The
+//! Tailscale checkbox is part of the SSH draft and follows it through sign-in.
 //!
 //! SPEC.md, "Topology" (the add host dialog, the host registry and its duplicate refusal). Ported from the old app's
 //! `hosts.rs` (`AddHostForm`, `validate_alias_draft`) and `api.rs` (`probe_ssh_host`), with its look from the
@@ -98,7 +99,8 @@ use super::{setup, setup_sign_in};
 use crate::approvals::answers;
 use crate::approvals::host_add::{self, AgentRequest, Answered};
 use crate::components::{
-    Button, DialogFrame, HoverHelp, Role, TabOption, TabStrip, TextInput, TextInputState, Tier,
+    Button, Checkbox, DialogFrame, HoverHelp, Role, TabOption, TabStrip, TextInput, TextInputState,
+    Tier,
 };
 use crate::drafts::DraftInput;
 use crate::focus::{self, Mark, ReturnTo};
@@ -193,6 +195,7 @@ pub fn open(
 pub(crate) struct Seed {
     pub(crate) destination: String,
     pub(crate) alias: String,
+    pub(crate) tailscale: bool,
     pub(crate) problem: HostSentence,
     /// The add began as an agent's request, which the user accepted: the reopened dialog still shows what Add
     /// approves, and still asks the setup confirmation whatever the setup preference says (SPEC.md: the confirmation
@@ -419,6 +422,7 @@ pub(crate) fn open_new_recipe_for_opened(window: &mut Window, cx: &mut App) {
 pub(crate) fn probe_command(
     destination: &str,
     alias: &str,
+    tailscale: bool,
     from_agent: bool,
 ) -> Result<Command, PathError> {
     let alias = (!alias.trim().is_empty()).then_some(alias);
@@ -427,12 +431,16 @@ pub(crate) fn probe_command(
     } else {
         json!({ "alias": alias })
     };
+    let mut target = json!({ "kind": "ssh", "destination": destination });
+    if tailscale {
+        target["tailscale"] = json!(true);
+    }
     Ok(Command::new(
         Work::Probe,
         Method::Post,
         ApiPath::api(&["hosts", "probe"])?,
         Some(json!({
-            "target": { "kind": "ssh", "destination": destination },
+            "target": target,
             "new_entry": entry,
         })),
         "POST /api/hosts/probe",
@@ -653,7 +661,7 @@ pub(crate) fn ask_takeover(
     );
 }
 
-/// The open dialog: its two fields, what it last had to say, the key its probe runs under, and its layer.
+/// The open SSH or sandbox draft, its layer, and the operation key for its check.
 pub(crate) struct AddHostDialog {
     /// The operation store's key for this opening's probe, and later its setup: fresh per opening, so a probe still out
     /// from an earlier opening never makes this one busy.
@@ -668,6 +676,9 @@ pub(crate) struct AddHostDialog {
     destination: DraftInput,
     /// The optional alias, as typed; blank means none.
     alias: DraftInput,
+    /// The SSH route requested by this draft. Keep it attached to sign-in
+    /// and to any confirmation that reopens the draft.
+    tailscale: bool,
     /// The error line: why Add refused or what the probe answered. Cleared when a probe starts.
     problem: Option<HostSentence>,
     /// Set right after the layer opens; taken when the dialog closes itself, so it closes once.
@@ -701,15 +712,16 @@ impl AddHostDialog {
     /// a new host's fields.
     fn new(opener: FocusHandle, start: Start, window: &mut Window, cx: &mut Context<Self>) -> Self {
         let mut sandbox = None;
-        let (destination, alias, problem, from_agent, agent) = match start {
-            Start::Empty => (String::new(), String::new(), None, false, None),
+        let (destination, alias, tailscale, problem, from_agent, agent) = match start {
+            Start::Empty => (String::new(), String::new(), false, None, false, None),
             Start::Sandbox(seed) => {
                 sandbox = Some(seed);
-                (String::new(), String::new(), None, false, None)
+                (String::new(), String::new(), false, None, false, None)
             }
             Start::Seed(seed) => (
                 seed.destination,
                 seed.alias,
+                seed.tailscale,
                 Some(seed.problem),
                 seed.from_agent,
                 None,
@@ -717,6 +729,7 @@ impl AddHostDialog {
             Start::Agent(request) => (
                 request.destination.clone(),
                 request.alias.clone(),
+                false,
                 None,
                 true,
                 Some(request),
@@ -772,6 +785,7 @@ impl AddHostDialog {
             probe_mark: Mark::take(cx),
             destination,
             alias,
+            tailscale,
             problem,
             layer: None,
             agent,
@@ -1003,7 +1017,7 @@ impl AddHostDialog {
         handle: AnyWindowHandle,
         cx: &mut Context<Self>,
     ) {
-        let command = match probe_command(&destination, &alias, self.from_agent) {
+        let command = match probe_command(&destination, &alias, self.tailscale, self.from_agent) {
             Ok(command) => command,
             Err(error) => {
                 tracing::debug!(?error, "host probe not built");
@@ -1261,6 +1275,7 @@ impl AddHostDialog {
                     target: setup::Target::New {
                         destination: self.destination.draft().value().clone(),
                         alias: self.alias.draft().value().clone(),
+                        tailscale: self.tailscale,
                         opener: self.opener.clone(),
                         from_agent: self.from_agent,
                     },
@@ -1333,7 +1348,7 @@ impl AddHostDialog {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let Ok(command) = probe_command(destination, "", false) else {
+        let Ok(command) = probe_command(destination, "", self.tailscale, false) else {
             return;
         };
         self.set_read_only(true, cx);
@@ -1465,7 +1480,7 @@ impl Render for AddHostDialog {
         });
         let shown: AnyElement = match &self.body {
             Body::Tensorlake(form) => form.clone().into_any_element(),
-            Body::Ssh => self.ssh_fields(palette),
+            Body::Ssh => self.ssh_fields(palette, busy, cx),
         };
         let body = div()
             .flex()
@@ -1544,8 +1559,11 @@ impl Render for AddHostDialog {
 }
 
 impl AddHostDialog {
-    /// SSH destination and alias, with the current setup question below the destination.
-    fn ssh_fields(&self, palette: &theme::Palette) -> AnyElement {
+    /// The draft and its current setup question. While checking or signing in,
+    /// the controls show the same route as the retained probe.
+    fn ssh_fields(&self, palette: &theme::Palette, busy: bool, cx: &Context<Self>) -> AnyElement {
+        const TAILSCALE_HELP: &str = "Verify the host's SSH key through Tailscale instead of ~/.ssh/known_hosts, and resolve Tailscale node names.";
+        let dialog = cx.weak_entity();
         div()
             .flex()
             .flex_col()
@@ -1556,17 +1574,32 @@ impl AddHostDialog {
                     "add-host-destination",
                     self.destination.input(),
                     "SSH destination",
-                    HoverHelp::tooltip("SSH destination: user@host, or a Host name from your ssh config"),
+                    HoverHelp::tooltip("user@host, a Tailscale node name, or a Host name from your ssh config"),
                 )
                 .monospace()
                 .height(px(FIELD_HEIGHT)),
                 palette,
             ))
             .child(help(
-                "user@host, or a Host name from your ssh config. Farhelm checks that it can reach the destination \
+                "user@host, a Tailscale node name, or a Host name from your ssh config. Farhelm checks that it can reach the destination \
                  before adding it.",
                 palette,
             ))
+            .child(div().flex().flex_col().gap(px(LABEL_GAP))
+                .child(Checkbox::new(
+                    "add-host-tailscale", "Tailscale host", HoverHelp::tooltip(TAILSCALE_HELP), Role::CheckBox,
+                )
+                .checked(self.tailscale)
+                .disabled(busy)
+                .on_toggle(move |on, _, cx| {
+                    let _ = dialog.update(cx, |dialog, cx| {
+                        if !dialog.busy(cx) {
+                            dialog.tailscale = on;
+                            cx.notify();
+                        }
+                    });
+                }))
+                .child(help(TAILSCALE_HELP, palette)))
             .children(self.sign_in.as_ref().and_then(|sign_in| sign_in.form.as_ref()).map(|(_, form)| {
                 div().flex().flex_col().gap(px(LABEL_GAP))
                     .child("Sign in for checking and setting up")
