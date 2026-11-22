@@ -778,7 +778,7 @@
     },
     {
       "id": "app-launcher-managed-checkout",
-      "title": "New with Managed checkout chosen on the Where row, on a host with no checkout folder yet: the inline field for the default checkout folder, the repository field holding a typed acme/bar with its suggestions list offering the typed pair, and the read-only folder field waiting for a repository",
+      "title": "New with Managed checkout chosen on the Where row, on a host with no checkout folder yet: the inline field for the default checkout folder, the repository field holding a typed acme/bar with its suggestions list offering the typed pair, and the Folder line waiting for a repository",
       "reference": null,
       "mockup": false,
       "start": [
@@ -826,7 +826,7 @@
     },
     {
       "id": "app-launcher-checkout-preview",
-      "title": "New on a managed checkout after the inline setup saved a checkout folder: the repository acme/bar picked, the preview naming its exact folder, and the read-only folder field showing it, with the name field offering the bar-1 the checkout will get",
+      "title": "New on a managed checkout after the inline setup saved a checkout folder: the repository acme/bar picked, the preview naming its exact folder, and the Folder line showing it, with the name field offering the bar-1 the checkout will get",
       "reference": null,
       "mockup": false,
       "start": [
