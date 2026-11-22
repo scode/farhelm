@@ -4486,7 +4486,7 @@ async fn launch_environment_for_agent(
         plan.title.clone(),
         plan.repo.clone(),
     )?;
-    request.validate_sandbox_launch(state).await?;
+    request.validate_sandbox_launch()?;
     let place_name = match place.host() {
         Some(host) => crate::hosts::host_views(state)
             .await?

@@ -343,7 +343,7 @@ impl ProvisioningService {
         RunAccepted,
         tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
     )> {
-        request.validate_sandbox_launch(&state).await?;
+        request.validate_sandbox_launch()?;
         let request = request.with_environment_target(farhelm_proto::LaunchTarget::Environment {
             recipe: recipe.clone(),
             place,

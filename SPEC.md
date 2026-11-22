@@ -1572,8 +1572,9 @@ software snapshot build; Add host keeps its existing build-if-missing behavior.
 
 The launch action's accessible name includes **new &lt;recipe&gt; sandbox**. A note by the destination explains that the
 sandbox is for this session, bills while running, Suspend stops CPU and memory billing, and deleting its last session
-removes the sandbox and its files. Managed checkout works normally, including the recipe's GitHub token for private
-clones. Folder is fixed to the new sandbox's home, without Browse or recent folders.
+removes the sandbox and its files. Managed checkout uses the default checkout folder when set and the sandbox's own home
+otherwise, including when the recipe's GitHub token is used for a private clone. Folder is fixed to the new sandbox's
+home, without Browse or recent folders.
 
 Launching asks **Create a sandbox for this session?**, naming recipe, CPU, memory and disk, linking Tensorlake pricing,
 and explaining suspension, the idle timeout and irreversible file deletion. Cancel creates nothing; **Create and
@@ -1730,19 +1731,21 @@ checkout's changes. If Replace removes the checkout's last session, the checkout
 session's own sandbox or container, this is trash inside the environment, which is discarded when the environment is
 deleted. `farhelm agent clone` keeps its existing-directory behavior.
 
-The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. There is no default
-root. The default checkout folder and all-hosts post-clone command can be set or cleared under **Checkouts** in Settings
-or with the command line. Each host's settings also offers its own checkout folder; per-host post-clone overrides remain
-command-line only. The default is resolved at launch, never copied when a host is added. Settings saves each field
-explicitly, shows a refused value's reason, and clears it when an all-whitespace field is saved. The command field
-preserves all other spacing and newlines. An explicitly disabled command displays as an empty field, but opening
-Settings never rewrites any stored value. Configuration replies the GUI reads may contain the default folder, a host's
-own folder and the all-hosts command, never per-host command overrides. A missing root and its parents are created on
-the target host at the first checkout, using the ordinary umask; configuration, discovery and preview create nothing.
-Existing symlink ancestors resolve to their canonical directory, while unresolved `..` in a missing suffix and dangling
-symlinks are refused. A root whose resolution changed since preview is still refused. `~` expands there, using the
-supervisor's captured home. Clearing an override restores inheritance; an empty hook override disables the inherited
-hook. Configuration changes affect new attempts, not an already accepted attempt or its retries.
+The helm owns a working-copy root and optional post-clone command, globally with per-host overrides. A session's own
+sandbox or container uses its configured checkout folder, with its home as the fallback. Managed checkout in these
+environments requires no checkout-folder setup. Installed hosts need a configured folder. The default checkout folder
+and all-hosts post-clone command can be set or cleared under **Checkouts** in Settings or with the command line. Each
+host's settings also offers its own checkout folder; per-host post-clone overrides remain command-line only. The default
+is resolved at launch, never copied when a host is added. Settings saves each field explicitly, shows a refused value's
+reason, and clears it when an all-whitespace field is saved. The command field preserves all other spacing and newlines.
+An explicitly disabled command displays as an empty field, but opening Settings never rewrites any stored value.
+Configuration replies the GUI reads may contain the default folder, a host's own folder and the all-hosts command, never
+per-host command overrides. A missing root and its parents are created on the target host at the first checkout, using
+the ordinary umask; configuration, discovery and preview create nothing. Existing symlink ancestors resolve to their
+canonical directory, while unresolved `..` in a missing suffix and dangling symlinks are refused. A root whose
+resolution changed since preview is still refused. `~` expands there, using the supervisor's captured home. Clearing an
+override restores inheritance; an empty hook override disables the inherited hook. Configuration changes affect new
+attempts, not an already accepted attempt or its retries.
 
 Settings offers an off-by-default, all-hosts choice under **Agents → Claude Code** to answer Claude's "trust this
 folder?" for new managed checkouts, including agent-requested checkouts and checkouts initially started with another
@@ -1795,13 +1798,13 @@ independent and reversible beside its switch. Failed settings reads never count 
 hint band: its project-resource approval is not currently recognized as a trust question. Older stored session snapshots
 default the new hint evidence to absent; the legacy Claude hint remains Claude-only.
 
-When the selected host has no checkout folder in effect, the launcher's managed-checkout destination offers the same
-explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed later in
-Settings → Checkouts or overridden in each host's settings. A refusal discards the edit and reloads the stored folder. A
-successful save or a reload that finds a different folder refreshes the repository suggestions and checkout preview
-without reopening the launcher. The refusal stays visible even if that refresh removes the setup field. Selecting a
-repository before setup does not hide the field. A host with its own folder keeps that folder and is never offered this
-setup. The template editor keeps its ordinary destination control.
+When the selected installed host has no checkout folder in effect, the launcher's managed-checkout destination offers
+the same explicit-save field, explaining that it sets the default for hosts without their own folder and can be changed
+later in Settings → Checkouts or overridden in each host's settings. A refusal discards the edit and reloads the stored
+folder. A successful save or a reload that finds a different folder refreshes the repository suggestions and checkout
+preview without reopening the launcher. The refusal stays visible even if that refresh removes the setup field.
+Selecting a repository before setup does not hide the field. A host with its own folder keeps that folder and is never
+offered this setup. The template editor keeps its ordinary destination control.
 
 Farhelm is not designed for a working-copy root that other local accounts can write to, such as a group-shared folder or
 a sticky, `/tmp`-style directory. Keeping the root, and so its checkouts and the archive folder inside it, in a location
@@ -5250,8 +5253,9 @@ either removing agent parent/child relationships or making them useful; neither 
 
 Container sessions are experimental disposable environments built from the shared recipe catalog. Each launch creates a
 rootless Podman container on a registered local or ordinary SSH Linux host. The container boots systemd and runs its own
-Farhelm supervisor under a login user's systemd user manager. The managed checkout is cloned inside it. Folder
-destinations use its home, without Browse or recent folders. Agent and command launches use the ordinary launch rules.
+Farhelm supervisor under a login user's systemd user manager. The managed checkout is cloned inside it, using the
+default checkout folder when set and the container's home otherwise. Folder destinations use its home, without Browse or
+recent folders. Agent and command launches use the ordinary launch rules.
 
 A usable container host runs Podman 4.9.3 or later, rootless, with cgroup v2, the systemd cgroup manager and a working
 `systemd-run --user`. A background probe records Linux, architecture, version and each requirement, with a timestamp.

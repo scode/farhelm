@@ -221,6 +221,26 @@ struct GithubRepositoriesBody {
     needs_checkout_root: bool,
 }
 
+/// Resolve the same checkout root for discovery, preview and create. A
+/// session-owned host can use its own home when the stored root is unset.
+/// Keep that fallback here so Settings and the CLI still read stored values.
+async fn checkout_config_for(
+    state: &AppState,
+    host: store::HostId,
+) -> anyhow::Result<crate::checkout_config::ResolvedCheckoutConfig> {
+    let mut config = state.store.resolve_checkout_config(Some(host)).await?;
+    if config.root.is_none()
+        && state
+            .manager
+            .status(host)
+            .ok_or_else(|| no_such_host(host))?
+            .is_session_owned
+    {
+        config.root = Some("~".into());
+    }
+    Ok(config)
+}
+
 /// The status a failed repository search shows, chosen by the helm.
 ///
 /// The supervisor's own error text never reaches the client here (it may
@@ -315,7 +335,7 @@ pub(crate) async fn github_repositories(
             .into(),
         );
     };
-    let config = match state.store.resolve_checkout_config(Some(claim.host)).await {
+    let config = match checkout_config_for(&state, claim.host).await {
         Ok(config) => config,
         Err(error) => return http_error(error),
     };
@@ -441,10 +461,7 @@ pub(crate) async fn preview_github_checkout(
     };
     // One database snapshot: root + revision are resolved together so the
     // binding the create later presents is internally consistent.
-    let config = state
-        .store
-        .resolve_checkout_config(Some(claim.host))
-        .await?;
+    let config = checkout_config_for(state, claim.host).await?;
     let Some(root) = config.root.clone() else {
         return Err(anyhow::Error::new(SupervisorError::helm(
             ErrorKind::InvalidRequest,
@@ -1353,7 +1370,7 @@ impl CreateReq {
     /// Refuse an invalid recipe launch before any sandbox can start billing.
     /// Placement belongs to the recipe route, and Folder means the new home;
     /// accepting an installed host or stale folder here would disguise reuse.
-    pub(crate) async fn validate_sandbox_launch(&self, state: &AppState) -> anyhow::Result<()> {
+    pub(crate) fn validate_sandbox_launch(&self) -> anyhow::Result<()> {
         if self
             .launch
             .as_ref()
@@ -1386,17 +1403,6 @@ impl CreateReq {
             {
                 return Err(invalid_request(
                     "managed checkout and session titles must agree".into(),
-                ));
-            }
-            if state
-                .store
-                .resolve_checkout_config(None)
-                .await?
-                .root
-                .is_none()
-            {
-                return Err(invalid_request(
-                    "set a default checkout folder in Settings → Checkouts before launching a repository in a new sandbox".into(),
                 ));
             }
         } else {
@@ -2607,10 +2613,7 @@ async fn create_fresh_session_resolved(
         if req.title.is_none() {
             req.title = checkout.title.clone();
         }
-        let config = state
-            .store
-            .resolve_checkout_config(Some(claim.host))
-            .await?;
+        let config = checkout_config_for(state, claim.host).await?;
         let github_checkout = github_checkout_resolution(&req, client_identity.clone(), &config)
             .expect("fresh request requires resolution")?;
         let mode = match resolved_mode {
