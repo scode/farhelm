@@ -27,8 +27,8 @@ use super::host_rail::tests::{node, texts_within};
 use super::lifecycle_tests::node_bounds;
 use super::pins_tests::away;
 use super::tests::{
-    Fixture, change, launcher_drawn, listing_meta, open_main, painted, row_order, selected, sent,
-    session,
+    Fixture, change, choose_delete, launcher_drawn, listing_meta, open_main, painted, row_order,
+    selected, sent, session,
 };
 use crate::actions::{
     DELETE_SESSION_CHORD as DELETE_CHORD, DELETE_SESSION_SHORTCUT_NAME,
@@ -129,10 +129,7 @@ fn paths(deletes: &[(u64, String)]) -> Vec<&str> {
     deletes.iter().map(|(_, path)| path.as_str()).collect()
 }
 
-/// Whether anything was drawn under `selector` in the last frame.
-pub(crate) fn drawn(cx: &mut VisualTestContext, selector: &'static str) -> bool {
-    cx.debug_bounds(selector).is_some()
-}
+pub(crate) use crate::test_support::drawn;
 
 /// Whether any dialog, menu or question is open.
 pub(crate) fn any_layer(cx: &mut VisualTestContext) -> bool {
@@ -145,13 +142,6 @@ pub(crate) fn label_of(cx: &mut VisualTestContext, id: &str) -> Option<String> {
         .into_iter()
         .find(|node| node.element_id.as_deref() == Some(id))
         .and_then(|node| node.label.map(|label| label.to_string()))
-}
-
-/// Open the menu of the row whose menu button is `button`, and choose Delete, by clicks.
-fn choose_delete(cx: &mut VisualTestContext, button: &'static str) {
-    test_support::click(cx, button);
-    test_support::click(cx, "session-menu-delete");
-    test_support::settle(cx);
 }
 
 pub(super) use crate::test_support::click_at;

@@ -9,15 +9,15 @@
 //! pulse animates while a test reads frames.
 
 use gpui::{
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, Role, ScrollDelta, ScrollEvent,
-    TestAppContext, VisualTestContext, point, px,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Role, TestAppContext, VisualTestContext,
+    point, px,
 };
 use serde_json::json;
 
 use super::row::ROW_ID_PREFIX;
 use super::selection;
 use super::tests::{
-    Fixture, change, listing, listing_meta, open_main, preferences, selected, session,
+    Fixture, change, listing, listing_meta, open_main, preferences, scroll_list, selected, session,
 };
 use crate::actions::DELETE_SESSION_CHORD;
 use crate::test_support::{self, focused_id, frame};
@@ -52,18 +52,6 @@ fn drawn_rows(cx: &mut VisualTestContext) -> Vec<String> {
         .collect();
     rows.sort_by(|a, b| a.0.total_cmp(&b.0));
     rows.into_iter().map(|(_, key)| key).collect()
-}
-
-/// Scroll the list down by `by` with the pointer over it, as a wheel or trackpad would.
-fn scroll_list(cx: &mut VisualTestContext, by: Pixels) {
-    let at = test_support::center(cx, "session-rows");
-    cx.simulate_mouse_move(at, None, Modifiers::none());
-    cx.simulate_event(ScrollEvent {
-        position: at,
-        delta: ScrollDelta::Pixels(point(px(0.), -by)),
-        ..Default::default()
-    });
-    test_support::settle(cx);
 }
 
 /// The 200-row measurement on the test Mac (2026-11-14) found every window redraw building every row, about 20 ms of

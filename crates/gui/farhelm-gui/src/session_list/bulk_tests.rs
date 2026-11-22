@@ -32,7 +32,9 @@ use super::pins_tests::away;
 use super::retired_tests::retired;
 use super::row_tests::texts_within;
 use super::status::{self, Live};
-use super::tests::{Fixture, change, listing_meta, painted, preferences_state, selected, session};
+use super::tests::{
+    Fixture, change, listing_meta, painted_frame as texts, preferences_state, selected, session,
+};
 use crate::components::Role;
 use crate::environment_ui::ProviderUi;
 use crate::focus;
@@ -97,11 +99,6 @@ fn answer(fake: &mut FakeHelm, others: &[FakeCommand]) {
 fn done(fake: &mut FakeHelm, command: &FakeCommand) {
     let body = (command.method == Method::Post).then(|| json!({}));
     fake.reply(command.id, 200, body);
-}
-
-/// The text a frame shows, every element's own.
-fn texts(cx: &mut VisualTestContext) -> Vec<String> {
-    painted(&frame(cx))
 }
 
 /// The keys of a to e whose row the bulk question draws, in that order.

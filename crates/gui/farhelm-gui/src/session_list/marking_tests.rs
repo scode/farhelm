@@ -31,7 +31,8 @@ use super::pins_tests::away;
 use super::seen::Toggle;
 use super::selection::Listed;
 use super::tests::{
-    Fixture, TEST_NOW, change, launcher_drawn, listing_meta, painted, row_order, selected, session,
+    Fixture, TEST_NOW, acknowledge_commands, change, launcher_drawn, listing_meta, painted,
+    row_order, selected, session,
 };
 use super::{NEW_ID, SessionList};
 use crate::actions::{DELETE_SESSION_CHORD, NewSession, RENAME_SESSION_CHORD};
@@ -405,10 +406,9 @@ pub(super) fn count(cx: &mut VisualTestContext) -> Option<String> {
 
 /// Every command the window sent since the last look, answered with success, as (method, path, body).
 pub(super) fn requests(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
-    fake.commands()
+    acknowledge_commands(fake)
         .into_iter()
         .map(|command| {
-            fake.reply(command.id, 200, None);
             (
                 command.method,
                 command.path,

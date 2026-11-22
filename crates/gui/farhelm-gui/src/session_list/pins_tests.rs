@@ -24,7 +24,9 @@ use serde_json::{Value, json};
 
 use super::hold::STILLNESS;
 use super::menu_tests::{any_layer, drawn, label_of, push, snapshot};
-use super::tests::{change, listing_meta, open_main, painted, row_order, session};
+use super::tests::{
+    acknowledge_commands, change, listing_meta, open_main, painted, row_order, session,
+};
 use crate::main_view::MainView;
 use crate::test_support::{self, focused_id, frame};
 
@@ -34,10 +36,9 @@ use crate::test_support::{self, focused_id, frame};
 /// only the pin routes': the window also sends preference writes, seen marks and session queries, which these tests do
 /// not count.
 fn pin_requests(fake: &mut FakeHelm) -> Vec<(Method, String, Value)> {
-    fake.commands()
+    acknowledge_commands(fake)
         .into_iter()
         .filter_map(|command| {
-            fake.reply(command.id, 200, None);
             (command.path.ends_with("/pin") || command.path.ends_with("/pin-order")).then(|| {
                 (
                     command.method,

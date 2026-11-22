@@ -21,7 +21,10 @@ use serde_json::{Value, json};
 use super::host_rail::tests::{hosts, local, remote};
 use super::marking::{COUNT_ID, MENU_TOGGLE_ID};
 use super::menu_tests::{drawn, label_of};
-use super::tests::{Fixture, TEST_NOW, listing, open_main, painted, preferences_state, session};
+use super::tests::{
+    Fixture, TEST_NOW, acknowledge_commands, listing, open_main, painted, preferences_state,
+    session,
+};
 use crate::actions::RENAME_SESSION_CHORD;
 use crate::test_support::{self, focused_id, frame, meta};
 
@@ -119,12 +122,9 @@ fn has_id(cx: &mut VisualTestContext, id: &str) -> bool {
 /// The paths of the commands the window sent since the last call, each answered with success at once: the fake answers
 /// in order, so a test that answers a later command (a Delete) answers these first.
 fn answered(fake: &mut FakeHelm) -> Vec<String> {
-    fake.commands()
+    acknowledge_commands(fake)
         .into_iter()
-        .map(|command| {
-            fake.reply(command.id, 200, None);
-            command.path
-        })
+        .map(|command| command.path)
         .collect()
 }
 

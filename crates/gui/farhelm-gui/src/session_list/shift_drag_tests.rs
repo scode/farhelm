@@ -10,7 +10,7 @@ use gpui::{
 
 use super::groups_tests::{group, grouped_snapshot};
 use super::marking_tests::{click_with, ctrl, fleet, markers, open_list, stored};
-use super::tests::{change, listing_meta, row_order, selected, session};
+use super::tests::{acknowledge_commands, change, listing_meta, row_order, selected, session};
 use crate::test_support::{self, frame};
 
 fn shift() -> Modifiers {
@@ -304,9 +304,7 @@ fn a_sweep_crosses_collapsed_groups_without_marking_hidden_members(cx: &mut Test
     release(cx, at, shift());
     assert_eq!(markers(cx), ["a", "b", "d"]);
     assert!(!stored(&list, "c", cx));
-    for command in fake.commands() {
-        fake.reply(command.id, 200, None);
-    }
+    acknowledge_commands(&mut fake);
     click_with(cx, "session-group-10-toggle", shift());
     assert!(
         fake.commands()

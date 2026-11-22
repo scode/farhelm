@@ -18,9 +18,8 @@ use farhelm_proto::ui_channel::{
     Availability, CollectionState, HostView, Preferences, SIDEBAR_WIDTH_RANGE,
 };
 use gpui::{
-    App, AppContext as _, DriverNode, DriverText, Entity, HeadlessAppContext, Modifiers, Pixels,
-    Point, Role, TestAppContext, TextStyle, VisualTestContext, Window, WindowTextSystem, point, px,
-    size,
+    App, AppContext as _, DriverNode, Entity, HeadlessAppContext, Modifiers, Pixels, Point, Role,
+    TestAppContext, TextStyle, VisualTestContext, Window, WindowTextSystem, point, px, size,
 };
 use gpui_component::Root;
 use serde_json::{Value, json};
@@ -50,29 +49,7 @@ pub(super) fn node<'a>(nodes: &'a [DriverNode], id: &str) -> Option<&'a DriverNo
         .find(|node| node.element_id.as_deref() == Some(id))
 }
 
-/// The lines of text painted under `id`, at any depth, in paint order: where a node's text is, since text is painted
-/// by the text elements inside it.
-pub(crate) fn texts_within(nodes: &[DriverNode], id: &str) -> Vec<DriverText> {
-    let Some(top) = nodes
-        .iter()
-        .position(|node| node.element_id.as_deref() == Some(id))
-    else {
-        panic!("{id} was not drawn");
-    };
-    let inside = |mut index: usize| loop {
-        if index == top {
-            return true;
-        }
-        match nodes[index].parent {
-            Some(parent) => index = parent,
-            None => return false,
-        }
-    };
-    (0..nodes.len())
-        .filter(|&index| inside(index))
-        .flat_map(|index| nodes[index].texts.iter().cloned())
-        .collect()
-}
+pub(crate) use super::tests::texts_within;
 
 /// The strings painted under `key`'s row, top to bottom and left to right within a line.
 fn row_texts(nodes: &[DriverNode], key: &str) -> Vec<String> {
