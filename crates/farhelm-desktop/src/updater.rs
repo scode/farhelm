@@ -404,20 +404,7 @@ pub fn start(state_path: PathBuf) -> Option<UpdaterHandle> {
             move || farhelm_supervisor::installation::snapshot(&applications, &app_name)
         }),
         read_installed: Box::new(move || read_installed_record(&installed_record)),
-        automatic_enabled: Box::new({
-            let path = state_path.clone();
-            move || automatic_updates_enabled(&path)
-        }),
-        read_probe_failure_since: Box::new({
-            let path = state_path.clone();
-            move || read_probe_failure_since(&path)
-        }),
-        write_probe_failure_since: Box::new(move |since| {
-            state::update_state(&state_path, |state| {
-                state.automatic_probe_failure_since = since;
-            })
-            .map(|_| ())
-        }),
+        state_file: StateFileAccess::from_path(state_path),
         now: Box::new(SystemTime::now),
     };
     let shared = Arc::new(Shared::new(running));
@@ -492,6 +479,37 @@ type ProbeFn = dyn Fn() -> anyhow::Result<String> + Send;
 /// request after the user disabled an automatic check during the body fetch.
 type AdvisoriesFn = dyn Fn(&dyn Fn() -> bool) -> anyhow::Result<Option<Advisories>> + Send;
 
+/// The updater's settings and probe history come from one desktop state file.
+/// File-backed tests use the production wiring while substituting other work.
+struct StateFileAccess {
+    /// Whether automatic updates are on now.
+    automatic_enabled: Box<dyn Fn() -> bool + Send>,
+    /// Optional persisted start, read once. File failures mean no known streak.
+    read_probe_failure_since: Box<dyn Fn() -> Option<SystemTime> + Send>,
+    /// Best-effort storage, serialized under the shared status lock so the
+    /// saved setting's re-enable cannot race a stale streak write.
+    write_probe_failure_since: Box<dyn Fn(Option<SystemTime>) -> anyhow::Result<()> + Send>,
+}
+
+impl StateFileAccess {
+    /// Bind every callback to the same path. Reads happen when the worker
+    /// invokes them, and writes use the desktop state file's locking rules.
+    fn from_path(path: PathBuf) -> Self {
+        let automatic_path = path.clone();
+        let read_path = path.clone();
+        Self {
+            automatic_enabled: Box::new(move || automatic_updates_enabled(&automatic_path)),
+            read_probe_failure_since: Box::new(move || read_probe_failure_since(&read_path)),
+            write_probe_failure_since: Box::new(move |since| {
+                state::update_state(&path, |state| {
+                    state.automatic_probe_failure_since = since;
+                })
+                .map(|_| ())
+            }),
+        }
+    }
+}
+
 /// Everything the worker reaches outside itself, as plain functions so a
 /// test can stand in for each.
 pub(crate) struct Deps {
@@ -508,14 +526,7 @@ pub(crate) struct Deps {
     pub(crate) snapshot: Box<SnapshotFn>,
     /// The version the Installed record names now.
     pub(crate) read_installed: Box<dyn Fn() -> Option<String> + Send>,
-    /// Whether automatic updates are on now.
-    pub(crate) automatic_enabled: Box<dyn Fn() -> bool + Send>,
-    /// Optional persisted start, read once. File failures mean no known streak.
-    pub(crate) read_probe_failure_since: Box<dyn Fn() -> Option<SystemTime> + Send>,
-    /// Best-effort storage, serialized under the shared status lock so the
-    /// saved setting's re-enable cannot race a stale streak write.
-    pub(crate) write_probe_failure_since:
-        Box<dyn Fn(Option<SystemTime>) -> anyhow::Result<()> + Send>,
+    state_file: StateFileAccess,
     /// Wall-clock now.
     pub(crate) now: Box<dyn Fn() -> SystemTime + Send>,
 }
@@ -878,7 +889,7 @@ impl CheckResult {
 
 impl Engine {
     pub(crate) fn new(deps: Deps, shared: Arc<Shared>) -> Self {
-        shared.lock_status().probe_failure_since = (deps.read_probe_failure_since)();
+        shared.lock_status().probe_failure_since = (deps.state_file.read_probe_failure_since)();
         Self {
             deps,
             shared,
@@ -929,7 +940,7 @@ impl Engine {
         };
         // Check the clock first to avoid reading state on every wake while
         // waiting for the next scheduled check.
-        clock_due && (self.deps.automatic_enabled)()
+        clock_due && (self.deps.state_file.automatic_enabled)()
     }
 
     /// Set or clear the reinstall notice and publish it.
@@ -1030,7 +1041,7 @@ impl Engine {
             return;
         }
         status.probe_failure_since = since;
-        if let Err(error) = (self.deps.write_probe_failure_since)(since) {
+        if let Err(error) = (self.deps.state_file.write_probe_failure_since)(since) {
             tracing::warn!("updater: saving the probe failure streak: {error:#}");
         }
     }
@@ -1314,7 +1325,7 @@ impl Engine {
     /// A user-joined check can continue after automatic updates are disabled.
     /// An unjoined automatic check cannot begin another request or install.
     fn check_allowed(&self) -> bool {
-        self.shared.lock_status().user_waiting || (self.deps.automatic_enabled)()
+        self.shared.lock_status().user_waiting || (self.deps.state_file.automatic_enabled)()
     }
 }
 
@@ -2517,21 +2528,23 @@ mod tests {
                 let installed = Arc::clone(&installed);
                 move || installed.lock().unwrap().clone()
             }),
-            automatic_enabled: Box::new({
-                let automatic = Arc::clone(&automatic);
-                move || *automatic.lock().unwrap()
-            }),
-            read_probe_failure_since: Box::new({
-                let streak = Arc::clone(&streak);
-                move || *streak.lock().unwrap()
-            }),
-            write_probe_failure_since: Box::new({
-                let streak = Arc::clone(&streak);
-                move |since| {
-                    *streak.lock().unwrap() = since;
-                    Ok(())
-                }
-            }),
+            state_file: StateFileAccess {
+                automatic_enabled: Box::new({
+                    let automatic = Arc::clone(&automatic);
+                    move || *automatic.lock().unwrap()
+                }),
+                read_probe_failure_since: Box::new({
+                    let streak = Arc::clone(&streak);
+                    move || *streak.lock().unwrap()
+                }),
+                write_probe_failure_since: Box::new({
+                    let streak = Arc::clone(&streak);
+                    move |since| {
+                        *streak.lock().unwrap() = since;
+                        Ok(())
+                    }
+                }),
+            },
             now: Box::new({
                 let now = Arc::clone(&now);
                 move || *now.lock().unwrap()
@@ -2555,23 +2568,7 @@ mod tests {
         /// including a missing or broken file. Each call starts a new Engine
         /// over the same fake network/installer, never the installed app.
         fn with_state_file(mut self, path: &Path) -> Self {
-            self.engine.deps.automatic_enabled = Box::new({
-                let path = path.to_path_buf();
-                move || automatic_updates_enabled(&path)
-            });
-            self.engine.deps.read_probe_failure_since = Box::new({
-                let path = path.to_path_buf();
-                move || read_probe_failure_since(&path)
-            });
-            self.engine.deps.write_probe_failure_since = Box::new({
-                let path = path.to_path_buf();
-                move |since| {
-                    state::update_state(&path, |state| {
-                        state.automatic_probe_failure_since = since;
-                    })
-                    .map(|_| ())
-                }
-            });
+            self.engine.deps.state_file = StateFileAccess::from_path(path.to_path_buf());
             let Engine { deps, shared, .. } = self.engine;
             self.engine = Engine::new(deps, shared);
             self
@@ -3619,7 +3616,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn failed_streak_and_setting_writes_preserve_their_distinct_contracts() {
         let mut rig = make_rig("1.0.0", Some("1.0.0"), None, true);
-        rig.engine.deps.write_probe_failure_since = Box::new(|_| bail!("fixture write refused"));
+        rig.engine.deps.state_file.write_probe_failure_since =
+            Box::new(|_| bail!("fixture write refused"));
         rig.engine.wake_once();
         let since = rig.shared.status.lock().unwrap().probe_failure_since;
         assert!(since.is_some());
