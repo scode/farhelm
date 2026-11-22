@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
 - [in-flight bb46f1] `agent-trust-every-folder.md` — make the Claude, Codex, Muse and Pi trust switches apply in every folder, after checking the current agents' trust mechanisms live (after `agent-hook-setup.md`)
 - [pending] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
-- [complete] `deflake-historical-base-prereqs.md` — refuse deflake sweeps of bases older than the current battery list, with an explanation, before anything starts
+- [landing a72fed] `deflake-historical-base-prereqs.md` — refuse deflake sweeps of bases older than the current battery list, with an explanation, before anything starts
 - [pending] `test-worker-staging-lock.md` — stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
 - [pending] `pace-bulk-metadata-changes.md` — raise the helm's limit on queued window commands (derived from the 500-row listing cap) so a metadata change to many marked sessions no longer resets the window
 - [pending] `bulk-actions-bound-to-drawn.md` — make the marked bar's Stop and Delete act on the sessions and Skip session confirmations setting the bar showed, as the single-row menu does
