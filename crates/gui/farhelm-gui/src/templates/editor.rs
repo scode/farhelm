@@ -69,9 +69,11 @@ use gpui::{
 };
 
 use super::dialog::TemplatesDialog;
-use super::fields::{Draft, Field, capitalized, duplicate_name, name_refusal};
+use super::fields::{Draft, Field, duplicate_name, name_refusal};
 use super::shortcuts::{self, Bindings};
-use crate::components::{Button, HoverHelp, TextInputEvent, TextInputState, Tier};
+use crate::components::{
+    Button, HoverHelp, TextInputEvent, TextInputState, Tier, capitalize_validation,
+};
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::RunsOn;
@@ -719,10 +721,10 @@ impl Editor {
         let name = &self.draft.name;
         let renamed = self.previous.as_deref() != Some(name.as_str());
         if renamed && let Err(reason) = check_new_template_name(name) {
-            return Some(said(capitalized(reason)));
+            return Some(said(capitalize_validation(reason)));
         }
         if let Err(reason) = check_template_shape(&self.draft.template()) {
-            return Some(said(capitalized(reason)));
+            return Some(said(capitalize_validation(reason)));
         }
         if let Some(reason) = self.draft.refusal(catalog) {
             return Some(said(reason));

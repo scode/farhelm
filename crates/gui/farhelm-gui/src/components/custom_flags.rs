@@ -124,7 +124,7 @@ impl RenderOnce for CustomFlags {
                     .into_any_element()
             }
             Err(error) => {
-                let words = capitalized(error);
+                let words = super::capitalize_validation(error);
                 div()
                     .id(ElementId::Name(
                         format!("{}-flags-error", self.prefix).into(),
@@ -151,12 +151,4 @@ impl RenderOnce for CustomFlags {
             .child(help_line)
             .child(outcome)
     }
-}
-
-/// A parse error as a sentence: its first letter capitalized, as the old app's `local_validation_notice` showed it.
-fn capitalized(mut reason: String) -> String {
-    if let Some(first) = reason.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    reason
 }

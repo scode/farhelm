@@ -40,7 +40,7 @@ use serde::Serialize;
 use super::{Editor, FIELD_GAP, NAME_KIND_HELP, SMALL_LINE_HEIGHT, Text, with_editor};
 use crate::components::{
     Button, CustomFlags, HoverHelp, RadioGroup, RadioOption, Select, SelectOption, TextInput, Tier,
-    option_heading,
+    capitalize_validation, option_heading,
 };
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::display_name;
@@ -199,7 +199,9 @@ impl Rows<'_> {
     /// One field the template sets (the old `FieldEditor`): its controls, the read-only hint, its refusal, and its ✕.
     pub(super) fn field(&self, field: Field) -> AnyElement {
         let fields = &self.editor.draft.fields;
-        let refusal = field.refusal(fields, self.catalog).map(super::capitalized);
+        let refusal = field
+            .refusal(fields, self.catalog)
+            .map(capitalize_validation);
         let mut controls = self.controls(field);
         if field.read_only(fields) {
             controls.push(

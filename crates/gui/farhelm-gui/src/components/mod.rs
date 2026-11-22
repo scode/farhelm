@@ -119,6 +119,16 @@ use crate::host_text::{HostSentence, Line};
 use crate::layers::{self, BesideCues, Help, HelpPlacement, Hint, TallSide, TooltipOwner};
 use crate::theme;
 
+/// Capitalize a local validation reason's first character when it is an ASCII
+/// letter. The old app's notices preserved leading punctuation, whitespace,
+/// and non-ASCII characters.
+pub(crate) fn capitalize_validation(mut reason: String) -> String {
+    if let Some(first) = reason.get_mut(..1) {
+        first.make_ascii_uppercase();
+    }
+    reason
+}
+
 /// What a control says when the user hovers it, moves keyboard focus onto it, or asks assistive technology about it.
 ///
 /// Every control has one: the layer manager shows it as a tooltip on hover and on keyboard focus ([`with_hover_help`]),

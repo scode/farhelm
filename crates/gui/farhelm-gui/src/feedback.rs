@@ -64,7 +64,8 @@ use gpui::{
 
 use crate::assets::Icon;
 use crate::components::{
-    Button, Checkbox, DialogFrame, HoverHelp, Role, TextInput, TextInputEvent, TextInputState, Tier,
+    Button, Checkbox, DialogFrame, HoverHelp, Role, TextInput, TextInputEvent, TextInputState,
+    Tier, capitalize_validation,
 };
 use crate::focus::{self, Mark, ReturnTo};
 use crate::host_text::{HostSentence, HostText};
@@ -288,15 +289,6 @@ fn failure_words(refusal: &Refusal) -> HostText {
     }
 }
 
-/// The local refusal of a submission the helm would refuse too, as the dialog shows it: the shared validation's reason
-/// with its first letter capitalized (the old `local_validation_notice`).
-fn local_problem(mut reason: String) -> String {
-    if let Some(first) = reason.get_mut(..1) {
-        first.make_ascii_uppercase();
-    }
-    reason
-}
-
 /// `POST /api/feedback` with `submission` as its body, as work on the feedback key.
 fn command(submission: &FeedbackSubmission) -> Result<Command, PathError> {
     // A struct of strings and an enum always serializes.
@@ -483,7 +475,7 @@ impl FeedbackDialog {
         if is_blank(&submission.message) {
             return None;
         }
-        submission.validate().err().map(local_problem)
+        submission.validate().err().map(capitalize_validation)
     }
 }
 
