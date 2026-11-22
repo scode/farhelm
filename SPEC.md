@@ -1779,9 +1779,10 @@ either writer's update, future Claude versions may change the file or locking wi
 continued safety. Farhelm waits on Claude's advisory lock and never takes over a stale one. A writer stalled past
 Claude's stale-lock threshold can still lose an update in either direction when another writer takes over. This is an
 accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does.
-Farhelm does not make the edit when a session starts in the home directory or the filesystem root: Claude treats a
-trusted directory as covering every directory inside it, so either would trust far more than the session's directory,
-and Claude asks there as usual. The mechanism is explicitly opt-in and best effort.
+Farhelm skips the edit in the session's home directory and all of its parents, including the filesystem root. Claude
+treats a trusted directory as covering every directory inside it. Farhelm also skips the edit when the login shell
+supplies no usable absolute home directory. The session still starts and Claude may ask as usual. The mechanism is
+explicitly opt-in and best effort.
 
 While Claude's trust question is visible in the agent terminal, the setting is off, and the hint has not been dismissed,
 an informational band appears above the terminal, below its tabs. It takes layout space rather than covering the

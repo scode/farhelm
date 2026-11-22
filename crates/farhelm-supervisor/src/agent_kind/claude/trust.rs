@@ -8,6 +8,7 @@
 use anyhow::{Context, ensure};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::ffi::OsString;
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Write};
 use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
@@ -35,13 +36,26 @@ pub(crate) struct Environment {
 impl Environment {
     /// Snapshot only the path-selection inputs in the actual launch process.
     pub(crate) fn current() -> anyhow::Result<Self> {
+        Self::from_vars(
+            std::env::var_os("HOME"),
+            std::env::var_os("CLAUDE_CONFIG_DIR"),
+            std::env::var_os("CLAUDE_CODE_CUSTOM_OAUTH_URL"),
+        )
+    }
+
+    /// An explicit config directory still needs a usable home for the trust boundary.
+    /// An empty or relative home could also select a config in the session's working directory.
+    fn from_vars(
+        home: Option<OsString>,
+        config_dir: Option<OsString>,
+        custom_oauth_url: Option<OsString>,
+    ) -> anyhow::Result<Self> {
+        let home = PathBuf::from(home.context("HOME is unset")?);
+        ensure!(home.is_absolute(), "HOME is empty or relative");
         Ok(Self {
-            home: std::env::var_os("HOME").context("HOME is unset")?.into(),
-            config_dir: std::env::var_os("CLAUDE_CONFIG_DIR")
-                .filter(|v| !v.is_empty())
-                .map(Into::into),
-            custom_oauth: std::env::var_os("CLAUDE_CODE_CUSTOM_OAUTH_URL")
-                .is_some_and(|v| !v.is_empty()),
+            home,
+            config_dir: config_dir.filter(|v| !v.is_empty()).map(Into::into),
+            custom_oauth: custom_oauth_url.is_some_and(|v| !v.is_empty()),
         })
     }
 
@@ -75,13 +89,21 @@ impl Environment {
     }
 }
 
-/// Resolve a removal record before writing anything. The caller persists it
-/// first, so a crash after the trust write still leaves cleanup evidence.
-/// An absent config means Claude has never written one; do not invent it.
+/// Resolve the same canonical project key for checking scope and writing trust.
+/// Claude extends trust to descendants, so trust for home or an ancestor would survive the launch and cover other
+/// projects. Require a resolvable home even with a config override. The caller can persist the resulting removal
+/// record before editing so a crash still leaves cleanup evidence. An absent vendor config stays absent.
 pub(crate) fn resolve(
     environment: &Environment,
     cwd: &Path,
 ) -> anyhow::Result<Option<TrustRecord>> {
+    let folder = fs::canonicalize(cwd).context("could not resolve the session folder")?;
+    let home = fs::canonicalize(&environment.home).context("could not resolve HOME")?;
+    ensure!(home.is_dir(), "HOME does not name a directory");
+    ensure!(
+        folder.parent().is_some() && !home.starts_with(&folder),
+        "the session folder is your home directory or one of its parents, including /. Claude's trust covers everything inside"
+    );
     let selected = environment.config_path();
     let config_path = match fs::canonicalize(&selected) {
         Ok(path) => path,
@@ -97,7 +119,7 @@ pub(crate) fn resolve(
     Ok(Some(TrustRecord {
         config_path,
         lock_path: lock_path.into(),
-        project_path: fs::canonicalize(cwd)?
+        project_path: folder
             .to_str()
             .context("checkout path is not UTF-8")?
             .to_string(),
@@ -303,9 +325,11 @@ mod tests {
         // Trust records use canonical paths. Seed the same project key even
         // when the platform's temporary directory is reached through a symlink.
         let root = fs::canonicalize(dir.path()).unwrap();
+        let project = root.join("project");
+        fs::create_dir(&project).unwrap();
         let config = root.join("vendor.json");
         let alias = root.join(".claude.json");
-        let before = serde_json::json!({"unrelated":{"nested":[1,true,"value"]},"projects":{"other":{"hasTrustDialogAccepted":true},root.to_str().unwrap():{"keep":42}}});
+        let before = serde_json::json!({"unrelated":{"nested":[1,true,"value"]},"projects":{"other":{"hasTrustDialogAccepted":true},project.to_str().unwrap():{"keep":42}}});
         fs::write(&config, serde_json::to_vec(&before).unwrap()).unwrap();
         fs::set_permissions(&config, fs::Permissions::from_mode(0o640)).unwrap();
         std::os::unix::fs::symlink(&config, &alias).unwrap();
@@ -314,7 +338,7 @@ mod tests {
             config_dir: None,
             custom_oauth: false,
         };
-        let record = resolve(&env, &root).unwrap().unwrap();
+        let record = resolve(&env, &project).unwrap().unwrap();
         assert_eq!(record.config_path, config);
         assert_eq!(record.lock_path, root.join(".claude.json.lock"));
         assert!(
@@ -340,7 +364,7 @@ mod tests {
         assert!(!record.lock_path.exists());
         assert_eq!(
             fs::read_dir(dir.path()).unwrap().count(),
-            2,
+            3,
             "no temporary file or lock remains"
         );
     }
@@ -354,6 +378,8 @@ mod tests {
     fn trust_round_trip_preserves_unrelated_number_values() {
         let dir = tempfile::tempdir().unwrap();
         let root = fs::canonicalize(dir.path()).unwrap();
+        let project = root.join("project");
+        fs::create_dir(&project).unwrap();
         let config = root.join(".claude.json");
         let numbers = [
             "0.9176884786531495",
@@ -378,7 +404,7 @@ mod tests {
                 config_dir: None,
                 custom_oauth: false,
             },
-            &root,
+            &project,
         )
         .unwrap()
         .unwrap();
@@ -426,12 +452,14 @@ mod tests {
     #[farhelm_testtrace::test]
     fn trust_refuses_non_objects_and_leaves_no_debris() {
         let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir(&project).unwrap();
         let env = Environment {
             home: dir.path().into(),
             config_dir: None,
             custom_oauth: false,
         };
-        assert!(resolve(&env, dir.path()).unwrap().is_none());
+        assert!(resolve(&env, &project).unwrap().is_none());
         edit(None, false).unwrap();
         for content in [
             "[]",
@@ -441,13 +469,13 @@ mod tests {
             r#"{"projects":{"bad":false}}"#,
         ] {
             fs::write(dir.path().join(".claude.json"), content).unwrap();
-            let mut record = resolve(&env, dir.path()).unwrap().unwrap();
+            let mut record = resolve(&env, &project).unwrap().unwrap();
             if content.contains("bad") {
                 record.project_path = "bad".into();
             }
             assert!(edit(Some(&record), true).is_err(), "{content}");
             assert_eq!(fs::read_to_string(&record.config_path).unwrap(), content);
-            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 1);
+            assert_eq!(fs::read_dir(dir.path()).unwrap().count(), 2);
         }
     }
 
@@ -456,6 +484,8 @@ mod tests {
     #[farhelm_testtrace::test]
     fn trust_waits_then_refuses_foreign_lock() {
         let dir = tempfile::tempdir().unwrap();
+        let project = dir.path().join("project");
+        fs::create_dir(&project).unwrap();
         fs::write(dir.path().join(".claude.json"), "{}").unwrap();
         let record = resolve(
             &Environment {
@@ -463,7 +493,7 @@ mod tests {
                 config_dir: None,
                 custom_oauth: false,
             },
-            dir.path(),
+            &project,
         )
         .unwrap()
         .unwrap();
@@ -517,5 +547,57 @@ mod tests {
             .config_path(),
             config_dir.join(".claude-custom-oauth.json")
         );
+    }
+
+    /// Claude grants trust to descendants, so home, its ancestors and aliases for them cannot become project keys.
+    /// Legitimate projects under home and sibling paths sharing only a string prefix still get their own records.
+    #[farhelm_testtrace::test]
+    fn trust_resolves_only_projects_outside_the_home_ancestor_chain() {
+        let dir = tempfile::tempdir().unwrap();
+        let parent = dir.path().join("homes");
+        let home = parent.join("alice");
+        let child = home.join("project");
+        let sibling = parent.join("al");
+        fs::create_dir_all(&child).unwrap();
+        fs::create_dir(&sibling).unwrap();
+        fs::write(home.join(".claude.json"), "{}").unwrap();
+        let alias = dir.path().join("home-link");
+        std::os::unix::fs::symlink(&home, &alias).unwrap();
+        let env = Environment {
+            home: alias.clone(),
+            config_dir: None,
+            custom_oauth: false,
+        };
+
+        for broad in [Path::new("/"), dir.path(), &parent, &home, &alias] {
+            let error = resolve(&env, broad).unwrap_err();
+            assert!(
+                error
+                    .to_string()
+                    .contains("the session folder is your home directory"),
+                "{error:#}"
+            );
+        }
+        for project in [child, sibling] {
+            let record = resolve(&env, &project).unwrap().unwrap();
+            assert_eq!(
+                Path::new(&record.project_path),
+                fs::canonicalize(project).unwrap()
+            );
+        }
+    }
+
+    /// Invalid shell input cannot make the config path relative to the session folder, even with an override.
+    #[farhelm_testtrace::test]
+    fn trust_environment_rejects_unset_empty_and_relative_home() {
+        for home in [None, Some("".into()), Some("home".into())] {
+            let expected = if home.is_none() {
+                "HOME is unset"
+            } else {
+                "HOME is empty or relative"
+            };
+            let result = Environment::from_vars(home, Some("/configured/claude".into()), None);
+            assert!(matches!(result, Err(error) if error.to_string() == expected));
+        }
     }
 }

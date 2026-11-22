@@ -16716,6 +16716,8 @@ pub(crate) mod tests {
         let ownership = sup.ownership.as_ref().unwrap().clone();
         let id = uuid::Uuid::new_v4().to_string();
         let config = state.path().join(".claude.json");
+        let project = state.path().join("project");
+        std::fs::create_dir(&project).unwrap();
         std::fs::write(&config, "{}").unwrap();
         let trust = crate::agent_kind::claude::trust::resolve(
             &crate::agent_kind::claude::trust::Environment {
@@ -16723,7 +16725,7 @@ pub(crate) mod tests {
                 config_dir: None,
                 custom_oauth: false,
             },
-            state.path(),
+            &project,
         )
         .unwrap()
         .unwrap();

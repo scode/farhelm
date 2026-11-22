@@ -390,10 +390,10 @@ Plain **Restart** and **Replace** reuse the trust carried by the saved launch. S
 of its switch. Pi's switch approves project settings and extensions; Pi still runs the agent's actions without asking.
 
 On the **Claude Code** page, you can **Answer Claude's "trust this folder?"**. The switch is off by default and applies
-in directories you choose and in managed checkouts on every host. It never marks your home directory or the root
-directory as trusted, because Claude would then trust everything inside them; a session started there shows a short
-note in its terminal, and Claude asks as usual. Farhelm also adds Claude trust to new checkouts that start with another
-agent while the switch is on.
+in directories you choose and in managed checkouts on every host. Farhelm skips your home directory and its parents,
+including the filesystem root, because Claude's trust would cover everything inside. It also skips the edit if it
+cannot resolve your home directory on the session's host. The session shows a terminal note and Claude may ask as
+usual. Farhelm also adds Claude trust to new checkouts that start with another agent while the switch is on.
 
 Farhelm edits the Claude settings that the login shell selects on the session's host, normally `~/.claude.json`.
 A wrapper that changes the directory or selects a different Claude configuration can still leave Claude asking.
