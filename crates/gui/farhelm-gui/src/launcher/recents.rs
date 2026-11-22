@@ -32,7 +32,7 @@ use farhelm_proto::{
     join_permission_flags,
 };
 
-use super::draft::{harness_label, joined};
+use super::draft::{checkout_label, harness_label, joined};
 use crate::host_text::HostText;
 use crate::permission::words::{effort_label, permission_display};
 
@@ -244,7 +244,7 @@ pub fn merged(
 /// Where `entry` started, as its row names it: `gh:owner/name` for a managed checkout, else its folder as typed.
 pub fn destination_label(entry: &LaunchHistoryEntry) -> String {
     match &entry.github_repo {
-        Some(repo) => format!("gh:{}/{}", repo.owner, repo.name),
+        Some(repo) => checkout_label(repo),
         None => entry.cwd.clone(),
     }
 }
