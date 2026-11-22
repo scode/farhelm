@@ -8,8 +8,8 @@
 //! `24bc0580`. Here's the TLDR of the rules:
 //!
 //! - **Targets are frozen as drawn.** The bar's Stop or Delete takes the marked rows the last frame showed, each frozen
-//!   as a [`Target`]: what the question draws of it and the precondition its request carries, from the row the store
-//!   holds at the press, the same row the session's own Stop or Delete reads. The request a target gets is the one its
+//!   as a [`Target`]: what the question draws of it and the precondition its request carries, from the row and
+//!   preferences the rendered control captured. The request a target gets is the one its
 //!   row would send ([`super::stop`], [`super::delete`]), so a session that became more alive since is refused rather
 //!   than killed.
 //! - **A retired containerized session is never a Stop target** ([`super::retired`]): it supports Delete only, so the
@@ -62,7 +62,7 @@
 //! `question_targets`, `DialogCopy`, `row_consequence`) and `list/marking.rs` (`LifecycleOffer`) at the reference
 //! commit:
 //!
-//! - **Each gets the Delete its lane allows**, picked from the hosts read at the press
+//! - **Each gets the Delete its lane allows**, picked from the hosts read when the bar drew
 //!   ([`super::environment_delete::lane`]) and frozen with the question, every reword included ([`Target`]'s
 //!   `environment`). A marked session of an environment the helm can ask gets its own session-lane Delete; that
 //!   environment's Farhelm takes them one at a time (they share its host's queue), and the last one seals it. The marked
@@ -87,7 +87,7 @@
 //!   decision.
 //! - **Being deleted.** A session whose environment is being deleted is left out of the question and the batch, with
 //!   the reason on its row ([`not_started`]), and the bar's Stop and Delete are drawn unavailable while every mark each
-//!   would act on is such a session ([`all_being_deleted`]).
+//!   would act on is such a session ([`DrawnAction::all_being_deleted`]).
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::rc::Rc;
@@ -96,8 +96,8 @@ use farhelm_helm_client::Collections;
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionStopRequest};
 use gpui::{
-    AnyWindowHandle, App, AppContext as _, Context, ElementId, FontWeight, InteractiveElement,
-    IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
+    AnyWindowHandle, App, AppContext as _, Context, ElementId, EntityId, FontWeight,
+    InteractiveElement, IntoElement, ParentElement, Render, SharedString, Styled, Window, div,
     prelude::FluentBuilder as _, px,
 };
 
@@ -209,7 +209,7 @@ pub(super) struct Target {
     /// Whether this target's own row would ask before acting, Skip session confirmations aside.
     asks: bool,
     /// For a Delete of a session in a disposable environment, the environment Delete it gets, with its lane as the
-    /// hosts read at the press picked it (the module docs' "Environment sessions"); `None` for an ordinary session and
+    /// hosts read at draw time picked it (the module docs' "Environment sessions"); `None` for an ordinary session and
     /// for every Stop. Kept through every reword, so the answer sends the lane its row said.
     environment: Option<environment_delete::Asked>,
 }
@@ -249,7 +249,7 @@ impl Target {
     }
 
     /// `row` as a target of `action` whose environment Delete, if any, is `environment` as already frozen: what a
-    /// reword freezes afresh, so a hosts read that changed since the press never changes the lane a row was asked in,
+    /// reword freezes afresh, so a hosts read that changed since the bar drew never changes the lane a row was asked in,
     /// nor makes an ordinary row an environment one (the old `reconcile` kept its `sandbox` and `whole` the same way).
     fn frozen_as(
         action: Lifecycle,
@@ -449,84 +449,101 @@ pub(super) const STOP_ID: &str = "session-marked-stop";
 /// The marked bar's Delete's element id.
 pub(super) const DELETE_ID: &str = "session-marked-delete";
 
-/// The marked bar's Stop's or Delete's hover help while it is drawn unavailable ([`all_being_deleted`]): the old
+/// The marked bar's Stop's or Delete's hover help while it is drawn unavailable ([`DrawnAction::all_being_deleted`]): the old
 /// `ALL_BEING_DELETED`, word for word.
 pub(super) const ALL_BEING_DELETED: &str =
     "The marked sessions' environments are being deleted, so their actions are unavailable";
 
-/// Whether the marked bar's `action` would act on nothing of `shown`, the marks the last frame showed, because every
-/// one it would take is a session whose environment is being deleted, which takes no action: the bar then draws it
-/// unavailable (the old `LifecycleOffer`). Stop never takes a retired session ([`super::retired`]), which is never an
-/// environment session either, so Stop counts only the others; a mark with no row in the store is no target of either.
-/// `false` when there is nothing to count.
-pub(super) fn all_being_deleted(action: Lifecycle, shown: &[String], cx: &App) -> bool {
-    let Some(store) = session::current_store(cx) else {
-        return false;
-    };
-    let collections = store.read(cx).collections();
-    let mut takes = shown
-        .iter()
-        .filter(|key| {
-            collections
-                .get::<SessionRow>(key.as_str())
-                .is_some_and(|row| action == Lifecycle::Delete || !retired::is(row))
-        })
-        .peekable();
-    takes.peek().is_some()
-        && takes.all(|key| super::environment::deleting_reason(key, cx).is_some())
+/// The marked bar's authority for one Stop or Delete. A store reset invalidates the whole snapshot even if the same
+/// session keys appear in the next connection.
+#[derive(PartialEq)]
+pub(super) struct DrawnAction {
+    store: EntityId,
+    targets: Vec<DrawnTarget>,
+    skips_questions: bool,
+}
+
+/// A row refused when the bar drew stays out even if its environment reconnects before the press.
+#[derive(PartialEq)]
+struct DrawnTarget {
+    target: Target,
+    deletion_refusal: Option<&'static str>,
+}
+
+impl DrawnAction {
+    /// Capture the guards, environment lanes and confirmation preference from the store that supplied this frame.
+    pub(super) fn capture(
+        action: Lifecycle,
+        shown: &[String],
+        store: EntityId,
+        collections: &Collections,
+    ) -> Self {
+        let targets = shown
+            .iter()
+            .filter_map(|key| {
+                let row = collections.get::<SessionRow>(key)?;
+                // Retired sessions offer Delete only and keep their marks when a Stop finishes.
+                (action == Lifecycle::Delete || !retired::is(row)).then(|| DrawnTarget {
+                    target: Target::of(action, key, row, collections),
+                    deletion_refusal: Environment::of(row, collections)
+                        .and_then(|environment| environment.deleting())
+                        .map(|deleting| deleting.help),
+                })
+            })
+            .collect();
+        Self {
+            store,
+            targets,
+            skips_questions: menu::skips_questions(collections),
+        }
+    }
+
+    /// Disable the button only when every target's environment is already being deleted.
+    pub(super) fn all_being_deleted(&self) -> bool {
+        !self.targets.is_empty()
+            && self
+                .targets
+                .iter()
+                .all(|row| row.deletion_refusal.is_some())
+    }
 }
 
 impl SessionList {
-    /// The marked bar's Stop or Delete was pressed: freeze the marked rows the last frame showed as targets of
-    /// `action`, then ask about them, or, when no target would ask on its own row or Skip session confirmations is on,
-    /// run them at once; a batch holding an environment Delete always asks. Nothing happens while a bulk question is
-    /// open (a second press queued before the question took the window's input) or when no shown mark has a row in the
-    /// store.
+    /// Use the presented bar's targets and consent to ask or run at once. An environment Delete always asks.
+    /// A reset invalidates the press, and a second press queued behind a question leaves that question in charge.
     pub(super) fn bulk_lifecycle(
         &mut self,
         action: Lifecycle,
+        drawn: &DrawnAction,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
         let mark = Mark::take(cx);
-        if self.bulk_question_open(window, cx) {
+        if self.bulk_question_open(window, cx)
+            || session::current_store(cx).is_none_or(|store| store.entity_id() != drawn.store)
+        {
             return;
         }
-        let Some(store) = session::current_store(cx) else {
-            return;
-        };
-        let shown = self.marking.shown();
-        let (targets, skips) = {
-            let collections = store.read(cx).collections();
-            let targets: Vec<Target> = shown
-                .iter()
-                .filter_map(|key| {
-                    let row = collections.get::<SessionRow>(key)?;
-                    // A retired session supports Delete only: never a Stop target, and nothing said about it.
-                    if action == Lifecycle::Stop && retired::is(row) {
-                        return None;
-                    }
-                    Some(Target::of(action, key, row, collections))
-                })
-                .collect();
-            (targets, menu::skips_questions(collections))
-        };
-        // A session whose environment is being deleted takes no action, so it is left out of the question and the
-        // batch, its line said at once, as the old batch's `exclude_unavailable` did when the batch was drawn; never
-        // the batch's, it keeps its mark when the batch finishes. Admission checks again (`run_batch`), for one whose
-        // environment started being deleted while the question was open.
-        let (unavailable, targets): (Vec<Target>, Vec<Target>) = targets
-            .into_iter()
-            .partition(|target| super::environment::deleting_reason(&target.key, cx).is_some());
-        for target in &unavailable {
-            not_started(&target.key, target.work(), target.label(), cx);
+        // A live refusal can only shrink the drawn offer. A skipped row keeps its mark, and gets the same reason
+        // whether its environment was already being deleted when the bar drew or began before the press.
+        let mut targets = Vec::with_capacity(drawn.targets.len());
+        for row in &drawn.targets {
+            let target = &row.target;
+            let refusal = row
+                .deletion_refusal
+                .or_else(|| super::environment::deleting_reason(&target.key, cx));
+            if let Some(reason) = refusal {
+                leave_line(&target.key, target.work(), target.label(), reason, cx);
+            } else {
+                targets.push(target.clone());
+            }
         }
         if targets.is_empty() {
             return;
         }
         // An environment Delete is never skipped, so a batch holding one always asks (the old `needs_confirmation`).
         let must_ask = targets.iter().any(|target| target.environment.is_some());
-        if !must_ask && (skips || !targets.iter().any(|target| target.asks)) {
+        if !must_ask && (drawn.skips_questions || !targets.iter().any(|target| target.asks)) {
             self.run_batch(targets, window, cx);
             return;
         }

@@ -458,14 +458,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   transfer and losing its source session without reopening it, including when there are no terminals left to draw it.
   Plan: `plans/queue/interrupted-upload-notices.md`.
 
-- **Keep bulk Stop and Delete bound to what the user saw.** In the desktop session list's marked bar, the click reads
-  fresh confirmation preferences and shell guards. Capture the drawn targets, guards, confirmation preference, and the
-  environment scope in the control as the single-row `Actionable` path does. Check that the connection, host identity
-  and environment Delete scope still match at acceptance and at queued dispatch. Reword or remove targets when facts
-  change without widening consent. This is the rule in SPEC_impl.md's “Questions: the prompt” and SPEC.md's bulk
-  actions. Cover changed confirmation preferences, a retargeted host and an unreachable environment that reconnects
-  while Delete is pending. Plan: `plans/queue/bulk-actions-bound-to-drawn.md`.
-
 - **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
   next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
   the viewer paints the default background there. Carry that cell's visible style through screen and history. Give the
