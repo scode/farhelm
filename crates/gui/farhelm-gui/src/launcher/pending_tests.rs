@@ -172,13 +172,9 @@ fn a_yolo_question_the_user_moved_on_from_waits_and_its_answer_resends_the_draft
 }
 
 /// A Delete of the open session sent while a launch is out picks the next open session by the ordinary rules once it
-/// settles, and the launch's success, which comes first, takes no part in it (nonblocking-launch.spec's "Delete selects
-/// its successor while New is held and New completion keeps it"). The old case's order of replies cannot happen: the UI
-/// channel answers in order, so a Delete sent while a create is out is answered after it (SPEC_impl.md, "The UI
-/// channel"). What it guarded can: a launch the user moved on from opens nothing, and the Delete's pick is not bent
-/// toward the session the launch made. Specified: with a open, b visited before it, and the create out, a's menu Delete
-/// is sent; the create succeeds as d, the newest session, leaving a open; the helm drops a and then answers the Delete:
-/// b, the most recently visited one still listed, is open, not d.
+/// settles. In this ordering the launch replies first, but the user has already moved on. With a open and b visited
+/// before it, the create succeeds as d and leaves a open. The Delete then opens b, the most recently visited session
+/// still listed.
 #[gpui::test]
 fn a_delete_while_a_launch_is_out_picks_by_the_ordinary_rules(cx: &mut TestAppContext) {
     let (mut helm, cx, create) = launched_over(
@@ -211,8 +207,7 @@ fn a_delete_while_a_launch_is_out_picks_by_the_ordinary_rules(cx: &mut TestAppCo
         Some("a"),
         "the launch the user moved on from opened nothing"
     );
-    // The helm pushes a Delete's change before its reply (SPEC_impl.md, "The UI channel"); then everything sent after
-    // the create is answered, in order, the Delete among it.
+    // The helm pushes the removed row before answering the Delete, which lets selection see the remaining sessions.
     helm.push(change(
         listing_meta(&["b", "c", "d"], 3, false),
         &[],

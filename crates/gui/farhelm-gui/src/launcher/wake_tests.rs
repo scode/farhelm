@@ -1,4 +1,4 @@
-//! Deterministic window tests of an existing host's wake before launch. The fake's ordered reply and host pushes
+//! Deterministic window tests of an existing host's wake before launch. The fake's Resume reply and host pushes
 //! can advance independently, and all budget and retry checks advance the GPUI clock.
 
 use std::time::Duration;

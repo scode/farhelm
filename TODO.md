@@ -47,14 +47,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Near term
 
-- **One slow host holds up every other action for up to 20 seconds.** The desktop app sends its commands to the helm one
-  at a time, each starting when the previous one has answered. Saving a replacement credential (delivered to every host,
-  at most 20 seconds per host) and deleting from Trash (at most 20 seconds per host) can therefore keep every later
-  click that needs the helm (a launch, a Stop, another save) waiting for up to 20 seconds when one host is slow or
-  unreachable. The window itself stays responsive, but actions look stuck. Check whether the per-host waits run in
-  parallel (if they run one after another, the worst case is 20 seconds times the number of hosts), and improve this,
-  for example by moving these routes to the accepted form, as provisioning already is. Plan:
-  `plans/queue/slow-host-async-actions.md`.
+- **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.
+  Session Stop and Delete, environment Suspend, Resume, Stop and suspend, Delete and Retry-delete, and Checkout Trash
+  listing and deletion now run independently of ordered commands. Credential replacement is the next candidate. It waits
+  at most 20 seconds total for delivery across hosts, with up to four deliveries in parallel. The remaining ordered work
+  includes launcher reads and Launch, session Rename, Restart, Replace, tabs and tunnels, and host management and
+  settings, including Delete sandbox or container from the Hosts panel. Review the two-lane channel and the operation
+  boundaries before converting more of them. Plan: `plans/queue/slow-host-async-actions.md`.
 
 - **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
   about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
@@ -252,6 +251,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Plan: `plans/queue/tailscale-ssh-hosts.md`.
 
 ### Plan follow-up
+
+- **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
+  watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
+  Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read
+  and wait for the pushed epoch after a delete times out. If a post-delete read reports that removal is finished,
+  another read is pending when the old delete reply arrives, and that pending read fails, the can can still show removal
+  until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
+  without showing the accepted removal.
 
 - **Show Stop and suspend's continuing work and actual timeout failures.** The desktop drops every 504 from this
   command. A reply from the helm's 20-second bound means the operation is still running. Add a helm-only typed marker to

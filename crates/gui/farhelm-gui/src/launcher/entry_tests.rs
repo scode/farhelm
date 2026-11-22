@@ -372,7 +372,7 @@ fn new_waits_for_a_host_change(cx: &mut TestAppContext) {
         "New is unavailable while the probe is out"
     );
     assert!(!new(cx), "and opens nothing");
-    // The fake answers in order: what the window sent before the probe (each connected host's trash read) goes first.
+    // Settle the initial Trash reads before moving on to the probe's result.
     for earlier in &sent[..probe] {
         assert_eq!(
             earlier.path, "/api/checkout-trash/list",

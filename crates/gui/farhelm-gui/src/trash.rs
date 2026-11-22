@@ -306,7 +306,7 @@ impl TrashButton {
             "expected_incarnation": entry.incarnation,
             "measure_sizes": measure,
         });
-        let sent = operations::send(
+        let sent = operations::send_unordered(
             Method::Post,
             path,
             Some(body),
@@ -340,10 +340,9 @@ impl TrashButton {
     /// connection, or when the dialog opens.
     ///
     /// DECISION (the other-dialogs area's coordinator, 2026-11-15): no recheck after any failed read. A read fails only
-    /// when the host or its connection is in trouble. One that timed out held the window's ordered command stream for
-    /// the helm's full 20-second host-wait bound, and its answer carries no status that would let the window tell a
-    /// timeout from a quick failure (a keyless read hands over only the refusal's words); the quick failures, a lost
-    /// connection or a removed host, are followed by a reconnect's read anyway.
+    /// when the host or its connection is in trouble. A timeout still spends the host's full 20-second reply bound.
+    /// Keyless reads carry the refusal's words, so the window treats quick failures the same way. A reconnect reads
+    /// the host again.
     fn listed(
         &mut self,
         host: i64,
@@ -656,20 +655,16 @@ impl TrashButton {
         }
     }
 
-    /// `target`'s delete settled: apply its answer to the kept listing and refusals, then read the host again (SPEC.md:
-    /// "The listing is rechecked after the deletes settle"), unless a read has gone out since the delete did
-    /// (`read_before` is the host's newest read then). The helm advances the host's trash epoch for an accepted delete
-    /// and pushes it before it replies, so that read is usually out already; it went out after the delete, so the helm
-    /// answers it after the delete too, and a second read would only spend another turn of the one UI channel. Refusals
-    /// are kept only for a host the registry still lists, so a late answer for a host removed meanwhile leaves nothing
-    /// behind.
+    /// A delete reply can mark the listing being shown while a refresh is pending. A successful refresh issued after
+    /// the delete supplies the host's removal state. The helm pushes the advanced trash epoch for an accepted
+    /// delete before replying, and that read can now answer before the delete. Reuse a read sent since `read_before`
+    /// rather than duplicate it. Refusals are kept only for a host the registry still lists.
     ///
     /// A delete the helm answers with a host timeout (504) is not followed by a read at all. DECISION (the other-dialogs
     /// area's coordinator, 2026-11-15): the helm stops waiting on the host after its 20-second host-wait bound but goes
-    /// on with the cleanup, holding that host's trash gate meanwhile, so a read sent now would itself wait the full bound
-    /// and fail, and since the helm answers the window's commands one at a time, every later command of the window would
-    /// wait behind it. Such a delete has not settled: when the host carries the cleanup out late, the helm advances the
-    /// host's trash epoch, and [`TrashButton::sync`] reads the host then.
+    /// on with the cleanup, holding that host's trash gate. A read on that host can spend the same bound while
+    /// waiting for the gate. When the late cleanup is accepted, the helm advances the epoch and
+    /// [`TrashButton::sync`] reads the host then.
     fn deleted(
         &mut self,
         target: &Target,
@@ -693,8 +688,13 @@ impl TrashButton {
                 .is_some()
         });
         let kept = self.current.current(cx);
+        let read_since = kept
+            .hosts
+            .get(&target.host)
+            .is_some_and(|entry| entry.serial != read_before);
         if let (Ok(deleted), Some(entry)) = (&outcome, kept.hosts.get_mut(&target.host))
             && entry.incarnation == target.incarnation
+            && (!read_since || entry.loading)
         {
             listing::accepted_cleanup(entry, &deleted.removed);
         }
@@ -705,10 +705,6 @@ impl TrashButton {
                 &outcome,
             );
         }
-        let read_since = kept
-            .hosts
-            .get(&target.host)
-            .is_some_and(|entry| entry.serial != read_before);
         if !read_since && !timed_out {
             self.read(target.host, cx);
         }

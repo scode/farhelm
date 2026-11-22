@@ -5,8 +5,8 @@
 //!
 //! Rows are marked by real Ctrl-clicks and the bar's Stop and Delete by real clicks; the bulk question is the prompt's
 //! centered dialog (`prompt`, with `prompt-confirm` and `prompt-cancel`), and each of its rows is drawn under
-//! `bulk-target-<key>`. The fake answers commands only in the order they were sent, which is also how these tests see
-//! one request at a time per host: a host's next request appears only once its last one is answered.
+//! `bulk-target-<key>`. The window sends one bulk request at a time per host. The tests observe that hold because
+//! the next request on the host appears only after the test answers the last one.
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::collections::decode_changes;
@@ -1560,7 +1560,7 @@ fn toggle(cx: &mut VisualTestContext, rows: &[&'static str]) {
 }
 
 /// The Deletes sent since the last look, in the order sent, left unanswered; every other command is answered with
-/// success at once. The fake answers in order, so this works only while nothing sent before it waits.
+/// success at once.
 fn sent_deletes(fake: &mut FakeHelm) -> Vec<FakeCommand> {
     let (deletes, others) = lifecycle(fake.commands());
     answer(fake, &others);

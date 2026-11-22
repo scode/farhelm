@@ -6,16 +6,11 @@
 //! `sidebar_summary`, `target`, `entry_target`, `accepted_cleanup`, the confirmation's and the tooltip's wording). One
 //! of its parts is not here, on purpose, and another is here in a smaller form:
 //!
-//! - **Read generations.** The old page fenced every read with a generation that a delete advanced, so a count read
-//!   before a delete could not put its rows back afterwards. Here commands are answered in the order they were sent
-//!   (SPEC_impl.md, "The UI channel"), so a read sent before a delete is answered before it, and the button reads the
-//!   host again once the delete settles. What remains is the order in which this app sees replies to different
-//!   commands, which is not promised; [`HostTrash::serial`] keeps the newest read per host, so a reply to an older read
-//!   is dropped. Read numbers come from one counter per UI session, never restarted for a host, so an answer from a
-//!   host's earlier connection can never pass for one of its new connection's reads. DECISION (made while porting the
-//!   trash, 2026-11-14, for the review gate to confirm): that per-host "newest read wins" replaces the generations. A
-//!   pre-delete read that this app happens to see after the delete's own answer is older than the read the delete's
-//!   answer sends, so it is dropped too.
+//! - **Read generations.** Trash reads and deletes use the unordered lane. [`HostTrash::serial`] keeps the newest
+//!   read per host, so a late answer to an older read cannot put its rows back. Read numbers come from one counter per
+//!   UI session, so an answer from a host's earlier connection cannot match a new read. A settled delete triggers a
+//!   refresh unless one was already sent after it. A completed refresh can therefore show the host's current state
+//!   even before the delete reply arrives. A delete that times out waits for the host's next Trash epoch instead.
 //! - **Uncertain-outcome bookkeeping.** The old page kept a lost reply's whole frozen selection privately and resolved
 //!   it ID by ID. Here an answer that was not a cleanup report is one [`Notice`] naming the IDs its delete sent (one
 //!   for an entry's Delete, a host's whole frozen set for a confirmed delete), and a later report shrinks it by the IDs
@@ -296,8 +291,8 @@ pub(crate) type Outcome = Result<CheckoutTrashDeleted, HostText>;
 
 /// Mark what a capable host accepted as removing, with any old failure cleared, so the row, the count and the size
 /// stay until a later listing confirms the folder gone; an older host, which hides accepted rows itself, loses them at
-/// once. Diagnostics for the accepted IDs go either way. A capable acceptance also starts the removal rechecks, even
-/// for an ID with no row, since a failed refresh right after must not lose the outcome (the old `accepted_cleanup`).
+/// once. Diagnostics for the accepted IDs go either way. This provisional mark also covers an ID with no row,
+/// so an immediate read failure can retain the accepted report. The next successful listing controls rechecks.
 pub(crate) fn accepted_cleanup(state: &mut HostTrash, ids: &[String]) {
     let Some(Ok(listing)) = state.listing.as_mut() else {
         return;

@@ -739,8 +739,7 @@ fn a_quick_launch_asks_for_the_checks_and_comes_back_until_one_answers(cx: &mut 
             cx
         ));
     });
-    // Taken before anything is answered, so the asks can be counted; the fake helm answers strictly in order, so these
-    // are answered here, in order, as `answer_except` would, before it answers the rest.
+    // Take the queued commands before answering any, so the probe requests can be counted separately.
     cx.run_until_parked();
     let taken = helm.commands();
     let asks = taken

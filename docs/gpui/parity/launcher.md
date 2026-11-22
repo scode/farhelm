@@ -502,9 +502,8 @@ naming cases (567, 658) are the templates area's.
   `launcher::restart_with_tests::a_timed_out_restart_with_settles_its_row_before_the_launcher_returns` and
   `launcher::replace_with_tests::a_timed_out_replace_with_settles_its_row_before_the_launcher_returns`.
 - 1617: `launcher::replace_with_tests::a_locally_refused_replace_with_keeps_the_sources_stop_report`.
-- 1693, reframed for the ordered channel, where a Delete sent while a create is out is answered after it (SPEC_impl.md,
-  "The UI channel"): the launch the user moved on from selects nothing, and the Delete's pick then follows the ordinary
-  rules, the most recently visited session still listed over the launch's newer one:
+- 1693, with the fixture replying to Create first and Delete second. The launch the user moved on from selects nothing.
+  Delete follows the ordinary rule and opens the most recently visited session still listed:
   `launcher::pending_tests::a_delete_while_a_launch_is_out_picks_by_the_ordinary_rules`.
 - 237's Rename variant, "Rename during a pending launch preserves its refusal and draft", reframed: opening Rename is a
   click, so the user has moved on, and a refusal the user moved on from waits behind its notice, which brings the

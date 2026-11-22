@@ -1044,8 +1044,8 @@ fn a_required_conversation_cannot_be_folded(cx: &mut TestAppContext) {
 // ---- The Agent tab's choices -----------------------------------------------------------------------------------------
 
 /// Answer the launcher's catalog read with `rows` (`GET /api/launch-catalog`), or with a 500 when `rows` is `None`.
-/// The fake answers commands in the order they were sent, so every other command sent since the last call (the main
-/// view's own) is answered too, in its place, with a plain success, as the helm answers them.
+/// Answer the main view's other commands with plain success in the same pass. Answering them in send order also
+/// preserves the order required for any ordered commands among them.
 pub(super) fn answer_catalog(
     helm: &mut FakeHelm,
     cx: &mut VisualTestContext,

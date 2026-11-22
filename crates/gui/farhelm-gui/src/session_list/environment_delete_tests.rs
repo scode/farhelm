@@ -58,8 +58,7 @@ const UNASKED: &str = "this environment's own Farhelm could not be asked to dele
                        decided, and an unanswered request may still have been acted on, which the next listing shows";
 
 /// The Delete requests the window sent since the last call, as (id, path), left unanswered. Every other command (a
-/// preference write, a seen mark) is answered with success at once; the fake answers in order, so this works only while
-/// nothing sent before it waits.
+/// preference write, a seen mark) is answered with success at once.
 fn deletes(fake: &mut FakeHelm) -> Vec<(u64, String)> {
     let mut found = Vec::new();
     for command in fake.commands() {

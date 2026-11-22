@@ -329,6 +329,62 @@ fn an_entrys_delete_runs_at_once_and_keeps_its_row_until_a_listing_confirms_it_g
     assert_eq!(snapshot(&button, cx).count(), (2, false));
 }
 
+/// A refresh triggered by the delete's epoch can report that cleanup has already finished before the delete replies.
+/// That reply must leave the fresh listing and the host's idle removal state intact.
+#[gpui::test]
+fn a_late_delete_reply_keeps_the_newer_trash_listing(cx: &mut TestAppContext) {
+    let (mut helm, button, cx) = opened(cx);
+    assert!(
+        enabled(&frame(cx), "trash-entry-delete-1-a"),
+        "the checkout can be deleted"
+    );
+    test_support::click(cx, "trash-entry-delete-1-a");
+    let (id, body) = one_delete(&mut helm);
+    assert_eq!(body["ids"], json!(["a"]));
+    assert!(snapshot(&button, cx).emptying(), "the delete is held");
+
+    push_hosts(&mut helm, &[epoch(local(), 1), remote(), down()]);
+    test_support::settle(cx);
+    let reread = take(&mut helm);
+    assert_eq!(
+        reads(&reread)
+            .iter()
+            .map(|read| (read.1, read.2))
+            .collect::<Vec<_>>(),
+        [(1, true)]
+    );
+    answer(
+        &mut helm,
+        &reread,
+        |_| (200, listing(&[checkout("b", None)], false)),
+        |command| panic!("unexpected command {command:?}"),
+    );
+    test_support::advance(cx, SETTLE);
+    assert!(
+        node(&frame(cx), "trash-entry-delete-1-a").is_none(),
+        "the newer read confirmed the checkout gone"
+    );
+    assert!(
+        snapshot(&button, cx).emptying(),
+        "the delete reply is still pending"
+    );
+
+    helm.reply(id, 200, Some(json!({ "removed": ["a"], "issues": [] })));
+    test_support::settle(cx);
+    assert!(node(&frame(cx), "trash-entry-delete-1-a").is_none());
+    assert!(
+        !snapshot(&button, cx).emptying(),
+        "the old reply cannot put the can back into removal"
+    );
+    // Ending the pending Delete starts the dialog's click guard again.
+    test_support::advance(cx, SETTLE);
+    assert!(enabled(&frame(cx), "trash-entry-delete-1-b"));
+    assert!(
+        take(&mut helm).is_empty(),
+        "the newer listing already covers the delete"
+    );
+}
+
 /// Why this matters: SPEC.md: "Close, header close and Escape remain available during that request", and a delete the
 /// helm took is work of the window's operation store, not of the dialog, so closing must not cancel it (the old "one
 /// trash entry deletes immediately and preserves neighbours", which dismissed the dialog with its request held).
@@ -368,10 +424,9 @@ fn closing_the_dialog_leaves_a_running_delete_to_finish(cx: &mut TestAppContext)
     assert_eq!(snapshot(&button, cx).count(), (2, false));
 }
 
-/// Why this matters: the helm bounds its wait on a host at 20 seconds and then answers a delete with a timeout (504)
-/// while the cleanup goes on and holds the host's trash gate; a read sent then would wait the whole bound too, and since
-/// the helm answers the window's commands one at a time, every later command would wait behind it (the other-dialogs
-/// area's coordinator's decision of 2026-11-15). Specified: a delete answered 504 keeps its notice but sends no read,
+/// A delete that answers 504 can still hold the host's trash gate. A read on that host can spend the same
+/// 20-second bound waiting for the gate (the other-dialogs area's coordinator's decision of 2026-11-15).
+/// A delete answered 504 keeps its notice but sends no read,
 /// also once its settle pause and a recheck's interval have passed; when the helm pushes the host's moved trash epoch,
 /// as it does once the late cleanup lands, the host is read once.
 #[gpui::test]
@@ -735,7 +790,7 @@ fn delete_all_sends_one_frozen_delete_per_reachable_host(cx: &mut TestAppContext
             ),
         ]
     );
-    // The helm answers in the order the commands were sent, so the local host's comes first.
+    // Answer the local host while the remote host's cleanup still holds its own key.
     let local_delete = sent.iter().find(|command| {
         command
             .body
@@ -825,7 +880,7 @@ fn delete_all_waits_for_every_reachable_host(cx: &mut TestAppContext) {
     let (local_read, remote_read): (Vec<_>, Vec<_>) = measured
         .into_iter()
         .partition(|command| reads(std::slice::from_ref(command))[0].1 == 1);
-    // The helm answers in the order the reads were sent: the local host's first.
+    // Answer only the local host so the global action still has a reachable host to wait for.
     answer(
         &mut helm,
         &local_read,

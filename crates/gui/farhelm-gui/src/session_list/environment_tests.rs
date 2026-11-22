@@ -176,8 +176,7 @@ fn is_environment(path: &str) -> bool {
 }
 
 /// The environment requests the window sent since the last call, as (id, method, path, body), left unanswered. Every
-/// other command (a preference write, a seen mark) is answered with success at once; the fake answers in order, so this
-/// works only while nothing sent before it waits.
+/// other command (a preference write, a seen mark) is answered with success at once.
 pub(crate) fn pending(fake: &mut FakeHelm) -> Vec<(u64, Method, String, Value)> {
     let mut found = Vec::new();
     for command in fake.commands() {
@@ -617,8 +616,8 @@ fn a_suspend_answered_after_the_phase_changed_still_suspends(cx: &mut TestAppCon
 /// changes elsewhere proceed while one is pending" (the old `tensorlake-sandbox-sessions.spec.ts`, "a held sandbox
 /// Suspend and a launch on another host proceed side by side"). A provider can take a while to freeze a sandbox, and a
 /// Suspend counted as a launch-excluding change would block New or Launch for all of it. A typed folder lets this
-/// draft proceed without waiting for the ordinary folder default. The fake answers commands in order, so the test
-/// observes the queued create while Suspend is unanswered. It cannot make the create settle before Suspend.
+/// draft proceed without waiting for the ordinary folder default. The test observes the create while the Suspend
+/// reply is still held.
 #[gpui::test]
 fn a_suspend_in_flight_leaves_new_available(cx: &mut TestAppContext) {
     let host = environment_host(Provider::Sandbox, connected());
