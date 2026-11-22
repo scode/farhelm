@@ -1690,7 +1690,7 @@ pub(crate) struct CommandResult {
 impl CommandResult {
     /// Describe every unsuccessful termination without relying on the host
     /// command to have written a diagnostic of its own.
-    fn failure_status(&self) -> String {
+    pub(crate) fn failure_status(&self) -> String {
         match (self.code, self.signal) {
             (Some(code), _) => format!("exit status {code}"),
             (None, Some(signal)) => format!("terminated by signal {signal}"),
