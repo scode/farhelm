@@ -26,6 +26,16 @@ SPEC.md or SPEC_impl.md in a way the work now contradicts, all without touching 
   conflict at the end of the ladder, but check it on purpose: two steps that claim the same version, or a fresh-schema
   literal that disagrees with the constant, can survive a rebase that applied cleanly, and an existing database then
   skips a migration.
+- When main bumped the wire protocol version since the work was based (`PROTOCOL_VERSION` in
+  `crates/farhelm-proto/src/lib.rs`) and the work bumps it too, every bump the work makes moves up past main's latest
+  number, in order: the constant, the `protocol_version_is_pinned_at_<n>` test's name and assertion, the constant's doc
+  comment that names that test, the pinned test's own doc comment (keep main's "Version n adds ..." sentence and
+  renumber the work's), every place the work's diff cites its number in prose (SPEC.md or SPEC_impl.md, doc comments
+  such as "Added with `PROTOCOL_VERSION` n"), and the work's commit messages and PR titles and descriptions. Decide this
+  from the work's diff as it was before the rebase, and note there which number it bumped to: when both sides made the
+  same one-line change from the same old number, the rebase can apply cleanly and drop the work's bump, so the rebased
+  diff no longer touches the constant and the work's incompatible change rides on main's version. Two builds that claim
+  one version then disagree about the wire; a landing caught exactly that once (2026-11-08).
 - Fix obvious problems found either way as part of the rebase. A conflict that needs a design decision is the user's:
   describe it and ask rather than picking an answer.
 - Make a judgment call about re-running tests, following `AGENTS.md`, "Tests and validation", and
