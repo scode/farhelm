@@ -232,6 +232,22 @@ pub(crate) enum Status {
     Ended(EndedWords),
 }
 
+impl Status {
+    /// The pane's status badge for the row, including the live mark derived from its activity and seen state.
+    /// An exit with no code reads `Exited`, and an unclassified row has no badge. Each surface decides when to show it.
+    pub(super) fn of(row: &SessionRow) -> Option<Self> {
+        status::live(row)
+            .map(Self::Live)
+            .or_else(|| status::ended_words(row, false).map(Self::Ended))
+    }
+}
+
+/// Measure the row's effective activity with the viewer's clock and stamp it in `zone`. The row supplies its
+/// creation time when it has no activity timestamp. A usable `now` is needed for either pane surface to show an age.
+pub(super) fn activity_age(row: &SessionRow, now: Option<i64>, zone: Zone) -> Option<Age> {
+    age::of(row.info.effective_activity(), now, zone)
+}
+
 /// The session's host as the bar names it.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct Host {
@@ -254,13 +270,7 @@ impl Details {
         now: Option<i64>,
         zone: Zone,
     ) -> Details {
-        let status = if row.stale {
-            None
-        } else {
-            status::live(row)
-                .map(Status::Live)
-                .or_else(|| status::ended_words(row, false).map(Status::Ended))
-        };
+        let status = if row.stale { None } else { Status::of(row) };
         let environment = Environment::of(row, collections);
         let host = (!row.host_name.is_empty()).then(|| {
             let mark = HostMark::of(row, collections, None);
@@ -278,7 +288,7 @@ impl Details {
         let age = if row.stale || deleting.is_some() {
             None
         } else {
-            age::of(row.info.effective_activity(), now, zone)
+            activity_age(row, now, zone)
         };
         let cwd = row.info.cwd.as_str();
         Details {
