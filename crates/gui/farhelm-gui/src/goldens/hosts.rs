@@ -1041,6 +1041,29 @@ pub(super) fn host_menu_setup(state: &SceneState, _: &mut Window, cx: &mut App) 
         .push(Box::new(Pending(Cell::new(true))));
 }
 
+/// A stopped container waiting for its container host has no lifecycle action in the real Hosts menu.
+pub(super) fn host_menu_waiting_container_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::hosts::tests::reference_hosts;
+    use crate::session_list::environment_tests::{Provider, environment_host};
+    use farhelm_proto::ui_channel::HostStateView;
+
+    let mut listed = reference_hosts();
+    listed[1] = environment_host(
+        Provider::Container,
+        HostStateView::Stopped {
+            start_failed: None,
+            waiting_for_place: true,
+        },
+    );
+    listed[1].name = "build-container".into();
+    listed[1].destination = None;
+    hosts_panel_scene(state, &listed, false, cx);
+    state
+        .keep
+        .borrow_mut()
+        .push(Box::new(Pending(Cell::new(true))));
+}
+
 /// The Hosts panel at the scene's left, so its menu has room beside it, and once its toggles have been drawn, one press
 /// of `build-box`'s toggle after that frame.
 pub(super) fn host_menu_scene(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {

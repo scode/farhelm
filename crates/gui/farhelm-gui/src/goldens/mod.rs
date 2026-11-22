@@ -1214,7 +1214,8 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "settings-containers-question",
-        size: (800., 830.),
+        // Keep both the existing help and the added refresh error above the footer.
+        size: (800., 880.),
         draw: settings_containers_question,
         setup: settings_containers_question_setup,
     },
@@ -1331,6 +1332,12 @@ static SCENES: &[Scene] = &[
         size: (640., 418.),
         draw: host_menu_scene,
         setup: host_menu_setup,
+    },
+    Scene {
+        name: "host-menu-waiting-container",
+        size: (640., 418.),
+        draw: host_menu_scene,
+        setup: host_menu_waiting_container_setup,
     },
     Scene {
         name: "host-settings-dialog",

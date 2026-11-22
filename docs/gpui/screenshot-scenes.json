@@ -3000,7 +3000,7 @@
     },
     {
       "golden": "settings-containers-question",
-      "title": "The Containers leftover card with an inline Delete question",
+      "title": "A leftover container stays visible after Refresh fails, with its Delete question open",
       "reference": null
     },
     {
@@ -3117,6 +3117,11 @@
       "golden": "host-menu",
       "title": "A host's actions menu beside its row's toggle: the header with its name, destination and build, then Retry, highlighted, Update, Settings, and Uninstall and Remove behind a separator",
       "reference": "host-menu"
+    },
+    {
+      "golden": "host-menu-waiting-container",
+      "title": "The Hosts action menu for a stopped container waiting for its container host",
+      "reference": null
     },
     {
       "golden": "host-settings-dialog",

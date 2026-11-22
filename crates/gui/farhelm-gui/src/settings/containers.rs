@@ -31,7 +31,8 @@
 //!   between the push and the request, so its "not found" must go with the host rather than wait for Refresh.
 //! - **The leftovers are read when first shown, on Refresh and after a Delete.** They are not pushed, so the section
 //!   reads them (the pattern Agent trust follows), and a reply reaches only the section it was sent for. Each Refresh
-//!   starts a new round, and the answers of an older round are dropped (`Containers::round`).
+//!   starts a new round, and the answers of an older round are dropped (`Containers::round`). A failed read keeps
+//!   the earlier rows beside its reason. Only a successful listing can report that no leftovers were found.
 //! - **Delete always asks.** Delete asks inline, under the lists, naming the container, with focus on Cancel since the
 //!   removal cannot be undone; its answer acts on the row as it was asked about. A leftover with a host row goes through
 //!   ordinary host removal (`DELETE /api/hosts/{id}`), whose connection hold and provisioning lock it needs; one without
@@ -81,9 +82,6 @@ pub(super) const LEFTOVERS_HELP: &str = "These containers have no completed sess
 /// (`places` in `crates/farhelm-helm/src/environment/podman.rs`), which the old section showed.
 const NEEDS_CHECK: &str = "this host needs a Podman check";
 
-/// What the section shows of one list: nothing read yet, the helm's answer, or why there is none.
-type Answered<T> = Option<Result<Vec<T>, HostText>>;
-
 /// A host at an address, as a round remembers the checks it asked for: a retarget is a different address, which the
 /// helm checks afresh, so it is asked about again.
 type Address = (i64, Option<String>);
@@ -101,7 +99,10 @@ struct Refused {
 /// The Containers section, a view of its own that Settings makes the first time Containers shows in an opening and
 /// keeps until the dialog closes (see the module docs).
 pub(super) struct Containers {
-    leftovers: Answered<ContainerLeftoverView>,
+    /// Rows from the last completed listing, minus containers this section has since deleted.
+    leftovers: Option<Vec<ContainerLeftoverView>>,
+    /// The last failed listing's reason, kept beside the earlier rows until a listing succeeds.
+    leftover_error: Option<HostText>,
     /// The first refusal among the current round's checks still not superseded by a pushed result ([`Refused`]).
     refused: Option<Refused>,
     /// The addresses this round has asked the helm to check, so following the store asks for each at most once per
@@ -126,9 +127,10 @@ impl Containers {
     /// Let the golden wait for a real leftover read before asking the same question as Delete.
     #[cfg(test)]
     pub(super) fn first_leftover_for_golden(&self) -> Option<ContainerLeftoverView> {
-        self.leftovers.as_ref()?.as_ref().ok()?.first().cloned()
+        self.leftovers.as_ref()?.first().cloned()
     }
 
+    /// Show a discovery refusal and the Delete question for an earlier row. The interaction tests exercise Refresh.
     #[cfg(test)]
     pub(super) fn ask_for_golden(
         &mut self,
@@ -136,12 +138,16 @@ impl Containers {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.leftover_error = Some(HostText::from_host(
+            "The container host could not be reached.",
+        ));
         self.ask(row, &Mark::take(cx), window, cx);
     }
     /// The section, reading the leftovers and checking every container host now.
     pub(super) fn new(cx: &mut Context<Self>) -> Self {
         let mut section = Containers {
             leftovers: None,
+            leftover_error: None,
             refused: None,
             asked: None,
             round: 0,
@@ -252,7 +258,13 @@ impl Containers {
             move |answer: Result<Vec<ContainerLeftoverView>, HostText>, cx| {
                 let _ = section.update(cx, |section, cx| {
                     if section.round == round {
-                        section.leftovers = Some(answer);
+                        match answer {
+                            Ok(rows) => {
+                                section.leftovers = Some(rows);
+                                section.leftover_error = None;
+                            }
+                            Err(reason) => section.leftover_error = Some(reason),
+                        }
                         cx.notify();
                     }
                 });
@@ -333,7 +345,17 @@ impl Containers {
                 let _ = section.update(cx, |section, cx| {
                     section.deleting = false;
                     match answer {
-                        Ok(_) => Self::read_leftovers(section.round, cx),
+                        Ok(_) => {
+                            // The follow-up read can fail. A container this section just deleted must stay gone.
+                            if let Some(rows) = &mut section.leftovers {
+                                rows.retain(|entry| entry.place != row.place || entry.id != row.id);
+                                // An empty cache after Delete says nothing about the next complete listing.
+                                if rows.is_empty() {
+                                    section.leftovers = None;
+                                }
+                            }
+                            Self::read_leftovers(section.round, cx);
+                        }
                         Err(reason) => section.failure = Some(reason),
                     }
                     cx.notify();
@@ -487,8 +509,8 @@ impl Render for Containers {
             .id("containers-leftovers-heading")
             .role(Role::Heading)
             .aria_label(LEFTOVERS_LABEL);
-        let rows = match &self.leftovers {
-            None => vec![
+        let rows = match (&self.leftovers, &self.leftover_error) {
+            (None, None) => vec![
                 Self::status(
                     "containers-leftovers-reading",
                     "Reading container leftovers…",
@@ -496,17 +518,15 @@ impl Render for Containers {
                 )
                 .into_any_element(),
             ],
-            Some(Err(reason)) => vec![
-                Self::failure_line("containers-leftovers-error", reason, cx).into_any_element(),
-            ],
-            Some(Ok(rows)) if rows.is_empty() => {
+            (Some(rows), None) if rows.is_empty() => {
                 vec![Self::status("containers-leftovers-none", "None found", cx).into_any_element()]
             }
-            Some(Ok(rows)) => rows
+            (Some(rows), _) => rows
                 .iter()
                 .enumerate()
                 .map(|(index, row)| self.leftover_row(row, index, cx).into_any_element())
                 .collect(),
+            (None, Some(_)) => Vec::new(),
         };
         let leftovers = div()
             .id("containers-leftovers")
@@ -519,6 +539,10 @@ impl Render for Containers {
             .child(heading)
             .child(card::rows(
                 rows.into_iter()
+                    .chain(self.leftover_error.as_ref().map(|reason| {
+                        Self::failure_line("containers-leftovers-error", reason, cx)
+                            .into_any_element()
+                    }))
                     .chain(
                         self.question
                             .as_ref()

@@ -72,6 +72,8 @@ linux/host-filter-empty--dark.png 46c0f6ccf634fcdafd6145bdc593e45265513429
 linux/host-filter-empty--light.png 8b2d2628a125e771593ff61ee46261cb4dbced07
 linux/host-menu--dark.png becf11d2cce42bec942d49662a5aa77cd6f76ade
 linux/host-menu--light.png febd2ebf9926d617ec64aba147715cefe51a5e65
+linux/host-menu-waiting-container--dark.png dd0f16741bc9aa2f10df6550cbe4084eea1032da
+linux/host-menu-waiting-container--light.png 65bb32c38c5e6ca0dc9b59c563014cd04cf9e4de
 linux/host-progress-card--dark.png 7e03f9998a1ff725dae9f35194900d6d9ec8a027
 linux/host-progress-card--light.png 23adc728ccff4a0b030baba1c96a0eadca80cdbe
 linux/host-progress-card-preview--dark.png 3a0d12cb1eaccb947084415d6cc5ce525a0bf42b
@@ -250,8 +252,8 @@ linux/settings-claude--dark.png 984143a50784fd970f026dd2bb168ed10b934f13
 linux/settings-claude--light.png 9558d88858ed674058c78e27bb790bd7bc7fd7e0
 linux/settings-containers--dark.png 46bebb668e00fd731935eca34f290121a16087cf
 linux/settings-containers--light.png 59db739eb3456059bc8a63acf52f47a9dba21d70
-linux/settings-containers-question--dark.png 62f1cf4d1b4d369065f554602676836c7ad870e2
-linux/settings-containers-question--light.png 56be0f1435195e52042066325e00171d6755f168
+linux/settings-containers-question--dark.png 38917f590a8231db2e5328f61646acc5dbb07e9b
+linux/settings-containers-question--light.png 04b09b7821231be27712434f6ca1bc1ec00f2229
 linux/settings-credential-editor--dark.png f79bfa48f4132c30916a9ad216af48291cb001e1
 linux/settings-credential-editor--light.png 9a598a749fcf1d6b3683f9bd90a90dd1b152b980
 linux/settings-credentials--dark.png decb9d558ff39721801e31b7c86930de7c087a50

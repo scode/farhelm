@@ -73,10 +73,6 @@ consequences.
   discovery fails while cleanup remains unfinished, earlier orphan rows disappear and unrelated fleet updates keep
   retrying the failed read.
 
-- [`trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md`](trailing-podman-leftover-discovery-all-or-nothing-and-row-loss.md)
-  — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`tensorlake-lifecycle-falls-back-to-unowned-name.md`](tensorlake-lifecycle-falls-back-to-unowned-name.md) — If
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
@@ -220,10 +216,6 @@ consequences.
 
 - [`trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md`](trailing-ordinary-tensorlake-add-keeps-source-mutex-through-ssh-readiness.md)
   — Ordinary Add retains source exclusion during post-Running SSH readiness. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-ui-stopped-container-waiting-place-offers-suspend.md`](trailing-ui-stopped-container-waiting-place-offers-suspend.md)
-  — Stopped container offers Suspend when its container host is unavailable. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md)

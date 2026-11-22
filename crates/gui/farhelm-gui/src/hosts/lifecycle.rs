@@ -7,10 +7,10 @@
 //! `cancel_suspend`) and the row's inline `host-resume` button (`hosts.rs`), at reference commit `24bc0580`. Here's the
 //! TLDR of its rules:
 //!
-//! - **Where they show.** On a sandbox or container in every phase but a deletion, under way or failed
-//!   ([`super::offers::lifecycle_of`]): Resume where it is suspended, stopped with its place available, or between
-//!   states, inline between the row's name and its phase and in the host menu after Retry; Suspend otherwise, in the
-//!   menu only, an unreachable machine included. Both are unavailable while the host is busy, and Resume while its
+//! - **Where they show.** A deletion or a stopped container waiting for its container host offers neither action
+//!   ([`super::offers::lifecycle_of`]). Resume shows on a suspended machine, a stopped container with its place
+//!   available, or a machine between states, both inline and in the menu after Retry. The other states offer Suspend
+//!   in the menu, an unreachable machine included. Both are unavailable while the host is busy, and Resume while its
 //!   change runs, as the old button and item were. While a Resume's request is out, and while the change it starts
 //!   runs, the unavailable Resume stays on the name's line and "Resuming…" takes a line of its own under it, as the
 //!   old row's grid laid out `.host-resume` and its lifecycle progress; the press hands focus to the row's menu

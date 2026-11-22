@@ -512,6 +512,35 @@ fn failed_container_reads_show_their_reasons_and_never_none_found(cx: &mut TestA
     assert_eq!(sent(&mut helm), []);
 }
 
+/// An unreachable place can fail a whole refresh. Keep the last known containers visible beside that error, then use
+/// the next successful listing as the new answer, even if it is empty.
+#[gpui::test]
+fn a_failed_refresh_keeps_the_previous_leftovers_until_a_read_succeeds(cx: &mut TestAppContext) {
+    let (mut helm, cx, _gear) = open_rail(cx, &Preferences::default());
+    show_containers_with(&mut helm, cx, &[], json!([leftover("build-check", None)]));
+    assert!(drawn(cx, "containers-leftover-0-delete"));
+
+    click(cx, "containers-refresh");
+    let failed = round(&mut helm, &[]);
+    helm.reply(
+        failed.leftovers,
+        502,
+        Some(json!("container host unreachable")),
+    );
+    settle(cx);
+    assert!(drawn(cx, "containers-leftover-0-delete"));
+    assert!(drawn(cx, "containers-leftovers-error"));
+    assert!(painted(cx).contains("container host unreachable"));
+
+    click(cx, "containers-refresh");
+    let recovered = round(&mut helm, &[]);
+    helm.reply(recovered.leftovers, 200, Some(json!([])));
+    settle(cx);
+    assert!(drawn(cx, "containers-leftovers-none"));
+    assert!(!drawn(cx, "containers-leftovers-error"));
+    assert!(!drawn(cx, "containers-leftover-0-delete"));
+}
+
 // ---- Delete --------------------------------------------------------------------------------------------------------
 
 /// SPEC.md: a container's removal destroys every session, process, file and unpushed change in it, so Delete must
@@ -584,10 +613,21 @@ fn a_leftover_delete_asks_sends_its_place_and_id_and_shows_a_refusal(cx: &mut Te
     let deletes = sent(&mut helm);
     helm.reply(deletes[0].id, 200, Some(json!({})));
     settle(cx);
+    let reads = sent(&mut helm);
     assert_eq!(
-        sent_paths(&mut helm),
+        paths(&reads),
         [(Method::Get, LEFTOVERS.to_string())],
         "a done Delete reads the leftovers again"
+    );
+    assert!(drawn(cx, "containers-leftovers-reading"));
+    assert!(!drawn(cx, "containers-leftovers-none"));
+    assert!(!drawn(cx, "containers-leftover-0-delete"));
+    helm.reply(reads[0].id, 502, Some(json!("another host unreachable")));
+    settle(cx);
+    assert!(drawn(cx, "containers-leftovers-error"));
+    assert!(
+        !drawn(cx, "containers-leftover-0-delete"),
+        "the deleted row stays gone"
     );
 }
 
