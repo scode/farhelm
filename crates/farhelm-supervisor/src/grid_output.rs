@@ -16,6 +16,8 @@
 //!   a run of its own, as the format requires. Blank cells in the default
 //!   style are left out, which the format reads as blank. Wide-wrap padding
 //!   is marked separately and carries a space run only when it needs paint.
+//!   If erasing a wide character's right half changes its background, the
+//!   two columns get their own runs so the client can paint each cell.
 //! - **The screen** ([`Screen`], [`SentScreen`]): what the screen looks
 //!   like now, and what the client was last sent, from which
 //!   [`SentScreen::update`] makes the next `rows` and `frame` messages:
@@ -138,8 +140,8 @@ impl CellRow {
 /// `colors` saying which palette entries the program redefined.
 ///
 /// Tabs read as spaces (alacritty keeps a tab's first cell as `\t` for
-/// copying). The spacer cell after a wide character is covered by that
-/// character's run. A wrap placeholder at the end of a row instead sets
+/// copying). A wide run covers its spacer or a plain blank that has the same
+/// background. A changed background gets its own cell. A wrap placeholder sets
 /// the padding bit, so the receiver can distinguish it from a printed space.
 /// Its nondefault style travels in a separate unlinked space run. Default
 /// blank cells are omitted, including default spaces at either end of a run.
@@ -200,13 +202,9 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
             let mut text = String::with_capacity(4 * (1 + zerowidth.len()));
             text.push(character);
             text.extend(zerowidth);
-            // A cell shift can leave a wide head beside the wrap placeholder.
-            // Preserve the placeholder's own column for text operations.
             let width = if wide
                 && col + 1 < cols
-                && !row[Column(col + 1)]
-                    .flags
-                    .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+                && wide_glyph_owns_next_cell(&row[Column(col + 1)], style.bg, colors)
             {
                 2
             } else {
@@ -243,6 +241,19 @@ pub fn row_from_cells(row: &TermRow<Cell>, cols: usize, colors: &Colors) -> Cell
         wide_wrap_padding,
         runs,
     }
+}
+
+/// A surviving spacer belongs to its wide glyph. Erasing that spacer leaves a blank with the erase color.
+/// Keep the glyph's full width when that color is already on its run. A shifted cell carrying text, a link,
+/// or a wrap placeholder needs its own column even when its background matches.
+fn wide_glyph_owns_next_cell(next: &Cell, bg: Color, colors: &Colors) -> bool {
+    (next.flags.contains(Flags::WIDE_CHAR_SPACER)
+        && !next.flags.contains(Flags::LEADING_WIDE_CHAR_SPACER))
+        || (next.c == ' '
+            && next.zerowidth().unwrap_or(&[]).is_empty()
+            && next.hyperlink().is_none()
+            && next.flags.difference(Flags::WRAPLINE).is_empty()
+            && wire_color(next.bg, colors) == bg)
 }
 
 /// Drop what draws the same as nothing: runs of default-style spaces, and

@@ -250,11 +250,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   from the reviewed revision `c9575db61abb31bebe43da0f11a76712e18725c1`. Read GUI locations relative to
   `crates/gui/farhelm-gui/src/` and desktop locations relative to `crates/farhelm-desktop/src/`.
 
-  - `terminal-grid-row-traversal-duplicated.md`. In
-    `crates/gui/farhelm-grid-model/src/{paths.rs:335–383,selection.rs:241–281}`, both row walks fill gaps, split plain
-    runs, keep other runs' widths and drop wide-wrap padding. Share a walker yielding column, width and text. Keep byte
-    offsets for paths and UTF-16 offsets for selection with the callers. Plan:
-    `plans/queue/wide-glyph-padding-cells.md`.
   - `gui-controls-repeat-shared-rendering.md`. Share the absolute two-pixel focus-ring element across
     `components/button.rs:1163–1200`, `select.rs:414–427`, `radio_group.rs:775–787,840–852,900–912,953–965`,
     `menu_item.rs:312–326`, `list_row.rs:125–136`, `tab_strip.rs:240–256`, `copy_field.rs:288–299`,
@@ -445,23 +440,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   session and generation's derived scope name, and retire the obligation once the scope is confirmed gone. Cover a gone
   host with an unconfirmed scope that becomes checkable on a later start. Plan:
   `plans/queue/restart-deleted-cleanup.md`.
-
-- **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
-  next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
-  the viewer paints the default background there. Carry that cell's visible style through screen and history. Give the
-  viewer a way to distinguish the placeholder from a space the program actually printed. Sending an ordinary styled
-  space makes selection, printed-path detection and hyperlink joining treat the padding as text. The current client
-  infers padding from an uncovered last column before a wide glyph. The row format has only a wrap bit and styled runs,
-  so settle how to carry that distinction across versions before changing the encoder. Cover both a colored placeholder
-  and a real styled space before a wrapped wide glyph. Plan: `plans/queue/wide-glyph-padding-cells.md`.
-
-- **Show the new background after erasing half of a wide terminal glyph.** If a program erases just the right column of
-  a wide character using a different background, the grid encoder sends the old two-column run and hides the erased
-  cell's style. Emit a one-column glyph and a separate erased cell when the continuation spacer is gone, on screen and
-  in scrollback. Also preserve the previous row's wide-wrap padding when the half-erased glyph starts a wrapped row. The
-  viewer currently recognizes that padding by the next run occupying two columns. With separate cells it needs the same
-  explicit wrap distinction as the colored-margin item above. Cover erasure both mid-row and just after a wrap,
-  including selection and links across the seam. Plan: `plans/queue/wide-glyph-padding-cells.md`.
 
 - **Keep working container images when Rebuild fails.** Rebuild currently retires a recipe's Podman software and
   prepared images before building replacements (`crates/farhelm-helm/src/environment/podman/build.rs`). A package or

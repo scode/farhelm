@@ -261,6 +261,119 @@ fn shifted_wide_head_stops_before_the_wrap_padding() {
     assert_eq!((last.col, last.width, last.text.as_str()), (3, 1, "界"));
 }
 
+/// Erasing the right half of a wide glyph leaves a separate background when the erase changes the color.
+/// If both columns still have the same color, the full glyph remains visible, including in scrollback.
+#[test]
+fn right_half_erase_splits_the_glyph_only_for_a_new_background() {
+    for (erase, bg, glyph_width) in [(b"\x1b[42m".as_slice(), 2, 2), (b"\x1b[41m", 1, 1)] {
+        let mut emulator = emulator(6, 3, 100, "\x1b[42ma界Z".as_bytes());
+        let before = &emulator.term().grid()[Line(0)][Column(2)];
+        assert!(before.flags.contains(Flags::WIDE_CHAR_SPACER));
+        feed(&mut emulator, b"\x1b[1;3H");
+        feed(&mut emulator, erase);
+        feed(&mut emulator, b"\x1b[X");
+        let after = &emulator.term().grid()[Line(0)][Column(2)];
+        assert_eq!((after.c, after.flags), (' ', Flags::empty()));
+
+        let visible = screen(&emulator);
+        let row = &visible.lines[0];
+        let glyph = &row.runs[1];
+        assert_eq!(
+            (glyph.col, glyph.width, glyph.text.as_str()),
+            (1, glyph_width, "界")
+        );
+        assert_eq!(glyph.style.bg, Color::Palette(2));
+        if glyph_width == 1 {
+            let erased = &row.runs[2];
+            assert_eq!(
+                (erased.col, erased.width, erased.text.as_str()),
+                (2, 1, " ")
+            );
+            assert_eq!(erased.style.bg, Color::Palette(bg));
+        }
+        assert_eq!(row.runs.len(), if glyph_width == 1 { 4 } else { 3 });
+        let tail = row.runs.last().unwrap();
+        assert_eq!((tail.col, tail.text.as_str()), (3, "Z"));
+
+        feed(&mut emulator, b"\r\n\r\n\r\n");
+        let history = HistoryCursor::new().read(&emulator, 0, usize::MAX);
+        assert_eq!(&history.lines[0], row);
+    }
+}
+
+/// The padding belongs to the wrapped row even when the next row's glyph now occupies just one column.
+/// The glyph keeps its link, and the right half takes the new background without inheriting the link.
+#[test]
+fn right_half_erase_after_a_wrap_preserves_the_previous_padding() {
+    let mut emulator = emulator(
+        4,
+        3,
+        100,
+        "\x1b[42m\x1b]8;id=example;https://example.test\x1b\\abc界".as_bytes(),
+    );
+    let grid = emulator.term().grid();
+    assert!(
+        grid[Line(0)][Column(3)]
+            .flags
+            .contains(Flags::LEADING_WIDE_CHAR_SPACER)
+    );
+    assert!(
+        grid[Line(1)][Column(1)]
+            .flags
+            .contains(Flags::WIDE_CHAR_SPACER)
+    );
+    let before = screen(&emulator);
+    feed(&mut emulator, b"\x1b[2;2H\x1b[41m\x1b[X");
+    let after = screen(&emulator);
+    assert!(after.lines[0].wide_wrap_padding);
+    assert_eq!(after.lines[0], before.lines[0]);
+    let [glyph, erased] = after.lines[1].runs.as_slice() else {
+        panic!(
+            "expected the glyph and erased cell: {:?}",
+            after.lines[1].runs
+        );
+    };
+    assert_eq!((glyph.col, glyph.width, glyph.text.as_str()), (0, 1, "界"));
+    assert!(glyph.link.is_some());
+    assert_eq!(glyph.link, after.lines[0].runs[0].link);
+    assert_eq!(
+        (erased.col, erased.width, erased.text.as_str()),
+        (1, 1, " ")
+    );
+    assert_eq!(erased.style.bg, Color::Palette(1));
+    assert!(erased.link.is_none());
+
+    feed(&mut emulator, b"\r\n\r\n\r\n");
+    let history = HistoryCursor::new().read(&emulator, 0, usize::MAX);
+    assert_eq!(history.lines.as_slice(), &after.lines[..2]);
+}
+
+/// Deleting only the spacer shifts printed text into its column. The glyph must give that text its own cell
+/// even when both backgrounds are the same.
+#[test]
+fn deleting_the_wide_spacer_keeps_a_shifted_printed_character() {
+    let mut emulator = emulator(6, 3, 100, "a界Z".as_bytes());
+    assert!(
+        emulator.term().grid()[Line(0)][Column(2)]
+            .flags
+            .contains(Flags::WIDE_CHAR_SPACER)
+    );
+    feed(&mut emulator, b"\x1b[1;3H\x1b[P");
+    assert_eq!(emulator.term().grid()[Line(0)][Column(2)].c, 'Z');
+    let visible = screen(&emulator);
+    let [_, glyph, printed] = visible.lines[0].runs.as_slice() else {
+        panic!(
+            "expected the leading text, wide glyph and shifted text: {:?}",
+            visible.lines[0].runs
+        );
+    };
+    assert_eq!((glyph.col, glyph.width, glyph.text.as_str()), (1, 1, "界"));
+    assert_eq!(
+        (printed.col, printed.width, printed.text.as_str()),
+        (2, 1, "Z")
+    );
+}
+
 /// An emoji that a variation selector (VS16) makes two cells wide is
 /// replayed two cells wide, and a cursor left right after one stays two
 /// cells after it.

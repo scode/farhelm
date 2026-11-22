@@ -146,9 +146,12 @@ pub(super) fn terminal_styles_setup(state: &SceneState, _: &mut Window, cx: &mut
 
 /// The last column of the first colored row is a separate padding run. Its background must meet the grid's edge.
 /// The following row starts with a two-cell lightning glyph from the bundled font, so no fallback font is needed.
+/// The last two rows show the same glyph after erasing its right half. A new color clips the glyph at one column.
+/// When the erase leaves the same color, the glyph still has both columns to draw in.
 pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     const HEAD: &str = "wide character wraps here";
     const GREEN: i64 = 0x12a_6f62;
+    const RED: i64 = 0x197_4640;
     let width: u16 = HEAD.len().try_into().unwrap();
     let screen = serde_json::json!([
         [0, {"w": true, "p": true, "r": [
@@ -159,10 +162,19 @@ pub(super) fn terminal_wide_glyphs_setup(state: &SceneState, _: &mut Window, cx:
             run(0, 2, "⚡", 0, -1, GREEN),
             run(2, 9, "continued", 0, -1, GREEN),
         ]),
+        screen_row(2, vec![
+            run(0, 1, "⚡", 0, -1, GREEN),
+            run(1, 1, " ", 0, -1, RED),
+            run(3, 20, "different background", 0, -1, -1),
+        ]),
+        screen_row(3, vec![
+            run(0, 2, "⚡", 0, -1, GREEN),
+            run(3, 15, "same background", 0, -1, -1),
+        ]),
     ]);
     let cursor = serde_json::json!({"x":0,"y":0,"visible":false,"shape":"block","blink":false});
     let view = terminal_view(
-        grid_output(width + 1, 2, screen, cursor),
+        grid_output(width + 1, 4, screen, cursor),
         CursorPhase {
             focused: false,
             on: false,
