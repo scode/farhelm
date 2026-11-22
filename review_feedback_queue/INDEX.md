@@ -169,14 +169,6 @@ consequences.
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-sealed-delete-comment-hold-versus-seal-record.md`](trailing-sealed-delete-comment-hold-versus-seal-record.md)
-  — Deletion test comment wrongly forbids releasing the failed host's connection hold. Abbreviated collection;
-  confidence, proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md`](trailing-shared-suspended-view-doc-retains-tensorlake-only-contract.md)
-  — Suspended view documentation retains the known Tensorlake-only vocabulary. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md)
   — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.

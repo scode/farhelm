@@ -1098,15 +1098,15 @@ pub enum HostStateView {
         direction: crate::tensorlake::LifecycleDirection,
         requested_at: i64,
     },
-    /// A Tensorlake host whose sandbox Tensorlake reports suspended (or
-    /// failed to resume); nothing is dialed until it runs again. Times are
-    /// unix ms: `observed_at` is when this helm first saw the suspension,
-    /// `suspended_by_farhelm_at` when Farhelm's own Suspend finished (carried
-    /// by the confirmed state and persisted on the host row for recovery;
-    /// `None` when Farhelm did not suspend it, which is how the UI tells
-    /// "suspended from Farhelm"
-    /// from an idle timeout). `resume_failed` is Tensorlake's diagnosis of a
-    /// failed resume.
+    /// A disposable environment whose reported suspension prevents a supervisor
+    /// dial. This includes paused Podman containers and Tensorlake sandboxes
+    /// that are suspended, suspending, or failed to resume.
+    /// `observed_at` records when the helm noticed the current suspension, in
+    /// Unix milliseconds. `suspended_by_farhelm_at` is the confirmed completion
+    /// time of Farhelm's own Suspend, when known, in the same units. Farhelm
+    /// saves that time on Tensorlake host rows for recovery after restart.
+    /// `resume_failed` describes a provider-reported failed resume. Farhelm
+    /// supplies a fallback message when Tensorlake gives no reason.
     #[serde(rename = "suspended")]
     Suspended {
         observed_at: i64,
