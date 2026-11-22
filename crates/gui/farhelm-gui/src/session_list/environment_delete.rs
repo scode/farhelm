@@ -249,19 +249,19 @@ pub(super) fn start(
         tracing::warn!("an environment Delete without its environment was not sent");
         return Err(NotStarted::Retired);
     };
-    let Some(operations) = session::current_operations(cx) else {
-        return Err(NotStarted::Retired);
-    };
-    let command = command(&frozen.key, asked.lane).map_err(|error| {
-        tracing::warn!("a session key that cannot be a path segment was not deleted");
-        NotStarted::Path(error)
-    })?;
-    let key = OpKey::session(&frozen.key);
-    operations.update(cx, |operations, cx| {
-        operations.start(&key, command, cx, move |settled, cx| {
+    super::start_request(
+        &OpKey::session(&frozen.key),
+        command(&frozen.key, asked.lane),
+        cx,
+        move |settled, cx| {
             let carries_on = settle(frozen, asked, again, settled, cx);
             then(carries_on, cx);
-        })
+        },
+    )
+    .inspect_err(|refused| {
+        if let NotStarted::Path(_) = refused {
+            tracing::warn!("a session key that cannot be a path segment was not deleted");
+        }
     })
 }
 

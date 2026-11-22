@@ -84,13 +84,13 @@ use farhelm_proto::{SessionStatus, SessionStopRequest};
 use gpui::{AnyWindowHandle, App, BorrowAppContext as _, Global, Window};
 use serde_json::json;
 
-use super::menu;
 use super::status::HostLookup;
+use super::{menu, outcome};
 use crate::components::{HoverHelp, Tier};
 use crate::environment_ui::{ProviderUi, target_label};
 use crate::hosts::identity::phase;
 use crate::launcher::launch::host_lifecycle_refusal;
-use crate::operations::{self, Command, OpKey, Outcome, Settled, Work};
+use crate::operations::{self, Command, NotStarted, OpKey, Outcome, Settled, Work};
 use crate::prompt::{Answer, Question};
 use crate::session::{self, PerSession};
 
@@ -301,9 +301,7 @@ impl Pending {
 /// flight on the session's key, then the pushed phase while the provider changes the environment, which is what a 504
 /// at the bound leaves to show (the module docs). `None` while nothing is under way.
 pub(crate) fn pending(key: &str, environment: Environment, cx: &App) -> Option<Pending> {
-    let work = session::current_operations(cx)
-        .and_then(|operations| operations.read(cx).in_flight(&OpKey::session(key)));
-    match work {
+    match outcome::in_flight(key, cx) {
         Some(Work::Suspend) => return Some(Pending::Suspending),
         Some(Work::Resume) => return Some(Pending::Resuming),
         Some(Work::StopAndSuspend) => return Some(Pending::Stopping),
@@ -322,16 +320,16 @@ pub(crate) fn pending(key: &str, environment: Environment, cx: &App) -> Option<P
 /// on the session's key, or the Hosts panel's Suspend on the host's key. The session pane holds back the reconnect card
 /// meanwhile. No provider is compared: every provider's Suspend ends the terminal's stream.
 pub(crate) fn suspend_in_flight(key: &str, cx: &App) -> bool {
-    let Some(operations) = session::current_operations(cx) else {
-        return false;
-    };
-    let operations = operations.read(cx);
     if matches!(
-        operations.in_flight(&OpKey::session(key)),
+        outcome::in_flight(key, cx),
         Some(Work::Suspend | Work::StopAndSuspend)
     ) {
         return true;
     }
+    let Some(operations) = session::current_operations(cx) else {
+        return false;
+    };
+    let operations = operations.read(cx);
     let host = session::current_store(cx).and_then(|store| {
         store
             .read(cx)
@@ -667,21 +665,16 @@ fn send(asked: Asked, cx: &mut App) {
     if host_lifecycle_refusal(asked.host, cx).is_some() {
         return;
     }
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command(&asked) else {
-        tracing::warn!("an environment request whose ids cannot be path segments was not sent");
-        return;
-    };
+    let command = command(&asked);
     let key = asked.key;
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(&key), command, cx, move |settled, cx| {
-            settle(&key, settled, cx)
-        })
-    });
-    if let Err(refused) = started {
-        tracing::debug!(?refused, "an environment request was not sent");
+    match super::start_request(&OpKey::session(&key), command, cx, move |settled, cx| {
+        settle(&key, settled, cx);
+    }) {
+        Ok(()) | Err(NotStarted::Retired) => {}
+        Err(NotStarted::Path(_)) => {
+            tracing::warn!("an environment request whose ids cannot be path segments was not sent");
+        }
+        Err(refused) => tracing::debug!(?refused, "an environment request was not sent"),
     }
 }
 

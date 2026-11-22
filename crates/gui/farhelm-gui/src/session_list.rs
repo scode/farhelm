@@ -245,7 +245,7 @@ pub(crate) mod tests;
 use std::collections::{HashMap, HashSet};
 use std::rc::Rc;
 
-use farhelm_helm_client::Collections;
+use farhelm_helm_client::{Collections, PathError};
 use farhelm_proto::ui_channel::{Availability, Collection, CollectionMeta, SessionRow};
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement,
@@ -272,6 +272,22 @@ use crate::theme::{self, metrics};
 use crate::trash::TrashButton;
 use crate::{launcher, templates, ticker};
 use selection::{Change, Listed, Open, Stamped};
+
+/// Start a list request on its session or group key in the current UI session's store.
+/// An inert window returns `Retired` even when the command's route was invalid.
+/// The store owns admission and drops the completion on reset. Callers own guards, logging, and reply handling.
+fn start_request(
+    key: &operations::OpKey,
+    command: Result<operations::Command, PathError>,
+    cx: &mut App,
+    then: impl FnOnce(&operations::Settled, &mut App) + 'static,
+) -> Result<(), operations::NotStarted> {
+    let store = session::current_operations(cx).ok_or(operations::NotStarted::Retired)?;
+    let command = command.map_err(operations::NotStarted::Path)?;
+    store.update(cx, |operations, cx| {
+        operations.start(key, command, cx, then)
+    })
+}
 
 /// How far past each edge of its view the list draws rows: about two noncompact rows, so a row scrolling in is already
 /// laid out and a short scroll draws nothing new. Every pixel of it is rows drawn on every frame, which is the cost the

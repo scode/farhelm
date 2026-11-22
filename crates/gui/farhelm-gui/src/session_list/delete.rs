@@ -67,7 +67,7 @@ use gpui::{
 use serde_json::Value;
 
 use super::environment_delete::{self, AskAgain};
-use super::{SessionList, delete_notice, menu};
+use super::{SessionList, delete_notice, menu, outcome};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
@@ -367,16 +367,12 @@ pub(super) fn start(
     then: impl FnOnce(&mut App) + 'static,
     cx: &mut App,
 ) -> Result<(), NotStarted> {
-    let Some(operations) = session::current_operations(cx) else {
-        return Err(NotStarted::Retired);
-    };
-    let command = command(key, guard).map_err(|error| {
-        tracing::warn!("a session key that cannot be a path segment was not deleted");
-        NotStarted::Path(error)
-    })?;
     let deleted = key.to_owned();
-    operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+    super::start_request(
+        &OpKey::session(key),
+        command(key, guard),
+        cx,
+        move |settled, cx| {
             if let Outcome::Done(reply) = &settled.outcome {
                 record_deleted_here(&deleted, cx);
                 let outcome = decode(reply.as_ref());
@@ -385,7 +381,12 @@ pub(super) fn start(
                 delete_notice::publish(outcome.and_then(|outcome| outcome.notice), cx);
             }
             then(cx);
-        })
+        },
+    )
+    .inspect_err(|refused| {
+        if let NotStarted::Path(_) = refused {
+            tracing::warn!("a session key that cannot be a path segment was not deleted");
+        }
     })
 }
 
@@ -431,12 +432,7 @@ pub(crate) fn deleted_here(key: &str, cx: &mut App) -> bool {
 /// Delete) is refused ([`super::menu::actionable`]) and its menu draws them unavailable, as SPEC.md's "a pending
 /// request refuses another lifecycle action" asks.
 pub(crate) fn busy(key: &str, cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations
-            .read(cx)
-            .in_flight(&OpKey::session(key))
-            .is_some()
-    })
+    outcome::in_flight(key, cx).is_some()
 }
 
 /// The row, header and terminal scrim all describe the same pending Delete. The guard says which processes the
@@ -447,8 +443,7 @@ pub(crate) fn busy(key: &str, cx: &App) -> bool {
 /// Environment Delete has no request guard, so its label follows the current session row, or says "Deleting…"
 /// when that row is gone.
 pub(crate) fn in_flight(key: &str, cx: &App) -> Option<&'static str> {
-    let operations = session::current_operations(cx)?;
-    let work = operations.read(cx).in_flight(&OpKey::session(key))?;
+    let work = outcome::in_flight(key, cx)?;
     let store = session::current_store(cx);
     let row = store
         .as_ref()

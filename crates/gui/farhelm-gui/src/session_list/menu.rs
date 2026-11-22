@@ -147,7 +147,7 @@ use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::entry;
 use crate::layers::{self, Anchor, LayerId, Popover, Subject};
-use crate::operations::{Command, OpKey, Work};
+use crate::operations::{Command, NotStarted, OpKey, Settled, Work};
 use crate::prompt::{self, Question};
 use crate::theme::metrics;
 use crate::{local_state, session};
@@ -737,20 +737,14 @@ pub(super) fn send_with(
     key: &OpKey,
     command: Result<Command, PathError>,
     cx: &mut App,
-    then: impl FnOnce(&crate::operations::Settled, &mut App) + 'static,
+    then: impl FnOnce(&Settled, &mut App) + 'static,
 ) {
-    let Some(operations) = session::current_operations(cx) else {
-        return;
-    };
-    let Ok(command) = command else {
-        tracing::warn!("an item key that cannot be a path segment was not sent a list request");
-        return;
-    };
-    let started = operations.update(cx, |operations, cx| {
-        operations.start(key, command, cx, then)
-    });
-    if let Err(refused) = started {
-        tracing::debug!(?refused, "a list request was not sent");
+    match super::start_request(key, command, cx, then) {
+        Ok(()) | Err(NotStarted::Retired) => {}
+        Err(NotStarted::Path(_)) => {
+            tracing::warn!("an item key that cannot be a path segment was not sent a list request");
+        }
+        Err(refused) => tracing::debug!(?refused, "a list request was not sent"),
     }
 }
 

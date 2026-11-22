@@ -38,7 +38,7 @@ use gpui::{
 use serde_json::{Value, json};
 
 use super::environment;
-use super::{SessionList, menu};
+use super::{SessionList, menu, outcome};
 use crate::components::{HoverHelp, Tier, spinner_icon};
 use crate::environment_ui::ProviderUi;
 use crate::focus::Mark;
@@ -253,19 +253,20 @@ pub(super) fn start(
     then: impl FnOnce(&mut App) + 'static,
     cx: &mut App,
 ) -> Result<(), NotStarted> {
-    let Some(operations) = session::current_operations(cx) else {
-        return Err(NotStarted::Retired);
-    };
-    let command = command(key, guard).map_err(|error| {
-        tracing::warn!("a session key that cannot be a path segment was not stopped");
-        NotStarted::Path(error)
-    })?;
     let stopped = key.to_owned();
-    operations.update(cx, |operations, cx| {
-        operations.start(&OpKey::session(key), command, cx, move |settled, cx| {
+    super::start_request(
+        &OpKey::session(key),
+        command(key, guard),
+        cx,
+        move |settled, cx| {
             settle(&stopped, settled, cx);
             then(cx);
-        })
+        },
+    )
+    .inspect_err(|refused| {
+        if let NotStarted::Path(_) = refused {
+            tracing::warn!("a session key that cannot be a path segment was not stopped");
+        }
     })
 }
 
@@ -307,9 +308,7 @@ fn notice(body: Option<&Value>) -> Option<String> {
 
 /// Whether `key` has a Stop in flight: its row then shows [`progress`] before its title.
 pub(crate) fn in_flight(key: &str, cx: &App) -> bool {
-    session::current_operations(cx).is_some_and(|operations| {
-        operations.read(cx).in_flight(&OpKey::session(key)) == Some(Work::Stop)
-    })
+    outcome::in_flight(key, cx) == Some(Work::Stop)
 }
 
 /// The row's in-progress mark for `key`'s pending request: the spinner at `step` and `label` ("Stopping…" for a Stop),
