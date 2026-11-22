@@ -300,20 +300,38 @@ fn release_section(release: &notes::ReleaseHighlights, cx: &App) -> Div {
                                 .tier(Tier::Link)
                                 .on_click(move |_, _, cx| cx.open_url(&url))
                             });
+                            // Each entry is a bulleted list item, as on the website's Release notes page.
+                            // The bullet sits in its own column so wrapped lines and the screenshot link
+                            // hang under the text rather than under the bullet. It shares the body's text
+                            // size and line height, so in a top-aligned row it centers on the first line.
                             div()
                                 .flex()
-                                .flex_col()
-                                .gap(px(4.))
-                                .pl(px(12.))
                                 .items_start()
-                                .child(paragraph(
-                                    SharedString::from(format!(
-                                        "whats-new-entry-{}-{category_index}-{index}",
-                                        release.version
-                                    )),
-                                    &entry.pieces,
-                                ))
-                                .children(link)
+                                .gap(px(8.))
+                                .pl(px(4.))
+                                .child(
+                                    div()
+                                        .flex_none()
+                                        .text_color(theme::color(palette.fg_2))
+                                        .child("•"),
+                                )
+                                .child(
+                                    div()
+                                        .flex()
+                                        .flex_col()
+                                        .flex_1()
+                                        .min_w_0()
+                                        .gap(px(4.))
+                                        .items_start()
+                                        .child(paragraph(
+                                            SharedString::from(format!(
+                                                "whats-new-entry-{}-{category_index}-{index}",
+                                                release.version
+                                            )),
+                                            &entry.pieces,
+                                        ))
+                                        .children(link),
+                                )
                         }))
                 }),
         )
