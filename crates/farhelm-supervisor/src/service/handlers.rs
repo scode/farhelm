@@ -10896,7 +10896,7 @@ mod tests {
                         matches!(name, "Detach" | "Resize" | "PauseOutput" | "ResumeOutput");
                     // Terminal control needs a live terminal of the target's
                     // own: a stand-in host, ended when this case's scope does.
-                    let (terminal, _target_host) = if terminal_control {
+                    let (terminal, target_host) = if terminal_control {
                         let (host, test_host) =
                             crate::hosts::terminal::test_host::adopt_test_host(None).await;
                         (Some(host), Some(test_host))
@@ -10982,11 +10982,12 @@ mod tests {
                                 .await;
                         }
                     }
-                    (message, listener)
+                    (message, listener, target_host)
                 }
             })
             .await;
-            let (message, listener) = match prepared {
+            // The prepared route needs its own host through the observation.
+            let (message, listener, _target_host) = match prepared {
                 Ok(prepared) => prepared,
                 Err(error) => {
                     let closed = shared.lock().await.finish().await;
@@ -11302,12 +11303,12 @@ mod tests {
         host.send(ControlMsg::ListSessions { req_id: 3 }).await;
         host.type_and_see_received("typed-while-the-list-waits")
             .await;
+        // Typing observes the terminal host, so it leaves the connection's
+        // output unread. Give a premature list reply a chance to reach us.
+        let early = tokio::time::timeout(Duration::from_secs(1), host.reply(3)).await;
         assert!(
-            host.replies
-                .iter()
-                .all(|reply| reply.reply_req_id() != Some(3)),
-            "the list must still be waiting for a list permit when the echo arrives, got {:?}",
-            host.replies
+            early.is_err(),
+            "list finished with every permit held: {early:?}"
         );
 
         drop(held);

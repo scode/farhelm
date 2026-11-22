@@ -92,6 +92,8 @@ pub(crate) struct TestHost {
     unreadable: Arc<AtomicBool>,
     /// How many connections the host has accepted.
     accepted: Arc<AtomicUsize>,
+    /// Shutdown reaches the protocol before the stand-in sends Goodbye.
+    shutdown_seen: Arc<AtomicBool>,
     /// A reversible handshake gate: unlike a foreign protocol, silence is
     /// a temporary failure that re-adoption must recover from.
     answering: watch::Sender<bool>,
@@ -135,6 +137,12 @@ impl TestHost {
     /// in order.
     pub(crate) fn received(&self) -> Vec<u8> {
         self.received.lock().expect("the input record").clone()
+    }
+
+    /// Whether a client asked this host to shut down. The stand-in leaves
+    /// the child running after Goodbye, so its liveness cannot show this.
+    pub(crate) fn shutdown_seen(&self) -> bool {
+        self.shutdown_seen.load(Ordering::SeqCst)
     }
 
     /// Wait, at most `within`, until the host has acknowledged exactly
@@ -449,6 +457,7 @@ fn start_with(
     let (held_tx, held) = watch::channel(0);
     let unreadable = Arc::new(AtomicBool::new(unreadable));
     let accepted = Arc::new(AtomicUsize::new(0));
+    let shutdown_seen = Arc::new(AtomicBool::new(false));
     let (answering, answers) = watch::channel(true);
     let journal = Journal {
         child_pid,
@@ -466,6 +475,7 @@ fn start_with(
         Records {
             received_len: received_len_tx,
             held: held_tx,
+            shutdown_seen: Arc::clone(&shutdown_seen),
         },
         journal,
         Arc::clone(&accepted),
@@ -481,6 +491,7 @@ fn start_with(
         commands,
         unreadable,
         accepted,
+        shutdown_seen,
         answering,
         task,
         _dir: None,
@@ -635,6 +646,7 @@ async fn serve_one(
                     }
                 },
                 ClientMessage::Shutdown => {
+                    records.shutdown_seen.store(true, Ordering::SeqCst);
                     let _ = stream.write_all(&encode_host(&HostMessage::Goodbye)).await;
                     return Ok(());
                 }
@@ -753,6 +765,8 @@ struct Records {
     received_len: watch::Sender<usize>,
     /// How many inputs it holds unacknowledged.
     held: watch::Sender<usize>,
+    /// Set before replying to Shutdown, so an acknowledged request is visible.
+    shutdown_seen: Arc<AtomicBool>,
 }
 
 /// Write `data` to the child, as far as the record goes, and the

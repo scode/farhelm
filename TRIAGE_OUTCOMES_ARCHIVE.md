@@ -36393,3 +36393,239 @@ Entries are appended in the order they graduate and are otherwise kept as they w
 - Execution: Added a first rejected Antigravity transcript check that verifies the durable pin and identity stay
   unchanged before a valid report. jj change `skvnnxxm`, bookmark
   `plan/triage-supervisor/06-tab-takeover-and-launch-test-gaps`, https://github.com/scode/farhelm/pull/4538/changes.
+
+## stop-wait-test-releases-exit-before-wait-witness.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The test that Stop waits for a terminal's final output before classifying a failed
+  launch would also pass if Stop only checked once. Verified: host_terminals.rs:736-770: the docstring openly allows the
+  record to precede Stop's probe, and the test does not witness Stop pending (confirmed). The landed plan
+  stop-wait-starting-launch-witness concerned a different (shutdown) test, so it does not cover this.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: witness Stop pending before releasing the exit record.
+- Execution: No change. The current test proves Stop's final classification and the adjacent test proves the terminal
+  wait. Establishing that Stop entered that wait would need a new scheduling witness. jj change `vvsqpyql`, bookmark
+  `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## foreign-host-refusal-test-cannot-observe-shutdown.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The test that Delete refuses to touch another session's terminal cannot see a
+  Shutdown sent to it. Verified: host_terminals.rs:1271-1297 asserts the refusal text, child alive, no input and row
+  kept. The stand-in records only input bytes (per the file; test_host.rs not fully re-read).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: add a shutdown counter to the stand-in and assert it is zero.
+- Execution: Fixed the refusal test to observe whether the other session's host received Shutdown as well as whether its
+  program kept running. jj change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## cancellation-test-releases-encoder-before-abort-witness.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The test of cancelling a Restart during history encoding may never actually cancel
+  anything. Verified: Accepted from the file: it opens the gate right after `abort()` and never checks the JoinError.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: await a cancelled JoinError before opening the gate.
+- Execution: Fixed the running seed test to join the cancelled caller while the encoder remains at its gate. jj change
+  `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## seed-cancellation-test-accepts-lost-emulator.md
+
+- Outcome: `other`.
+- Assessment: None in the product. The test that an ended terminal's history stays readable after a cancelled Restart
+  also passes when reading reports the history lost. Verified: Accepted from the file: `timeout(...).await.is_ok()`
+  accepts `Ok(Err(EmulatorLost))`.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  Fix in a batch: require the inner result to be `Ok`.
+- Execution: Fixed the ended seed test to require a successful emulator read within the deadline. jj change `vvsqpyql`,
+  bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-checkout-status-borrower-reload-keeps-origin-runtime.md
+
+- Outcome: `other`.
+- Assessment: None. A supervisor test reloads sessions while the origin host's runtime is still attached, creating two
+  owners of one host. The wrapper's comment says "The tests that use it have no hosts." Verified: the stale comment is
+  still at `service/core.rs:7428`, and the test is still in core.rs. No flake has been observed.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard, or batch (abort the origin runtime before reload and fix the comment)
+- Execution: Fixed the checkout interruption test to release the origin terminal runtime before reloading the borrower's
+  session. jj change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-failed-spec-test-accepts-an-attempted-host-start-as-never-started.md
+
+- Outcome: `other`.
+- Assessment: None. The "failed spec publish never starts a terminal" test accepts any Error and checks only an empty
+  hosts directory, so an attempted host start would pass. Verified: still at `service/core.rs` around :26299-26308
+  (`matches!(decoded, ControlMsg::Error { .. })`, `read_dir(...).map_or(true, ...)`).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard or batch
+- Execution: Fixed the failed spec publication test to require the write failure and verify that the host start path
+  never created its directory. jj change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-deleted-startup-error-artifact-readonly-oracle.md
+
+- Outcome: `other`.
+- Assessment: None directly. A supervisor that doesn't own the state directory must leave a failed launch's files alone
+  at startup. The only test of that went away with a tmux fixture. Verified: every `reload_sessions(...)` call in
+  core.rs and core/tests/host_terminals.rs on main passes `true` (write authority). No read-only startup reload test
+  exists. The read-only check runs only through periodic reconciliation.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (terminal-independent reload test: false leaves files, true removes them)
+- Execution: Restored read-only startup coverage for a durable Error row whose launch spec and failure marker must
+  remain intact. jj change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-request-conformance-target-testhost-owner-dropped-at-preparation-return.md
+
+- Outcome: `other`.
+- Assessment: None. The terminal-control conformance test drops the stand-in host it is about to exercise before sending
+  the control. Its live-terminal premise is broken, and the test can fail or pass for the wrong reason. Verified:
+  handlers.rs:10870 binds `_target_host` inside the preparation future, which returns only `(message, listener)`
+  (~:10956). Unchanged.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (return the host owner with the prepared tuple)
+- Execution: Fixed request conformance to keep its target terminal host alive during the contention observation. jj
+  change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-migrated-seal-constraint-test-accepts-duplicate-metadata-key.md
+
+- Outcome: `other`.
+- Assessment: None. The schema test for the environment seal's allowed values would still pass if an upgraded database
+  lost that constraint, because its bad INSERT also violates the primary key. Verified: store.rs:8166-8167 on main:
+  `INSERT ... (0, 2)` with a generic `expect_err`, and the migration inserts id 0 unconditionally.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (UPDATE the existing row to sealed=2 and match the CHECK error). Tiny.
+- Execution: Fixed the migrated seal test to exercise the CHECK on the existing metadata row. jj change `vvsqpyql`,
+  bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-omp-capture-survives-owner-exit-test-loses-exit-barrier.md
+
+- Outcome: `other`.
+- Assessment: None (test quality). The test promising that an OMP session's Resume offer survives the agent exiting
+  checks the offer before confirming the agent actually exited. Verified: core.rs ~:24128-24161 on main: doc says "after
+  the runtime and reporter are gone", then `kill_owner()` and an immediate offer assertion. No gone/zombie wait. The
+  non-first-class harness filter does not apply (no rare trigger; consequence is test evidence).
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (wait for both pids gone before asserting) or discard as low value; leaning fix, it is small
+- Execution: Fixed the OMP Resume test to wait for the owner and its reporter to exit before reading the durable offer.
+  jj change `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`,
+  https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md
+
+- Outcome: `other`.
+- Assessment: None. The test that Delete of an environment's last session waits for an in-flight create (so it won't
+  seal over it) watches an earlier lock, not the directory-admission wait it names. Verified: handlers.rs:12093-12123 on
+  main: waits on `claimed_for_test("s1")`, plants the row, drops admission, then asserts. Unchanged. Production ordering
+  is reported correct.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  discard unless a parked-at-admission seam is cheap. The final count still catches most early decisions.
+- Execution: No change. A witness at the directory wait would need to instrument the mutex acquisition. The existing
+  session-fence witness provides no observation at that boundary. jj change `vvsqpyql`, bookmark
+  `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-test-one-shot-sample-before-host-catch-up.md
+
+- Outcome: `other`.
+- Assessment: None. A ticker persistence test runs one status sample without waiting for its new terminal to catch up.
+  On Linux, text and CRLF can arrive as separate events, so the sample may skip the terminal and the test fails falsely.
+  Verified: ticker.rs:5206-5255 on main: `spawn_host(... "printf 'work resumed\\n'; sleep 300")`, then a single
+  `sample_pass` with no caught_up wait. The route is source-established by the reviewer (Linux OPOST/ONLCR), not
+  observed as a flake.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (bounded wait for caught_up before the pass)
+- Execution: Fixed the one-shot work-start sample to wait for the resumed terminal screen and catch-up first. jj change
+  `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.
+
+## trailing-busy-host-list-limit-negative-oracle-never-reads-client-output.md
+
+- Outcome: `other`.
+- Assessment: None. The test that a session list waiting for its own limit doesn't block typing never reads the
+  connection before asserting the list hasn't answered, so an early answer would go unseen. Verified:
+  handlers.rs:11261-11291 on main: `send(ListSessions)`, `type_and_see_received`, then asserts on the `host.replies`
+  cache, which nothing refilled in between.
+- Decision: Q11, the maintainer picked "Fix only the cheap ones that guard product behavior". (2026-11-21
+  fewest-questions triage page (main ca62397de).) Maintainer's note on execution: "yes we definitely need to batch these
+  in a much smaller set of plans. please try to separate them by area of code so there is a good chance of them running
+  concurrently."
+- Completion criteria: Fix the test if the fix is a few lines (about 20 at most) and the test guards a user-facing
+  behavior, including a retired test whose behavior still applies; otherwise make no change. Either way remove the
+  feedback file and its index entry, and say in the execution record which way it went. Recommendation for reference:
+  fix code (drain client output up to the echo before the negative assertion). Cheap.
+- Execution: Fixed the list-limit test to read the actual connection while all list permits remain held. jj change
+  `vvsqpyql`, bookmark `plan/triage-supervisor/07-unit-test-gaps`, https://github.com/scode/farhelm/pull/4543/changes.

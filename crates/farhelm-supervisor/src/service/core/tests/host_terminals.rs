@@ -1269,7 +1269,8 @@ async fn a_recorded_host_that_cannot_be_read_is_guarded_and_signalled() {
 /// over a tmux row and its launch record naming a stand-in tagged as `s2`'s
 /// agent (premise: its child runs), an unconditional Delete fails saying
 /// the socket serves a host for another terminal; the stand-in's child
-/// still runs, the stand-in was sent no input, and the row is kept.
+/// still runs, the stand-in received neither input nor Shutdown, and the
+/// row is kept.
 #[farhelm_testtrace::test]
 async fn a_record_naming_another_sessions_host_refuses_and_touches_nothing() {
     let state = StateDir::new();
@@ -1293,6 +1294,7 @@ async fn a_record_naming_another_sessions_host_refuses_and_touches_nothing() {
     );
     assert!(runs(child), "the other session's program was not swept");
     assert_eq!(other.received(), b"", "nothing was written to it");
+    assert!(!other.shutdown_seen(), "the foreign host received Shutdown");
     assert!(
         sup.store.session("s1").await.expect("read").is_some(),
         "the row is kept"
@@ -4452,8 +4454,8 @@ fn a_seed_whose_runtime_is_stopped_mid_encode_answers_and_ends() {
 /// one blocking thread, for a stand-in host that went away (its runtime
 /// ended), with the thread held busy, a seed is asked for and its caller is
 /// cancelled once the emulator is away or the request answered; once the
-/// thread is released and every encode ended, a `read` answers within the
-/// bound.
+/// thread is released and every encode ended, a `read` succeeds within the
+/// bound. A lost emulator also answers promptly, with an error.
 #[test]
 fn a_cancelled_seed_of_an_ended_runtime_leaves_the_emulator_readable() {
     one_blocking_thread().block_on(async {
@@ -4482,10 +4484,10 @@ fn a_cancelled_seed_of_an_ended_runtime_leaves_the_emulator_readable() {
         tokio::time::timeout(WAIT, host.encodes_ended())
             .await
             .expect("no encode runs");
-        assert!(
-            tokio::time::timeout(WAIT, host.read(|_| ())).await.is_ok(),
-            "the emulator is readable"
-        );
+        tokio::time::timeout(WAIT, host.read(|_| ()))
+            .await
+            .expect("the read finishes")
+            .expect("the emulator is still readable");
     });
 }
 
@@ -4496,7 +4498,8 @@ fn a_cancelled_seed_of_an_ended_runtime_leaves_the_emulator_readable() {
 /// encoded (its client went away); the runtime's task owns the encode, so
 /// the emulator must come back and later reads and seeds work. Spec: with
 /// the runtime's encodes held at an encode gate, a seed is asked for; once
-/// the encode reached the gate its caller is cancelled and the gate opened;
+/// the encode reaches the gate, its caller must finish cancelling before
+/// the encoder is released.
 /// a `read` answers within the bound, a second seed is given, and output
 /// still reaches the screen.
 #[farhelm_testtrace::test(flavor = "multi_thread")]
@@ -4533,11 +4536,21 @@ async fn a_cancelled_seed_of_a_running_runtime_gives_the_emulator_back() {
     };
     assert!(entered, "premise: the seed's encode reached the gate");
     seeding.abort();
+    let cancelled = tokio::time::timeout(WAIT, seeding).await;
+    let encoder_held = !gate.passed();
     gate.open();
     assert!(
-        tokio::time::timeout(WAIT, host.read(|_| ())).await.is_ok(),
-        "the emulator came back"
+        matches!(&cancelled, Ok(Err(error)) if error.is_cancelled()),
+        "the caller must cancel with the encoder still held: {cancelled:?}"
     );
+    assert!(
+        encoder_held,
+        "the encoder passed the gate before cancellation"
+    );
+    tokio::time::timeout(WAIT, host.read(|_| ()))
+        .await
+        .expect("the read finishes")
+        .expect("the emulator came back");
     assert!(
         host.history_seed(terminal_host::protocol::MAX_SNAPSHOT)
             .await
