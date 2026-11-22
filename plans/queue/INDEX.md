@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
 - [complete] `test-worker-staging-lock.md` — stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
 - [in-flight 034072] `pace-bulk-metadata-changes.md` — raise the helm's limit on queued window commands (derived from the 500-row listing cap) so a metadata change to many marked sessions no longer resets the window
-- [in-flight f0de19] `bulk-actions-bound-to-drawn.md` — make the marked bar's Stop and Delete act on the sessions and Skip session confirmations setting the bar showed, as the single-row menu does
+- [complete] `bulk-actions-bound-to-drawn.md` — make the marked bar's Stop and Delete act on the sessions and Skip session confirmations setting the bar showed, as the single-row menu does
 - [in-flight 528d14] `interrupted-upload-notices.md` — post a notice in the notice center when the open session is no longer the one a file was still uploading to, so an interrupted upload is never lost unseen
 - [pending] `wide-glyph-padding-cells.md` — keep a program's background color where a wide character wraps or is half erased in a terminal, marking wide-wrap padding in terminal rows, with a protocol bump
 - [pending] `launcher-managed-checkout-compact.md` — make the launcher's managed-checkout destination compact: one Host | Repository address line, then the clone's folder and a one-line note across the full width
