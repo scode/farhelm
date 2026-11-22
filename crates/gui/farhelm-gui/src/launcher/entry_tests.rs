@@ -80,7 +80,21 @@ pub(super) fn window_with<'a>(
     cx: &'a mut TestAppContext,
     selected: Option<&str>,
 ) -> (FakeHelm, &'a mut VisualTestContext) {
-    window_on(cx, selected, fixture_hosts(&[0, 4, 8, 10]), Vec::new())
+    let mut hosts = fixture_hosts(&[0, 4, 8, 10]);
+    // The shared host-list contract describes host11 the way the real helm does, environment included, to pin that
+    // field's wire shape. These tests guard the fallback for a sandbox host that names no environment, so they take it
+    // away here; `environment_window` sets one of its own.
+    let host11 = hosts
+        .entries
+        .iter_mut()
+        .find(|entry| entry.key == "11")
+        .expect("the fixture lists host11");
+    host11
+        .value
+        .as_object_mut()
+        .expect("a host entry is an object")
+        .remove("environment");
+    window_on(cx, selected, hosts, Vec::new())
 }
 
 /// [`window_with`] over the hosts collection `hosts`, with `more` collections in the helm's first snapshot.
