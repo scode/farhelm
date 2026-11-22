@@ -84,9 +84,6 @@ consequences.
   — Failure at an enumerated place suppresses healthy container leftovers. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`omitted-session-row-drops-live-tabs.md`](omitted-session-row-drops-live-tabs.md) — A list update can take away the
-  shell tab you’re using and make the agent terminal receive your next typing. The shell on the host can keep running.
-
 - [`session-delete-shortcut-ignores-composition.md`](session-delete-shortcut-ignores-composition.md) — Pressing the
   session Delete shortcut while composing text can delete the open session, including its processes, when Skip session
   confirmations is enabled.
@@ -104,10 +101,6 @@ consequences.
 
 - [`shell-switch-can-submit-hidden-conversation-id.md`](shell-switch-can-submit-hidden-conversation-id.md) — Entering an
   agent choice from a shell draft can submit a conversation ID typed earlier for a different agent.
-
-- [`remembered-terminal-restore-keeps-unavailable-tab.md`](remembered-terminal-restore-keeps-unavailable-tab.md) —
-  Reopening a session can leave it on a remembered shell tab that cannot attach, even while the main terminal is
-  available.
 
 - [`template-leave-prompts-can-stack.md`](template-leave-prompts-can-stack.md) — Two outstanding leave questions can
   cause the remaining answer to save or discard a different template draft.

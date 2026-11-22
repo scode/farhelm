@@ -2616,6 +2616,11 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "terminal-cut-session-row",
+      "title": "The open shell stays selected when a shortened session list omits its row",
+      "reference": null
+    },
+    {
       "golden": "terminal-file-disclosures",
       "title": "A terminal file link's hover display: checking, the three size tiers, the 100 MB refusal in red, a folder and a failed check",
       "reference": null

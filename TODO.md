@@ -394,6 +394,13 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
+- **Show the main terminal when a remembered shell tab cannot attach.** Reopening a session can leave it stuck
+  reconnecting to a remembered shell tab whose terminal the supervisor cannot read. Fall back to the main terminal after
+  an explicit initial refusal, even if the shell tab remains listed. The terminal stream currently uses the same detach
+  code for that refusal and for some dropped supervisor connections. Give the desktop app a way to tell them apart so a
+  temporary outage keeps retrying. Route pending upload notices to the terminal the app ends up showing, and keep the
+  shell tab available for a deliberate selection.
+
 - **Retain failed Restart cleanup when the session was deleted.** When Delete removes the session row while Restart is
   launching its replacement, `tear_down_relaunch_deleted_meanwhile` reports an unconfirmed replacement scope and keeps
   the replacement's host record. That record carries the socket and starter identity, while the deleted row held the

@@ -324,6 +324,8 @@ linux/terminal-covered-link--dark.png f4f8d6746094ec5b19ed65f0b1b796b42e5bbf7a
 linux/terminal-covered-link--light.png e9f23c56971c4956d563b8821f699a30d1673496
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d
 linux/terminal-cursors--light.png 132a4374cd6c6d9f0caf116436286f67a99df8e9
+linux/terminal-cut-session-row--dark.png ed0454f06fa1eca998d2e8db2cee1e5a68340e4c
+linux/terminal-cut-session-row--light.png 526734f7d709c5ca430a7e1cf6e4741ad88eb00d
 linux/terminal-delete-scrim--dark.png 003f83508000483997e7455343e31346be48de97
 linux/terminal-delete-scrim--light.png ce2e00db3c93831342dec1b7910dad3ff4aa65eb
 linux/terminal-file-disclosures--dark.png 57fb470fa468eaac9d34af3e44d1265b74801711
