@@ -54,12 +54,13 @@ use farhelm_helm_client::ChannelState;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Entity, InteractiveElement as _, IntoElement,
     ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Subscription,
-    Window, div,
+    Window, div, relative,
 };
 
 use crate::actions::{BeginSequence, QuickLaunch, ShowKeyboardShortcuts, TemplateNumberKey};
 use crate::actions::{DeleteSession, NewSession, QuickSwitcher, RenameSession, TemplateList};
 use crate::components::{Banner, Button, HoverHelp, Role, Tier};
+use crate::components::{scroll_from_controls, scroll_handle};
 use crate::desktop::linux_title_bar;
 use crate::desktop::title_band::{self, Row};
 use crate::focus::Mark;
@@ -89,6 +90,9 @@ pub struct MainView {
     root: root::Attachment,
     /// Redraws on a change of the connection's state and of the notice center.
     _observed: Vec<Subscription>,
+    /// The previous connected frame's banners. A fresh notice should scroll into view. Dismissing the last banner
+    /// or receiving a notice for the approval region should leave the banner scroll position alone.
+    drawn_banners: Vec<Notice>,
     /// The sidebar's session list, which the sidebar keeps for the window's life (it holds only per-UI-session state,
     /// which it starts over by itself after a reset). A handle is kept here for the quick switcher, which this view
     /// opens and which tells the list what a pick opened, and for tests, which ask the list for a row's action the way
@@ -137,6 +141,7 @@ impl MainView {
             }),
             root,
             _observed: observed,
+            drawn_banners: Vec::new(),
             sidebar: cx.new(|cx| Sidebar::new(session_list.clone(), cx)),
             session_list,
             session_pane: cx.new(|cx| SessionPane::new(new, window, cx)),
@@ -179,10 +184,11 @@ impl Render for MainView {
             self.pane_anchor = Some(pane_anchor.clone());
             // The approval region centers its cards in this pane and reaches at most its height.
             crate::approvals::region::set_pane(pane_anchor.clone(), cx);
-            let posted: Vec<Notice> = notices::posted(cx)
-                .into_iter()
-                .filter(|notice| is_banner(*notice))
-                .collect();
+            let posted: Vec<Notice> = notices::posted(cx).into_iter().filter(is_banner).collect();
+            let reveal_latest = posted
+                .last()
+                .is_some_and(|last| !self.drawn_banners.contains(last));
+            self.drawn_banners.clone_from(&posted);
             // In the macOS window a posted notice's banner would sit under the traffic lights, so a strip of the title
             // band goes above the banners while any is shown.
             let above_banners = (!posted.is_empty())
@@ -193,7 +199,9 @@ impl Render for MainView {
                 .flex_col()
                 .size_full()
                 .children(above_banners)
-                .children(posted.into_iter().map(banner))
+                .children(
+                    (!posted.is_empty()).then(|| notice_banners(posted, reveal_latest, window, cx)),
+                )
                 // In a narrow macOS window the app header leaves the sidebar's column and runs across the window's top
                 // here, above the row that scrolls sideways (`Sidebar::floating_header`).
                 .children(
@@ -409,19 +417,50 @@ fn inert(state: &ChannelState, cx: &App) -> AnyElement {
 /// Whether `notice` shows as a banner across the top of the window. Exhaustive, so a new notice decides where it is
 /// drawn: a late answer to an approval card shows in the approval region above its waiting list, as the old app drew it
 /// (`approvals.rs` at `24bc0580`), not across the window.
-fn is_banner(notice: Notice) -> bool {
+fn is_banner(notice: &Notice) -> bool {
     match notice {
         Notice::ConnectionLost
         | Notice::LaunchNotStarted
         | Notice::LaunchMayStillStart
-        | Notice::EnvironmentLaunchUnknown => true,
+        | Notice::EnvironmentLaunchUnknown
+        | Notice::InterruptedUpload(_) => true,
         Notice::LateAnswer { .. } => false,
     }
 }
 
+/// Leave room for the workspace even when several interrupted uploads are waiting for Dismiss. A new notice
+/// reveals the end of the stack without moving keyboard focus. Tab can still reach earlier Dismiss buttons.
+fn notice_banners(
+    posted: Vec<Notice>,
+    reveal_latest: bool,
+    window: &mut Window,
+    cx: &mut App,
+) -> impl IntoElement {
+    let scroll = scroll_handle("window-notice-scroll".into(), window, cx);
+    if reveal_latest {
+        scroll.scroll_to_bottom();
+    }
+    let banners = div()
+        .id("window-notice-banners")
+        .debug_selector(|| "window-notice-banners".into())
+        .role(Role::Region)
+        .aria_label("Notices")
+        .flex_none()
+        .min_h_0()
+        .max_h(relative(0.5))
+        .overflow_y_scroll()
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .children(posted.into_iter().map(banner)),
+        );
+    crate::focus::scroll_region(scroll_from_controls(banners, &scroll), &scroll)
+}
+
 /// A launch notice's banner: its words with Open launcher, which brings back the launcher waiting behind it
 /// (`launcher::launch::open_waiting`), hovering as `help` says.
-fn open_launcher_banner(notice: Notice, help: &'static str) -> Banner {
+fn open_launcher_banner(notice: &Notice, help: &'static str) -> Banner {
     Banner::new(notice.text()).lead_action(
         Button::new(
             "notice-open-launcher",
@@ -444,36 +483,43 @@ fn open_launcher_banner(notice: Notice, help: &'static str) -> Banner {
 /// the crate so the goldens can pin it.
 pub(crate) fn banner(notice: Notice) -> AnyElement {
     // What a notice offers besides dismissing it, before Dismiss. Exhaustive, so a new notice decides.
-    let banner = match notice {
+    let banner = match &notice {
         // The connection-lost notice offers nothing but Dismiss. A late answer is never drawn as a banner
         // ([`is_banner`]); were it one, its text and Dismiss would be all it offers too.
         Notice::ConnectionLost | Notice::LateAnswer { .. } => Banner::new(notice.text()),
         // SPEC.md, "Creation": a refused launch the user had moved on from is offered by a notice, "and the launcher
         // returns when the user opens that notice".
         Notice::LaunchNotStarted => open_launcher_banner(
-            notice,
+            &notice,
             "Open launcher: show the refused launch with its settings and why it did not start",
         ),
         // A launch that may still start is offered the same way (its launcher holds the helm's timeout reply).
         Notice::LaunchMayStillStart => open_launcher_banner(
-            notice,
+            &notice,
             "Open launcher: show the launch with its settings and the helm's reply",
         ),
         // So is an environment launch whose end is unknown (its launcher holds what is known of it).
         Notice::EnvironmentLaunchUnknown => open_launcher_banner(
-            notice,
+            &notice,
             "Open launcher: show the launch with its settings and what is known of how it ended",
         ),
+        Notice::InterruptedUpload(upload) => Banner::new(upload.sentence()).flush_wrapped_actions(),
+    };
+    let dismiss = match &notice {
+        Notice::InterruptedUpload(upload) => {
+            format!("notice-dismiss-interrupted-upload-{}", upload.key())
+        }
+        _ => format!("notice-dismiss-{notice:?}"),
     };
     banner
         .action(
             Button::new(
-                SharedString::from(format!("notice-dismiss-{notice:?}")),
+                SharedString::from(dismiss),
                 "Dismiss",
                 HoverHelp::tooltip("Dismiss this notice"),
                 Role::Button,
             )
-            .on_click(move |_, _, cx| notices::withdraw(notice, cx)),
+            .on_click(move |_, _, cx| notices::withdraw(notice.clone(), cx)),
         )
         .into_any_element()
 }

@@ -21,6 +21,7 @@ pub struct Banner {
     content: AnyElement,
     lead: Option<Button>,
     action: Option<Button>,
+    flush_wrapped_actions: bool,
 }
 
 impl Banner {
@@ -30,6 +31,7 @@ impl Banner {
             content: content.into_any_element(),
             lead: None,
             action: None,
+            flush_wrapped_actions: false,
         }
     }
 
@@ -46,16 +48,29 @@ impl Banner {
         self.lead = Some(button.tier(Tier::OnBanner).help_below());
         self
     }
+
+    /// Align buttons that wrap below long notice text with its left edge, keeping the gap between inline items.
+    pub(crate) fn flush_wrapped_actions(mut self) -> Self {
+        self.flush_wrapped_actions = true;
+        self
+    }
 }
 
 impl RenderOnce for Banner {
     fn render(self, _: &mut Window, cx: &mut App) -> impl IntoElement {
         let palette = theme::palette(cx);
         let (pad_y, pad_x) = metrics::BANNER_PAD;
+        let flush = self.flush_wrapped_actions;
+        let action = |button| {
+            div()
+                .when(!flush, |slot| slot.ml(metrics::BANNER_BUTTON_GAP))
+                .child(button)
+        };
         div()
             .flex()
             .flex_row()
             .flex_wrap()
+            .when(flush, |band| band.gap_x(metrics::BANNER_BUTTON_GAP))
             .items_center()
             .py(pad_y)
             .px(pad_x)
@@ -63,11 +78,7 @@ impl RenderOnce for Banner {
             .text_color(theme::color(palette.on_fill))
             .text_size(metrics::TEXT_MD)
             .child(div().min_w_0().child(self.content))
-            .when_some(self.lead, |band, button| {
-                band.child(div().ml(metrics::BANNER_BUTTON_GAP).child(button))
-            })
-            .when_some(self.action, |band, button| {
-                band.child(div().ml(metrics::BANNER_BUTTON_GAP).child(button))
-            })
+            .when_some(self.lead, |band, button| band.child(action(button)))
+            .when_some(self.action, |band, button| band.child(action(button)))
     }
 }

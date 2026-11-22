@@ -627,7 +627,7 @@ fn late_notice(notice: Notice, height: Rc<Cell<Pixels>>, cx: &App) -> AnyElement
                 Role::Button,
             )
             .tier(Tier::Neutral)
-            .on_click(move |_, _, cx| notices::withdraw(notice, cx)),
+            .on_click(move |_, _, cx| notices::withdraw(notice.clone(), cx)),
         )
         .child(height_tracker(height))
         .into_any_element()

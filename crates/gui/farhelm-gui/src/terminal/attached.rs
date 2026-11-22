@@ -1802,7 +1802,8 @@ impl AttachedTerminal {
         self.blink = None;
         self.paste = None;
         self.put_drag_notice_away(cx);
-        // The uploads stop with the terminal. The session's next shown terminal receives their interruption lines.
+        // The uploads stop with the terminal. Interruptions follow a still-open session to its next visible
+        // terminal, or go to the notice center when the user leaves the session.
         self.attachments
             .update(cx, |attachments, cx| attachments.hand_over(cx));
         cx.notify();

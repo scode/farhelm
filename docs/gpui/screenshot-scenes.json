@@ -2591,6 +2591,11 @@
       "reference": "terminal-detached-banner"
     },
     {
+      "golden": "interrupted-upload-notices",
+      "title": "Interrupted upload notices for the files sent and the ones still waiting",
+      "reference": null
+    },
+    {
       "golden": "approval-card",
       "title": "An agent approval card at its full width",
       "reference": "approval-card"

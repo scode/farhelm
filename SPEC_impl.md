@@ -485,23 +485,22 @@ which is not a device-local preferences store and has no room for one. The last 
 the app's `ShownTerminals` global (`crates/gui/farhelm-gui/src/terminal/set.rs`). A new set restores the choice only if
 it builds a terminal for that tab within the attach cap. Choosing Agent clears the entry. An absent or unattached tab
 keeps its entry because a short snapshot can omit a tab that is still open. Tab ids are never reused, so an old entry
-cannot select a different tab. Attachment lines a terminal leaves when it goes also survive
-(`crates/gui/farhelm-gui/src/terminal/attachments.rs`, `Carried`): the failures still on its strip, and a line for each
-upload the reset cut off, saying whether it was sent. The new set delivers them to the shown terminal once it knows
-which tab it will restore. SPEC.md's "Attachments" has an attachment never disappear silently, and the terminal the
-lines belonged to will not come back, so dropping them with the UI session would lose them. They go when the new
-terminal takes them, or once the current UI session's store proves their session gone (a complete session listing
-without it, checked by every terminal's attachments whenever the store changes, a new snapshot included), so a deleted
-session's lines do not stay for the life of the app. The window itself, its size included, is not part of the UI session
-and is untouched. The settings the old app kept per device (appearance, sidebar width, host rail, status sounds,
-terminal text size) become helm preferences in the new app, so they return with the new snapshot like the rest of the
-helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width, appearance, terminal text
-size or status sounds per device; it still calls the host rail per device until the change that moves it. The store fed
-by the channel holds only helm state. Half-typed drafts do not survive, and neither do open dialogs and menus: going
-inert closes every layer through the layer manager (`layers::close_all`). Menus would close anyway with the ground they
-are anchored to, but a dialog closes only when its opener or its subject says so, and one left open would keep its veil
-over the inert window, taking the clicks and Tab presses meant for Take back or Retry. Work the helm accepted continues
-independently of the reset.
+cannot select a different tab. The terminal's shown attachment failures and pending upload interruptions survive in
+`Carried` (`crates/gui/farhelm-gui/src/terminal/attachments.rs`). For a session that stays open, the new set gives them
+to its shown terminal once it knows which tab to restore. If the selection moves on or clears, an app-wide observer
+posts the interruptions to the notice center, including when a filtered listing cannot prove the session gone or there
+is no terminal. Each notice names the original files and session title and says whether the upload was sent. Once
+posted, those interruptions are out of `Carried` so the user sees them once. A complete listing that proves the session
+gone still prunes its already-shown failures when a terminal's attachments check the store. The window itself, its size
+included, is not part of the UI session and is untouched. The settings the old app kept per device (appearance, sidebar
+width, host rail, status sounds, terminal text size) become helm preferences in the new app, so they return with the new
+snapshot like the rest of the helm's state (maintainer decision, 2026-11-13). SPEC.md no longer calls the sidebar width,
+appearance, terminal text size or status sounds per device; it still calls the host rail per device until the change
+that moves it. The store fed by the channel holds only helm state. Half-typed drafts do not survive, and neither do open
+dialogs and menus: going inert closes every layer through the layer manager (`layers::close_all`). Menus would close
+anyway with the ground they are anchored to, but a dialog closes only when its opener or its subject says so, and one
+left open would keep its veil over the inert window, taking the clicks and Tab presses meant for Take back or Retry.
+Work the helm accepted continues independently of the reset.
 
 What never gets written again on the GUI side: lost-reply reconciliation, retry keys, request fences, outcome-unknown
 reports for commands, and their tests (an upload cut off by a reset is not a command: its line above says its outcome
@@ -1411,10 +1410,12 @@ Owner: the notice center. It is a code owner, not a new surface.
 
 It is the single place that decides when to post to and withdraw from approval cards and banners such as the
 version-mismatch and outage cards, and its own generic notices. The surfaces look as they do today. A new notice is
-added only where SPEC.md requires one, and each is drawn in an existing style; the generic connection-lost notice after
-a reset was the first. The session rows' bells with their lists and the rail's notices panel are not its surfaces: they
-draw the notification records the helm keeps and pushes, straight from the store, with no notice-center step, and the
-three status sounds (chimes) are decided by the one sound owner, not here.
+added only where SPEC.md requires one, and each is drawn in an existing style. Notices can carry data as well as fixed
+text. An interrupted upload carries the host-supplied names as `HostText`; the banner draws them with the app's words in
+a `HostSentence` and stays posted across resets until dismissed. The banner stack scrolls when it reaches half the
+window's content height, leaving the workspace and every Dismiss reachable. New banners scroll into view without moving
+keyboard focus. The session rows' bells with their lists and the rail's notices panel draw the records pushed by the
+helm. The one sound owner decides when to play the three status chimes.
 
 Enforced by the review gate.
 

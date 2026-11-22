@@ -442,8 +442,9 @@ Lint exceptions: none.
 
 ### Notice center
 
-Extension points: a new `Notice` variant with its text, posted and withdrawn only through `notices::post` and
-`notices::withdraw`, with the surface that draws it.
+Extension points: a new `Notice` variant with its text and any data needed to draw it, posted and withdrawn only through
+`notices::post` and `notices::withdraw`, with the surface that draws it. Keep any host values in the variant as
+`HostText` so the surface can draw them in a `HostSentence`.
 
 Lint exceptions: none.
 

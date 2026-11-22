@@ -124,6 +124,8 @@ linux/hosts-shown-with-a-host-chosen--dark.png 8be3b952f1a40678d22f644977bb2eb15
 linux/hosts-shown-with-a-host-chosen--light.png f16d15fef043952bc0864780119d84caf41b5972
 linux/inline-prompt--dark.png 8250e424c4f5da2573166f4e375ead472ce66c56
 linux/inline-prompt--light.png ba01554c80aabc7ec6293f52d47d6f34a60fce58
+linux/interrupted-upload-notices--dark.png 3788a78bab686da3682d4bae708719ca4b10c750
+linux/interrupted-upload-notices--light.png 7613307d6cc33d661f49a4d4c5d6b852af199be4
 linux/keyboard-shortcuts-dialog--dark.png bef6d89f6614d8f0a9ecd15d3ddf658d42eceb5a
 linux/keyboard-shortcuts-dialog--light.png 67b6ed0b4dfdaa9d4526024e5a29d59489678387
 linux/launcher-checkout-on-suspended-host--dark.png be76dd570b95eef0162324808dab150571d7ff22

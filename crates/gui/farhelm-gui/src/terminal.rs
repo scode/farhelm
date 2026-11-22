@@ -20,6 +20,7 @@
 
 pub mod attached;
 mod attachments;
+pub(crate) use attachments::install_carried;
 mod blocks;
 mod disclosure;
 mod drag_notice;

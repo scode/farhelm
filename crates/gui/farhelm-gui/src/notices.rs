@@ -9,11 +9,19 @@
 //! The center holds notices for the window's approval region and banners. Session row bells and the rail's
 //! Notifications panel draw the records that the helm pushes to the store. The sound owner decides when to play
 //! status chimes.
+//!
+//! A notice can carry the host values it names. The upload banner keeps the original file names and session title
+//! as host text so they remain safe to draw after the session row and terminal are gone.
+
+use std::hash::{DefaultHasher, Hash, Hasher};
+use std::rc::Rc;
 
 use gpui::{App, AppContext as _, Entity, Global, SharedString};
 
+use crate::host_text::{HostSentence, HostText};
+
 /// Everything the notice center can show. Exhaustive, so adding a notice makes every surface decide about it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Notice {
     /// The connection to the helm was lost and the window was rebuilt (SPEC.md, "Losing the connection to the helm").
     /// Stays until the user dismisses it.
@@ -38,12 +46,15 @@ pub enum Notice {
     /// environment may exist, so the notice says to check Hosts rather than that nothing launched; its launcher waits
     /// with the draft, offered and withdrawn as [`Notice::LaunchNotStarted`] is.
     EnvironmentLaunchUnknown,
+    /// Files whose upload was cut off and whose session is no longer open. The banner outlives the terminal and
+    /// connection that held the upload, so the user sees the result without returning to that session.
+    InterruptedUpload(Rc<InterruptedUploads>),
 }
 
 impl Notice {
-    /// The notice's text, as SPEC.md words it.
-    /// The environment launch's notice is the app's own words: SPEC.md words none for it.
-    pub fn text(self) -> SharedString {
+    /// The notice's accessible text. An interrupted-upload banner draws the host parts from its sentence so each
+    /// file name and session title keeps its direction isolation.
+    pub fn text(&self) -> SharedString {
         match self {
             Notice::ConnectionLost => {
                 "The connection to the helm was lost; something you did just before may or may \
@@ -72,7 +83,70 @@ impl Notice {
                  the launcher still holds your settings."
                     .into()
             }
+            Notice::InterruptedUpload(upload) => upload.sentence().accessible_name(),
         }
+    }
+}
+
+/// One group of interrupted files with the same outcome from one session. The session key distinguishes two
+/// sessions with the same title and file names. The title is the one the first file had when it was offered.
+#[derive(Debug, PartialEq, Eq, Hash)]
+pub struct InterruptedUploads {
+    session: String,
+    title: Option<HostText>,
+    files: Vec<HostText>,
+    sent: bool,
+}
+
+impl InterruptedUploads {
+    /// Build a notice for a nonempty group. A sent request's outcome is unknown if the connection never answers.
+    pub(crate) fn new(
+        session: String,
+        title: Option<HostText>,
+        files: Vec<HostText>,
+        sent: bool,
+    ) -> Self {
+        Self {
+            session,
+            title,
+            files,
+            sent,
+        }
+    }
+
+    /// Stable across redraws and bounded in length even if the file names are long.
+    pub(crate) fn key(&self) -> u64 {
+        let mut hasher = DefaultHasher::new();
+        self.hash(&mut hasher);
+        hasher.finish()
+    }
+
+    /// Name a few files, the original session title, and what is known about their publication.
+    pub(crate) fn sentence(&self) -> HostSentence {
+        const NAMED_FILES: usize = 3;
+        let count = self.files.len();
+        let mut sentence =
+            HostSentence::new(("notice-interrupted-upload", self.key())).text("Attaching ");
+        for (index, file) in self.files.iter().take(NAMED_FILES).enumerate() {
+            if index != 0 {
+                sentence = sentence.text(if index + 1 == count { " and " } else { ", " });
+            }
+            sentence = sentence.host(file);
+        }
+        match count.saturating_sub(NAMED_FILES) {
+            0 => {}
+            1 => sentence = sentence.text(" and 1 more file"),
+            more => sentence = sentence.text(format!(" and {more} more files")),
+        }
+        if let Some(title) = &self.title {
+            sentence = sentence.text(" to ").host(title);
+        }
+        sentence.text(match (self.sent, count == 1) {
+            (true, true) => " was interrupted — whether it was attached cannot be told.",
+            (true, false) => " was interrupted — whether they were attached cannot be told.",
+            (false, true) => " was interrupted before it was sent, so nothing was uploaded.",
+            (false, false) => " was interrupted before they were sent, so nothing was uploaded.",
+        })
     }
 }
 
@@ -116,7 +190,7 @@ pub fn withdraw(notice: Notice, cx: &mut App) {
     if let Some(notices) = entity(cx) {
         notices.update(cx, |notices, cx| {
             let before = notices.posted.len();
-            notices.posted.retain(|posted| *posted != notice);
+            notices.posted.retain(|posted| posted != &notice);
             if notices.posted.len() != before {
                 cx.notify();
             }

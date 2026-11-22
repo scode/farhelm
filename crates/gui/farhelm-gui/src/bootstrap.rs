@@ -95,6 +95,7 @@ pub(crate) fn install_app_state(cx: &mut App) -> anyhow::Result<()> {
     local_time::install(cx);
     notices::install(cx);
     local_state::install(cx);
+    crate::terminal::install_carried(cx);
     render_count::install(cx);
     // Last: see the module docs.
     desktop::install_menus(cx);
