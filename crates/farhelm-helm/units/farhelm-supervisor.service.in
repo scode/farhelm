@@ -7,6 +7,7 @@ ExecStart=@FARHELM@ supervisor run --state-dir @STATE_DIR@
 Environment="PATH=@PATH@"
 UnsetEnvironment=FARHELM_SESSION_ID FARHELM_AGENT_ID FARHELM_TAB_ID
 KillMode=process
+TimeoutStopSec=@TIMEOUT_STOP_SEC@
 Restart=on-failure
 
 [Install]

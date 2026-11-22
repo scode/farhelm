@@ -23,13 +23,14 @@ use crate::ssh::shell_quote;
 ///
 /// Sixty seconds is the most launchd allows: on both versions it records any
 /// larger value (61, 90 and 300 were tried) as 60, and a job asking for 90
-/// was killed 60 seconds after bootout. The Linux unit relies on systemd's
-/// default of 90 seconds; the Mac gets as close to that as launchd permits,
-/// still several times the orderly stop's design length. Measured on both
-/// versions, launchd honors the key for `bootout` (20 seconds asked, 20
-/// waited). launchd.plist(5) ties the key to system shutdown as well, so a
-/// remote Mac's shutdown or reboot may now wait for the supervisor's orderly
-/// stop too, as systemd does on Linux; that effect was not measured.
+/// was killed 60 seconds after bootout. The Linux unit gets 90 seconds
+/// ([`crate::units::SUPERVISOR_STOP_GRACE`], systemd's default); the Mac
+/// gets as close to that as launchd permits, still several times the
+/// orderly stop's design length. Measured on both versions, launchd honors
+/// the key for `bootout` (20 seconds asked, 20 waited). launchd.plist(5)
+/// ties the key to system shutdown as well, so a remote Mac's shutdown or
+/// reboot may now wait for the supervisor's orderly stop too, as systemd
+/// does on Linux; that effect was not measured.
 pub(super) const SUPERVISOR_EXIT_TIMEOUT: Duration = Duration::from_secs(60);
 
 /// How long [`bootout_job_sh`] waits for launchd to drop a booted-out job:
