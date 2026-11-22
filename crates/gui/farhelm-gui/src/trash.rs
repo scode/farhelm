@@ -66,8 +66,8 @@ use farhelm_proto::CheckoutTrashDeleted;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
-    ParentElement as _, Render, Styled as _, Subscription, Transformation, WeakEntity, Window, div,
-    point, px, svg,
+    ParentElement as _, Render, Styled as _, Transformation, WeakEntity, Window, div, point, px,
+    svg,
 };
 use serde_json::json;
 
@@ -165,9 +165,9 @@ pub struct TrashButton {
     /// Reads and drops hosts' trash as the store changes ([`TrashButton::sync`]).
     _following: session::ObservingCurrent,
     /// The bob's ticks, held while the can is upside down and the window active, like the session list's pulse.
-    bob: Option<Ticks>,
+    bob: Option<ticker::AnimationTicks>,
     /// The archive cue's wiggle ([`cue`]): its ticks while it plays.
-    wiggle: Option<Ticks>,
+    wiggle: Option<ticker::AnimationTicks>,
     /// The drawn-button token ([`Self::shown`]) the cue saw when it asked for a wiggle, which the next draw starts if it
     /// still draws that same button: starting one needs the window, which the cue's caller does not have, and a button
     /// that stopped being drawn in between must not play late.
@@ -768,7 +768,7 @@ impl Render for TrashButton {
         // ticker's timer running, which an inactive window has no use for.
         let bobs = emptying && ticker::is_active(window, cx);
         if bobs != self.bob.is_some() {
-            self.bob = bobs.then(|| Ticks::start(window, cx));
+            self.bob = bobs.then(|| ticker::AnimationTicks::start(window, cx));
         }
         let lift = self.bob.as_ref().map_or(0., |bob| bob_lift(bob.count(cx)));
         self.shown = window
@@ -780,7 +780,7 @@ impl Render for TrashButton {
         // rule above), and by the time the user is back the old 900 ms animation would long be over.
         let active = ticker::is_active(window, cx);
         if self.wiggle_asked.take() == Some(self.shown.entity_id()) && active {
-            self.wiggle = Some(Ticks::start(window, cx));
+            self.wiggle = Some(ticker::AnimationTicks::start(window, cx));
         }
         let turn = self
             .wiggle
@@ -827,40 +827,5 @@ impl Render for TrashButton {
             let mark = Mark::take(cx);
             button.open(ReturnTo::Control(focus.clone()), &mark, window, cx);
         }))
-    }
-}
-
-/// An animation's ticks (the bob's, the wiggle's): a small entity of its own that the ticker notifies on every tick,
-/// counting them, which the button observes to redraw. The same shape as the component layer's spinner
-/// (`components::Spinner`).
-struct Ticks {
-    turn: Entity<Turn>,
-    _redraw: Subscription,
-}
-
-/// See [`Ticks`].
-struct Turn {
-    ticks: u64,
-    _animating: ticker::Animating,
-    _ticks: Subscription,
-}
-
-impl Ticks {
-    /// Ticks counted from 0, redrawing the view `cx` belongs to on every tick.
-    fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Ticks {
-        let turn = cx.new(|cx| Turn {
-            ticks: 0,
-            _animating: ticker::animate(window, cx),
-            _ticks: cx.observe_self(|turn: &mut Turn, _| turn.ticks += 1),
-        });
-        Ticks {
-            _redraw: cx.observe(&turn, |_, _, cx| cx.notify()),
-            turn,
-        }
-    }
-
-    /// How many ticks have come since the start.
-    fn count(&self, cx: &App) -> u64 {
-        self.turn.read(cx).ticks
     }
 }

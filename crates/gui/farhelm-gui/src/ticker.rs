@@ -65,7 +65,10 @@
 use std::rc::{Rc, Weak};
 use std::time::{Duration, SystemTime};
 
-use gpui::{AnyWindowHandle, App, Context, EntityId, Global, Task, Window};
+use gpui::{
+    AnyWindowHandle, App, AppContext as _, Context, Entity, EntityId, Global, Subscription, Task,
+    Window,
+};
 
 use crate::bootstrap::{installed, installed_mut};
 
@@ -227,6 +230,43 @@ fn pulse_step(ticks: u64) -> u64 {
 #[must_use = "a view animates only while it holds this"]
 pub struct Animating {
     _alive: Rc<()>,
+}
+
+/// A view's own elapsed animation ticks. The counter gets the ordinary
+/// animation notifications, so it pauses under reduced motion and when the
+/// window goes inactive. Dropping it ends its ticks and redraws.
+pub(crate) struct AnimationTicks {
+    counter: Entity<TickCounter>,
+    _redraw: Subscription,
+}
+
+/// Use a separate entity so the owner's unrelated redraws cannot advance the animation.
+struct TickCounter {
+    count: u64,
+    _animating: Animating,
+    _ticks: Subscription,
+}
+
+impl AnimationTicks {
+    /// Start at zero and notify the owner on each delivered animation tick.
+    pub(crate) fn start<V: 'static>(window: &Window, cx: &mut Context<V>) -> Self {
+        let counter = cx.new(|cx| TickCounter {
+            count: 0,
+            _animating: animate(window, cx),
+            _ticks: cx.observe_self(|counter: &mut TickCounter, _| {
+                counter.count = counter.count.wrapping_add(1);
+            }),
+        });
+        Self {
+            _redraw: cx.observe(&counter, |_, _, cx| cx.notify()),
+            counter,
+        }
+    }
+
+    /// Ticks delivered since this animation started, independent of other animations in the window.
+    pub(crate) fn count(&self, cx: &App) -> u64 {
+        self.counter.read(cx).count
+    }
 }
 
 /// Held by a view whose cursor blinks, for as long as it blinks. Dropping it stops the view's blink ticks; making a new
