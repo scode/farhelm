@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`launcher-repository-search-loading`](reports/launcher-repository-search-loading.report.md) landed 2026-11-21 in #4388: show "Loading repositories…" instead of "no matches" while the launcher's repository search is pending, and close its triage outcome
 - [`stop-wait-starting-launch-witness`](reports/stop-wait-starting-launch-witness.report.md) landed 2026-11-21 in #4391: make the supervisor stop-wait test witness a launch still registering, and close its triage outcome
 - [`desktop-updater-unreadable-optout`](reports/desktop-updater-unreadable-optout.report.md) landed 2026-11-21 in #4407: treat an unreadable automatic-update setting as off, closing its triage outcome
 - [`container-delete-and-link-group-tests`](reports/container-delete-and-link-group-tests.report.md) landed 2026-11-21 in #4412, #4413: add regression tests for legacy container Delete's removal and snapshot link grouping, closing two triage outcomes
