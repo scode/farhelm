@@ -30,6 +30,7 @@ const PUBLIC_REPO: &str = "octocat/Hello-World";
 /// Credential delivery reaches the real agent child without issuing an auth
 /// request to an actual endpoint or consuming a vendor turn.
 const ENDPOINT: &str = "https://podman-e2e.invalid/v1";
+const CODEX_ENDPOINT: &str = "https://podman-codex-e2e.invalid/v1";
 /// Network bootstrap owns most of this allowance. Cleanup gets its own bound
 /// so a failed scenario still has time to end the resources it created.
 const SCENARIO_BUDGET: Duration = Duration::from_secs(30 * 60);
@@ -582,6 +583,27 @@ impl Fixture {
             credentials["env"]["ANTHROPIC_AUTH_TOKEN"] == token,
             "the selected fictional endpoint token must reach the private state file"
         );
+        // The real provider publishes Codex and Claude together. A clean container must stay free of a Codex settings
+        // file even when the recipe selects a managed endpoint.
+        assert_eq!(credentials["codex_endpoint"]["base_url"], CODEX_ENDPOINT);
+        assert_eq!(credentials["codex_endpoint"]["has_token"], true);
+        assert!(
+            credentials["env"][farhelm_supervisor::recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV]
+                == token,
+            "Codex's bearer must be in the same private snapshot"
+        );
+        require_engine(&[
+            "exec",
+            "--user",
+            "ubuntu",
+            container,
+            "test",
+            "!",
+            "-e",
+            "/home/ubuntu/.codex/config.toml",
+        ])
+        .await
+        .expect("endpoint delivery must leave a clean Codex settings path alone");
         let permissions = require_engine(&[
             "exec",
             "--user",
@@ -1021,7 +1043,8 @@ impl Fixture {
                 "name":self.recipe, "recipe": {"base":{"kind":"tensorlake_ubuntu"},
                     "size":{"cpus":1,"memory_gb":1,"disk_gb":10}, "packages":["python3"],
                     "claude":{"base_url":ENDPOINT,"token_credential":self.recipe},
-                    "codex":null,"claude_login_credential":null,
+                    "codex":{"base_url":CODEX_ENDPOINT,"token_credential":self.recipe},
+                    "claude_login_credential":null,
                     "codex_login_credential":null,"github_token_credential":null,"tunnels":[]}
             }),
         )

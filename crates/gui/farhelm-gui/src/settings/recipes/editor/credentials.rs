@@ -123,9 +123,10 @@ impl Agent {
                 login_id: "recipe-codex-login",
                 login_kind: CredentialKind::CodexLogin,
                 login_missing: "The selected Codex login is unavailable. Choose another login.",
-                help: "Subscription uses a Codex login from Settings → Credentials. Farhelm writes auth.json when \
-                       that saved login changes and leaves Codex's refreshed file alone. Switching away leaves \
-                       auth.json on the host; sign out in Codex to remove it.",
+                help: "Farhelm supplies API endpoint credentials when it launches a Codex session. Restart a running \
+                       session to pick up a replacement. Subscription uses a Codex login from Settings → Credentials. \
+                       Farhelm writes auth.json when that saved login changes and leaves Codex's refreshed file alone. \
+                       Switching away leaves auth.json on the host; sign out in Codex to remove it.",
             },
         }
     }

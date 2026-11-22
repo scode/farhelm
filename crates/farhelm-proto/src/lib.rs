@@ -256,7 +256,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_86` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_87` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -267,7 +267,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 86;
+pub const PROTOCOL_VERSION: u32 = 87;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -6031,6 +6031,8 @@ mod tests {
     /// environment file now that the helm retires Claude settings delivery.
     /// Version 86 marks the unused last column of a wide wrap in the binary
     /// grid row.
+    /// Version 87 requires supervisors that understand the Codex provider descriptor in the private recipe credentials
+    /// file. An older supervisor would refuse a launch after the helm installed that descriptor.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6041,8 +6043,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_86() {
-        assert_eq!(PROTOCOL_VERSION, 86);
+    fn protocol_version_is_pinned_at_87() {
+        assert_eq!(PROTOCOL_VERSION, 87);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,

@@ -660,6 +660,8 @@ pub struct HookPolicy<'a> {
     /// The materialized reporter extension for kinds that load one (Pi,
     /// OMP), or `None` when it is unavailable or the kind has none.
     pub vendor_extension: Option<&'a str>,
+    /// The managed Codex provider descriptor from the same snapshot as the child environment.
+    pub codex_endpoint: Option<&'a crate::recipe_credentials::CodexEndpoint>,
 }
 
 /// The skip reason for a kind whose hooks `FARHELM_AGENT_HOOKS` turned off.
@@ -1376,6 +1378,9 @@ impl AgentIntegration for CodexIntegration {
         // Keep commands in this session's process tree and environment even
         // without hooks; see SPEC_impl.md, "Codex without the shared server".
         expansion.args.insert(0, "--no-daemon".to_string());
+        if let Some(endpoint) = policy.codex_endpoint {
+            expansion.args.extend(codex_endpoint_args(endpoint));
+        }
         expansion
     }
 
@@ -1450,6 +1455,29 @@ impl AgentIntegration for CodexIntegration {
             ),
         ]
     }
+}
+
+/// Retain the provider ID associated with saved conversations. The override names the child environment key only
+/// when the recipe supplies a token, so a clean tokenless configuration sends no bearer.
+fn codex_endpoint_args(endpoint: &crate::recipe_credentials::CodexEndpoint) -> [String; 4] {
+    let env_key = if endpoint.has_token {
+        format!(
+            ",env_key={}",
+            toml_basic_string(crate::recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV)
+        )
+    } else {
+        String::new()
+    };
+    let provider = format!(
+        "model_providers.farhelm={{name=\"Farhelm\",base_url={},wire_api=\"responses\",requires_openai_auth=false{env_key}}}",
+        toml_basic_string(&endpoint.base_url)
+    );
+    [
+        "-c".into(),
+        "model_provider=farhelm".into(),
+        "-c".into(),
+        provider,
+    ]
 }
 
 // ---------------------------------------------------------------------
@@ -2852,6 +2880,7 @@ mod tests {
                         instructions: AgentInstructions::On,
                         exe,
                         vendor_extension: None,
+                        codex_endpoint: None,
                     },
                 );
                 assert_eq!(expansion.args[0], "--no-daemon");
@@ -2868,6 +2897,49 @@ mod tests {
                     }
                     _ => panic!("the ownership flag must preserve the hook log decision"),
                 }
+            }
+        }
+    }
+
+    /// Provider selection survives a hook opt-out on both phases. The environment key points to a secret
+    /// supplied separately, and a tokenless recipe leaves that key out of Codex's config.
+    #[test]
+    fn codex_recipe_endpoint_is_independent_of_hooks() {
+        use crate::recipe_credentials::{CODEX_ENDPOINT_TOKEN_ENV, CodexEndpoint};
+
+        let base_url = "https://example.invalid/v1/\"quoted\"/\\path/🗺";
+        for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
+            for has_token in [false, true] {
+                let endpoint = CodexEndpoint {
+                    base_url: base_url.into(),
+                    has_token,
+                };
+                let expansion = CodexIntegration.farhelm_args(
+                    phase,
+                    &HookPolicy {
+                        hooks: &AgentHooks::None,
+                        instructions: AgentInstructions::Off,
+                        exe: Some("/opt/farhelm"),
+                        vendor_extension: None,
+                        codex_endpoint: Some(&endpoint),
+                    },
+                );
+                assert_eq!(
+                    &expansion.args[..4],
+                    ["--no-daemon", "-c", "model_provider=farhelm", "-c"]
+                );
+                assert!(expansion.env.is_empty());
+                assert!(!expansion.hooked);
+                let doc: toml::Value = toml::from_str(&expansion.args[4]).unwrap();
+                let provider = &doc["model_providers"]["farhelm"];
+                assert_eq!(provider["base_url"].as_str(), Some(base_url));
+                assert_eq!(provider["wire_api"].as_str(), Some("responses"));
+                assert_eq!(provider["requires_openai_auth"].as_bool(), Some(false));
+                assert_eq!(
+                    provider.get("env_key").and_then(toml::Value::as_str),
+                    has_token.then_some(CODEX_ENDPOINT_TOKEN_ENV)
+                );
+                assert!(provider.get("experimental_bearer_token").is_none());
             }
         }
     }
@@ -2890,6 +2962,7 @@ mod tests {
             instructions: AgentInstructions::On,
             exe: Some("/opt/farhelm"),
             vendor_extension: Some("/state/extension.js"),
+            codex_endpoint: None,
         };
         let argv = |program: &str| vec![program.to_string()];
         let decide = |kind: AgentKind, program: &str| {

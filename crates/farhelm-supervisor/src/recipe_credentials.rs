@@ -1,5 +1,5 @@
-//! Managed recipe credentials reach only the terminal host child's environment.
-//! Read each spawn's values from one snapshot of the private state file.
+//! Read endpoint metadata and child environment entries from one private snapshot per spawn.
+//! Only the metadata can take part in composing a saved launch specification.
 
 use std::collections::BTreeMap;
 use std::ffi::OsString;
@@ -11,6 +11,18 @@ use tokio::io::AsyncReadExt;
 /// Size limit for the private file before parsing or passing data to a host.
 pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 
+/// The Codex provider names this variable in its argv. Only the child's environment carries its value.
+pub const CODEX_ENDPOINT_TOKEN_ENV: &str = "FARHELM_CODEX_ENDPOINT_TOKEN";
+
+/// Non-secret provider settings are sufficient for argv composition. Reading the token and these settings from
+/// one snapshot keeps a launch from pairing a rotated token with the previous endpoint.
+#[derive(Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct CodexEndpoint {
+    pub base_url: String,
+    pub has_token: bool,
+}
+
 /// The file contract for managed child environment entries. The environment
 /// includes credential values, so the snapshot has no debug formatter.
 #[derive(Default, Deserialize, Serialize)]
@@ -18,6 +30,9 @@ pub const MAX_FILE_BYTES: usize = 1024 * 1024;
 pub struct RecipeCredentials {
     /// Child environment entries. The helm chooses their names by recipe mode.
     pub env: BTreeMap<String, String>,
+    /// An older Claude-only file has no Codex provider to select.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub codex_endpoint: Option<CodexEndpoint>,
 }
 
 /// The helm uses this basename for atomic delivery into the host state dir.
@@ -72,6 +87,16 @@ impl RecipeCredentials {
                 && !value.contains('\0')),
             "the recipe credentials file has an invalid environment entry"
         );
+        anyhow::ensure!(
+            self.codex_endpoint
+                .as_ref()
+                .is_some_and(|endpoint| endpoint.has_token)
+                == self.env.contains_key(CODEX_ENDPOINT_TOKEN_ENV)
+                && self.codex_endpoint.as_ref().is_none_or(|endpoint| {
+                    !endpoint.base_url.trim().is_empty() && !endpoint.base_url.contains('\0')
+                }),
+            "the recipe credentials file has an invalid Codex endpoint"
+        );
         Ok(())
     }
 
@@ -98,6 +123,41 @@ impl RecipeCredentials {
 mod tests {
     use super::*;
 
+    /// Upgrading the supervisor must accept files written by the Claude-only helm. Codex's new descriptor and its
+    /// token presence are checked together before the spawn can use either one.
+    #[farhelm_testtrace::test]
+    async fn codex_endpoint_and_token_are_one_snapshot() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = host_file(dir.path());
+        std::fs::write(
+            &path,
+            br#"{"env":{"CLAUDE_CODE_OAUTH_TOKEN":"fixture-login"}}"#,
+        )
+        .unwrap();
+        let old = RecipeCredentials::read(&path).await.unwrap();
+        assert!(old.codex_endpoint.is_none());
+        assert_eq!(old.env["CLAUDE_CODE_OAUTH_TOKEN"], "fixture-login");
+
+        for has_token in [false, true] {
+            let mut snapshot = RecipeCredentials {
+                codex_endpoint: Some(CodexEndpoint {
+                    base_url: "http://127.0.0.1:1234/v1".into(),
+                    has_token,
+                }),
+                ..RecipeCredentials::default()
+            };
+            if has_token {
+                snapshot
+                    .env
+                    .insert(CODEX_ENDPOINT_TOKEN_ENV.into(), "fixture-bearer".into());
+            }
+            std::fs::write(&path, serde_json::to_vec(&snapshot).unwrap()).unwrap();
+            let loaded = RecipeCredentials::read(&path).await.unwrap();
+            assert_eq!(loaded.codex_endpoint.as_ref().unwrap().has_token, has_token);
+            assert_eq!(loaded.env, snapshot.env);
+        }
+    }
+
     /// A refused launch can surface this error in logs or to a client. A
     /// malformed file must never send its credential values along with it.
     #[farhelm_testtrace::test]
@@ -108,6 +168,8 @@ mod tests {
             r#"{"fictional-private":"unknown field"}"#,
             r#"{"env":{"BAD=NAME":"fictional-private"}}"#,
             r#"{"env":{"GOOD":"fictional-private\u0000"}}"#,
+            r#"{"env":{},"codex_endpoint":{"base_url":"fictional-private","has_token":true}}"#,
+            r#"{"env":{"FARHELM_CODEX_ENDPOINT_TOKEN":"fictional-private"}}"#,
         ] {
             std::fs::write(&path, input).unwrap();
             let Err(error) = RecipeCredentials::read(&path).await else {

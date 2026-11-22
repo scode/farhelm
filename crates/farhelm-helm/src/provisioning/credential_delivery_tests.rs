@@ -68,91 +68,91 @@ async fn container_connections_resolve_shared_recipe_selections_and_delivery_rec
     );
 }
 
-/// A saved edit must survive delivery, whether the initial read found a file or
-/// absence. Two competing saves exhaust the retry without falsely stamping success.
+/// The one stamped Codex cleanup must keep edits saved while it is running. Two competing saves exhaust the retry
+/// without enabling the new endpoint or stamping cleanup as complete.
 #[farhelm_testtrace::test]
 async fn concurrent_settings_edits_are_merged_once_then_warn_and_retry_on_connect() {
-    for existing in [false, true] {
-        for conflicts in [1, 2] {
-            let f = Fixture::new(true).await;
-            let path = f.home.join(".codex/config.toml");
-            tokio::fs::create_dir(path.parent().unwrap()).await.unwrap();
-            if existing {
-                tokio::fs::write(&path, b"editor = 'old'\n").await.unwrap();
-            }
-            assert_eq!(path.exists(), existing);
-            assert!(
-                f.delivery
-                    .read_record(&f.row)
-                    .await
-                    .unwrap()
-                    .codex
-                    .is_none()
+    for conflicts in [1, 2] {
+        let f = Fixture::new(true).await;
+        let path = f.home.join(".codex/config.toml");
+        tokio::fs::create_dir(path.parent().unwrap()).await.unwrap();
+        tokio::fs::write(&path, legacy_codex_config("old"))
+            .await
+            .unwrap();
+        f.stamp_legacy_codex().await;
+        let editor_path = path.clone();
+        let backend = Arc::downgrade(&f.backend);
+        *f.backend.on_operation.lock().unwrap() = Some((
+            "write-unit",
+            Box::new(move || {
+                std::fs::write(&editor_path, legacy_codex_config("first")).unwrap();
+                if conflicts == 2 {
+                    *backend.upgrade().unwrap().on_operation.lock().unwrap() = Some((
+                        "write-unit",
+                        Box::new(move || {
+                            std::fs::write(editor_path, legacy_codex_config("second")).unwrap();
+                        }),
+                    ));
+                }
+            }),
+        ));
+        let _lease = f.delivery.enter(&f.row);
+        f.delivery.connect(&f.row, &f.events).await;
+        assert_eq!(
+            f.operations()
+                .iter()
+                .filter(|op| *op == "write-unit")
+                .count(),
+            2
+        );
+        let record = f.delivery.read_record(&f.row).await.unwrap();
+        if conflicts == 2 {
+            assert_eq!(
+                tokio::fs::read_to_string(&path).await.unwrap(),
+                legacy_codex_config("second")
             );
-            let editor_path = path.clone();
-            let backend = Arc::downgrade(&f.backend);
-            *f.backend.on_operation.lock().unwrap() = Some((
-                "write-unit",
-                Box::new(move || {
-                    std::fs::write(&editor_path, b"editor = 'first'\n").unwrap();
-                    if conflicts == 2 {
-                        *backend.upgrade().unwrap().on_operation.lock().unwrap() = Some((
-                            "write-unit",
-                            Box::new(move || {
-                                std::fs::write(editor_path, b"editor = 'second'\n").unwrap();
-                            }),
-                        ));
-                    }
-                }),
-            ));
-            let _lease = f.delivery.enter(&f.row);
+            assert_eq!(
+                f.delivery.warning(f.row.id).as_deref(),
+                Some(
+                    "Codex recipe credential cleanup is pending (could not install the agent settings)"
+                )
+            );
+            assert!(matches!(record.codex, Some(EndpointStamp::Endpoint { .. })));
+            assert!(record.codex_environment.is_none());
             f.delivery.connect(&f.row, &f.events).await;
-            assert_eq!(
-                f.operations()
-                    .iter()
-                    .filter(|op| *op == "write-unit")
-                    .count(),
-                2
-            );
-            let record = f.delivery.read_record(&f.row).await.unwrap();
-            if conflicts == 2 {
-                assert_eq!(
-                    tokio::fs::read_to_string(&path).await.unwrap(),
-                    "editor = 'second'\n"
-                );
-                assert_eq!(
-                    f.delivery.warning(f.row.id).as_deref(),
-                    Some("could not install the agent settings")
-                );
-                assert!(record.codex.is_none());
-                f.delivery.connect(&f.row, &f.events).await;
-            } else {
-                assert!(record.codex.is_some());
-            }
-            assert_eq!(f.delivery.warning(f.row.id), None);
-            let settings: toml_edit::DocumentMut = tokio::fs::read_to_string(&path)
-                .await
-                .unwrap()
-                .parse()
-                .unwrap();
-            assert_eq!(
-                settings["editor"].as_str(),
-                Some(if conflicts == 2 { "second" } else { "first" })
-            );
-            assert_eq!(
-                settings["model_providers"]["farhelm"]["experimental_bearer_token"].as_str(),
-                Some(FIRST)
-            );
-            assert!(
-                f.delivery
-                    .read_record(&f.row)
-                    .await
-                    .unwrap()
-                    .codex
-                    .is_some()
-            );
+        } else {
+            assert_eq!(record.codex, Some(EndpointStamp::Cleared));
         }
+        assert_eq!(f.delivery.warning(f.row.id), None);
+        let settings: toml_edit::DocumentMut = tokio::fs::read_to_string(&path)
+            .await
+            .unwrap()
+            .parse()
+            .unwrap();
+        assert_eq!(
+            settings["editor"].as_str(),
+            Some(if conflicts == 2 { "second" } else { "first" })
+        );
+        assert!(!settings.contains_key("model_provider"));
+        assert!(
+            settings["model_providers"]["farhelm"]
+                .as_table_like()
+                .unwrap()
+                .get("experimental_bearer_token")
+                .is_none()
+        );
+        assert_eq!(
+            f.snapshot().await.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+            FIRST
+        );
     }
+}
+
+/// Model an older settings write that a concurrent user save still carries along with their own value.
+fn legacy_codex_config(editor: &str) -> String {
+    format!(
+        "editor = '{editor}'\nmodel_provider = 'farhelm'\n[model_providers.farhelm]\nexperimental_bearer_token = 'fictional-legacy'\n"
+    )
 }
 
 /// Own both sides of delivery until every file and durable stamp is inspected.
@@ -167,6 +167,26 @@ struct Fixture {
 }
 
 impl Fixture {
+    /// A durable stamp grants cleanup authority over the fixture's prior Codex write.
+    async fn stamp_legacy_codex(&self) {
+        let entry = self.delivery.entry(&self.row);
+        let guard = entry.serial.clone().lock_owned().await;
+        let mut record = self.delivery.read_record(&self.row).await.unwrap();
+        record.codex = Some(EndpointStamp::Endpoint {
+            base_url: "https://legacy.example/v1".into(),
+            credential: Some(self.stamp("work", 1).await),
+        });
+        self.delivery
+            .write_record(&self.row, &record, guard)
+            .await
+            .unwrap();
+    }
+
+    /// Decode the file delivered for the next spawn, so a token shared by Claude and Codex cannot mask a missing slot.
+    async fn snapshot(&self) -> RecipeCredentials {
+        serde_json::from_slice(&tokio::fs::read(self.claude_path()).await.unwrap()).unwrap()
+    }
+
     /// Registration uses the real recipe/reference store; no supervisor or
     /// vendor service is needed to exercise serialized endpoint convergence.
     async fn new(codex: bool) -> Self {
@@ -540,7 +560,12 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     *f.backend.fail.lock().unwrap() = Some("write-legacy-claude-settings".into());
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(PENDING));
-    assert!(!f.claude_path().exists());
+    let snapshot = f.snapshot().await;
+    assert!(!snapshot.env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+    assert_eq!(
+        snapshot.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+        FIRST
+    );
     assert_eq!(tokio::fs::read(&settings).await.unwrap(), legacy);
     let record = f.delivery.read_record(&f.row).await.unwrap();
     assert!(record.claude_environment.is_none());
@@ -554,11 +579,13 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
         .await;
     assert_eq!(shared.len(), 1);
     assert_eq!(shared[0].reason, PENDING);
-    assert!(!f.claude_path().exists());
-    let codex = tokio::fs::read_to_string(f.home.join(".codex/config.toml"))
-        .await
-        .unwrap();
-    assert!(codex.contains(SECOND) && !codex.contains(FIRST));
+    let snapshot = f.snapshot().await;
+    assert!(!snapshot.env.contains_key("ANTHROPIC_AUTH_TOKEN"));
+    assert_eq!(
+        snapshot.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+        SECOND
+    );
+    assert!(!f.home.join(".codex/config.toml").exists());
 
     f.replace("git-work", "fictional-github-second").await;
     assert!(
@@ -577,9 +604,9 @@ async fn stamped_claude_cleanup_gates_only_its_launch_environment() {
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(
         f.delivery.warning(f.row.id).as_deref(),
-        Some("could not install the managed Claude launch credentials")
+        Some("could not install the managed launch credentials")
     );
-    assert!(!f.claude_path().exists());
+    assert!(!f.snapshot().await.env.contains_key("ANTHROPIC_AUTH_TOKEN"));
     let actual: serde_json::Value =
         serde_json::from_slice(&tokio::fs::read(&settings).await.unwrap()).unwrap();
     assert_eq!(actual, serde_json::json!({"env":{"KEEP":"old"}}));
@@ -717,16 +744,8 @@ async fn codex_refresh_survives_reconnect_and_mode_changes_until_replacement() {
             Some(f.stamp("codex-work", 1).await)
         );
     }
-    let config = std::fs::read_to_string(f.home.join(".codex/config.toml")).unwrap();
-    let config: toml_edit::DocumentMut = config.parse().unwrap();
-    assert!(!config.contains_key("model_provider"));
-    assert!(
-        config["model_providers"]["farhelm"]
-            .as_table_like()
-            .unwrap()
-            .get("experimental_bearer_token")
-            .is_none()
-    );
+    assert!(!f.home.join(".codex/config.toml").exists());
+    assert!(f.snapshot().await.codex_endpoint.is_none());
     let replacement = r#"{"new_vendor_shape":{"opaque":"fictional-new-login"}}"#;
     f.replace("codex-work", replacement).await;
     assert!(
@@ -834,11 +853,10 @@ async fn codex_auth_success_is_durable_before_later_github_failure() {
     );
 }
 
-/// The old Absent fingerprint represented no work. Explicit None must clear
-/// legacy owned settings once, while preserving manually selected providers,
-/// comments and unrelated table keys, then reconnect without any file access.
+/// Explicit None must clear previously delivered settings once, while preserving manually selected providers,
+/// comments and unrelated table keys. A reconnect then needs no settings access.
 #[farhelm_testtrace::test]
-async fn codex_none_cleans_legacy_absence_once_without_touching_auth() {
+async fn codex_none_cleans_legacy_endpoint_once_without_touching_auth() {
     let f = Fixture::new(false).await;
     std::fs::create_dir(f.home.join(".codex")).unwrap();
     let config = f.home.join(".codex/config.toml");
@@ -847,20 +865,7 @@ async fn codex_none_cleans_legacy_absence_once_without_touching_auth() {
     // A directory at auth.json makes any attempted read or replacement fail;
     // None has no authority over it, even when cleaning a legacy config.
     std::fs::create_dir(&auth).unwrap();
-    let entry = f.delivery.entry(&f.row);
-    let guard = entry.serial.clone().lock_owned().await;
-    f.delivery
-        .write_record(
-            &f.row,
-            &Record {
-                home: Some(f.home.clone()),
-                codex: Some(EndpointStamp::Absent),
-                ..Record::default()
-            },
-            guard,
-        )
-        .await
-        .unwrap();
+    f.stamp_legacy_codex().await;
     let _lease = f.connected().await;
     let text = std::fs::read_to_string(&config).unwrap();
     assert!(text.contains("# personal comment") && !text.contains("fictional-old-token"));
@@ -878,6 +883,33 @@ async fn codex_none_cleans_legacy_absence_once_without_touching_auth() {
     let before = f.operations();
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.operations(), before);
+}
+
+/// An old None or Subscription delivery could record Absent without creating a settings file. A user who subsequently
+/// chose the `farhelm` provider owns its settings and the upgrade must leave them alone.
+#[farhelm_testtrace::test]
+async fn codex_absent_stamp_preserves_later_user_settings() {
+    let f = Fixture::new(false).await;
+    let config = f.home.join(".codex/config.toml");
+    tokio::fs::create_dir(config.parent().unwrap())
+        .await
+        .unwrap();
+    let personal = legacy_codex_config("personal");
+    tokio::fs::write(&config, &personal).await.unwrap();
+    let entry = f.delivery.entry(&f.row);
+    let guard = entry.serial.clone().lock_owned().await;
+    let mut record = f.delivery.read_record(&f.row).await.unwrap();
+    record.codex = Some(EndpointStamp::Absent);
+    f.delivery
+        .write_record(&f.row, &record, guard)
+        .await
+        .unwrap();
+
+    let _lease = f.connected().await;
+    assert_eq!(tokio::fs::read_to_string(config).await.unwrap(), personal);
+    assert!(!f.operations().iter().any(|op| op == "read-agent-settings"));
+    let record = f.delivery.read_record(&f.row).await.unwrap();
+    assert_eq!(record.codex, Some(EndpointStamp::Cleared));
 }
 
 /// Pending recipe edits do not update host stamps. Reusing an unreferenced
@@ -922,13 +954,15 @@ async fn recreated_endpoint_names_do_not_match_a_previous_delivery() {
     f.delivery.connect(&f.row, &f.events).await;
     assert_eq!(f.delivery.warning(f.row.id), None);
     assert!(f.claude().await.contains(SECOND));
-    assert!(
-        std::fs::read_to_string(f.home.join(".codex/config.toml"))
-            .unwrap()
-            .contains(SECOND)
+    let snapshot = f.snapshot().await;
+    assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], SECOND);
+    assert_eq!(
+        snapshot.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+        SECOND
     );
+    assert!(!f.home.join(".codex/config.toml").exists());
     let record = f.delivery.read_record(&f.row).await.unwrap();
-    for stamp in [record.claude_environment, record.codex] {
+    for stamp in [record.claude_environment, record.codex_environment] {
         let Some(EndpointStamp::Endpoint { credential, .. }) = stamp else {
             panic!("endpoint stamp missing")
         };
@@ -1207,6 +1241,10 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     tokio::fs::write(&path, settings).await.unwrap();
     drop(lease);
     let before = f.operations();
+    assert!(
+        !before.iter().any(|op| op == "read-home"),
+        "a fresh host can receive launch credentials without a home lookup"
+    );
     let restarted = CredentialDelivery::new(f.store.clone(), f.backend.clone());
     let _lease = restarted.enter(&f.row);
     restarted.connect(&f.row, &f.events).await;
@@ -1214,7 +1252,7 @@ async fn unchanged_reconnect_uses_durable_stamps_without_remote_work() {
     assert_eq!(restarted.warning(f.row.id), None);
     assert_eq!(tokio::fs::read(path).await.unwrap(), settings);
     let record = restarted.read_record(&f.row).await.unwrap();
-    assert_eq!(record.home, Some(f.home.clone()));
+    assert_eq!(record.home, None);
     assert_eq!(record.codex, Some(EndpointStamp::Cleared));
     assert_eq!(
         std::fs::metadata(f.claude_path())
@@ -1443,7 +1481,7 @@ async fn a_stalled_host_is_reported_at_the_reply_bound_while_its_delivery_carrie
     let _settled = entry.serial.clone().lock_owned().await;
     assert_eq!(
         f.delivery.warning(f.row.id).as_deref(),
-        Some("could not install the managed Claude launch credentials")
+        Some("could not install the managed launch credentials")
     );
     assert!(f.claude().await.contains(SECOND));
     assert_eq!(f.store.credentials().await.unwrap()[0].revision, 3);
@@ -1557,11 +1595,13 @@ async fn an_old_lease_cannot_cancel_a_second_live_connection() {
     assert!(f.claude().await.contains(SECOND));
 }
 
-/// Claude's completed file is recorded before Codex is attempted. A malformed
-/// later document cannot cause a retry to reread or replace the successful one.
+/// A malformed stamped Codex document withholds Codex from the shared snapshot while Claude proceeds.
 #[farhelm_testtrace::test]
-async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
+async fn codex_cleanup_failure_preserves_the_claude_slot() {
     let f = Fixture::new(true).await;
+    f.github_credential().await;
+    f.select_codex(false, true, true).await;
+    f.stamp_legacy_codex().await;
     tokio::fs::create_dir(f.home.join(".codex")).await.unwrap();
     let codex = f.home.join(".codex/config.toml");
     tokio::fs::write(&codex, b"[invalid fictional-private-marker")
@@ -1571,10 +1611,27 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
     f.delivery.connect(&f.row, &f.events).await;
     assert!(f.claude().await.contains(FIRST));
     let record = f.delivery.read_record(&f.row).await.unwrap();
-    assert!(record.claude_environment.is_some() && record.codex.is_none());
+    assert!(record.claude_environment.is_some() && record.codex_environment.is_none());
+    assert!(matches!(record.codex, Some(EndpointStamp::Endpoint { .. })));
+    assert!(f.snapshot().await.codex_endpoint.is_none());
     let warning = f.delivery.warning(f.row.id).unwrap();
     assert!(!warning.contains("fictional-private-marker"));
-    assert_eq!(warning, "~/.codex/config.toml is not valid TOML");
+    assert_eq!(
+        warning,
+        "Codex recipe credential cleanup is pending (~/.codex/config.toml is not valid TOML)"
+    );
+    f.replace("git-work", "fictional-github-replacement").await;
+    assert!(
+        f.delivery
+            .push("git-work", past_the_ssh_budget(), &f.events)
+            .await
+            .is_empty(),
+        "the GitHub save does not inherit the Codex refusal"
+    );
+    assert_eq!(
+        f.delivery.warning(f.row.id).as_deref(),
+        Some(warning.as_str())
+    );
     let before = f.operations().len();
     tokio::fs::write(&codex, b"unrelated = true\n")
         .await
@@ -1585,8 +1642,7 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
         [
             "read-agent-settings",
             "create-directories",
-            "write-unit",
-            "remove-github-token"
+            "wrote-agent-credentials",
         ]
     );
     assert_eq!(f.delivery.warning(f.row.id), None);
@@ -1596,14 +1652,77 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
             .unwrap()
             .contains("unrelated = true")
     );
+    let snapshot = f.snapshot().await;
+    assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], FIRST);
+    assert_eq!(
+        snapshot.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+        FIRST
+    );
+}
+
+/// A fresh host can carry its own Codex config. Preparation may write the old Claude-only file before hello,
+/// but only an accepted connection can add a Codex descriptor, with or without a bearer.
+#[farhelm_testtrace::test]
+async fn tokenless_codex_waits_for_hello_and_keeps_unstamped_settings() {
+    let f = Fixture::new(false).await;
+    let config = f.home.join(".codex/config.toml");
+    tokio::fs::create_dir(config.parent().unwrap())
+        .await
+        .unwrap();
+    let personal = b"# Personal settings\nmodel = 'personal'\n";
+    tokio::fs::write(&config, personal).await.unwrap();
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.claude = Some(endpoint("https://first.example/v1", "work"));
+    recipe.codex = Some(EndpointSave {
+        base_url: "https://tokenless.example/v1".into(),
+        token_credential: None,
+    });
+    f.store
+        .update_tensorlake_recipe("recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+
+    let bindings = f.delivery.read_bindings(&f.row).await.unwrap();
+    assert!(
+        bindings.codex.is_some(),
+        "the test selected a tokenless Codex endpoint"
+    );
+    let entry = f.delivery.entry(&f.row);
+    let guard = entry.serial.clone().lock_owned().await;
+    f.delivery
+        .apply(
+            &f.row,
+            bindings,
+            Some(f.home.clone()),
+            DeliveryPhase::Setup,
+            guard,
+        )
+        .await
+        .unwrap();
+    assert!(f.snapshot().await.codex_endpoint.is_none());
     assert!(
         f.delivery
             .read_record(&f.row)
             .await
             .unwrap()
-            .codex
-            .is_some()
+            .codex_environment
+            .is_none()
     );
+
+    let _lease = f.connected().await;
+    let snapshot = f.snapshot().await;
+    let codex = snapshot.codex_endpoint.unwrap();
+    assert_eq!(codex.base_url, "https://tokenless.example/v1");
+    assert!(!codex.has_token);
+    assert!(
+        !snapshot
+            .env
+            .contains_key(recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV)
+    );
+    assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], FIRST);
+    assert_eq!(tokio::fs::read(config).await.unwrap(), personal);
+    assert!(!f.operations().iter().any(|op| op == "read-agent-settings"));
 }
 
 /// Each backend failure is mapped at the delivery boundary; transport context
@@ -1611,23 +1730,45 @@ async fn a_later_slot_failure_preserves_the_completed_slot_stamp() {
 #[farhelm_testtrace::test]
 async fn backend_failures_leave_saved_values_and_safe_warnings() {
     for (operation, reason) in [
-        ("read-home", "could not read the sandbox's home directory"),
-        ("read-agent-settings", "could not read the agent settings"),
+        (
+            "read-home",
+            "Codex recipe credential cleanup is pending (could not read the sandbox's home directory)",
+        ),
+        (
+            "read-agent-settings",
+            "Codex recipe credential cleanup is pending (could not read the agent settings)",
+        ),
         (
             "create-directories",
-            "could not prepare the managed Claude credentials directory",
+            "could not prepare the managed launch credentials directory",
         ),
-        ("write-unit", "could not install the agent settings"),
+        (
+            "write-unit",
+            "Codex recipe credential cleanup is pending (could not install the agent settings)",
+        ),
         (
             "wrote-agent-credentials",
-            "could not install the managed Claude launch credentials",
+            "could not install the managed launch credentials",
         ),
     ] {
         let f = Fixture::new(true).await;
+        f.stamp_legacy_codex().await;
+        let codex = f.home.join(".codex/config.toml");
+        tokio::fs::create_dir(codex.parent().unwrap())
+            .await
+            .unwrap();
+        tokio::fs::write(&codex, legacy_codex_config("old"))
+            .await
+            .unwrap();
         let _lease = f.delivery.enter(&f.row);
         *f.backend.fail.lock().unwrap() = Some(operation.into());
         f.delivery.connect(&f.row, &f.events).await;
         assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(reason));
+        if operation == "read-home" {
+            let snapshot = f.snapshot().await;
+            assert_eq!(snapshot.env["ANTHROPIC_AUTH_TOKEN"], FIRST);
+            assert!(snapshot.codex_endpoint.is_none());
+        }
         f.replace("work", SECOND).await;
         let failures = f
             .delivery
@@ -1920,7 +2061,7 @@ async fn route_replacement_covers_the_hook_publication_gap_and_reports_failures(
     assert_eq!(ack.delivery_failures.len(), 1);
     assert_eq!(
         ack.delivery_failures[0].reason,
-        "could not install the managed Claude launch credentials"
+        "could not install the managed launch credentials"
     );
     assert_eq!(f.store.credentials().await.unwrap()[0].revision, 3);
     assert!(harness.manager.status(f.row.id).unwrap().client.is_some());
@@ -1942,7 +2083,7 @@ async fn route_replacement_covers_the_hook_publication_gap_and_reports_failures(
         .unwrap();
     assert_eq!(
         host["tensorlake"]["credential_warning"],
-        "could not install the managed Claude launch credentials"
+        "could not install the managed launch credentials"
     );
     assert!(
         !std::str::from_utf8(&bytes)

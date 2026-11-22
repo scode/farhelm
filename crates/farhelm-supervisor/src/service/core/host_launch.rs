@@ -489,6 +489,7 @@ impl Supervisor {
                 preparation,
                 initial_prompt,
                 setup_persistent_hooks,
+                credentials.codex_endpoint.as_ref(),
             )
             .await
             .map_err(HostSpawnFailure::Spec)?;

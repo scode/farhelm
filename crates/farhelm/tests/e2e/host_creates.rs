@@ -357,6 +357,196 @@ async fn the_host_holds_no_credential_or_marker() {
     end_runtime(&host, host_pid).await;
 }
 
+/// A named Codex session recomposes its endpoint when it resumes the same thread. The real host passes the bearer
+/// through its child's environment without putting it in executable arguments or the shim's on-disk launch spec.
+#[farhelm_testtrace::test]
+async fn codex_recipe_endpoint_follows_start_and_resume_without_serializing_the_bearer() {
+    use farhelm_proto::{LaunchHarness, LaunchSelection, SessionLaunch};
+    use farhelm_supervisor::agent_kind::AgentHooks;
+    use farhelm_supervisor::launch::LaunchSpec;
+    use farhelm_supervisor::recipe_credentials::{self, CODEX_ENDPOINT_TOKEN_ENV, CodexEndpoint};
+
+    const STARTED: &str = "CODEX-RECIPE-STARTED";
+    const RESUMED: &str = "CODEX-RECIPE-RESUMED";
+    const FIRST: &str = "fictional-codex-bearer-first";
+    const SECOND: &str = "fictional-codex-bearer-second";
+    const THREAD: &str = "codex-fixture-thread";
+    const RUNTIME: &str = "codex-fixture-runtime";
+    let owned = farhelm_teststate::tempdir().unwrap();
+    let spec_directory = owned.path().join("launch-directory");
+    let spec_witness = owned.path().join("observed-launch-spec");
+    let argv_witness = owned.path().join("observed-agent-argv");
+    // Only one launch is active at a time. Copy its spec before the real shim consumes it, then run the real shim.
+    let shell = script(
+        &owned.path().join("login-shell"),
+        &format!(
+            "IFS= read -r launch_dir < {} || exit 1\n\
+             set -- \"$@\" \"$launch_dir\"/*.json\n\
+             [ \"$#\" = 5 ] && /bin/cp -- \"$5\" {} || exit 1\n\
+             exec /bin/sh \"$1\" \"$2\" \"$3\" \"$4\"",
+            shell_words::quote(&spec_directory.to_string_lossy()),
+            shell_words::quote(&spec_witness.to_string_lossy()),
+        ),
+    );
+    // Restart replays old terminal history. Only the new agent can emit the resume witness after writing its argv.
+    let agent = script(
+        &owned.path().join("codex"),
+        &format!(
+            "printf '%s\\0' \"$@\" > {}\n\
+             if [ \"$1\" = resume ]; then printf '%s\\n' '{RESUMED}'; else printf '%s\\n' '{STARTED}'; fi\n\
+             exec /bin/sleep 600",
+            shell_words::quote(&argv_witness.to_string_lossy()),
+        ),
+    );
+    let h = harness_with_seams(
+        SupervisorTimeouts::default(),
+        SupervisorSeams {
+            agent_hooks: AgentHooks::None,
+            launch_shell: Some(shell.to_string_lossy().into_owned()),
+            launch_env: vec![("HOME".into(), owned.path().to_string_lossy().into_owned())],
+            ..host_seams()
+        },
+    )
+    .await;
+    std::fs::write(
+        &spec_directory,
+        format!("{}\n", h.state.path().join("launch").display()),
+    )
+    .unwrap();
+    let config = owned.path().join(".codex/config.toml");
+    let user_config = b"# User settings\nmodel = 'my-model'\n";
+    std::fs::create_dir(config.parent().unwrap()).unwrap();
+    std::fs::write(&config, user_config).unwrap();
+    let path = recipe_credentials::host_file(h.state.path());
+    let publish = |base_url: &str, token: &str| {
+        let staged = path.with_extension("staged");
+        std::fs::write(
+            &staged,
+            serde_json::to_vec(&recipe_credentials::RecipeCredentials {
+                env: [(CODEX_ENDPOINT_TOKEN_ENV.into(), token.into())].into(),
+                codex_endpoint: Some(CodexEndpoint {
+                    base_url: base_url.into(),
+                    has_token: true,
+                }),
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        std::fs::rename(staged, &path).unwrap();
+    };
+    let check = |host: &HostTerminal, base_url: &str, token: &str, resume: &[&str]| {
+        let spec_bytes = std::fs::read(&spec_witness).unwrap();
+        let spec: LaunchSpec =
+            serde_json::from_slice(&spec_bytes).expect("parse the actual launch spec");
+        assert_eq!(spec.argv[0], agent.to_string_lossy());
+        assert_eq!(&spec.argv[1..1 + resume.len()], resume);
+        assert_eq!(
+            &spec.argv[1 + resume.len()..1 + resume.len() + 4],
+            ["--no-daemon", "-c", "model_provider=farhelm", "-c"]
+        );
+        let provider = spec.argv.last().unwrap();
+        assert!(
+            provider.contains(base_url),
+            "expected endpoint in {provider}"
+        );
+        assert!(provider.contains(&format!("env_key=\"{CODEX_ENDPOINT_TOKEN_ENV}\"")));
+        let argv = std::fs::read_to_string(&argv_witness).unwrap();
+        assert_eq!(
+            argv.trim_end_matches('\0').split('\0').collect::<Vec<_>>(),
+            spec.argv[1..],
+            "the actual agent receives the spec's provider argv"
+        );
+        let json = String::from_utf8(spec_bytes).unwrap();
+        for secret in [FIRST, SECOND] {
+            assert!(
+                !json.contains(secret),
+                "the bearer leaked into the launch spec"
+            );
+            assert!(
+                !argv.contains(secret),
+                "the bearer leaked into the agent argv"
+            );
+        }
+        assert_eq!(
+            environ(host.status().child_pid)
+                .get(CODEX_ENDPOINT_TOKEN_ENV)
+                .map(String::as_str),
+            Some(token)
+        );
+        let host_pid = host_process(host.socket()).expect("the terminal host is live");
+        assert!(!environ(host_pid).contains_key(CODEX_ENDPOINT_TOKEN_ENV));
+        assert_eq!(std::fs::read(&config).unwrap(), user_config);
+    };
+
+    let first_url = "https://first.example.invalid/v1";
+    let second_url = "https://second.example.invalid/v1";
+    publish(first_url, FIRST);
+    let program = agent.to_string_lossy().into_owned();
+    let launch = SessionLaunch::Agent {
+        selection: LaunchSelection {
+            harness: LaunchHarness::Codex,
+            model: None,
+            effort: None,
+            permissions: None,
+            permission_flags: None,
+            wrapper_prefix: None,
+            container: None,
+            workspace_trust: None,
+        },
+        start: vec![program.clone(), "{farhelm_args}".into()],
+        resume: Some(vec![
+            program,
+            "resume".into(),
+            "{conversation}".into(),
+            "{farhelm_args}".into(),
+        ]),
+    };
+    let session = h
+        .client
+        .create_session_with_extras(
+            &owned.path().to_string_lossy(),
+            launch,
+            None,
+            80,
+            24,
+            Default::default(),
+        )
+        .await
+        .expect("create Codex session");
+    let original = agent_host(&h, &session.id).await;
+    wait_for_screen(&original, STARTED).await;
+    check(&original, first_url, FIRST, &[]);
+
+    // Supply the accepted conversation binding directly. Identity admission has separate tests; Restart still checks
+    // the exact transcript before using its persistent ID.
+    let transcript = owned.path().join("codex-thread.jsonl");
+    let root = serde_json::json!({
+        "timestamp": "2026-09-19T12:00:05Z",
+        "type": "session_meta",
+        "payload": { "source": "cli", "id": THREAD, "session_id": RUNTIME, "cwd": owned.path() }
+    });
+    std::fs::write(&transcript, format!("{root}\n")).unwrap();
+    let locator = serde_json::json!({
+        "version": 1, "runtime_session_id": RUNTIME, "session_file": transcript,
+        "thread_id": THREAD, "resumable": true
+    });
+    h.sup
+        .record_conversation_for_test(&session.id, &format!("codex:{locator}"))
+        .await;
+    publish(second_url, SECOND);
+    check(&original, first_url, FIRST, &[]);
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("resume the same Codex thread");
+    let restarted = agent_host(&h, &session.id).await;
+    assert_ne!(restarted.socket(), original.socket());
+    wait_for_screen(&restarted, RESUMED).await;
+    check(&restarted, second_url, SECOND, &["resume", THREAD]);
+    let pid = host_process(restarted.socket()).unwrap();
+    end_runtime(&restarted, pid).await;
+}
+
 /// Managed GitHub and recipe values must reach every later spawn,
 /// including Restart, without becoming durable launch input or host argv.
 /// The GitHub witness also covers the login shell. Existing agents keep
@@ -411,6 +601,7 @@ async fn managed_github_token_is_fresh_for_agents_tabs_and_restart() {
             &staged,
             serde_json::to_vec(&farhelm_supervisor::recipe_credentials::RecipeCredentials {
                 env: [(RECIPE_KEY.into(), token.into())].into(),
+                ..farhelm_supervisor::recipe_credentials::RecipeCredentials::default()
             })
             .unwrap(),
         )

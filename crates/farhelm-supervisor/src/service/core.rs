@@ -3005,6 +3005,7 @@ fn with_farhelm_args_using(
     instructions: crate::agent_kind::AgentInstructions,
     exe: Option<&str>,
     vendor_extension: Option<&str>,
+    codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
     session: &str,
 ) -> FarhelmArgsExpansion {
     let FarhelmArgsMode::Expand(phase) = mode else {
@@ -3036,6 +3037,7 @@ fn with_farhelm_args_using(
                 instructions,
                 exe,
                 vendor_extension,
+                codex_endpoint,
             },
         ),
         None => crate::agent_kind::FarhelmArgs::none(),
@@ -3210,6 +3212,7 @@ fn legacy_hook_injection(
         instructions,
         exe,
         vendor_extension,
+        codex_endpoint: None,
     };
     let injection = integration.inject_hooks(argv, &policy);
     let mut skipped = None;
@@ -14490,6 +14493,7 @@ impl Supervisor {
         mode: FarhelmArgsMode,
         snapshot: &IntegrationSnapshot,
         vendor_extension: Option<&str>,
+        codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
         session: &str,
     ) -> FarhelmArgsExpansion {
         with_farhelm_args_using(
@@ -14500,6 +14504,7 @@ impl Supervisor {
             self.seams.agent_instructions,
             Some(self.session_farhelm_exe_str.as_str()),
             vendor_extension,
+            codex_endpoint,
             session,
         )
     }
@@ -14580,6 +14585,7 @@ impl Supervisor {
         preparation: Option<crate::launch::CheckoutPreparation>,
         initial_prompt: Option<(farhelm_proto::LaunchHarness, &str)>,
         setup_persistent_hooks: bool,
+        codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
     ) -> anyhow::Result<PreparedLaunch> {
         // Start and Restart share this boundary, but a refusal must name the
         // field the user can correct, including when an old row reaches spawn.
@@ -14654,8 +14660,16 @@ impl Supervisor {
             }
             None => None,
         };
-        let (argv, env, hooked, hook_skip, shell_arguments) =
-            self.with_farhelm_args(argv, args_mode, snapshot, vendor_extension.as_deref(), id);
+        // The descriptor can be written to the launch spec. The token goes through the terminal host's child
+        // environment below this boundary, using the same snapshot so a rotation cannot split the two.
+        let (argv, env, hooked, hook_skip, shell_arguments) = self.with_farhelm_args(
+            argv,
+            args_mode,
+            snapshot,
+            vendor_extension.as_deref(),
+            codex_endpoint,
+            id,
+        );
         // The message is literal user data, including whole arguments that
         // resemble {cwd} or {farhelm_args}. Append it only after both fills;
         // neither hooks nor a later Restart may reinterpret or repeat it.
@@ -16728,6 +16742,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     false,
+                    None,
                 )
                 .await
                 .expect("the fixture must reach spec publication");
@@ -16766,6 +16781,7 @@ pub(crate) mod tests {
                     None,
                     None,
                     false,
+                    None,
                 )
                 .await;
             let Err(error) = invalid else {
@@ -17004,6 +17020,7 @@ pub(crate) mod tests {
                     None,
                     prompt.map(|text| (LaunchHarness::Claude, text)),
                     false,
+                    None,
                 )
                 .await
                 .expect("the fixture must reach spec publication");
@@ -31277,6 +31294,7 @@ exit 1
                 AgentInstructions::On,
                 Some("/opt/farhelm"),
                 extension,
+                None,
                 "session-1",
             )
             .3
@@ -31388,6 +31406,7 @@ exit 1
                 instructions,
                 Some("/opt/farhelm"),
                 Some("/opt/extension.ts"),
+                None,
                 "session-1",
             );
             (argv, env, hooked)
@@ -31442,6 +31461,7 @@ exit 1
                 &hook_snapshot(AgentKind::Codex),
                 &AgentHooks::All,
                 AgentInstructions::On,
+                None,
                 None,
                 None,
                 "session-1",

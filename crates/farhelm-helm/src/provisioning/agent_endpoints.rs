@@ -1,16 +1,16 @@
-//! Compose Claude launch credentials and preserve the existing Codex settings merge.
+//! Compose private launch credentials and remove keys written by the legacy settings delivery.
 //!
 //! These functions return bytes only. The backend writes them through stdin,
 //! never argv, and parse errors deliberately omit the input and parser detail:
 //! either may contain a token. An incompatible document is refused intact.
 
 use crate::tensorlake::recipes::ResolvedEndpoint;
-use farhelm_supervisor::recipe_credentials::RecipeCredentials;
+use farhelm_supervisor::recipe_credentials::{
+    CODEX_ENDPOINT_TOKEN_ENV, CodexEndpoint, RecipeCredentials,
+};
 
-/// Each mode owns the entire delivered environment. Switching modes drops
-/// the previous mode's variables from the file. An empty map asks delivery
-/// to remove the file. A tokenless endpoint retains the empty token value
-/// that the earlier settings writer assigned.
+/// Compose Claude's part of a new snapshot. Its modes have distinct keys, so a mode change drops every key from
+/// the previous mode. A tokenless Claude endpoint retains the empty token value the old settings writer assigned.
 pub(super) fn claude_environment(
     endpoint: Option<ResolvedEndpoint>,
     subscription: Option<String>,
@@ -29,7 +29,30 @@ pub(super) fn claude_environment(
     } else {
         Default::default()
     };
-    RecipeCredentials { env }
+    RecipeCredentials {
+        env,
+        ..RecipeCredentials::default()
+    }
+}
+
+/// Add Codex to the shared snapshot. Tokenless endpoints only need the descriptor, which is the part allowed in
+/// launch arguments.
+pub(super) fn add_codex_endpoint(
+    credentials: &mut RecipeCredentials,
+    endpoint: Option<ResolvedEndpoint>,
+) {
+    let Some(endpoint) = endpoint else {
+        return;
+    };
+    credentials.codex_endpoint = Some(CodexEndpoint {
+        base_url: endpoint.base_url,
+        has_token: endpoint.token.is_some(),
+    });
+    if let Some(token) = endpoint.token {
+        credentials
+            .env
+            .insert(CODEX_ENDPOINT_TOKEN_ENV.into(), token);
+    }
 }
 
 /// Remove the three keys an earlier Farhelm could write. Callers establish
@@ -70,44 +93,8 @@ fn claude_document(bytes: &[u8]) -> Result<serde_json::Value, String> {
     Ok(value)
 }
 
-/// Replace Farhelm's Codex provider so old credentials cannot follow a new URL.
-/// This is best-effort cleanup of mixed credential ownership; root settings,
-/// other providers and comments outside the replaced table remain intact.
-pub(super) fn codex(bytes: Option<&[u8]>, endpoint: &ResolvedEndpoint) -> Result<Vec<u8>, String> {
-    let mut doc = codex_document(bytes)?;
-    doc["model_provider"] = toml_edit::value("farhelm");
-    if !doc.contains_key("model_providers") {
-        doc["model_providers"] = toml_edit::Item::Table(toml_edit::Table::new());
-    }
-    let providers = doc["model_providers"]
-        .as_table_like_mut()
-        .ok_or("model_providers in ~/.codex/config.toml must be a table")?;
-    if !providers.contains_key("farhelm") {
-        providers.insert("farhelm", toml_edit::Item::Table(toml_edit::Table::new()));
-    }
-    let provider = providers
-        .get_mut("farhelm")
-        .and_then(toml_edit::Item::as_table_like_mut)
-        .ok_or("the farhelm provider in ~/.codex/config.toml must be a table")?;
-    provider.clear();
-    for (key, value) in [
-        ("name", toml_edit::value("Farhelm")),
-        ("base_url", toml_edit::value(&endpoint.base_url)),
-        ("wire_api", toml_edit::value("responses")),
-        ("requires_openai_auth", toml_edit::value(false)),
-        (
-            "experimental_bearer_token",
-            toml_edit::value(endpoint.token.as_deref().unwrap_or_default()),
-        ),
-    ] {
-        provider.insert(key, value);
-    }
-    Ok(doc.to_string().into_bytes())
-}
-
-/// None and Subscription stop selecting Farhelm's API provider while keeping
-/// user-owned provider configuration intact. The table remains available for
-/// later endpoint use; only its bearer token and our active selection go away.
+/// Retire the bearer and provider selection from a Farhelm-stamped file before the first launch-time override.
+/// The provider table and other settings remain user-owned.
 /// Already clean or absent files require no write, preserving their exact bytes.
 pub(super) fn clear_codex(bytes: Option<&[u8]>) -> Result<Option<Vec<u8>>, String> {
     let mut doc = codex_document(bytes)?;
@@ -275,76 +262,34 @@ mod tests {
         );
     }
 
-    /// Recipe setup must preserve personal settings, including other
-    /// providers, rather than making an endpoint save a config replacement.
+    /// A tokenless Codex endpoint still has a descriptor and can coexist with Claude's own settings.
     #[test]
-    fn codex_merge_preserves_unrelated_settings() {
-        let endpoint = ResolvedEndpoint {
-            base_url: "http://127.0.0.1:8080".into(),
-            token: Some("secret".into()),
-            revision: None,
-            incarnation: None,
-        };
-        let toml = codex(Some(b"# keep me\nmodel = 'gpt-test'\n[model_providers.other]\nname = 'other'\n[model_providers.farhelm]\ncustom = true\n"), &endpoint).unwrap();
-        let text = String::from_utf8(toml).unwrap();
-        assert!(text.contains("# keep me"));
-        let doc: toml_edit::DocumentMut = text.parse().unwrap();
-        assert_eq!(doc["model"].as_str(), Some("gpt-test"));
-        assert_eq!(doc["model_provider"].as_str(), Some("farhelm"));
-        assert_eq!(
-            doc["model_providers"]["other"]["name"].as_str(),
-            Some("other")
-        );
-        assert!(doc["model_providers"]["farhelm"].get("custom").is_none());
-        assert_eq!(
-            doc["model_providers"]["farhelm"]["requires_openai_auth"].as_bool(),
-            Some(false)
-        );
-    }
-
-    /// A reused image can carry credentials that outrank the recipe token or
-    /// add secret headers. Replace the entire selected provider in each TOML
-    /// table form, including nested header tables, without touching its peers.
-    #[test]
-    fn codex_endpoint_replaces_preexisting_provider_credentials() {
-        let endpoint = ResolvedEndpoint {
-            base_url: "https://new.test/v1".into(),
-            token: Some("fictional-new".into()),
-            revision: None,
-            incarnation: None,
-        };
-        for provider in [
-            "[model_providers.farhelm]\nenv_key = 'OLD_KEY'\nhttp_headers = { api-key = 'fictional-old' }\nenv_http_headers = { X-Key = 'OLD_HEADER' }\n",
-            "[model_providers.farhelm]\nenv_key = 'OLD_KEY'\n[model_providers.farhelm.http_headers]\napi-key = 'fictional-old'\n[model_providers.farhelm.env_http_headers]\nX-Key = 'OLD_HEADER'\n",
-            "[model_providers]\nfarhelm = { env_key = 'OLD_KEY', http_headers = { api-key = 'fictional-old' }, env_http_headers = { X-Key = 'OLD_HEADER' } }\n",
-        ] {
-            let original = format!(
-                "# root comment\nmodel = 'personal'\n{provider}\n# peer comment\n[model_providers.other]\nname = 'personal provider'\n"
+    fn codex_endpoint_coexists_with_claude_in_a_single_snapshot() {
+        for token in [None, Some("fictional-codex")] {
+            let mut credentials = claude_environment(None, Some("fictional-claude".into()));
+            add_codex_endpoint(
+                &mut credentials,
+                Some(ResolvedEndpoint {
+                    base_url: "https://new.test/v1".into(),
+                    token: token.map(str::to_owned),
+                    revision: None,
+                    incarnation: None,
+                }),
             );
-            let output =
-                String::from_utf8(codex(Some(original.as_bytes()), &endpoint).unwrap()).unwrap();
-            let doc: toml_edit::DocumentMut = output.parse().unwrap();
-            let provider = doc["model_providers"]["farhelm"].as_table_like().unwrap();
-            assert_eq!(provider.len(), 5);
+            let descriptor = credentials.codex_endpoint.unwrap();
+            assert_eq!(descriptor.base_url, "https://new.test/v1");
+            assert_eq!(descriptor.has_token, token.is_some());
             assert_eq!(
-                provider.get("base_url").and_then(toml_edit::Item::as_str),
-                Some("https://new.test/v1")
+                credentials.env["CLAUDE_CODE_OAUTH_TOKEN"],
+                "fictional-claude"
             );
             assert_eq!(
-                provider
-                    .get("experimental_bearer_token")
-                    .and_then(toml_edit::Item::as_str),
-                Some("fictional-new")
+                credentials
+                    .env
+                    .get(CODEX_ENDPOINT_TOKEN_ENV)
+                    .map(String::as_str),
+                token
             );
-            for key in ["env_key", "http_headers", "env_http_headers"] {
-                assert!(!provider.contains_key(key), "retained {key}");
-            }
-            assert_eq!(doc["model"].as_str(), Some("personal"));
-            assert_eq!(
-                doc["model_providers"]["other"]["name"].as_str(),
-                Some("personal provider")
-            );
-            assert!(output.contains("# root comment") && output.contains("# peer comment"));
         }
     }
 
@@ -352,18 +297,7 @@ mod tests {
     /// must not repeat the token a parser may have encountered.
     #[test]
     fn incompatible_codex_documents_fail_without_echoing_contents() {
-        let endpoint = ResolvedEndpoint {
-            base_url: "https://example.test".into(),
-            token: None,
-            revision: None,
-            incarnation: None,
-        };
         for bytes in [b"model_providers = false".as_slice(), b"secret invalid"] {
-            assert!(
-                !codex(Some(bytes), &endpoint)
-                    .unwrap_err()
-                    .contains("secret")
-            );
             assert!(!clear_codex(Some(bytes)).unwrap_err().contains("secret"));
         }
         assert!(
@@ -371,6 +305,5 @@ mod tests {
                 .unwrap_err()
                 .contains("must be a table")
         );
-        assert!(codex(None, &endpoint).is_ok());
     }
 }
