@@ -307,7 +307,8 @@ Each entry: trigger phrases, the file to read in full before the first action, a
 - **Vercel** ("trigger vercel on main", "deploy the website", "trigger vercel on this PR"): `.agents/vercel.md`. Fence:
   deploy only when asked; the script builds from GitHub, not the working copy.
 - **devbuild** ("devbuild <thing to test>", or any other request to try a PR or branch on the maintainer's Mac, or to
-  run, test or see it there): `.agents/devbuild.md`. Fence: say so when the target changes a database schema.
+  run, test or see it there): `.agents/devbuild.md`. Fence: say so when the target changes a database schema or bumps
+  the protocol.
 - **TODO board and todo flow** ("tldr todo", "what's in the todo", a message starting with "todo flow,"):
   `.agents/todo.md`. Fence: the implied merge applies ONLY while TODO.md is the only file the session has changed;
   otherwise commit or merge nothing automatically, say so and ask.
