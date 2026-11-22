@@ -29,6 +29,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
+- **Revisit keeping the existing `farhelm` Codex provider ID.** On 2026-11-22 the landing monitor answered
+  `recipe-credentials-in-launch-env`'s block on the maintainer's behalf: Codex launches and resumes keep the provider ID
+  `farhelm` while the recipe endpoint token moves into the launched processes' environment, and Farhelm removes the
+  settings keys it wrote. Codex 0.171.0 saves the provider ID with each conversation and would not resume one under a
+  different ID, so keeping it preserves Restart and opening a saved conversation by ID. The alternative was a fresh
+  provider ID, which keeps stale settings from ever applying but needs a separate way to configure the saved provider
+  for both forms of resume, including conversation IDs typed by hand.
+
 ## Near term
 
 - **A launch onto a suspended host should resume it first.** SPEC.md "Topology" says launching on a suspended host
