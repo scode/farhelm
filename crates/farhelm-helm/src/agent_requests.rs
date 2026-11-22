@@ -2086,14 +2086,17 @@ async fn create_for_agent(
             .await?;
             // Resolve trust before the card. The same launch is carried through
             // approval and dispatch, so a Settings change while the card waits
-            // cannot silently change what the user approved.
-            let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
-            composition_incarnation = Some(claim.incarnation);
+            // cannot silently change what the user approved. Only a launch whose
+            // folder the card pins is tied to the connection that checked it.
             let launch = normalize_launch_workspace_trust(state, launch).await?;
-            launch
-                .pin_trusted_approval_cwd(&client, &mut resolved.resolution.cwd)
-                .await
-                .context(ReadOnlyPhase("checking the launch folder for approval"))?;
+            if launch.pins_approval_cwd() {
+                let (claim, client) = crate::sessions::host_client(state, resolved.host)?;
+                composition_incarnation = Some(claim.incarnation);
+                launch
+                    .pin_trusted_approval_cwd(&client, &mut resolved.resolution.cwd)
+                    .await
+                    .context(ReadOnlyPhase("checking the launch folder for approval"))?;
+            }
             launch
         }
     };

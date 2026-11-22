@@ -1,5 +1,5 @@
-//! Each agent's Settings page holds its all-hosts opt-in for answering workspace-trust questions. Claude, Codex, Muse and
-//! Pi are scoped to managed checkouts. Antigravity also covers ordinary directories. Agents with a discovery hint
+//! Each agent's Settings page holds its all-hosts opt-in for answering workspace-trust questions, which applies in any
+//! directory, as Antigravity's always has. Agents with a discovery hint
 //! have a separate switch that restores or dismisses it.
 //!
 //! SPEC.md, "Managed checkouts" (the Agent trust paragraphs). Ported from the old app's `ClaudeTrustSettings`

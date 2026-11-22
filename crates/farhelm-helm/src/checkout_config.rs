@@ -1257,11 +1257,11 @@ pub struct ResolvedCheckoutConfig {
     pub keep_spare: bool,
     /// Global opt-in, frozen on create without invalidating path previews.
     pub claude_trust: bool,
-    /// Codex's per-launch opt-in; never authorizes a user-picked folder.
+    /// Codex's per-launch opt-in, in any folder: nothing is written to Codex's configuration.
     pub codex_trust: bool,
     /// Muse's per-launch opt-in, independent of its tool-permission mode.
     pub muse_trust: bool,
-    /// Pi's per-launch project-resource approval for managed checkouts only.
+    /// Pi's per-launch project-resource approval, in any folder.
     pub pi_trust: bool,
     /// Antigravity opt-in for managed checkouts and plain folders.
     pub antigravity_trust: bool,

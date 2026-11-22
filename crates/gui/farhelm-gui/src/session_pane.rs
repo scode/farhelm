@@ -97,7 +97,7 @@
 //!   card as home, while its host is reachable; the unavailable card stands there alone while it is not. A set made
 //!   before the session's row arrived is dropped once the row says it is retired.
 //! - **The trust hint band** ([`trust_band`]), between the top row's lines and the terminal, taking height from it,
-//!   while the session's agent (Claude, Codex or Muse) asks whether to trust a managed checkout. Its state is an entity
+//!   while the session's agent (Claude, Codex or Muse) asks whether to trust its folder. Its state is an entity
 //!   the pane keeps for the window's life: it reads trust, which the helm does not push, and remembers hidden
 //!   occurrences across session switches.
 //!

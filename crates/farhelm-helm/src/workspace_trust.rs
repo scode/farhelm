@@ -40,14 +40,21 @@ impl TrustResolvedLaunch {
         client: &SupervisorClient,
         cwd: &mut String,
     ) -> anyhow::Result<()> {
-        if self.0.agent_selection().is_some_and(|selection| {
-            selection.workspace_trust == Some(true)
-                && launches::workspace_trust_pins_approval_cwd(selection.harness)
-        }) {
+        if self.pins_approval_cwd() {
             *cwd = crate::sessions::within_host_read_bound(client.canonical_launch_directory(cwd))
                 .await?;
         }
         Ok(())
+    }
+
+    /// Whether [`Self::pin_trusted_approval_cwd`] checks the folder at all: only when this launch carries trust for an
+    /// agent whose trust follows the folder. A caller that ties the approval to the host connection the check used
+    /// does so only then, so a launch without trust does not depend on that connection surviving the wait for Allow.
+    pub(crate) fn pins_approval_cwd(&self) -> bool {
+        self.0.agent_selection().is_some_and(|selection| {
+            selection.workspace_trust == Some(true)
+                && launches::workspace_trust_pins_approval_cwd(selection.harness)
+        })
     }
 }
 

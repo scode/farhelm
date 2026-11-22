@@ -3044,6 +3044,21 @@
       "reference": "settings-agent-trust"
     },
     {
+      "golden": "settings-codex",
+      "title": "Codex's page with its trust switch for any folder and its hint switch",
+      "reference": null
+    },
+    {
+      "golden": "settings-muse",
+      "title": "Muse's page with its per-launch trust option and its hint switch",
+      "reference": null
+    },
+    {
+      "golden": "settings-pi",
+      "title": "Pi's page approving project resources in any folder, with no hint switch",
+      "reference": null
+    },
+    {
       "golden": "settings-antigravity",
       "title": "Antigravity's page with hook setup, workspace trust and hint switches",
       "reference": null
@@ -3061,6 +3076,16 @@
     {
       "golden": "session-hook-setup-hint",
       "title": "The session hint for a Grok launch that is waiting for capture without setup",
+      "reference": null
+    },
+    {
+      "golden": "session-flag-agent-trust-hints",
+      "title": "The Codex and Muse trust hints as shown in an ordinary folder",
+      "reference": null
+    },
+    {
+      "golden": "session-claude-trust-hint",
+      "title": "Claude's trust hint pointing to the caveats of editing its settings",
       "reference": null
     },
     {

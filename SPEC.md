@@ -1763,8 +1763,10 @@ launch or Delete never fails because this edit failed. The caution explains that
 either writer's update, future Claude versions may change the file or locking without notice, and Farhelm cannot promise
 continued safety. Farhelm waits on Claude's advisory lock and never takes over a stale one. A writer stalled past
 Claude's stale-lock threshold can still lose an update in either direction when another writer takes over. This is an
-accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does. The
-mechanism is explicitly opt-in and best effort.
+accepted trade-off of editing Claude's file. Trust allows repository hooks and commands just as answering Yes does.
+Farhelm does not make the edit when a session starts in the home directory or the filesystem root: Claude treats a
+trusted directory as covering every directory inside it, so either would trust far more than the session's directory,
+and Claude asks there as usual. The mechanism is explicitly opt-in and best effort.
 
 While Claude's trust question is visible in the agent terminal, the setting is off, and the hint has not been dismissed,
 an informational band appears above the terminal, below its tabs. It takes layout space rather than covering the
@@ -1931,10 +1933,11 @@ time still detects a folder actually replaced at the same path, which is what th
 such a directory against an identity recorded earlier follows this rule rather than comparing device numbers. Confirmed
 2026-10-22: a checkout recorded without a creation time, whose folder still reports none, cannot be told from a folder
 removed and re-cloned at the same path, so Farhelm treats it as unconfirmed: Delete releases it without archiving it,
-with the notice below; the trash never deletes it permanently; and a new session started in it does not trust its agent
-automatically. The launch that creates a fresh checkout can still apply the agent trust settings the user opted into,
-because Farhelm just created the directory. A checkout recorded before creation times were kept, on a filesystem that
-reports them now, keeps the inode and device comparison.
+with the notice below; the trash never deletes it permanently; and a new session started in it gets the agent trust the
+user opted into as any directory the user chose does, so Claude's entry is not removed when the checkout is archived.
+The launch that creates a fresh checkout records Claude's entry for removal at archive, because Farhelm just created the
+directory. A checkout recorded before creation times were kept, on a filesystem that reports them now, keeps the inode
+and device comparison.
 
 Ownership follows use, not the lifetime of the session that first requested the checkout. Ordinary sessions in a managed
 directory or its canonical subdirectories also retain references, including references to managed ancestors. Stopped,
@@ -4269,18 +4272,17 @@ The CLI's contract, since agents will script against it: on success it prints th
 zero, and success means the session exists — a child whose agent then fails to launch still exists, in error or exited
 status. Precondition failures exit nonzero with a message on stderr. `--cwd` is required, and the launch is either
 `--inherit-agent` or the launch flags shared with `farhelm agent create` below. `--inherit-agent` explicitly reuses the
-asking session's stored launch, which the session's own supervisor supplies. The helm recomputes workspace trust for the
-destination using Settings and the selected agent's directory scope. The launch flags are resolved by the helm, which
-owns templates and composes agent launches. Either is refused with a remedy when no helm is connected. The title is
-generated when omitted. An optional idempotency key makes retries safe: re-running spawn with the same key after a
-timeout or ambiguous outcome returns the existing child rather than creating another. Keys are scoped to the asking
-session on its host and live as long as the child session does: the same key from another session is an unrelated
-request, never a replay of someone else's child, and a replay never returns the asking session itself. The same caller
-scoping and created-session lifetime apply to the idempotency keys of `farhelm agent create` and `farhelm agent clone`,
-including when they target another host. Refusals recorded before any session exists are replayed for 24 hours for all
-three verbs. Guaranteed Farhelm-injected environment: the session id (`$FARHELM_SESSION_ID`) and the per-session
-credential; other Farhelm-specific variables are illustrative, not contract. (The user's login-shell environment is
-separately guaranteed; see Durability.)
+asking session's stored launch, which the session's own supervisor supplies. The helm recomputes workspace trust from
+current Settings. The launch flags are resolved by the helm, which owns templates and composes agent launches. Either is
+refused with a remedy when no helm is connected. The title is generated when omitted. An optional idempotency key makes
+retries safe: re-running spawn with the same key after a timeout or ambiguous outcome returns the existing child rather
+than creating another. Keys are scoped to the asking session on its host and live as long as the child session does: the
+same key from another session is an unrelated request, never a replay of someone else's child, and a replay never
+returns the asking session itself. The same caller scoping and created-session lifetime apply to the idempotency keys of
+`farhelm agent create` and `farhelm agent clone`, including when they target another host. Refusals recorded before any
+session exists are replayed for 24 hours for all three verbs. Guaranteed Farhelm-injected environment: the session id
+(`$FARHELM_SESSION_ID`) and the per-session credential; other Farhelm-specific variables are illustrative, not contract.
+(The user's login-shell environment is separately guaranteed; see Durability.)
 
 Session references handed to clients and agents are full IDs: the host entry's helm-assigned UUID in canonical
 36-character lowercase form, a colon, and the supervisor's opaque session ID. The separator is at that fixed position;
@@ -4612,8 +4614,9 @@ record lives only on the host the first attempt reached, and a host taken from a
 attempt and its retry. A host name that comes to mean another machine between the two (hosts renamed or reassigned) is a
 known, accepted gap: the retry is then a new create on that machine and starts a second session, with every check a
 fresh create gets. `farhelm agent clone` copies its explicitly selected source's stored launch onto an explicitly named
-host, changing only destination-dependent workspace trust. Clone carries no translation between hosts: a command written
-for one machine may name a binary that is absent, a different build, or one that takes different flags on another.
+host, changing only workspace trust, which follows current Settings. Clone carries no translation between hosts: a
+command written for one machine may name a binary that is absent, a different build, or one that takes different flags
+on another.
 
 A known model ID in a template or `--model` can supply the agent type when it has a single owner and no agent type is
 chosen. This works for current and older catalog models.
