@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`whats-new-on-upgrade`](reports/whats-new-on-upgrade.report.md) landed 2026-11-21 in #4419, #4421, #4423, #4426, #4431, #4432: after an update, show the Mac app's release highlights since the last release shown, downloaded from a data file the website publishes, with a Settings switch and a release-procedure stop for deploying the website
 - [`settings-dialog-refresh`](reports/settings-dialog-refresh.report.md) landed 2026-11-21 in #4434, #4435, #4437, #4439, #4440: give Settings grouped sections with one hue per group, cards under a sticky page heading, a pinned footer Save for every form, and a question before closing with unsaved changes
 - [`docs-shots-targeted-runs`](reports/docs-shots-targeted-runs.report.md) landed 2026-11-21 in #4446, #4447, #4453: let one docs screenshot run name several pages or single shots, locally and on boats, and make a parking failure list every spot it tried and why
 - [`goldens-fast-and-targeted`](reports/goldens-fast-and-targeted.report.md) landed 2026-11-21 in #4450, #4451, #4452, #4454, #4455: make the golden screenshot runs fast (optimized image, renderer and UI libraries in development builds, each picture written once, four scenes at a time) and targeted (render only named scenes), and keep a run going past a broken scene
