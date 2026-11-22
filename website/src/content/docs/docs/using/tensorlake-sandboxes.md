@@ -113,8 +113,8 @@ on those hosts does not start a snapshot build. Old package recipes keep their b
 Under **Agents**, choose **API endpoint** for Claude Code, Codex, or both, then set a base URL and choose a named
 endpoint token. Create the token in Settings → **Credentials** first; **None** in the token picker uses the endpoint
 without a token. A base URL can point at a [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm
-writes these settings when it sets up each host, for every base, and before it connects. Recipe changes reach existing
-hosts at their next connection or setup. Updating Farhelm on a host does not independently reapply them.
+delivers these when it sets up each host, for every base, and before it connects. Recipe changes reach existing hosts at
+their next connection or setup. Updating Farhelm on a host does not independently reapply them.
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
@@ -135,8 +135,10 @@ in the recipes.
 For Claude Code, choose **Subscription** and select the setup-token you saved in Credentials, or choose **API endpoint**
 to supply your own endpoint. A new Farhelm session or terminal on that host gets the recipe's Claude credentials. Use
 **Restart** on an existing session to pick up a replacement. Claude started outside a Farhelm terminal uses that shell's
-own credentials. Choose **None** to use credentials already set up on the host. Claude may show its own first-run setup
-when you open it on a new host.
+own credentials. Claude settings already in the recipe's base image, such as a base URL in `~/.claude/settings.json`,
+take precedence over the recipe, and Claude would then send the recipe's token to that URL; choose **None** for such an
+image. Choose **None** to use credentials already set up on the host. Claude may show its own first-run setup when you
+open it on a new host.
 
 For a ChatGPT login, choose Codex **Subscription** and select the login you saved in Credentials. Farhelm writes it to
 the host's usual `~/.codex/auth.json` and leaves Codex's refreshed file alone until you replace that saved login. Recipe
