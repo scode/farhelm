@@ -80,7 +80,8 @@ use crate::focus::Mark;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::destination_rows::destination_choice;
 use crate::launcher::draft::{
-    AgentChoices, CommandChoices, DestinationKind, Field, Mode, Tab, repo_identifier,
+    AgentChoices, CommandChoices, DestinationKind, Field, Mode, Tab, checkout_label,
+    repo_identifier,
 };
 use crate::launcher::request::Preview;
 use crate::launcher::request::WAIT_FOR_PREVIEW;
@@ -1319,11 +1320,11 @@ impl Launcher {
             (Some(repo), _)
                 if self.draft.target.is_some() || self.checkout_allocation_notice(cx).is_some() =>
             {
-                format!("gh:{}", repo_identifier(repo))
+                checkout_label(repo)
             }
             (Some(_), Preview::Ready(preview)) => preview.binding.cwd.clone(),
             (Some(repo), Preview::Waiting | Preview::Failed) => {
-                format!("gh:{} (preview pending)", repo_identifier(repo))
+                format!("{} (preview pending)", checkout_label(repo))
             }
         };
         Some(HostText::from_host(words))

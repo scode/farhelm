@@ -196,6 +196,12 @@ pub fn repo_identifier(repo: &GithubRepo) -> String {
     format!("{}/{}", repo.owner, repo.name)
 }
 
+/// Name a managed checkout by repository in summaries and recent setups. The `gh:` prefix uses the launcher's
+/// search spelling so the same text identifies the checkout in either surface.
+pub(super) fn checkout_label(repo: &GithubRepo) -> String {
+    format!("gh:{}", repo_identifier(repo))
+}
+
 /// The repository a Clone of `session` starts a new managed checkout of: the checkout the session is in now, else the
 /// one its launch made (SPEC.md: "preferring its current checkout association over its launch provenance"). `None`
 /// when the session is in no checkout, and `Some(None)` when it is but its repository cannot be carried.
