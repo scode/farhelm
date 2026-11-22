@@ -1,10 +1,12 @@
 //! Opt-in checks that the installed CLIs still accept Farhelm's launch and resume commands.
 //!
 //! Each test owns a new workspace, supervisor state and terminal host. Vendors retain their ordinary login and
-//! manual hook configuration. The tracked tests submit one small turn. A resumed composer is exercised with text
-//! that is never submitted.
+//! manual hook configuration. The tracked tests plant a code word, Restart, and ask the new process to recall it.
+//! A fresh accepted hook report must also leave the original resume command intact.
 
-use super::{SCREEN_BYTES, StreamText, serving_supervisor, which_binary};
+use super::{
+    SCREEN_BYTES, StreamText, reported_runtime_identity, serving_supervisor, which_binary,
+};
 use crate::harness::*;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
@@ -16,9 +18,8 @@ const COLS: u16 = 115;
 const ROWS: u16 = 35;
 const START_LIMIT: Duration = Duration::from_secs(90);
 const TURN_LIMIT: Duration = Duration::from_secs(180);
-const PROMPT: &str =
-    "Reply with the uppercase letters O and K joined together, on a line by themselves.";
-const RESUME_PROBE: &str = "Farhelm drift resume input";
+// Spell the prefix separately so neither the prompt echo nor Turn 1 can supply the recall witness.
+const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on one line. No tools.";
 
 /// An unavailable prerequisite gives no verdict. Once a turn succeeds, a startup or resume refusal is a failure.
 #[derive(Debug)]
@@ -42,6 +43,14 @@ enum UpdateOverride {
     Omp,
 }
 
+/// Some report paths acknowledge subordinate or stale callbacks without changing the captured conversation.
+/// Those profiles need an acknowledgment that names the runtime identity in the snapshot.
+#[derive(Clone, Copy)]
+enum HookWitness {
+    Fresh,
+    MatchingIdentity,
+}
+
 /// Per-harness launch inputs and rendered composer cues. An omitted model uses the user's vendor setting.
 struct Harness {
     binary: &'static str,
@@ -49,7 +58,7 @@ struct Harness {
     effort: Option<LaunchEffort>,
     composer: &'static [&'static str],
     manual_hook: Option<&'static str>,
-    tracked: bool,
+    hook_witness: Option<HookWitness>,
     trust_at_launch: bool,
     update_override: Option<UpdateOverride>,
 }
@@ -62,7 +71,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
     let flash = std::env::var_os("OPENROUTER_API_KEY")
         .filter(|key| !key.is_empty())
         .map(|_| "z-ai/glm-5.3-flash");
-    let (binary, model, effort, composer, manual_hook, tracked, trust_at_launch, update_override) =
+    let (binary, model, effort, composer, manual_hook, witness, trust_at_launch, update_override) =
         match kind {
             Claude => (
                 "claude",
@@ -70,7 +79,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 Some(LaunchEffort::Low),
                 &["claude code v", "❯"][..],
                 None,
-                true,
+                Some(HookWitness::MatchingIdentity),
                 false,
                 None,
             ),
@@ -80,7 +89,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 Some(LaunchEffort::Low),
                 &["openai codex", "›"][..],
                 None,
-                true,
+                Some(HookWitness::MatchingIdentity),
                 true,
                 None,
             ),
@@ -90,7 +99,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 Some(LaunchEffort::Low),
                 &["antigravity", "type a message"][..],
                 Some("antigravity"),
-                true,
+                Some(HookWitness::MatchingIdentity),
                 false,
                 None,
             ),
@@ -100,7 +109,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 None,
                 &["goose session", "enter your message", "( o)>"][..],
                 None,
-                true,
+                Some(HookWitness::Fresh),
                 false,
                 None,
             ),
@@ -110,7 +119,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 None,
                 &["grok", "❯"][..],
                 Some("grok"),
-                true,
+                Some(HookWitness::Fresh),
                 false,
                 None,
             ),
@@ -121,7 +130,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 // Startup warnings can truncate the model name in the composer footer.
                 &["muse-spark-1.3-"][..],
                 None,
-                true,
+                Some(HookWitness::MatchingIdentity),
                 true,
                 Some(UpdateOverride::Muse),
             ),
@@ -131,7 +140,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 Some(LaunchEffort::Low),
                 &["pi v", "/hotkeys", "ctrl+c"][..],
                 None,
-                true,
+                Some(HookWitness::Fresh),
                 false,
                 None,
             ),
@@ -149,7 +158,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                     "\n╰─",
                 ][..],
                 None,
-                true,
+                Some(HookWitness::Fresh),
                 false,
                 Some(UpdateOverride::Omp),
             ),
@@ -159,7 +168,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 None,
                 &["cursor agent", "→"][..],
                 None,
-                false,
+                None,
                 false,
                 None,
             ),
@@ -169,7 +178,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 None,
                 &["opencode", "ask anything", "ctrl+p"][..],
                 None,
-                false,
+                None,
                 false,
                 None,
             ),
@@ -181,7 +190,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
         effort,
         composer,
         manual_hook,
-        tracked,
+        hook_witness: witness,
         trust_at_launch,
         update_override,
     })
@@ -458,7 +467,7 @@ impl<'a> Terminal<'a> {
             let text = rendered.to_lowercase();
             self.check(&text, turned).await?;
             if trust_prompt(&text) {
-                if !profile.tracked {
+                if profile.hook_witness.is_none() {
                     return Ok(());
                 }
                 if answered.as_ref() != Some(&rendered)
@@ -481,8 +490,8 @@ impl<'a> Terminal<'a> {
         }
     }
 
-    /// Type first, then require a rendered echo before Enter. A lost input or a blocked composer cannot become a
-    /// successful vendor turn. For resume the echo itself is the liveness proof and costs no model turn.
+    /// Type first, then require a rendered echo before Enter. This catches lost input and keeps Enter separate from
+    /// paste, which some composers would treat as a literal line break.
     async fn type_text(&mut self, value: &str, turned: bool) -> DriftResult {
         self.check(&self.host.screen_tail(SCREEN_BYTES).to_lowercase(), turned)
             .await?;
@@ -514,12 +523,50 @@ async fn pace() {
     tokio::time::sleep(Duration::from_millis(350)).await;
 }
 
-/// The requested response is absent from the prompt. Seeing a whole line proves a real turn independently of
-/// hooks that report on startup. Common TUI answer bullets are decoration around that line.
-fn answered_ok(text: &str) -> bool {
-    text.lines()
-        .map(str::trim)
-        .any(|line| line.trim_start_matches(['•', '●', '✦', '◆']).trim() == "OK")
+/// A model response and an accepted resumable report are independent evidence. After Restart the report must be
+/// newer than the stopped generation's baseline and keep the exact argv the supervisor derived from Turn 1.
+struct TurnExpectation<'a> {
+    reply: &'a str,
+    acked_before: usize,
+    original_argv: Option<&'a [String]>,
+    hook_witness: HookWitness,
+}
+
+impl TurnExpectation<'_> {
+    /// Full-line matching allows common answer bullets and casing. A word embedded in the prompt is just input echo.
+    fn saw_reply(&self, text: &str) -> bool {
+        text.lines().map(str::trim).any(|line| {
+            line.trim_start_matches(['•', '●', '✦', '◆', '-', '*'])
+                .trim()
+                .eq_ignore_ascii_case(self.reply)
+        })
+    }
+
+    /// After Restart both turns must resolve to the same resume command. If admission can acknowledge a callback
+    /// without applying it, the new report also has to name the runtime identity in the sampled snapshot.
+    fn saw_report(&self, log: &str, resume_argv: Option<&[String]>, conversation: &str) -> bool {
+        if !resume_argv
+            .is_some_and(|argv| self.original_argv.is_none_or(|original| argv == original))
+        {
+            return false;
+        }
+        let mut fresh = acknowledged_reports(log).skip(self.acked_before);
+        match self.hook_witness {
+            HookWitness::Fresh => fresh.next().is_some(),
+            HookWitness::MatchingIdentity => {
+                let expected = reported_runtime_identity(conversation);
+                fresh.any(|incoming| incoming == expected)
+            }
+        }
+    }
+}
+
+/// The supervisor writes the reported identity as the third field of an acknowledgment.
+fn acknowledged_reports(log: &str) -> impl Iterator<Item = &str> {
+    log.lines().filter_map(|line| {
+        let mut fields = line.split_whitespace().skip(1);
+        (fields.next()? == "acked").then_some(fields.next()?)
+    })
 }
 
 /// The hook log belongs to this new session only. A startup hook can fire before the prompt, so both an accepted
@@ -529,32 +576,43 @@ async fn wait_for_turn(
     sup: &Supervisor,
     id: &str,
     hook_log: &Path,
+    expected: &TurnExpectation<'_>,
 ) -> Result<SessionSnapshot, DriftError> {
     let deadline = tokio::time::Instant::now() + TURN_LIMIT;
     let mut answered = false;
+    let mut acked = 0;
     loop {
         let text = terminal.host.screen_tail(SCREEN_BYTES);
-        answered |= answered_ok(&text);
-        terminal.check(&text.to_lowercase(), answered).await?;
+        answered |= expected.saw_reply(&text);
+        terminal
+            .check(
+                &text.to_lowercase(),
+                answered || expected.original_argv.is_some(),
+            )
+            .await?;
         if answered {
-            terminal.client.list_sessions().await?;
+            // Read the acknowledgment first. A snapshot sampled before the report could still show the original
+            // conversation inherited from Restart even when the new report names a different one.
+            let log = std::fs::read_to_string(hook_log).unwrap_or_default();
+            acked = acknowledged_reports(&log).count();
             let snapshot = sup
                 .session_snapshot(id)
                 .await?
                 .ok_or_else(|| anyhow::anyhow!("launched session vanished"))?;
-            let acked = std::fs::read_to_string(hook_log).is_ok_and(|log| {
-                log.lines()
-                    .any(|line| line.split_whitespace().nth(1) == Some("acked"))
-            });
-            if snapshot.captured_conversation.is_some()
+            if let Some(conversation) = snapshot.captured_conversation.as_deref()
                 && snapshot.restart_offer == RestartOffer::Resume
-                && acked
+                && expected.saw_report(&log, snapshot.resume_argv.as_deref(), conversation)
             {
                 return Ok(snapshot);
             }
         }
         if tokio::time::Instant::now() >= deadline {
-            let reason = if answered {
+            let reason = if !answered && expected.original_argv.is_some() {
+                "the restarted agent did not recall the original code word"
+            } else if answered && acked > expected.acked_before && expected.original_argv.is_some()
+            {
+                "recall arrived, but the new acknowledgments did not confirm the original resume command"
+            } else if answered {
                 "reply arrived but no accepted resumable conversation report followed"
             } else {
                 "no response to the drift prompt"
@@ -630,7 +688,10 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         model: profile.model.map(str::to_owned),
         effort: profile.effort,
         // Exercise the two launch-only agents' actual permission flags without sending either a prompt.
-        permissions: (!profile.tracked).then_some(LaunchPermission::Yolo),
+        permissions: profile
+            .hook_witness
+            .is_none()
+            .then_some(LaunchPermission::Yolo),
         permission_flags: None,
         wrapper_prefix,
         container: None,
@@ -653,14 +714,44 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
     let mut first = Terminal::attach(&sup, &client, id, false).await?;
     let result = async {
         first.ready(&profile, false).await?;
-        if !profile.tracked {
+        let Some(hook_witness) = profile.hook_witness else {
             return Ok(());
-        }
-        first.type_text(PROMPT, false).await?;
+        };
+        let random = uuid::Uuid::new_v4().simple().to_string();
+        let code_word = format!("FH{}", random[..8].to_ascii_uppercase());
+        // Both turns can be answered from the conversation. A tool approval would strand the terminal on a dialog
+        // that has nothing to do with whether the agent remembered the word.
+        let prompt =
+            format!("Remember test label {code_word}. Reply with O and K joined. No tools.");
+        first.type_text(&prompt, false).await?;
         first.client.send_keys(first.channel, b"\r".to_vec()).await;
         let hook_log = state.path().join("hook-log").join(format!("{id}.log"));
-        let captured = wait_for_turn(&mut first, &sup, id, &hook_log).await?;
+        let captured = wait_for_turn(
+            &mut first,
+            &sup,
+            id,
+            &hook_log,
+            &TurnExpectation {
+                reply: "OK",
+                acked_before: 0,
+                original_argv: None,
+                hook_witness,
+            },
+        )
+        .await?;
+
+        // Listing observes the stopped row but does not apply reports. Drain them before taking the baseline
+        // so Restart cannot acknowledge a pending Turn-1 callback and count it as a new-generation witness.
         client.stop_session(id).await?;
+        client.list_sessions().await?;
+        sup.reconcile_for_test().await;
+        let hook_baseline = std::fs::read_to_string(&hook_log).map_err(anyhow::Error::from)?;
+        let acked_before = acknowledged_reports(&hook_baseline).count();
+        if acked_before == 0 {
+            return Err(
+                anyhow::anyhow!("the accepted Turn-1 hook disappeared before Restart").into(),
+            );
+        }
         client.restart_session(id, false).await?;
         let resumed = sup
             .session_snapshot(id)
@@ -671,7 +762,29 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         }
         let mut second = Terminal::attach(&sup, &client, id, true).await?;
         second.ready(&profile, true).await?;
-        second.type_text(RESUME_PROBE, true).await
+        let expected = TurnExpectation {
+            reply: &format!("RECALL-{code_word}"),
+            acked_before,
+            original_argv: Some(
+                captured
+                    .resume_argv
+                    .as_deref()
+                    .expect("accepted Turn 1 has resume argv"),
+            ),
+            hook_witness,
+        };
+        if expected.saw_reply(&second.host.screen_tail(SCREEN_BYTES)) {
+            return Err(
+                anyhow::anyhow!("the recall witness was already present before Turn 2").into(),
+            );
+        }
+        second.type_text(RECALL_PROMPT, true).await?;
+        second
+            .client
+            .send_keys(second.channel, b"\r".to_vec())
+            .await;
+        wait_for_turn(&mut second, &sup, id, &hook_log, &expected).await?;
+        Ok(())
     }
     .await;
     drop(first);
@@ -730,4 +843,69 @@ drift_cases! {
     drift_omp => Omp,
     drift_cursor => Cursor,
     drift_opencode => OpenCode,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A prior report is already in the log, and the old conversation command is still in memory after Restart.
+    fn after_restart(original_argv: &[String]) -> TurnExpectation<'_> {
+        TurnExpectation {
+            reply: "RECALL-FH78C1E9AF",
+            acked_before: 1,
+            original_argv: Some(original_argv),
+            hook_witness: HookWitness::MatchingIdentity,
+        }
+    }
+
+    /// A rendered recall line and a second accepted report prove two separate parts of the same-conversation check.
+    #[farhelm_testtrace::test]
+    fn the_resumed_turn_recalls_the_code_word_and_keeps_its_identity() {
+        let argv = ["resume".into(), "original".into()];
+        let expected = after_restart(&argv);
+        assert!(expected.saw_reply("Agent\n  • recall-fh78c1e9af\nComposer"));
+        let log = "1 acked original stop\n2 written original start\n3 acked original start\n";
+        assert!(expected.saw_report(log, Some(&argv), "original"));
+    }
+
+    /// Retained Turn-1 history, typed input and a line merely containing the token are insufficient witnesses.
+    #[farhelm_testtrace::test]
+    fn replay_and_prompt_echo_cannot_supply_the_recall_line() {
+        let argv = ["resume".into(), "original".into()];
+        let expected = after_restart(&argv);
+        let screen = format!(
+            "Remember test label FH78C1E9AF. Reply with O and K joined. No tools.\n• OK\n› {RECALL_PROMPT}"
+        );
+        assert!(!expected.saw_reply(&screen));
+        assert!(!expected.saw_reply("I can't remember the code word."));
+        assert!(!expected.saw_reply("› RECALL-FH78C1E9AF"));
+        assert!(!expected.saw_reply("The code is RECALL-FH78C1E9AF."));
+    }
+
+    /// A recalled word proves access to history, while the accepted report must preserve the resume identity.
+    #[farhelm_testtrace::test]
+    fn recall_with_a_changed_or_missing_resume_identity_is_incomplete() {
+        let original = ["resume".into(), "original".into()];
+        let other = ["resume".into(), "different".into()];
+        let expected = after_restart(&original);
+        let log = "1 acked original stop\n2 acked different start\n";
+        assert!(expected.saw_reply("RECALL-FH78C1E9AF"));
+        assert!(!expected.saw_report(log, Some(&other), "different"));
+        assert!(!expected.saw_report(log, None, "original"));
+        // A callback may be acknowledged even if the supervisor keeps the old identity.
+        assert!(!expected.saw_report(log, Some(&original), "original"));
+    }
+
+    /// Unchanged stored argv can survive the restart itself. A written or refused hook cannot confirm it afresh.
+    #[farhelm_testtrace::test]
+    fn the_saved_resume_identity_needs_a_new_accepted_report() {
+        let argv = ["resume".into(), "original".into()];
+        let expected = after_restart(&argv);
+        let log =
+            "1 acked original stop\n2 written original start\n3 refused stale original start\n";
+        assert_eq!(acknowledged_reports(log).count(), 1);
+        assert!(expected.saw_reply("RECALL-FH78C1E9AF"));
+        assert!(!expected.saw_report(log, Some(&argv), "original"));
+    }
 }

@@ -2,7 +2,7 @@
 
 Use this suite to check that the installed agent CLIs still accept Farhelm's launch commands and that the agents with
 conversation tracking still report a conversation Farhelm can restart. Run it deliberately on Linux. Each tracked agent
-sends one small prompt using your existing vendor login or provider credentials. A smoke check of Cursor or OpenCode
+sends two small prompts using your existing vendor login or provider credentials. A smoke check of Cursor or OpenCode
 opens the interactive CLI without submitting a prompt.
 
 ```sh
@@ -15,10 +15,11 @@ With no selection the runner checks every discovered harness. `--list` builds th
 without starting agents. These cases are ignored in normal nextest, CI, the release gate and the deflake sweep.
 
 Each case starts the shipped launch command in its own supervisor, terminal host and empty working directory. A tracked
-case checks for a real response to the prompt and a conversation report that Farhelm accepts for Restart. The case then
-stops the session and uses Restart to start it again with the saved resume arguments. A successful Restart accepts fresh
-input in the composer without submitting another turn. Checking the conversation identity shown by each resumed CLI is a
-follow-up. The launch-only cases check that the interactive screen or workspace trust prompt opens.
+case asks the agent to remember a random code word and waits for its reply and an accepted conversation report. The case
+then stops the session, records how many hook reports were accepted, and uses Restart with the saved resume arguments.
+The resumed agent must recall the code word in a second reply. Farhelm must also accept a new hook report that leaves
+the original resume arguments intact. The runner allows up to 720 seconds per case for startup, both turns and cleanup.
+The launch-only cases check that the interactive screen or workspace trust prompt opens.
 
 An agent may save a trust choice for the temporary directory. The Muse launcher and OMP can update themselves during
 startup, so these cases disable their updaters for the test invocations using a launcher variable and a temporary OMP

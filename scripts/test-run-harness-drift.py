@@ -131,7 +131,7 @@ class DriftRunnerTests(unittest.TestCase):
         self.assertEqual(output.getvalue().strip(), "claude")
 
     def test_retains_the_structured_verdict_with_the_recorder_files(self):
-        """Give the child a fresh private verdict path and keep the result beside its recorder manifest."""
+        """Give the recorder time for both turns and retain the verdict beside its manifest."""
         with tempfile.TemporaryDirectory() as directory:
             evidence = Path(directory)
             (evidence / "manifest.json").write_text("{}")
@@ -159,6 +159,7 @@ class DriftRunnerTests(unittest.TestCase):
                 result = runner["recorded_case"](Path("/synthetic/e2e"), "exact-case", "grok", {"PATH": "bin"})
             command = spawn.call_args.args[0]
             self.assertEqual(command[-7:], ["/synthetic/e2e", "--ignored", "--exact", "exact-case", "--test-threads", "1", "--nocapture"])
+            self.assertEqual(command[command.index("--timeout") + 1], "720")
             self.assertIn("FARHELM_DRIFT_VERDICT_FILE", command)
             self.assertEqual(result.verdict, "could_not_run")
             self.assertEqual(result.evidence, evidence)

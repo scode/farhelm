@@ -118,7 +118,8 @@ def recorded_case(binary: Path, test: str, name: str, env: dict[str, str]) -> Re
             "--kind", "development",
             "--selection", f"real {name} harness drift",
             "--concurrency", "one test, one libtest thread",
-            "--timeout", "480",
+            # Two turns, both composer startups, and private fixture cleanup share this budget.
+            "--timeout", "720",
             "--keep-farhelm-env", VERDICT_ENV,
             "--", str(binary), "--ignored", "--exact", test, "--test-threads", "1", "--nocapture",
         ]
