@@ -28,18 +28,22 @@ ordinary `known_hosts` check). A missing file means there is no worker; say so r
 The worker follows the `scode-ssh-delegate` skill's trust rules: source is pushed from the local checkout (the working
 copy's tracked files only), nothing on the worker gets GitHub, cloud or registry credentials or contacts a private
 remote, and only summaries, console logs and a failed run's retained recorder directories come back. It keeps one tree
-per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental. Its lock
-covers execution after the driver stages the tools and source. A run that reaches a held lock fails and names the
-holder.
+per checkout name under `~/farhelm-test-worker/<checkout>/`, with its own `target/` so builds stay incremental. Each
+invocation stages its tools and tracked files in a private directory. A detached controller takes the checkout's lock
+before it installs the source and takes the run through completion. The install preserves file mtimes. A contender that
+reaches a held lock fails and names the holder, leaving the running checkout and tools intact.
 
 Assume the worker can be reset to a fresh image at any time. Nothing on it is precious: every run syncs the working copy
 again, and a lost `target/` only makes the next build cold. Before each run the driver checks a marker the bootstrap
 writes last, holding a hash of `scripts/test-worker/remote/bootstrap.sh`; when it is missing (a fresh worker) or names
-another version of the script, the run bootstraps first, which takes a few minutes. `bootstrap` also runs on its own. It
-installs the packages the Rust suite and the GPUI app need, rootless Podman with the exact production base image, tmux,
-Mutter, Mesa's software renderer, Bun, a static BusyBox, an OpenSSH server and passwordless self-ssh for the second-host
-tests, lingering for the account's systemd user manager, and rustup (the toolchain follows `rust-toolchain.toml` on
-first use). It needs Ubuntu 24.04 or newer and passwordless sudo.
+another version of the script, the run bootstraps first, which takes a few minutes. `bootstrap` also runs on its own.
+Setup calls queue behind each other. Setup needs exclusive use of the worker and immediately names the active runs if
+tests are already running. A run arriving during setup waits up to five minutes before reporting that setup is busy. The
+detached controller closes its lock descriptors in the test command, so a surviving test subprocess cannot keep other
+checkouts from bootstrapping. Bootstrap installs the packages the Rust suite and the GPUI app need, rootless Podman with
+the exact production base image, tmux, Mutter, Mesa's software renderer, Bun, a static BusyBox, an OpenSSH server and
+passwordless self-ssh for the second-host tests, lingering for the account's systemd user manager, and rustup (the
+toolchain follows `rust-toolchain.toml` on first use). It needs Ubuntu 24.04 or newer and passwordless sudo.
 
 ## Running
 
@@ -50,7 +54,13 @@ first use). It needs Ubuntu 24.04 or newer and passwordless sudo.
 - Anything else from the synced tree: `test-worker.sh run --out <dir> -- <command...>`, for a clippy run, a narrow test
   selection through the recorder, or the vendored crates' tests.
 - `test-worker.sh stop` ends the run holding the lock. Interrupting the script locally does not end the remote run,
-  which keeps building and holding the lock until it finishes.
+  which keeps building and holding the lock until it finishes. During preparation, Stop records a cancellation so tests
+  never start. In a running suite the recorder gets time to stop its command and save evidence. The worker keeps both
+  locks until the process group has stopped, including when its foreground shell exits first. After a forced stop the
+  controller retains whatever the workload wrote before it was killed.
+- `test-worker.sh status` shows the checkout's lock holder and its recent summaries.
+- `test-worker.sh collect --out <dir> <id>` retrieves a finished run after a client disconnect or copy failure. Use the
+  invocation id printed at startup. Collection reports when the run is still active or its evidence is gone.
 
 A full build of the workspace with the GUI and its tests takes about 55 GB of `target/` on the worker, and incremental
 builds only add to it, so a run that finds less than 15 GB free cleans `target/` first and says so in its summary.
@@ -60,9 +70,14 @@ self-ssh), the summary and failures, and the runtime `SKIPPED` count from the re
 directories come back as `runs.tar.gz`; keep them as evidence. Report the worker's runs by their recorder run ids and
 say they ran on the test worker, with its architecture.
 
-The command prints the summary from its worker. If the evidence copy fails, the driver prints the copy error and the
-status returned by the SSH command. A reused output directory can contain earlier artifacts, such as an old failure
-archive.
+The command prints the summary from its worker. Each invocation has its own evidence. The driver clears the harness's
+prior archive, summary and logs from a reused output directory and writes `invocation.txt` with the source commit and
+result. A refused request leaves its own stamp and copies no evidence. If the copy fails, the driver reports it and the
+status returned by the worker. The worker retains the newest 20 invocation directories per checkout under its tree lock.
+That lock also guards sweeping day-old abandoned stages, and each upload holds the stage lock while it writes.
+
+Only one client can own a local output directory at a time. A concurrent request for that same directory fails before
+changing its files, so its stamp and artifacts always come from one invocation.
 
 ## When the worker cannot be used
 

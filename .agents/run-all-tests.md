@@ -148,8 +148,11 @@ second clippy run on floating stable is needed.
   the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page, and
   clearing only the selected docs outputs). Run the harness only on the maintainer's request, per `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
-  `python3 -m py_compile scripts/test-worker/remote/prune.py` (the SSH test worker harness's checks, including the
-  evidence-copy driver). Run the harness only on the maintainer's request, per `.agents/test-worker.md`.
+  `python3 -m py_compile scripts/test-worker/lock-output.py scripts/test-worker/remote/prune.py scripts/test-worker/remote/run-workload.py scripts/test-worker/test-test-worker.py`
+  (the SSH test worker harness's checks, including the evidence-copy driver). On Linux, run
+  `python3 -B scripts/test-worker/test-test-worker.py` through the recorder for local stand-in coverage of staging,
+  bootstrap, detachment and evidence ownership. Use the worker only on the maintainer's request, per
+  `.agents/test-worker.md`.
 - `python3 scripts/test-record-test-run.py` and `python3 scripts/test-test-run-traces.py` (the runtime recorder,
   including nested failure evidence, and trace tooling)
 - `python3 -B scripts/test-summarize-test-runs.py` and `python3 -B scripts/test-test-run-summary.py` (ledger selection,

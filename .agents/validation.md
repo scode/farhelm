@@ -1186,10 +1186,14 @@ systemd or SSH substrate ran.
   the default sandbox name prefix. Run them when the harness changes (seconds, no sandbox). Using the harness itself is
   described in `.agents/boat.md`.
 - `shellcheck -x scripts/test-worker/test-worker.sh scripts/test-worker/remote/*.sh` and
-  `python3 -m py_compile scripts/test-worker/remote/prune.py` — the SSH test worker harness's own checks (the driver,
-  the worker's bootstrap, runners, lock and stop, and the sync's prune). Run them when the harness changes. Seconds, no
-  worker. The driver should report a failed copy with the worker's exit status while streaming that run's summary. Using
-  the harness itself is described in `.agents/test-worker.md`.
+  `python3 -m py_compile scripts/test-worker/lock-output.py scripts/test-worker/remote/prune.py scripts/test-worker/remote/run-workload.py scripts/test-worker/test-test-worker.py`
+  — the SSH test worker harness's own checks (the driver, the worker's bootstrap, runners, lock and stop, and the sync's
+  prune). Run them when the harness changes. Seconds, no worker. Run
+  `python3 -B scripts/test-worker/test-test-worker.py` through the recorder on Linux to drive the real driver against
+  the local SSH stand-in. It checks that a busy tree keeps the admitted run's bytes, the run survives a client
+  disconnect, incremental mtimes survive, bootstrap and execution exclude each other, evidence belongs to one invocation
+  even through Stop, and pruning spares staging under an active lease. The fixture allows the full Stop grace period, so
+  it takes about a minute. Using the harness is described in `.agents/test-worker.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,

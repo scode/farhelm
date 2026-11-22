@@ -3,15 +3,17 @@
 # after the other: each starts its own headless Mutter and app, and both render with lavapipe, which is CPU-bound. The
 # first suite builds the app the way `scripts/gui-agent.py start` does; the second reuses that build.
 #
-# Usage: run-gui.sh <base> [smoke] [lifecycle] (both when none is named). Writes <base>/out/gui/summary.txt, one console
-# log per suite, and runs.tar.gz on failure.
+# Usage: run-gui.sh <base> <out> [smoke] [lifecycle] (both when none is named). Writes summary.txt, one console log
+# per suite, and runs.tar.gz on failure.
 set -u
+# Finish the foreground recorder's cleanup on TERM and skip the next suite.
+cancelled=
+trap 'cancelled=1' TERM
 base=$(cd "$1" && pwd) || exit 1
-shift
+out=$2
+shift 2
 # shellcheck source=SCRIPTDIR/env.sh
-. "$base/tools/env.sh"
-out=$base/out/gui
-rm -rf "$out" && mkdir -p "$out" || exit 1
+. "$(dirname "$0")/env.sh"
 cd "$base/src" || exit 1
 use_pinned_toolchain
 [ $# -gt 0 ] || set -- smoke lifecycle
@@ -23,6 +25,7 @@ use_pinned_toolchain
 } >"$out/summary.txt"
 code=0 built='' runs=()
 for suite in "$@"; do
+  [ -z "$cancelled" ] || break
   case "$suite" in
   smoke)
     script=scripts/gui-e2e-smoke.py selection='GPUI app end-to-end smoke'
@@ -56,6 +59,7 @@ for suite in "$@"; do
       | head -20
   } >>"$out/summary.txt"
 done
+[ -z "$cancelled" ] || code=143
 if [ "${#runs[@]}" -gt 0 ]; then
   tar -czf "$out/runs.tar.gz" "${runs[@]}" 2>/dev/null
 fi
