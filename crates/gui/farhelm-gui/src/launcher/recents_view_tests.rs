@@ -197,13 +197,7 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     keys(cx, "down");
     assert!(recent_highlighted(cx, "launcher-recent-0"));
     assert!(super::view_tests::search_focused(cx));
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse("enter").unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
+    test_support::press(cx, "enter", true);
     assert_eq!(draft(cx).tab, Tab::Command, "a held Enter fills nothing");
     assert!(creates(&mut helm, cx).is_empty(), "and launches nothing");
     keys(cx, "enter");

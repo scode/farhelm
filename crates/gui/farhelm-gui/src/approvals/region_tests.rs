@@ -24,9 +24,9 @@ use farhelm_proto::{
     CommandLaunch, DeleteGuard, LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch,
 };
 use gpui::{
-    Bounds, Context, DriverNode, FocusHandle, IntoElement, KeyDownEvent, KeyUpEvent, Keystroke,
-    Modifiers, ParentElement as _, Pixels, Render, ScrollDelta, ScrollEvent, Styled as _,
-    TestAppContext, VisualTestContext, Window, div, point, px, size,
+    Bounds, Context, DriverNode, FocusHandle, IntoElement, Modifiers, ParentElement as _, Pixels,
+    Render, ScrollDelta, ScrollEvent, Styled as _, TestAppContext, VisualTestContext, Window, div,
+    point, px, size,
 };
 use serde_json::json;
 
@@ -41,7 +41,7 @@ use crate::notices::{self, Notice};
 use crate::root;
 use crate::test_support::{
     self, any_open, button, center, click, focused, focused_id, frame, keys, label, meta,
-    one_command, settle, started,
+    one_command, press, release, settle, started,
 };
 
 // ---- Placement -------------------------------------------------------------------------------------------------------
@@ -1444,24 +1444,7 @@ fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) 
     );
     assert!(!any_open(cx), "premise: Add host has yet to open");
 
-    let enter = Keystroke::parse("enter").expect("Enter keystroke");
-    let press = |cx: &mut VisualTestContext, is_held| {
-        cx.simulate_event(KeyDownEvent {
-            native_key: None,
-            keystroke: enter.clone(),
-            is_held,
-            prefer_character_input: false,
-        });
-        settle(cx);
-    };
-    let release = |cx: &mut VisualTestContext| {
-        cx.simulate_event(KeyUpEvent {
-            native_key: None,
-            keystroke: enter.clone(),
-        });
-        settle(cx);
-    };
-    press(cx, false);
+    press(cx, "enter", false);
     assert!(any_open(cx), "Enter opened Add host on key-down");
     assert!(
         destination_focused(cx),
@@ -1471,20 +1454,20 @@ fn a_held_enter_that_opened_add_host_cannot_approve_it(cx: &mut TestAppContext) 
     assert_eq!(alias(cx), "newbox");
     assert!(helm.commands().is_empty(), "opening sent nothing");
 
-    press(cx, true);
+    press(cx, "enter", true);
     cx.executor().advance_clock(ARM_DELAY);
-    press(cx, true);
+    press(cx, "enter", true);
     let sent = helm.commands();
     assert!(sent.is_empty(), "held Enter sent requests: {sent:?}");
 
-    release(cx);
+    release(cx, "enter");
     assert!(helm.commands().is_empty(), "releasing Enter sent nothing");
     assert!(
         destination_focused(cx),
         "premise: the destination still has focus"
     );
-    press(cx, false);
-    release(cx);
+    press(cx, "enter", false);
+    release(cx, "enter");
     let (_, body) = one_command(&mut helm, Method::Post, "/api/approvals/add-1");
     assert_eq!(
         body,

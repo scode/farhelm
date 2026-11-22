@@ -14,7 +14,7 @@ use crate::assets::Icon;
 use crate::components::{Button, HoverHelp, RadioGroup, RadioOption, Role};
 use crate::test_support::{bounds, center, check, click, focused_id, frame, open, redraw};
 
-use super::{held_key, painted_under, press_and_draw, stroke, tooltip, wait_hover_delay};
+use super::{painted_under, press, press_and_draw, release, stroke, tooltip, wait_hover_delay};
 
 /// What the owner of a test's radio group sees: the value chosen now (its state, which the group's choices set), how
 /// many choices it heard, how often its main action ran and with which value chosen at the time, and how many Enter
@@ -203,7 +203,7 @@ fn space_chooses_a_focused_radio_and_enter_goes_on_to_the_owner(cx: &mut TestApp
             "the premise: focus is on A"
         );
         press_and_draw(cx, "enter");
-        key_up(cx, "enter");
+        release(cx, "enter");
         redraw(cx);
         assert_eq!(
             owner.chosen.get(),
@@ -249,7 +249,7 @@ fn space_chooses_a_focused_radio_and_enter_goes_on_to_the_owner(cx: &mut TestApp
         Some("choice-A"),
         "the premise: focus is still on A"
     );
-    held_key(cx, "enter");
+    press(cx, "enter", true);
     assert_eq!(
         owner.launched_with.borrow().len(),
         1,
@@ -260,17 +260,6 @@ fn space_chooses_a_focused_radio_and_enter_goes_on_to_the_owner(cx: &mut TestApp
         0,
         "nor reached what holds the group"
     );
-}
-
-/// Release `chord`, which GPUI turns into a click on the focused element when it released an Enter or Space pressed
-/// there, and check.
-fn key_up(cx: &mut VisualTestContext, chord: &'static str) {
-    cx.simulate_event(gpui::KeyUpEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse(chord).unwrap(),
-    });
-    cx.run_until_parked();
-    check(cx);
 }
 
 /// The old launcher's segmented choices (effort, permission mode, destination type) were buttons with `aria-pressed`:

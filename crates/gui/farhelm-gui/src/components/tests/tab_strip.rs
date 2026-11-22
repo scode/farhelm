@@ -10,7 +10,7 @@ use gpui::{
 use crate::components::{Button, HoverHelp, Role};
 use crate::test_support::{focused_id, frame, open, redraw};
 
-use super::{held_key, press_and_draw};
+use super::{press, press_and_draw};
 
 /// What the owner of a test's tab strip sees: the tab chosen now (its state, which the strip's choices set) and how
 /// often its main action ran.
@@ -102,7 +102,7 @@ fn the_tab_strip_moves_with_the_arrows_and_enter_chooses_then_launches(cx: &mut 
     press_and_draw(cx, "enter");
     assert_eq!(owner.chosen.get(), "B", "Enter chose the focused B");
     assert_eq!(owner.launched.get(), 1, "and then ran the main action");
-    held_key(cx, "enter");
+    press(cx, "enter", true);
     assert_eq!(owner.launched.get(), 1, "a held Enter did nothing");
 
     press_and_draw(cx, "tab");

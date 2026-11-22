@@ -612,13 +612,7 @@ fn only_a_fresh_enter_on_an_empty_box_launches(cx: &mut TestAppContext) {
         search_focused(cx) && search_text(cx).is_empty(),
         "the premise: the box has focus and is empty"
     );
-    cx.simulate_event(gpui::KeyDownEvent {
-        native_key: None,
-        keystroke: gpui::Keystroke::parse("enter").unwrap(),
-        is_held: true,
-        prefer_character_input: false,
-    });
-    settle(cx);
+    test_support::press(cx, "enter", true);
     assert!(
         super::launch_tests::creates(&mut helm, cx).is_empty(),
         "a held Enter sends nothing"

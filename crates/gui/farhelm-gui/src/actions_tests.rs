@@ -20,8 +20,8 @@ use std::time::Duration;
 
 use gpui::{
     Action as _, App, AppContext as _, Context, FocusHandle, InteractiveElement as _, IntoElement,
-    KeyBinding, KeyContext, KeyDownEvent, KeyUpEvent, Keystroke, ParentElement, Render, Styled,
-    TestAppContext, VisualTestContext, Window, actions, div, point, px,
+    KeyBinding, KeyContext, KeyDownEvent, Keystroke, ParentElement, Render, Styled, TestAppContext,
+    VisualTestContext, Window, actions, div, point, px,
 };
 
 use crate::actions::{
@@ -204,33 +204,13 @@ impl Opened<'_> {
         self.cx.update(|window, _| window.context_stack())
     }
 
-    /// Send a key-down for `chord`: a fresh press, or with `held` an auto-repeat of the key already held down, which is
-    /// how the platform reports a repeat.
-    fn key_down(&mut self, chord: &'static str, held: bool) {
-        self.cx.simulate_event(KeyDownEvent {
-            native_key: None,
-            keystroke: parse(chord),
-            is_held: held,
-            prefer_character_input: false,
-        });
-        test_support::settle(self.cx);
-    }
-
-    /// Send the key-up that releases `chord`.
-    fn key_up(&mut self, chord: &'static str) {
-        self.cx.simulate_event(KeyUpEvent {
-            native_key: None,
-            keystroke: parse(chord),
-        });
-        test_support::settle(self.cx);
-    }
-
     /// Hold `chord` down for a press and two auto-repeats, then release it.
+    /// Each event settles so the initial press can change focus before a repeat arrives.
     fn hold(&mut self, chord: &'static str) {
-        self.key_down(chord, false);
-        self.key_down(chord, true);
-        self.key_down(chord, true);
-        self.key_up(chord);
+        test_support::press(self.cx, chord, false);
+        test_support::press(self.cx, chord, true);
+        test_support::press(self.cx, chord, true);
+        test_support::release(self.cx, chord);
     }
 
     /// How many times the session shortcut action named `name` has run.
