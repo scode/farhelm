@@ -60,3 +60,31 @@ paragraphs. Classes are `readiness`, `replay-live`, `fixture-premise`, `peer-lif
 `budget`, `ambiguous-observable`, `pointer-focus`, `substrate`, `product`, `deterministic-regression`, or `unknown`.
 Confidence is `established`, `hypothesis`, or `unknown`; `Cause:` is the last line. These fields apply only to new
 entries. Missing historical fields are missing evidence, not an implicit cause classification.
+
+## 2026-11-22 — `the_exit_is_reported_while_a_descendant_holds_the_pty` in `crates/terminal-host/tests/host_lifecycle.rs`
+
+The x86-64 Linux v0.44.1 release job failed this test alone. The test read the helper's stdout link in `/proc` while the
+helper was still redirecting stdout to the readiness FIFO. Reading the PID from the FIFO let the parent exit before the
+helper's shell had restored stdout to the PTY. The assertion ran in 9 ms. A prior hosted pass with the same fixture took
+47 ms, and an isolated retry on v0.44.1 passed in 51 ms. The full workspace suite passed on the hosted retry. Open.
+
+```text
+the helper's stdout is "/tmp/<run>/<fixture>/ready"
+```
+
+- Failure evidence `0363fbf7-7a8f-4f6d-b2cb-b627e371d917` is in the hosted run's expiring failure artifact. The
+  GitHub-hosted runner was Linux x86-64 (Ubuntu 24.04, kernel 6.14.0-1017-azure, eight logical CPUs, locale `C.UTF-8`).
+  The tree at `d8c0baa6d3a8a8f791c44e84fa5a3438fa61bcd3` was clean. The selection was
+  `cargo nextest run --workspace --exclude farhelm-desktop`, with four slots and zero retries. The only `FARHELM_*`
+  names were the recorder's `FARHELM_TEST_RUN_DEFAULT_ROOT` and `FARHELM_TEST_TRACE_DIR`. Machine load and memory
+  pressure were unavailable. [Failing job](https://github.com/scode/farhelm/actions/runs/45056978170/job/137314424304)
+- Isolated Linux retry `f1492329-18dc-4d14-a6c6-6610282d20f5` used
+  `cargo nextest run -p terminal-host --test host_lifecycle -E 'test(=the_exit_is_reported_while_a_descendant_holds_the_pty)'`
+  on the same clean tag. One test ran and passed.
+  [Hosted retry](https://github.com/scode/farhelm/actions/runs/45056978170/job/137328954707)
+- PR #4487 added the fixture assertion. The terminal-host source and fixture were identical in v0.44.0-rc.6, v0.44.0 and
+  v0.44.1. The failed assertion occurred before the helper's post-exit PTY output check.
+
+Class: fixture-premise
+
+Cause: established
