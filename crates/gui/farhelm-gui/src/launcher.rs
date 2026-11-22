@@ -110,4 +110,6 @@ mod search_view_tests;
 #[cfg(test)]
 pub(crate) mod view_tests;
 #[cfg(test)]
+pub(crate) mod wake_tests;
+#[cfg(test)]
 pub(crate) mod yolo_tests;

@@ -146,6 +146,8 @@ linux/launcher-repository-refusal--dark.png 1fc7535e09efed1043b626548cadc3711966
 linux/launcher-repository-refusal--light.png cd4bc786fcd9eb725e58fd4ff6896f1f4808defd
 linux/launcher-restart-with--dark.png 9c9e64b4c1ab4adc2ed1abdf15a038c1d601c5c5
 linux/launcher-restart-with--light.png c478210f6325a38c0153405a069ed51aaee69b2b
+linux/launcher-resuming-host--dark.png f08185ac34b6eebf7bf8eb5074f7d073b76d724d
+linux/launcher-resuming-host--light.png 7fc38b48c1c97c964ce3906eb1b40413c8927611
 linux/launcher-shell-wrapper--dark.png 4d989293e8857e9009ac598fe4de3afe747a0fbb
 linux/launcher-shell-wrapper--light.png 72e6db731fa7d4c9d32cd956bd6c4c9b463aa10e
 linux/launcher-shell-wrapper-note--dark.png 6b1e452c690e865b2f60166270655a7ac6106cea

@@ -665,6 +665,15 @@ impl Actionable {
         })
     }
 
+    /// Opening a launcher preserves the drawn session identity while letting it prepare a resumable environment.
+    pub(crate) fn allows_launch_with(&self, cx: &App) -> bool {
+        self.allows(cx, |row| {
+            !super::retired::is(row)
+                && environment::of_key(&self.key, cx)
+                    .is_none_or(Environment::permits_launch_preparation)
+        })
+    }
+
     /// A different environment Delete lane requires a different warning, so refuse the old action.
     pub(crate) fn allows_delete(&self, cx: &App) -> bool {
         self.allows(cx, |row| {
@@ -691,7 +700,8 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// Whether `key`'s lifecycle commands (Rename, Clone, Replace with, Replace, Stop and Delete here, and Restart, Restart
 /// with and Clone in the open session's header) are refused now, and drawn unavailable: SPEC.md's "an open lifecycle
 /// confirmation or a pending request refuses another lifecycle action". A request of the session in flight is one
-/// ([`delete::busy`]), and so is its host's Suspend or Resume, with its activity read and the provider's change after
+/// ([`delete::busy`]), as is a Replace with or Restart with waking the source's host before its request. Its host's
+/// Suspend or Resume also holds it, through the activity read and the provider's change after
 /// it, and its environment being deleted ([`environment::held`]). The other two are the inline questions, which a press
 /// elsewhere does not close: the YOLO question a Replace of the session met ([`super::replace_yolo::open`]), and the
 /// Replace question the session's recovery card asked ([`crate::session_pane::card::asks`]), each while it is open.
@@ -699,6 +709,7 @@ pub(crate) fn actionable(key: &str, cx: &App) -> Option<Actionable> {
 /// their buttons, which are inert while their question is open.
 pub(crate) fn refused(key: &str, cx: &App) -> bool {
     delete::busy(key, cx)
+        || crate::launcher::launch::wake_owns_source(key, cx)
         || super::replace_yolo::open(key, cx)
         || crate::session_pane::card::asks(key, cx)
         || environment::held(key, cx)
@@ -1055,7 +1066,9 @@ impl RowMenu {
             launcher_wait,
             entry::open_replace_with,
         )
-        .disabled(launcher_busy || frozen);
+        .disabled(
+            launcher_busy || environment.is_some_and(|host| !host.permits_launch_preparation()),
+        );
         let replace = lifecycle(
             "session-menu-replace",
             Icon::Replace,

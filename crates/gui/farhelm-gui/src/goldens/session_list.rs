@@ -567,18 +567,18 @@ pub(super) fn stop_while_launching_setup(state: &SceneState, window: &mut Window
     keep.push(Box::new(helm));
     keep.push(Box::new(connection));
     state.after.set(Some(open_launch_for_stop));
-    state.after_capture.set(Some(disconnect_stop_launch));
+    state.after_capture.set(Some(disconnect_pending_launch));
 }
 
 /// Let the launcher and operation store release the pending create after the screenshot. Its reply must stay out
 /// until then so the launch still owns the host in the captured frame.
-fn disconnect_stop_launch(state: &SceneState) {
+pub(super) fn disconnect_pending_launch(state: &SceneState) {
     state
         .keep
         .borrow_mut()
         .iter_mut()
         .find_map(|item| item.downcast_mut::<FakeHelm>())
-        .expect("the Stop scene keeps its fake helm")
+        .expect("the scene keeps its fake helm")
         .break_channel();
 }
 

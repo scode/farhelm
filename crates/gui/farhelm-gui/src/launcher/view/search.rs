@@ -687,7 +687,7 @@ impl Launcher {
                     .text_color(theme::color(palette.warn))
                     .child(sentence.clone()),
             ),
-            Some(super::Note::Banner(_)) | None => None,
+            Some(super::Note::Banner(_) | super::Note::WakeRefusal(_)) | None => None,
         };
         let refusal = self.search_box.refusal.clone().map(|words| {
             div()

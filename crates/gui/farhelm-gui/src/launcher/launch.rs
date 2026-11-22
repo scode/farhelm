@@ -80,6 +80,9 @@ use crate::session::{self, ObservingCurrent, PerSession};
 use crate::session_list::{outcome, replace, selection};
 use crate::ticker;
 
+pub(super) mod wake;
+mod wake_state;
+
 /// Where a launcher that is not drawn waits (one submitted, refused behind its notice, or a quick launch's being
 /// prepared): one per UI session, so a reset drops it.
 pub(crate) struct LaunchSlot {
@@ -102,6 +105,8 @@ struct Held {
     /// other wait. While it is set the launcher still waits for its "reply" ([`Waiting::Reply`]): the launch is not
     /// over, so it stays busy and its progress pill stays up.
     run: Option<RunWait>,
+    /// A wake holds the destination and its source through the hidden preparation after connection.
+    wake: Option<wake::Wake>,
 }
 
 /// A pending create's progress pill: the deadline that shows it two seconds after the press, then the pill it showed in
@@ -198,6 +203,7 @@ fn slot(cx: &mut App) -> Entity<LaunchSlot> {
                 withdraw_notices(cx);
                 return;
             }
+            wake::follow(slot, cx);
             follow_run(slot, cx);
         }),
     });
@@ -235,15 +241,44 @@ pub(crate) fn host_lifecycle_refusal(host: i64, cx: &App) -> Option<&'static str
 /// Whether the hidden launcher is still submitting a launch to the existing host `host`.
 /// A draft waiting for the user behind its notice has released the destination.
 fn targets_host(host: i64, cx: &App) -> bool {
-    let Some(held) = cx
-        .try_global::<Slot>()
-        .and_then(|slot| slot.0.read(cx).held.read(cx))
-        .and_then(Option::as_ref)
-    else {
+    let Some(held) = current_held(cx) else {
         return false;
     };
+    if let Some(wake) = &held.wake {
+        return wake.install.host == host;
+    }
+    if held.waiting != Waiting::Reply {
+        return false;
+    }
     let draft = &held.launcher.read(cx).draft;
-    held.waiting == Waiting::Reply && draft.host == Some(host) && draft.target.is_none()
+    draft.host == Some(host) && draft.target.is_none()
+}
+
+/// The UI session's held launcher, if it still owns the slot. Reading an old slot after a reset changes nothing.
+fn current_held(cx: &App) -> Option<&Held> {
+    cx.try_global::<Slot>()?.0.read(cx).held.read(cx)?.as_ref()
+}
+
+/// A wake remains pending until the hidden draft sends its create or comes back. Hosts uses this alongside the
+/// create operation because Resume itself has no create in flight.
+pub(crate) fn waking(cx: &App) -> bool {
+    current_held(cx).is_some_and(|held| held.wake.is_some())
+}
+
+/// A Replace with or Restart with owns its source before it can put the create on that session's operation key.
+pub(crate) fn wake_owns_source(key: &str, cx: &App) -> bool {
+    current_held(cx)
+        .and_then(|held| held.wake.as_ref())
+        .is_some_and(|wake| wake.source.as_deref() == Some(key))
+}
+
+/// Later preparation callbacks share the held wake's installation check. A stale preview or history callback can
+/// run before the slot's observer reacts to a host change.
+fn wake_allows_create(launcher: &Entity<Launcher>, cx: &App) -> bool {
+    current_held(cx)
+        .filter(|held| held.launcher == *launcher)
+        .and_then(|held| held.wake.as_ref())
+        .is_none_or(|wake| wake.allows_create(cx))
 }
 
 /// The run an accepted environment create waits on, by host id and run id, while the slot's launcher waits on one;
@@ -280,6 +315,7 @@ pub(super) fn preparing(launcher: Entity<Launcher>, cx: &mut App) {
             // host's history or a checkout preview.
             progress: None,
             run: None,
+            wake: None,
         }),
         cx,
     );
@@ -356,10 +392,14 @@ pub(crate) const HOST_CHANGE_IN_FLIGHT: &str = "Wait for the host change to fini
 /// Put `held` in the slot for the current UI session, or empty it, and notify: a surface drawing New's trigger reads
 /// [`super::entry::new_available`] while it draws, and redraws when the slot it read changes.
 fn hold(held: Option<Held>, cx: &mut App) {
-    slot(cx).update(cx, |slot, cx| {
-        *slot.held.current(cx) = held;
+    let previous = slot(cx).update(cx, |slot, cx| {
+        let previous = std::mem::replace(slot.held.current(cx), held);
         cx.notify();
+        previous
     });
+    if let Some(wake) = previous.and_then(|held| held.wake) {
+        wake::dismiss(wake, cx);
+    }
 }
 
 /// What a launcher's main action sends: a create (New and Clone), or Replace with's create followed by its source's
@@ -509,6 +549,9 @@ pub(super) fn start(
     window: &mut Window,
     cx: &mut App,
 ) -> bool {
+    if !wake_allows_create(&launcher, cx) {
+        return false;
+    }
     let Some(operations) = session::current_operations(cx) else {
         return false;
     };
@@ -539,6 +582,14 @@ pub(super) fn start(
     if let Some(source) = request.source() {
         outcome::start_clock(&source, request.work(), cx);
     }
+    let shown = slot(cx).update(cx, |slot, cx| {
+        slot.held
+            .current(cx)
+            .as_mut()
+            .filter(|held| held.launcher == launcher)
+            .and_then(|held| held.wake.as_mut())
+            .and_then(wake::Wake::take_pill)
+    });
     let shows = arm_progress(&launcher, handle, request.verb(), host, request.title(), cx);
     hold(
         Some(Held {
@@ -546,9 +597,10 @@ pub(super) fn start(
             waiting: Waiting::Reply,
             progress: Some(Progress {
                 _shows: shows,
-                shown: None,
+                shown,
             }),
             run: None,
+            wake: None,
         }),
         cx,
     );
@@ -1101,6 +1153,7 @@ fn come_back(
                 waiting: Waiting::User,
                 progress: None,
                 run: None,
+                wake: None,
             }),
             cx,
         );

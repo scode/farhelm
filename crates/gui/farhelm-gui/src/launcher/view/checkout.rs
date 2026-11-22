@@ -175,7 +175,7 @@ struct Armed {
     mark: Mark,
     key: PreviewKey,
     window: AnyWindowHandle,
-    unseen: bool,
+    held_out_of_sight: bool,
 }
 
 /// A host connection and installation, which whether a host has a checkout folder is known for.
@@ -513,7 +513,7 @@ impl Launcher {
         // A quick launch's launcher is never drawn, so its preview is asked for here rather than while drawing.
         self.follow_preview(cx);
         // Compared with the launcher's own constant, never with helm words: a reworded reason must reword the constant.
-        if matches!(self.refusal(cx), Some(super::Refusal::Plain(words)) if words == WAIT_FOR_PREVIEW)
+        if matches!(self.refusal(cx), Some(super::Refusal(words)) if words == WAIT_FOR_PREVIEW)
             && self.checkout_preview(cx) == Preview::Waiting
             && let Some(key) = self.preview_key(cx)
         {
@@ -522,7 +522,7 @@ impl Launcher {
                 mark,
                 key,
                 window: window.window_handle(),
-                unseen: self.quick_launch_unseen,
+                held_out_of_sight: self.quick_launch_unseen || super::super::launch::waking(cx),
             });
             cx.notify();
             return true;
@@ -554,7 +554,7 @@ impl Launcher {
         let settled = entity.update(cx, |launcher, cx| {
             let armed = launcher.checkout.armed.as_ref()?;
             let renamed = launcher.preview_key(cx).filter(|key| {
-                armed.unseen
+                armed.held_out_of_sight
                     && launcher.checkout.advanced_from.as_ref() == Some(&armed.key)
                     && key.renamed_from(&armed.key)
             });
@@ -578,7 +578,7 @@ impl Launcher {
                 }
             };
             let armed = launcher.checkout.armed.take()?;
-            let start = start && (armed.unseen || launcher.layer.is_some());
+            let start = start && (armed.held_out_of_sight || launcher.layer.is_some());
             Some((start, armed))
         });
         let Some((start, armed)) = settled else {
@@ -593,7 +593,7 @@ impl Launcher {
         }
         // A launch that went out moved the quick launch's launcher to waiting for its reply; one that did not comes
         // back to be seen.
-        if armed.unseen {
+        if armed.held_out_of_sight {
             super::super::launch::reveal_prepared(entity, armed.window, armed.mark, cx);
         }
     }

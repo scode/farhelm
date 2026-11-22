@@ -127,58 +127,31 @@ fn refusals_name_the_first_thing_to_fix() {
     assert_eq!(draft.refusal(target(&hosts, None), None), None);
 }
 
-/// Paused and stopped environments require an explicit Resume in Hosts. The refusal keeps the chosen host's escaped
-/// name and its state, and tells the user which action to retry after resuming in each launcher mode.
+/// A valid folder launch can start preparing on a resumable environment. A create still needs a fresh connection,
+/// so the same draft cannot build its create request while the host remains paused or stopped.
 #[test]
-fn a_suspended_environment_names_the_resume_needed_before_launch() {
+fn a_resumable_environment_allows_the_press_before_it_can_create() {
     let mut hosts = hosts();
     let mut draft = draft();
     draft.host = Some(2);
-    let source = session(agent_launch(codex()), RestartOffer::Resume);
-    let drafts = [
-        (&draft, "launch"),
-        (&LaunchDraft::clone_of(&source, Some(2)), "launch"),
-        (
-            &LaunchDraft::restart_with("source", &source, Some(2)).expect("source can resume"),
-            "restart",
-        ),
-        (
-            &LaunchDraft::replace_with("source", &source, Some(2)),
-            "replace",
-        ),
-    ];
+    draft.choose_harness(LaunchHarness::Codex, None, None);
+    draft.choose_permissions(Some(LaunchPermission::Guarded));
     for kind in ["tensorlake", "podman"] {
         hosts[1].kind = kind.into();
-        hosts[1].name = "work\u{202e}box".into();
-        for (state, state_word) in [
-            (
-                HostStateView::Suspended {
-                    observed_at: 1,
-                    suspended_by_farhelm_at: Some(1),
-                    resume_failed: None,
-                },
-                "suspended",
-            ),
-            // A stopped environment is named stopped, as its Hosts row labels it, never suspended.
-            (
-                HostStateView::Stopped {
-                    start_failed: None,
-                    waiting_for_place: false,
-                },
-                "stopped",
-            ),
+        for state in [
+            HostStateView::Suspended {
+                observed_at: 1,
+                suspended_by_farhelm_at: Some(1),
+                resume_failed: None,
+            },
+            HostStateView::Stopped {
+                start_failed: None,
+                waiting_for_place: false,
+            },
         ] {
             hosts[1].state = state;
-            for (draft, action) in drafts {
-                let expected =
-                    format!("work<U+202E>box is {state_word}. Resume it in Hosts, then {action}.");
-                assert_eq!(
-                    draft.refusal(target(&hosts, None), None).as_deref(),
-                    Some(expected.as_str()),
-                    "{kind} {:?}",
-                    draft.mode,
-                );
-            }
+            assert_eq!(draft.refusal(target(&hosts, None), None), None, "{kind}");
+            assert!(draft.create_body(target(&hosts, None)).is_none());
         }
     }
     hosts[1].state = HostStateView::Stopped {

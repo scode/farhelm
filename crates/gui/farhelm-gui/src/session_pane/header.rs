@@ -360,8 +360,16 @@ impl Choices {
         launcher_wait: Option<&'static str>,
         cx: &App,
     ) -> Choices {
-        // A plain choice that would start a session waits for a host change, as its main part does, saying why.
-        let wait = menu::launch_wait(cx);
+        // A plain action needs the supervisor now. The launcher variants can prepare a resumable environment first.
+        let environment = environment::of_key(key, cx);
+        let wait = environment
+            .filter(|host| host.frozen())
+            .map(|_| "Wait for this host to connect")
+            .or_else(|| menu::launch_wait(cx));
+        let launcher_wait = environment
+            .filter(|host| !host.permits_launch_preparation())
+            .map(|_| "Wait for this host to connect")
+            .or(launcher_wait);
         match split {
             Split::Restart => {
                 let reason = entry::restart_with_unavailable(key, cx);
@@ -503,6 +511,8 @@ struct EnvironmentShown {
     ui: ProviderUi,
     /// Suspended, stopped, changing or being deleted: Stop, Restart and Replace are unavailable.
     frozen: bool,
+    /// The caret can offer an edited launch when the destination can wake.
+    permits_launch_preparation: bool,
     /// The control reads Resume, in the primary tier, rather than Suspend.
     resume: bool,
     /// Stopped, so Resume's help says it starts the environment again rather than continuing its processes.
@@ -526,6 +536,7 @@ impl EnvironmentShown {
         Some(EnvironmentShown {
             ui: shown.ui,
             frozen: shown.frozen(),
+            permits_launch_preparation: shown.permits_launch_preparation(),
             resume: shown.resumable(),
             stopped: shown.stopped(),
             pending: environment::pending(key, shown, cx),
@@ -1046,17 +1057,16 @@ impl Drawn<'_> {
                 buttons.push(main.into_any_element());
                 continue;
             };
-            // A frozen environment withholds the whole split, its caret menu's choices included, as the old header's
-            // `busy: lifecycle.busy() || sandbox_frozen` did.
-            let frozen = self
+            // A resumable destination keeps the caret available for the variant that opens the launcher.
+            let waiting_for_host = self
                 .shown
                 .offer
                 .environment
-                .is_some_and(|environment| environment.frozen);
+                .is_some_and(|environment| !environment.permits_launch_preparation);
             let caret = self.caret_button(
                 *split,
                 choices,
-                self.shown.offer.busy || frozen,
+                self.shown.offer.busy || waiting_for_host,
                 self.menu_open == Some(*split),
                 condensed,
                 focus,
@@ -1360,7 +1370,7 @@ impl SessionPane {
         if self.header.open_menu(window, cx).is_some() {
             return;
         }
-        if self.open_key(cx).as_ref() != Some(&target.key) || !target.allows_active(false, cx) {
+        if self.open_key(cx).as_ref() != Some(&target.key) || !target.allows_launch_with(cx) {
             return;
         }
         let Some((anchor, caret)) = self.header.carets.get(&split).cloned() else {
@@ -1419,10 +1429,9 @@ impl SessionPane {
         if self.open_key(cx).as_ref() != Some(&target.key) {
             return;
         }
-        // A frozen environment withholds the variants too, as `header_action` withholds the plain choice.
         if !with {
             self.act_from_header(split.action(), target, mark, window, cx);
-        } else if target.allows_active(false, cx) && !split.open_with(&target.key, window, cx) {
+        } else if target.allows_launch_with(cx) && !split.open_with(&target.key, window, cx) {
             tracing::debug!(
                 ?split,
                 "the launcher refused to open from the header's menu"

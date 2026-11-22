@@ -1262,7 +1262,8 @@ later (Deviations, the first bullet).
 Case: its 13 cases of a launch that resumes its suspended host first (lines 216 to 630 and 1131 to 1835 at the pin); its
 other 8 cases are host and session lifecycle and stay with that file's entry.
 
-deferred: resume before create is a near-term TODO item; all 13 cases depend on it.
+The desktop launcher resumes a host before launching in an existing folder. The remaining managed-checkout cases depend
+on obtaining a fresh preview after the wake.
 
 ## Deviations
 
@@ -1275,11 +1276,6 @@ deferred: resume before create is a near-term TODO item; all 13 cases depend on 
   (`launcher::restart_with_tests::restart_with_hover_explains_a_changed_stored_launch`).
 - A command line the shared command-launch check refuses is refused before sending in every launcher mode; the old app
   checked it only in Restart with and left the rest to the helm.
-- A launch on a suspended environment or a stopped one that offers Resume names its host and asks you to resume it in
-  Hosts. The advice says to launch, restart or replace according to the launcher mode. Resume before create is a
-  near-term TODO item, as SPEC.md's interim Topology note records. Both providers' refusals are checked by
-  `launcher::request_tests::a_suspended_environment_names_the_resume_needed_before_launch`; quick launch reveals the
-  advice after "Not launched." in `templates::dispatch_tests::a_suspended_quick_launch_asks_to_resume_its_named_host`.
 - While a new environment's recipe is chosen, the composer search's folder rows and Browse are refused in the old words,
   and so is a `~` path, which the old search took as a choice of the home the folder already was.
 - New sandbox reads the Tensorlake account once as the launcher opens; the old launcher read it again on every fleet
