@@ -142,7 +142,7 @@ pub(crate) fn asked(row: &SessionRow, cx: &App) -> Option<Asked> {
 }
 
 /// [`asked`] from `collections`, the store's as the caller already holds them: the bulk Delete freezes each marked
-/// session's lane this way, from the one hosts read the press saw (`super::bulk`).
+/// session's lane this way, from the hosts read that supplied the drawn bar (`super::bulk`).
 pub(super) fn asked_in(row: &SessionRow, collections: &Collections) -> Option<Asked> {
     let environment = Environment::of(row, collections)?;
     Some(Asked {

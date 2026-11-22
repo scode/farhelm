@@ -46,7 +46,8 @@
 //!
 //! The bar's Stop and Delete are drawn unavailable, with "The marked sessions' environments are being deleted, so their
 //! actions are unavailable" as their help, while every mark each would act on is a session whose environment is being
-//! deleted ([`super::bulk::all_being_deleted`]); what a batch does with environment sessions is [`super::bulk`]'s.
+//! deleted ([`super::bulk::DrawnAction::all_being_deleted`]); what a batch does with environment sessions is
+//! [`super::bulk`]'s.
 //!
 //! NOTE: GPUI cannot report `aria-haspopup`.
 //!
@@ -76,6 +77,7 @@ use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::local_state;
 use crate::operations::Work;
+use crate::prompt::ActionFrame;
 use crate::session;
 use crate::theme::{self, metrics};
 
@@ -418,6 +420,9 @@ pub(super) struct Kept {
     /// Stop's and Delete's tab stops also give the question a return target when the marked menu is absent.
     stop_focus: FocusHandle,
     delete_focus: FocusHandle,
+    /// Each destructive control admits presses only after its own targets and availability have been presented.
+    stop_frame: ActionFrame<bulk::DrawnAction, bool>,
+    delete_frame: ActionFrame<bulk::DrawnAction, bool>,
     /// The ⋯ toggle's handle, a tab stop.
     menu_focus: FocusHandle,
     /// Clear's handle, a tab stop.
@@ -442,6 +447,8 @@ impl Kept {
             count_focus: cx.focus_handle(),
             stop_focus: cx.focus_handle().tab_stop(true),
             delete_focus: cx.focus_handle().tab_stop(true),
+            stop_frame: ActionFrame::default(),
+            delete_frame: ActionFrame::default(),
             menu_focus: cx.focus_handle().tab_stop(true),
             clear_focus: cx.focus_handle().tab_stop(true),
             anchor: None,
@@ -517,6 +524,16 @@ impl SessionList {
                 .map_or_else(Vec::new, |projection| actions(&projection.offers));
         if changed && let Some(menu) = self.marked_menu_open(window, cx) {
             window.defer(cx, move |window, cx| layers::close(menu, window, cx));
+        }
+        // A button that disappears has to present its action again when it returns.
+        if !projection.as_ref().is_some_and(|frame| frame.stop) {
+            self.marking.stop_frame.clear();
+        }
+        if projection
+            .as_ref()
+            .is_none_or(|frame| frame.shown.is_empty())
+        {
+            self.marking.delete_frame.clear();
         }
         self.marking.projection = projection;
     }
@@ -613,8 +630,8 @@ const PANEL_WIDTH: f32 = 246.;
 impl SessionList {
     /// The heading's band while marks are effective (`.marked-bar`): "N marked", Stop, Delete, the ⋯ toggle when an
     /// action applies, and Clear, on the heading's ground. `None` while no mark is effective, when the heading is drawn
-    /// instead. Drawn before the store is borrowed for the rest of the frame: the toggle's anchor needs the window's
-    /// element state.
+    /// instead. Each lifecycle button captures the targets and consent supplied by this store at draw time, so a
+    /// press delivered before the next redraw uses the same guards as the presented bar.
     pub(super) fn marked_bar(
         &mut self,
         window: &mut Window,
@@ -648,9 +665,8 @@ impl SessionList {
         // being deleted, as the old bar's were (its `LifecycleOffer`); a mixed selection keeps it, and the batch leaves
         // those sessions out with their reason.
         let shown = self.marking.shown();
-        let app: &App = cx;
-        let unavailable = [bulk::Lifecycle::Stop, bulk::Lifecycle::Delete]
-            .map(|action| bulk::all_being_deleted(action, &shown, app));
+        let store = session::current_store(cx)?;
+        let collections = store.read(cx).collections();
         let lifecycle = [
             (
                 bulk::Lifecycle::Stop,
@@ -658,7 +674,7 @@ impl SessionList {
                 "Stop the marked sessions currently shown and close their terminal tabs",
                 Tier::Neutral,
                 &self.marking.stop_focus,
-                unavailable[0],
+                &mut self.marking.stop_frame,
             ),
             (
                 bulk::Lifecycle::Delete,
@@ -666,12 +682,15 @@ impl SessionList {
                 "Delete the marked sessions currently shown",
                 Tier::Danger,
                 &self.marking.delete_focus,
-                unavailable[1],
+                &mut self.marking.delete_frame,
             ),
         ]
         .into_iter()
         .filter(|(action, ..)| offers_stop || *action != bulk::Lifecycle::Stop)
-        .map(|(action, id, help, tier, focus, unavailable)| {
+        .map(|(action, id, help, tier, focus, frame)| {
+            let drawn = bulk::DrawnAction::capture(action, &shown, store.entity_id(), collections);
+            let unavailable = drawn.all_being_deleted();
+            let drawn = frame.capture(drawn, unavailable, window);
             let list = cx.weak_entity();
             let help = if unavailable {
                 bulk::ALL_BEING_DELETED
@@ -684,7 +703,11 @@ impl SessionList {
                 .disabled(unavailable)
                 .focus(focus)
                 .on_click(move |_, window, cx| {
-                    let _ = list.update(cx, |list, cx| list.bulk_lifecycle(action, window, cx));
+                    if let Some(drawn) = drawn.shown() {
+                        let _ = list.update(cx, |list, cx| {
+                            list.bulk_lifecycle(action, drawn, window, cx)
+                        });
+                    }
                 })
         })
         .collect::<Vec<_>>();

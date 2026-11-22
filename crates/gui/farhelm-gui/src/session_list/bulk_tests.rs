@@ -9,9 +9,10 @@
 //! one request at a time per host: a host's next request appears only once its last one is answered.
 
 use farhelm_helm_client::Method;
+use farhelm_helm_client::collections::decode_changes;
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
 use farhelm_proto::ProviderKind;
-use farhelm_proto::ui_channel::{HostView, SessionRow};
+use farhelm_proto::ui_channel::{CollectionChanges, HostView, Preferences, SessionRow};
 use gpui::{Modifiers, TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
@@ -26,12 +27,12 @@ use super::marking::{CLEAR_ID, COUNT_ID, MENU_ID, MENU_TOGGLE_ID};
 use super::marking_tests::{
     click_with, count, ctrl, fleet, open_list, requests, rows, start_rename, stored,
 };
-use super::menu_tests::{any_layer, drawn, ended, label_of, push, snapshot};
+use super::menu_tests::{any_layer, drawn, ended, entry, label_of, push, snapshot};
 use super::pins_tests::away;
 use super::retired_tests::retired;
 use super::row_tests::texts_within;
 use super::status::{self, Live};
-use super::tests::{Fixture, change, listing_meta, painted, selected, session};
+use super::tests::{Fixture, change, listing_meta, painted, preferences_state, selected, session};
 use crate::components::Role;
 use crate::environment_ui::ProviderUi;
 use crate::focus;
@@ -875,6 +876,107 @@ fn skip_session_confirmations_runs_bulk_stop_and_delete_unasked(cx: &mut TestApp
     assert_eq!(owned(&fake.commands()), [delete("/api/sessions/a")]);
 }
 
+/// A preference update can arrive before the window shows it. Stop on the presented bar still needs the confirmation
+/// that was in force when that bar drew, even though the live store now says to skip questions.
+#[gpui::test]
+fn marked_stop_keeps_the_drawn_confirmation_preference(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, snapshot(&[(session("a"), 1)], false));
+    requests(&mut fake);
+    mark(cx, &["session-row-a"]);
+    show_next_frame(cx);
+    let position = test_support::center(cx, STOP_ID);
+    let preferences = preferences_state(Preferences {
+        skip_session_confirmations: Some(true),
+        welcome_seen: Some(true),
+        ..Preferences::default()
+    });
+    let changes = decode_changes(CollectionChanges {
+        collection: preferences.collection,
+        meta: preferences.meta,
+        upsert: preferences.entries,
+        remove: Vec::new(),
+    })
+    .unwrap();
+
+    cx.update(|window, cx| {
+        let store = session::current_store(cx).unwrap();
+        assert!(!super::menu::skips_questions(store.read(cx).collections()));
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        assert!(super::menu::skips_questions(store.read(cx).collections()));
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert_eq!(question_rows(cx), ["a"]);
+    assert!(lifecycle(fake.commands()).0.is_empty());
+}
+
+/// A tab arriving just before the press cannot widen the presented Stop's consent. The request sent from the
+/// old bar still tells the helm to refuse Stop if any tabs are open.
+#[gpui::test]
+fn marked_stop_sends_the_drawn_no_tabs_guard(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, snapshot(&[(session("a"), 0)], true));
+    requests(&mut fake);
+    mark(cx, &["session-row-a"]);
+    show_next_frame(cx);
+    let position = test_support::center(cx, STOP_ID);
+
+    cx.update(|window, cx| {
+        add_tab_before_marked_stop(cx);
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert!(!drawn(cx, "prompt"));
+    let (commands, _) = lifecycle(fake.commands());
+    assert_eq!(owned(&commands), [stop("a")]);
+    assert_eq!(commands[0].body, Some(stop_body(true, false)));
+}
+
+/// GPUI can install new listeners before presenting their frame. The latest listener has a different tab guard
+/// and must refuse a press until its frame appears. A later press is accepted with that frame's guard.
+#[gpui::test]
+fn marked_stop_refuses_a_drawn_but_unpresented_action(cx: &mut TestAppContext) {
+    let (mut fake, _list, cx) = open_list(cx, snapshot(&[(session("a"), 0)], true));
+    requests(&mut fake);
+    mark(cx, &["session-row-a"]);
+    show_next_frame(cx);
+    let position = test_support::center(cx, STOP_ID);
+
+    cx.update(|window, cx| {
+        add_tab_before_marked_stop(cx);
+        window.draw(cx).clear(cx);
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert!(!drawn(cx, "prompt"));
+    assert!(lifecycle(fake.commands()).0.is_empty());
+
+    test_support::click(cx, STOP_ID);
+    let (commands, _) = lifecycle(fake.commands());
+    assert_eq!(owned(&commands), [stop("a")]);
+    assert_eq!(commands[0].body, Some(stop_body(false, false)));
+}
+
+/// Put the same marked row's tab-list update in the live store without advancing the bar's presentation.
+fn add_tab_before_marked_stop(cx: &mut gpui::App) {
+    let store = session::current_store(cx).unwrap();
+    let tab_count = |cx: &gpui::App| {
+        store
+            .read(cx)
+            .collections()
+            .get::<SessionRow>("a")
+            .unwrap()
+            .info
+            .tabs
+            .len()
+    };
+    assert_eq!(tab_count(cx), 0);
+    let mut changes = change(listing_meta(&["a"], 1, false), &[], &[]);
+    changes.upsert.push(entry(&session("a"), 1));
+    let changes = decode_changes(changes).unwrap();
+    store.update(cx, |store, cx| store.apply(&changes, cx));
+    assert_eq!(tab_count(cx), 1);
+}
+
 /// Why this matters: SPEC.md: "An accepted changed target rewords the question and replaces its opening; authoritative
 /// disappearance can remove it, while a filtered, partial, failed or non-authoritative omission cannot", and
 /// "answer-time admission may only remove targets no longer displayed or marked"; the old spec's "Delete rewords and
@@ -1321,6 +1423,51 @@ fn the_bulk_question_leaves_out_a_session_being_deleted(cx: &mut TestAppContext)
     );
     test_support::click(cx, "prompt-confirm");
     test_support::settle(cx);
+    assert_eq!(
+        owned(&lifecycle(fake.commands()).0),
+        [delete("/api/sessions/b")]
+    );
+}
+
+/// A mixed selection keeps Delete available while one environment is being removed. When that environment reconnects
+/// before the next frame, the old bar must still leave its session out of the question.
+#[gpui::test]
+fn a_reconnected_environment_stays_out_of_the_delete_from_an_older_bar(cx: &mut TestAppContext) {
+    let deleting = environment_host(Provider::Sandbox, deleting(None));
+    let (mut fake, cx) = open_environment(
+        cx,
+        &[(session("a"), 0), (session("b").host(1), 0)],
+        false,
+        &deleting,
+    );
+    toggle(cx, &["session-row-a", "session-row-b"]);
+    show_next_frame(cx);
+    assert_eq!(count(cx).as_deref(), Some("2 marked"));
+    let position = test_support::center(cx, DELETE_ID);
+    let reconnected = registry(&environment_host(Provider::Sandbox, connected()));
+    let changes = decode_changes(CollectionChanges {
+        collection: reconnected.collection,
+        meta: reconnected.meta,
+        upsert: reconnected.entries,
+        remove: Vec::new(),
+    })
+    .unwrap();
+
+    cx.update(|window, cx| {
+        assert!(super::environment::deleting_reason("a", cx).is_some());
+        let store = session::current_store(cx).unwrap();
+        store.update(cx, |store, cx| store.apply(&changes, cx));
+        assert!(super::environment::deleting_reason("a", cx).is_none());
+        test_support::click_before_redraw(position, window, cx);
+    });
+    test_support::settle(cx);
+    assert_eq!(question_rows(cx), ["b"]);
+    assert_eq!(
+        label_of(cx, "session-outcome-a").as_deref(),
+        Some("Delete: This session's sandbox is being deleted, so its actions are unavailable")
+    );
+    assert!(lifecycle(fake.commands()).0.is_empty());
+    test_support::click(cx, "prompt-confirm");
     assert_eq!(
         owned(&lifecycle(fake.commands()).0),
         [delete("/api/sessions/b")]
