@@ -59,3 +59,66 @@ Each draft passed an independent source review and cold wording check. The first
 inherited shell-variable behavior and the unbounded recovery's positional argument handling after review. The startup
 draft clarified version-skew replies and the saved frame size threshold. The updater still decides why a reinstall is
 needed. The verification and minimum-version notices each keep their explanation and share the same reinstall command.
+
+### Landing
+
+#### What landed with it
+
+The plan's five PRs (#4581, #4585, #4586, #4587, #4591) landed second in this round, after recipe credentials in the
+launch environment, with no landing fix. Neither that plan nor what main gained since this plan's work was written
+touches the desktop startup and updater code this plan changed, apart from separate TODO.md edits, and the rebase had no
+conflicts.
+
+An independent reviewer checked each helper move by hand and found that all five keep behavior exactly the same,
+including error paths and the updater's state file on disk: the reopen and Restart-to-update paths run the same commands
+with the same limits, the supervisor discovery check is the same expression, saved window sizes come out the same, the
+new stable-release check asks the opposite question from the old one and every caller was flipped to match, so each
+behaves the same, and build labels and the reinstall tooltip produce the same text.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+This round landed two plans stacked in this order on main: recipe credentials in the launch environment (protocol 85)
+and the desktop startup helpers. The checks ran on the combined result; the worker runs were on a separate arm64 Linux
+test worker, the rest locally on x86_64.
+
+On both plans as delivered, stacked onto main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, with four nextest slots, no retries and four build jobs, on
+  the test worker (recorder run `0533a2d1-482b-4855-8997-6048700f9783`): all 8318 passed, the real Podman environment
+  test among them.
+- The four clippy runs (`--all-targets`, `-p farhelm --bins`, and the desktop app with and without `--features agent`),
+  on the test worker, not through the recorder: passed.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `e684d4f8-2f9e-4959-a29b-b54a9d260b29`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `f73f7f73-6517-4404-ac56-ac4d02ee04f8`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 -B scripts/gui-lifecycle.py`, the Linux app lifecycle test (startup, quitting, the saved window frame), on
+  the test worker (recorder run `198b3e2a-a687-4689-8fd2-9d0bba408994`): every step passed.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `993f1622-0462-4776-95eb-e35602d8230d`):
+  passed.
+- The docs website build, `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its isolated
+  environment), `dprint check` and `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the recipe credentials' landing fix (#4600), which changes only Markdown: `dprint check`, the website build and
+`python3 releasing/check-changelog.py format`, locally: passed. The runs above still apply.
+
+Skipped: a launch on a real Tensorlake sandbox with Claude recipe credentials, which spends cloud resources (the real
+Podman environment test in the workspace run delivers the credentials to a container); macOS, since no Mac was part of
+this landing; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The shared wait-and-reopen script is harder to read than the two it replaced: it takes its arguments in two orders and
+  rewrites one into the other, to keep every detail of both old scripts, including one no caller depends on (whether the
+  program it opens inherits the script's own variable names). The plan's own reviewer asked for that; accepting one
+  argument order would be a simpler possible follow-up.
+- The reinstall sentence ("Reinstall it by running this in a terminal: …") is now built in two places, the desktop
+  updater and the GUI's minimum-version notice, so the rule that the command comes last could drift between them.
+- Three code comments lost their reasons in the moves, and restoring them is a small possible follow-up: why Restart to
+  update gives up instead of opening the app when the old one will not quit, why the reinstall command needs no signing
+  key (it fetches the installer over TLS), and why the build identity shown in session details must not be escaped a
+  second time.
