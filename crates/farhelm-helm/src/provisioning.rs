@@ -23,6 +23,7 @@ mod agent_endpoints;
 /// it, and how later non-Rust consumers stay aligned with it instead).
 pub mod assets;
 mod backend;
+mod command_status;
 pub(crate) mod credential_delivery;
 /// A filesystem-controlled provisioning backend for unit tests, which debug
 /// builds also select at startup for the GPUI app's end-to-end runs (see
@@ -180,7 +181,9 @@ mod tests {
                 .unwrap()
                 .push(super::ssh_stand_in::shares_connection(command));
             let mut scripted = tokio::process::Command::new("sh");
-            scripted.args(["-c", &script]);
+            scripted
+                .arg("-c")
+                .arg(super::ssh_stand_in::replacement_script(command, &script));
             super::ssh_stand_in::spawn_remote(command, scripted)
         }
     }
@@ -216,25 +219,23 @@ mod tests {
                 .into_owned();
             let temporary = shell_path(&self.temporary)
                 .map_err(|error| std::io::Error::other(error.rendered()))?;
-            // The backend wraps every remote script as `sh -c <quoted>`; unwrap
-            // it to recognise the upload exactly rather than by substring.
-            let script = shell_words::split(&remote)
-                .ok()
-                .and_then(|words| words.get(2).cloned());
-            if script
-                .as_deref()
-                .and_then(|script| script.strip_prefix(REMOTE_RUNTIME_PREFIX))
+            // Compare the payload after decoding both layers of shell quoting.
+            let script = super::ssh_stand_in::provisioning_script(command);
+            if script.strip_prefix(REMOTE_RUNTIME_PREFIX)
                 == Some(upload_script(&self.temporary).unwrap().as_str())
             {
                 if let Some((path, bytes)) = &self.edit {
                     std::fs::write(path, bytes)?;
                 }
-                child.arg("-c").arg(format!(
+                let body = format!(
                     "cat >/dev/null; printf '%s' {} > {}; exit {}",
                     shell_words::quote(self.bytes),
                     temporary,
                     self.exit_status
-                ));
+                );
+                child
+                    .arg("-c")
+                    .arg(super::ssh_stand_in::replacement_script(command, &body));
             } else {
                 child.arg("-c").arg(remote);
             }
@@ -268,15 +269,16 @@ mod tests {
                 .last()
                 .unwrap()
                 .to_string_lossy();
-            let words = shell_words::split(&remote).unwrap();
+            let body = super::ssh_stand_in::provisioning_script(command);
             let upload = upload_script(&self.temporary).unwrap();
-            let script = if words[2].strip_prefix(REMOTE_RUNTIME_PREFIX) == Some(upload.as_str()) {
-                format!(
+            let script = if body.strip_prefix(REMOTE_RUNTIME_PREFIX) == Some(upload.as_str()) {
+                let script = format!(
                     "umask 022; ({upload}); result=$?; printf '%s' $$ > {started}.pending && mv {started}.pending {started} || exit 1; \
                      while [ ! -e {release} ]; do sleep 0.01; done; exit \"$result\"",
                     started = shell_path(&self.started).unwrap(),
                     release = shell_path(&self.release).unwrap(),
-                )
+                );
+                super::ssh_stand_in::replacement_script(command, &script)
             } else {
                 remote.into_owned()
             };
@@ -305,21 +307,14 @@ mod tests {
             assert_eq!(command.as_std().get_program().to_string_lossy(), "ssh");
             // Substitute the system BSD stat in Linux Darwin fixtures only.
             // Leave bare stat untouched so PATH precedence remains observable.
-            let remote = command
-                .as_std()
-                .get_args()
-                .last()
-                .unwrap()
-                .to_string_lossy();
-            let words = shell_words::split(&remote).unwrap();
-            let remote = words[2].replace(
+            let remote = super::ssh_stand_in::provisioning_script(command).replace(
                 "/usr/bin/stat",
                 &shell_path(&self.bin.join("native-stat")).unwrap(),
             );
             let mut child = tokio::process::Command::new("sh");
             child
                 .arg("-c")
-                .arg(remote)
+                .arg(super::ssh_stand_in::replacement_script(command, &remote))
                 .env("HOME", &self.home)
                 .env("PATH", format!("{}:/usr/bin:/bin", self.bin.display()))
                 .env_remove("XDG_CONFIG_HOME")
@@ -8568,7 +8563,7 @@ master.touch()
         isolate_process_group(&mut command);
         let child = command.spawn().unwrap();
 
-        let result = capture_transfer_child(child, 10, Duration::from_secs(2), None)
+        let result = capture_transfer_child(child, 10, Duration::from_secs(2), None, None)
             .await
             .unwrap_or_else(|failure| panic!(
                 "verified remote growth must renew the idle deadline; {failure:?}; remote bytes: {:?}",
@@ -8875,7 +8870,7 @@ master.touch()
         stdin.write_all(b"data").await.unwrap();
         stdin.shutdown().await.unwrap();
         drop(stdin);
-        let failure = capture_transfer_child(child, 4, Duration::from_millis(200), None)
+        let failure = capture_transfer_child(child, 4, Duration::from_millis(200), None, None)
             .await
             .expect_err("the deadline must survive both feeder EOF and stdout EOF");
         assert!(failure.context.contains("stalled"), "{failure:?}");
@@ -8941,6 +8936,7 @@ master.touch()
                 10,
                 Duration::from_millis(300),
                 Some(feeder.abort_handle()),
+                None,
             ),
         )
         .await;
@@ -9057,7 +9053,7 @@ master.touch()
             terminate_child(&mut child).await;
             panic!("the descendant exited before the stall observation");
         }
-        let failure = capture_transfer_child(child, 10, Duration::from_millis(300), None)
+        let failure = capture_transfer_child(child, 10, Duration::from_millis(300), None, None)
             .await
             .expect_err("pipe noise cannot renew a stalled transfer");
         assert!(failure.context.contains("stalled"), "{failure:?}");
@@ -12490,7 +12486,8 @@ master.touch()
 
     /// The install step cannot trust the upload step's earlier digest: bytes
     /// at the nonce path may change between separately reported actions.
-    /// A mismatch must preserve the installed binary and clean the nonce.
+    /// A mismatch must preserve the installed binary and clean the nonce, even
+    /// when the SSH client reports zero for the failed digest check.
     /// The local remote-shell stand-in uses GNU metadata tools, so this
     /// fixture must run on Linux to reach the tampering boundary.
     #[cfg(target_os = "linux")]
@@ -12507,12 +12504,7 @@ master.touch()
         let backend = SystemBackend {
             control_dir: root.path().to_path_buf(),
             linger: LingerBehavior::Simulated(Ok(())),
-            launcher: Arc::new(ScriptedTransferLauncher {
-                temporary: temporary.clone(),
-                bytes: "new bytes",
-                exit_status: 0,
-                edit: None,
-            }),
+            launcher: Arc::new(super::ssh_stand_in::LyingSsh { omit_record: false }),
             runtime_units: false,
             one_shot: false,
             helm_store: None,
@@ -12540,6 +12532,7 @@ master.touch()
             .install_path(&target, &prepared, &destination, &temporary, 0o755)
             .await
             .expect_err("install must recheck bytes at the nonce path");
+        assert!(error.rendered().contains("exit status 76"), "{error:?}");
         assert!(
             error
                 .rendered()

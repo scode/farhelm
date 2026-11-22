@@ -2644,8 +2644,8 @@ The stdio helper writes one exact, newline-terminated `farhelm-supervisor-connec
 connect succeeds, before either copy direction starts. This proves only that a supervisor socket accepted the
 connection; the framed hello still has to finish. Stdout remains exclusively the protocol stream, so the marker changes
 neither its framing nor its version. Initial not-found/refused socket errors exit 75; other initial dial failures
-exit 1. Provisioning still requires its own wrapper records before treating 75 as positive absence: the connected marker
-grants no setup permission and supplies no resolved executable path.
+exit 1. A remote provisioning probe reads exit 75 from its tagged command status record. Positive absence also needs the
+probe's start marker and empty stdout. The connected marker only establishes that the proxy reached the socket.
 
 The ssh child's stderr is piped and relayed as bounded, control-escaped tracing events attributed to the host, not
 inherited. Inheriting is defensible for the single-host path a user started by hand; for a registered host it hands a
@@ -2673,13 +2673,14 @@ cancelled connection alive.
 Before hello, natural SSH exit 255 identifies an SSH connection/login failure, 126/127 identify a remote Farhelm that
 could not be executed/found, and 75 identifies Farhelm with no supervisor running and supplies the start command, or
 describes it when the shown command would not be exact (too long, or altered by the diagnostic's escaping). Other
-numeric statuses, including zero before hello, report a failed remote command. Missing status, a signal or a failed wait
-does not invent a numeric exit code. Already observed malformed or partial protocol data keeps its protocol diagnosis.
-Without a current connected marker, a timeout remains uncertain between connecting/logging in and an older remote that
-cannot report progress, unless this helm process already observed the marker for that host's current connection
-configuration. That capability is memory only, scoped to the existing destination/program/state-directory snapshot; a
-retarget does not borrow another endpoint's evidence. A completed hello is stronger evidence than the independently
-scheduled stderr marker and always keeps the attempt in final setup.
+numeric statuses, including zero before hello, report a failed remote command. An SSH server that loses exit statuses
+can leave this live connection with that generic failure detail. Missing status, a signal or a failed wait does not
+invent a numeric exit code. Already observed malformed or partial protocol data keeps its protocol diagnosis. Without a
+current connected marker, a timeout remains uncertain between connecting/logging in and an older remote that cannot
+report progress, unless this helm process already observed the marker for that host's current connection configuration.
+That capability is memory only, scoped to the existing destination/program/state-directory snapshot; a retarget does not
+borrow another endpoint's evidence. A completed hello is stronger evidence than the independently scheduled stderr
+marker and always keeps the attempt in final setup.
 
 The hello's two free-text fields carry generous LENGTH caps checked at handshake decode (256 bytes each): both are
 retained for the connection's whole life by the peer's counterpart, so an unbounded one is a memory cost a peer chooses
@@ -7915,6 +7916,13 @@ user-level systemd units, `systemctl --user enable --now`, `loginctl enable-ling
 (proceed-without-if-privileged per SPEC.md). Discovery-first: probe for a running supervisor via
 `farhelm internal stdio` before proposing any of this, and show the full concrete action list before touching the host
 for initial setup.
+
+The helm wraps every remote setup command in a parent shell that prints `farhelm-command-status-v1 <tag> <status>` on
+stderr when its child exits. Some SSH servers report zero even for a failed command, so setup takes the result from the
+record with the command's fresh tag. SSH exit 255 still reports a transport failure. A missing or invalid record fails
+the step and includes the transport status and host diagnostic. A finished probe hello already proves that a supervisor
+answered, so that path can stop the probe without waiting for the record. Stdout carries the same data and framed
+messages as before.
 
 Inspection chooses the OS with `uname -s` before any systemd command. The combined payload target is Linux x86_64, Linux
 aarch64 or macOS aarch64; its serialized Linux architecture names remain `x86_64` and `aarch64`. Apple-silicon Macs

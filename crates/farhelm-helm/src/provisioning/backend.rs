@@ -1,6 +1,7 @@
 //! The system-facing half of provisioning executes the same action vocabulary
 //! for the local machine or through a remote machine's execution route.
 
+use super::command_status::Tag;
 use super::plan::{DirectorySpec, PayloadTarget, ProvisioningTarget};
 use crate::access::RemoteRoute;
 use crate::manager::peer_text;
@@ -810,24 +811,28 @@ impl SystemBackend {
     ///
     /// Nested container commands borrow the place's supervisor master, as
     /// defined by the route. They never open a provisioning master there.
+    /// The wrapper's tag lets the caller recover the real script status even
+    /// when the transport reports a different one.
     pub(super) fn remote_command(
         &self,
         route: &crate::access::RemoteRoute,
         remote_command: String,
-    ) -> anyhow::Result<tokio::process::Command> {
+    ) -> anyhow::Result<(tokio::process::Command, Tag)> {
         let policy = if self.one_shot {
             crate::access::ConnectionPolicy::OneShot
         } else {
             crate::access::ConnectionPolicy::Shared(crate::ssh::SharedConnection::Provisioning)
         };
-        let script = format!("{REMOTE_RUNTIME_PREFIX}{remote_command}");
-        Ok(route
+        let tag = Tag::new();
+        let script = tag.wrap(&format!("{REMOTE_RUNTIME_PREFIX}{remote_command}"));
+        let command = route
             .command(
                 &self.control_dir,
                 policy,
                 crate::access::RemoteCommand::Script(&script),
             )?
-            .command())
+            .command();
+        Ok((command, tag))
     }
 
     /// Existing SSH-focused fixtures exercise the same route lowering while
@@ -846,6 +851,7 @@ impl SystemBackend {
             },
             script,
         )
+        .map(|(command, _)| command)
     }
 
     /// Fetch the user manager's `XDG_CONFIG_HOME` from the host and choose
@@ -911,14 +917,15 @@ impl SystemBackend {
         script: &str,
         timeout: Duration,
     ) -> Result<CommandResult, BackendFailure> {
-        let mut command = match target {
+        let (mut command, status_tag) = match target {
             ProvisioningTarget::Local => {
                 let mut command = tokio::process::Command::new("sh");
                 command.args(["-c", script]);
-                command
+                (command, None)
             }
             ProvisioningTarget::Remote(route) => self
                 .remote_command(route, script.to_string())
+                .map(|(command, tag)| (command, Some((route, tag))))
                 .map_err(|error| {
                     BackendFailure::new("building the remote command", error.to_string())
                 })?,
@@ -933,17 +940,17 @@ impl SystemBackend {
             .launcher
             .spawn(&mut command)
             .map_err(|error| BackendFailure::new("spawning the host command", error.to_string()))?;
-        let output = capture_child(child, timeout, "the host command").await?;
-        if let ProvisioningTarget::Remote(route) = target
-            && let Some(reason) = crate::transport::nested_session_failure(
-                route,
-                output.code,
-                output.stderr.as_bytes(),
-            )
-        {
-            return Err(BackendFailure::session_limit(reason, output.stderr));
+        let output = capture_child_with_status(
+            child,
+            timeout,
+            "the host command",
+            status_tag.as_ref().map(|(_, tag)| tag),
+        )
+        .await?;
+        match status_tag {
+            Some((route, tag)) => output.resolve_remote_status(route, &tag),
+            None => Ok(output),
         }
-        Ok(output)
     }
 
     /// Require a zero exit status while preserving the host's stderr.
@@ -1506,7 +1513,7 @@ impl SystemBackend {
             .await
             .map_err(|error| BackendFailure::new("reading staged payload size", error.to_string()))?
             .len();
-        let mut command = self
+        let (mut command, status_tag) = self
             .remote_command(route, upload_script(remote)?)
             .map_err(|error| {
                 BackendFailure::new("building the payload transfer command", error.to_string())
@@ -1539,8 +1546,10 @@ impl SystemBackend {
             source_bytes,
             TRANSFER_IDLE_TIMEOUT,
             Some(feeder.abort_handle()),
+            Some(&status_tag),
         )
-        .await;
+        .await
+        .and_then(|output| output.resolve_remote_status(route, &status_tag));
         // Unless the copy succeeded, nothing will read the rest of the input,
         // and the feeder's write fails only once every holder of the pipe's
         // read end is gone. With OpenSSH that happens as soon as the ssh
@@ -1554,11 +1563,6 @@ impl SystemBackend {
         }
         let fed = feeder.await;
         let output = output?;
-        if let Some(reason) =
-            crate::transport::nested_session_failure(route, output.code, output.stderr.as_bytes())
-        {
-            return Err(BackendFailure::session_limit(reason, output.stderr));
-        }
         if output.code != Some(0) {
             return Err(BackendFailure::new(
                 format!("transferring {} to the host", source.display()),
@@ -1620,15 +1624,15 @@ impl SystemBackend {
     async fn spawn_probe(
         &self,
         target: &ProbeTarget,
-    ) -> Result<(tokio::process::Child, bool), BackendFailure> {
-        let mut command = match &target.transport {
+    ) -> Result<(tokio::process::Child, Option<Tag>), BackendFailure> {
+        let (mut command, status_tag) = match &target.transport {
             ProvisioningTarget::Local => {
                 let mut command = tokio::process::Command::new(&target.probe_farhelm);
                 command.args(["internal", "stdio"]);
                 if let Some(state) = &target.probe_state_dir {
                     command.arg("--state-dir").arg(state);
                 }
-                command
+                (command, None)
             }
             ProvisioningTarget::Remote(route) => {
                 let farhelm = shell_path(&target.probe_farhelm)?;
@@ -1638,9 +1642,11 @@ impl SystemBackend {
                     .map(|path| shell_path(path))
                     .transpose()?;
                 let script = Self::probe_script(&farhelm, state.as_deref(), route);
-                self.remote_command(route, script).map_err(|error| {
-                    BackendFailure::new("building the remote probe", error.to_string())
-                })?
+                self.remote_command(route, script)
+                    .map(|(command, tag)| (command, Some(tag)))
+                    .map_err(|error| {
+                        BackendFailure::new("building the remote probe", error.to_string())
+                    })?
             }
         };
         command
@@ -1652,10 +1658,7 @@ impl SystemBackend {
         let child = self.launcher.spawn(&mut command).map_err(|error| {
             BackendFailure::new("spawning the supervisor probe", error.to_string())
         })?;
-        Ok((
-            child,
-            matches!(target.transport, ProvisioningTarget::Remote(_)),
-        ))
+        Ok((child, status_tag))
     }
 }
 
@@ -1694,6 +1697,71 @@ impl CommandResult {
             (None, None) => "terminated without an exit status or signal".to_string(),
         }
     }
+
+    /// The result of the script comes from its stderr record. A 255 from SSH
+    /// itself still belongs to the transport, including a refused mux session.
+    /// Keep the resolver above the shared capture layer, where the tag is known.
+    fn resolve_remote_status(
+        mut self,
+        route: &RemoteRoute,
+        tag: &Tag,
+    ) -> Result<Self, BackendFailure> {
+        let record = tag.find_record(self.stderr.as_bytes());
+        if let Some((_, range)) = &record {
+            self.stderr.replace_range(range.clone(), "");
+        }
+        if self.code == Some(255) && route_uses_ssh(route) {
+            if let Some(reason) =
+                crate::transport::nested_session_failure(route, self.code, self.stderr.as_bytes())
+            {
+                return Err(BackendFailure::session_limit(reason, self.stderr));
+            }
+            return Ok(self);
+        }
+        let Some((code, _)) = record else {
+            let status = self.failure_status();
+            return Err(missing_command_status(
+                route,
+                self.code,
+                &status,
+                self.stderr,
+            ));
+        };
+        self.code = Some(code);
+        self.signal = None;
+        Ok(self)
+    }
+}
+
+/// SSH reserves 255 for failures of its own, including when it carries a
+/// Podman command. A local Podman exec has no SSH layer to report that failure.
+fn route_uses_ssh(route: &RemoteRoute) -> bool {
+    matches!(
+        route,
+        RemoteRoute::Ssh { .. }
+            | RemoteRoute::PodmanExec {
+                via: crate::access::BaseRoute::Ssh { .. },
+                ..
+            }
+    )
+}
+
+/// Explain a missing record without treating the transport's zero as proof
+/// that the script ran. Exit zero from a lossy SSH server is a common cause.
+fn missing_command_status(
+    route: &RemoteRoute,
+    code: Option<i32>,
+    status: &str,
+    stderr: String,
+) -> BackendFailure {
+    let mut context =
+        format!("the host did not report how the command ended (transport: {status})");
+    if code == Some(0) && route_uses_ssh(route) {
+        context.push_str(
+            ". Some SSH servers, including Tailscale SSH on macOS, can lose command exit statuses",
+        );
+    }
+    BackendFailure::new(context, stderr)
 }
 
 /// Content and permission facts required for an idempotent skip decision.
@@ -1790,6 +1858,7 @@ pub(super) struct ProbeStderr {
     pub(super) prefix: Vec<u8>,
     pub(super) command_started: bool,
     resolved_farhelm: Option<Vec<u8>>,
+    command_status: Option<i32>,
 }
 
 /// Count handshake bytes without changing framing. Positive absence emits no
@@ -1835,6 +1904,20 @@ impl ProbeStderr {
         }
     }
 
+    /// Retain the diagnostic prefix independently of line recognition. The
+    /// return value tells the next line whether it can remove the wrapper's
+    /// leading newline without removing an earlier diagnostic's newline.
+    fn retain_line(&mut self, line: &[u8], newline: bool) -> bool {
+        let remaining = MAX_CHILD_STREAM_BYTES.saturating_sub(self.prefix.len());
+        self.prefix
+            .extend_from_slice(&line[..line.len().min(remaining)]);
+        let keep_newline = newline && remaining > line.len();
+        if keep_newline {
+            self.prefix.push(b'\n');
+        }
+        keep_newline
+    }
+
     /// Render the bounded prefix retained for a safe peer diagnostic.
     fn diagnostic(&self) -> String {
         String::from_utf8_lossy(&self.prefix).into_owned()
@@ -1853,7 +1936,7 @@ pub(super) async fn drain_probe_stderr<R>(
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    drain_probe_stderr_into(stream, signal, &std::sync::Mutex::default()).await
+    drain_probe_stderr_into(stream, signal, &std::sync::Mutex::default(), None).await
 }
 
 /// [`drain_probe_stderr`], also publishing everything recognized so far to
@@ -1863,19 +1946,15 @@ async fn drain_probe_stderr_into<R>(
     mut stream: R,
     signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
     progress: &std::sync::Mutex<ProbeStderr>,
+    tag: Option<&Tag>,
 ) -> ProbeStderr
 where
     R: tokio::io::AsyncRead + Unpin,
 {
-    let publish = |result: &ProbeStderr| {
-        progress
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner)
-            .clone_from(result);
-    };
     let mut result = ProbeStderr::default();
     let mut line = Vec::new();
     let mut line_overflow = false;
+    let mut retained_break = false;
     let mut buffer = [0_u8; 4096];
     loop {
         match stream.read(&mut buffer).await {
@@ -1883,17 +1962,26 @@ where
                 if !line_overflow {
                     result.observe_line(&line);
                 }
+                result.retain_line(&line, false);
                 return result;
             }
             Ok(read) => {
-                let remaining = MAX_CHILD_STREAM_BYTES.saturating_sub(result.prefix.len());
-                result
-                    .prefix
-                    .extend_from_slice(&buffer[..read.min(remaining)]);
                 for byte in &buffer[..read] {
                     if *byte == b'\n' {
-                        if !line_overflow {
-                            result.observe_line(&line);
+                        let record = tag
+                            .filter(|_| !line_overflow)
+                            .and_then(|tag| tag.parse_line(&line));
+                        if let Some(code) = record {
+                            result.command_status = Some(code);
+                            if retained_break {
+                                result.prefix.pop();
+                            }
+                            retained_break = false;
+                        } else {
+                            if !line_overflow {
+                                result.observe_line(&line);
+                            }
+                            retained_break = result.retain_line(&line, !line_overflow);
                         }
                         line.clear();
                         line_overflow = false;
@@ -1903,9 +1991,14 @@ where
                         line_overflow = true;
                     }
                 }
-                publish(&result);
+                let mut snapshot = progress
+                    .lock()
+                    .unwrap_or_else(std::sync::PoisonError::into_inner);
+                snapshot.clone_from(&result);
+                snapshot.retain_line(&line, false);
             }
             Err(error) => {
+                result.retain_line(&line, false);
                 let _ = signal.send(DrainFailure {
                     stream: "stderr",
                     detail: error.to_string(),
@@ -1923,29 +2016,28 @@ async fn drain_capped<R>(
     mut stream: R,
     name: &'static str,
     signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
+    tag: Option<Tag>,
 ) -> Vec<u8>
 where
     R: tokio::io::AsyncRead + Unpin,
 {
     let mut kept = Vec::new();
     let mut buffer = [0_u8; 4096];
-    loop {
+    // A tagged stderr stream has room for one additional record. The extra
+    // space belongs only to a complete matching record, measured in raw bytes.
+    let limit = MAX_CHILD_STREAM_BYTES + tag.as_ref().map_or(0, Tag::max_record_bytes);
+    let overflow = loop {
         match stream.read(&mut buffer).await {
-            Ok(0) => return kept,
-            Ok(read) if kept.len() + read <= MAX_CHILD_STREAM_BYTES => {
-                kept.extend_from_slice(&buffer[..read]);
-            }
+            Ok(0) => break false,
             Ok(read) => {
-                let remaining = MAX_CHILD_STREAM_BYTES.saturating_sub(kept.len());
+                let remaining = limit - kept.len();
                 kept.extend_from_slice(&buffer[..read.min(remaining)]);
-                let _ = signal.send(DrainFailure {
-                    stream: name,
-                    detail: format!("exceeded the {MAX_CHILD_STREAM_BYTES}-byte limit"),
-                    prefix: kept.clone(),
-                });
-                return kept;
+                if read > remaining {
+                    break true;
+                }
             }
             Err(error) => {
+                kept.truncate(MAX_CHILD_STREAM_BYTES);
                 let _ = signal.send(DrainFailure {
                     stream: name,
                     detail: error.to_string(),
@@ -1954,7 +2046,23 @@ where
                 return kept;
             }
         }
+    };
+    if kept.len() > MAX_CHILD_STREAM_BYTES || overflow {
+        let record = tag.as_ref().and_then(|tag| tag.find_record(&kept));
+        let diagnostics = kept.len() - record.as_ref().map_or(0, |(_, range)| range.len());
+        if overflow || diagnostics > MAX_CHILD_STREAM_BYTES {
+            if let Some((_, range)) = record {
+                kept.drain(range);
+            }
+            kept.truncate(MAX_CHILD_STREAM_BYTES);
+            let _ = signal.send(DrainFailure {
+                stream: name,
+                detail: format!("exceeded the {MAX_CHILD_STREAM_BYTES}-byte limit"),
+                prefix: kept.clone(),
+            });
+        }
     }
+    kept
 }
 
 /// Wait for one child while concurrently draining bounded stdout and stderr.
@@ -1964,16 +2072,27 @@ where
 /// The caller must isolate the command with [`isolate_process_group`] before
 /// spawning so descendants cannot outlive a timed-out shell.
 pub(crate) async fn capture_child(
+    child: tokio::process::Child,
+    timeout: Duration,
+    context: &str,
+) -> Result<CommandResult, BackendFailure> {
+    capture_child_with_status(child, timeout, context, None).await
+}
+
+/// Capture the same bounded diagnostics for provisioning. Its tag allows
+/// the pipe reader to account for the record separately before resolving it.
+async fn capture_child_with_status(
     mut child: tokio::process::Child,
     timeout: Duration,
     context: &str,
+    tag: Option<&Tag>,
 ) -> Result<CommandResult, BackendFailure> {
     let stdout = child.stdout.take().expect("captured child stdout");
     let stderr = child.stderr.take().expect("captured child stderr");
     let (signal_tx, mut signal_rx) = tokio::sync::mpsc::unbounded_channel();
     let _signal_guard = signal_tx.clone();
-    let stdout_task = tokio::spawn(drain_capped(stdout, "stdout", signal_tx.clone()));
-    let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx));
+    let stdout_task = tokio::spawn(drain_capped(stdout, "stdout", signal_tx.clone(), None));
+    let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx, tag.cloned()));
     let deadline = tokio::time::Instant::now() + timeout;
 
     let status = tokio::select! {
@@ -2100,11 +2219,13 @@ where
 /// failure cancels it first. This is defensive rather than load-bearing: as
 /// measured (see `ssh_stand_in`), killing the ssh process already closes the
 /// remote command's stdin and makes the feeder's next write fail.
+/// A tagged transfer keeps the same stderr diagnostic limit as a shell command.
 pub(super) async fn capture_transfer_child(
     mut child: tokio::process::Child,
     source_bytes: u64,
     idle_timeout: Duration,
     input: Option<tokio::task::AbortHandle>,
+    tag: Option<&Tag>,
 ) -> Result<CommandResult, BackendFailure> {
     let context = "the payload transfer";
     let stdout = child.stdout.take().expect("captured transfer stdout");
@@ -2114,7 +2235,7 @@ pub(super) async fn capture_transfer_child(
     let (sizes_tx, mut sizes_rx) = tokio::sync::watch::channel(None);
     let stdout_task = tokio::spawn(drain_transfer_sizes(stdout, sizes_tx, signal_tx.clone()));
     let mut sizes_open = true;
-    let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx));
+    let stderr_task = tokio::spawn(drain_capped(stderr, "stderr", signal_tx, tag.cloned()));
     let mut deadline: Option<tokio::time::Instant> = None;
     let mut observed_bytes = 0;
     let status = loop {
@@ -2282,14 +2403,19 @@ struct ProbeStderrReader {
 }
 
 impl ProbeStderrReader {
-    fn spawn<R>(stream: R, signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>) -> Self
+    fn spawn<R>(
+        stream: R,
+        signal: tokio::sync::mpsc::UnboundedSender<DrainFailure>,
+        tag: Option<Tag>,
+    ) -> Self
     where
         R: tokio::io::AsyncRead + Unpin + Send + 'static,
     {
         let progress = Arc::new(std::sync::Mutex::new(ProbeStderr::default()));
         let shared = Arc::clone(&progress);
-        let task =
-            tokio::spawn(async move { drain_probe_stderr_into(stream, signal, &shared).await });
+        let task = tokio::spawn(async move {
+            drain_probe_stderr_into(stream, signal, &shared, tag.as_ref()).await
+        });
         Self { task, progress }
     }
 
@@ -2412,7 +2538,8 @@ impl ProvisioningBackend for SystemBackend {
             })?),
             None => None,
         };
-        let (mut child, remote) = self.spawn_probe(target).await?;
+        let (mut child, status_tag) = self.spawn_probe(target).await?;
+        let remote = status_tag.is_some();
         // The probe's process group, kept for the path below where the child
         // has already been reaped and `child.id()` no longer answers.
         let group = child.id();
@@ -2421,7 +2548,7 @@ impl ProvisioningBackend for SystemBackend {
         let stderr = child.stderr.take().expect("piped probe stderr");
         let (stderr_signal_tx, mut stderr_signal_rx) = tokio::sync::mpsc::unbounded_channel();
         let _stderr_signal_guard = stderr_signal_tx.clone();
-        let stderr_task = ProbeStderrReader::spawn(stderr, stderr_signal_tx);
+        let stderr_task = ProbeStderrReader::spawn(stderr, stderr_signal_tx, status_tag);
         let stdout_bytes = Arc::new(std::sync::atomic::AtomicUsize::new(0));
         let mut reader = FrameReader::new(CountingReader {
             inner: stdout,
@@ -2664,12 +2791,7 @@ impl ProvisioningBackend for SystemBackend {
                         String::from_utf8_lossy(&failure.prefix),
                     ));
                 }
-                if status.code() == Some(POSITIVE_ABSENCE_EXIT)
-                    && stdout_empty
-                    && (!remote || stderr.command_started)
-                {
-                    return Ok(ProbeObservation::Absent);
-                }
+                let mut code = status.code();
                 if let ProvisioningTarget::Remote(route) = &target.transport
                     && let Some(reason) = crate::transport::nested_session_failure(
                         route,
@@ -2678,6 +2800,25 @@ impl ProvisioningBackend for SystemBackend {
                     )
                 {
                     return Err(BackendFailure::session_limit(reason, stderr.diagnostic()));
+                }
+                if let ProvisioningTarget::Remote(route) = &target.transport
+                    && !(code == Some(255) && route_uses_ssh(route))
+                {
+                    let Some(reported) = stderr.command_status else {
+                        return Err(missing_command_status(
+                            route,
+                            code,
+                            &status.to_string(),
+                            stderr.diagnostic(),
+                        ));
+                    };
+                    code = Some(reported);
+                }
+                if code == Some(POSITIVE_ABSENCE_EXIT)
+                    && stdout_empty
+                    && (!remote || stderr.command_started)
+                {
+                    return Ok(ProbeObservation::Absent);
                 }
                 let detail = if status.code() == Some(255)
                     && !stderr.command_started
@@ -2693,9 +2834,9 @@ impl ProvisioningBackend for SystemBackend {
                     // Setup's socket can exceed the limit by one byte while the sessions socket still fits.
                     format!("SSH could not connect or log in to the host. {reason}")
                 } else {
-                    format!(
-                        "the supervisor probe closed before hello completion with exit status {status}"
-                    )
+                    let status = code
+                        .map_or_else(|| status.to_string(), |code| format!("exit status {code}"));
+                    format!("the supervisor probe closed before hello completion with {status}")
                 };
                 Err(BackendFailure::new(detail, stderr.diagnostic()))
             }
@@ -4000,6 +4141,161 @@ mod macos_reach_tests {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::provisioning::ssh_stand_in::{LyingSsh, control_root};
+
+    /// A script can use all one-byte exit codes. Reserve SSH's 255 for the
+    /// transport while retaining a child's 255 in the wrapper record.
+    #[test]
+    fn ssh_transport_255_takes_precedence_over_a_recorded_status() {
+        let tag = Tag::new();
+        let route = RemoteRoute::Ssh {
+            destination: "fixture.example".into(),
+            access: crate::ssh::SshAccessKind::UserConfig,
+        };
+        for (body, wrapper_status, transport_status, resolved_status) in
+            [("exit 255", 254, 254, 255), ("exit 0", 0, 255, 255)]
+        {
+            let child = std::process::Command::new("sh")
+                .args(["-c", &tag.wrap(body)])
+                .output()
+                .unwrap();
+            assert_eq!(child.status.code(), Some(wrapper_status));
+            let captured = CommandResult {
+                code: Some(transport_status),
+                signal: None,
+                stdout: child.stdout,
+                stderr: String::from_utf8(child.stderr).unwrap(),
+            };
+            let result = captured.resolve_remote_status(&route, &tag).unwrap();
+            assert_eq!(result.code, Some(resolved_status));
+            assert!(result.stderr.is_empty());
+        }
+    }
+
+    /// Status framing gets its own allowance. A command can write the entire
+    /// diagnostic budget, but an extra peer byte is still a capture failure.
+    #[farhelm_testtrace::test]
+    async fn tagged_shell_keeps_the_full_stderr_diagnostic_budget() {
+        let control = control_root();
+        let mut backend = SystemBackend::new(control.path().to_owned());
+        backend.launcher = Arc::new(LyingSsh { omit_record: false });
+        let target = ProvisioningTarget::ssh("fixture.example");
+        let script = |bytes| format!("head -c {bytes} /dev/zero >&2");
+        let output = backend
+            .require_shell(&target, &script(MAX_CHILD_STREAM_BYTES), "fixture")
+            .await
+            .unwrap();
+        assert_eq!(output.stderr.len(), MAX_CHILD_STREAM_BYTES);
+        let failure = backend
+            .require_shell(&target, &script(MAX_CHILD_STREAM_BYTES + 1), "fixture")
+            .await
+            .unwrap_err();
+        assert!(failure.context.contains("exceeded the 65536-byte limit"));
+    }
+
+    /// An empty source cannot fail a data write in the local input feeder.
+    /// The earlier remote redirection failure must come from the status record.
+    #[farhelm_testtrace::test]
+    async fn remote_put_fails_when_ssh_hides_the_upload_error() {
+        let control = control_root();
+        let mut backend = SystemBackend::new(control.path().to_owned());
+        backend.launcher = Arc::new(LyingSsh { omit_record: false });
+        let source = control.path().join("empty-payload");
+        std::fs::write(&source, []).unwrap();
+        let route = RemoteRoute::Ssh {
+            destination: "fixture.example".into(),
+            access: crate::ssh::SshAccessKind::UserConfig,
+        };
+        let error = backend
+            .remote_put(&route, &source, control.path())
+            .await
+            .unwrap_err();
+        assert!(error.context.starts_with("transferring "), "{error:?}");
+        assert!(control.path().is_dir());
+    }
+
+    /// A lying transport reports zero for a failed command. The record must
+    /// preserve the actual code and stderr while binary stdout bypasses it.
+    #[farhelm_testtrace::test]
+    async fn remote_shell_uses_the_record_when_ssh_reports_zero() {
+        let control = control_root();
+        let mut backend = SystemBackend::new(control.path().to_owned());
+        backend.launcher = Arc::new(LyingSsh { omit_record: false });
+        let target = ProvisioningTarget::ssh("fixture.example");
+        let output = backend
+            .run_shell(
+                &target,
+                "printf 'x\\000y'; printf 'broken' >&2; exit 44",
+                COMMAND_TIMEOUT,
+            )
+            .await
+            .unwrap();
+        assert_eq!(output.stdout, b"x\0y");
+        assert_eq!(output.stderr, "broken");
+        assert_eq!(output.code, Some(44));
+        let error = backend
+            .require_shell(&target, "exit 42", "fixture command")
+            .await
+            .unwrap_err();
+        assert_eq!(error.stderr, "exit status 42");
+
+        backend.launcher = Arc::new(LyingSsh { omit_record: true });
+        let error = backend
+            .require_shell(
+                &target,
+                "printf 'closed early' >&2; exit 17",
+                "fixture command",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .context
+                .contains("the host did not report how the command ended")
+        );
+        assert!(error.context.contains("exit status 0"));
+        assert!(error.context.contains("Tailscale SSH on macOS"));
+        assert_eq!(error.stderr, "closed early");
+    }
+
+    /// A real wrapper around the probe can report positive absence even when
+    /// SSH says zero. Both the missing executable and the exec'd proxy's own
+    /// exit 75 must reach that result. Silence from the wrapper cannot prove it.
+    #[farhelm_testtrace::test]
+    async fn remote_probe_reads_absence_from_the_record_when_ssh_reports_zero() {
+        use std::os::unix::fs::PermissionsExt as _;
+
+        let control = control_root();
+        let mut backend = SystemBackend::new(control.path().to_owned());
+        backend.launcher = Arc::new(LyingSsh { omit_record: false });
+        let executable = control.path().join("fixture-proxy");
+        let target = ProbeTarget {
+            transport: ProvisioningTarget::ssh("fixture.example"),
+            probe_farhelm: executable.clone(),
+            probe_state_dir: None,
+        };
+        assert!(!executable.exists());
+        assert!(matches!(
+            backend.probe(&target).await.unwrap(),
+            ProbeObservation::Absent
+        ));
+        std::fs::write(&executable, "#!/bin/sh\nexit 75\n").unwrap();
+        std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            backend.probe(&target).await.unwrap(),
+            ProbeObservation::Absent
+        ));
+
+        backend.launcher = Arc::new(LyingSsh { omit_record: true });
+        let error = backend.probe(&target).await.unwrap_err();
+        assert!(
+            error
+                .context
+                .contains("the host did not report how the command ended")
+        );
+        assert!(error.stderr.contains(REMOTE_PROBE_MARKER));
+        assert!(!error.stderr.contains("farhelm-command-status-v1"));
+    }
 
     /// Proxy environment files use the credential installer's exact bytes,
     /// private mode and atomic replacement. A failed replacement must preserve
@@ -4087,6 +4383,11 @@ mod tests {
                 self.0,
             );
             let mut remote = tokio::process::Command::new("sh");
+            let script = if self.0 == 255 {
+                script
+            } else {
+                super::super::ssh_stand_in::replacement_script(command, &script)
+            };
             remote.args(["-c", &script]);
             super::super::ssh_stand_in::spawn_remote(command, remote)
         }
@@ -4338,7 +4639,7 @@ mod tests {
         let mut child = reaped_probe().await;
         let (mut producer, consumer) = tokio::io::duplex(64);
         let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
-        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal, None);
         assert!(
             !stderr_task.task.is_finished(),
             "the producer still holds stderr open"
@@ -4373,7 +4674,7 @@ mod tests {
         producer.write_all(b"retained diagnostic").await.unwrap();
         producer.shutdown().await.unwrap();
         let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
-        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal, None);
         let drained = stop_probe(&mut child, stderr_task).await;
         assert_eq!(drained.prefix, b"retained diagnostic");
     }
@@ -4394,7 +4695,7 @@ mod tests {
         let records = format!("{REMOTE_PROBE_MARKER}\n{REMOTE_RESOLVED_PREFIX}/fixture/farhelm\n");
         producer.write_all(records.as_bytes()).await.unwrap();
         let (signal, _failures) = tokio::sync::mpsc::unbounded_channel();
-        let stderr_task = ProbeStderrReader::spawn(consumer, signal);
+        let stderr_task = ProbeStderrReader::spawn(consumer, signal, None);
         // Premise: the reader has consumed both records while the producer,
         // standing in for the master, still holds stderr open.
         tokio::time::timeout(Duration::from_secs(10), async {
