@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`exited-terminal-scrollback`](reports/exited-terminal-scrollback.report.md) landed 2026-11-21 in #4512, #4516, #4523: let every retained terminal line be scrolled to and selected after an agent exits (or the red status line shows), including history under a killed full-screen agent
 - [`status-mark-hover-ring`](reports/status-mark-hover-ring.report.md) landed 2026-11-21 in #4517, #4524: stop drawing the hover ring around status icons (agent mark, idle time and the like) while controls keep it
 - [`environment-checkout-without-setup`](reports/environment-checkout-without-setup.report.md) landed 2026-11-22 in #4519, #4532: let a managed checkout in a session's own sandbox or container use the default checkout folder or else the machine's home folder, never asking or refusing over a missing folder
 - [`triage-supervisor`](reports/triage-supervisor.report.md) landed 2026-11-22 in #4520, #4527, #4529, #4530, #4534, #4538, #4543, #4546, #4552: execute the 2026-11-21 triage outcomes for the supervisor (session lifecycle, shell sessions, cleanup), in grouped PRs
