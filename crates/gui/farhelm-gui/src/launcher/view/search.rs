@@ -39,9 +39,9 @@
 //! What the box holds besides the draft (the open results, the highlight, the last refusal) is the launcher's alone;
 //! what is typed is the field's own text, read when the rows are needed, never copied.
 
+use farhelm_proto::RETIRED_CONTAINER_REASON;
 use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::HostView;
-use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Div, FontWeight, InteractiveElement as _, IntoElement,
@@ -60,7 +60,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::short_name;
 use crate::launcher::draft::{Field, Mode, Tab};
 use crate::launcher::recents::{
-    SetupKey, destination_label, permission_value, summary_before_permissions,
+    SetupKey, destination_label, permission_presentation, summary_before_permissions,
     summary_without_wrapper, wrapper_summary,
 };
 use crate::launcher::request::capitalized;
@@ -1010,8 +1010,7 @@ fn recent_lines(
 ) -> AnyElement {
     let part = |name: &str| SharedString::from(format!("{id}-{name}"));
     let selection = &entry.selection;
-    let yolo =
-        selection.harness.request_permission(selection.permissions) == Some(LaunchPermission::Yolo);
+    let (permission, yolo) = permission_presentation(selection);
     let destination = HostText::from_host(destination_label(entry));
     let first = HostSentence::new(part("destination")).text("Recent setup: ");
     let first = if entry.github_repo.is_none() {
@@ -1066,7 +1065,7 @@ fn recent_lines(
                             .when(yolo, |word| word.text_color(theme::color(palette.danger)))
                             .child(
                                 HostSentence::new(part("permission"))
-                                    .text(permission_value(selection))
+                                    .text(permission)
                                     .underline_matches(query),
                             ),
                     )

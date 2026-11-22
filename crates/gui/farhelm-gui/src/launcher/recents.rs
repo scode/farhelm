@@ -278,10 +278,18 @@ pub fn remembered_folder(history: &LaunchHistoryReply) -> String {
 
 /// The permission `selection` launches with, in the launcher's words; "Agent's own setting" for none.
 pub fn permission_value(selection: &LaunchSelection) -> &'static str {
-    match selection.harness.request_permission(selection.permissions) {
+    permission_presentation(selection).0
+}
+
+/// Give both recent-setup surfaces the label and YOLO emphasis from the same effective permission. Each surface
+/// decides how to draw the words and whether to omit a default.
+pub(super) fn permission_presentation(selection: &LaunchSelection) -> (&'static str, bool) {
+    let permission = selection.harness.request_permission(selection.permissions);
+    let label = match permission {
         None => "Agent's own setting",
         permission => permission_display(permission),
-    }
+    };
+    (label, permission == Some(LaunchPermission::Yolo))
 }
 
 /// Whether `selection` launches with the agent's default Guarded mode, which a row leaves unsaid.

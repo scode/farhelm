@@ -4,10 +4,10 @@
 //! takes Enter away from an empty field's main action. An empty-list highlight follows the setup or template
 //! through store updates, so a replaced row cannot take Enter on someone else's behalf.
 
+use farhelm_proto::RETIRED_CONTAINER_REASON;
 use farhelm_proto::launcher::{LaunchTemplate, LauncherKind};
 use farhelm_proto::session_requests::LaunchHistoryEntry;
 use farhelm_proto::ui_channel::{HostStateView, HostView};
-use farhelm_proto::{LaunchPermission, RETIRED_CONTAINER_REASON};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, Context, Div, InteractiveElement as _, IntoElement, ParentElement as _,
@@ -26,7 +26,7 @@ use crate::harness;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::harness_label;
 use crate::launcher::recents::{
-    ALL_DEFAULTS, destination_label, explicit_before_permissions, permission_value,
+    ALL_DEFAULTS, destination_label, explicit_before_permissions, permission_presentation,
     selection_summary, setup_key, uses_guarded_default, wrapper_summary,
 };
 use crate::templates::{rows, summary};
@@ -447,8 +447,7 @@ fn recent_choice(
     } else {
         harness::ink(mark, palette).unwrap_or(quiet)
     };
-    let yolo =
-        selection.harness.request_permission(selection.permissions) == Some(LaunchPermission::Yolo);
+    let (permission, yolo) = permission_presentation(selection);
     let short_host = host
         .filter(|_| entry.target.is_none())
         .map_or_else(|| placement.clone(), crate::hosts::identity::short_name);
@@ -462,7 +461,7 @@ fn recent_choice(
         .underline_matches(query);
     let mut choices = explicit_before_permissions(selection);
     if !selection.harness.is_shell() && !yolo && !uses_guarded_default(selection) {
-        choices.push(format!("Permissions: {}", permission_value(selection)));
+        choices.push(format!("Permissions: {permission}"));
     }
     if let Some(wrapper) = wrapper_summary(selection) {
         choices.insert(0, wrapper);
@@ -496,7 +495,7 @@ fn recent_choice(
                         )
                         .when(yolo, |line| {
                             line.child(key_chip(
-                                "YOLO",
+                                permission,
                                 if selected { ink } else { palette.danger },
                                 palette,
                             ))
