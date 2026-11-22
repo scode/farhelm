@@ -6,12 +6,13 @@
 //! the product behavior it exists to make simple. The short version:
 //!
 //! - The GUI sends [`ClientMessage::Command`]s, each an `{id, method, path,
-//!   body}` envelope that the helm runs through its ordinary HTTP router in
+//!   body, lane}` envelope that the helm runs through its ordinary HTTP router in
 //!   process. There is no second, typed command API: a command is the HTTP
 //!   request it names, with the same handlers, validation and authentication.
-//! - The helm answers every command with exactly one [`ServerMessage::Reply`],
-//!   in the order the commands arrived, and pushes every change the command
-//!   caused BEFORE that reply. A GUI that sees "done" already shows the result.
+//! - The helm answers each command with one [`ServerMessage::Reply`]. Ordered
+//!   commands answer in arrival order. Commands marked unordered can run and
+//!   answer independently. Remaining changes are pushed before each reply,
+//!   so a GUI that sees "done" already shows the result.
 //!   A reply carries the routed response's status and body, and the helm-only
 //!   headers among its headers as [`HelmMarker`]s; no other header crosses.
 //! - State arrives as collections keyed by id: a [`ServerMessage::Snapshot`]
@@ -51,8 +52,8 @@ pub const UI_CHANNEL_PATH: &str = "/api/ui";
 /// Outside `/api/` on purpose: the helm handles it in the channel itself
 /// rather than routing it, because the query is state of THIS channel (the
 /// helm keeps serving the filtered, sorted view, its counts and the open
-/// session after every change), not something any HTTP route owns. It is still an ordinary
-/// command, so it is admitted in order and answered like every other one.
+/// session after every change), not something any HTTP route owns. It always
+/// uses the ordered lane.
 pub const SESSION_QUERY_PATH: &str = "/ui/session-query";
 
 /// A message from the GUI to the helm.
@@ -86,6 +87,9 @@ pub struct Command {
     /// The JSON request body, if the route takes one.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub body: Option<serde_json::Value>,
+    /// The GUI's scheduling choice. Older and default commands stay ordered.
+    #[serde(default, skip_serializing_if = "Lane::is_ordered")]
+    pub lane: Lane,
 }
 
 impl std::fmt::Debug for Command {
@@ -95,7 +99,35 @@ impl std::fmt::Debug for Command {
             .field("id", &self.id)
             .field("method", &self.method)
             .field("path", &self.path)
+            .field("lane", &self.lane)
             .finish_non_exhaustive()
+    }
+}
+
+/// Whether this command needs its place in the GUI's sequence of requests.
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Lane {
+    /// Preserve arrival order among commands that can depend on each other.
+    #[default]
+    Ordered,
+    /// Run independently of commands still waiting for a reply.
+    Unordered,
+}
+
+impl Lane {
+    fn is_ordered(&self) -> bool {
+        *self == Self::Ordered
+    }
+
+    /// The session query changes the channel's own projection. Both peers
+    /// count it as ordered so its admission deadline agrees with dispatch.
+    pub fn for_path(self, path: &ApiPath) -> Self {
+        if path.as_str() == SESSION_QUERY_PATH {
+            Self::Ordered
+        } else {
+            self
+        }
     }
 }
 
@@ -142,7 +174,7 @@ pub enum ServerMessage {
     Snapshot { collections: Vec<CollectionState> },
     /// What changed in one collection since the last message about it.
     Changes(CollectionChanges),
-    /// The answer to one command, in command order.
+    /// The answer to one command. Ordered replies keep their relative order.
     Reply(Reply),
     /// The answer to a [`ClientMessage::Ping`].
     Pong { n: u64 },
@@ -1281,6 +1313,21 @@ pub enum SshSignInOutcome {
 mod tests {
     use super::*;
 
+    /// A command with the original envelope keeps ordered scheduling and its original wire shape.
+    /// Only an explicitly unordered command adds a field.
+    #[test]
+    fn ordered_commands_keep_the_original_envelope() {
+        let original = serde_json::json!({ "id": 1, "method": "GET", "path": "/api/hosts" });
+        let mut command: Command = serde_json::from_value(original.clone()).unwrap();
+        assert_eq!(command.lane, Lane::Ordered);
+        assert_eq!(serde_json::to_value(&command).unwrap(), original);
+
+        command.lane = Lane::Unordered;
+        let wire = serde_json::to_value(&command).unwrap();
+        assert_eq!(wire["lane"], "unordered");
+        assert_eq!(serde_json::from_value::<Command>(wire).unwrap(), command);
+    }
+
     /// Debugging the whole channel message must keep the request ID and route without printing a credential body.
     /// The helm still receives the body through serde.
     #[test]
@@ -1291,6 +1338,7 @@ mod tests {
             method: Method::Post,
             path: ApiPath::api(&["credentials"]).unwrap(),
             body: Some(body.clone()),
+            lane: Lane::Ordered,
         };
         let serialized = serde_json::to_value(&command).unwrap();
         assert_eq!(serialized["body"], body);

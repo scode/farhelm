@@ -369,6 +369,17 @@ async fn next(driven: &mut Driven) -> ServerMessage {
 }
 
 fn command(id: u64, method: &str, path: &str, body: Option<Value>) -> ClientMessage {
+    command_in_lane(Lane::Ordered, id, method, path, body)
+}
+
+/// Build an explicit wire command, including labels that the client would normalize before sending.
+fn command_in_lane(
+    lane: Lane,
+    id: u64,
+    method: &str,
+    path: &str,
+    body: Option<Value>,
+) -> ClientMessage {
     ClientMessage::Command(Command {
         id,
         method: serde_json::from_value(Value::String(method.to_string()))
@@ -378,7 +389,46 @@ fn command(id: u64, method: &str, path: &str, body: Option<Value>) -> ClientMess
         path: serde_json::from_value(Value::String(path.to_string()))
             .expect("a test command's path is canonical"),
         body,
+        lane,
     })
+}
+
+/// Let the test release the next save independently of the command loop.
+fn gate_save(routes: &TestRoutes) -> oneshot::Sender<()> {
+    let (release, gate) = oneshot::channel();
+    *routes.save_gate.lock().unwrap() = Some(gate);
+    release
+}
+
+/// Prove that a save is parked in its route before exercising requests that might overtake it.
+async fn wait_at_save_gate(routes: &TestRoutes, release: &oneshot::Sender<()>) {
+    tokio::time::timeout(NOTICE, routes.gated_save_started.notified())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "the save did not reach its gate (receiver present: {})",
+                !release.is_closed()
+            )
+        });
+    assert!(!release.is_closed(), "the save must still be waiting");
+}
+
+/// A timeout while a save is held should distinguish a stuck channel from a broken gate.
+async fn next_while_save_is_held(
+    driven: &mut Driven,
+    routes: &TestRoutes,
+    release: &oneshot::Sender<()>,
+) -> ServerMessage {
+    tokio::time::timeout(NOTICE, driven.from_channel.recv())
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "no message before the save was released (gate receiver present: {}, value: {:?})",
+                !release.is_closed(),
+                routes.value.lock().unwrap(),
+            )
+        })
+        .expect("the channel should still be open")
 }
 
 /// Serial admission is what makes the stream ordered (SPEC_impl.md, "The UI
@@ -440,14 +490,70 @@ async fn a_command_waits_for_the_one_before_it_while_heartbeats_are_answered() {
     );
 }
 
+/// A slow ordered save leaves room for an independent command to push its changes and answer. The following
+/// ordered read still sees the saved value. A session query has the same order even when the wire asks otherwise.
+#[farhelm_testtrace::test]
+async fn unordered_work_answers_with_its_changes_while_ordered_commands_stay_fifo() {
+    let routes = Arc::new(TestRoutes::default());
+    let release = gate_save(&routes);
+    let (mut driven, _snapshot) = drive(Arc::clone(&routes)).await;
+    let save = command(
+        1,
+        "PUT",
+        "/api/test/value",
+        Some(serde_json::json!("saved")),
+    );
+    driven.to_channel.send(save).await.unwrap();
+    wait_at_save_gate(&routes, &release).await;
+    for request in [
+        command(2, "GET", "/api/test/value", None),
+        command_in_lane(Lane::Unordered, 3, "GET", SESSION_QUERY_PATH, None),
+        command_in_lane(
+            Lane::Unordered,
+            4,
+            "POST",
+            "/api/test/items",
+            Some(serde_json::json!("new")),
+        ),
+    ] {
+        driven.to_channel.send(request).await.unwrap();
+    }
+
+    let ServerMessage::Changes(changes) =
+        next_while_save_is_held(&mut driven, &routes, &release).await
+    else {
+        panic!("the independent add's changes precede its reply");
+    };
+    assert_eq!(changes.collection, Collection::Approvals);
+    assert_eq!(changes.meta.order, ["\"new\""]);
+    let ServerMessage::Reply(added) = next_while_save_is_held(&mut driven, &routes, &release).await
+    else {
+        panic!("the add's reply immediately follows its changes");
+    };
+    assert_eq!((added.id, added.status), (4, 201));
+    assert!(!release.is_closed() && routes.value.lock().unwrap().is_none());
+
+    release.send(()).unwrap();
+    let saved = next_reply(&mut driven).await;
+    assert_eq!((saved.id, saved.status), (1, 204));
+    let read = next_reply(&mut driven).await;
+    assert_eq!((read.id, read.body), (2, Some(serde_json::json!("saved"))));
+    let query = next_reply(&mut driven).await;
+    assert_eq!(
+        (query.id, query.status),
+        (3, 405),
+        "the channel handled the query itself"
+    );
+    assert_eq!(routes.unrouted_hits.load(Ordering::SeqCst), 0);
+}
+
 /// Status from elsewhere in the fleet should still reach the GUI during a slow
 /// command. Hold a save inside its route while an independent feed bump publishes
 /// a new item. The GUI receives the item while the save still holds its gate.
 #[farhelm_testtrace::test]
 async fn a_feed_bump_pushes_changes_while_a_command_is_held() {
     let routes = Arc::new(TestRoutes::default());
-    let (release, gate) = oneshot::channel();
-    *routes.save_gate.lock().unwrap() = Some(gate);
+    let release = gate_save(&routes);
     let (mut driven, _snapshot) = drive(Arc::clone(&routes)).await;
 
     driven
@@ -460,24 +566,14 @@ async fn a_feed_bump_pushes_changes_while_a_command_is_held() {
         ))
         .await
         .unwrap();
-    tokio::time::timeout(NOTICE, routes.gated_save_started.notified())
-        .await
-        .expect("the save reached its gate before the feed bump");
+    wait_at_save_gate(&routes, &release).await;
 
     let item = serde_json::json!({ "id": "external" });
     routes.items.lock().unwrap().push(item.clone());
     driven.feed.send_modify(|revision| *revision += 1);
-    let message = tokio::time::timeout(NOTICE, driven.from_channel.recv())
-        .await
-        .unwrap_or_else(|_| {
-            panic!(
-                "no list change before the save was released (gate receiver present: {}, value: {:?})",
-                !release.is_closed(),
-                routes.value.lock().unwrap(),
-            )
-        })
-        .expect("the channel should still be open");
-    let ServerMessage::Changes(changes) = message else {
+    let ServerMessage::Changes(changes) =
+        next_while_save_is_held(&mut driven, &routes, &release).await
+    else {
         panic!("expected the list change while the save was held");
     };
     assert_eq!(
@@ -718,6 +814,103 @@ async fn a_gui_that_floods_commands_behind_a_stuck_one_is_disconnected() {
     assert!(
         routes.value.lock().unwrap().is_none(),
         "premise: the first command was still held when the queue overflowed"
+    );
+}
+
+/// Both lanes draw from one allowance. Overflow ends the channel and drops a held unordered request with it.
+/// The held ordered save makes the backlog stable while the test fills it one command at a time.
+#[farhelm_testtrace::test]
+async fn a_mixed_backlog_shares_the_cap_and_cancels_held_unordered_work_on_exit() {
+    let ordered = Arc::new(TestRoutes::default());
+    let unordered = Arc::new(TestRoutes::default());
+    let ordered_release = gate_save(&ordered);
+    let unordered_release = gate_save(&unordered);
+    let channel = Channel::new(
+        test_router(Arc::clone(&ordered)).nest("/api/other", test_router(Arc::clone(&unordered))),
+        HeaderValue::from_static("Bearer test"),
+        vec![test_collection()],
+    );
+    let (mut driven, _snapshot) = drive_channel(channel).await;
+    let held = Some(serde_json::json!("held"));
+    driven
+        .to_channel
+        .send(command(0, "PUT", "/api/test/value", held.clone()))
+        .await
+        .unwrap();
+    wait_at_save_gate(&ordered, &ordered_release).await;
+    driven
+        .to_channel
+        .send(command_in_lane(
+            Lane::Unordered,
+            1,
+            "PUT",
+            "/api/other/api/test/value",
+            held,
+        ))
+        .await
+        .unwrap();
+    wait_at_save_gate(&unordered, &unordered_release).await;
+    driven
+        .to_channel
+        .send(command_in_lane(
+            Lane::Unordered,
+            2,
+            "GET",
+            "/api/test/items",
+            None,
+        ))
+        .await
+        .unwrap();
+    let ServerMessage::Reply(read) =
+        next_while_save_is_held(&mut driven, &unordered, &unordered_release).await
+    else {
+        panic!("the second unordered command can answer while the first is still held");
+    };
+    assert_eq!((read.id, read.status), (2, 200));
+    assert!(
+        !unordered_release.is_closed(),
+        "the first unordered save is still held"
+    );
+
+    // The active ordered save consumes no backlog slot. The active unordered save does.
+    let limit = MAX_QUEUED_COMMANDS as u64;
+    for id in 3..=limit + 1 {
+        driven
+            .to_channel
+            .send(command(id, "GET", "/api/test/value", None))
+            .await
+            .unwrap();
+    }
+    driven
+        .to_channel
+        .send(ClientMessage::Ping { n: 1 })
+        .await
+        .unwrap();
+    assert_eq!(next(&mut driven).await, ServerMessage::Pong { n: 1 });
+    assert!(!ordered_release.is_closed() && !unordered_release.is_closed());
+
+    driven
+        .to_channel
+        .send(command(limit + 2, "GET", "/api/test/value", None))
+        .await
+        .unwrap();
+    tokio::time::timeout(NOTICE, driven.task)
+        .await
+        .unwrap_or_else(|_| {
+            panic!(
+                "overflow should close the channel (save gates open: ordered={}, unordered={})",
+                !ordered_release.is_closed(),
+                !unordered_release.is_closed(),
+            )
+        })
+        .unwrap();
+    assert!(
+        unordered_release.is_closed(),
+        "the route's held future was dropped"
+    );
+    assert!(
+        unordered.value.lock().unwrap().is_none(),
+        "the held save never wrote"
     );
 }
 

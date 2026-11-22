@@ -243,9 +243,21 @@ async fn a_reply_resolves_only_after_the_changes_sent_before_it() {
 // The watchdog
 // ---------------------------------------------------------------------------
 
-/// The helm runs commands one at a time, so a command queued behind a slow one has not started. Counting its time
+/// A healthy scripted peer keeps answering heartbeats even if a regression removes a command deadline.
+/// Bound the wait on the paused clock so a missing deadline fails without waiting for nextest to kill the test.
+async fn expect_watchdog_reset(harness: &mut Harness, started: Instant, expected: Duration) {
+    let deadline = started + expected + Duration::from_secs(1);
+    tokio::time::timeout_at(deadline, harness.until_state(ChannelState::Reconnecting))
+        .await
+        .unwrap_or_else(|_| {
+            panic!("no reset by {deadline:?} for the intentionally unanswered commands")
+        });
+    assert_eq!(started.elapsed(), expected);
+}
+
+/// An ordered command queued behind a slow ordered command has not started. Counting its time
 /// from the send would break a healthy channel whenever two slow commands queue up; this pins that the clock starts
-/// at admission (the previous reply), and that a break settles both kinds of pending command correctly.
+/// at admission (the previous reply). An unordered send after that admission has a later deadline.
 #[tokio::test(start_paused = true)]
 async fn the_watchdog_counts_a_queued_command_from_its_admission() {
     let mut harness = start();
@@ -259,16 +271,114 @@ async fn the_watchdog_counts_a_queued_command_from_its_admission() {
     // sleep-ok: paused clock: the first reply arrives 20 s after admission, the stimulus under test
     tokio::time::sleep(Duration::from_secs(20)).await;
     peer.reply(first_id);
-    harness.until_state(ChannelState::Reconnecting).await;
-
-    assert_eq!(started.elapsed(), Duration::from_secs(50));
-    // The state came first; the lost command's failure fires only as the feed is read past it.
     assert_eq!(harness.run(first).await.unwrap().id, first_id);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    let unordered = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    assert_eq!(peer.command().await.lane, Lane::Unordered);
+    expect_watchdog_reset(&mut harness, started, Duration::from_secs(50)).await;
     assert_eq!(harness.run(second).await, Err(CommandError::Reset));
+    assert_eq!(harness.run(unordered).await, Err(CommandError::Reset));
     // A connection that had been up comes back at once, not after a backoff.
     // sleep-ok: paused clock: lets the channel task make its immediate reconnect attempt
     tokio::time::sleep(Duration::from_millis(1)).await;
     assert_eq!(harness.script.attempts(), 2);
+}
+
+/// An unordered reply can pass an earlier ordered command and an earlier unordered command. Each completion goes
+/// to the caller that sent that ID, while a held ordered command retains its place.
+#[tokio::test(start_paused = true)]
+async fn unordered_replies_can_overtake_both_lanes() {
+    let mut harness = start();
+    let mut peer = harness.connect(true).await;
+    let mut ordered = harness.handle.command(Method::Post, path(), None);
+    let mut first = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    let last = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    let ordered_wire = peer.command().await;
+    let first_wire = peer.command().await;
+    let last_wire = peer.command().await;
+    assert_eq!(
+        [ordered_wire.lane, first_wire.lane, last_wire.lane],
+        [Lane::Ordered, Lane::Unordered, Lane::Unordered],
+    );
+
+    peer.reply(last_wire.id);
+    assert_eq!(harness.run(last).await.unwrap().id, last_wire.id);
+    assert!((&mut ordered).now_or_never().is_none());
+    assert!((&mut first).now_or_never().is_none());
+    peer.reply(first_wire.id);
+    peer.reply(ordered_wire.id);
+    assert_eq!(harness.run(first).await.unwrap().id, first_wire.id);
+    assert_eq!(harness.run(ordered).await.unwrap().id, ordered_wire.id);
+}
+
+/// Neither the ordered reply nor an unordered reply that overtakes an older one resets that older one's clock.
+/// The reset is due 30 seconds after the oldest unanswered unordered send, ahead of the queued ordered command.
+#[tokio::test(start_paused = true)]
+async fn the_unordered_clock_starts_at_send_and_survives_other_replies() {
+    let mut harness = start();
+    let mut peer = harness.connect(true).await;
+    let started = Instant::now();
+    let first = harness.handle.command(Method::Post, path(), None);
+    let queued = harness.handle.command(Method::Post, path(), None);
+    let first_id = peer.command().await.id;
+    peer.command().await;
+
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let held = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    assert_eq!(peer.command().await.lane, Lane::Unordered);
+    let sent = Instant::now();
+    assert_eq!(sent - started, Duration::from_secs(10));
+
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let quick = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    let quick_id = peer.command().await.id;
+    peer.reply(quick_id);
+    assert_eq!(harness.run(quick).await.unwrap().id, quick_id);
+    peer.reply(first_id);
+    assert_eq!(harness.run(first).await.unwrap().id, first_id);
+
+    expect_watchdog_reset(&mut harness, sent, Duration::from_secs(30)).await;
+    assert_eq!(harness.run(held).await, Err(CommandError::Reset));
+    assert_eq!(harness.run(queued).await, Err(CommandError::Reset));
+}
+
+/// A busy unordered lane neither starts an ordered command's clock early nor makes it inherit an expired deadline.
+/// The first ordered command is admitted at its own send even though an earlier unordered command is waiting.
+#[tokio::test(start_paused = true)]
+async fn an_ordered_command_keeps_its_own_deadline_behind_unordered_work() {
+    let mut harness = start();
+    let mut peer = harness.connect(true).await;
+    let started = Instant::now();
+    let slow = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    let slow_wire = peer.command().await;
+
+    tokio::time::advance(Duration::from_secs(10)).await;
+    let ordered = harness.handle.command(Method::Post, path(), None);
+    let ordered_wire = peer.command().await;
+    assert_eq!(
+        [slow_wire.lane, ordered_wire.lane],
+        [Lane::Unordered, Lane::Ordered]
+    );
+    assert_eq!(started.elapsed(), Duration::from_secs(10));
+
+    tokio::time::advance(Duration::from_secs(10)).await;
+    peer.reply(slow_wire.id);
+    assert_eq!(harness.run(slow).await.unwrap().id, slow_wire.id);
+
+    expect_watchdog_reset(&mut harness, started, Duration::from_secs(40)).await;
+    assert_eq!(harness.run(ordered).await, Err(CommandError::Reset));
 }
 
 /// Pings are what notice a dead helm while the GUI sends nothing, so an unanswered ping alone must break the
@@ -475,14 +585,13 @@ async fn a_missing_snapshot_trips_the_watchdog() {
     assert_eq!(started.elapsed(), Duration::from_secs(30));
 }
 
-/// Replies are matched to commands by order, so a reply out of order means the two sides disagree about which command
-/// it answers. Resolving the wrong future would be worse than any break, so the channel breaks, and at once: the
-/// watchdog would also break it 30 s later, so only zero elapsed time shows the reply itself was the cause.
+/// The ordered lane still requires its next reply to name its first command. A protocol violation resets at once.
+/// The watchdog could also reset the channel 30 seconds later, so the elapsed time identifies which rule fired.
 #[tokio::test(start_paused = true)]
 async fn an_out_of_order_reply_breaks_the_channel() {
     let mut harness = start();
     let mut peer = harness.connect(true).await;
-    let first = harness.handle.command(Method::Post, path(), None);
+    let mut first = harness.handle.command(Method::Post, path(), None);
     let second = harness.handle.command(Method::Post, path(), None);
     peer.command().await;
     let second_id = peer.command().await.id;
@@ -494,8 +603,42 @@ async fn an_out_of_order_reply_breaks_the_channel() {
         Duration::ZERO,
         "the out-of-order reply did not break the channel itself"
     );
+    assert!(
+        (&mut first).now_or_never().is_none(),
+        "reset state came first"
+    );
     assert_eq!(harness.run(first).await, Err(CommandError::Reset));
     assert_eq!(harness.run(second).await, Err(CommandError::Reset));
+}
+
+/// A reply has exactly one pending destination. Both unknown and already completed IDs break the channel before
+/// an innocent pending command can receive the reply or fail ahead of the reset state.
+#[tokio::test(start_paused = true)]
+async fn unknown_and_duplicate_reply_ids_break_the_channel() {
+    for duplicate in [false, true] {
+        let mut harness = start();
+        let mut peer = harness.connect(true).await;
+        let mut held = harness.handle.command(Method::Post, path(), None);
+        let held_id = peer.command().await.id;
+        let invalid_id = if duplicate {
+            let answered =
+                harness
+                    .handle
+                    .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+            let id = peer.command().await.id;
+            peer.reply(id);
+            assert_eq!(harness.run(answered).await.unwrap().id, id);
+            id
+        } else {
+            held_id + 1
+        };
+        let started = Instant::now();
+        peer.reply(invalid_id);
+        harness.until_state(ChannelState::Reconnecting).await;
+        assert_eq!(started.elapsed(), Duration::ZERO, "duplicate={duplicate}");
+        assert!((&mut held).now_or_never().is_none());
+        assert_eq!(harness.run(held).await, Err(CommandError::Reset));
+    }
 }
 
 /// The GUI's copy of pushed state is only right if every change lands on a collection a snapshot installed and every
@@ -560,14 +703,17 @@ async fn changes_the_gui_cannot_apply_break_the_channel() {
 
 /// SPEC_impl.md, "One failure path: the reset": a completion queued across a reset must not reach the new UI
 /// session. The GUI drops its UI-session owner when it reads the new state, so the channel must announce the state
-/// before any lost command fails, and must fail them all before the next connection's snapshot can arrive. The command
-/// also fails with the one opaque error, never with advice about resending.
+/// before any lost command from either lane fails, and must fail them all before the next snapshot can arrive.
 #[tokio::test(start_paused = true)]
 async fn a_completion_queued_across_a_reset_fires_after_the_state_and_before_the_new_snapshot() {
     let mut harness = start();
     let mut peer = harness.connect(true).await;
     let mut lost = harness.handle.command(Method::Post, path(), None);
-    peer.command().await;
+    let mut unordered = harness
+        .handle
+        .command_in_lane(Lane::Unordered, Method::Post, path(), None);
+    assert_eq!(peer.command().await.lane, Lane::Ordered);
+    assert_eq!(peer.command().await.lane, Lane::Unordered);
     drop(peer);
 
     assert_eq!(
@@ -578,6 +724,10 @@ async fn a_completion_queued_across_a_reset_fires_after_the_state_and_before_the
         (&mut lost).now_or_never().is_none(),
         "the lost command failed before the GUI read the new state"
     );
+    assert!(
+        (&mut unordered).now_or_never().is_none(),
+        "reset state came first"
+    );
     let next = harness.open(true);
     // The next connection's snapshot is the next event; reading up to it fires the queued failure first.
     next.send(snapshot());
@@ -586,4 +736,5 @@ async fn a_completion_queued_across_a_reset_fires_after_the_state_and_before_the
         Some(ChannelEvent::Snapshot(_))
     ));
     assert_eq!(lost.now_or_never(), Some(Err(CommandError::Reset)));
+    assert_eq!(unordered.now_or_never(), Some(Err(CommandError::Reset)));
 }

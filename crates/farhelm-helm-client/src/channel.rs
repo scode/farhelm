@@ -19,10 +19,9 @@
 //!   helm gets a new connection.
 //!
 //! The watchdog is the one liveness rule: the channel is broken when the snapshot, an admitted command, or a ping
-//! stays unanswered for [`ChannelConfig::watchdog`]. "Admitted" matters because the helm runs commands one at a time:
-//! a command queued behind a slow one has not started, so its clock starts when the reply before it arrives. The
-//! default of 30 s sits above the helm's own 20 s bound on waiting for a host, so a slow host shows up as a failed
-//! reply rather than a broken channel.
+//! stays unanswered for [`ChannelConfig::watchdog`]. An ordered command's clock starts when the previous ordered
+//! reply arrives, or at send if that lane is empty. Every unordered command has its own clock from send. The
+//! earliest deadline wins. The default of 30 s sits above the helm's 20 s bound on waiting for a host.
 //!
 //! However the channel breaks, the GUI hears the new state first and only then sees its pending commands fail, all
 //! with the one opaque [`CommandError::Reset`] (SPEC_impl.md, "One failure path: the reset"). The GUI drops its
@@ -31,7 +30,7 @@
 //! the GUI has read the new state can run on the next connection. That is the "may or may not have happened" case the
 //! reset already tells the user about, so the client does not stamp commands with a connection generation to stop it.
 
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::future::Future;
 use std::pin::Pin;
 use std::sync::Arc;
@@ -125,7 +124,7 @@ pub enum CommandError {
 
 /// A command's HTTP method. The wire type itself, re-exported so the GUI names one type and the helm decodes the
 /// same one.
-pub use farhelm_proto::ui_channel::Method;
+pub use farhelm_proto::ui_channel::{Lane, Method};
 
 /// How a command's completion travels. It rides the event queue, so it is delivered in order with the events.
 pub(crate) type Completion = oneshot::Sender<Result<Reply, CommandError>>;
@@ -136,6 +135,7 @@ pub(crate) enum Request {
         method: Method,
         path: ApiPath,
         body: Option<Value>,
+        lane: Lane,
         done: Completion,
     },
     TakeBack,
@@ -160,14 +160,27 @@ impl ChannelHandle {
         ChannelHandle { requests }
     }
 
-    /// Send one command. The future resolves with the helm's reply (any HTTP status, 202 included; a 202 settles the
-    /// watchdog but promises nothing about the outcome) once every event sent before that reply has been handed out
+    /// Send one ordered command. The future resolves with the helm's reply (including 202 for accepted work)
+    /// once every event sent before that reply has been handed out
     /// by [`ChannelEvents`]. A GUI that applies each event before asking for the next therefore sees the command's
     /// effects in its collections by the time the reply arrives.
     pub fn command(&self, method: Method, path: ApiPath, body: Option<Value>) -> CommandFuture {
+        self.command_in_lane(Lane::Ordered, method, path, body)
+    }
+
+    /// Send on a chosen lane with the same event-before-reply guarantee as [`Self::command`]. Unordered work
+    /// must be independent of unanswered commands. The channel-local session query is always ordered.
+    pub fn command_in_lane(
+        &self,
+        lane: Lane,
+        method: Method,
+        path: ApiPath,
+        body: Option<Value>,
+    ) -> CommandFuture {
         let (done, reply) = oneshot::channel();
         let _ = self.requests.send(Request::Command {
             method,
+            lane: lane.for_path(&path),
             path,
             body,
             done,
@@ -415,9 +428,11 @@ impl Task {
         let mut proven = false;
         // The collections the current snapshot installed. Changes to any other collection are a protocol violation.
         let mut installed: Vec<Collection> = Vec::new();
-        let mut in_flight: VecDeque<InFlight> = VecDeque::new();
-        // When the oldest in-flight command was admitted: sent onto an idle queue, or the reply before it arrived.
+        let mut ordered: VecDeque<InFlight> = VecDeque::new();
+        // When the oldest ordered command was admitted: sent onto an idle lane, or the ordered reply before it arrived.
         let mut admitted = opened;
+        // IDs increase at send, so the first remaining ID has the earliest deadline even when replies overtake it.
+        let mut unordered: BTreeMap<u64, (Completion, Instant)> = BTreeMap::new();
         let mut ping: Option<(u64, Instant)> = None;
         let mut next_ping_n = 1;
         let mut next_ping_at = opened + self.config.ping_interval;
@@ -429,8 +444,11 @@ impl Task {
             if !up {
                 watch(opened + self.config.watchdog);
             }
-            if !in_flight.is_empty() {
+            if !ordered.is_empty() {
                 watch(admitted + self.config.watchdog);
+            }
+            if let Some((_, (_, sent))) = unordered.first_key_value() {
+                watch(*sent + self.config.watchdog);
             }
             if let Some((_, sent)) = ping {
                 watch(sent + self.config.watchdog);
@@ -475,12 +493,15 @@ impl Task {
                         }
                     }
                     Some(ServerMessage::Reply(reply)) => {
-                        let Some(front) = in_flight.pop_front().filter(|front| front.id == reply.id) else {
-                            tracing::warn!(id = reply.id, "the helm answered a command out of order");
+                        if let Some(front) = ordered.pop_front_if(|front| front.id == reply.id) {
+                            self.complete(front.done, Ok(reply));
+                            admitted = Instant::now();
+                        } else if let Some((done, _)) = unordered.remove(&reply.id) {
+                            self.complete(done, Ok(reply));
+                        } else {
+                            tracing::warn!(id = reply.id, "the helm answered an unknown or out-of-order command");
                             break Ended::Broken { proven };
-                        };
-                        self.complete(front.done, Ok(reply));
-                        admitted = Instant::now();
+                        }
                     }
                     Some(ServerMessage::Pong { n }) => {
                         if ping.is_some_and(|(sent, _)| sent == n) {
@@ -493,20 +514,27 @@ impl Task {
                 },
                 request = self.requests.recv() => match request {
                     None => break Ended::Abandoned,
-                    Some(Request::Command { method, path, body, done }) => {
+                    Some(Request::Command { method, path, body, lane, done }) => {
                         if !up {
                             self.complete(done, Err(CommandError::Reset));
                             continue;
                         }
                         let id = self.next_id;
                         self.next_id += 1;
-                        if in_flight.is_empty() {
-                            admitted = Instant::now();
+                        match lane {
+                            Lane::Ordered => {
+                                if ordered.is_empty() {
+                                    admitted = Instant::now();
+                                }
+                                ordered.push_back(InFlight { id, done });
+                            }
+                            Lane::Unordered => {
+                                unordered.insert(id, (done, Instant::now()));
+                            }
                         }
-                        in_flight.push_back(InFlight { id, done });
                         // No local queue or cap: the helm closes a channel whose queue overflows, and that is the
                         // same break as any other.
-                        let command = Command { id, method, path, body };
+                        let command = Command { id, method, path, body, lane };
                         if link.tx.send(ClientMessage::Command(command)).is_err() {
                             break Ended::Broken { proven };
                         }
@@ -539,8 +567,11 @@ impl Task {
             Ended::HelmExited => self.set_state(ChannelState::HelmEnded),
             Ended::Refused { .. } | Ended::Abandoned => {}
         }
-        for command in in_flight {
+        for command in ordered {
             self.complete(command.done, Err(CommandError::Reset));
+        }
+        for (done, _) in unordered.into_values() {
+            self.complete(done, Err(CommandError::Reset));
         }
         ended
     }
