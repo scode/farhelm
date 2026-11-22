@@ -3,7 +3,7 @@
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
 - [in-flight ad4cb5] `recipe-credentials-in-launch-env.md` — give recipe Claude and Codex credentials to sessions through a Farhelm-owned file and the launch environment instead of editing the agents' settings files, with a protocol bump (after `agent-hook-setup.md`)
-- [complete] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
+- [landing 0b3c6e] `sqlite-compaction-settings.md` — add light upkeep to the helm and supervisor databases (a WAL size cap, planner statistics and a size log at owning opens, a checkpoint on orderly stop), with no vacuum
 - [complete] `test-worker-staging-lock.md` — stage each test worker run separately and install it only under the lock, tie evidence to one invocation, add collect, and keep worker setup away from running tests
 - [complete] `pace-bulk-metadata-changes.md` — raise the helm's limit on queued window commands (derived from the 500-row listing cap) so a metadata change to many marked sessions no longer resets the window
 - [complete] `bulk-actions-bound-to-drawn.md` — make the marked bar's Stop and Delete act on the sessions and Skip session confirmations setting the bar showed, as the single-row menu does
