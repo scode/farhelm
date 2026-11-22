@@ -35916,3 +35916,114 @@ Entries are appended in the order they graduate and are otherwise kept as they w
   Assessment describes. No behavior change. Remove the feedback file and its index entry.
 - Execution: Corrected the text. jj change `vkpnklnm`, bookmark `plan/triage-supervisor/03-service-comment-corrections`,
   https://github.com/scode/farhelm/pull/4529/changes.
+
+## systemd-isolation-comments-point-to-active-ledger.md
+
+- Outcome: `fix code`.
+- Assessment: None. Test comments tell maintainers to look in FLAKES.md for entries that have moved to
+  FLAKES_ARCHIVE.md. Verified: The citations are at e2e/harness.rs:1881, e2e/create_idempotency.rs:634 and
+  core.rs:27757. The 2026-11-09 entries are only in FLAKES_ARCHIVE.md (4906, 4958). The same drift also exists at
+  core.rs:32560 and :37675, which cite 2026-09-30 entries that are now archived.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md
+
+- Outcome: `fix code`.
+- Assessment: None. A test helper's doc points at a conformance battery that was deleted. Its only caller is now the
+  tab-close SIGTERM test. Verified: crates/farhelm/tests/e2e/terminal_tabs.rs:28-32 on main still says "so the
+  conformance tests can drive BOTH terminals identically".
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md
+
+- Outcome: `fix code`.
+- Assessment: None. The shared gate helper's doc says "The two hooks this file installs". None are installed in that
+  file any more; the only user is in host_tabs. Verified: crates/farhelm/tests/e2e/terminal_tabs.rs:251, :257 on main.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## host-flood-stall-window-claim.md
+
+- Outcome: `fix code`.
+- Assessment: Maintainer tests only. A test's doc says it runs longer than the stall window, but it runs 8 s against a
+  60 s stall timeout. Its "FLOOD-" recovery marker can also match the echo of the typed command. Verified: Confirmed.
+  `terminal_tabs.rs` L1487-1557 runs 8 s, and `STALL_DETACH_TIMEOUT` is 60 s (`core.rs` L209). The doc's claim is false.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md
+
+- Outcome: `fix code`.
+- Assessment: None. A test doc says nothing of a host-orphaned row is still running. Programs that ignored the hangup
+  can outlive their host. Verified: core.rs:17889-17892 on main still says "nothing of it is running".
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md
+
+- Outcome: `fix code`.
+- Assessment: None. A test comment says leaving full-screen mode erases the frame from Farhelm's emulator. The emulator
+  keeps it in its inactive buffer, and only the active screen is replayed. Verified: session_lifecycle.rs:3738 on main
+  still says "the alt-screen frame is gone from the terminal's emulator".
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md
+
+- Outcome: `fix code`.
+- Assessment: None. A test helper says terminal size is not a status field, so it polls. The status does carry size and
+  notifies on resize. Verified: crates/farhelm/tests/e2e/terminal_tabs.rs:1394 on main still says "not a status field of
+  its own".
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.
+
+## trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md
+
+- Outcome: `fix code`.
+- Assessment: None. The flood fixture doc says program exit "would end the terminal whose history is under test".
+  Terminals outlive their program (SPEC.md, Terminal experience). Verified:
+  crates/farhelm-fixtures/src/fake_agent.rs:1884 on main still says this.
+- Decision: Q12, the maintainer picked "Correct the text". (2026-11-21 fewest-questions triage page (main ca62397de).)
+  Maintainer's note on execution: "yes we definitely need to batch these in a much smaller set of plans. please try to
+  separate them by area of code so there is a good chance of them running concurrently."
+- Completion criteria: Correct the comment, doc or spec prose so it matches the accepted current behavior, as the
+  Assessment describes. No behavior change. Remove the feedback file and its index entry.
+- Execution: Corrected the text. jj change `kvytlnvk`, bookmark `plan/triage-supervisor/04-test-doc-corrections`,
+  https://github.com/scode/farhelm/pull/4530/changes.

@@ -3726,20 +3726,15 @@ async fn stop_then_delete_both_succeed() {
     );
 }
 
-/// SPEC.md, Terminal experience: a full-screen program's last frame "is
-/// not retained after it exits, and no snapshot of it is taken or
-/// stored". This is the negative regression for the removed stop-time
-/// alt-screen snapshot: it fails if stop ever again captures the screen,
-/// stores a frame under the state dir, or appends anything to an exited
-/// terminal's replay.
+/// Attaching after Stop replays the original terminal, as SPEC.md's "Terminal
+/// experience" describes. The regression checks that Stop does not store
+/// a separate capture or append it to the exited terminal's replay.
 ///
 /// The `altscreen` fixture restores the primary screen on SIGTERM (like
-/// claude), so after a stop the exited terminal holds only its primary
-/// grid — the alt-screen frame is gone from the terminal's emulator
-/// entirely, and only a capture taken before the kill could bring its
-/// marker back. The replay is drained to its replay-complete marker, not to
-/// any needle or placeholder text, so the absence assertions cannot race a
-/// still-arriving replay.
+/// claude). The alternate grid can remain in the emulator's inactive
+/// buffer. Replay draws the primary grid, which is active after the exit.
+/// The test drains through the replay-complete marker before checking for
+/// absence, so the assertions cover the whole replay.
 #[farhelm_testtrace::test]
 async fn stop_takes_no_screen_capture_and_replays_none() {
     let h = harness().await;

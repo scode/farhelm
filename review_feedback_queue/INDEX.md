@@ -225,10 +225,6 @@ consequences.
   supervisors is not this race: both share the same process's live ownership claim. The possible consequence is a
   maintainer-test false failure only.
 
-- [`host-flood-stall-window-claim.md`](host-flood-stall-window-claim.md) — A migrated test now claims to cross the new
-  terminal's stall timeout, but observes only eight of its configured sixty seconds. Its inherited flood witness also
-  does not establish output pressure. This is a new coverage-description error, with no observed product stall.
-
 - [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
   runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
   empty overall filter selection.
@@ -313,10 +309,6 @@ consequences.
   — Host-backed teardown removes the owner-exit test's exit barrier. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md`](trailing-terminal-less-host-orphan-doc-asserts-no-survivors.md)
-  — Terminal-less test documentation treats host loss as proof no program survives. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md`](trailing-delete-directory-admission-test-observes-only-earlier-agent-fence.md)
   — Directory-admission test observes the earlier fence, not the blocked directory wait. Abbreviated collection;
   confidence, proposed dismissals and unresolved consequences are preserved in the entry.
@@ -337,17 +329,9 @@ consequences.
   — Deleting the kind test also removes the completed-create reboot retry oracle. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
-- [`trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md`](trailing-stopped-altscreen-test-comment-claims-inactive-buffer-erasure.md)
-  — Correct the stopped alternate-screen test's emulator-retention explanation. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-old-server-guard-loses-directory-in-consumed-restart.md`](trailing-old-server-guard-loses-directory-in-consumed-restart.md)
   — Restart failure deletes the tmux socket before the explicit server guard runs. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md`](trailing-flood-fixture-false-child-exit-terminal-lifetime-rationale.md)
-  — Flood fixture docs incorrectly say program exit ends its terminal. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
   — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
@@ -359,18 +343,6 @@ consequences.
 
 - [`trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md`](trailing-647f022-pre-reap-tab-live-only-attach-oracle-not-ported.md)
   — Dead-but-unreaped tab refusal gap remains applicable to host tabs at tip. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md`](trailing-70bc66a-host-size-wait-comment-denies-public-status-size.md)
-  — Resize wait comment gives a false synchronization rationale. Abbreviated collection; confidence, proposed dismissals
-  and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md`](trailing-terminal-tabs-shell-harness-docs-retain-deleted-conformance-caller.md)
-  — shell harness docs still describe the deleted conformance battery. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md`](trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md)
-  — shared gate docs claim hook installations that the module no longer has. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`ime-commit-bypasses-quick-launch-capture.md`](ime-commit-bypasses-quick-launch-capture.md) — Some input-method text
@@ -417,9 +389,6 @@ consequences.
 
 - [`ssh-chime-test-accepts-pending-draft.md`](ssh-chime-test-accepts-pending-draft.md) — The chime test can pass while
   the switch still shows its draft choice, even if it never starts following the saved setting.
-
-- [`systemd-isolation-comments-point-to-active-ledger.md`](systemd-isolation-comments-point-to-active-ledger.md) — The
-  new test comments send maintainers to the active flake ledger for evidence that has moved to the archive.
 
 - [`antigravity-first-refused-pin-test.md`](antigravity-first-refused-pin-test.md) — The Antigravity tests can pass
   despite recording a process identity from a rejected first callback.
