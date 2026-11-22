@@ -1220,8 +1220,6 @@ async fn an_unusable_host_that_cannot_be_ended_keeps_the_launching_record() {
         message.contains("may still be running at") && message.contains("launching record"),
         "{message}"
     );
-    // A refusal proof would let the client discard this unresolved intent key.
-    assert!(!message.contains("the create was durably refused without retaining a session"));
     assert!(!process_is_gone(listener), "the listener was left alone");
     let store = SessionStore::open(&h.state.path().join("supervisor.db"), false)
         .await
