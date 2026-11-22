@@ -297,8 +297,8 @@ Extension points: none. A new question is a `Question` built by the feature, not
   (`Question::returns_home_on_escape`), or every close returning focus to a named control (`Question::returns_to`);
 - an answer whose action can fail and keeps the question up with the reason, an extra one
   (`Question::fallible_alternative`, on an inline question or a centered one built with
-  `Question::keeps_focus_on_empty_click`) or the confirming one (`prompt::ask_fallible`, only on such a centered
-  question), settled through `prompt::Attempt`;
+  `Question::keeps_focus_on_empty_click`) or the confirming one (`prompt::ask_fallible` on such a centered question, or
+  `prompt::ask_inline_fallible` on an inline one), settled through `prompt::Attempt`;
 - the YOLO confirmation's loud look (`Question::loud`) and its outlined permanent answer (`Tier::DangerOutline`);
 - for a centered question, a body the feature draws, built once from the frozen value as the question is asked or
   reworded (`Question::body`), and the host dialogs' header tile, footer note and width (`Question::tile`,
@@ -306,9 +306,9 @@ Extension points: none. A new question is a `Question` built by the feature, not
   the dialog (`Question::scroll_stop`).
 
 It is asked centered with `prompt::ask`, beside its control with `prompt::ask_anchored`, or inside the owner's own
-surface with `prompt::ask_inline` (the owner draws the `prompt::Inline` it returns). A centered question that SPEC.md
-rewords while it is open is asked with `prompt::ask_rewordable`, whose `prompt::Open` the feature keeps and rewords in
-place (`Open::reword`).
+surface with `prompt::ask_inline` or `prompt::ask_inline_fallible` (the owner draws the `prompt::Inline` it returns). A
+centered question that SPEC.md rewords while it is open is asked with `prompt::ask_rewordable`, whose `prompt::Open` the
+feature keeps and rewords in place (`Open::reword`).
 
 Lint exceptions: 1: GPUI's next-frame callback (`Window::on_next_frame`) in `prompt::when_shown`, which tells a reworded
 question when a frame showing its new words goes on screen, so that an answer given before then (a key GPUI handles with
