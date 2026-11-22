@@ -2847,30 +2847,39 @@ while True:
     held.append(s.accept()[0])
 ";
 
-/// A shutdown whose host acknowledges it but whose process does not end is
-/// reported unconfirmed, with the process, and leaves the terminal
-/// unavailable.
-///
-/// Why: Delete falls back to the verified SIGTERM only when it knows the
-/// host may still run; reading a goodbye as proof would leak the host.
-/// Spec: the stand-in (this process, which goes on running) answers
-/// `Shutdown` with `Goodbye`; with a 300 ms shutdown deadline, the report
-/// has the goodbye, no confirmed end and this process as the peer, and the
-/// terminal is unavailable as `ShutdownUnconfirmed`.
+/// Shutdown keeps the adopted process available for Delete's verified signal
+/// when that process stays alive after Goodbye or after the socket disappears.
+/// Both stand-ins run in the test process, so neither can confirm its exit.
 #[farhelm_testtrace::test]
 async fn a_shutdown_whose_process_stays_is_unconfirmed() {
+    assert_shutdown_leaves_process_unconfirmed(true).await;
+    assert_shutdown_leaves_process_unconfirmed(false).await;
+}
+
+/// The stand-in runs in the test process, keeping the adopted peer alive
+/// through either ending of the connection.
+async fn assert_shutdown_leaves_process_unconfirmed(goodbye: bool) {
     let mut options = options();
     options.deadlines.shutdown = Duration::from_millis(300);
     let stand_in = StandIn::new();
     let (terminal, mut server, _) = adopt(&stand_in, Adoption::Fresh, &info(0), options).await;
+    assert_eq!(
+        terminal.adopted_process().map(|peer| peer.pid),
+        Some(std::process::id())
+    );
     let report = async { within("the shutdown", terminal.shutdown()).await };
     let host = async {
         assert_eq!(server.next().await, ClientMessage::Shutdown);
-        server.send(&HostMessage::Goodbye).await;
+        if goodbye {
+            server.send(&HostMessage::Goodbye).await;
+        } else {
+            std::fs::remove_file(stand_in.socket()).expect("unlink the stand-in socket");
+            drop(server);
+        }
     };
     let (report, ()) = tokio::join!(report, host);
     let report = report.expect("the runtime shuts down");
-    assert!(report.goodbye);
+    assert_eq!(report.goodbye, goodbye);
     assert!(!report.ended);
     assert_eq!(report.peer.map(|peer| peer.pid), Some(std::process::id()));
     assert!(matches!(

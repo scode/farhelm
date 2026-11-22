@@ -316,9 +316,15 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
     )
 }
 
+/// The agent terminal is missing if there is no handle or its runtime knows the host went away.
+/// A host that is unreadable may recover, and an exited agent's host can still hold the screen.
+pub(super) fn agent_terminal_missing(terminal: Option<&HostTerminal>) -> bool {
+    terminal.is_none_or(|terminal| matches!(terminal.liveness(), crate::hosts::Liveness::Gone))
+}
+
 /// One entry as a reply must describe it: stored metadata and the current
-/// status, tabs and restart offer. Terminal presence comes from the handle
-/// on this entry, independently of what the terminal says about its agent.
+/// status, tabs and restart offer. A gone host is missing even while the
+/// entry retains its handle. An unavailable host can still be readopted.
 ///
 /// `last_activity_at` is refreshed here too. It is stored, and this is a
 /// plain read of the entry's live cell rather than a recomputation. It needs refreshing for a
@@ -338,7 +344,7 @@ pub(super) fn session_restart_offer(entry: &SessionEntry) -> RestartOffer {
 /// now-uncommittable fallback. Replies never touch launch artifacts themselves.
 pub(crate) fn entry_info(entry: &SessionEntry) -> SessionInfo {
     let mut info = entry.info.clone();
-    info.terminal_missing = entry.terminal.is_none();
+    info.terminal_missing = agent_terminal_missing(entry.terminal.as_ref());
     // List and rename replies read the same run cell; the immutable entry was
     // built before any footer was sampled and must not freeze that first value.
     let activity = entry.run.activity.lock().expect("activity mutex poisoned");
@@ -858,6 +864,21 @@ mod tests {
     /// A terminal whose host has ended, which status reads as no terminal.
     fn gone_terminal() -> HostTerminal {
         HostTerminal::fixed_for_test(crate::hosts::Liveness::Gone)
+    }
+
+    /// The recovery card needs a positive report that the host is gone.
+    /// Inaccessible or exited terminals can still offer their saved screen.
+    #[farhelm_testtrace::test]
+    async fn listing_marks_a_gone_terminal_missing_even_if_its_handle_is_retained() {
+        let entry = entry_with(None, LastOutcome::Running);
+        let unavailable = HostTerminal::fixed_for_test(crate::hosts::Liveness::Unavailable {
+            reason: crate::hosts::Unavailability::Busy,
+            peer: None,
+        });
+        assert!(entry_info(&entry).terminal_missing);
+        assert!(entry_info(&on(&entry, &gone_terminal())).terminal_missing);
+        assert!(!entry_info(&on(&entry, &unavailable)).terminal_missing);
+        assert!(!entry_info(&on(&entry, &terminal_in(true, Some(0)))).terminal_missing);
     }
 
     /// `entry` on `terminal`: the same cells (outcome, samples), with

@@ -1282,8 +1282,8 @@ pub(crate) fn launch_scope_unit(id: &str, generation: i64, scoped: bool) -> Opti
 
 /// Scope names a teardown may try before its portable sweep.
 ///
-/// `recorded` is the one launch unit the durable row says actually existed;
-/// it is evidence strong enough to justify one re-probe after a cached
+/// `recorded` holds units the saved launch or tab state says actually existed.
+/// That evidence justifies one re-probe after a cached
 /// negative manager verdict. `derived` is rediscovered or re-derived state:
 /// useful on a usable manager, but deliberately skippable where the manager
 /// is absent because it does not prove a unit ever existed. Keeping the two
@@ -1364,12 +1364,20 @@ impl ScopeUnits {
         self.needs_sweep = true;
     }
 
-    /// Delete historically treats tab names as derived cleanup handles.
-    /// Retain that manager policy while keeping the tab's actual selection
-    /// for the independent decision about omitting the portable sweep.
+    /// A tab's recorded scope is evidence that Delete must confirm it.
+    /// Names without that evidence can help cleanup on a usable manager.
     pub(crate) fn extend_tab(&mut self, unit: Option<String>, scoped: bool) {
         self.needs_sweep |= unit.is_none() || !scoped;
-        self.derived.extend(unit);
+        if scoped {
+            self.recorded.extend(unit);
+        } else {
+            self.derived.extend(unit);
+        }
+    }
+
+    /// A recorded launch or tab scope earns a re-probe before Delete enumerates scope names.
+    pub(crate) fn has_recorded(&self) -> bool {
+        !self.recorded.is_empty()
     }
 
     /// Let caller-metadata tests observe the fact Delete must preserve,
@@ -1434,9 +1442,9 @@ impl ScopeUnits {
 /// and a scope failure is logged, or carried into the error only when the
 /// sweep also failed.
 ///
-/// `units.recorded` is the one launch scope the durable row says this launch
-/// ran in. `units.derived` contains every name inferred later: tab names,
-/// manager glob results, and launch scopes from other generations. Existence
+/// `units.recorded` holds scopes recorded by the main launch or terminal
+/// tabs. `units.derived` contains names inferred later from manager globs or
+/// launch and tab identities. Existence
 /// is still re-checked before every kill because no name proves its unit was
 /// retained rather than collected. When the cached verdict is negative, the
 /// recorded set gets one re-probe; it is evidence that this host had a
@@ -1531,9 +1539,9 @@ where
     }
     // A derived name on a manager-less host is ordinary: delete names tabs
     // without knowing whether that launch used a scope, and manager globs
-    // are only a best-effort source. A row-recorded launch unit is different:
-    // it is durable evidence that a manager existed when this generation
-    // launched, so it gets one chance to overturn a stale negative cache.
+    // are only a best-effort source. A unit recorded by the launch or tab
+    // proves a manager existed when it started, so it gets one chance to
+    // overturn a stale negative cache.
     // If that chance still says no, the sweep below remains the whole
     // mechanism; if it says yes, `kill_scope` settles every name normally.
     // A recorded unit that cannot be checked is an unconfirmed cleanup, not a
@@ -1546,7 +1554,7 @@ where
     // `possible` unit also earns the re-probe, but is skipped when it fails.
     let mut needs_sweep = units.needs_sweep;
     let mut scope_errors: Vec<String> = Vec::new();
-    let earns_reprobe = !units.recorded.is_empty() || !units.possible.is_empty();
+    let earns_reprobe = units.has_recorded() || !units.possible.is_empty();
     let hangup_main = units.hangup_main;
     let units: Vec<&String> =
         if scopes.available().await || (earns_reprobe && scopes.reprobe().await) {
@@ -1575,7 +1583,7 @@ where
             for unit in &units.recorded {
                 warn!(
                     session = %session_id, unit = %unit,
-                    "the row recorded a scoped launch but this host's systemd user manager is not \
+                    "this launch or tab ran in a scope but this host's systemd user manager is not \
                      usable now, so the scope cannot be checked"
                 );
                 scope_errors.push(format!(
@@ -1632,9 +1640,8 @@ where
                 Ok(())
             }
             ScopeKillFailure::Refuse => Err(anyhow::anyhow!(
-                "the process-tree sweep confirmed nothing is running, but the named cgroup \
-                 scope(s) could not be torn down ({e}); the session is kept so the operation \
-                 can be retried"
+                "the process-tree sweep found no survivors, but the named cgroup \
+                 scope(s) could not be confirmed gone ({e})"
             )),
         },
         (Ok(()), None) => Ok(()),
@@ -3033,7 +3040,7 @@ mod tests {
     /// `Refuse` is what Stop, Restart, Delete and tab close use (SPEC.md
     /// "Lifecycle operations"): the unconfirmed cgroup may still hold
     /// processes, so the error stays visible after a clean sweep, naming the
-    /// unit and saying why the session is kept for a retry.
+    /// unit and the verdict the manager could not confirm.
     #[farhelm_testtrace::test]
     async fn a_broken_user_manager_splits_warn_from_refuse() {
         let session_id = uuid::Uuid::new_v4().to_string();
@@ -3079,8 +3086,8 @@ mod tests {
             "error must name the unit: {error}"
         );
         assert!(
-            error.contains("session is kept") && error.contains("retried"),
-            "error must explain retryability: {error}"
+            error.contains("scope(s) could not be confirmed gone"),
+            "error must explain what cleanup could not confirm: {error}"
         );
         // The refusal is for a unit that SURVIVED its SIGKILL, and the
         // error must say so — the confirmation timeout is the finding, with
@@ -3716,6 +3723,29 @@ mod tests {
             vec![crate::scope::ScopeOp::Probe, crate::scope::ScopeOp::Probe],
             "a still-negative manager must not receive a scope kill"
         );
+    }
+
+    /// Delete must refuse when it cannot check a recorded tab scope, even
+    /// when the main launch had no scope and the portable sweep was clean.
+    #[farhelm_testtrace::test]
+    async fn delete_refuses_a_recorded_tab_scope_the_manager_cannot_check() {
+        let session = uuid::Uuid::new_v4().to_string();
+        let tab = crate::scope::tab_unit_name(&session, &uuid::Uuid::new_v4().to_string()).unwrap();
+        let scopes = crate::scope::ScopeManager::fake_reprobing(false, false, Arc::new(|_| {}));
+        let mut units = ScopeUnits::recorded(None);
+        units.extend_tab(Some(tab.clone()), true);
+        let error = reap_process_tree_with_sweep(
+            &scopes,
+            units,
+            None,
+            &session,
+            ScopeKillFailure::Refuse,
+            None,
+            |_| async { Ok(()) },
+        )
+        .await
+        .expect_err("the recorded tab scope can still contain survivors");
+        assert!(error.to_string().contains(&tab), "{error:#}");
     }
 
     /// A scope kill must never leave the sweep seeding itself from a pid the

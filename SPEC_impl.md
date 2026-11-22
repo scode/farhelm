@@ -2088,47 +2088,49 @@ The supervisor's side of a host is `crates/farhelm-supervisor/src/hosts/`:
   it by its record, and to the next start. Ending it before the reply keeps Delete out meanwhile; a wedged old host can
   hold the reply for the runtime's 15-second `Shutdown` bound plus the verified signal's graces. A replacement that does
   not start is unwound as a failed create is. The supervisor confirms any replacement host has ended, tries to remove
-  the spec, waypoint and host record, and sweeps the replacement's process tree. Removal failures accompany the launch
-  error. After definitive unwind the supervisor tries to restore the previous outcome, the row's `terminal_address` and
-  the old host as the session's terminal (the generation stays advanced, so the row's `terminal_address` then names a
-  host tagged with an earlier generation, which reload takes as the row's own). The restored terminal, like a published
-  one, goes back only before an orderly stop gathers the host terminals (otherwise a placeholder, its runtime stopped),
-  and a runtime the restored entry does not hold is stopped. If the replacement host's end or the process-tree sweep
-  cannot be confirmed, the new generation keeps its launching record with no published main terminal. The old host's
-  runtime stops and its host stays reachable by its record. A replacement host that may still be running keeps its host
-  record.
+  the spec and waypoint, and sweeps the replacement's process tree. The new host record stays until the sweep and the
+  named scope are settled. Removal failures accompany the launch error. After definitive unwind the supervisor tries to
+  restore the previous outcome, the row's `terminal_address` and the old host as the session's terminal (the generation
+  stays advanced, so the row's `terminal_address` then names a host tagged with an earlier generation, which reload
+  takes as the row's own). The restored terminal, like a published one, goes back only before an orderly stop gathers
+  the host terminals (otherwise a placeholder, its runtime stopped), and a runtime the restored entry does not hold is
+  stopped. If the replacement host's end, scope or process-tree cleanup cannot be confirmed, the new generation keeps
+  its launching row and host record with no published main terminal. The old host's runtime stops and its host stays
+  reachable by its record.
 
-  A sweep failure comes after host record removal was attempted. A restart that finds its row deleted when it confirms
-  sweeps the new agent's tree and ends both hosts. A restarted agent's runtime is published only before an orderly stop
-  gathers the host terminals, as a create's is. The session's host tabs keep running across a Restart, but while the
-  session is off the session map for the Restart's window its tab cell is held beside the map, under the same lock as
-  the stop's flag, so a stop in the window still checkpoints and closes the tab runtimes; a Restart that puts the
-  session back (published or restored) after the stop began stops them, as it stops the new agent runtime. **A crash in
-  a restart** leaves both generations' records, from which the next start converges with no other state. Before the
-  replacement had a launch record (the generation claimed, or a failed replacement cleaned up before the previous record
-  was restored), the row's own generation has no host, no `terminal_address` and no record; then, and only then, the
-  host of the newest earlier generation that has an agent launch record is taken as the row's terminal when the scan
-  read it at the record's socket. A record whose host the scan found gone is passed over for the next older one, since a
-  dead host has nothing to keep or supersede; any other record whose host was not read there, or a launch directory that
-  cannot be listed in full, leaves the row with none, and the next start tries again, so that an older host with older
-  history is never taken while the newer one is merely unreadable. Its socket is recorded in `terminal_address` (the row
-  lists the previous run's exit), so the next Restart seeds from it and ends it. After the new host started, the reload
-  finds it by its tag and confirms it, and the old host is superseded. **Superseded agent hosts** (decided during the
-  terminal host's design, 2026-11-02): an old host left running is no orphan, since its session exists. So every reload,
-  after its reconciliation has committed (a restart whose new host it just confirmed by its tag counts), ends each live
-  agent host no row claimed whose tag names a host row at a later generation whose launch is confirmed (a
-  `terminal_address` naming another socket), all at once within one stop budget, over the scan's own connection
-  (`Shutdown`, then the verified signal to its peer), and removes its launch record. The current generation's host is
-  never one, nor is a host the scan could not read, nor a tab's host (its tag names a tab, not a launch generation). The
-  old program was stopped by the restart; a descendant that survives the host's hangup is left to the session's next
-  marker sweep. **The residual**: the earlier host of a restart whose replacement started but was never confirmed and is
-  gone by the next start (its launch record names nothing, so the fallback above does not apply) stays until the
-  session's Delete, or a later restart is confirmed and a supervisor starts. So does the old host of a restart that
-  failed ambiguously in a running supervisor (host end or process-tree cleanup unconfirmed): the session holds no
-  terminal, so the next Restart from that supervisor starts empty while the old host, with the history, runs on until a
-  later start supersedes it or Delete ends it. And a runtime stopped while it encodes a checkpoint or a seed leaves its
-  emulator away for good; a runtime is stopped only where its host is given up (a stopping supervisor, or a create's, a
-  Restart's or a reload's cleanup, or the end of a superseded host), so nothing reads it afterwards.
+  A restart that finds its row deleted when it confirms sweeps the new agent's tree and ends both hosts. Its error names
+  any unconfirmed cleanup. It keeps the new host record in that case. The row's scope selection is lost on deletion.
+
+  A restarted agent's runtime is published only before an orderly stop gathers the host terminals, as a create's is. The
+  session's host tabs keep running across a Restart, but while the session is off the session map for the Restart's
+  window its tab cell is held beside the map, under the same lock as the stop's flag, so a stop in the window still
+  checkpoints and closes the tab runtimes; a Restart that puts the session back (published or restored) after the stop
+  began stops them, as it stops the new agent runtime. **A crash in a restart** leaves both generations' records, from
+  which the next start converges with no other state. Before the replacement had a launch record (the generation
+  claimed, or a failed replacement cleaned up before the previous record was restored), the row's own generation has no
+  host, no `terminal_address` and no record; then, and only then, the host of the newest earlier generation that has an
+  agent launch record is taken as the row's terminal when the scan read it at the record's socket. A record whose host
+  the scan found gone is passed over for the next older one, since a dead host has nothing to keep or supersede; any
+  other record whose host was not read there, or a launch directory that cannot be listed in full, leaves the row with
+  none, and the next start tries again, so that an older host with older history is never taken while the newer one is
+  merely unreadable. Its socket is recorded in `terminal_address` (the row lists the previous run's exit), so the next
+  Restart seeds from it and ends it. After the new host started, the reload finds it by its tag and confirms it, and the
+  old host is superseded. **Superseded agent hosts** (decided during the terminal host's design, 2026-11-02): an old
+  host left running is no orphan, since its session exists. So every reload, after its reconciliation has committed (a
+  restart whose new host it just confirmed by its tag counts), ends each live agent host no row claimed whose tag names
+  a host row at a later generation whose launch is confirmed (a `terminal_address` naming another socket), all at once
+  within one stop budget, over the scan's own connection (`Shutdown`, then the verified signal to its peer), and removes
+  its launch record. The current generation's host is never one, nor is a host the scan could not read, nor a tab's host
+  (its tag names a tab, not a launch generation). The old program was stopped by the restart; a descendant that survives
+  the host's hangup is left to the session's next marker sweep. **The residual**: the earlier host of a restart whose
+  replacement started but was never confirmed and is gone by the next start (its launch record names nothing, so the
+  fallback above does not apply) stays until the session's Delete, or a later restart is confirmed and a supervisor
+  starts. So does the old host of a restart that failed ambiguously in a running supervisor (host end or process-tree
+  cleanup unconfirmed): the session holds no terminal, so the next Restart from that supervisor starts empty while the
+  old host, with the history, runs on until a later start supersedes it or Delete ends it. And a runtime stopped while
+  it encodes a checkpoint or a seed leaves its emulator away for good; a runtime is stopped only where its host is given
+  up (a stopping supervisor, or a create's, a Restart's or a reload's cleanup, or the end of a superseded host), so
+  nothing reads it afterwards.
 - **Delete ends every terminal host of the session** (`service/session_hosts.rs`), since nothing else would: a host
   outlives its program and carries no session marker. Delete acts only on what the session records, never on a scan of
   the socket directory: the agent's host when its runtime holds one, the session's tab runtimes, and the session's
@@ -8374,9 +8376,9 @@ sets. A serde-additive field can still be semantically load-bearing: the non-dis
 peer that ignores it displaces a client it was asked to leave alone, silently, on both ends), and decode tolerance is
 why such a bump is required rather than why it is unnecessary.
 
-Protocol 79 adds `SessionInfo::terminal_missing`. The supervisor sets it when it holds no agent terminal for the
-session. An unreadable terminal with a retained handle and an exited agent whose terminal still holds output both keep
-it clear. A Restart reply describes the terminal published for the new run. The helm carries the value through its
+Protocol 79 adds `SessionInfo::terminal_missing`. The supervisor sets it when it holds no agent terminal for the session
+or the terminal's host is known gone. An unreadable terminal and an exited agent whose terminal still holds output both
+keep it clear. A Restart reply describes the terminal published for the new run. The helm carries the value through its
 session cache and into the app's session row. Older cached rows omit it and decode as false until refreshed. Ignoring a
 positive report would cause the app to keep trying to attach, so this field requires a protocol bump.
 

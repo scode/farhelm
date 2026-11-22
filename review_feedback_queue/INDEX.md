@@ -71,9 +71,6 @@ consequences.
   Tensorlake setup refuses a sandbox name already in use, the failed Farhelm host can still offer Suspend or Resume and
   act on the existing sandbox.
 
-- [`gone-terminal-retained-handle-hides-recovery.md`](gone-terminal-retained-handle-hides-recovery.md) — A terminal the
-  supervisor knows is gone can stay in reconnecting state and hide the recovery card.
-
 - [`linux-ctrl-f-leaves-settings-field-at-end.md`](linux-ctrl-f-leaves-settings-field-at-end.md) — Ctrl+F at the end of
   a Linux Settings field can focus Search and send the next keystroke there.
 
@@ -252,10 +249,6 @@ consequences.
   sandbox runner cannot stage an ordinary checkout whose absolute path contains spaces, because nested remote shell
   commands interpolate that path without quoting it.
 
-- [`trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md`](trailing-delete-recorded-tab-scope-kept-derived-under-unusable-manager.md)
-  — Scoped-tab Delete policy gap predates the whole review range. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
-
 - [`trailing-http-golden-omits-populated-environment.md`](trailing-http-golden-omits-populated-environment.md) — The new
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -302,10 +295,6 @@ consequences.
 
 - [`trailing-launch-comment-terminal-host-inherits-tab-marker.md`](trailing-launch-comment-terminal-host-inherits-tab-marker.md)
   — marker-inheritance documentation wrongly puts tab markers on terminal hosts. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md`](trailing-failed-host-relaunch-warn-scope-error-definitive-rollback.md)
-  — failed-relaunch warning policy and restoration route predate the full range. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md`](trailing-deleted-integrated-unmarked-tab-shell-delete-oracle.md)
@@ -438,10 +427,6 @@ consequences.
 
 - [`trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md`](trailing-terminal-tabs-shared-gate-docs-retain-removed-local-hook-installations.md)
   — shared gate docs claim hook installations that the module no longer has. Abbreviated collection; confidence,
-  proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-delete-held-gone-host-skips-adopted-process-confirmation.md`](trailing-delete-held-gone-host-skips-adopted-process-confirmation.md)
-  — Known Delete confirmation bypass is separate from guarded tab-close identity. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
 
 - [`trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md`](trailing-connection-writer-comment-points-to-deleted-outputstream-checkpoint.md)

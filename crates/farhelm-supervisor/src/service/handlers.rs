@@ -1324,8 +1324,7 @@ async fn handle_delete_session(
 fn teardown_failure_message(error: TeardownError) -> String {
     match error {
         TeardownError::TabScopeEnumeration(error) => format!(
-            "this host has a systemd user manager but its terminal-tab scopes could not be \
-             enumerated, so nothing was deleted: {error:#}"
+            "could not enumerate this session's systemd scopes. The session was kept: {error:#}"
         ),
         TeardownError::Sweep(error) => format!("killing process tree: {error:#}"),
         TeardownError::HostDiscovery(error) => format!(
