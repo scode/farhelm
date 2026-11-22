@@ -61,3 +61,72 @@ The independent Sol high source gate found two issues that are fixed in the chan
 allowance inside the bounded stderr capture, so it cannot displace the host's diagnostic. The wrapper separates a
 command's 255 from a real SSH transport 255. A new test checks that a zero-reporting SSH transport cannot hide a failed
 upload. The corrected fixtures and all three review cases passed. The commit message was cold-read separately.
+
+### Landing
+
+#### What landed with it
+
+The plan's PR (#4617) landed last in this round, after the two helper refactors of the desktop window, followed by one
+landing fix (#4629). It changes the helm's host setup and SSH code, which nothing else in the round or on main since its
+base touched, so the rebase was clean.
+
+An independent reviewer traced every place the helm reads how a setup command ended and found no blocker: when the
+status line a command now prints at its end is missing or garbled, the step fails with "the host did not report how the
+command ended" instead of passing, and a command's own exit 255 stays apart from an SSH connection failure.
+
+#### Fixes made while landing
+
+- #4629 adds a context paragraph to the plan's changelog draft for the release curator. The draft said adding a host
+  whose SSH server reports success for failed commands can now work, but not that no real Tailscale SSH Mac and no real
+  Tensorlake sandbox took part in testing, that only host setup commands changed, or that Tailscale SSH's check mode and
+  leftover sessions are untouched. The entry text itself is unchanged.
+
+#### Checks
+
+The round landed two refactors of the desktop window's code and a change to how the helm learns whether a host setup
+command succeeded, so the landing ran the whole Rust workspace, the desktop app's tests, the lint runs, the end-to-end
+smoke test and every reference screenshot, once, on the three plans stacked together. The worker runs were on a separate
+arm64 Linux test worker with a systemd user manager and SSH to itself; the rest ran locally.
+
+On the three plans as delivered, rebased onto main and stacked:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `068b2cdd-019d-458c-8d42-853d8baa039b`): all 8342 passed, and none printed a runtime `SKIPPED`, so the tests that need
+  the systemd user manager, Podman or SSH ran rather than returning early. The 86 tests marked ignored (benchmarks and
+  opt-in real-host and real-Mac tests among them) did not run, as on every run.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and both desktop app
+  clippy runs (with and without `--features agent`), on the test worker: passed. Lints are not runtime tests, so they
+  have no recorder run.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `d7399edb-dd5b-4c27-bdff-c8afce3a87d9`): all
+  185 passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `dbfad242-d312-4bbc-8951-85c55a6a19f7`): 49 of
+  its 50 steps passed and the paste step was skipped, as on every Linux run.
+- `python3 scripts/check-gui-goldens.py`, every scene, locally (recorder run `87d4fc87-f934-4921-977d-06508c7234bb`):
+  every reference screenshot matched.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot
+  comparison page's own tests), locally: passed.
+
+After the changelog fix on the host command status plan (#4629), which touches only a release-notes draft:
+`python3 releasing/check-changelog.py format` and `dprint check`, locally: passed. Everything above still applies.
+
+Skipped: macOS, since nothing in the round builds only on a Mac; for the host command status plan, a real Tailscale SSH
+Mac and the real Tensorlake gateway, which its report names as post-landing checks; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The new status line goes to the command's error output. If the Tensorlake gateway or a Tailscale SSH Mac merged error
+  output into normal output, Add or Update would fail with "the host did not report how the command ended" rather than
+  report a false success. Nothing suggests either does this, but the local tests use a stand-in that keeps the two
+  apart, so only the real-host checks the report names would show it.
+- The tests check that the status line is removed from what the install, update and uninstall steps hand on, but not
+  from the output of Add's first check, which goes through its own path. A follow-up test would close that gap.
+- Whether an exit 255 means "SSH failed" depends on the command's route going over SSH (plain SSH, or Podman reached
+  over SSH), and the helm decides that from a fixed list of route kinds. A new SSH-based route added later without
+  updating that list would have its connection failures reported as the command's own exit 255. Worth remembering when a
+  route is added; no change needed now.
+- SPEC_impl.md does not mention that when a command itself exits 255, the helm's wrapper exits 254 so SSH's own status
+  never looks like a connection failure, while the status line still carries the real 255. A one-sentence docs
+  follow-up.
+- TODO.md's "Use the Tailscale SSH wrapper for Tailscale hosts" entry still calls itself separate from "the in-band
+  status entry above", which this plan removed. Harmless; the next edit of that entry can drop the reference.

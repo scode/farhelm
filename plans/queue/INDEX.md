@@ -2,7 +2,6 @@
 
 One line per plan that has not landed, in queue order, oldest first. `plans/AGENTS.md` describes the states; only `scripts/plans-queue.py` changes them, and planning PRs add new `[pending]` (or, when the maintainer asks, `[held]`) lines, at the end unless the maintainer places them elsewhere. A landed plan moves to `plans/REPORTS.md` until the maintainer has reviewed its report. This file is excluded from dprint so a line is never rewrapped.
 
-- [landing f5ea9c] `in-band-host-command-status.md` — read the result of every host setup command from a tagged status line the command prints, not from ssh's exit status, so a Mac with Tailscale SSH can be added and failed steps never pass as success
 - [complete] `keep-images-on-failed-rebuild.md` — keep a container recipe's working images until a Rebuild succeeds, while launches during a Rebuild still wait for its outcome
 - [in-flight ca9acb] `podman-place-host-identity.md` — record the machine and account each new container runs on, refuse twin container hosts for one machine and account, and never treat a container as deleted on a host that now reaches somewhere else
 - [in-flight 6e9ad4] `slow-host-async-actions.md` — keep live desktop UI pushes flowing while host commands wait and add an unordered UI-channel lane for environment lifecycle, Trash and session Stop/Delete, with Opus design-review gates and a mandatory post-landing architecture review (after `launch-wakes-suspended-host.md`)
