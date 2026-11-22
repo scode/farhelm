@@ -61,6 +61,7 @@ use style::{ResolvedStyle, Underline};
 /// The key that gives a drag to Farhelm when the terminal program has mouse reporting enabled.
 /// The gesture and the drag-copy notice use the same platform choice so the notice always names
 /// the key that actually takes over the drag.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SelectionModifier {
     Option,
     Shift,

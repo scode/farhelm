@@ -65,9 +65,8 @@ use farhelm_helm_client::{ApiPath, Method};
 use farhelm_proto::CheckoutTrashDeleted;
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
-    App, AppContext as _, Context, Entity, FocusHandle, FontWeight, IntoElement,
-    ParentElement as _, Render, Styled as _, Transformation, WeakEntity, Window, div, point, px,
-    svg,
+    App, AppContext as _, Context, FocusHandle, FontWeight, IntoElement, ParentElement as _,
+    Render, Styled as _, Transformation, WeakEntity, Window, div, point, px, svg,
 };
 use serde_json::json;
 
@@ -466,7 +465,7 @@ impl TrashButton {
 
     /// The dialog this button opened, while it is open: for the screenshot goldens, which turn its settle pause off.
     #[cfg(test)]
-    pub(crate) fn dialog_view(&self) -> Option<Entity<TrashDialog>> {
+    pub(crate) fn dialog_view(&self) -> Option<gpui::Entity<TrashDialog>> {
         self.dialog
             .as_ref()
             .and_then(|(_, dialog)| dialog.upgrade())
