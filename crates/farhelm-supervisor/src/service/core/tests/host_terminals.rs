@@ -1299,6 +1299,16 @@ async fn a_record_naming_another_sessions_host_refuses_and_touches_nothing() {
         sup.store.session("s1").await.expect("read").is_some(),
         "the row is kept"
     );
+    // The host must stay live through the refusal assertions, then release
+    // its listener before StateDir checks for any surviving hosts.
+    other.close().await;
+    let path = state.path().to_path_buf();
+    drop(sup);
+    drop(state);
+    assert!(
+        !path.try_exists().expect("check fixture directory removal"),
+        "the fixture state directory was retained"
+    );
 }
 
 /// Ending a session's hosts is bounded as a whole: a host whose end does

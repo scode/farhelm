@@ -73,8 +73,9 @@ enum Command {
     Restore(Vec<u8>),
 }
 
-/// A running stand-in host. Dropping it ends the host's task and removes
-/// its socket's directory.
+/// A running stand-in host. Drop requests task cancellation and reaps its
+/// child. When a caller owns the socket directory and cleans it up
+/// synchronously, use [`Self::close`] first to finish cancellation.
 pub(crate) struct TestHost {
     socket: PathBuf,
     /// The child the host's `Info` names, until the test kills it.
@@ -111,6 +112,23 @@ impl Drop for TestHost {
 }
 
 impl TestHost {
+    /// End this listener before the caller's state directory runs its
+    /// blocking cleanup. On a current-thread runtime, that cleanup would
+    /// prevent the aborted listener from dropping until after the deadline.
+    pub(crate) async fn close(mut self) {
+        self.task.abort();
+        let joined = (&mut self.task).await;
+        let unlinked = std::fs::remove_file(&self.socket);
+        // Remove the socket even if the listener panicked. The task's
+        // panic is the first failure and should remain the reported one.
+        if let Err(error) = joined
+            && error.is_panic()
+        {
+            std::panic::resume_unwind(error.into_panic());
+        }
+        unlinked.expect("unlink the closed test host socket");
+    }
+
     /// The host's socket.
     pub(crate) fn socket(&self) -> &Path {
         &self.socket
