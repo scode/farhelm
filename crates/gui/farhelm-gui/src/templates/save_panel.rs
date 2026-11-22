@@ -36,7 +36,8 @@ use gpui::{
     Subscription, Window, div, px,
 };
 
-use super::editor::{NAME_KIND_HELP, save_command, stored_names};
+use super::available_names;
+use super::editor::{NAME_KIND_HELP, save_command};
 use super::fields::{self, Field, taken_refusal};
 use super::save::{Candidate, choice_text};
 use crate::components::{
@@ -157,7 +158,7 @@ impl SavePanel {
         if let Some(reason) = draft.refusal(self.catalog.as_deref()) {
             return Some(plain(reason));
         }
-        let names = stored_names(cx);
+        let names = available_names(cx);
         let names: Option<Vec<&str>> = names
             .as_ref()
             .map(|names| names.iter().map(String::as_str).collect());
