@@ -17,7 +17,8 @@ Turn on **Set up conversation hooks on all hosts** in **Settings → Agents → 
 the session launcher offers it. The setting starts off. Once enabled, Farhelm installs or updates
 `~/.grok/hooks/farhelm.json` on each machine where it starts Grok, including inside a container or sandbox. The hooks
 let **Restart** resume the conversation after your first prompt. The hooks also run when you start Grok outside Farhelm,
-where they exit quietly.
+where they exit quietly. A session started while the setting was off cannot be restarted, and a note above its terminal
+says so. Turn the setting on and start a new session.
 
 If the supervisor has `GROK_HOME` set in its environment, Farhelm uses `$GROK_HOME/hooks/farhelm.json` instead. Setting
 `GROK_HOME` only in a shell startup file does not reach the supervisor. To remove the hooks, turn the setting off,

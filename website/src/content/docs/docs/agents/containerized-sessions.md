@@ -28,12 +28,17 @@ For the cloud equivalent, see
 
 Add the Linux machine as an ordinary [SSH host](/docs/get-started/add-a-remote-host/), or use your local Linux host. It
 needs Podman **4.9.3 or later**, running rootless with **cgroup v2**, the **systemd cgroup manager**, and a working
-`systemd-run --user`. Farhelm offers every usable host automatically. You can launch from a Mac to a Linux container
-host. Docker, macOS container hosting and nested environments are unsupported.
+`systemd-run --user`, plus `sha256sum` and `tr`. Farhelm offers every usable host automatically. You can launch from a
+Mac to a Linux container host. Docker, macOS container hosting and nested environments are unsupported.
 
 Opening the launcher checks hosts in the background. **Settings → Containers** shows each host's readiness and the
 reason it cannot be used. **Refresh** checks again. A selected host that becomes unusable stays selected, with its
 reason visible.
+
+Farhelm also checks which machine and account each container host reaches. If two of your hosts reach the same machine
+and account, new containers go through one of them, and **Settings → Containers** says which. If a host's SSH
+destination starts reaching a different machine or account, Farhelm starts no new containers there until you restore the
+destination and press **Refresh**.
 
 On an SSH host, container connections share the host's SSH connection with its ordinary supervisor. The SSH server's
 usual ten-channel limit means **about ten concurrent container connections** when each new SSH login needs interactive
@@ -62,7 +67,8 @@ container's login user, endpoints and credentials.
 The Recipes list shows each container host's build status with **Rebuild**, beside the Tensorlake snapshot's own **Build
 snapshot** or **Rebuild snapshot**. A container's first launch on a host builds any missing software image. On later
 launches, Farhelm prepares it again when more than 24 hours old, after a Farhelm update or after the software image is
-rebuilt. Existing containers keep their software. Rebuild affects future launches. User-owned base images are retained.
+rebuilt. Existing containers keep their software. Rebuild affects future launches; if it fails, the previous images stay
+on that host and later launches keep using them while they are fresh. User-owned base images are retained.
 
 **Settings → Tensorlake** keeps the cloud account's API key, SSH key, creation confirmation and sandbox leftovers.
 **Settings → Containers** keeps host readiness and container leftovers. Recipes are edited in **Recipes** for both.
@@ -162,8 +168,9 @@ delete just the one session, resume or update the container first.
 
 While Farhelm deletes a container, **Hosts** and the sidebar show it as **Deleting…**, and its sessions' actions are
 unavailable. If that fails after its last session was deleted, it shows **Deleting failed** with the reason, and
-**Retry** deletes it again. Farhelm forgets the container only after confirming its removal. Deleting several marked
-sessions works one session at a time in the same way, as for
+**Retry** deletes it again. Farhelm forgets the container only after confirming its removal, so if the container host's
+SSH destination now reaches a different machine or account, the container stays listed until you restore the destination
+and retry. Deleting several marked sessions works one session at a time in the same way, as for
 [sandboxes](/docs/using/tensorlake-sandboxes/#delete-a-session-in-its-own-sandbox).
 
 **Delete container** in Hosts always destroys the whole container after its own confirmation. A failure there keeps the

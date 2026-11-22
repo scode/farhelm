@@ -49,7 +49,9 @@ card, and **Open add dialog** on it opens this same dialog with the agent's dest
 
 If you reach the host through Tailscale, turn on **Tailscale host** before choosing **Add**. Enter its Tailscale node
 name or IP address, with your SSH login if needed, such as `dev@build-box`. Tailscale must be running on your Mac,
-and the host must advertise the SSH key it uses. Farhelm uses those advertised keys to verify the connection.
+and the host must advertise the SSH key it uses. Farhelm uses those advertised keys to verify the connection. It
+connects straight to the host over your Tailscale network, so a jump host or proxy command in your ssh config for that
+name is not used; your SSH login and keys work as usual.
 
 If the host asks for a verification code, a password, or a key passphrase, enter it in **Add host**. With regular SSH,
 you may also be asked to confirm an unfamiliar host key's fingerprint. Farhelm signs in once to check and set up the

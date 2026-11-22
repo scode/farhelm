@@ -58,6 +58,9 @@ Farhelm then stops checking by itself. You can
 [Install Farhelm](/docs/get-started/install/). The red version number still appears when a newer version is installed,
 however it got there.
 
+If Farhelm cannot read your saved choice, it does not update automatically until it can, and the switch shows off. You
+can still check for an update now.
+
 ## How updates are checked
 
 The update check and the download both go to get.farhelm.io over HTTPS, which hands the release files themselves over

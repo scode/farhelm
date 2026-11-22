@@ -42,6 +42,8 @@ button or Cmd+Q.
 Each shell tab is named **Terminal 1**, **Terminal 2**, and so on, and runs on the same host as the agent, in the
 session's directory. In a [container session](/docs/agents/containerized-sessions/), it opens inside the session's
 container. It belongs to the session: it keeps running when you switch to another session or restart the agent.
+When you come back to a session, Farhelm shows the tab you last chose there until you quit the app; if that tab has
+closed, it shows the agent.
 Stopping or deleting the session closes it. Closing a tab yourself asks you to confirm first, since it ends whatever is running in it; press Enter
 to confirm, or **Cancel** to keep it open. You can skip that question with
 [Skip session confirmations](/docs/using/stop-restart-resume/#stop-or-delete) under **Sessions** in settings.
@@ -64,7 +66,8 @@ control characters, such as Ctrl-C, still reach the program.
 
 To give the agent a screenshot or a file, paste it into the terminal. Farhelm uploads it to the session's host and types
 its path at the prompt, so it works the same on a remote host as on your Mac. Dropping a file onto the terminal does the
-same. On Linux, a file you copy in a file manager pastes as text, usually its path on your machine, instead of being
+same. If you leave the session before an upload finishes, a notice names the files and says whether any of them reached
+the host. On Linux, a file you copy in a file manager pastes as text, usually its path on your machine, instead of being
 uploaded; pasted screenshots and other images still upload.
 
 Clicking a web link in the terminal opens it once in your browser. Farhelm keeps that click from reaching the program,
@@ -83,7 +86,8 @@ To bring a file back from the session's host, hover over its path in the termina
   alt="Hovering over a file path in the terminal, showing the host, full path, and size, with the hover explained."
 />
 
-A click saves it into Downloads, chooses a new name if needed, and tells you where it went. A failed transfer leaves no partial file.
+A click saves it into Downloads, chooses a new name if needed, and tells you where it went. A failed transfer leaves no partial file, though one can be left behind if
+Farhelm crashes or is force-quit mid-download.
 
 **Cmd-click** on your Mac (**Ctrl-click** on Linux) also opens the saved copy in its default app.
 By default, Markdown, text and JSON files and common image types (PNG, JPEG, GIF, WebP, BMP, AVIF) open; other types
