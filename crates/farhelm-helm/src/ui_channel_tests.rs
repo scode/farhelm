@@ -225,6 +225,8 @@ struct TestRoutes {
     value: Mutex<Option<String>>,
     items: Mutex<Vec<Value>>,
     save_gate: Mutex<Option<oneshot::Receiver<()>>>,
+    /// A gated save reached the route and can wait while the test fills the queue.
+    gated_save_started: tokio::sync::Notify,
     fail_items: AtomicBool,
     /// Requests that matched no test route. The router's fallback counts them, so a test can show a command never
     /// reached the router at all, not merely that it missed every real route.
@@ -239,6 +241,7 @@ fn test_router(routes: Arc<TestRoutes>) -> axum::Router {
     async fn save(AxState(routes): AxState<Arc<TestRoutes>>, body: String) -> StatusCode {
         let gate = routes.save_gate.lock().unwrap().take();
         if let Some(gate) = gate {
+            routes.gated_save_started.notify_one();
             let _ = gate.await;
         }
         *routes.value.lock().unwrap() = Some(body);
@@ -600,14 +603,13 @@ async fn marked_reply(driven: &mut Driven, id: u64, which: &str) -> Vec<HelmMark
     reply.markers
 }
 
-/// Commands run one at a time, so a GUI that keeps sending while one is stuck
-/// would grow the queue without bound. The channel holds up to
-/// `MAX_QUEUED_COMMANDS` behind the one in flight and closes on the next: a
-/// close is the failure the GUI already handles, by resetting.
+/// A full marked-session edit must fit even when a slow command is in flight.
+/// A heartbeat proves the channel stays open at its backlog limit. One more
+/// command closes it, which bounds a broken window's backlog.
 #[farhelm_testtrace::test]
 async fn a_gui_that_floods_commands_behind_a_stuck_one_is_disconnected() {
     let routes = Arc::new(TestRoutes::default());
-    let (_release, gate) = oneshot::channel();
+    let (release, gate) = oneshot::channel();
     *routes.save_gate.lock().unwrap() = Some(gate);
     let (mut driven, _snapshot) = drive(Arc::clone(&routes)).await;
     driven
@@ -620,7 +622,11 @@ async fn a_gui_that_floods_commands_behind_a_stuck_one_is_disconnected() {
         ))
         .await
         .unwrap();
-    for id in 1..=MAX_QUEUED_COMMANDS as u64 {
+    tokio::time::timeout(NOTICE, routes.gated_save_started.notified())
+        .await
+        .expect("the first command reached the save gate before filling the queue");
+    let limit = (2 * farhelm_proto::LIST_SESSIONS_CAP) as u64;
+    for id in 1..=limit {
         driven
             .to_channel
             .send(command(id, "GET", "/api/test/value", None))
@@ -638,12 +644,17 @@ async fn a_gui_that_floods_commands_behind_a_stuck_one_is_disconnected() {
 
     driven
         .to_channel
-        .send(command(999, "GET", "/api/test/value", None))
+        .send(command(limit + 1, "GET", "/api/test/value", None))
         .await
         .unwrap();
     tokio::time::timeout(NOTICE, driven.task)
         .await
-        .expect("one command past the bound closes the channel")
+        .unwrap_or_else(|_| {
+            let save_held = !release.is_closed() && routes.value.lock().unwrap().is_none();
+            panic!(
+                "one command past the bound should close the channel (save still held: {save_held})"
+            );
+        })
         .unwrap();
     assert!(
         routes.value.lock().unwrap().is_none(),

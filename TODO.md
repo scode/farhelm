@@ -466,13 +466,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   actions. Cover changed confirmation preferences, a retargeted host and an unreachable environment that reconnects
   while Delete is pending. Plan: `plans/queue/bulk-actions-bound-to-drawn.md`.
 
-- **Pace metadata changes to marked sessions.** Pin, Unpin, Mute, Unmute, Mark read and Mark unread can issue a burst
-  from the desktop's marked menu. The helm closes its UI channel when more than 64 commands are pending, leaving the
-  window reconnecting with a partly applied batch. Use the existing reply-paced Stop/Delete and group-move mechanisms as
-  guides. Keep each eligible row's drawn write, acceptance-time refusal if busy, row-local failures, and cancellation on
-  reconnect. Cover a batch larger than the channel limit and show that rows keep making progress after a refusal. Plan:
-  `plans/queue/pace-bulk-metadata-changes.md`.
-
 - **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
   next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
   the viewer paints the default background there. Carry that cell's visible style through screen and history. Give the
