@@ -140,8 +140,9 @@ second clippy run on floating stable is needed.
 - `deno test -A scripts/tensorlake/sandbox-tests.ts`, `deno test -A scripts/tensorlake/rust-tests.ts`,
   `deno check scripts/tensorlake/rust-tests.ts` and
   `shellcheck scripts/tensorlake/bootstrap.sh scripts/tensorlake/run-rust-shard.sh` (the Tensorlake harness's own
-  checks, including the snapshot listing and archive configuration preserving the scoped Podman payload setup while
-  removing the local fixture build). Run the harness only on the maintainer's request, per `.agents/tensorlake.md`.
+  checks, including snapshot listing, the archive configuration preserving scoped Podman payload setup, and a local CLI
+  stand-in for shard verdicts and retained evidence). Run the harness only on the maintainer's request, per
+  `.agents/tensorlake.md`.
 - `deno check scripts/boat/boat-tests.ts`, `deno test -A scripts/boat/boat-tests.ts` and
   `shellcheck scripts/boat/sandbox/*.sh` (the boat harness's own checks, including the shard configuration preserving
   the scoped Podman payload setup while removing the local fixture build, grouping docs shot selectors by page, and

@@ -127,21 +127,6 @@ consequences.
 
 ## Other: correctness, diagnostics, cleanup, or convenience
 
-- [`browser-shard-failure-sweeps-running-siblings.md`](browser-shard-failure-sweeps-running-siblings.md) — An early
-  shard exception can clean up workers that sibling shards are still using. Additional reviewed scope: A Rust runner
-  infrastructure or local evidence-save exception can sweep sibling sandboxes before their work and evidence collection
-  settle.
-
-- [`browser-shard-failures-exit-successfully.md`](browser-shard-failures-exit-successfully.md) — The browser harness can
-  exit successfully even when its shards report validation failures. Additional reviewed scope: The Rust sandbox command
-  can exit successfully even when its shard results say tests failed.
-
-- [`worker-evidence-deleted-after-download-failure.md`](worker-evidence-deleted-after-download-failure.md) — The harness
-  can delete a failed worker's evidence even when downloading that evidence failed.
-
-- [`worker-allocation-precedes-ownership-ledger.md`](worker-allocation-precedes-ownership-ledger.md) — A created worker
-  can fall outside cleanup when ledger writing fails or remote creation succeeds before the local request times out.
-
 - [`suspended-plan-test-erases-its-suspension-premise.md`](suspended-plan-test-erases-its-suspension-premise.md) — The
   suspended-host setup test changes installation paths and erases its own Suspended state before checking the guard. The
   resulting failing scheduler ordering remains unverified after investigation.
@@ -153,18 +138,6 @@ consequences.
 - [`redirect-regression-omits-location-header.md`](redirect-regression-omits-location-header.md) — The redirect
   regression does not supply a redirect destination, so it cannot prove that Farhelm refuses to follow one.
 
-- [`rust-sandbox-runner-passes-empty-selection.md`](rust-sandbox-runner-passes-empty-selection.md) — The Rust sandbox
-  runner can announce all shards passed while running no tests, including with zero or nonnumeric shard counts and an
-  empty overall filter selection.
-
-- [`rust-sandbox-pack-ignores-cargo-target-dir.md`](rust-sandbox-pack-ignores-cargo-target-dir.md) — A checkout built
-  only into a shared or external Cargo target directory cannot package its Rust sandbox tests: the runner still requires
-  its fixture binary under the default target path.
-
-- [`rust-sandbox-staging-misquotes-checkout-path.md`](rust-sandbox-staging-misquotes-checkout-path.md) — The Rust
-  sandbox runner cannot stage an ordinary checkout whose absolute path contains spaces, because nested remote shell
-  commands interpolate that path without quoting it.
-
 - [`trailing-http-golden-omits-populated-environment.md`](trailing-http-golden-omits-populated-environment.md) — The new
   environment host JSON is omitted from every golden contract row. Abbreviated collection; confidence, proposed
   dismissals and unresolved consequences are preserved in the entry.
@@ -172,10 +145,6 @@ consequences.
 - [`trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md`](trailing-sealed-setup-test-overlay-hides-hold-and-run-leak.md)
   — Sealed-setup regression test cannot observe its claimed no-hold boundary. Abbreviated collection; confidence,
   proposed dismissals and unresolved consequences are preserved in the entry.
-
-- [`trailing-rust-worker-trims-explicit-payload-directory.md`](trailing-rust-worker-trims-explicit-payload-directory.md)
-  — Archive packer changes an accepted explicit payload directory. Abbreviated collection; confidence, proposed
-  dismissals and unresolved consequences are preserved in the entry.
 
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes
   the Templates leave question as inline, although the app centers it.
