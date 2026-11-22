@@ -13,7 +13,7 @@ use std::rc::Rc;
 
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
-use farhelm_helm_client::fake::transfers::{FakeTransfer, FakeTransfers};
+use farhelm_helm_client::fake::transfers::{FakeAnswer, FakeTransfer, FakeTransfers};
 use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_helm_client::transfers::Transfers;
 use farhelm_proto::DetachCode;
@@ -27,7 +27,9 @@ use super::{
 };
 use crate::focus::Mark;
 use crate::main_view::MainView;
+use crate::notices::{self, Notice};
 use crate::session::Connection;
+use crate::session_list::host_rail::tests::{answer_everything, filtered};
 use crate::session_list::tests::{listing_meta, painted, preferences, session};
 use crate::session_pane::SessionPane;
 use crate::terminal::attached::STATUS_RECONNECT_ID;
@@ -966,12 +968,12 @@ fn a_missing_tab_falls_back_to_agent_without_erasing_the_choice(cx: &mut TestApp
     assert_eq!(window.chosen().as_deref(), Some("t1"));
 }
 
-/// An upload cut off when leaving a session reports its outcome in the restored shell. A line owned by the
-/// hidden Agent terminal would make the file disappear from the view where the user offered it.
-#[gpui::test]
-fn a_restored_tab_shows_the_upload_notice_left_by_its_old_view(cx: &mut TestAppContext) {
-    let (mut transfers, handle) = FakeTransfers::new();
-    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+/// Leave a sent upload waiting for an answer in the first shell tab. Its cancellation can then be distinguished
+/// from a queued upload that never reached the fake.
+fn pending_upload_in_first_tab(
+    window: &mut Window<'_>,
+    transfers: &mut FakeTransfers,
+) -> FakeAnswer<String> {
     click(window.cx, T1_TAB);
     assert_eq!(window.chosen().as_deref(), Some("t1"));
     let tab = window.stream_of(Some("t1"));
@@ -988,25 +990,128 @@ fn a_restored_tab_shows_the_upload_notice_left_by_its_old_view(cx: &mut TestAppC
     }
     settle(window.cx);
     let requests = transfers.take();
-    let [FakeTransfer::Upload { answer, .. }] = requests.as_slice() else {
-        panic!("expected one pending upload, got {requests:?}");
+    let [FakeTransfer::Upload { answer, .. }]: [FakeTransfer; 1] =
+        requests.try_into().expect("one pending request")
+    else {
+        panic!("the pending request was an upload");
     };
     assert!(!answer.abandoned(), "the upload is still in flight");
+    answer
+}
 
+/// Leaving a session reports its shell's interrupted upload in a banner right away. Restoring the shell
+/// keeps the banner and has no second interruption to show in the strip.
+#[gpui::test]
+fn an_interrupted_upload_is_reported_once_across_a_tab_restore(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let answer = pending_upload_in_first_tab(&mut window, &mut transfers);
     click(window.cx, "session-row-b");
     assert!(
         answer.abandoned(),
         "leaving the session stopped waiting for it"
     );
+    let posted = window.cx.update(|_, cx| notices::posted(cx));
+    assert!(matches!(posted.as_slice(), [Notice::InterruptedUpload(_)]));
+    assert_eq!(
+        posted[0].text().as_ref(),
+        "Attaching Cargo.toml to a was interrupted — whether it was attached cannot be told."
+    );
     click(window.cx, "session-row-a");
     assert_eq!(window.chosen().as_deref(), Some("t1"));
-    let nodes = test_support::frame(window.cx);
-    let notice = nodes
-        .iter()
-        .find(|node| node.element_id.as_deref() == Some(attachments::STRIP_ID))
-        .and_then(|node| node.label.as_deref())
-        .expect("the restored shell shows the upload notice");
-    assert!(notice.contains("Cargo.toml was interrupted"), "{notice}");
+    assert!(
+        test_support::frame(window.cx)
+            .iter()
+            .all(|node| { node.element_id.as_deref() != Some(attachments::STRIP_ID) })
+    );
+    assert_eq!(window.cx.update(|_, cx| notices::posted(cx)), posted);
+}
+
+/// A closed shell's interruption has to wait while the chosen tab is beyond the attach limit. A hidden Agent
+/// strip cannot report it. Leaving then shows the banner, which stays visible when a later Delete removes the
+/// source under a filter without the user reopening it.
+#[gpui::test]
+fn leaving_an_unattached_tab_reports_an_upload_even_after_a_filtered_delete(
+    cx: &mut TestAppContext,
+) {
+    let ids: Vec<String> = (1..=MAX_ATTACHED_TABS + 2)
+        .map(|n| format!("t{n}"))
+        .collect();
+    let tabs: Vec<&str> = ids.iter().map(String::as_str).collect();
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&tabs), Some(handle));
+    let answer = pending_upload_in_first_tab(&mut window, &mut transfers);
+    let set = window.set();
+    let last = tabs.last().unwrap().to_string();
+    window.cx.update(|w, cx| {
+        set.update(cx, |set, cx| set.choose(Some(last), &Mark::take(cx), w, cx));
+    });
+    drop(set);
+    settle(window.cx);
+    assert!(
+        window.cx.debug_bounds(NOT_ATTACHED_ID).is_some(),
+        "the chosen tab has no terminal"
+    );
+    window.push_tabs(&tabs[1..]);
+    assert!(
+        window.cx.debug_bounds(NOT_ATTACHED_ID).is_some(),
+        "the chosen tab remains beyond the attach limit"
+    );
+    assert!(
+        answer.abandoned(),
+        "closing the uploading tab interrupted it"
+    );
+    assert!(
+        window.cx.update(|_, cx| notices::posted(cx)).is_empty(),
+        "the source session is still open"
+    );
+
+    window.helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: filtered(&["a", "b"], 3, 2),
+        upsert: Vec::new(),
+        remove: Vec::new(),
+    });
+    settle(window.cx);
+    click(window.cx, "session-row-b");
+    let posted = window.cx.update(|_, cx| notices::posted(cx));
+    let [Notice::InterruptedUpload(upload)] = posted.as_slice() else {
+        panic!("expected an upload notice on departure, got {posted:?}");
+    };
+    let wanted = format!("notice-dismiss-interrupted-upload-{}", upload.key());
+    let banner_is_drawn = |cx: &mut VisualTestContext| {
+        test_support::frame(cx)
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(wanted.as_str()))
+    };
+    assert!(banner_is_drawn(window.cx));
+
+    answer_everything(&mut window.helm);
+    click(window.cx, "session-menu-a");
+    click(window.cx, "session-menu-delete");
+    click(window.cx, "prompt-confirm");
+    let (id, _) = test_support::one_command(
+        &mut window.helm,
+        farhelm_helm_client::Method::Delete,
+        "/api/sessions/a",
+    );
+    window.helm.push(CollectionChanges {
+        collection: Collection::Sessions,
+        meta: filtered(&["b"], 2, 1),
+        upsert: Vec::new(),
+        remove: vec!["a".into()],
+    });
+    window.helm.reply(id, 200, None);
+    settle(window.cx);
+    assert_eq!(
+        window
+            .cx
+            .update(|_, cx| crate::local_state::selected(cx))
+            .as_deref(),
+        Some("b")
+    );
+    assert_eq!(window.cx.update(|_, cx| notices::posted(cx)), posted);
+    assert!(banner_is_drawn(window.cx));
 }
 
 /// Old `terminal-reconnect.spec.ts`, "leaving-a-session-cancels-a-pending-reconnect". Why: a wait to reattach that

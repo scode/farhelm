@@ -598,6 +598,12 @@ static SCENES: &[Scene] = &[
         setup: focus_ring_setup,
     },
     Scene {
+        name: "interrupted-upload-notices",
+        size: (920., 124.),
+        draw: interrupted_upload_notices,
+        setup: no_setup,
+    },
+    Scene {
         name: "approval-card",
         size: (684., 500.),
         draw: approval_card,

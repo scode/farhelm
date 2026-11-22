@@ -14,6 +14,7 @@ use std::rc::Rc;
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{FakePhase, FakeTerminal, FakeTerminalRequest};
+use farhelm_helm_client::fake::transfers::{FakeTransfer, FakeTransfers};
 use farhelm_helm_client::terminal::TerminalAttach;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::DetachCode;
@@ -22,8 +23,9 @@ use farhelm_proto::ui_channel::{
     Availability, Collection, CollectionChanges, CollectionState, HostView,
 };
 use gpui::{
-    AppContext as _, Context, Entity, InteractiveElement as _, IntoElement, ParentElement as _,
-    Render, Styled as _, TestAppContext, VisualTestContext, Window, div, px,
+    AppContext as _, ClipboardEntry, ClipboardItem, Context, Entity, ExternalPaths,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, Styled as _, TestAppContext,
+    VisualTestContext, Window, div, px,
 };
 
 use super::SessionPane;
@@ -34,6 +36,7 @@ use crate::launcher::launch_tests::{
 };
 use crate::launcher::view_tests::fixture_hosts;
 use crate::main_view::MainView;
+use crate::notices::{self, Notice};
 use crate::operations::{Command, OpKey, Work};
 use crate::session::Connection;
 use crate::session_list::SessionList;
@@ -1262,6 +1265,236 @@ fn after_a_successful_delete_the_next_terminal_shows_normally(cx: &mut TestAppCo
     assert!(fleet.drawn(CARD));
     assert!(!fleet.drawn(BAND));
     assert!(fleet.drawn("terminal-exit"));
+}
+
+/// Uploads leave the terminal when an acknowledged Delete takes away the last open session, even under a
+/// filter where omission cannot prove the session gone. The window still has to tell the user which files
+/// were interrupted and what is known about each outcome. A reconnect keeps both banners until Dismiss.
+#[gpui::test]
+fn deleting_the_only_filtered_session_shows_interrupted_uploads_without_a_terminal(
+    cx: &mut TestAppContext,
+) {
+    let (mut helm, connection) = started(cx);
+    let opened = serve_terminals(&connection, cx);
+    let (mut transfers, served) = FakeTransfers::new();
+    cx.update(|cx| connection.update(cx, |connection, _| connection.serve_transfers(served)));
+
+    let mut sessions = listing(&["a"], &[session("a").title("Build artifacts")]);
+    sessions.meta = filtered(&["a"], 2, 1);
+    helm.connect(vec![sessions, preferences(&["a"], None)]);
+    cx.run_until_parked();
+    let (main, cx) = test_support::open_view(cx, MainView::new);
+    let pane = cx.update(|_, cx| main.read(cx).session_pane().clone());
+    let mut fleet = Fleet {
+        cx,
+        helm,
+        pane,
+        opened,
+    };
+    fleet.go_live(0);
+    assert_eq!(fleet.selected().as_deref(), Some("a"));
+    assert!(
+        terminal_focused(fleet.cx),
+        "Paste goes to the live terminal"
+    );
+    let files = [
+        "Cargo.toml",
+        "src/lib.rs",
+        "src/bootstrap.rs",
+        "src/main_view.rs",
+        "src/session.rs",
+    ]
+    .map(|file| std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join(file));
+    fleet.cx.write_to_clipboard(ClipboardItem {
+        entries: vec![ClipboardEntry::ExternalPaths(ExternalPaths(
+            files.to_vec().into(),
+        ))],
+    });
+    fleet.cx.dispatch_action(crate::actions::Paste);
+    settle(fleet.cx);
+    let started_uploads = transfers.take();
+    let [
+        FakeTransfer::Upload {
+            session,
+            filename,
+            answer,
+            ..
+        },
+    ] = started_uploads.as_slice()
+    else {
+        panic!("expected only the first upload to have been sent, got {started_uploads:?}");
+    };
+    assert_eq!(session, "a");
+    assert_eq!(filename, "Cargo.toml");
+    assert!(
+        !answer.abandoned(),
+        "the first upload is still waiting for its reply"
+    );
+    assert_eq!(fleet.painted_count("Attaching 5 files…"), 1);
+
+    let id = fleet.delete_open_session();
+    fleet.helm.push(change(filtered(&[], 1, 0), &[], &["a"]));
+    settle(fleet.cx);
+    fleet.cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).expect("the helm remains connected");
+        assert!(
+            !crate::session::listing_proves_gone(store.read(cx).collections(), "a"),
+            "the remaining listing cannot prove disappearance"
+        );
+    });
+    fleet.helm.reply(id, 200, None);
+    settle(fleet.cx);
+    assert_eq!(fleet.selected(), None);
+    assert!(
+        fleet.agent().is_none(),
+        "the pane has no terminal to take the lines"
+    );
+    assert!(answer.abandoned(), "the request went with its terminal");
+    assert!(
+        transfers.take().is_empty(),
+        "the waiting uploads never went out"
+    );
+
+    let posted = fleet.cx.update(|_, cx| notices::posted(cx));
+    let [
+        Notice::InterruptedUpload(sent),
+        Notice::InterruptedUpload(waiting),
+    ] = posted.as_slice()
+    else {
+        panic!("expected two interrupted-upload banners, got {posted:?}")
+    };
+    assert_eq!(
+        sent.sentence().accessible_name().as_ref(),
+        "Attaching Cargo.toml to Build artifacts was interrupted — whether it was attached cannot be told."
+    );
+    assert_eq!(
+        waiting.sentence().accessible_name().as_ref(),
+        "Attaching lib.rs, bootstrap.rs, main_view.rs and 1 more file to Build artifacts was interrupted before they were sent, so nothing was uploaded."
+    );
+
+    let sent_dismiss = format!("notice-dismiss-interrupted-upload-{}", sent.key());
+    let waiting_dismiss = format!("notice-dismiss-interrupted-upload-{}", waiting.key());
+    assert_eq!(
+        test_support::label(fleet.cx, &sent_dismiss).as_deref(),
+        Some("Dismiss")
+    );
+    assert_eq!(
+        test_support::label(fleet.cx, &waiting_dismiss).as_deref(),
+        Some("Dismiss")
+    );
+    fleet.helm.break_channel();
+    settle(fleet.cx);
+    let mut empty = listing(&[], &[]);
+    empty.meta = filtered(&[], 1, 0);
+    fleet.helm.connect(vec![empty, preferences(&[], None)]);
+    settle(fleet.cx);
+    let dismiss = |cx: &mut VisualTestContext, id: &str| {
+        test_support::show_next_frame(cx);
+        let button = frame(cx)
+            .into_iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .expect("the upload banner still shows its Dismiss button after the reset");
+        cx.simulate_click(button.bounds.center(), gpui::Modifiers::none());
+        settle(cx);
+    };
+    dismiss(fleet.cx, &sent_dismiss);
+    assert_eq!(
+        fleet.cx.update(|_, cx| notices::posted(cx)),
+        [posted[1].clone(), Notice::ConnectionLost],
+        "Dismiss withdraws only the banner clicked after the reconnect"
+    );
+    dismiss(fleet.cx, &waiting_dismiss);
+    assert_eq!(
+        fleet.cx.update(|_, cx| notices::posted(cx)),
+        [Notice::ConnectionLost]
+    );
+}
+
+/// Undismissed uploads can outnumber the window's available lines. The pane keeps its working area, a new
+/// interruption is visible without moving focus, and scrolling can still reach the earlier Dismiss buttons.
+#[gpui::test]
+fn a_full_notice_stack_reveals_the_latest_upload_without_hiding_the_pane(cx: &mut TestAppContext) {
+    let mut fleet = open_main(cx, a_and_b());
+    fleet.go_live(0);
+    let pane_before = test_support::bounds(fleet.cx, "main-pane");
+    assert!(terminal_focused(fleet.cx));
+    let uploads: Vec<_> = (1..=48)
+        .map(|index| {
+            Rc::new(notices::InterruptedUploads::new(
+                "a".into(),
+                Some(crate::host_text::HostText::from_host("Build artifacts")),
+                vec![crate::host_text::HostText::from_host(format!(
+                    "report-{index}.zip"
+                ))],
+                true,
+            ))
+        })
+        .collect();
+    let (latest, earlier) = uploads.split_last().unwrap();
+    fleet.cx.update(|_, cx| {
+        for upload in earlier {
+            notices::post(Notice::InterruptedUpload(upload.clone()), cx);
+        }
+    });
+    settle(fleet.cx);
+    let viewport = test_support::bounds(fleet.cx, "window-notice-banners");
+    let pane = test_support::bounds(fleet.cx, "main-pane");
+    let window_height = fleet.cx.update(|window, _| window.viewport_size().height);
+    assert!(
+        viewport.size.height <= window_height / 2.,
+        "the notice region is capped"
+    );
+    assert!(
+        pane.size.height >= pane_before.size.height * 0.4,
+        "the notices leave room to use the terminal"
+    );
+    assert!(
+        pane.top() >= viewport.bottom(),
+        "the pane stays below the notices"
+    );
+    let dismiss_in_view = |cx: &mut VisualTestContext, upload: &notices::InterruptedUploads| {
+        let id = format!("notice-dismiss-interrupted-upload-{}", upload.key());
+        frame(cx).iter().any(|node| {
+            node.element_id.as_deref() == Some(id.as_str())
+                && node.bounds.top() >= viewport.top()
+                && node.bounds.bottom() <= viewport.bottom()
+        })
+    };
+    assert!(dismiss_in_view(fleet.cx, earlier.last().unwrap()));
+    assert!(
+        !dismiss_in_view(fleet.cx, &earlier[0]),
+        "the existing banners overflow"
+    );
+    let pointer = viewport.center();
+    fleet
+        .cx
+        .simulate_mouse_move(pointer, None, gpui::Modifiers::none());
+    fleet.cx.simulate_event(gpui::ScrollEvent {
+        position: pointer,
+        delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.), px(10000.))),
+        ..Default::default()
+    });
+    settle(fleet.cx);
+    assert!(
+        dismiss_in_view(fleet.cx, &earlier[0]),
+        "the oldest banner is still reachable"
+    );
+    assert!(
+        !dismiss_in_view(fleet.cx, earlier.last().unwrap()),
+        "the user is looking at old notices"
+    );
+    fleet
+        .cx
+        .update(|_, cx| notices::post(Notice::InterruptedUpload(latest.clone()), cx));
+    settle(fleet.cx);
+    assert!(
+        dismiss_in_view(fleet.cx, latest),
+        "the newly posted interruption is visible"
+    );
+    assert!(
+        terminal_focused(fleet.cx),
+        "revealing the notice leaves focus on the terminal"
+    );
 }
 
 /// The hold and the scrim belong to the open session's own Delete: SPEC.md lets Deletes of other sessions run while

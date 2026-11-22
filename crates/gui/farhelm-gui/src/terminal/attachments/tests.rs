@@ -297,8 +297,11 @@ fn harness_with(
     if let Some(served) = served {
         cx.update(|cx| connection.update(cx, |connection, _| connection.serve_transfers(served)));
     }
-    helm.connect(preferences());
+    let mut snapshot = preferences();
+    snapshot.push(test_support::sessions(&["s1", "s2"]));
+    helm.connect(snapshot);
     cx.run_until_parked();
+    cx.update(|cx| local_state::select("s1", cx));
     let session = cx.update(|cx| connection.read(cx).session().cloned().unwrap());
     let stream: Rc<RefCell<Option<FakeTerminal>>> = Rc::default();
     let extra: Extra = Rc::default();
@@ -1113,15 +1116,12 @@ fn a_closed_tab_reports_its_cut_off_uploads_in_the_agent_terminal(cx: &mut TestA
     );
 }
 
-/// A failure the user has not read yet, and an upload cut off by leaving the session, must still be there when the
-/// session's terminal is back, or the file vanishes without a word. Specified: a session's agent terminal that goes
-/// away (the session left) with a failure on its strip and an upload running leaves both, the upload as cut off; the
-/// session's next shown terminal shows them, in that order. Replaces the old spec's "an upload failure stays on screen
-/// across a reconnect" (here across the terminal being made again) and "leaving mid-upload and reopening leaves exactly
-/// one set of hooks" (a reopened terminal uploads nothing twice: it never saw the first upload).
+/// A strip failure that was already visible still follows its session. An interruption on leaving is reported
+/// at once and can no longer appear on that strip, even if the user leaves the notice open on their return.
 #[gpui::test]
 fn a_failure_and_a_cut_off_upload_outlive_their_terminal(cx: &mut TestAppContext) {
     let mut h = harness(cx);
+    h.cx.update(|_, cx| local_state::select("s2", cx));
     let (owner, _stream) = h.add("s2", None);
     let second = PathBuf::from(concat!(env!("CARGO_MANIFEST_DIR"), "/src/lib.rs"));
     h.drop_files(EXTRA_PANE, vec![real_file(), second.clone()]);
@@ -1133,19 +1133,27 @@ fn a_failure_and_a_cut_off_upload_outlive_their_terminal(cx: &mut TestAppContext
             message: "no space left on device".into(),
         }),
     );
-    let _running = h.upload_in("s2", UploadSource::File(second), "lib.rs");
+    let running = h.upload_in("s2", UploadSource::File(second), "lib.rs");
+    let failed = "Attaching Cargo.toml failed: no space left on device — whether it was attached cannot be told, and no path was inserted";
+    assert!(
+        lines_of(h.cx, &owner).iter().any(|line| line == failed),
+        "the premise: the first failure was already on the strip"
+    );
+    h.cx.update(|_, cx| local_state::select("s1", cx));
     drop(owner);
     h.remove_added();
-
-    let (owner, _stream) = h.add("s2", None);
+    assert!(running.abandoned(), "leaving cancels the request");
+    let notices = h.cx.update(|_, cx| notices::posted(cx));
+    assert_eq!(notices.len(), 1);
     assert_eq!(
-        lines_of(h.cx, &owner),
-        [
-            "Attaching Cargo.toml failed: no space left on device — whether it was attached cannot be told, and no \
-             path was inserted",
-            "Attaching lib.rs was interrupted — whether it was attached cannot be told, and no path was inserted",
-        ]
+        notices[0].text().as_ref(),
+        "Attaching lib.rs to Fix the widget was interrupted — whether it was attached cannot be told."
     );
+
+    h.cx.update(|_, cx| local_state::select("s2", cx));
+    let (owner, _stream) = h.add("s2", None);
+    assert_eq!(lines_of(h.cx, &owner), [failed]);
+    assert_eq!(h.cx.update(|_, cx| notices::posted(cx)), notices);
     assert!(h.uploads_in("s2").is_empty(), "nothing is uploaded again");
     let main = h.owner.clone();
     assert_eq!(
@@ -1174,7 +1182,14 @@ fn a_reset_reports_a_cut_off_upload_in_the_new_agent_terminal(cx: &mut TestAppCo
     );
     assert!(running.abandoned(), "the request went with the terminal");
 
-    h.helm.connect(preferences());
+    assert_eq!(
+        h.cx.update(|_, cx| local_state::selected(cx)).as_deref(),
+        Some("s1"),
+        "the inert window keeps the selection while the terminal is gone"
+    );
+    let mut snapshot = preferences();
+    snapshot.push(test_support::sessions(&["s1"]));
+    h.helm.connect(snapshot);
     settle(h.cx);
     let connection = h.connection.clone();
     let new =
@@ -1189,23 +1204,44 @@ fn a_reset_reports_a_cut_off_upload_in_the_new_agent_terminal(cx: &mut TestAppCo
             "Attaching Cargo.toml was interrupted — whether it was attached cannot be told, and no path was inserted"
         ]
     );
+    assert_eq!(
+        h.cx.update(|_, cx| notices::posted(cx)),
+        [Notice::ConnectionLost],
+        "the upload belongs to the new terminal of the still-open session"
+    );
 }
 
-/// The lines a reset leaves must not stay for the life of the app once their session is gone, while those of a session
-/// still there must wait for it (SPEC_impl.md, "One failure path: the reset"). Specified: a reset cutting off an upload
-/// in session `s1` and one in `s2` leaves lines for both; the next snapshot's complete listing names `s1` only, and
-/// with it `s2`'s lines go while `s1`'s stay, so `s1`'s next shown terminal shows its line and `s2`'s shows nothing.
+/// A failure that was already shown survives leaving its session, but a complete reconnect listing can prove
+/// there will never be another terminal to take it. Only the current session's interrupted upload stays for its
+/// next terminal.
 #[gpui::test]
 fn after_a_reset_the_lines_of_a_session_gone_from_the_listing_go(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.paste(vec![file(real_file().to_str().unwrap())]);
-    let _s1 = h.upload(UploadSource::File(real_file()), "Cargo.toml");
-    let (_other, _stream) = h.add("s2", None);
+    h.cx.update(|_, cx| local_state::select("s2", cx));
+    let (other, _stream) = h.add("s2", None);
     h.drop_files(EXTRA_PANE, vec![real_file()]);
-    let _s2 = h.upload_in("s2", UploadSource::File(real_file()), "Cargo.toml");
+    let answer = h.upload_in("s2", UploadSource::File(real_file()), "Cargo.toml");
+    h.answer(
+        answer,
+        Err(TransferError::Refused {
+            status: 500,
+            message: "no space left on device".into(),
+        }),
+    );
+    assert_eq!(
+        lines_of(h.cx, &other).len(),
+        1,
+        "the failure was on the strip"
+    );
+    h.cx.update(|_, cx| local_state::select("s1", cx));
+    drop(other);
+    h.remove_added();
+    h.paste(vec![file(real_file().to_str().unwrap())]);
+    let running = h.upload(UploadSource::File(real_file()), "Cargo.toml");
 
     h.helm.break_channel();
     settle(h.cx);
+    assert!(running.abandoned(), "the reset retired the open terminal");
     let carried = |h: &mut Harness<'_>, key: &str| {
         h.cx.update(|_, cx| {
             cx.try_global::<Carried>()
@@ -1214,7 +1250,7 @@ fn after_a_reset_the_lines_of_a_session_gone_from_the_listing_go(cx: &mut TestAp
     };
     assert!(
         carried(&mut h, "s1") && carried(&mut h, "s2"),
-        "the premise: the reset left lines for both sessions"
+        "the premise: the session left behind has its shown failure and the open session has its interrupted upload"
     );
 
     let mut snapshot = preferences();
@@ -1231,10 +1267,6 @@ fn after_a_reset_the_lines_of_a_session_gone_from_the_listing_go(cx: &mut TestAp
     h.session =
         h.cx.update(|_, cx| connection.read(cx).session().cloned())
             .expect("the premise: the channel is back with a new UI session");
-    h.remove_added();
-    let (s2, _stream) = h.add("s2", None);
-    assert_eq!(lines_of(h.cx, &s2), Vec::<String>::new());
-    h.remove_added();
     let (s1, _stream) = h.add("s1", None);
     assert_eq!(
         lines_of(h.cx, &s1),

@@ -36,9 +36,8 @@
 //!   app's reload did, and switching the open session leaves it alone. The list redraws when it changes ([`observe`]).
 //! - **A store of its own, not the notice center's or the operation store's.** The migration's orchestrator prescribed
 //!   this shape on 2026-11-16, when it asked for the band, and its review gate asked for the reasons to be recorded.
-//!   The notice center ([`crate::notices`]) carries `Copy` notices in the app's own words and keeps them across a reset
-//!   (the connection-lost notice is posted because of one), while this notice is host text that must go with the UI
-//!   session, so carrying it there would change that foundation beyond its one extension point, a new variant. The
+//!   The notice center ([`crate::notices`]) keeps its posted notices across a reset. This band belongs to the UI
+//!   session whose Delete reply drew it and goes away when that UI session is retired. The
 //!   operation store's per-session slot (`super::outcome`) is cleared by the session's next operation and goes with
 //!   its row, and the notice exists to outlive the row: showing a Replace's notice on the replacement's row was the
 //!   stopgap this replaces, and it had to drop the notice whenever the replacement already had work running. And the

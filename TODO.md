@@ -449,15 +449,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   host with an unconfirmed scope that becomes checkable on a later start. Plan:
   `plans/queue/restart-deleted-cleanup.md`.
 
-- **Keep interrupted uploads visible after their session goes away.** The terminal leaves a line for each interrupted
-  upload in `terminal/attachments.rs` (`Carried` and `prune_carried`), then the desktop can discard the lines when it
-  learns the session is gone. SPEC.md's “Attachments” says upload failures must be visible. Preserve the file name and
-  whether the upload was never sent or its result is unknown. Show the line on a surface that outlives the terminal,
-  either when the user moves to another session or when removal is established. Reuse the notice center and account for
-  a successful Delete or Replace behind a filter, when an incomplete list cannot prove absence. Cover leaving during a
-  transfer and losing its source session without reopening it, including when there are no terminals left to draw it.
-  Plan: `plans/queue/interrupted-upload-notices.md`.
-
 - **Keep the terminal's colored margin when a wide glyph wraps.** A wide glyph printed in the last column wraps to the
   next row. The emulator leaves a styled blank in the old column, but the grid encoder skips the wrap placeholder and
   the viewer paints the default background there. Carry that cell's visible style through screen and history. Give the

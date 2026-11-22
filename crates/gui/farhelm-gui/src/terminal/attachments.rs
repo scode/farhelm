@@ -18,8 +18,9 @@
 //!   timer, and outlives its terminal ([`Carried`]).
 //! - Files or an image offered to a terminal that is not live are refused ([`DETACHED_TEXT`]), and the refusal goes
 //!   once the terminal is live again.
-//! - A terminal that goes away with uploads running or waiting says so for each ([`Attachments::hand_over`]): one not
-//!   yet sent was not attached, one sent cannot be told.
+//! - A terminal that goes away with uploads running or waiting preserves each outcome ([`Attachments::hand_over`]).
+//!   The next terminal can report them while the session stays open. Leaving the session puts them in the notice
+//!   center so the user learns about the interruption even after the session is gone.
 //!
 //! The terminal's owner ([`super::attached`]) hands a classified paste or a drop to [`Attachments::attach`] and types
 //! each [`Uploaded`] event's path itself, because only it knows which attachment is live when the upload completes.
@@ -40,9 +41,11 @@ mod tests;
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
+use std::rc::Rc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 
 use farhelm_helm_client::{TransferError, Transfers, UploadOutcome};
+use farhelm_proto::ui_channel::SessionRow;
 use gpui::{
     AnyElement, App, ClipboardEntry, ClipboardItem, Context, ElementId, EventEmitter, Global,
     Image, InteractiveElement as _, IntoElement as _, ParentElement as _, SharedString,
@@ -51,6 +54,8 @@ use gpui::{
 
 use crate::components::Role;
 use crate::host_text::{HostSentence, HostText};
+use crate::local_state::{self, LocalState};
+use crate::notices::{self, InterruptedUploads, Notice};
 use crate::session;
 use crate::theme;
 
@@ -350,27 +355,94 @@ impl Uploaded {
     }
 }
 
-/// Upload results left by a retired terminal, kept by session until its next visible terminal takes them.
+/// Upload results left by a retired terminal, keyed by the same session key as the window selection.
 ///
 /// The old app kept a pane's messages on its status element, which outlived the terminal a reconnect or a restart
 /// remounted into it (SPEC.md: an attachment must never disappear silently). Here a terminal goes away whole when its
-/// session is closed, its tab closes or the window's connection resets, so what it showed, and a line for each upload
-/// it cut off, waits here. Its terminal set gives them to the terminal it shows, so an interrupted upload is visible
-/// when the window restores a shell tab. An agent terminal created without a set takes its own session's lines.
+/// session is closed, its tab closes or the window's connection resets. Lines that were already shown wait for that
+/// session's next terminal. An interrupted upload either follows the still-open session to its next terminal or
+/// becomes a notice when the selection moves on. A reset keeps the selection through its disconnected window.
 ///
-/// The lines of a session that is gone go too ([`prune_carried`]), so a deleted session's lines do not stay for the life
-/// of the app: whenever the current UI session's store changes (a new snapshot after a reset included), every
-/// terminal's attachments drop the entries of sessions the store's listing proves gone, by the one evidence rule for
-/// that ([`session::listing_proves_gone`]). A filtered, cut or unavailable listing proves nothing, so their lines wait
-/// for a complete one. With no terminal open nothing watches, and the lines wait for the next terminal, which prunes as
-/// it is made.
+/// A store that proves a session is gone can prune its already-shown lines ([`prune_carried`]). The app-wide
+/// observer owns interrupted entries, so an incomplete or filtered listing cannot hide these uploads.
 #[derive(Default)]
-pub(super) struct Carried(HashMap<String, Vec<HostSentence>>);
+pub(super) struct Carried(HashMap<String, CarriedLines>);
 
 impl Global for Carried {}
 
-/// Drop the carried lines of every session the current UI session's store proves gone. Reads first without writing,
-/// because writing the global notifies its observers.
+/// The already visible failures and the structured interruptions waiting for their first delivery.
+#[derive(Default)]
+struct CarriedLines {
+    lines: Vec<HostSentence>,
+    interrupted: Vec<Interrupted>,
+}
+
+impl CarriedLines {
+    fn is_empty(&self) -> bool {
+        self.lines.is_empty() && self.interrupted.is_empty()
+    }
+}
+
+/// An abandoned upload retains the names as they were offered and how far Farhelm got before retiring its terminal.
+struct Interrupted {
+    name: HostText,
+    title: Option<HostText>,
+    sent: bool,
+}
+
+/// Watch uploads and selection for the app's lifetime, even while the window has no terminals.
+pub(crate) fn install_carried(cx: &mut App) {
+    cx.set_global(Carried::default());
+    cx.observe_global::<Carried>(post_departed_uploads).detach();
+    cx.observe_global::<LocalState>(post_departed_uploads)
+        .detach();
+}
+
+/// Move interruptions from departed sessions to the notice center. The terminal can still take its older strip lines.
+fn post_departed_uploads(cx: &mut App) {
+    let selected = local_state::selected(cx);
+    let Some(carried) = cx.try_global::<Carried>() else {
+        return;
+    };
+    let departed: Vec<_> = carried
+        .0
+        .iter()
+        .filter(|(key, entry)| selected.as_ref() != Some(*key) && !entry.interrupted.is_empty())
+        .map(|(key, _)| key.clone())
+        .collect();
+    if departed.is_empty() {
+        return;
+    }
+    let mut notices_to_post = Vec::new();
+    let carried = cx.global_mut::<Carried>();
+    for key in departed {
+        let Some(entry) = carried.0.get_mut(&key) else {
+            continue;
+        };
+        let (sent, unsent): (Vec<_>, Vec<_>) = std::mem::take(&mut entry.interrupted)
+            .into_iter()
+            .partition(|upload| upload.sent);
+        for (sent, uploads) in [(true, sent), (false, unsent)] {
+            if let Some(first) = uploads.first() {
+                let title = first.title.clone();
+                let files = uploads.into_iter().map(|upload| upload.name).collect();
+                notices_to_post.push(Notice::InterruptedUpload(Rc::new(InterruptedUploads::new(
+                    key.clone(),
+                    title,
+                    files,
+                    sent,
+                ))));
+            }
+        }
+    }
+    carried.0.retain(|_, entry| !entry.is_empty());
+    for notice in notices_to_post {
+        notices::post(notice, cx);
+    }
+}
+
+/// Prune already-shown lines when the current store proves their session gone. Interrupted uploads belong to the
+/// selection observer, even if disappearance in the listing and terminal retirement happen in the same update.
 fn prune_carried(cx: &mut App) {
     let Some(carried) = cx.try_global::<Carried>() else {
         return;
@@ -384,17 +456,22 @@ fn prune_carried(cx: &mut App) {
     let collections = store.read(cx).collections();
     let gone: Vec<String> = carried
         .0
-        .keys()
-        .filter(|key| session::listing_proves_gone(collections, key))
-        .cloned()
+        .iter()
+        .filter(|(key, entry)| {
+            !entry.lines.is_empty() && session::listing_proves_gone(collections, key)
+        })
+        .map(|(key, _)| key.clone())
         .collect();
     if gone.is_empty() {
         return;
     }
     let carried = cx.default_global::<Carried>();
     for key in gone {
-        carried.0.remove(&key);
+        if let Some(entry) = carried.0.get_mut(&key) {
+            entry.lines.clear();
+        }
     }
+    carried.0.retain(|_, entry| !entry.is_empty());
 }
 
 /// The attachments of one terminal: the uploads waiting and the one running, and the lines its strip shows. One per
@@ -424,6 +501,8 @@ pub(crate) struct Attachments {
 struct Queued {
     /// The name it is shown under in every line about it.
     name: HostText,
+    /// Capture this while the row still exists, before a Replace or Delete can remove it.
+    title: Option<HostText>,
     /// The name proposed to the host: the file's own, or the generated one; empty lets the supervisor choose.
     filename: String,
     source: Source,
@@ -432,6 +511,7 @@ struct Queued {
 /// The upload in flight.
 struct Running {
     name: HostText,
+    title: Option<HostText>,
     /// Whether its request was handed to the helm client, after which its outcome is unknown if it is cut off.
     sent: bool,
     /// Dropping it abandons the request.
@@ -471,8 +551,9 @@ impl Attachments {
     ) -> Self {
         let mut carry = vec![cx.on_release(|attachments, cx| attachments.hand_over(cx))];
         if takes_carried {
-            carry
-                .push(cx.observe_global::<Carried>(|attachments, cx| attachments.take_carried(cx)));
+            carry.push(cx.observe_global::<Carried>(|attachments, cx| {
+                attachments.take_carried(true, cx);
+            }));
         }
         let prune = session::observe_current(cx, |_: &mut Self, cx| prune_carried(cx));
         prune_carried(cx);
@@ -488,7 +569,7 @@ impl Attachments {
             _prune: prune,
         };
         if takes_carried {
-            attachments.take_carried(cx);
+            attachments.take_carried(true, cx);
         }
         attachments
     }
@@ -501,6 +582,13 @@ impl Attachments {
             return;
         }
         self.lines.clear();
+        let title = session::current_store(cx).and_then(|store| {
+            store
+                .read(cx)
+                .collections()
+                .get::<SessionRow>(&self.session)
+                .map(|row| HostText::from_host(row.info.title.as_str()))
+        });
         for offered in offered {
             let queued = match offered {
                 Offered::File(path) => {
@@ -515,6 +603,7 @@ impl Attachments {
                     };
                     Queued {
                         name: HostText::from_host(shown),
+                        title: title.clone(),
                         filename,
                         source: Source::File(path),
                     }
@@ -528,6 +617,7 @@ impl Attachments {
                     );
                     Queued {
                         name: HostText::from_host(filename.clone()),
+                        title: title.clone(),
                         filename,
                         source: Source::Bytes(image.bytes),
                     }
@@ -572,6 +662,7 @@ impl Attachments {
         let (session, transfers) = (self.session.clone(), self.transfers.clone());
         let Queued {
             name,
+            title,
             filename,
             source,
         } = queued;
@@ -609,6 +700,7 @@ impl Attachments {
         });
         self.running = Some(Running {
             name: shown,
+            title,
             sent: false,
             _task: task,
         });
@@ -659,49 +751,75 @@ impl Attachments {
     }
 
     /// The terminal is going away (retired with its window's connection, or dropped): stop the running upload, which
-    /// abandons its request, and leave what the strip showed, with a line for the running and every waiting upload,
-    /// for the next shown terminal to show ([`Carried`]). The refusal stays behind: it was about this terminal.
+    /// abandons its request, and leave the original upload facts for the still-open terminal or the notice center.
+    /// Already-shown failures wait for the session's next terminal. A refusal was specific to this terminal.
     /// Once only; nothing starts afterwards.
     pub(crate) fn hand_over(&mut self, cx: &mut App) {
         if std::mem::replace(&mut self.retired, true) {
             return;
         }
-        let mut left: Vec<HostSentence> = self
+        let lines: Vec<HostSentence> = self
             .lines
             .drain(..)
             .filter(|line| !line.refusal)
             .map(|line| line.sentence)
             .collect();
-        if let Some(running) = self.running.take() {
-            left.push(interrupted_line(&running.name, running.sent));
-        }
-        left.extend(
-            self.queue
-                .drain(..)
-                .map(|queued| interrupted_line(&queued.name, false)),
-        );
-        if !left.is_empty() {
+        let interrupted: Vec<_> = self
+            .running
+            .take()
+            .map(|running| Interrupted {
+                name: running.name,
+                title: running.title,
+                sent: running.sent,
+            })
+            .into_iter()
+            .chain(self.queue.drain(..).map(|queued| Interrupted {
+                name: queued.name,
+                title: queued.title,
+                sent: false,
+            }))
+            .collect();
+        if !lines.is_empty() || !interrupted.is_empty() {
             let carried = cx.default_global::<Carried>();
-            carried
-                .0
-                .entry(self.session.clone())
-                .or_default()
-                .extend(left);
+            let entry = carried.0.entry(self.session.clone()).or_default();
+            entry.lines.extend(lines);
+            entry.interrupted.extend(interrupted);
         }
     }
 
-    /// Take only this session's pending lines. The owner calls this once it knows which terminal will show them.
-    /// Read first because updating the global notifies its observers.
-    pub(super) fn take_carried(&mut self, cx: &mut Context<Self>) {
+    /// Take this terminal's session's old strip lines. Only a visible terminal of the current selection can
+    /// report an interruption for the first time. Read first because updating the global notifies its observers.
+    pub(super) fn take_carried(&mut self, shown: bool, cx: &mut Context<Self>) {
+        let can_report =
+            shown && local_state::selected(cx).as_deref() == Some(self.session.as_str());
         let waiting = cx
             .try_global::<Carried>()
-            .is_some_and(|carried| carried.0.contains_key(&self.session));
+            .and_then(|carried| carried.0.get(&self.session))
+            .is_some_and(|entry| {
+                !entry.lines.is_empty() || (can_report && !entry.interrupted.is_empty())
+            });
         if self.retired || !waiting {
             return;
         }
-        let taken = cx.default_global::<Carried>().0.remove(&self.session);
-        for sentence in taken.into_iter().flatten() {
+        let carried = cx.default_global::<Carried>();
+        let Some(entry) = carried.0.get_mut(&self.session) else {
+            return;
+        };
+        let lines = std::mem::take(&mut entry.lines);
+        // A retiring or hidden terminal must leave the facts for the notice center or a visible replacement.
+        let interrupted = if can_report {
+            std::mem::take(&mut entry.interrupted)
+        } else {
+            Vec::new()
+        };
+        if entry.is_empty() {
+            carried.0.remove(&self.session);
+        }
+        for sentence in lines {
             self.push(sentence);
+        }
+        for upload in interrupted {
+            self.push(interrupted_line(&upload.name, upload.sent));
         }
         cx.notify();
     }

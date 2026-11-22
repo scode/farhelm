@@ -909,9 +909,10 @@ islands.
   `a_missing_tab_falls_back_to_agent_without_erasing_the_choice`, and
   `tabs_past_the_bound_are_listed_but_not_attached`). Pane test `a_reset_restores_the_chosen_tab_on_its_new_stream`
   checks the same focus and input path after a helm reconnect.
-- Set test `a_restored_tab_shows_the_upload_notice_left_by_its_old_view` checks an upload interrupted by switching away.
-  The quick switcher tests `a_hidden_picks_first_row_restores_the_remembered_tab` and
-  `a_hidden_picks_late_row_keeps_agent_after_the_user_types` cover a pick whose row arrives after the pane opens.
+- Set test `an_interrupted_upload_is_reported_once_across_a_tab_restore` checks that switching away reports the
+  interrupted upload in a banner and restoring the tab adds no strip line for it. The quick switcher tests
+  `a_hidden_picks_first_row_restores_the_remembered_tab` and `a_hidden_picks_late_row_keeps_agent_after_the_user_types`
+  cover a pick whose row arrives after the pane opens.
 - "closing a tab confirms in-page, then kills its shell and drops it from the session" by
   `closing_a_tab_asks_first_then_sends_one_delete` and e2e terminal_tabs.rs
   `closing_a_tab_kills_its_shell_and_daemonized_child_and_nothing_else`.

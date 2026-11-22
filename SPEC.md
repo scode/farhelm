@@ -3623,9 +3623,10 @@ path; the window never needs to reach any machine but the helm's.
 Transfer must not block the terminal: you can keep typing while it runs, and the path is inserted at whatever cursor
 position is current when the transfer completes. For a typical screenshot this is imperceptible.
 
-Upload failures must be visible; an attachment must never disappear silently. Confirmed 2026-10-10: that covers
-Farhelm's own failures and crashes. Whether an attachment survives a power loss or system crash right after its upload
-completed is best effort.
+Upload failures must be visible; an attachment must never disappear silently. An upload cut off by leaving its session
+is reported in a notice naming the file and the session, when its title is available, that stays until dismissed.
+Confirmed 2026-10-10: the failure guarantee covers Farhelm's own failures and crashes. Whether an attachment survives a
+power loss or system crash right after its upload completed is best effort.
 
 ## Keyboard focus
 

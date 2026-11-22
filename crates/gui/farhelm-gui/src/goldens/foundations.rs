@@ -2,6 +2,8 @@
 //! overlays, the focus ring, the prompt and host-supplied text. The scene list itself, `SCENES` with each scene's name
 //! and size, stays in `mod.rs`.
 
+use std::rc::Rc;
+
 use crate::assets::Icon;
 use crate::components::{
     Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, OptionRow, RadioGroup,
@@ -12,7 +14,7 @@ use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
 use crate::hosts::identity::host_mark;
 use crate::layers::{self, Anchor, Popover};
-use crate::notices::Notice;
+use crate::notices::{InterruptedUploads, Notice};
 use crate::prompt::{self, Answer, Question};
 use crate::theme;
 use crate::ticker;
@@ -915,6 +917,43 @@ pub(super) fn notice_banner(_: &SceneState, _: &mut Window, _: &mut App) -> AnyE
     div()
         .w_full()
         .child(crate::main_view::banner(Notice::ConnectionLost))
+        .into_any_element()
+}
+
+/// The two outcomes shown together when a session closes with a sent upload and several more waiting. The labels
+/// mix app words with the original names, including the summary of files beyond the three named.
+pub(super) fn interrupted_upload_notices(
+    _: &SceneState,
+    _: &mut Window,
+    _: &mut App,
+) -> AnyElement {
+    let notice = |sent, names: &[&str]| {
+        let files = names
+            .iter()
+            .map(|name| HostText::from_host(*name))
+            .collect();
+        crate::main_view::banner(Notice::InterruptedUpload(Rc::new(InterruptedUploads::new(
+            "release".into(),
+            Some(HostText::from_host("Review the release")),
+            files,
+            sent,
+        ))))
+    };
+    div()
+        .w_full()
+        .flex()
+        .flex_col()
+        .child(notice(true, &["build-log.txt"]))
+        .child(notice(
+            false,
+            &[
+                "overview.png",
+                "metrics.csv",
+                "notes.md",
+                "query.sql",
+                "trace.json",
+            ],
+        ))
         .into_any_element()
 }
 

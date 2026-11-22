@@ -616,19 +616,18 @@ impl TerminalSet {
         cx.notify();
     }
 
-    /// Deliver old upload results to the terminal that can show them. If the first row is still pending, wait for it
-    /// to settle the restore so the messages do not land in a terminal the view is about to hide.
+    /// Deliver old upload results once the first row settles the restored tab. A tab past the attach limit has no
+    /// visible strip. The hidden Agent can still keep failures already shown, while interruptions wait for a
+    /// visible terminal or a departure.
     fn take_carried(&mut self, cx: &mut Context<Self>) {
         if self.restore.is_some() {
             return;
         }
-        let attachments = self
-            .shown()
-            .unwrap_or(&self.agent)
-            .read(cx)
-            .attachments()
-            .clone();
-        attachments.update(cx, |attachments, cx| attachments.take_carried(cx));
+        let shown = self.shown();
+        let attachments = shown.unwrap_or(&self.agent).read(cx).attachments().clone();
+        attachments.update(cx, |attachments, cx| {
+            attachments.take_carried(shown.is_some(), cx)
+        });
     }
 
     /// The shown terminal `shown` measured its pane, as it does after every frame it is drawn in: fit every other
