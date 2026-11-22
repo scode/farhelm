@@ -21,7 +21,8 @@ use tracing::warn;
 const PROBE_TIMEOUT: Duration = Duration::from_secs(15);
 pub(super) const COMMAND_TIMEOUT: Duration = Duration::from_secs(30);
 /// The uninstall stop step's bound: [`COMMAND_TIMEOUT`] for its systemd and
-/// cleanup commands, plus the time this build's
+/// cleanup commands (on a Mac, including the up to about 16-second wait for
+/// launchd to drop the booted-out job), plus the time this build's
 /// `farhelm internal stop-terminal-hosts` takes at most between them, and ten
 /// seconds for starting that program and its runtime on a loaded host. The
 /// remote `farhelm` may come from another release, whose bound is not part of

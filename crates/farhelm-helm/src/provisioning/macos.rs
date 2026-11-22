@@ -86,6 +86,11 @@ pub(super) fn start_script(
     absolute_path(plist)?;
     let mut script = job_inspection_script(domain, label)?;
     script.push_str(&format!("expected={}\n", shell_path(plist)?));
+    // Only Update may unload the job, so an ordinary start never even defines
+    // the function that would.
+    if refresh {
+        script.push_str(BOOTOUT_JOB_SH);
+    }
     script.push_str(
         r#"if [ "$active" = active ]; then
     loaded=$(readlink -f -- "$fragment") || exit 1
@@ -98,9 +103,7 @@ pub(super) fn start_script(
     );
     if refresh {
         script.push_str(
-            r#"    launchctl bootout "$job_target" || exit 1
-    inspect_job || exit 1
-    [ "$active" = inactive ] || { printf '%s\n' "launchd job $job_target is still loaded" >&2; exit 1; }
+            r#"    bootout_job || exit 1
 else
     :
 fi
@@ -122,6 +125,8 @@ fi
 /// Remove the exact job, then confirm every terminal host stopped before cleanup.
 ///
 /// The caller has already removed the plist and checked uninstall authority.
+/// Terminal hosts are stopped only once launchd no longer lists the job
+/// ([`BOOTOUT_JOB_SH`]), which is after the supervisor process has exited.
 /// Bootout alone deliberately preserves children; the installed command's exit
 /// status 0 is the stable proof for hosts. Only leftover socket files are removed
 /// afterwards. A retry after lib removal succeeds only if `hosts` is absent;
@@ -142,11 +147,10 @@ pub(super) fn stop_script(
         shell_path(state_dir)?,
         farhelm_supervisor::hosts::HOSTS_DIR_NAME,
     ));
+    script.push_str(BOOTOUT_JOB_SH);
     script.push_str(
         r#"if [ "$active" = active ]; then
-    launchctl bootout "$job_target" || exit 1
-    inspect_job || exit 1
-    [ "$active" = inactive ] || { printf '%s\n' "launchd job $job_target is still loaded" >&2; exit 1; }
+    bootout_job || exit 1
     changed=yes
 fi
 if inspection=$(/usr/bin/stat -f '%HT' "$hosts" 2>&1); then
@@ -258,6 +262,44 @@ EOF_JOB
             return 1
         fi
     fi
+}
+"#;
+
+/// Unload the inspected job and wait until launchd no longer lists it.
+///
+/// `launchctl bootout` does not wait for the job to go away. It sends SIGTERM
+/// and returns within milliseconds, and launchd keeps listing the job (as
+/// `state = SIGTERMed`) for a while after. Measured over SSH on macOS 26 and
+/// 27 with a throwaway job, the job was still listed right after a successful
+/// bootout in every probe, even when its process exited at once on SIGTERM,
+/// and was gone 0.2 to 2.6 seconds later. A single check right after bootout
+/// therefore failed the uninstall of a running supervisor on its first try;
+/// Update runs the same sequence and was not observed separately.
+///
+/// launchd SIGKILLs a process that ignores SIGTERM about five seconds after
+/// bootout (measured on macOS 26 and 27), and the job disappears then, so the
+/// wait allows 75 polls 0.2 seconds apart: about three times that. A poll cost
+/// under 10 ms in the same measurements, so the whole wait stays near 16
+/// seconds, inside the callers' 30-second command bound. A job still listed
+/// after that, or an inspection failure on any poll, fails the step as before.
+/// A retry then finds the job gone or boots it out again: a second bootout of
+/// a job launchd is still removing returned 0 in the same probes.
+///
+/// Requires the inspection fragment ([`job_inspection_script`]) earlier in
+/// the same script, since it reuses `inspect_job`, `job_target` and `active`.
+const BOOTOUT_JOB_SH: &str = r#"bootout_job() {
+    launchctl bootout "$job_target" || return 1
+    polls=0
+    while :; do
+        inspect_job || return 1
+        [ "$active" = active ] || return 0
+        polls=$((polls + 1))
+        if [ "$polls" -ge 75 ]; then
+            printf '%s\n' "launchd job $job_target is still loaded after 75 checks over 15 seconds since bootout" >&2
+            return 1
+        fi
+        sleep 0.2
+    done
 }
 "#;
 
@@ -458,11 +500,241 @@ mod tests {
         )
         .unwrap();
         let compare = script.find("[ \"$loaded\" != \"$planned\" ]").unwrap();
-        let bootout = script.find("launchctl bootout").unwrap();
+        let bootout = script.find("bootout_job || exit 1").unwrap();
         let bootstrap = script.find("launchctl bootstrap").unwrap();
         assert!(compare < bootout && bootout < bootstrap);
         assert!(!script.contains("kill "));
         assert!(!script.contains("launchctl disable"));
+        let start = start_script(
+            "user/501",
+            "io.farhelm.test",
+            Path::new("/owned/job.plist"),
+            false,
+        )
+        .unwrap();
+        assert!(
+            !start.contains("bootout"),
+            "an ordinary start must never unload the running job"
+        );
+    }
+
+    /// Install a `launchctl` that keeps listing the job, as `state =
+    /// SIGTERMed`, for `lingering` prints after bootout, then reports it
+    /// missing with launchd's real status and diagnostic. This is what real
+    /// launchd does: bootout returns before the job is gone (measured on
+    /// macOS 26 and 27). `lingering = None` models a job that never goes away.
+    /// `sleep` is stubbed so the 15-second wait costs nothing; every call is
+    /// still logged, which lets tests count polls.
+    fn lingering_launchctl(fixture: &ShellFixture, lingering: Option<u32>) {
+        let state = fixture.directory.path().join("job-state");
+        fs::write(&state, "loaded").unwrap();
+        let limit = lingering.map_or_else(|| "never".to_owned(), |n| n.to_string());
+        fixture.tool(
+            "launchctl",
+            &format!(
+                r#"state={state}
+case "$1 $2" in
+    'print user/501') exit 0 ;;
+    'print user/501/io.farhelm.test')
+        case "$(cat "$state")" in
+            loaded) printf 'job = {{\n\tpath = /owned/job.plist\n\tstate = running\n}}\n' ;;
+            'lingering never'|'lingering '[1-9]*)
+                left=$(cut -d' ' -f2 "$state")
+                [ "$left" = never ] || echo "lingering $((left - 1))" > "$state"
+                printf 'job = {{\n\tpath = /owned/job.plist\n\tstate = SIGTERMed\n}}\n' ;;
+            *)
+                echo gone > "$state"
+                printf '%s\n' 'Bad request.' 'Could not find service "io.farhelm.test" in domain for uid: 501' >&2
+                exit 113 ;;
+        esac ;;
+    'bootout user/501/io.farhelm.test') echo 'lingering {limit}' > "$state" ;;
+    'bootstrap user/501') [ "$(cat "$state")" = gone ] || exit 90 ;;
+    *) exit 92 ;;
+esac"#,
+                state = shell_path(&state).unwrap(),
+            ),
+        );
+        fixture.tool("sleep", ":");
+    }
+
+    /// Update of a running Mac runs the same bootout as the uninstall that
+    /// failed with "still loaded": bootout returns while launchd still lists
+    /// the job, so refresh must keep inspecting and bootstrap only once the
+    /// job is reported missing.
+    #[test]
+    fn refresh_waits_for_a_booted_out_job_to_disappear_before_bootstrap() {
+        let fixture = ShellFixture::new();
+        lingering_launchctl(&fixture, Some(3));
+        fixture.tool("readlink", "printf '%s\\n' \"$3\"");
+        let result = fixture.run(
+            &start_script(
+                "user/501",
+                "io.farhelm.test",
+                Path::new("/owned/job.plist"),
+                true,
+            )
+            .unwrap(),
+        );
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        let commands = fixture.commands();
+        assert_eq!(commands.matches("sleep 0.2").count(), 3, "{commands}");
+        assert!(
+            commands.ends_with(
+                "launchctl print user/501/io.farhelm.test\nlaunchctl bootstrap user/501 /owned/job.plist\n"
+            ),
+            "{commands}"
+        );
+    }
+
+    /// Regression for the Mac uninstall step failing with "still loaded" on
+    /// its first try: the stop must wait out a job launchd still lists after
+    /// bootout and only then stop terminal hosts. The host-stop stub refuses
+    /// unless launchd already reports the job missing, so a stop that ran
+    /// early fails the test rather than passing on order of log lines alone.
+    #[test]
+    fn stop_waits_for_a_booted_out_job_to_disappear_before_stopping_hosts() {
+        let fixture = ShellFixture::new();
+        lingering_launchctl(&fixture, Some(2));
+        fixture.tool("native-stat", "printf '%s\\n' Directory");
+        fixture.tool(
+            "farhelm",
+            &format!(
+                "[ \"$(cat {})\" = gone ] || exit 93",
+                shell_path(&fixture.directory.path().join("job-state")).unwrap()
+            ),
+        );
+        fixture.tool("find", ":");
+        fixture.tool("rmdir", ":");
+        let result = fixture.run(
+            &stop_script(
+                "user/501",
+                "io.farhelm.test",
+                &fixture.directory.path().join("farhelm"),
+                Path::new("/owned/state"),
+            )
+            .unwrap(),
+        );
+        assert!(
+            result.status.success(),
+            "{}",
+            String::from_utf8_lossy(&result.stderr)
+        );
+        // A job that was there is a change, never `absent`.
+        assert!(result.stdout.is_empty());
+        let commands = fixture.commands();
+        assert_eq!(commands.matches("sleep 0.2").count(), 2, "{commands}");
+        assert_eq!(commands.matches("launchctl bootout").count(), 1);
+        let last_print = commands
+            .rfind("launchctl print user/501/io.farhelm.test")
+            .unwrap();
+        let host_stop = commands
+            .find("farhelm internal stop-terminal-hosts")
+            .expect("the terminal hosts were never stopped");
+        assert!(last_print < host_stop, "{commands}");
+    }
+
+    /// An inspection failure while waiting fails the step at once: a launchd
+    /// domain that stops answering is not evidence the job is gone, so
+    /// neither script may go on to bootstrap or stop terminal hosts.
+    #[test]
+    fn an_inspection_failure_while_waiting_fails_without_continuing() {
+        for refresh in [false, true] {
+            let fixture = ShellFixture::new();
+            let booted = fixture.directory.path().join("booted");
+            fixture.tool(
+                "launchctl",
+                &format!(
+                    r#"booted={}
+case "$1 $2" in
+    'print user/501')
+        [ ! -e "$booted" ] || {{ printf '%s\n' 'domain unavailable' >&2; exit 5; }} ;;
+    'print user/501/io.farhelm.test') printf 'job = {{\n\tpath = /owned/job.plist\n}}\n' ;;
+    'bootout user/501/io.farhelm.test') : > "$booted" ;;
+    *) exit 92 ;;
+esac"#,
+                    shell_path(&booted).unwrap()
+                ),
+            );
+            fixture.tool("sleep", ":");
+            fixture.tool("readlink", "printf '%s\\n' \"$3\"");
+            fixture.tool("native-stat", "exit 99");
+            let script = if refresh {
+                start_script(
+                    "user/501",
+                    "io.farhelm.test",
+                    Path::new("/owned/job.plist"),
+                    true,
+                )
+            } else {
+                stop_script(
+                    "user/501",
+                    "io.farhelm.test",
+                    Path::new("/owned/lib/farhelm"),
+                    Path::new("/owned/state"),
+                )
+            }
+            .unwrap();
+            let result = fixture.run(&script);
+            assert_eq!(result.status.code(), Some(1), "refresh={refresh}");
+            assert!(
+                String::from_utf8_lossy(&result.stderr).contains("domain unavailable"),
+                "refresh={refresh}"
+            );
+            let commands = fixture.commands();
+            assert!(booted.exists(), "refresh={refresh}: bootout never ran");
+            assert!(!commands.contains("sleep"), "refresh={refresh}");
+            assert!(!commands.contains("bootstrap"), "refresh={refresh}");
+            assert!(!commands.contains("native-stat"), "refresh={refresh}");
+        }
+    }
+
+    /// The wait is bounded: a job launchd keeps listing fails the step with a
+    /// diagnostic naming the bound, after exactly 75 polls, and nothing after
+    /// bootout (terminal hosts, bootstrap) runs.
+    #[test]
+    fn a_job_that_never_disappears_fails_after_the_bounded_wait() {
+        for refresh in [false, true] {
+            let fixture = ShellFixture::new();
+            lingering_launchctl(&fixture, None);
+            fixture.tool("readlink", "printf '%s\\n' \"$3\"");
+            fixture.tool("native-stat", "exit 99");
+            let script = if refresh {
+                start_script(
+                    "user/501",
+                    "io.farhelm.test",
+                    Path::new("/owned/job.plist"),
+                    true,
+                )
+            } else {
+                stop_script(
+                    "user/501",
+                    "io.farhelm.test",
+                    Path::new("/owned/lib/farhelm"),
+                    Path::new("/owned/state"),
+                )
+            }
+            .unwrap();
+            let result = fixture.run(&script);
+            assert_eq!(result.status.code(), Some(1), "refresh={refresh}");
+            assert!(
+                String::from_utf8_lossy(&result.stderr)
+                    .contains("is still loaded after 75 checks over 15 seconds"),
+                "refresh={refresh}: {}",
+                String::from_utf8_lossy(&result.stderr)
+            );
+            let commands = fixture.commands();
+            assert_eq!(
+                commands.matches("sleep 0.2").count(),
+                74,
+                "refresh={refresh}"
+            );
+            assert!(!commands.contains("bootstrap"), "refresh={refresh}");
+            assert!(!commands.contains("native-stat"), "refresh={refresh}");
+        }
     }
 
     /// A failed print is absence only for the measured status and diagnostic.
