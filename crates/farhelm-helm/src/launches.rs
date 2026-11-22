@@ -714,12 +714,12 @@ pub(crate) fn workspace_trust_enabled(
     config: &crate::checkout_config::ResolvedCheckoutConfig,
 ) -> bool {
     match harness {
+        LaunchHarness::Claude => config.claude_trust,
         LaunchHarness::Codex => config.codex_trust,
         LaunchHarness::Muse => config.muse_trust,
         LaunchHarness::Pi => config.pi_trust,
         LaunchHarness::Antigravity => config.antigravity_trust,
-        LaunchHarness::Claude
-        | LaunchHarness::Cursor
+        LaunchHarness::Cursor
         | LaunchHarness::Grok
         | LaunchHarness::Goose
         | LaunchHarness::OpenCode
@@ -734,9 +734,10 @@ pub(crate) fn workspace_trust_enabled(
 #[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) fn workspace_trust_pins_approval_cwd(harness: LaunchHarness) -> bool {
     match harness {
-        LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => true,
+        LaunchHarness::Claude | LaunchHarness::Codex | LaunchHarness::Muse | LaunchHarness::Pi => {
+            true
+        }
         LaunchHarness::Antigravity
-        | LaunchHarness::Claude
         | LaunchHarness::Cursor
         | LaunchHarness::Goose
         | LaunchHarness::Grok
@@ -2734,6 +2735,8 @@ mod tests {
     #[test]
     fn workspace_trust_compiles_only_for_supported_harnesses() {
         for (harness, trust, expected_flag) in [
+            (LaunchHarness::Claude, Some(true), None),
+            (LaunchHarness::Claude, Some(false), None),
             (LaunchHarness::Codex, Some(true), None),
             (LaunchHarness::Codex, Some(false), None),
             (LaunchHarness::Muse, Some(true), Some("--trust-workspace")),
@@ -2759,6 +2762,12 @@ mod tests {
                 expected_flag.into_iter().collect::<Vec<_>>()
             );
             assert_eq!(compiled.selection.workspace_trust, trust);
+            if harness == LaunchHarness::Claude {
+                assert_eq!(
+                    compiled.invocation,
+                    compile(selection(harness)).unwrap().invocation
+                );
+            }
             if harness == LaunchHarness::Codex {
                 assert_eq!(argv[0], "codex");
                 assert_eq!(&argv[1..5], ["-a", "on-request", "-s", "workspace-write"]);
@@ -2774,7 +2783,7 @@ mod tests {
             }
             assert_eq!(compiled.selection.permissions, harness.omitted_permission());
         }
-        for harness in [LaunchHarness::Claude, LaunchHarness::Goose] {
+        for harness in [LaunchHarness::Cursor, LaunchHarness::Goose] {
             let mut choice = selection(harness);
             choice.model = Some("z-ai/glm-5.3".into());
             choice.workspace_trust = Some(true);

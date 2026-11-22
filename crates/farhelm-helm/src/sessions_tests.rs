@@ -6557,13 +6557,16 @@ enum TrustComposeSurface {
 /// Exercise the real routes with an ordinary directory. The peer expects the
 /// mutation first to catch a reintroduced ownership lookup. Both the reusable
 /// launch and named start carry the trust choice from Settings.
-async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
+async fn assert_workspace_trust_dispatch(
+    surface: TrustComposeSurface,
+    harness_kind: farhelm_proto::LaunchHarness,
+) {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
-    use farhelm_proto::{ControlMsg, LaunchHarness, LaunchPermission, LaunchSelection};
+    use farhelm_proto::{ControlMsg, LaunchPermission, LaunchSelection};
 
     for enabled in [false, true] {
         let selection = LaunchSelection {
-            harness: LaunchHarness::Codex,
+            harness: harness_kind,
             model: None,
             effort: None,
             permissions: Some(LaunchPermission::Guarded),
@@ -6582,7 +6585,7 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
         source.cwd = "/source".into();
         source.launch = crate::launches::compile(selection.clone()).unwrap();
         source.invocation = source.launch.display_command();
-        source.agent_kind = farhelm_proto::AgentKind::Codex;
+        source.agent_kind = harness_kind.agent_kind();
         source.restart_offer = farhelm_proto::RestartOffer::Resume;
         assert!(
             source.working_copy.is_none(),
@@ -6681,16 +6684,14 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
         harness.await_refreshed(local).await;
         harness
             .store
-            .set_agent_trust(LaunchHarness::Codex, enabled)
+            .set_agent_trust(harness_kind, enabled)
             .await
             .unwrap();
         assert_eq!(
-            harness
-                .store
-                .resolve_checkout_config(None)
-                .await
-                .unwrap()
-                .codex_trust,
+            crate::launches::workspace_trust_enabled(
+                harness_kind,
+                &harness.store.resolve_checkout_config(None).await.unwrap()
+            ),
             enabled
         );
         let live = harness.manager.status(local).unwrap();
@@ -6725,21 +6726,48 @@ async fn assert_codex_trust_dispatch(surface: TrustComposeSurface) {
 /// A legacy client's contrary choice cannot override the switch.
 #[farhelm_testtrace::test]
 async fn create_normalizes_workspace_trust_at_destination_dispatch() {
-    assert_codex_trust_dispatch(TrustComposeSurface::Create).await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::Create,
+        farhelm_proto::LaunchHarness::Codex,
+    )
+    .await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::Create,
+        farhelm_proto::LaunchHarness::Claude,
+    )
+    .await;
 }
 
 /// Restart with composes fresh choices for the source's fixed folder.
 /// The setting applies even though the source has no managed checkout.
 #[farhelm_testtrace::test]
 async fn restart_with_normalizes_workspace_trust_before_named_resume() {
-    assert_codex_trust_dispatch(TrustComposeSurface::RestartWith).await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::RestartWith,
+        farhelm_proto::LaunchHarness::Codex,
+    )
+    .await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::RestartWith,
+        farhelm_proto::LaunchHarness::Claude,
+    )
+    .await;
 }
 
 /// Replace with applies the current setting to the new directory. Source
 /// deletion still follows successful admission of the replacement.
 #[farhelm_testtrace::test]
 async fn replace_with_normalizes_workspace_trust_before_create_and_delete() {
-    assert_codex_trust_dispatch(TrustComposeSurface::ReplaceWith).await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::ReplaceWith,
+        farhelm_proto::LaunchHarness::Codex,
+    )
+    .await;
+    assert_workspace_trust_dispatch(
+        TrustComposeSurface::ReplaceWith,
+        farhelm_proto::LaunchHarness::Claude,
+    )
+    .await;
 }
 
 /// POST a JSON body to `uri` through the router, returning the status, the

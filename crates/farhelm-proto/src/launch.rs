@@ -7,8 +7,8 @@
 //! OpenCode model still has to use its supported Zen provider. The supervisor
 //! later stores the same value beside the resolved argv so clone and history
 //! can preserve the launch without parsing a command line back into intent.
-//! Workspace trust is supplied by the helm from Settings and destination
-//! ownership for new compositions; old stored values remain reproducible.
+//! The helm supplies workspace trust from Settings on new compositions.
+//! Saved launches keep their choice for plain Restart and Replace.
 
 use std::borrow::Cow;
 
@@ -212,21 +212,20 @@ impl LaunchHarness {
         }
     }
 
-    /// Whether this harness has a per-run workspace-trust argv mapping
-    /// ([`LaunchSelection::workspace_trust`]). Settings supplies this value
-    /// for new compositions within the harness's configured scope. The mapping remains
-    /// available when reproducing an older stored launch exactly.
+    /// Whether a structured launch can carry a workspace-trust choice.
+    /// Settings supplies it for new compositions. A saved launch carries
+    /// the choice used by plain Restart and Replace.
     ///
     /// Exhaustive, like every per-harness capability here, so a new harness
     /// is a compile error until it answers.
     pub const fn offers_workspace_trust(self) -> bool {
         match self {
-            LaunchHarness::Codex
+            LaunchHarness::Claude
+            | LaunchHarness::Codex
             | LaunchHarness::Muse
             | LaunchHarness::Pi
             | LaunchHarness::Antigravity => true,
             LaunchHarness::Cursor
-            | LaunchHarness::Claude
             | LaunchHarness::Goose
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
@@ -681,7 +680,7 @@ pub struct LaunchSelection {
     ///
     /// This is separate from tool approval and from Farhelm's hook-trust
     /// bypass. New requests carry no authority in this field: the helm
-    /// overwrites it from Settings and managed-checkout ownership. Stored
+    /// overwrites it from Settings. Stored
     /// values, including false, remain meaningful for exact Restart/Replace
     /// and compiler reproduction. Older selections lack the field and retain the vendor's
     /// ordinary startup behavior. An unset value stays absent in serialized

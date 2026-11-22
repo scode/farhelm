@@ -53,17 +53,17 @@ const CAUTION_GAP: f32 = 8.;
 pub(super) const CAUTION_ID: &str = "settings-claude-trust-caution";
 pub(super) const CAUTION_TITLE: &str = "How this works, and why it's off by default";
 pub(super) const CAUTION: [&str; 3] = [
-    "Claude has no supported way to do this. Farhelm edits Claude's own settings file directly \
-     (normally ~/.claude.json on the session's host), copying how Claude writes it. That file also \
-     holds sign-in, settings and per-folder state. Farhelm changes only the folder's trust key and \
-     replaces the file in one step, so it is never left half-written.",
+    "Claude has no supported way to do this. Farhelm edits the settings file selected by the login shell \
+     (normally ~/.claude.json on the session's host), which also holds sign-in and per-folder state. \
+     Farhelm replaces the file in one step, changing only the folder's trust key. A wrapper can start Claude \
+     with a different file, in which case Claude may still ask.",
     "A Claude session exiting at the same instant can rarely undo Farhelm's edit or lose one of its \
      own updates. Any Claude update can change the file or its locking without notice: the edit may \
      stop working, so Claude asks again, or collide with Claude's writes. Farhelm cannot detect every \
      such change. This is best effort; Farhelm cannot promise it stays safe across Claude versions.",
-    "As when you answer Yes yourself, the repository's Claude hooks and commands then run without \
-     Claude's warning. When Farhelm archives the checkout, it removes that folder's trust key again, \
-     also best effort.",
+    "The repository's Claude hooks and commands can run, as when you answer Yes. In a folder you choose, \
+     the trust entry stays after the session ends. For checkouts Farhelm cloned with the switch on, \
+     Farhelm makes a best-effort removal when it archives the checkout.",
 ];
 
 /// An agent with a workspace trust switch: the GUI's per-agent trust vocabulary. Everything the section and the
@@ -175,7 +175,7 @@ impl TrustAgent {
     /// question (the old `choice_label`).
     pub(super) fn label(self) -> &'static str {
         match self {
-            TrustAgent::Claude => "Answer Claude's \"trust this folder?\" for new checkouts",
+            TrustAgent::Claude => "Answer Claude's \"trust this folder?\"",
             TrustAgent::Codex => "Answer Codex's folder-trust question",
             TrustAgent::Muse => "Answer Muse's workspace-trust question",
             TrustAgent::Pi => "Approve Pi project resources",
@@ -187,8 +187,7 @@ impl TrustAgent {
     pub(super) fn tooltip(self) -> &'static str {
         match self {
             TrustAgent::Claude => {
-                "Mark each new managed checkout trusted in Claude's own settings file before the agent starts; see the \
-                 caveats below"
+                "Mark the folder trusted in Claude's own settings file before the agent starts. See the caveats below."
             }
             TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
                 self.mechanism()
@@ -201,10 +200,10 @@ impl TrustAgent {
     fn mechanism(self) -> &'static str {
         match self {
             TrustAgent::Claude => {
-                "For folders Farhelm clones, including agent-requested checkouts, Farhelm marks the folder trusted \
-                 before the agent starts. Folders you choose yourself still get Claude's question. On a remote host, \
-                 the edit is made to that host's own Claude settings. Changes apply to future checkouts, whatever \
-                 agent they start with."
+                "Before Claude starts, Farhelm marks the folder trusted in Claude's settings file on the session's \
+                 host. This applies in folders you choose and in managed checkouts, including launches an agent requests. \
+                 It also applies to a checkout Farhelm clones for another agent. New, Clone, Restart with and \
+                 Replace with use this setting. Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {
                 "In folders you choose and in managed checkouts, Farhelm passes a trust option to Codex for that \
@@ -309,16 +308,6 @@ impl TrustAgent {
         }
     }
 
-    /// Whether the discovery hint applies only to folders Farhelm checked out.
-    pub(crate) fn managed_checkouts_only(self) -> bool {
-        match self {
-            TrustAgent::Claude => true,
-            TrustAgent::Codex | TrustAgent::Muse | TrustAgent::Pi | TrustAgent::Antigravity => {
-                false
-            }
-        }
-    }
-
     /// The trust hint band's words for the agent, `None` for an agent without a hint (Pi). Claude's are the old
     /// `ClaudeTrustBand`'s (`claude_trust.rs`), which point at the caveats of editing Claude's own file; Codex's and
     /// Muse's are the old `AgentTrustBand`'s (`workspace_trust.rs`), whose mechanism is a command-line flag, both at
@@ -329,12 +318,11 @@ impl TrustAgent {
                             default because repository hooks, settings and commands are then trusted.";
         match self {
             TrustAgent::Claude => Some(BandWords {
-                lead: "Claude asks this for every new checkout. ",
+                lead: "Claude asks this for every new folder. ",
                 rest: "Farhelm can answer it for you, but it's off by default: there's no supported way to do it, \
                        so Farhelm would have to edit Claude's own settings file, which comes with caveats.",
                 settings: "Settings and caveats",
-                settings_help: "Open Settings at the option to answer this question for new checkouts, with its \
-                                caveats",
+                settings_help: "Open Claude's folder-trust setting and its caveats",
                 dismiss_help: "Stop showing this note for every session; Settings can turn it back on",
             }),
             TrustAgent::Codex => Some(BandWords {

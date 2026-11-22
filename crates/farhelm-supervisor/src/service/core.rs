@@ -14654,6 +14654,10 @@ impl Supervisor {
             // hook, and only then execs the agent — all inside this
             // session's terminal. `None` is an ordinary launch.
             preparation,
+            claude_workspace_trust: selection.is_some_and(|selection| {
+                selection.workspace_trust == Some(true)
+                    && crate::agent_kind::edits_config_for_workspace_trust(selection.harness)
+            }),
             env,
         };
         // Serialized before the write so the (practically impossible)

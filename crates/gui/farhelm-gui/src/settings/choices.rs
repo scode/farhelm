@@ -269,9 +269,7 @@ impl Choice {
             Choice::AutoUpdateRemoteHosts => "Update remote hosts automatically",
             Choice::SkipHostSetupConfirmation => "Set up new hosts without asking",
             Choice::SkipHostRemoveConfirmation => "Remove hosts without asking",
-            Choice::ShowClaudeTrustHint => {
-                "Show the hint when Claude asks about a managed checkout"
-            }
+            Choice::ShowClaudeTrustHint => "Show the hint when Claude asks about folder trust",
             Choice::ShowCodexTrustHint => "Show the hint when Codex asks about folder trust",
             Choice::ShowMuseTrustHint => "Show the hint when Muse asks about folder trust",
             Choice::ShowAntigravityTrustHint => {
@@ -309,7 +307,7 @@ impl Choice {
                 "Forget a host as soon as you choose remove, without asking; its sessions keep running"
             }
             Choice::ShowClaudeTrustHint => {
-                "Show a note above the terminal when Claude asks whether to trust a new managed checkout"
+                "Show a note above the terminal when Claude asks whether to trust the folder"
             }
             Choice::ShowCodexTrustHint => {
                 "Show a note above the terminal when Codex asks whether to trust the folder"

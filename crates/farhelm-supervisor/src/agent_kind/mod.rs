@@ -86,7 +86,7 @@
 //!   selectors with `farhelm_proto::conversation::validate_launch_conversation`.
 //!   The agent pages in Settings come from `LaunchHarness::ALL`. Their workspace trust controls use
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`
-//!   (a harness with no managed-checkout trust setting has no variant there,
+//!   (a harness with no workspace-trust setting has no variant there,
 //!   as the helm's `trust_column` refuses it), whose exhaustive methods hold
 //!   each trust agent's route, wording, caution, hint switch and hint band
 //!   words, and which launch harness's workspace-trust question names which
@@ -119,7 +119,7 @@
 //!   [`AgentIntegration::farhelm_args`] for what a new launch's
 //!   `{farhelm_args}` expands to on start and on resume, and the legacy
 //!   [`AgentIntegration::inject_hooks`]), the exhaustive
-//!   per-kind functions below (ownership, locators, resume verification,
+//!   per-kind functions below (workspace trust, ownership, locators, resume verification,
 //!   report vocabularies, executable names), and one file per kind
 //!   (`antigravity.rs`, `claude.rs`, `codex.rs`, `goose.rs`, `grok.rs`, `muse.rs`, `omp.rs`, `pi.rs`) for
 //!   that kind's own helpers: argv grammar, record and locator parsing, and
@@ -1822,6 +1822,26 @@ fn correlators_from(
 /// Refusing the literals keeps the passes from reinterpreting each other's
 /// output; asking the shared set means a marker added later is covered too.
 pub(crate) use farhelm_proto::conversation::is_plausible_conversation_id;
+
+/// Claude interprets the saved choice as a pre-exec config edit. The shim
+/// runs it after shell startup to use the config directory Claude will see.
+#[warn(clippy::wildcard_enum_match_arm)]
+pub(crate) fn edits_config_for_workspace_trust(harness: LaunchHarness) -> bool {
+    match harness {
+        LaunchHarness::Claude => true,
+        LaunchHarness::Antigravity
+        | LaunchHarness::Bash
+        | LaunchHarness::Codex
+        | LaunchHarness::Cursor
+        | LaunchHarness::Goose
+        | LaunchHarness::Grok
+        | LaunchHarness::Muse
+        | LaunchHarness::Omp
+        | LaunchHarness::OpenCode
+        | LaunchHarness::Pi
+        | LaunchHarness::Zsh => false,
+    }
+}
 
 /// What capture and restart need from a session's launch: its integration
 /// kind and the resume command a Restart fills, still holding its

@@ -748,6 +748,12 @@ static SCENES: &[Scene] = &[
         setup: no_setup,
     },
     Scene {
+        name: "session-claude-trust-hint",
+        size: (780., 150.),
+        draw: claude_trust_hint,
+        setup: no_setup,
+    },
+    Scene {
         name: "session-details-copy-warning",
         size: (644., 102.),
         draw: session_details_copy_warning,

@@ -1,4 +1,4 @@
-//! Best-effort managed-checkout trust edits for Claude Code.
+//! Best-effort workspace trust edits for Claude Code before launch and at checkout retirement.
 //!
 //! Claude has no supported interactive trust switch. This opt-in integration
 //! shares its mkdir lock and edits one project key, preserving the rest of the

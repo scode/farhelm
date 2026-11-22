@@ -200,6 +200,8 @@ linux/sequence-pill--dark.png a19b44adc6ff5078a6cb782649ab11f68d0b2b2a
 linux/sequence-pill--light.png 6c911c5443e09477a4588b2018a3c2a50f0921cc
 linux/session-bell-list--dark.png 0ac622f55714c61a88c5e8e055d8352892478827
 linux/session-bell-list--light.png 5f2184dedc84850748a7107b8aadcd135d7da92e
+linux/session-claude-trust-hint--dark.png 85da63c2613f9cdebf023d6b098ba956d047db6d
+linux/session-claude-trust-hint--light.png 98074a7a831aad8423c6abf67ffae3b25c033b40
 linux/session-details-bar--dark.png f73a0b88d418c34b286cbf5a854ac9488228bec0
 linux/session-details-bar--light.png a85863c16fcaefd15746f425f7abdaa91189db79
 linux/session-details-copy-warning--dark.png 747274a067fb5632032cc0aa4b719c740298fbea
@@ -254,8 +256,8 @@ linux/settings-checkouts-capped--dark.png 27d9acb3e5cf0420f13073cf28a9c079706b52
 linux/settings-checkouts-capped--light.png da905e2fcd46a235f7f833e596833d86f7d7620b
 linux/settings-checkouts-edited--dark.png 3e880ee2e81dbe84e57a7525d3d00ebc6dd763af
 linux/settings-checkouts-edited--light.png d9fe6fc904c382b580c8073b74b44a16c133bb3a
-linux/settings-claude--dark.png 984143a50784fd970f026dd2bb168ed10b934f13
-linux/settings-claude--light.png 9558d88858ed674058c78e27bb790bd7bc7fd7e0
+linux/settings-claude--dark.png 0fa6e5fade88ef6978ce65a7e30082416351cc4f
+linux/settings-claude--light.png 08e41410026713b4fd316edcab497ac5cf856b65
 linux/settings-codex--dark.png 9213f232ac134c4204eba4630793235f912585c8
 linux/settings-codex--light.png ce42e4b53ef2201575642d2c74c76673c62bca9c
 linux/settings-containers--dark.png 46bebb668e00fd731935eca34f290121a16087cf

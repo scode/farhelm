@@ -217,6 +217,10 @@ pub struct LaunchSpec {
     /// [`CheckoutPreparation::state_path`].
     #[serde(default)]
     pub preparation: Option<CheckoutPreparation>,
+    /// The structured launch opted in to editing Claude's trust key before
+    /// exec. Older specs keep the ordinary launch path by default.
+    #[serde(default)]
+    pub claude_workspace_trust: bool,
     /// Decode old queued specs only to refuse them before preparation or exec.
     /// Ignoring this marker could run an old container's argv on the outside
     /// host after upgrade. New specs never serialize this compatibility field.
@@ -1210,7 +1214,19 @@ pub fn exec_launch_spec_with_seam(
         let report = record_launch_failure(&status_path, format!("{error:#}"), seam);
         return error.context(report);
     }
-    // Nothing is written to the terminal before `exec`. The shim once
+    if spec.claude_workspace_trust
+        && !spec
+            .preparation
+            .as_ref()
+            .is_some_and(|prep| prep.claude_trust)
+    {
+        // The shell has installed Claude's config environment and the shim
+        // has entered the final directory. Fresh checkout preparation owns
+        // the edit when it can record its removal at archive time.
+        apply_claude_workspace_trust(Path::new("."), |_| Ok(()));
+    }
+
+    // No synthetic screen is written to the terminal before `exec`. The shim once
     // painted a "preamble" here — the previous run's captured last screen,
     // handed over by a restart — and SPEC.md now forbids exactly that: a
     // frame with no process behind it looks live, accepts typing, and is
@@ -1967,32 +1983,44 @@ fn run_checkout_preparation(
     // contract: any vendor/config failure leaves the agent free to ask its
     // ordinary question, and never turns a successful checkout into an error.
     if preparation.claude_trust {
-        let result = (|| -> anyhow::Result<()> {
-            use crate::agent_kind::claude::trust;
-            let environment = trust::Environment::current()?;
-            let Some(trust_record) = trust::resolve(&environment, cwd)? else {
-                return Ok(());
-            };
+        apply_claude_workspace_trust(cwd, |trust_record| {
             let mut record =
                 read_preparation_state(&preparation.state_path, &preparation.working_copy_id)?
                     .context("ready preparation record is absent")?;
-            record.claude_trust = Some(trust_record);
+            record.claude_trust = Some(trust_record.clone());
             crate::files::write_durable_sync(
                 &preparation.state_path,
                 &serde_json::to_vec(&record)?,
                 seam,
             )?;
-            trust::edit(record.claude_trust.as_ref(), true)
-        })();
-        if let Err(error) = result {
-            eprintln!("Farhelm could not mark this folder trusted; Claude may ask. ({error:#})");
-        }
+            Ok(())
+        });
     }
 
     // Released before the agent exec (the lock file is closed here), and
     // CLOEXEC'd at open so git/hook children never inherited it either.
     drop(lock);
     Ok(())
+}
+
+/// The trust edit is best effort. A fresh checkout persists the cleanup
+/// record before writing Claude's key so archive can reverse it after a crash.
+fn apply_claude_workspace_trust(
+    cwd: &Path,
+    record: impl FnOnce(&ClaudeTrustRecord) -> anyhow::Result<()>,
+) {
+    use crate::agent_kind::claude::trust;
+    let result = (|| -> anyhow::Result<()> {
+        let environment = trust::Environment::current()?;
+        if let Some(trust_record) = trust::resolve(&environment, cwd)? {
+            record(&trust_record)?;
+            trust::edit(Some(&trust_record), true)?;
+        }
+        Ok(())
+    })();
+    if let Err(error) = result {
+        eprintln!("Farhelm could not mark this folder trusted. Claude may ask. ({error:#})");
+    }
 }
 
 /// Give cache clones, spare inspection and updates the same Git environment.
@@ -2841,6 +2869,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn browser_forwarding_preserves_agent_environment_and_excludes_preparation() {
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["agent".into()],
@@ -2888,11 +2917,16 @@ mod tests {
         legacy
             .as_object_mut()
             .unwrap()
+            .remove("claude_workspace_trust");
+        legacy
+            .as_object_mut()
+            .unwrap()
             .remove("scope_waypoint_expected");
         let legacy: LaunchSpec = serde_json::from_value(legacy).unwrap();
         assert!(legacy.working_directory.is_none());
         assert!(legacy.browser_command.is_none());
         assert!(!legacy.scope_waypoint_expected);
+        assert!(!legacy.claude_workspace_trust);
     }
 
     /// Explicit launch environment must not override the PWD established after
@@ -2905,6 +2939,7 @@ mod tests {
         // where the system temp directory itself is a symlink.
         let directory = std::fs::canonicalize(work.path()).unwrap();
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             argv: vec!["/usr/bin/printenv".into(), "PWD".into()],
             scope_waypoint_expected: false,
             working_directory: Some(directory.clone()),
@@ -2938,6 +2973,7 @@ mod tests {
         std::fs::create_dir_all(spec_path.parent().unwrap()).unwrap();
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
@@ -3051,6 +3087,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: Some(tmp.path().to_path_buf()),
             argv: vec![missing_binary.to_string_lossy().into_owned()],
@@ -3107,6 +3144,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let directory = tmp.path().join("missing-directory");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: Some(directory.clone()),
             argv: vec![tmp.path().join("missing-agent").to_str().unwrap().into()],
@@ -3150,6 +3188,7 @@ mod tests {
         std::fs::write(&non_executable, b"not a real binary").unwrap();
         std::fs::set_permissions(&non_executable, std::fs::Permissions::from_mode(0o600)).unwrap();
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![non_executable.to_string_lossy().into_owned()],
@@ -3232,6 +3271,7 @@ mod tests {
         let ran = root.path().join("agent-ran");
         let preparation_state = root.path().join("preparation.json");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: Some(root.path().join("missing-directory")),
             argv: vec![
@@ -3307,6 +3347,7 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let spec_path = tmp.path().join("spec.json");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![],
@@ -3345,6 +3386,7 @@ mod tests {
         let spec_path = tmp.path().join("spec.json");
         let missing_binary = tmp.path().join("no-such-farhelm-test-binary");
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec![missing_binary.to_string_lossy().into_owned()],
@@ -3475,6 +3517,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn a_launchs_own_environment_reaches_only_the_agent_and_wins() {
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["pi".to_string()],
@@ -3514,6 +3557,7 @@ mod tests {
     #[farhelm_testtrace::test]
     fn agent_command_injects_the_spawn_contract() {
         let spec = LaunchSpec {
+            claude_workspace_trust: false,
             scope_waypoint_expected: false,
             working_directory: None,
             argv: vec!["agent".to_string()],
@@ -4013,6 +4057,7 @@ exec sleep 60
         /// matching the production builder's post-preparation directory contract.
         fn write_spec(&self) -> PathBuf {
             let spec = LaunchSpec {
+                claude_workspace_trust: false,
                 scope_waypoint_expected: false,
                 working_directory: Some(PathBuf::from(&self.preparation.cwd)),
                 argv: FAKE_AGENT_ARGV.iter().map(|s| s.to_string()).collect(),
@@ -4050,6 +4095,17 @@ exec sleep 60
             env_removes: &[&str],
         ) -> (String, String, std::process::ExitStatus) {
             self.write_spec();
+            self.run_written_shim_in_child(path_override, envs, env_removes)
+        }
+
+        /// Run an already written spec, including ordinary launches whose
+        /// layout deliberately omits this fixture's checkout preparation.
+        fn run_written_shim_in_child(
+            &self,
+            path_override: Option<&std::ffi::OsStr>,
+            envs: &[(&str, &std::ffi::OsStr)],
+            env_removes: &[&str],
+        ) -> (String, String, std::process::ExitStatus) {
             let exe = std::env::current_exe().expect("locate the supervisor test binary");
             let mut command = std::process::Command::new(&exe);
             command
@@ -4542,6 +4598,59 @@ printf 'AGENT-RAN\n'
                     assert!(record.claude_trust.is_none());
                 }
             }
+        }
+    }
+
+    /// Claude sees the trust edit by the time it starts in an ordinary
+    /// folder. An absent opt-in and a damaged config still start the agent.
+    #[farhelm_testtrace::test]
+    fn plain_claude_launch_applies_saved_workspace_trust_before_exec() {
+        for (enabled, content) in [(false, "{}"), (true, "{}"), (true, "[]")] {
+            let fixture = build_d1_fixture(None);
+            let config_dir = fixture.tmp.path().join("vendor-config");
+            std::fs::create_dir(&config_dir).unwrap();
+            let config = config_dir.join(".claude.json");
+            std::fs::write(&config, content).unwrap();
+            fixture.install_script(
+                "fake-agent",
+                "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n/bin/cat \"$CLAUDE_CONFIG_DIR/.claude.json\"\nprintf '\\nCONFIG-END\\n'\n",
+            );
+            fixture.write_spec();
+            let mut spec: LaunchSpec =
+                serde_json::from_slice(&std::fs::read(&fixture.spec_path).unwrap()).unwrap();
+            spec.preparation = None;
+            spec.claude_workspace_trust = enabled;
+            std::fs::write(&fixture.spec_path, serde_json::to_vec(&spec).unwrap()).unwrap();
+            let (report, terminal, status) = fixture.run_written_shim_in_child(
+                None,
+                &[
+                    ("CLAUDE_CONFIG_DIR", config_dir.as_os_str()),
+                    ("HOME", fixture.tmp.path().as_os_str()),
+                ],
+                &["CLAUDE_CODE_CUSTOM_OAUTH_URL"],
+            );
+            assert!(
+                status.success() && report.is_empty(),
+                "{terminal}\n{report}"
+            );
+            let (_, observed) = terminal
+                .split_once("AGENT-RAN\n")
+                .expect("the agent reached exec");
+            let (observed, _) = observed
+                .split_once("\nCONFIG-END\n")
+                .expect("the agent read its config");
+            let document: serde_json::Value = serde_json::from_str(observed.trim()).unwrap();
+            let cwd = std::fs::canonicalize(&fixture.preparation.cwd).unwrap();
+            if enabled && content == "{}" {
+                assert_eq!(
+                    document["projects"][cwd.to_str().unwrap()]["hasTrustDialogAccepted"],
+                    true
+                );
+            } else {
+                assert_eq!(observed.trim(), content);
+                assert_eq!(terminal.contains("Claude may ask"), enabled);
+            }
+            assert_eq!(fixture.state().unwrap(), PreparationState::NotStarted);
         }
     }
 

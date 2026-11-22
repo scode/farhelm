@@ -694,10 +694,10 @@ pub struct Preferences {
     /// Only true authorizes desktop loopback tunnels; unset and false both disable them.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub tunnel_consent: Option<bool>,
-    /// Shared opt-out for the managed-checkout Claude trust hint.
+    /// Shared dismissal of Claude's workspace-trust hint.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub claude_trust_hint_dismissed: Option<bool>,
-    /// Shared opt-outs for each agent's managed-checkout trust hint. Unset
+    /// Shared dismissals of each agent's workspace-trust hint. Unset
     /// and false both allow the hint, independently of the trust switch.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub codex_trust_hint_dismissed: Option<bool>,
