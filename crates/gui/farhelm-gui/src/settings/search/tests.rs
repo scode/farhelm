@@ -132,7 +132,7 @@ fn authored_help_and_radio_options_lead_to_their_settings() {
     let entries = catalog(Platform::Linux);
     for (query, section, id) in [
         (
-            "half-written",
+            "one step",
             Section::Agent(LaunchHarness::Claude),
             super::agent_trust::CAUTION_ID,
         ),

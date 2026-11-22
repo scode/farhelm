@@ -2,8 +2,8 @@
 //!
 //! Claude's hook argv itself (`--settings` carrying a `SessionStart` hook)
 //! is built by its integration in the parent module; this file holds the
-//! Claude-specific reason not to append it. Managed-checkout trust writes
-//! live in `trust`, separate from command-line hook integration.
+//! Claude-specific reason not to append it. Trust writes to Claude's
+//! settings file live in `trust`, separate from command-line hook integration.
 
 pub(crate) mod trust;
 

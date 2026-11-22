@@ -1223,7 +1223,15 @@ pub fn exec_launch_spec_with_seam(
         // The shell has installed Claude's config environment and the shim
         // has entered the final directory. Fresh checkout preparation owns
         // the edit when it can record its removal at archive time.
-        apply_claude_workspace_trust(Path::new("."), |_| Ok(()));
+        let home = std::env::var_os("HOME").map(std::path::PathBuf::from);
+        if claude_trust_covers_too_much(Path::new("."), home.as_deref()) {
+            eprintln!(
+                "Farhelm does not mark your home directory or / trusted for Claude, since that would trust every folder \
+                 inside it. Claude may ask."
+            );
+        } else {
+            apply_claude_workspace_trust(Path::new("."), |_| Ok(()));
+        }
     }
 
     // No synthetic screen is written to the terminal before `exec`. The shim once
@@ -2003,6 +2011,23 @@ fn run_checkout_preparation(
     Ok(())
 }
 
+/// Whether marking `cwd` trusted in Claude would trust far more than the session's folder.
+///
+/// Claude treats a trusted folder as covering every folder inside it, so a launch-time edit for the home directory
+/// or the filesystem root would trust everything under it, with no removal record, outside Farhelm too, and after the
+/// switch is turned off. Those two are left to Claude's own question. `home` is passed in rather than read here so
+/// tests need not change the process environment. A folder that cannot be resolved is not refused here: the edit then
+/// fails and reports that as it always has.
+fn claude_trust_covers_too_much(cwd: &Path, home: Option<&Path>) -> bool {
+    let Ok(folder) = std::fs::canonicalize(cwd) else {
+        return false;
+    };
+    folder.parent().is_none()
+        || home
+            .and_then(|home| std::fs::canonicalize(home).ok())
+            .is_some_and(|home| home == folder)
+}
+
 /// The trust edit is best effort. A fresh checkout persists the cleanup
 /// record before writing Claude's key so archive can reverse it after a crash.
 fn apply_claude_workspace_trust(
@@ -2456,6 +2481,28 @@ mod tests {
 
     const EXEC_FAILURE_CHILD_SPEC: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_SPEC";
     const EXEC_FAILURE_CHILD_KIND: &str = "FARHELM_LAUNCH_EXEC_FAILURE_CHILD_KIND";
+
+    /// A launch-time Claude trust edit for the home directory or `/` would make Claude trust every folder inside it,
+    /// permanently and outside Farhelm, so the shim leaves those to Claude's own question. Specified: the root and the
+    /// given home (also through a symlink) count as too broad; a folder inside home, and any folder when no home is
+    /// known, do not.
+    #[farhelm_testtrace::test]
+    fn claude_trust_skips_the_home_directory_and_the_root() {
+        let home = tempfile::tempdir().unwrap();
+        let inside = home.path().join("project");
+        std::fs::create_dir(&inside).unwrap();
+        let link = tempfile::tempdir().unwrap();
+        let home_link = link.path().join("home");
+        std::os::unix::fs::symlink(home.path(), &home_link).unwrap();
+        assert!(claude_trust_covers_too_much(
+            Path::new("/"),
+            Some(home.path())
+        ));
+        assert!(claude_trust_covers_too_much(home.path(), Some(home.path())));
+        assert!(claude_trust_covers_too_much(&home_link, Some(home.path())));
+        assert!(!claude_trust_covers_too_much(&inside, Some(home.path())));
+        assert!(!claude_trust_covers_too_much(home.path(), None));
+    }
 
     /// The target callback is the late-orphan fence, so moving it before the
     /// cache flock or after even bare init would make startup removal unsafe.
