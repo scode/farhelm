@@ -1,4 +1,4 @@
-//! Positional attribution of a hook to its emitter for agents with no executable identity rule.
+//! Positional attribution of a hook to the process that ran it.
 //! Admission pins that process; ancestry alone does not establish authority.
 
 use super::*;
@@ -69,6 +69,8 @@ fn is_custom_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
 pub(crate) struct PositionalAttribution {
     pub(crate) emitter: ProcessIdentity,
     pub(crate) ancestors: Vec<ProcessIdentity>,
+    /// The emitter's link in the input chain, for vendor checks on its original arguments.
+    pub(super) emitter_index: usize,
 }
 
 /// Attribute an already-anchored chain by the position of the hook invocation.
@@ -127,6 +129,7 @@ pub(crate) fn positional_corridor(
             pid: link.pid,
             start: link.start,
         },
+        emitter_index: emitter,
         ancestors: chain[emitter + 1..]
             .iter()
             .map(|link| ProcessIdentity {

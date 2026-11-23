@@ -29,6 +29,8 @@
 //!   recorded reporter does not match this build.
 //! - [`NotificationKind::CodexPinCorrected`]: Codex admission, after a recorded
 //!   ancestor's verified record corrects a child-first conversation choice.
+//! - [`NotificationKind::GrokPinCorrected`]: Grok admission, when an ancestor's
+//!   selection corrects the conversation reported by its child.
 //! - [`NotificationKind::ClaudePinCorrected`]: Claude admission, when a recorded
 //!   ancestor corrects a child-first conversation choice.
 //! - [`NotificationKind::MusePinCorrected`]: the same correction for Muse.
@@ -82,6 +84,8 @@ pub(crate) enum NotificationKind {
     /// A verified Codex ancestor corrected a conversation selected by its child.
     /// The warning preserves what a Restart before correction would have used.
     CodexPinCorrected,
+    /// A recorded Grok ancestor corrected the selected conversation on SessionStart.
+    GrokPinCorrected,
     /// A recorded Claude ancestor corrected a conversation selected by its child.
     /// This records the prior Restart target, so later capture does not resolve it.
     ClaudePinCorrected,
@@ -110,12 +114,13 @@ pub(crate) enum NotificationKind {
 }
 
 impl NotificationKind {
-    const ALL: [Self; 12] = [
+    const ALL: [Self; 13] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
         Self::ReporterMismatch,
         Self::CodexPinCorrected,
+        Self::GrokPinCorrected,
         Self::ClaudePinCorrected,
         Self::MusePinCorrected,
         Self::AntigravityPinCorrected,
@@ -136,6 +141,7 @@ impl NotificationKind {
             Self::HookNotAdded
             | Self::ReporterMismatch
             | Self::CodexPinCorrected
+            | Self::GrokPinCorrected
             | Self::ClaudePinCorrected
             | Self::MusePinCorrected
             | Self::AntigravityPinCorrected
@@ -158,6 +164,7 @@ impl NotificationKind {
             NotificationKind::ResumeWithdrawn
             | NotificationKind::ReporterMismatch
             | NotificationKind::CodexPinCorrected
+            | NotificationKind::GrokPinCorrected
             | NotificationKind::ClaudePinCorrected
             | NotificationKind::MusePinCorrected
             | NotificationKind::AntigravityPinCorrected
@@ -177,6 +184,7 @@ impl NotificationKind {
             NotificationKind::ResumeWithdrawn => "resume_withdrawn",
             NotificationKind::ReporterMismatch => "reporter_mismatch",
             NotificationKind::CodexPinCorrected => "codex_pin_corrected",
+            NotificationKind::GrokPinCorrected => "grok_pin_corrected",
             NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
             NotificationKind::MusePinCorrected => "muse_pin_corrected",
             NotificationKind::AntigravityPinCorrected => "antigravity_pin_corrected",
@@ -203,6 +211,11 @@ pub(crate) const OLD_TERMINAL_ENDED_TEXT: &str = "This session ran in an old ter
 pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Codex conversation \
     started by another Codex process in this session. A Restart before now would have resumed \
     that conversation. Farhelm now follows the conversation of the Codex process that started it.";
+
+/// Record the previous Restart target after a Grok ancestor corrects the selection.
+pub(crate) const GROK_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a conversation \
+    reported by a child Grok process in this session. Restart may have offered that conversation. \
+    Farhelm now follows the conversation reported by the Grok process that started it.";
 
 /// Preserve the consequence of child-first capture after the ancestor takes over.
 /// Like Codex's correction, this remains unresolved and appears once per launch.

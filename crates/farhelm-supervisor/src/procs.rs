@@ -3090,9 +3090,8 @@ mod tests {
         assert!(refusal.contains("unclassified intermediary"), "{refusal}");
     }
 
-    /// Grok's supported foreground is one native image with a private
-    /// backend flag in its option region. A flag after `--` is user payload,
-    /// so treating it as ownership evidence would admit the shared leader.
+    /// Versioned images can report when the process that ran the hook uses
+    /// its own backend. An option after `--` belongs to the prompt.
     #[farhelm_testtrace::test]
     fn grok_requires_no_leader_before_the_option_boundary() {
         let admitted = vec![
@@ -3112,12 +3111,12 @@ mod tests {
             ),
             corridor_link(
                 10,
-                "/home/user/.grok/downloads/grok-linux-x86_64",
+                "/opt/test/grok-1.0.92-linux-x86_64",
                 &["grok", "--no-leader"],
             ),
         ];
-        let emitter = grok_corridor(&admitted).expect("the supported Grok corridor is admitted");
-        assert_eq!(emitter.pid, 10);
+        let attribution = grok_corridor(&admitted).expect("the versioned Grok image can report");
+        assert_eq!(attribution.emitter.pid, 10);
 
         for argv in [
             vec!["grok"],
@@ -3138,57 +3137,38 @@ mod tests {
         }
     }
 
-    /// Another Grok image or another harness in the ancestry means the hook
-    /// cannot be attributed to the one top-level foreground conversation.
+    /// The first report can come from a nested process. Keep each ancestor
+    /// through the terminal root so the parent can later correct that choice.
     #[farhelm_testtrace::test]
-    fn grok_rejects_nested_and_foreign_runtime_corridors() {
+    fn grok_attributes_the_nested_reporter_and_keeps_its_ancestors() {
         let nested = vec![
             corridor_link(
                 13,
                 "/opt/test/bin/farhelm",
                 &["farhelm", "internal", "hook", "--vendor", "grok"],
             ),
-            corridor_link(
-                12,
-                "/home/user/.grok/downloads/grok-linux-x86_64",
-                &["grok", "--no-leader"],
-            ),
+            corridor_link(12, "/opt/test/child-grok", &["grok", "--no-leader"]),
             corridor_link(
                 11,
-                "/home/user/.grok/downloads/grok-linux-x86_64",
-                &["grok", "--no-leader"],
-            ),
-        ];
-        let refusal = grok_corridor(&nested).expect_err("nested Grok must refuse");
-        assert!(refusal.contains("nested Grok"), "{refusal}");
-
-        let foreign = vec![
-            corridor_link(
-                13,
-                "/opt/test/bin/farhelm",
-                &["farhelm", "internal", "hook", "--vendor", "grok"],
-            ),
-            corridor_link(12, "/opt/test/bin/codex", &["codex"]),
-            corridor_link(
-                11,
-                "/home/user/.grok/downloads/grok-linux-x86_64",
+                "/opt/test/grok-1.0.92-linux-x86_64",
                 &["grok", "--no-leader"],
             ),
             corridor_link(10, "/bin/bash", &["-bash"]),
         ];
-        let refusal = grok_corridor(&foreign).expect_err("foreign runtime must refuse");
-        assert!(
-            refusal.contains("another session-hosting runtime"),
-            "{refusal}"
-        );
+        let attribution = grok_corridor(&nested).expect("the first non-trampoline ran the hook");
+        assert_eq!(attribution.emitter.pid, 12);
+        let ancestors: Vec<_> = attribution
+            .ancestors
+            .iter()
+            .map(|process| process.pid)
+            .collect();
+        assert_eq!(ancestors, [11, 10]);
     }
 
-    /// A session pane that looks like a Grok runtime under an image name the
-    /// attribution does not recognise must refuse, or a recognised nested Grok
-    /// below it would be the only emitter and its conversation admitted. A
-    /// resident wrapper pane that does not look like Grok keeps working.
+    /// The backend check belongs to the process that ran this hook. A flag
+    /// farther up the chain cannot authorize a report with missing emitter evidence.
     #[farhelm_testtrace::test]
-    fn grok_refuses_an_unrecognised_grok_pane_above_a_nested_grok() {
+    fn grok_requires_the_emitters_own_backend_evidence() {
         let reporter = || {
             corridor_link(
                 13,
@@ -3196,22 +3176,15 @@ mod tests {
                 &["farhelm", "internal", "hook", "--vendor", "grok"],
             )
         };
-        let nested = || corridor_link(12, "/opt/test/bin/grok", &["grok", "--no-leader"]);
-        for pane in [
-            corridor_link(
-                11,
-                "/opt/test/bin/grok-darwin-arm64",
-                &["grok-darwin-arm64"],
-            ),
-            corridor_link(11, "/opt/test/bin/xai-cli", &["grok", "--no-leader"]),
-        ] {
-            let refusal = grok_corridor(&[reporter(), nested(), pane])
-                .expect_err("an unrecognised Grok pane must refuse");
-            assert!(refusal.contains("looks like a Grok runtime"), "{refusal}");
-        }
-        let wrapper = corridor_link(11, "/bin/bash", &["-bash"]);
-        let emitter = grok_corridor(&[reporter(), nested(), wrapper]).expect("wrapper pane");
-        assert_eq!(emitter.pid, 12);
+        let parent = || corridor_link(11, "/opt/test/bin/grok", &["grok", "--no-leader"]);
+        let unowned = corridor_link(12, "/opt/test/grok-child", &["grok"]);
+        let missing = corridor_link_no_argv(12, "/opt/test/grok-child");
+        let refusal = grok_corridor(&[reporter(), unowned, parent()])
+            .expect_err("an ancestor's option cannot stand in for the emitter's");
+        assert!(refusal.contains("--no-leader"), "{refusal}");
+        let refusal = grok_corridor(&[reporter(), missing, parent()])
+            .expect_err("the emitter's unavailable argv must refuse");
+        assert!(refusal.contains("command line is unavailable"), "{refusal}");
     }
 
     /// The installed hook command for OMP reports, as the kernel captures

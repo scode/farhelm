@@ -2,6 +2,8 @@
 //! resume verification, and its proven report admission.
 
 use super::super::*;
+use crate::agent_kind::report_pin::{PinDecision, ReportPin};
+use crate::service::notifications::{GROK_PIN_CORRECTED_TEXT, NotificationKind};
 
 impl Supervisor {
     /// Grok's half of `verify_report_only_resume`: re-verify the exact
@@ -66,14 +68,14 @@ impl Supervisor {
         .into())
     }
 
-    /// Admit one Grok callback (from hooks Farhelm installed on opt-in or the user did) through the shared
-    /// ownership and capture transaction.
+    /// Admit a Grok callback from the pinned reporter or an ancestor that can correct it.
     ///
     /// `SessionStart` is the only selecting event. Its vendor timestamp is
     /// compared while the capture claim is held, which keeps a delayed old
     /// callback from restoring a UUID displaced by `/new`, including after a
-    /// supervisor restart. `UserPromptSubmit` and `Stop` can only enrich the
-    /// UUID already selected in the durable row.
+    /// supervisor restart. A recorded ancestor's selection has authority over
+    /// a child-first choice regardless of timestamps. Enrichment belongs to
+    /// the selected UUID and cannot take over from a pinned child.
     pub(in crate::service::core) async fn report_grok_conversation(
         &self,
         id: &str,
@@ -154,25 +156,55 @@ impl Supervisor {
             ));
         }
 
-        let previous = match row.captured_conversation.as_deref() {
-            Some(stored) => Some(crate::agent_kind::grok::GrokLocator::parse(stored).map_err(
-                |_| {
+        let attribution = crate::procs::grok_corridor(&chain)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
+        let stored_pin = self.store.report_pin(id).await.map_err(|_| {
+            RequestError::new(
+                ErrorKind::Internal,
+                "could not read the Grok reporting-process pin",
+            )
+        })?;
+        let pin = stored_pin
+            .as_deref()
+            .map(serde_json::from_str::<ReportPin>)
+            .transpose()
+            .map_err(|_| {
+                RequestError::new(
+                    ErrorKind::Internal,
+                    "the Grok reporting-process pin is invalid",
+                )
+            })?;
+        let decision = super::judge_report_pin(pin.as_ref(), attribution.emitter, &chain, |_| None)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
+        let correction = decision == PinDecision::Correct;
+        if event != "SessionStart" && decision != PinDecision::Accept {
+            // A turn callback cannot select a different conversation, even from a recorded ancestor.
+            return Ok(());
+        }
+        if decision == PinDecision::Refuse {
+            return Err(RequestError::new(
+                ErrorKind::Conflict,
+                "the Grok report came from a process other than this launch's pinned emitter",
+            ));
+        }
+        if !correction {
+            let previous = row
+                .captured_conversation
+                .as_deref()
+                .map(crate::agent_kind::grok::GrokLocator::parse)
+                .transpose()
+                .map_err(|_| {
                     RequestError::new(
                         ErrorKind::Conflict,
                         "the durable Grok selection cannot be ordered safely",
                     )
-                },
-            )?),
-            None => None,
-        };
-        incoming = crate::agent_kind::grok::GrokLocator::merge_report(previous, incoming, event)
-            .map_err(|error| RequestError::new(ErrorKind::Conflict, error.to_string()))?;
-
-        // The recorded chain is already anchored at the current pane; the
-        // corridor names its emitter once, from evidence that cannot change
-        // while the record pair is verified.
-        let emitter = crate::procs::grok_corridor(&chain)
-            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
+                })?;
+            incoming =
+                crate::agent_kind::grok::GrokLocator::merge_report(previous, incoming, event)
+                    .map_err(|error| RequestError::new(ErrorKind::Conflict, error.to_string()))?;
+        }
+        // A correcting ancestor verifies its own locator. The child's ordering stamp and path
+        // belong to the displaced selection, even if both processes report the same UUID.
         incoming.verify().await;
         let conversation = incoming
             .encode()
@@ -180,13 +212,19 @@ impl Supervisor {
         info!(target: LOG_TARGET,
             session = %id,
             generation,
-            emitter_pid = emitter.pid,
+            emitter_pid = attribution.emitter.pid,
             grok_session = %incoming.session_id,
             resumable = incoming.resumable,
             event,
             "attributed a Grok foreground conversation report"
         );
 
+        let replacement_pin = ReportPin::replacement_json(
+            stored_pin.as_deref().zip(pin.as_ref()),
+            attribution.emitter,
+            attribution.ancestors,
+        )
+        .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?;
         let injected = self
             .seams
             .faults
@@ -197,16 +235,25 @@ impl Supervisor {
             Some(Err(error)) => Err(error),
             _ => {
                 self.store
-                    .admit_ownership_proven_conversation(
-                        id,
-                        generation,
-                        row.captured_conversation.as_deref(),
-                        row.capture_ownership_version,
+                    .admit_pinned_conversation(
+                        &row,
+                        stored_pin.as_deref(),
                         &conversation,
+                        &replacement_pin,
+                        1,
+                        correction.then_some((
+                            NotificationKind::GrokPinCorrected.as_str(),
+                            GROK_PIN_CORRECTED_TEXT,
+                        )),
                     )
                     .await
             }
         };
-        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)
+        self.finish_reported_admission(id, written, &conversation, &source, generation, entry, 1)?;
+        // Reload only after the correction and its notice have committed together.
+        if correction && self.reload_notification_cell(id).await {
+            self.hint_sessions_changed();
+        }
+        Ok(())
     }
 }

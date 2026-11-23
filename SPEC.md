@@ -4153,14 +4153,19 @@ cover every possible Muse child. Muse reports carrying `agent_id`, `subagent_id`
 refused. Muse requires no transcript check or versioned ownership proof; its pinned captures use ownership version 0.
 Farhelm never discovers a Muse conversation from its session files or index.
 
-Grok reports must come from one native `grok` process under the agent's terminal, launched with `--no-leader` before any
-real end-of-options boundary. The only admitted descendants are the documented reporter command and its narrow shell
-trampoline; a nested Grok or another session-hosting runtime cannot replace the parent selection. `SessionStart` with
-source `new` or `load` selects a UUID. `UserPromptSubmit` and `Stop` may add saved-record evidence only for that
-selected UUID, and child-marked callbacks never select a top-level conversation. A selection stores the callback's
-canonical RFC3339 event timestamp in the Grok locator: another UUID must be strictly newer, while repeats for the same
-UUID may advance the timestamp but cannot lower it. Equal or older competing selections fail closed, including after
-supervisor restart, without a general event log or clock-recovery protocol.
+Farhelm attributes a Grok report to the process that ran the hook, skipping its narrow shell trampoline. The reporting
+process must be under the session's terminal and have `--no-leader` before the end of options. Farhelm pins the first
+admitted reporter and its recorded ancestors. A nested process can report first if the parent has not yet reported. A
+stored conversation from before the upgrade can also have no pin. A recorded ancestor's next `SessionStart` replaces a
+child-first selection and records a notification once per launch. Later reports from a nested process cannot replace the
+pinned parent's selection.
+
+`SessionStart` with source `new` or `load` selects a UUID. `UserPromptSubmit` and `Stop` may add saved-record evidence
+only for the selected UUID and cannot correct a child-first selection. Child-marked callbacks never select a top-level
+conversation. A selection stores the callback's canonical RFC3339 timestamp in the Grok locator. The pinned emitter
+needs a strictly newer timestamp to switch UUIDs. Repeats for the same UUID may advance the timestamp. The ordering
+survives a supervisor restart. A recorded ancestor's correction starts its own selection with its own timestamp and
+record path.
 
 The selected UUID is resumable only while the exact reported absolute `updates.jsonl` begins with a supported record
 whose method and `params.sessionId` match, and its sibling `summary.json` is a complete bounded JSON document with the
