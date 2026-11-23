@@ -5143,36 +5143,47 @@ repository and complete selection, independently of their previous ephemeral cwd
 repository suggestions with its other history; ordinary history rows retain their existing semantics.
 
 `LaunchHarness::omitted_permission` is the one per-harness fact for new request defaults. The helm fills omissions
-before validation and still refuses unsupported explicit choices; every harness that offers Guarded defaults to it,
-including OMP. Draft reconciliation uses `request_permission`. Stored launches use `stored_permission` instead: missing
-fields keep their no-flag meaning on Claude, Codex, Grok, Muse, Cursor and Antigravity, and their historical YOLO
-meaning on Pi, OpenCode, OMP and Goose. Own-setting launches count as YOLO for admission but get a grey dashed shield
-rather than a positive bypass claim. Protocol 48 adds the closed `Guarded` permission variant; older supervisors cannot
-decode it, and older releases cannot read new stored guarded launches. `LaunchHarness::guarded_flags` supplies both the
-compiler's argv and the launcher's help, so the two cannot describe different flags. A resume copies these before its
-selector, including before Codex's subcommand. The helm's remembered permission discards a permission equal to the
-harness's omitted mode, as the old browser app's local mirror did; the desktop app keeps no mirror and starts New from
-the helm's remembered word. This prevents default or forced YOLO from becoming another harness's preselection while
-preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same boundary: passing
-through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects the real default.
-Preferences written before this change retain their value until the next structured launch; the stored word does not say
-which harness supplied it. Bash and Zsh have no mode to remember. They retain recent setups and per-shell wrapper memory
-while leaving the remembered agent permission untouched. Their omitted permissions have no admission or shield meaning.
-No second default-mode table or preference provenance is kept.
+before validation and still refuses unsupported explicit choices. Every harness that offers Guarded defaults to it.
+Cursor, Pi, OpenCode and Goose default to YOLO. Draft reconciliation uses `request_permission`. Stored launches use
+`stored_permission` so a missing or unsupported agent mode classifies as YOLO for the host guard and the shield even on
+older wire rows or cached rows. Protocol 48 adds the closed `Guarded` permission variant. `LaunchHarness::guarded_flags`
+supplies both the compiler's argv and the launcher's help, so the two cannot describe different flags. A resume copies
+these before its selector, including before Codex's subcommand. The helm's remembered permission discards a permission
+equal to the harness's omitted mode, as the old browser app's local mirror did; the desktop app keeps no mirror and
+starts New from the helm's remembered word. This prevents default or forced YOLO from becoming another harness's
+preselection while preserving explicit YOLO on harnesses with a non-YOLO default. Harness switching applies the same
+boundary: passing through a default-YOLO harness loses any earlier explicit YOLO provenance, so switching back selects
+the real default. Preferences written before this change retain their value until the next structured launch; the stored
+word does not say which harness supplied it. Bash and Zsh have no mode to remember. They retain recent setups and
+per-shell wrapper memory while leaving the remembered agent permission untouched. Their omitted permissions have no
+admission or shield meaning. No second default-mode table or preference provenance is kept.
+
+Supervisor schema 39 records YOLO for agent launches with an omitted permission. The saved start and resume argv keep
+their original words. On an ordinary create retry the supervisor can match the pre-upgrade reservation by reversing only
+this metadata change and comparing the complete fingerprint. A pending keyed agent request compares the old and new
+launch representations symmetrically so its source and destination can be upgraded in either order. All other fields
+retain their equality checks. Create admission accounts separately for the two extra JSON bytes of the YOLO
+classification so a saved launch at the previous size limit can still be copied.
+
+Plain Replace uses the shared YOLO question. The guarded answer sends the existing Replace-with body with the visible
+source title and directory at answer time, the original host incarnation and Delete guard, and a Guarded selection. The
+helm compiles the new launch with current workspace trust settings and uses the ordinary Replace-with bookkeeping for
+launch history and remembered defaults. If the visible source moves hosts or its saved launch changes before the answer,
+the desktop asks the user to choose Replace again.
 
 The launcher observes completed agent-switch transactions for permission escalation, including cross-agent model picks
 and search. A template's explicit permission is a deliberate choice, not an automatic fallback; compare after its full
 replay rather than after each inner edit. Between harnesses, the comparison uses effective request permissions,
 including passive memory seeds. Before the first harness, only an explicit permission choice counts; a passive memory
 seed or displayed default cannot trigger the notice. Permissions are ordered as Chat/Approve, SmartApprove/Guarded, then
-YOLO/Custom/own-setting. Switching to or from a shell skips this comparison, since the shell has no permission mode. One
-transient notice retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection
-evidence or cache contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. Notice
-generations fence queued Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and
-a new opening or prefill clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved
-draft. The banner's slide and the permission outline's fade are the component layer's one-shot transitions, keyed on the
-banner's generation; its eight seconds are a ticker deadline counted only while it is neither hovered nor holding focus,
-and, unlike the old app's, they keep running while the window is inactive (a recorded deviation,
+YOLO/Custom. Switching to or from a shell skips this comparison, since the shell has no permission mode. One transient
+notice retains the complete pre-switch draft and raw editor ownership, but never retry intent, connection evidence or
+cache contents. Undo invalidates browse/preview work and retires ordinary create/replace authority. Notice generations
+fence queued Undo, dismiss and expiry callbacks. Undo also checks the live launcher opening generation, and a new
+opening or prefill clears the notice, so a mounted Clone/Replace reseed cannot receive another source's saved draft. The
+banner's slide and the permission outline's fade are the component layer's one-shot transitions, keyed on the banner's
+generation; its eight seconds are a ticker deadline counted only while it is neither hovered nor holding focus, and,
+unlike the old app's, they keep running while the window is inactive (a recorded deviation,
 `crates/gui/farhelm-gui/src/launcher/view/escalation.rs`). Reduced motion drops the slide and keeps the outline,
 unfaded, while the banner shows. Removing the notice's controls returns focus through the existing launcher helper.
 

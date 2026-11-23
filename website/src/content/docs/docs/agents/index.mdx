@@ -24,7 +24,7 @@ export const groups = [
     { key: 'launch', label: 'Start from the launcher', desc: "Pick an agent, Bash, or Zsh on the launcher's Agent tab. Other programs run from the Command tab." },
     { key: 'model', label: 'Choose the model', desc: "Pick a model from the launcher's suggestions, or type any model name." },
     { key: 'effort', label: 'Choose the effort', desc: 'Pick how much effort the model puts in, from the levels that agent offers.' },
-    { key: 'perms', label: 'Guarded or YOLO', desc: "Guarded lets the agent approve actions through a safety check; YOLO skips those checks. Cursor's own setting cannot be classified. See Permission modes below." },
+    { key: 'perms', label: 'Guarded or YOLO', desc: 'Choose Guarded to keep the safety checks or YOLO to skip them. See Permission modes below.' },
     { key: 'trust', label: 'Workspace trust', desc: "Answer the agent’s directory-trust question from its page under Settings → Agents. Which directories it covers depends on the agent. An agent that never asks counts as supported." },
   ] },
   { name: 'Status', caps: [
@@ -56,7 +56,7 @@ export const agents = [
   { name: 'Grok', href: '/docs/agents/grok/', tier: 1, v: { launch: 'y', model: 'n', effort: 'n', perms: 'y', trust: 'y', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
     tip: { trust: 'Never asks, so there is nothing to answer.', model: "Grok uses the model in its own settings.", status: basic, resume: 'Enable hook setup. Restart becomes available after your first prompt.', warn: 'Warns if automatic setup fails, a session with setup goes without a report after its first prompt, or a conversation file is missing at restart.' } },
   { name: 'Cursor', href: '/docs/agents/cursor/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
-    tip: { perms: "YOLO or the agent's own setting; Farhelm cannot force a guarded mode.", trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and Farhelm cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
+    tip: { perms: 'Defaults to YOLO. Custom permission flags are also available.', trust: 'Cursor asks whether to trust a new directory, even in YOLO mode, and Farhelm cannot answer that for you.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'OpenCode', href: '/docs/agents/opencode/', tier: 2, v: { launch: 'y', model: 'y', effort: 'n', perms: 'p', trust: 'y', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO only.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'Shells', href: '/docs/agents/shells/', head: 'Bash and Zsh in their own sessions.', tier: 3, v: { launch: 'y', model: 'n', effort: 'n', perms: 'n', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
@@ -124,8 +124,9 @@ them, while a plain Restart reuses them. Custom is never remembered as the next 
 Pi and OpenCode do not offer this choice. See [Start a session](/docs/using/start-a-session/).
 
 **Guarded** lets an agent approve work on its own through a safety check that can still refuse an action or ask you.
-It does not mean it asks about everything. **YOLO** skips those checks. The shield beside a session tells you which
-choice Farhelm started it with; its hover names the agent's mode and the command it ran.
+Choosing **YOLO** skips those checks. The shield beside a session shows how Farhelm treats its launch. Hold the
+pointer over it to see the mode and command. Farhelm treats older agent sessions with no recorded permission as YOLO
+and keeps their saved commands.
 
 | Agent | Guarded mode | Flags Farhelm passes |
 | --- | --- | --- |
@@ -135,11 +136,10 @@ choice Farhelm started it with; its hover names the agent's mode and the command
 | Grok | Auto-review: its classifier approves or blocks actions | `--permission-mode auto` |
 | Muse | Auto-review: its AI reviewer checks eligible actions, with a workspace sandbox | `--permission-profile :auto-review` |
 | OMP | Write: workspace edits are approved automatically; other actions ask you | `--approval-mode write` |
-| Cursor | Agent's own setting: Farhelm cannot override its configured Run Everything mode | No forcing permission flag |
 
 Guarded is the default for every agent that offers it, unless you chose another mode or the launcher remembered one. Goose keeps its
-approve, smart approve and chat choices and starts in YOLO unless you choose another mode;
-Pi and OpenCode offer YOLO only. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
+approve, smart approve and chat choices and starts in YOLO unless you choose another mode.
+Cursor defaults to YOLO, and Pi and OpenCode offer YOLO only. [Custom commands](/docs/agents/custom-commands/) use your own assertion about whether
 the command is YOLO.
 
 Farhelm passes these flags, but cannot guarantee the agent's behavior. Claude and Grok can allow actions through your
@@ -158,10 +158,9 @@ shows the launch choice until Farhelm sees the status line again. The shield nev
 launch choice. This changes only the display; Farhelm's confirmations and permission choices for new sessions still
 follow the launch.
 
-Cursor's **Agent's own setting** has a grey dashed shield. Hosts that ask before YOLO launches treat it as YOLO,
-because Farhelm cannot promise a safety check. The same applies to older Claude, Codex, Grok and Muse sessions started without permission flags:
-restart, plain Replace and copies keep their old command. Use **Clone**, **Replace with** or **Restart with** to build
-a new guarded launch. On a host that asks first, plain Replace of an older session asks for confirmation too.
+Older agent sessions with no recorded permission show the amber YOLO shield. If you confirm plain **Replace**, Farhelm
+uses the saved command. On a host that asks before YOLO launches, the confirmation offers **Replace as guarded
+instead** when the saved agent supports Guarded. See [Start a session](/docs/using/start-a-session/).
 
 Guarded launches need Farhelm 0.29.0 or later on the host. If a remote host runs an older release,
 [update it](/docs/using/manage-hosts/) before starting sessions there.

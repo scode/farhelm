@@ -458,15 +458,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Replace on a guarded Codex session asks to confirm a YOLO launch.** it's a guarded session and i clicked replace and
-  got a dialog indicating farhelm wants to replace with a yolo session instead of guarded. codex session. macos
-  supervisor. (Screenshot, 0.44.0-rc.4: a Codex session on Local (this machine), shown with the guarded shield mark in
-  the session list, is selected. After Replace, the session pane shows a red "Confirm YOLO launch" banner: "YOLO means
-  the agent bypasses its safety checks: no person, classifier, AI reviewer or sandbox stops its actions on Local (this
-  machine) without asking you. This launch uses the agent's own setting, which Farhelm cannot override or classify. It
-  is treated as YOLO on this host. Local (this machine) asks before every YOLO launch. Nothing has been started." with
-  Cancel, "Start, and don't ask again on this host" and "Start YOLO session anyway".) Plan:
-  `plans/queue/remove-own-setting-permission.md`.
 - **Make a pending upgrade more eye-catching.** when there is an upgrade pending, make it a little more "eyey catching".
   in addition to being read, let's have some kind of "animation" like a bouncing arrow or something point at it every 15
   minutes while its being used or something liek that (details tbd during planning of todo item)
