@@ -468,7 +468,7 @@ fn session_lists_at(state: &SceneState, height: Pixels, cx: &mut App) -> AnyElem
 static SCENES: &[Scene] = &[
     Scene {
         name: "buttons",
-        size: (560., 124.),
+        size: (560., 152.),
         draw: buttons,
         setup: no_setup,
     },
@@ -765,6 +765,12 @@ static SCENES: &[Scene] = &[
         size: (640., 310.),
         draw: cue_target,
         setup: cue_flash,
+    },
+    Scene {
+        name: "session-toolbar",
+        size: (1428., 104.),
+        draw: session_toolbar,
+        setup: session_toolbar_setup,
     },
     Scene {
         name: "session-details-bar",
@@ -1757,18 +1763,20 @@ fn settle(
             }
             // The draw takes the after-draw callback out of the slot. Check after its deferred effect has had
             // a chance to put the next step back, or a partly staged scene can appear ready.
-            let ready = cx.update(|cx| {
+            let (ready, toolbar_unready) = cx.update_window(window, |_, window, cx| {
                 let state = &view.read(cx).state;
-                state.after.get().is_none()
+                let ready = state.after.get().is_none()
                     && !settings::settings_scene_pending(state)
-                    && state.hover.get().is_none()
-            });
-            if ready {
+                    && state.hover.get().is_none();
+                (ready, session_toolbar_unready(state, window))
+            })?;
+            if ready && toolbar_unready.is_none() {
                 break;
             }
             anyhow::ensure!(
                 remaining_staging > 0,
-                "after-draw interaction still pending after {MAX_STAGING_FRAMES} frames"
+                "after-draw interaction still pending after {MAX_STAGING_FRAMES} frames{}",
+                toolbar_unready.map_or_else(String::new, |reason| format!(": {reason}"))
             );
             remaining_staging -= 1;
             previous = None;
