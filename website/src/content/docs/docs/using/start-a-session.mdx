@@ -143,18 +143,21 @@ you tell them not to. This setting skips the confirmation, not the launcher's pe
   alt="The YOLO confirmation, with answers to start guarded instead, start YOLO once, stop asking on this host, or cancel."
 />
 
-**Cancel** goes back to the launcher with nothing started.
+In the session launcher, **Cancel** returns to your draft with nothing started. In **Replace**, it leaves you at
+the original session.
 
 If you chose **YOLO** and the agent also offers **Guarded**, **Start guarded session instead** starts it with the agent's
-own safety checks. This choice is available in the session launcher and **Restart with**.
+own safety checks. This choice is available in the session launcher and **Restart with**. When a plain **Replace**
+asks for YOLO confirmation, **Replace as guarded instead** is available for saved agent sessions that Farhelm treats
+as YOLO when the agent offers Guarded. It starts a new session with Guarded and your current workspace trust settings.
+Sessions with **Custom** permission flags keep the YOLO answers.
 
 On a host that asks, it is not only the **YOLO** choice that asks. **Custom** permission flags ask too, because Farhelm does not check what
 they do. Farhelm offers Pi and OpenCode only in YOLO mode, so every launch of
 either asks. Goose runs in YOLO mode unless you pick one of its approval modes, so its launches ask too, and
 so does a custom command you say runs in YOLO mode. Farhelm goes by that answer alone and never reads the command to
-check it. Cursor launches ask as well, because they run on Cursor's own setting, and so does a plain **Replace** of a
-session an older version of Farhelm started without choosing a permission mode. It does not take an agent's word for it, though, and an agent cannot confirm a YOLO launch: on a
-host that asks, an agent cannot start a YOLO session or a custom command at all ([Approve what agents
+check it. Cursor defaults to YOLO. A plain **Replace** of an older agent session with no recorded permission also
+asks for confirmation. On a host that asks, an agent cannot start a YOLO session or a custom command at all ([Approve what agents
 do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 
 To change your mind about a host later, open **Hosts** at the foot of the navigation rail and choose **Settings** from
@@ -224,8 +227,7 @@ With nothing highlighted, Enter in the directory field launches the path you typ
 A few other prefixes do something no plain search does: `gh:`
 starts a [managed checkout](#start-from-a-managed-checkout), `tl:` applies one of your [launch
 templates](/docs/using/launch-templates/), saved sets of launcher choices,
-and `perms:` picks a [permission mode](/docs/agents/#permission-modes),
-including **Agent's own setting** where available. You can also type
+and `perms:` picks a [permission mode](/docs/agents/#permission-modes). You can also type
 `guarded` or `yolo` without a prefix, even before choosing an agent; `perms:guarded` and `perms:yolo` work then too.
 Other permission modes and effort choices need an agent first. Rejections and errors appear in yellow, while ordinary
 typing hints keep the normal text color. `effort:default` returns to your agent's default

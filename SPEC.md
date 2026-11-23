@@ -648,12 +648,10 @@ show **No snapshot yet** with **Build snapshot**, unless an earlier build failed
 failure and offers **Retry**, the same build; adding a host builds first. Hosts already created from those recipes keep
 running, reconnecting, suspending and deleting as before, and rerunning their setup does not build a snapshot.
 
-Cursor is an agent type launched as `cursor-agent`, and YOLO adds `--force`; Farhelm launches Cursor by that name, never
-as the generic `agent`, which other tools also use. Its model is optional, with `auto`, `composer-2.5` and literal
-custom IDs supported. The non-YOLO choice is labelled "Agent's own setting": Farhelm found no flag that wins over
-Cursor's configured Run Everything mode, so it cannot classify that launch and treats it as YOLO for the host guard.
-YOLO adds `--force` and preserves explicit Cursor denies. There is no separate effort selector. Cursor uses generic
-activity status and has no conversation tracking, automatic Resume, configuration editing, hooks or instruction
+Cursor is an agent type launched as `cursor-agent`, a name distinct from other tools that install `agent`. Its model is
+optional, with `auto`, `composer-2.5` and literal custom IDs supported. Cursor offers YOLO (the default) and Custom
+permissions. YOLO adds `--force` and preserves explicit Cursor denies. There is no separate effort selector. Cursor uses
+generic activity status and has no conversation tracking, automatic Resume, configuration editing, hooks or instruction
 injection. The launcher states that tracking and Resume are unsupported, so a Cursor session cannot be restarted;
 Replace starts it over, and clone preserves launch intent. See [Cursor](website/src/content/docs/docs/agents/cursor.md).
 
@@ -1086,33 +1084,33 @@ agent choice is independent of that destination:
   retain the raw words, and editors display them joined with spaces. Farhelm does not inspect the wrapper's behavior:
   the user asserts that it runs the selected program with Farhelm's arguments and environment passed through. A launch
   that needs custom agent arguments, a directory placeholder in the wrapper, or a separately written resume command is a
-  command launch; visible permission vocabulary is `Guarded`, `Agent's own setting`, `Custom`, `Approve`,
-  `Smart approve`, `Chat`, and `YOLO`. Custom is offered for Claude, Antigravity, Codex, Grok, Muse, Cursor and OMP: the
-  user supplies permission flags instead of Farhelm's own. The launcher splits quotes and escapes into literal words and
-  previews those words; it evaluates no expansions. Empty words lists and incomplete quotes are refused. The user is
-  responsible for keeping these flags limited to permissions; Farhelm neither checks their effect nor infers a safety
-  mode, and every custom session counts as YOLO. Templates and recent setups retain the words, Clone, Replace with and
-  Restart with allow editing them, and plain Restart or Replace reuses the stored command. Changing agent type clears
-  custom and its words; a later template setting another permission clears them. Custom never becomes the remembered
-  default permission. Guarded means an agent can approve actions through a safety mechanism that can still refuse or
-  escalate (a classifier, AI reviewer, sandbox or asking the user), not that it asks about everything. YOLO means no
-  such check. For every agent type that supports Guarded, Guarded is the default permission when none is chosen. This
-  does not change when defaults apply or override a remembered choice. Claude and Grok use `--permission-mode auto`,
-  Codex uses `-a on-request -s workspace-write`, Muse uses `--permission-profile :auto-review`, Antigravity uses
-  `--mode auto`, and OMP uses `--approval-mode write`. Every supported resume retains those flags. Cursor's omission
-  stays under its own setting; Pi, OpenCode and Goose omissions remain YOLO. Model and effort omissions still leave
-  their flags out. Model selection is optional for every harness; OpenCode, Cursor, and Grok offer no effort choice, and
-  Grok accepts no model choice. The helm owns the released model catalog and validates every agent-launch choice, so the
-  GUI never turns a model identifier into an argv fragment. The catalog knows older and current model IDs, with one
-  latest model per family and agent type. Replacing a model keeps its ID and supported efforts in the catalog. A clearly
-  obsolete model leaves only by deliberate removal. Typing a model never changes a selected harness: the typed id is
-  read as that harness spells it (for OpenCode, a bare Zen name means `opencode/<model>`). For a family word or current
-  model ID offered only by other agents, the launcher says “Claude has no sol model; choose an agent that offers it.” If
-  only one agent offers it, the message names that agent, as in “Codex has no fable model; choose Claude to use it.” An
-  older ID can still be used as a custom model on an explicitly chosen harness that has no entry for it, preserving
-  existing launches that used the same spelling. Choosing another harness's model from the full model list switches the
-  harness on purpose. With no harness selected yet, a typed known model fills in its owning harness (a bare `gpt-6-luna`
-  picks Codex). A custom model or an ID offered by several harnesses needs an explicit harness.
+  command launch; visible permission vocabulary is `Guarded`, `Custom`, `Approve`, `Smart approve`, `Chat`, and `YOLO`.
+  Custom is offered for Claude, Antigravity, Codex, Grok, Muse, Cursor and OMP: the user supplies permission flags
+  instead of Farhelm's own. The launcher splits quotes and escapes into literal words and previews those words; it
+  evaluates no expansions. Empty words lists and incomplete quotes are refused. The user is responsible for keeping
+  these flags limited to permissions; Farhelm neither checks their effect nor infers a safety mode, and every custom
+  session counts as YOLO. Templates and recent setups retain the words, Clone, Replace with and Restart with allow
+  editing them, and plain Restart or Replace reuses the stored command. Changing agent type clears custom and its words;
+  a later template setting another permission clears them. Custom never becomes the remembered default permission.
+  Guarded means an agent can approve actions through a safety mechanism that can still refuse or escalate (a classifier,
+  AI reviewer, sandbox or asking the user), not that it asks about everything. YOLO means no such check. For every agent
+  type that supports Guarded, Guarded is the default permission when none is chosen. This does not change when defaults
+  apply or override a remembered choice. Claude and Grok use `--permission-mode auto`, Codex uses
+  `-a on-request -s workspace-write`, Muse uses `--permission-profile :auto-review`, Antigravity uses `--mode auto`, and
+  OMP uses `--approval-mode write`. Every supported resume retains those flags. Cursor, Pi, OpenCode and Goose default
+  to YOLO. Omitted models and efforts leave their flags out. Model selection is optional for every harness; OpenCode,
+  Cursor, and Grok offer no effort choice, and Grok accepts no model choice. The helm owns the released model catalog
+  and validates every agent-launch choice, so the GUI never turns a model identifier into an argv fragment. The catalog
+  knows older and current model IDs, with one latest model per family and agent type. Replacing a model keeps its ID and
+  supported efforts in the catalog. A clearly obsolete model leaves only by deliberate removal. Typing a model never
+  changes a selected harness: the typed id is read as that harness spells it (for OpenCode, a bare Zen name means
+  `opencode/<model>`). For a family word or current model ID offered only by other agents, the launcher says “Claude has
+  no sol model; choose an agent that offers it.” If only one agent offers it, the message names that agent, as in “Codex
+  has no fable model; choose Claude to use it.” An older ID can still be used as a custom model on an explicitly chosen
+  harness that has no entry for it, preserving existing launches that used the same spelling. Choosing another harness's
+  model from the full model list switches the harness on purpose. With no harness selected yet, a typed known model
+  fills in its owning harness (a bare `gpt-6-luna` picks Codex). A custom model or an ID offered by several harnesses
+  needs an explicit harness.
 
   Every model family has a versionless name such as `sol` or `glm-flash`. In the launcher's model field, typing that
   name exactly, ignoring ASCII case, highlights the family's latest model for the chosen harness. Enter chooses its full
@@ -1129,49 +1127,49 @@ agent choice is independent of that destination:
   draft before the switch; dismiss closes the banner. The banner lasts about eight seconds, paused while hovered or
   focused, and is announced to screen readers. The permission control gets a thick red outline that fades after about
   two and a half seconds. Reduced motion replaces slide and fade with a static outline while the banner is shown. Chat
-  and approve are safest, then smart approve and Guarded, then YOLO, custom flags and the agent's own setting; only a
-  move to a later group triggers the banner. Choosing a permission directly never triggers it. Choosing the first agent
-  triggers it only when a permission was explicitly chosen before that agent; a displayed default or a remembered
-  permission alone does not. An invalid combination cannot launch. New normally preselects no harness or model. The
-  permissions mode remembers the last successful agent launch, helm-wide across every client, except that a harness's
-  default or forced YOLO clears that memory instead of preselecting YOLO for another harness. Explicit YOLO on a harness
-  with a non-YOLO default is remembered. The last wrapper prefix from a successful user agent launch is remembered per
-  agent type, helm-wide; a launch without one clears that agent's remembered prefix. Switching agent types loads the new
-  type's remembered prefix. Agent-origin launches and command launches do not change this memory. Workspace trust for
-  Codex, Muse and Pi comes from separate off-by-default Settings switches that apply in any directory (below). There is
-  no per-launch trust choice, and the old remembered trust value is neither read nor written. Those switches add
-  per-launch trust arguments. Claude's separate switch edits its own configuration as described below. Without an
-  override, Codex, Muse, Claude, and Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does
-  not send answers to their terminal prompts. "Reset choices" returns permissions and the wrapper prefix to their
-  remembered values, and a recent setup's saved choices override them when used. A recent setup's historical trust value
-  is ignored. The launch-composer search matches harnesses, launch templates (`tl:name`), models scoped by the chosen
-  harness, effort words offered by that harness and model plus `effort:default`, bare `yolo` and `guarded` plus the
-  `perms:` choices for those modes, custom, own setting and supported approval modes, host and name actions, folders and
-  recent setups. On the Agent tab, Guarded and YOLO can also be chosen before a harness, by their bare words or `perms:`
-  choices. Other permission actions are offered only when the selected harness can represent them; own setting is
-  offered only on Cursor. The Command tab offers no permission actions. `name:foo` applies the entire value as the
-  session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even if it has an alias.
-  The default local host label in the GUI is `Local (this machine)`. Accepting a result applies it and clears the box
-  while keeping focus there, except custom moves focus to its flags editor. With no row highlighted, Enter on an empty
-  field launches only a complete, valid selection through the ordinary Launch path; an incomplete attempt says why
-  beside Launch, as does a refused Launch press, and the greyed-out button's hover names what is missing. Enter when the
-  launcher itself has focus uses that same Launch path and refusal. Request refusals appear there too, within the
-  initial dialog viewport. Unmatched unlabelled text offers one visible **Set session name** row; accepting it sets the
-  name and clears the box without launching. Scoped queries with no results show a live reason in the results area: a
-  missing name, no matching choice, a pending model or template list, or the owner/repo form a repository needs. Unknown
-  model ids belong in the model field. On the agent tab, an unmatched effort or permission word, or an `effort:` or
-  `perms:` query with no offered row, asks for a harness first when none is chosen. Input refusals and request errors in
-  the launcher use yellow warning colors; loading messages and typing hints keep the ordinary text color, while
-  permission danger stays red. Spaces alone ask for a search or an empty box and never launch. Escape or a click outside
-  search closes its rows or message without clearing the query. Enter on a nonempty query with the area closed first
-  reopens it; a separate Enter picks the visible highlighted row, or leaves the explanation in place when there is none.
-  Enter on a choice button (launch-kind tab, harness, effort, or permissions) applies that choice and then launches
-  through the ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode and focuses its
-  required flags editor. Enter on the closed host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox
-  launches with the values shown, without changing them; those native controls retain their Space and arrow behavior.
-  Action buttons keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel
-  keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without
-  launching; with no highlighted entry it launches as before. A held Enter never launches.
+  and approve are safest, then smart approve and Guarded, then YOLO and custom flags. Only a move to a later group
+  triggers the banner. Choosing a permission directly never triggers it. Choosing the first agent triggers it only when
+  a permission was explicitly chosen before that agent; a displayed default or a remembered permission alone does not.
+  An invalid combination cannot launch. New normally preselects no harness or model. The permissions mode remembers the
+  last successful agent launch, helm-wide across every client, except that a harness's default or forced YOLO clears
+  that memory instead of preselecting YOLO for another harness. Explicit YOLO on a harness with a non-YOLO default is
+  remembered. The last wrapper prefix from a successful user agent launch is remembered per agent type, helm-wide; a
+  launch without one clears that agent's remembered prefix. Switching agent types loads the new type's remembered
+  prefix. Agent-origin launches and command launches do not change this memory. Workspace trust for Codex, Muse and Pi
+  comes from separate off-by-default Settings switches that apply in any directory (below). There is no per-launch trust
+  choice, and the old remembered trust value is neither read nor written. Those switches add per-launch trust arguments.
+  Claude's separate switch edits its own configuration as described below. Without an override, Codex, Muse, Claude, and
+  Cursor may still ask for directory trust (Cursor even with `--force`). Farhelm does not send answers to their terminal
+  prompts. "Reset choices" returns permissions and the wrapper prefix to their remembered values, and a recent setup's
+  saved choices override them when used. A recent setup's historical trust value is ignored. The launch-composer search
+  matches harnesses, launch templates (`tl:name`), models scoped by the chosen harness, effort words offered by that
+  harness and model plus `effort:default`, bare `yolo` and `guarded` plus the `perms:` choices for those modes, custom
+  and supported approval modes, host and name actions, folders and recent setups. On the Agent tab, Guarded and YOLO can
+  also be chosen before a harness, by their bare words or `perms:` choices. Other permission actions are offered only
+  when the selected harness can represent them. The Command tab offers no permission actions. `name:foo` applies the
+  entire value as the session name. `host:foo` filters host choices, and `host:local` selects the helm-local host even
+  if it has an alias. The default local host label in the GUI is `Local (this machine)`. Accepting a result applies it
+  and clears the box while keeping focus there, except custom moves focus to its flags editor. With no row highlighted,
+  Enter on an empty field launches only a complete, valid selection through the ordinary Launch path; an incomplete
+  attempt says why beside Launch, as does a refused Launch press, and the greyed-out button's hover names what is
+  missing. Enter when the launcher itself has focus uses that same Launch path and refusal. Request refusals appear
+  there too, within the initial dialog viewport. Unmatched unlabelled text offers one visible **Set session name** row;
+  accepting it sets the name and clears the box without launching. Scoped queries with no results show a live reason in
+  the results area: a missing name, no matching choice, a pending model or template list, or the owner/repo form a
+  repository needs. Unknown model ids belong in the model field. On the agent tab, an unmatched effort or permission
+  word, or an `effort:` or `perms:` query with no offered row, asks for a harness first when none is chosen. Input
+  refusals and request errors in the launcher use yellow warning colors; loading messages and typing hints keep the
+  ordinary text color, while permission danger stays red. Spaces alone ask for a search or an empty box and never
+  launch. Escape or a click outside search closes its rows or message without clearing the query. Enter on a nonempty
+  query with the area closed first reopens it; a separate Enter picks the visible highlighted row, or leaves the
+  explanation in place when there is none. Enter on a choice button (launch-kind tab, harness, effort, or permissions)
+  applies that choice and then launches through the ordinary Launch path, or shows its refusal beside Launch; custom
+  instead selects the mode and focuses its required flags editor. Enter on the closed host picker, agent-type or effort
+  dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those native controls
+  retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO
+  confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an
+  arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held Enter
+  never launches.
 
   A key or click may act before a frame shows an arriving background update, with destructive confirmations and launches
   that retire a session (Replace with) limited to the action and consent already shown.
@@ -1525,34 +1523,37 @@ Controls that perform exactly the same operation on the same target behave ident
 including a pending confirmation, differing only where the GUI strictly requires it.
 
 A YOLO launch on a host that asks before YOLO launches (see the host settings under Topology) needs an explicit
-confirmation. An agent launch counts as YOLO when its stored permission is custom or YOLO, including omitted permissions
-on Pi, OpenCode, OMP and Goose. A stored omission on Claude, Antigravity, Codex, Grok, Muse or Cursor is the agent's own
-setting, not guarded, and is conservatively treated as YOLO by the host guard. A plain shell has no permission mode, so
-its create, clone and replace do not ask for YOLO consent. The existing explicit approval rule for an agent-supplied
+confirmation. Farhelm treats an agent launch as YOLO when its saved permission is YOLO, Custom, missing, or unsupported
+by the saved agent. An upgrade records YOLO on saved agent launches with no recorded mode and preserves their start and
+resume commands. Cached or older records with no permission follow the same rule. A plain shell has no permission mode,
+so its create, clone and replace do not ask for YOLO consent. The existing explicit approval rule for an agent-supplied
 wrapper still applies. A command launch counts as YOLO when its YOLO assertion says so, and only then: Farhelm does not
 parse command lines to second-guess the assertion. Because an agent's assertion cannot be checked either, an agent may
 not start a command launch, or a YOLO launch, on such a host at all (see Agent-spawned sessions). The helm enforces the
 confirmation, so no client can skip it: every create, clone, replace, replace with, and restart with that reaches it on
-such a host without the override is refused before any supervisor is contacted, and nothing is started. The GUI answers
-that refusal with a prominent confirmation, shown with the control or surface that started the launch and scrolled into
-view, that names the host, says what YOLO means and why this launch is one (YOLO was chosen where the agent type offers
-other modes, the agent type has no guarded mode, the launch uses the agent's own setting which Farhelm cannot override,
-custom flags whose effect Farhelm does not check, or the command was asserted to be YOLO), and retries with the override
-only when the user confirms. Besides a one-off confirmation it offers to stop asking for that host: that answer first
-sets the host to start YOLO sessions without asking, exactly as its settings would, and then retries with the override;
-if changing that setting fails, nothing is started and the confirmation stays up with the reason. In the session
-launcher, an explicit YOLO choice on an agent that offers guarded mode also offers starting the same launch guarded
-instead, without YOLO confirmation; Restart with offers it only when the resulting draft still differs from the stored
-launch. The `farhelm` command line has no override: a request from inside a session is an agent's, and agents follow
+such a host without the override is refused before the helm sends a launch or restart request to the supervisor. The GUI
+answers that refusal with a prominent confirmation, shown with the control or surface that started the launch and
+scrolled into view, that names the host and explains the launch's classification. A saved YOLO permission, an agent
+whose supported choices all count as YOLO, unverified custom flags, and a command asserted to be YOLO each get an
+explanation. Farhelm retries with the override only when the user confirms. Besides a one-off confirmation it offers to
+stop asking for that host: that answer first sets the host to start YOLO sessions without asking, exactly as its
+settings would, and then retries with the override; if changing that setting fails, nothing is started and the
+confirmation stays up with the reason. In the session launcher, an explicit YOLO choice on an agent that offers guarded
+mode also offers starting the same launch guarded instead, without YOLO confirmation; Restart with offers it only when
+the resulting draft still differs from the stored launch. A plain Replace of a saved YOLO agent launch offers **Replace
+as guarded instead** when the agent supports Guarded. This includes older agent launches classified as YOLO because
+their mode is missing or unsupported. The guarded answer uses Replace with to compile the same agent, model, effort and
+wrapper in Guarded, using current workspace trust settings. It keeps the source host, displayed directory and title, and
+the original Delete precondition. It sends no YOLO consent or host-setting write. Custom flags and commands use the YOLO
+answers. The `farhelm` command line has no override: a request from inside a session is an agent's, and agents follow
 their own rule under Agent-spawned sessions, whatever the request claims. A plain restart relaunches the session's own
 stored launch and needs no YOLO confirmation again. The question stays inline and has no header Close: its answers read
 Cancel, the guarded option when offered, the outlined permanent YOLO answer, then the filled one-time YOLO answer. Tab
 follows that same order; Cancel keeps initial focus, except that a plain Replace's question, which arrives after its
 reply, takes focus only if the user has not moved on since answering Replace (see [Keyboard focus](#keyboard-focus)).
-Plain Replace, agent clone and inherited spawn also copy the stored command; pre-upgrade no-flag sessions therefore
-remain own-setting, with plain Replace asking on hosts that ask before YOLO launches and agent copies refused there.
-Clone, Replace with and Restart with compile new choices and get the guarded flags. Remote hosts must be updated after
-this protocol change before launches resume; older releases cannot read launches stored as guarded.
+The usual Replace answers, agent clone and inherited spawn copy the stored command. For an older agent launch without
+permission flags this preserves the original command and applies the YOLO gate. Clone, Replace with and Restart with
+compile new choices. Guarded launches need a host that understands protocol 48 or later.
 
 Failures split cleanly in two: precondition failures (nonexistent directory, unknown template, unreachable host) fail
 the create with a visible error and no session; launch failures of a session that was successfully created surface on
@@ -1771,8 +1772,9 @@ attempts, not an already accepted attempt or its retries.
 
 Settings offers an off-by-default, all-hosts choice under **Agents → Claude Code** to answer Claude's "trust this
 folder?" in any directory. New, Clone, Restart with, Replace with and agent-requested launches read the current setting.
-Plain Restart and Replace reuse the stored choice. On a new managed checkout the same switch also enables trust after
-clone and its post-clone command, including checkouts initially started with another agent. Changing the switch does not
+Plain Restart and the Replace answers that reuse the saved command keep the stored choice. **Replace as guarded
+instead** reads Settings as Replace with does. On a new managed checkout the same switch also enables trust after clone
+and its post-clone command, including checkouts initially started with another agent. Changing the switch does not
 invalidate an already displayed path preview.
 
 The help leads with the mechanism: Claude has no supported switch, so Farhelm edits its settings file (normally
@@ -1805,15 +1807,17 @@ Restart with, Replace with and agent-requested launches apply the current settin
 reads Settings under the same rule as Clone. Codex receives a per-launch trusted directory override, Muse receives
 `--trust-workspace`, and Pi receives `--approve` for project settings and extensions. The agent keeps its saved
 configuration. The help explains that the repository's hooks, settings and commands may run as if the user had approved
-them. Plain Restart and plain Replace keep the stored launch. An accepted fresh-checkout retry retains its original
-trust choice. An ordinary keyed retry whose resolved launch changes may refuse the reused key. This includes a retry
-across the workspace-trust upgrade if the original attempt used a symlink and stored its canonical path.
+them. Plain Restart and the Replace answers that reuse the saved command keep the stored launch. **Replace as guarded
+instead** reads Settings as Replace with does. An accepted fresh-checkout retry retains its original trust choice. An
+ordinary keyed retry whose resolved launch changes may refuse the reused key. This includes a retry across the
+workspace-trust upgrade if the original attempt used a symlink and stored its canonical path.
 
 Antigravity has its own off-by-default, all-hosts switch. It applies to newly composed Antigravity agent launches in
 ordinary directories, managed checkouts and disposable environments. The per-launch `--settings` argument trusts the
 canonical working directory on the session's host. It replaces the saved trust list for that process and leaves the
 settings file alone. Custom permission options supplying `--settings` or `--settings=...` take precedence. Plain Restart
-and Replace reuse the saved launch. Literal Command launches supply their own arguments.
+and the Replace answers that reuse the saved command keep the stored launch. **Replace as guarded instead** reads
+Settings as Replace with does. Literal Command launches supply their own arguments.
 
 Codex, Muse and Antigravity show the same nonmodal discovery hint while their recognized trust question is current in
 the agent terminal, their switch is off, and their own hint has not been dismissed. The hint names the agent, offers
@@ -2172,17 +2176,17 @@ submission and focus-return behavior.
   fields, never rediscovered by parsing its composed command, or a command launch's command, YOLO assertion, declared
   agent type, and resume command. Cloning does not deduplicate titles — a duplicate is allowed, the same as any other
   create.
-- **Replace** creates a new session — new id, fresh conversation, same host, working directory, title, and launch,
-  copied exactly as stored — and then DELETES the source. For a command launch, "fresh conversation" means only that
-  Farhelm starts the stored command again rather than a resume; a command that itself continues a conversation, such as
-  `claude --continue`, does so. Confirmed directly from the row menu, with one inline confirmation and nothing to edit
-  first, since the whole point is the same settings. Contrast restart, which keeps the session's own id and its
-  conversation: restart continues a session, replace starts one over under the same settings. If the create fails, the
-  source is untouched. If the create succeeds and the removal that follows fails, the reply names both sessions; whether
-  the source is still there depends on how the removal failed, and the user checks or removes it by hand. Replace is
-  offered wherever clone is offered. After about two seconds waiting for the reply, the sidebar, session header and
-  interrupted-session card share a spinner, the host and elapsed seconds, updated about once a second. The status
-  disappears on the reply. A refusal keeps its ordinary explanation, including partial failure of the source's removal.
+- **Replace** creates a new session with a new id and a fresh conversation, keeping the host, working directory and
+  title, then DELETES the source. The usual answers copy the stored launch exactly. When the host asks for YOLO
+  confirmation, **Replace as guarded instead** recompiles the launch as described under [Creation](#creation). For a
+  command launch, Farhelm runs the saved start command. A command such as `claude --continue` resumes a conversation
+  itself. The row menu asks for inline confirmation without opening the launcher. Restart keeps the existing session's
+  id and conversation. If the create fails, the source is untouched. If the create succeeds and the removal that follows
+  fails, the reply names both sessions; whether the source is still there depends on how the removal failed, and the
+  user checks or removes it by hand. Replace is offered wherever clone is offered. After about two seconds waiting for
+  the reply, the sidebar, session header and interrupted-session card share a spinner, the host and elapsed seconds,
+  updated about once a second. The status disappears on the reply. A refusal keeps its ordinary explanation, including
+  partial failure of the source's removal.
 - **Replace with** opens the same editable create form clone opens, pre-filled with the source's host, existing
   directory, title, and launch even when the source belongs to a GitHub checkout, so every field can be edited before
   launching — the key use is starting an equivalent session on a different harness or effort. Launching creates the new
@@ -2815,29 +2819,28 @@ up** and **Move down** rearrange eligible pins relative to the displayed neighbo
 and unpinned rows offer neither action. Accepting a move closes the menu and keeps keyboard focus on the moved row's
 menu button. Every session row except a shell carries one permission mark. Bash and Zsh show their own terminal-window
 marks, `$_` and `%_` in the inherited grey, with a hover that names the shell. An amber slashed shield means the
-session's launch is YOLO by the rule under Creation: its effective agent-launch permission is custom or YOLO, or its
-command was asserted to be YOLO. A green plain shield means an agent launch in guarded or an approval mode, or a command
-asserted not to be YOLO. A session created before launch kinds existed that was not an agent launch has no assertion and
-carries an amber question mark. Hover and screen-reader text name the specific agent-launch mode (guarded, custom,
-approve, smart approve, chat, or YOLO), or say that the mark is the assertion made when the command was launched, by the
-user or by an agent, and not something Farhelm checked, or that a pre-existing session's command was never classified. A
-grey dashed shield means the agent's own setting, including older sessions started without guarded flags. Its hover says
-Not classified and that the host guard treats it as YOLO. For Claude, Grok, Muse and Cursor, Farhelm also tries to read
-the agent's permission mode from its status line. A definite no-checks reading changes any shield other than YOLO or
-asserted-YOLO to the YOLO shield. Hover and screen-reader text name the observed mode and say it was seen on screen,
-while retaining the launch mode and command. Once observed, YOLO stays for the rest of the agent run: a recognized
-non-YOLO mode, an unreadable or obscured line, or an unrecognized mode cannot clear it. This errs toward safety:
-restoring a safer shield would risk leaving it there if a later switch back to YOLO went unnoticed. This never makes the
-shield safer than its launch choice. Restart, Replace and resume start a new run with no observed evidence; a supervisor
-restart also clears it until new definite samples arrive. Command launches with a declared agent type are included;
-legacy sessions and the other agents are not read. This is advisory and best effort, not a promise of detection: a
-missed or late reading is outside the guarantee. It cannot see allow rules, hooks or managed policy. It is display only;
-host YOLO guards, spawned-session permission inheritance and approval decisions still use the stored launch alone. Every
-guarded hover names the agent's mode and meaning, shows the actual stored command under Launched with, and explains that
-allow rules, hooks, plugins, always-allow answers, sandbox settings and in-session switches can loosen it; agents may
-change behavior between versions. A custom hover says the flags were the user's, that Farhelm does not check them and
-counts the session as YOLO, and shows both the flags and the full stored command under Launched with. The launcher's
-permission choice has a separate ? button with that help, opening the docs section on permission modes.
+session's launch is treated as YOLO by the rule under Creation. A green plain shield means an agent launch in guarded or
+an approval mode, or a command asserted not to be YOLO. A session created before launch kinds existed that was not an
+agent launch has no assertion and carries an amber question mark. Hover and screen-reader text name the specific
+agent-launch mode (guarded, custom, approve, smart approve, chat, or YOLO), or say that the mark is the assertion made
+when the command was launched, by the user or by an agent, and not something Farhelm checked, or that a pre-existing
+session's command was never classified. The YOLO hover describes Farhelm's classification and shows the recorded
+command. For Claude, Grok, Muse and Cursor, Farhelm also tries to read the agent's permission mode from its status line.
+A definite no-checks reading changes any shield other than YOLO or asserted-YOLO to the YOLO shield. Hover and
+screen-reader text name the observed mode and say it was seen on screen, while retaining the launch mode and command.
+Once observed, YOLO stays for the rest of the agent run: a recognized non-YOLO mode, an unreadable or obscured line, or
+an unrecognized mode cannot clear it. This errs toward safety: restoring a safer shield would risk leaving it there if a
+later switch back to YOLO went unnoticed. This never makes the shield safer than its launch choice. Restart, Replace and
+resume start a new run with no observed evidence; a supervisor restart also clears it until new definite samples arrive.
+Command launches with a declared agent type are included; legacy sessions and the other agents are not read. This is
+advisory and best effort, not a promise of detection: a missed or late reading is outside the guarantee. It cannot see
+allow rules, hooks or managed policy. It is display only; host YOLO guards, spawned-session permission inheritance and
+approval decisions still use the stored launch alone. Every guarded hover names the agent's mode and meaning, shows the
+actual stored command under Launched with, and explains that allow rules, hooks, plugins, always-allow answers, sandbox
+settings and in-session switches can loosen it; agents may change behavior between versions. A custom hover says the
+flags were the user's, that Farhelm does not check them and counts the session as YOLO, and shows both the flags and the
+full stored command under Launched with. The launcher's permission choice has a separate ? button with that help,
+opening the docs section on permission modes.
 
 Hover help keeps neighboring choices visible wherever the window has room. Menu items, dropdown choices and actions in
 the notification and tunnels lists show help just outside the panel, to the right if it fits and to the left otherwise.
@@ -4522,12 +4525,12 @@ the raw reference, including characters shown as escapes. Answering the card sti
 
 Launch and restart cards show one Permissions row using the session list's classification. Shell launch cards name the
 shell and show the command with no Permissions row. For the other launch types, the row shows a warning YOLO chip for
-YOLO or Custom, the vendor's guarded mode name, Approve, Smart approve, Chat, or Unknown for a launch predating
-classification. Own setting explains that Farhelm treats it as YOLO. A command launch's Asserted YOLO or Asserted not
-YOLO is explicitly the agent's unchecked claim, never Farhelm's verdict. Stored workspace trust has its own Trusted
-workspace or Not trusted chip. The trusted chip names Settings as the source. Permission flags remain a separate, fully
-wrapped fact. Prompt cards use the same chip presentation; template cards keep their stored permission labels and YOLO
-assertions without interpreting an omitted permission as own setting.
+YOLO (including Custom), the vendor's guarded mode name, Approve, Smart approve, Chat, or Unknown for a launch predating
+classification. A command launch's Asserted YOLO or Asserted not YOLO is explicitly the agent's unchecked claim, never
+Farhelm's verdict. Stored workspace trust has its own Trusted workspace or Not trusted chip. The trusted chip names
+Settings as the source. Permission flags remain a separate, fully wrapped fact. Prompt cards use the same chip
+presentation. Template cards show the permission field when present, resolving a reset to the agent's default when the
+template names one. They retain any explicit command YOLO assertion.
 
 A qualifying session card offers Allow, **Always allow on <host> only**, **Always allow from <host>**, and Deny. The new
 button grants only **Manage sessions on this host without asking** to the requesting install and approves that request.
