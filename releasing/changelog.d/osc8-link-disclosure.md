@@ -2,4 +2,4 @@
 kind: fixed
 ---
 
-Terminal hyperlinks with descriptive labels no longer show a mismatch warning just because the label includes a URL in parentheses.
+Terminal hyperlinks with descriptive labels no longer show a mismatch warning just because the label includes a URL in parentheses. Concealed text no longer affects the warning or responds to hovering and clicking.

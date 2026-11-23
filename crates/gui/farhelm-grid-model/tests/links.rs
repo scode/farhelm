@@ -21,10 +21,15 @@ fn model(cols: u16, rows: Vec<Value>, links: Vec<Value>) -> GridModel {
         json!({"t":"rows","rows":rows.into_iter().enumerate().map(|(index,row)|json!([index,row])).collect::<Vec<_>>(),"links":links}),
         json!({"t":"frame","rev":1,"cols":cols,"rows":count,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
     ] {
-        let message: GridOutput = serde_json::from_value(value).unwrap();
-        let _ = model.apply(&message.encode().unwrap()).unwrap();
+        apply_message(&mut model, value);
     }
     model
+}
+
+/// Apply the encoded message even for an update, so a conceal toggle has the same frame boundary as live rendering.
+fn apply_message(model: &mut GridModel, value: Value) {
+    let message: GridOutput = serde_json::from_value(value).unwrap();
+    let _ = model.apply(&message.encode().unwrap()).unwrap();
 }
 
 /// ASCII has one byte per wire cell. Unicode cases supply their widths below
@@ -295,6 +300,247 @@ fn concealed_text_breaks_a_wrapped_link_but_remains_in_selection() {
     assert_eq!(link.uri, "https://example.test");
     assert_eq!(link.ranges.len(), 1);
     assert!(model.link_at(Position { line: 1, col: 5 }).is_none());
+}
+
+/// A style-only update changes which label a user sees. It can expose a real destination mismatch or remove
+/// a false warning. The link under the pointer changes identity and its hover range ends at the visible label.
+#[test]
+fn concealing_a_program_link_suffix_rechecks_the_visible_label() {
+    for (prefix, suffix, target, warns_before) in [
+        (
+            "https://example.test",
+            ".other.test",
+            "https://example.test.other.test",
+            false,
+        ),
+        ("menu", "://example.test/x", "https://other.test/x", true),
+    ] {
+        let split = prefix.len() as u16;
+        let row = |flags| {
+            json!({"w":false,"r":[
+                [0,split,prefix,[0,-1,-1],0],
+                [split,suffix.len(),suffix,[flags,-1,-1],0]
+            ]})
+        };
+        let links = vec![json!(["tag", target])];
+        let mut grid = model(48, vec![row(0)], links.clone());
+        let start = Position { line: 0, col: 0 };
+        let boundary = Position {
+            line: 0,
+            col: split,
+        };
+        let before = grid.link_at(start).unwrap();
+        let full_label = format!("{prefix}{suffix}");
+        assert_eq!(before.label, full_label);
+        assert_eq!(grid.link_at(boundary), Some(before.clone()));
+        assert_eq!(
+            grid.link_disclosure(&before)
+                .unwrap()
+                .claimed_text
+                .as_deref(),
+            warns_before.then_some(full_label.as_str())
+        );
+
+        apply_message(
+            &mut grid,
+            json!({"t":"rows","rows":[[0,row(style_flags::HIDDEN)]],"links":links}),
+        );
+        apply_message(
+            &mut grid,
+            json!({"t":"frame","rev":2,"cols":48,"rows":1,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+        );
+        let after = grid.link_at(start).unwrap();
+        assert_eq!(after.kind, before.kind);
+        assert_eq!(after.uri, before.uri);
+        assert_eq!(after.label, prefix);
+        assert_eq!(after.ranges[0].end, boundary);
+        assert_ne!(after, before);
+        assert_eq!(grid.link_at(boundary), None);
+        assert_eq!(
+            grid.link_disclosure(&after)
+                .unwrap()
+                .claimed_text
+                .as_deref(),
+            (!warns_before).then_some(prefix)
+        );
+    }
+}
+
+/// A concealed-only row ends the visible label walk. It stays in the evidence boundary so revealing it can
+/// extend the link, and another visible row carrying the same tag beyond it stays outside the comparison.
+#[test]
+fn a_concealed_only_row_breaks_a_program_link_label() {
+    let grid = model(
+        42,
+        vec![
+            ascii("https://example.test/x", false, Some(0)),
+            json!({"w":false,"r":[[0,6,"hidden",[style_flags::HIDDEN,-1,-1],0]]}),
+            ascii("unrelated", false, Some(0)),
+        ],
+        vec![json!(["tag", "https://example.test/x"])],
+    );
+    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+    let other = grid.link_at(Position { line: 2, col: 0 }).unwrap();
+    assert_eq!(first.kind, other.kind);
+    assert!(grid.row_links(1).is_empty());
+    assert!(first.evidence.contains(&1));
+    assert!(!first.evidence.contains(&2));
+    assert!(grid.link_disclosure(&first).unwrap().claimed_text.is_none());
+}
+
+/// A concealed gap splits the hit ranges even when the runs have one explicit tag. An adjacent continuation
+/// makes the address ambiguous, so the visible address-shaped fragment still warns.
+#[test]
+fn a_concealed_gap_splits_the_hit_ranges_of_an_explicit_program_link() {
+    let address = "https://example.test/x";
+    let split = address.len();
+    let grid = model(
+        48,
+        vec![
+            json!({"w":false,"r":[
+                [0,split,address,[0,-1,-1],0],
+                [split,2,"  ",[style_flags::HIDDEN,-1,-1],0],
+                [split+2,4,"more",[0,-1,-1],0]
+            ]}),
+            ascii("continuation", false, Some(0)),
+        ],
+        vec![json!(["tag", address])],
+    );
+    let links = grid.row_links(0);
+    assert_eq!(links.len(), 2);
+    assert_eq!(links[0].kind, links[1].kind);
+    assert_eq!(links[0].label, address);
+    assert_eq!(links[0].ranges[0].end.col, split as u16);
+    assert_eq!(links[1].label, "more");
+    assert_eq!(links[1].ranges[0].start.col, (split + 2) as u16);
+    assert_eq!(
+        grid.link_at(Position {
+            line: 0,
+            col: split as u16
+        }),
+        None
+    );
+    assert_eq!(
+        grid.link_disclosure(&links[0])
+            .unwrap()
+            .claimed_text
+            .as_deref(),
+        Some(address)
+    );
+}
+
+/// Revealing a separate stretch of the same tag can change the hovered row's warning while leaving the
+/// hovered stretch itself untouched. When that happens, a display for the old link must be refreshed.
+#[test]
+fn revealing_a_second_stretch_invalidates_a_wrapped_link_disclosure() {
+    let prefix = "https://example.test/";
+    let links = vec![json!(["tag", "https://example.test/x"])];
+    let separated = prefix.len() + 1;
+    let row = |flags| {
+        json!({"w":false,"r":[
+            [0,prefix.len(),prefix,[0,-1,-1],0],
+            [separated,4,"more",[flags,-1,-1],0]
+        ]})
+    };
+    let mut grid = model(
+        48,
+        vec![row(style_flags::HIDDEN), ascii("x", false, Some(0))],
+        links.clone(),
+    );
+    let hovered = Position { line: 0, col: 0 };
+    let before = grid.link_at(hovered).unwrap();
+    assert_eq!(before.label, prefix);
+    assert!(
+        grid.link_disclosure(&before)
+            .unwrap()
+            .claimed_text
+            .is_none()
+    );
+
+    apply_message(
+        &mut grid,
+        json!({"t":"rows","rows":[[0,row(0)]],"links":links}),
+    );
+    apply_message(
+        &mut grid,
+        json!({"t":"frame","rev":2,"cols":48,"rows":2,"cursor":{"x":0,"y":0,"visible":true,"shape":"block","blink":false}}),
+    );
+    let after = grid.link_at(hovered).unwrap();
+    assert_eq!(grid.row_links(0).len(), 2, "the second stretch is visible");
+    assert_eq!(after.label, before.label);
+    assert_eq!(after.ranges, before.ranges);
+    assert_eq!(after.evidence, before.evidence);
+    assert_eq!(after.uri, before.uri);
+    assert_eq!(after.kind, before.kind);
+    assert_ne!(after, before, "the display must refresh");
+    assert_eq!(
+        grid.link_disclosure(&after)
+            .unwrap()
+            .claimed_text
+            .as_deref(),
+        Some(prefix)
+    );
+}
+
+/// Anonymous tags sharing a destination only inherit each other's identity across visible cells. Concealing
+/// either side of a soft-wrap seam keeps the second row's visible text from joining the first.
+#[test]
+fn concealed_cells_break_generated_link_continuation_on_either_side_of_a_wrap() {
+    for hide_above in [false, true] {
+        let style = |hide| {
+            [
+                if hide {
+                    i64::from(style_flags::HIDDEN)
+                } else {
+                    0
+                },
+                -1,
+                -1,
+            ]
+        };
+        let grid = model(
+            8,
+            vec![
+                json!({"w":true,"r":[[0,4,"head",style(false),0],[4,4,"seam",style(hide_above),1]]}),
+                json!({"w":false,"r":[[0,4,"seam",style(!hide_above),2],[4,4,"tail",style(false),3]]}),
+            ],
+            (1..=4)
+                .map(|id| json!([format!("{id}_alacritty"), "https://example.test/x"]))
+                .collect(),
+        );
+        let head = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+        let tail = grid.link_at(Position { line: 1, col: 4 }).unwrap();
+        assert!(matches!(head.kind, LinkKind::Osc { ref id } if id == "1_alacritty"));
+        let expected = if hide_above {
+            "3_alacritty"
+        } else {
+            "4_alacritty"
+        };
+        assert!(matches!(tail.kind, LinkKind::Osc { ref id } if id == expected));
+        let hidden = if hide_above {
+            Position { line: 0, col: 4 }
+        } else {
+            Position { line: 1, col: 0 }
+        };
+        assert_eq!(grid.link_at(hidden), None);
+    }
+}
+
+/// A printed address under a program's tag must never become a fallback target, including when the whole
+/// tagged label is concealed. The same visible address without a tag is a printed link.
+#[test]
+fn a_concealed_program_link_over_a_printed_address_has_no_fallback_link() {
+    let label = "https://example.test/x";
+    let position = Position { line: 0, col: 0 };
+    let printed = model(26, vec![ascii(label, false, None)], vec![]);
+    assert_eq!(printed.link_at(position).unwrap().kind, LinkKind::Text);
+    let tagged = model(
+        26,
+        vec![json!({"w":false,"r":[[0,label.len(),label,[style_flags::HIDDEN,-1,-1],0]]})],
+        vec![json!(["tag", "https://other.test/x"])],
+    );
+    assert!(tagged.row_links(0).is_empty());
+    assert_eq!(tagged.link_at(position), None);
 }
 
 /// Explicit OSC ownership defeats prose recognition even for an inert scheme;
