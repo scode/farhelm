@@ -3,6 +3,7 @@
 //! attribution plus root record validation).
 
 use super::super::*;
+use crate::agent_kind::report_pin::{PinDecision, ReportPin};
 
 impl Supervisor {
     /// Check the admitted exact file only when Restart is about to use it.
@@ -136,7 +137,7 @@ impl Supervisor {
         })?;
         let pin = stored_pin
             .as_deref()
-            .map(serde_json::from_str::<crate::agent_kind::report_pin::ReportPin>)
+            .map(serde_json::from_str::<ReportPin>)
             .transpose()
             .map_err(|_| {
                 RequestError::new(
@@ -144,26 +145,8 @@ impl Supervisor {
                     "the Codex reporting-process pin is invalid",
                 )
             })?;
-        use crate::agent_kind::report_pin::PinDecision;
-        let decision = match pin.as_ref() {
-            None => PinDecision::Accept,
-            Some(pin) => {
-                let initial = pin.judge(attribution.emitter, true, &chain);
-                if initial == PinDecision::Refuse {
-                    // Unavailable evidence is not proof that the pin exited.
-                    // Only a gone/reused/non-running process releases authority.
-                    let live = crate::procs::read_process(pin.process.pid)
-                        .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?
-                        .is_some_and(|(_, start, state)| {
-                            start == pin.process.start
-                                && state == crate::procs::ProcessState::Running
-                        });
-                    pin.judge(attribution.emitter, live, &chain)
-                } else {
-                    initial
-                }
-            }
-        };
+        let decision = super::judge_report_pin(pin.as_ref(), attribution.emitter, &chain, |_| None)
+            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         if decision == PinDecision::Refuse {
             if enrichment {
                 return Ok(());
@@ -251,23 +234,12 @@ impl Supervisor {
         conversation = locator
             .encode()
             .map_err(|error| RequestError::new(ErrorKind::InvalidRequest, error.to_string()))?;
-        let replacement_pin = if decision == PinDecision::Accept
-            && pin
-                .as_ref()
-                .is_some_and(|pin| pin.process == attribution.emitter)
-        {
-            // A repeated report must not erase ancestors recorded by the winning
-            // report merely because later process evidence ends at another anchor.
-            stored_pin
-                .clone()
-                .expect("the accepted pin was loaded from storage")
-        } else {
-            serde_json::to_string(&crate::agent_kind::report_pin::ReportPin {
-                process: attribution.emitter,
-                ancestors: attribution.ancestors,
-            })
-            .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?
-        };
+        let replacement_pin = ReportPin::replacement_json(
+            stored_pin.as_deref().zip(pin.as_ref()),
+            attribution.emitter,
+            attribution.ancestors,
+        )
+        .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?;
         // Step 4: the atomic CAS over the COMPLETE prior binding —
         // generation plus exact locator plus proof version plus process pin — committing
         // identity, locator, pin, provenance 1, source, readiness, and the
