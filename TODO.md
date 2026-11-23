@@ -40,6 +40,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   permission as YOLO for confirmation, which keeps Clone and Replace with composing Guarded but departs from the
   decision to migrate them to YOLO. Plan: `plans/queue/remove-own-setting-permission.md`.
 
+- **Revisit giving each repository cache its own directory path.** On 2026-11-23 the landing monitor answered
+  `repo-cache-lock-redesign`'s block on the maintainer's behalf: recovery from a stuck repository cache gives each new
+  cache its own directory, with a small Farhelm-owned record selecting the current one, plus a migration of existing
+  caches and cleanup of an interrupted rebuild. The executor found that a Git process surviving an interrupted cleanup
+  can reopen the cache's original absolute path, so recovering in place could let it touch the replacement. The
+  alternative was to keep the current layout and defer checkout recovery, leaving sessions on an affected cache able to
+  fail at checkout. Plan: `plans/queue/repo-cache-lock-redesign.md`.
+
 ## Near term
 
 - **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.
