@@ -256,7 +256,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   just Tailscale ones), clicking Remove while a sign-in prompt is open silently blocks until the prompt times out or is
   answered, making Remove look stuck. Either make Remove fail fast as busy, cancel the open sign-in check, or check
   whether `remove_host` needs `ssh_route_lock` across the sign-in wait at all (editing a host's SSH destination already
-  changes the route without taking it).
+  changes the route without taking it). Plan: `plans/queue/remove-host-signin-lock.md`.
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
@@ -440,9 +440,11 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Make a pending upgrade more eye-catching.** when there is an upgrade pending, make it a little more "eyey catching".
   in addition to being read, let's have some kind of "animation" like a bouncing arrow or something point at it every 15
-  minutes while its being used or something liek that (details tbd during planning of todo item)
+  minutes while its being used or something liek that (details tbd during planning of todo item) Plan:
+  `plans/queue/eye-catching-pending-upgrade.md`.
 - **Host auto-update may stall on 2FA prompts.** i THINK auto-updating of hosts may stop working when 2fa prompts are
-  involved. at least i had to click in an environment where i also have a 2fa prompt. tbd during planning.
+  involved. at least i had to click in an environment where i also have a 2fa prompt. tbd during planning. Plan:
+  `plans/queue/host-auto-update-after-2fa.md`.
 
 ## Linux support
 
