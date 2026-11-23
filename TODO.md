@@ -489,6 +489,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Command and control drop-down on Command-backtick.** command and control bound to `` command-` `` (drops down)
 
+- **Agent-operable config through command and control.** agent operable config through command and control
+
 ### Tensorlake
 
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
