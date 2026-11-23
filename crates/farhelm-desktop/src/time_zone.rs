@@ -1,8 +1,8 @@
 //! The platform's time zone, read for the GPUI app's clock times (`farhelm_gui::local_time`).
 //!
-//! The GUI crates never query the platform, so this binary hands the app its time zone, as it hands over reduced motion
-//! and Tab's reach. On macOS and Linux that is the C library's local time: `tzset` reads the zone setting (the `TZ`
-//! variable, else `/etc/localtime`, which macOS's System Settings and Linux's `timedatectl` both rewrite), and
+//! The GUI crates never query the platform, so this binary hands the app its time zone, as it hands over Tab's reach.
+//! On macOS and Linux that is the C library's local time: `tzset` reads the zone setting (the `TZ` variable, else
+//! `/etc/localtime`, which macOS's System Settings and Linux's `timedatectl` both rewrite), and
 //! `localtime_r` turns an instant into a local time with the zone data it loaded, daylight saving time included. Here's
 //! the TLDR of why it is shaped this way:
 //!

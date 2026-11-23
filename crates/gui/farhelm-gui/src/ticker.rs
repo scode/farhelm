@@ -39,8 +39,9 @@
 //! their own timers because they track elapsed time.
 //!
 //! One-shot transitions are not the ticker's: an element that fades in as it appears goes through the component layer's
-//! `components::entrance` (its module docs say why ticks cannot draw one). The setting still comes from here: the
-//! entrance asks [`reduced_motion`].
+//! `components::entrance` (its module docs say why ticks cannot draw one). GPUI's own animation element reads the same
+//! reduced-motion flag for those, so the entrance does not ask here; motion GPUI does not drive, such as the permission
+//! control's fading outline (`components::outline_fade`), asks [`reduced_motion`].
 //!
 //! The ticks are counted, and an animation whose phase changes more slowly than every tick says how often it needs to
 //! hear about it. A cursor blink ([`blink`]) changes twice a second, so its view is notified twice a second rather than
@@ -362,8 +363,8 @@ pub(crate) fn set_reduced_motion(reduced: bool, cx: &mut App) {
     cx.set_reduce_motion(reduced);
 }
 
-/// The same live preference GPUI and Kit use, for motion the ticks do not drive. A one-shot entrance, for example,
-/// draws its final state at once under reduced motion.
+/// The same live preference GPUI and Kit use, for motion neither the ticks nor GPUI's animation element drive: the
+/// permission control's fading outline, for example, shows its final state at once under reduced motion.
 pub fn reduced_motion(cx: &App) -> bool {
     cx.reduce_motion()
 }

@@ -429,7 +429,8 @@ Extension points: none (each of these is a use of the ticker from a view's own c
   seconds `ticker::every_second`'s, and each reads the time from `ticker::wall_now`.
 
 A one-shot entrance is not the ticker's: an area draws it through the component layer's `components::entrance`, from its
-own code (the entrance reads `ticker::reduced_motion`).
+own code (GPUI's animation element applies reduced motion to it; `ticker::reduced_motion` serves motion GPUI does not
+drive).
 
 Lint exceptions: 1: the executor timer in `ticker::timer`.
 
