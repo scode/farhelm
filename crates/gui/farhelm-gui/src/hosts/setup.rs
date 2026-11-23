@@ -699,15 +699,12 @@ pub(super) fn not_started(line: HostSentence, cx: &mut App) {
     show(cx, |lines| lines.not_started = Some((store, line)));
 }
 
-/// `POST /api/hosts/probe` for a registered host's rerun of its setup, as `how` probes it: an SSH host's destination
-/// with the install paths the helm recorded for it (`null` for none), and no `new_entry`, so a supervisor that answers
-/// is registered onto the same entry rather than refused as a second one, as the old rerun's probe did; or a Tensorlake
-/// sandbox's registry id, for which the helm plans creating the sandbox the host names again, locally and without a
-/// Tensorlake call.
+/// `POST /api/hosts/probe` for a registered host's setup rerun. SSH pins the entry and destination shown at the
+/// click across sign-in and replay. Tensorlake names the registry id so the helm plans to recreate that sandbox.
 pub(crate) fn rerun_command(host: &HostView, how: SetupRerun) -> Result<Command, PathError> {
     let body = match how {
         SetupRerun::Ssh => json!({
-            "target": { "kind": "ssh", "destination": host.destination },
+            "target": { "kind": "ssh-host", "host": host.id, "destination": host.destination },
             "remote_farhelm": host.remote_farhelm,
             "remote_state_dir": host.remote_state_dir,
         }),

@@ -266,10 +266,6 @@ consequences.
   — On a multi-user machine, another local account can pre-create the predictable /tmp/fhs-<digest> directory and
   permanently block Farhelm from connecting to or setting up that Tailscale host.
 
-- [`trailing-remove-ssh-host-blocks-on-ssh-route-lock.md`](trailing-remove-ssh-host-blocks-on-ssh-route-lock.md) —
-  Removing an SSH host or finishing an uninstall awaits the SSH route lock and can hang past 20 seconds or stall for
-  minutes behind an open SSH sign-in prompt or background Podman check.
-
 ## Other: correctness, diagnostics, cleanup, or convenience
 
 - [`template-leave-spec-still-inline.md`](template-leave-spec-still-inline.md) — The implementation spec still describes

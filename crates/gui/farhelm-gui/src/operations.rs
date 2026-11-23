@@ -883,6 +883,8 @@ struct InFlight {
     /// The task waiting for the request's reply, or `None` for a hold ([`Operations::hold`]): a key held for work
     /// that is not sent yet, with nothing to wait for. Read through [`InFlight::is_held`].
     _task: Option<Task<()>>,
+    /// The detached setup check keeps its hold while Remove is on the wire. A refusal can leave the check asking.
+    setup_sign_in: Option<Work>,
 }
 
 impl InFlight {
@@ -921,6 +923,15 @@ impl Operations {
         self.in_flight.get(key).map(|running| running.work)
     }
 
+    /// A Remove on the host's key can pass its detached SSH sign-in hold. A command on the wire still owns the key.
+    pub(crate) fn can_remove_during_setup_sign_in(&self, key: &OpKey) -> bool {
+        matches!(key.0, Key::Host(_))
+            && self
+                .in_flight
+                .get(key)
+                .is_some_and(|entry| entry.is_held() && entry.setup_sign_in.is_some())
+    }
+
     /// Whether any key has work in flight that `matches`: the session list asks it about Deletes, whose settling
     /// its automatic selection waits for (SPEC.md: "Automatic selection after Delete waits until every admitted Delete
     /// has settled"), wherever they were started.
@@ -953,7 +964,16 @@ impl Operations {
         cx: &mut Context<Operations>,
         on_settled: impl FnOnce(&Settled, &mut App) + 'static,
     ) -> Result<(), NotStarted> {
-        self.admit(key)?;
+        let setup_sign_in =
+            if command.work == Work::RemoveHost && self.can_remove_during_setup_sign_in(key) {
+                self.failures.remove(key);
+                self.in_flight
+                    .get(key)
+                    .and_then(|entry| entry.setup_sign_in)
+            } else {
+                self.admit(key)?;
+                None
+            };
         let mark = Mark::take(cx);
         let Command {
             work,
@@ -980,13 +1000,14 @@ impl Operations {
             InFlight {
                 work,
                 _task: Some(task),
+                setup_sign_in,
             },
         );
         cx.notify();
         Ok(())
     }
 
-    /// The store's one admission rule, for a start ([`Operations::start`]) and a hold ([`Operations::hold`]) alike:
+    /// The store's ordinary admission rule, for starts ([`Operations::start`]) and holds ([`Operations::hold`]):
     /// refused on a retired store, and while the key has work in flight or held; otherwise the key's last failure goes,
     /// since its new work supersedes it. A future "latest wins" rule for supersedable work belongs here, so it covers
     /// holds too.
@@ -1016,7 +1037,20 @@ impl Operations {
         // This drops the handle of the very task that is running this code. That is safe, and the completion after it
         // still runs: dropping a running task's handle cancels only its next poll, and this poll is its last. Moving
         // the removal after the completion would let the completion see its own key as still busy.
-        self.in_flight.remove(key);
+        if let Some(work) = self
+            .in_flight
+            .remove(key)
+            .and_then(|entry| entry.setup_sign_in)
+        {
+            self.in_flight.insert(
+                key.clone(),
+                InFlight {
+                    work,
+                    _task: None,
+                    setup_sign_in: Some(work),
+                },
+            );
+        }
         cx.notify();
         let outcome = Outcome::from_reply(result.ok()?, shown);
         if let Outcome::Refused(refusal) = &outcome {
@@ -1141,19 +1175,51 @@ impl Operations {
         work: Work,
         cx: &mut Context<Operations>,
     ) -> Result<(), NotStarted> {
+        self.hold_work(key, work, None, cx)
+    }
+
+    /// Keep a setup continuation busy after the pending reply, with Remove's exception for the host's own hold.
+    pub(crate) fn hold_setup_sign_in(
+        &mut self,
+        key: &OpKey,
+        work: Work,
+        cx: &mut Context<Operations>,
+    ) -> Result<(), NotStarted> {
+        self.hold_work(key, work, Some(work), cx)
+    }
+
+    fn hold_work(
+        &mut self,
+        key: &OpKey,
+        work: Work,
+        setup_sign_in: Option<Work>,
+        cx: &mut Context<Operations>,
+    ) -> Result<(), NotStarted> {
         self.admit(key)?;
-        self.in_flight
-            .insert(key.clone(), InFlight { work, _task: None });
+        self.in_flight.insert(
+            key.clone(),
+            InFlight {
+                work,
+                _task: None,
+                setup_sign_in,
+            },
+        );
         cx.notify();
         Ok(())
     }
 
     /// End the hold [`Operations::hold`] put on `key`. Only a hold is ever released: a request started on `key` (once
     /// the hold has given way to it, or any other) stays in flight with its completion, so a late or repeated release
-    /// cannot drop live work. Does nothing when `key` is not held.
+    /// cannot drop live work. When Remove is on the wire, release can end the SSH sign-in hold it is carrying while
+    /// the Remove task remains responsible for its own reply.
     pub fn release(&mut self, key: &OpKey, cx: &mut Context<Operations>) {
-        if self.in_flight.get(key).is_some_and(InFlight::is_held) {
+        let Some(entry) = self.in_flight.get_mut(key) else {
+            return;
+        };
+        if entry.is_held() {
             self.in_flight.remove(key);
+            cx.notify();
+        } else if entry.setup_sign_in.take().is_some() {
             cx.notify();
         }
     }

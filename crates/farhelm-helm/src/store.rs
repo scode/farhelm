@@ -7653,11 +7653,18 @@ impl HelmStore {
             host_identity,
             new_entry,
             false,
+            None,
         )
         .await
     }
 
-    /// Write the probed paths and identity only if the route still matches the registered host.
+    /// Converge the proved SSH route and identity. When discovery started from a registered host, commit only against
+    /// that entry and destination. Remove and retarget can finish while the probe is away, and the old reply must
+    /// neither recreate its row nor update a replacement that has taken its destination.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the probe's route, identity, and registration preconditions commit together"
+    )]
     pub(crate) async fn register_probed_ssh_host_with_mode(
         &self,
         destination: &str,
@@ -7666,6 +7673,7 @@ impl HelmStore {
         host_identity: Option<&str>,
         new_entry: Option<&NewHostEntry>,
         tailscale: bool,
+        expected_host: Option<(HostId, &str)>,
     ) -> anyhow::Result<(HostId, bool)> {
         if !destination_is_usable(destination)
             || (tailscale && crate::ssh::tailscale::destination_host(destination).is_err())
@@ -7685,6 +7693,7 @@ impl HelmStore {
         let remote_state_dir = remote_state_dir.map(str::to_string);
         let host_identity = host_identity.map(str::to_string);
         let new_entry = new_entry.cloned();
+        let expected_host = expected_host.map(|(host, entry)| (host, entry.to_owned()));
         self.conn
             .call(
                 "register discovered ssh host task panicked",
@@ -7692,6 +7701,25 @@ impl HelmStore {
                     let tx = conn
                         .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                         .context("beginning discovered-host registration")?;
+                    if let Some((host, entry)) = &expected_host {
+                        let current: String = tx
+                            .query_row(
+                                concat!(
+                                    "SELECT destination FROM hosts WHERE kind = '",
+                                    host_kind_sql!(ssh),
+                                    "' AND id = ?1 AND entry_uuid = ?2"
+                                ),
+                                rusqlite::params![host, entry],
+                                |row| row.get(0),
+                            )
+                            .optional()
+                            .context("checking the entry this SSH probe used")?
+                            .ok_or(HostStoreError::HostNotFound(*host))?;
+                        if current != destination {
+                            return Err(HostStoreError::StaleAttempt { host: *host }.into());
+                        }
+                        // The unique SSH destination index now binds the convergence below to this entry.
+                    }
                     if let Some(entry) = &new_entry {
                         new_entry_conflict(&tx, &destination, entry)?;
                     }
@@ -21272,6 +21300,60 @@ mod tests {
             store.list_hosts().await.unwrap().len(),
             2,
             "the refused registration must not create a destination row"
+        );
+    }
+
+    /// A discovery reply can outlive both a retarget and removal. The identity of the entry binds a reply to a
+    /// single row, and its old destination must never become a new row through convergence.
+    #[farhelm_testtrace::test]
+    async fn register_probed_ssh_host_refuses_a_retargeted_or_removed_entry() {
+        let (_dir, store) = fresh_store().await;
+        let host = store
+            .add_ssh_host("formerly.example", None, None)
+            .await
+            .unwrap();
+        let entry = store
+            .list_hosts()
+            .await
+            .unwrap()
+            .into_iter()
+            .find(|row| row.id == host)
+            .unwrap()
+            .entry_uuid;
+        store
+            .update_ssh_destination(host, "current.example")
+            .await
+            .unwrap();
+        let register = || {
+            store.register_probed_ssh_host_with_mode(
+                "formerly.example",
+                Some("/probe/farhelm"),
+                None,
+                None,
+                None,
+                false,
+                Some((host, &entry)),
+            )
+        };
+        let error = register()
+            .await
+            .expect_err("an old route cannot converge the current entry");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::StaleAttempt { host: id }) if *id == host
+        ));
+        store.remove_ssh_host(host).await.unwrap();
+        let error = register()
+            .await
+            .expect_err("a probe cannot recreate the deleted entry");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::HostNotFound(id)) if *id == host
+        ));
+        assert_eq!(
+            store.list_hosts().await.unwrap().len(),
+            1,
+            "only the reserved local row remains"
         );
     }
 

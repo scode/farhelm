@@ -53,9 +53,12 @@ pub(crate) struct Waiting {
     complete: Option<Completion>,
     mark: Mark,
     pending_sends: Cell<usize>,
+    /// Ready ends the SSH deadline even when a command reply still owns the operation key.
+    ready: bool,
     question: Option<String>,
     deadline: Option<ticker::Deadline>,
     _watch: session::ObservingCurrent,
+    _operation_watch: Subscription,
     _release: Subscription,
 }
 
@@ -70,11 +73,16 @@ impl Waiting {
     ) -> Option<Entity<Self>> {
         let operations = session::current_operations(cx)?;
         operations
-            .update(cx, |operations, cx| operations.hold(&key, work, cx))
+            .update(cx, |operations, cx| {
+                operations.hold_setup_sign_in(&key, work, cx)
+            })
             .ok()?;
         Some(cx.new(|cx| {
             let watch =
                 session::observe_current(cx, |waiting: &mut Waiting, cx| waiting.changed(cx));
+            let operation_watch = cx.observe(&operations, |waiting: &mut Waiting, _, cx| {
+                waiting.changed(cx);
+            });
             let release = cx.on_release(|waiting: &mut Waiting, cx| waiting.release(cx));
             let mut waiting = Self {
                 attempt,
@@ -83,9 +91,11 @@ impl Waiting {
                 complete: Some(Box::new(complete)),
                 mark,
                 pending_sends: Cell::new(0),
+                ready: false,
                 question: None,
                 deadline: None,
                 _watch: watch,
+                _operation_watch: operation_watch,
                 _release: release,
             };
             waiting.restart_deadline(cx);
@@ -164,25 +174,39 @@ impl Waiting {
             );
             return;
         }
-        let Some(store) = session::current_store(cx) else {
-            return;
-        };
-        let collections = store.read(cx).collections();
-        if let Some(completion) = collections.get::<SshSignInCompletion>(&self.attempt) {
-            let result = match &completion.outcome {
-                SshSignInOutcome::Ready if self.pending_sends.get() != 0 => return,
-                SshSignInOutcome::Ready => Ok(()),
-                SshSignInOutcome::Failed { reason } => Err(HostText::from_host(reason.as_str())),
+        if !self.ready {
+            let Some(store) = session::current_store(cx) else {
+                return;
             };
-            self.finish(result, cx);
-        } else if let Some(question) = collections
-            .ordered::<SshQuestion>()
-            .into_iter()
-            .find(|question| question.attempt == self.attempt)
-            && self.question.as_deref() != Some(&question.id)
+            let collections = store.read(cx).collections();
+            if let Some(completion) = collections.get::<SshSignInCompletion>(&self.attempt) {
+                match &completion.outcome {
+                    SshSignInOutcome::Ready => {
+                        self.ready = true;
+                        self.deadline = None;
+                    }
+                    SshSignInOutcome::Failed { reason } => {
+                        self.finish(Err(HostText::from_host(reason.as_str())), cx);
+                        return;
+                    }
+                }
+            } else if let Some(question) = collections
+                .ordered::<SshQuestion>()
+                .into_iter()
+                .find(|question| question.attempt == self.attempt)
+                && self.question.as_deref() != Some(&question.id)
+            {
+                self.question = Some(question.id.clone());
+                self.restart_deadline(cx);
+            }
+        }
+        // A refused Remove can leave a valid Ready to replay. The operation store notifies when the reply frees
+        // the key. The replay still names the original host if Remove succeeded first.
+        if self.ready
+            && self.pending_sends.get() == 0
+            && self.operations.read(cx).in_flight(&self.key) != Some(Work::RemoveHost)
         {
-            self.question = Some(question.id.clone());
-            self.restart_deadline(cx);
+            self.finish(Ok(()), cx);
         }
     }
 }

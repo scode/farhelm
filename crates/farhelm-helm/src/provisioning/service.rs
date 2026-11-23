@@ -217,6 +217,8 @@ enum ProbeRegistration {
         tailscale: bool,
         remote_farhelm: Option<String>,
         remote_state_dir: Option<String>,
+        /// A probe of a registered host can only converge that entry. The destination may be reused after Remove.
+        existing_host: Option<(HostId, String)>,
         /// Set only for an add from the add host dialog
         /// ([`crate::store::NewHostEntry`]); kept through a pending setup
         /// confirmation so the confirmed add still refuses a duplicate and
@@ -779,12 +781,13 @@ impl ProvisioningService {
     }
 
     /// Split one request into probe transport and eventual registry input.
-    /// `access` is how the stored row for an ssh destination is reached, or
-    /// the user's own setup when there is none.
+    /// `access` is how the stored row for an SSH destination is reached, or the user's own setup when there is none.
+    /// Carry that row's identity through the probe and confirmation because Remove can finish while either is open.
     fn target(
         &self,
         request: &ProbeRequest,
         access: crate::ssh::SshAccessKind,
+        stored: Option<&HostRow>,
     ) -> anyhow::Result<(ProbeTarget, ProbeRegistration)> {
         match &request.target {
             ProbeDestination::Tensorlake { .. } | ProbeDestination::TensorlakeHost { .. } => {
@@ -812,7 +815,8 @@ impl ProvisioningService {
                     ProbeRegistration::Local,
                 ))
             }
-            ProbeDestination::Ssh { destination, .. } => {
+            ProbeDestination::Ssh { destination, .. }
+            | ProbeDestination::SshHost { destination, .. } => {
                 if !crate::store::destination_is_usable(destination) {
                     return Err(anyhow::Error::new(ProvisioningRequestError::InvalidProbe(
                         format!("{destination:?} is not a usable ssh destination"),
@@ -834,6 +838,7 @@ impl ProvisioningService {
                     tailscale: access == crate::ssh::SshAccessKind::Tailscale,
                     remote_farhelm: request.remote_farhelm.clone(),
                     remote_state_dir: request.remote_state_dir.clone(),
+                    existing_host: stored.map(|row| (row.id, row.entry_uuid.clone())),
                     new_entry,
                 };
                 Ok((
@@ -888,6 +893,13 @@ impl ProvisioningService {
         // path EQUAL to the stored one is not new input either: the host
         // row's own set up action sends its stored paths back.
         let stored = match &request.target {
+            ProbeDestination::SshHost { host, destination } => {
+                let row = self.host_row(*host).await?;
+                if row.kind != HostKind::Ssh || row.destination.as_deref() != Some(destination) {
+                    return Err(HostStoreError::StaleAttempt { host: *host }.into());
+                }
+                Some(row)
+            }
             ProbeDestination::Ssh { destination, .. } => self
                 .store
                 .list_hosts()
@@ -917,7 +929,10 @@ impl ProvisioningService {
         // keeps the looser rule, so a host stored before the full rule
         // existed can be set up again, which is what repairs it (the install
         // uses absolute paths and the host is re-registered with them).
-        if matches!(request.target, ProbeDestination::Ssh { .. }) {
+        if matches!(
+            request.target,
+            ProbeDestination::Ssh { .. } | ProbeDestination::SshHost { .. }
+        ) {
             fn entered<'a>(requested: Option<&'a str>, kept: Option<&str>) -> Option<&'a str> {
                 requested.filter(|value| Some(*value) != kept)
             }
@@ -990,7 +1005,7 @@ impl ProvisioningService {
             .new_entry
             .as_ref()
             .is_some_and(|entry| entry.from_agent);
-        let (target, registration) = self.target(&request, access)?;
+        let (target, registration) = self.target(&request, access, stored.as_ref())?;
         // An add from the add host dialog is refused before anything
         // contacts the destination when the destination is already a host
         // entry or the alias is already a host's name. Registration checks
@@ -1332,6 +1347,7 @@ impl ProvisioningService {
                 tailscale,
                 remote_farhelm,
                 remote_state_dir,
+                existing_host,
                 new_entry,
             } => {
                 let discovered_identity = discovered
@@ -1361,6 +1377,9 @@ impl ProvisioningService {
                         discovered_identity,
                         new_entry.as_ref(),
                         *tailscale,
+                        existing_host
+                            .as_ref()
+                            .map(|(id, entry)| (*id, entry.as_str())),
                     )
                     .await?
             }
@@ -1403,6 +1422,17 @@ impl ProvisioningService {
                     return Err(error.context(format!(
                         "the new host row could not be reconciled, and rolling it back also failed ({rollback:#})"
                     )));
+                }
+            } else if let ProbeRegistration::Ssh {
+                existing_host: Some((id, entry)),
+                destination,
+                ..
+            } = registration
+            {
+                // Registry edits can commit between this probe's write and actor reconciliation.
+                let row = self.host_row(*id).await?;
+                if row.entry_uuid != *entry || row.destination.as_deref() != Some(destination) {
+                    return Err(HostStoreError::StaleAttempt { host: *id }.into());
                 }
             }
             return Err(error);
@@ -1516,6 +1546,11 @@ impl ProvisioningService {
             self.store.check_new_entry(destination, entry).await?;
         }
         let existing = match registration {
+            // A stale confirmation must never claim the busy slot of a replacement at the same destination.
+            ProbeRegistration::Ssh {
+                existing_host: Some((host, _)),
+                ..
+            } => Some(*host),
             ProbeRegistration::Ssh { destination, .. } => self
                 .store
                 .list_hosts()
@@ -2501,16 +2536,24 @@ impl ProvisioningService {
             Some(host_write) => host_write,
             None => self.manager.host_provision_lock(host).await,
         };
-        let current_mode = self.host_row(host).await.and_then(|row| {
-            if let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh { access, .. }) =
-                &pending.plan.target
-                && row.tailscale != (*access == crate::ssh::SshAccessKind::Tailscale)
+        let current_route = self.host_row(host).await.and_then(|row| {
+            if let ProvisioningTarget::Remote(crate::access::RemoteRoute::Ssh {
+                destination,
+                access,
+            }) = &pending.plan.target
             {
-                return Err(crate::store::HostStoreError::SshModeChanged(host).into());
+                // An ADD can have saved its paths before a retarget won the provisioning lock. Compare the
+                // frozen network target, since registration now reflects whatever row reconciliation found.
+                if row.destination.as_deref() != Some(destination.as_str()) {
+                    return Err(HostStoreError::StaleAttempt { host }.into());
+                }
+                if row.tailscale != (*access == crate::ssh::SshAccessKind::Tailscale) {
+                    return Err(HostStoreError::SshModeChanged(host).into());
+                }
             }
             Ok(())
         });
-        if let Err(error) = current_mode {
+        if let Err(error) = current_route {
             {
                 let mut memory = self.memory.lock().await;
                 memory.busy.remove(&host);
@@ -2565,6 +2608,8 @@ impl ProvisioningService {
     /// The order is Remove's: the cache-write lock so no cache write
     /// interleaves with the deletion, the row, the helm's memory of the
     /// host, then the actor, and its lock only after the row is gone.
+    /// Detached sign-in checks are cancelled after commit. Discovery can finish on its own schedule because its
+    /// registration transaction checks the identity of the host it probed.
     ///
     /// `deleted` is the proof a Tensorlake host's sandbox is gone, without
     /// which the store refuses to forget such a host
@@ -2577,15 +2622,11 @@ impl ProvisioningService {
         deleted: Option<&crate::environment::Destroyed>,
     ) -> anyhow::Result<bool> {
         let row = self.host_row(host).await?;
-        // Finish a registered SSH probe before it can recreate the just-deleted
-        // row from its discovery reply or write private pins after cleanup.
-        let _routing = if row.kind == HostKind::Ssh {
-            Some(self.manager.ssh_route_lock(host).write_owned().await)
-        } else {
-            None
-        };
         let serialized = self.manager.host_write_lock(host).await;
         self.store.remove_host_row(host, deleted).await?;
+        if let Some(setup) = &self.setup_sign_in {
+            setup.cancel_host(host);
+        }
         let task = self.forget_host_memory(host).await;
         if run_task == RunTask::Abort
             && let Some(task) = task
@@ -2647,7 +2688,15 @@ impl ProvisioningService {
             .iter()
             .filter(|(_, pending)| match &pending.confirmation {
                 PendingConfirmation::Update { host: planned, .. }
-                | PendingConfirmation::Uninstall { host: planned, .. } => *planned == host,
+                | PendingConfirmation::Uninstall { host: planned, .. }
+                | PendingConfirmation::Add {
+                    registration:
+                        ProbeRegistration::Ssh {
+                            existing_host: Some((planned, _)),
+                            ..
+                        },
+                    ..
+                } => *planned == host,
                 PendingConfirmation::Add { .. } => false,
             })
             .map(|(id, _)| id.clone())
@@ -3835,6 +3884,7 @@ fn registration_for_row(row: &HostRow) -> anyhow::Result<ProbeRegistration> {
             tailscale: row.tailscale,
             remote_farhelm: row.remote_farhelm.clone(),
             remote_state_dir: row.remote_state_dir.clone(),
+            existing_host: Some((row.id, row.entry_uuid.clone())),
             new_entry: None,
         }),
     }

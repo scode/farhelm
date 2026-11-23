@@ -675,6 +675,12 @@ fn panel_with_a_failed_setup(
     let mut snapshot = vec![
         hosts(&reference_hosts()),
         progress(&[run(2, ProvisioningOperation::Add, RunStatus::Failed)]),
+        crate::sign_in::tests::questions(&[]),
+        CollectionState {
+            collection: Collection::SshSignInCompletions,
+            meta: meta(&[]),
+            entries: Vec::new(),
+        },
     ];
     if without_asking {
         snapshot.push(preferences(true));
@@ -690,6 +696,120 @@ fn choose_rerun(helm: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
     click(cx, "host-menu-toggle-2");
     click(cx, "host-menu-rerun");
     one_probe(helm).0
+}
+
+/// A detached question must leave Remove available while the host is asking. A Ready that arrives during a refused
+/// Remove still belongs to the same host and must replay once the Delete reply frees the command slot.
+#[gpui::test]
+fn remove_starts_during_host_setup_sign_in_and_defers_ready_replay(cx: &mut TestAppContext) {
+    use farhelm_proto::ui_channel::{SshConnectionPurpose, SshQuestion};
+
+    let (mut helm, cx) = panel_with_a_failed_setup(cx, false);
+    let _sign_in = cx.update(crate::sign_in::SignIn::attach);
+    let probe = choose_rerun(&mut helm, cx);
+    helm.reply(probe, 202, Some(json!({"attempt": "registered-check"})));
+    settle(cx);
+    let key = OpKey::host("2");
+    assert_eq!(work(&key, cx), Some(Work::Probe));
+    let question = SshQuestion {
+        attempt: "registered-check".into(),
+        purpose: SshConnectionPurpose::Setup,
+        ..crate::sign_in::tests::question("registered-question", 2, "Verification code:", false)
+    };
+    let shown = crate::sign_in::tests::questions(std::slice::from_ref(&question));
+    helm.push(CollectionChanges {
+        collection: shown.collection,
+        meta: shown.meta,
+        upsert: shown.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert!(
+        cx.update(|_, cx| {
+            session::current_store(cx).is_some_and(|store| {
+                store
+                    .read(cx)
+                    .collections()
+                    .get::<SshQuestion>(&question.id)
+                    .is_some()
+            })
+        }),
+        "premise: the host is waiting for its SSH answer"
+    );
+    assert!(helm.commands().is_empty());
+
+    // Close the sign-in popover to reach the host menu. The SSH question stays pending until answered or cancelled.
+    assert!(
+        label(cx, "ssh-sign-in-send").is_some(),
+        "premise: the sign-in popover is open"
+    );
+    keys(cx, "escape");
+    assert!(label(cx, "ssh-sign-in-send").is_none());
+    assert!(
+        helm.commands().is_empty(),
+        "closing the popover leaves the check pending"
+    );
+    assert_eq!(work(&key, cx), Some(Work::Probe));
+    click(cx, "host-menu-toggle-2");
+    click(cx, "host-menu-remove");
+    assert_eq!(
+        label(cx, "prompt").as_deref(),
+        Some("Remove host · build-box")
+    );
+    click(cx, "prompt-confirm");
+    let (removal, _) = one_command(&mut helm, Method::Delete, "/api/hosts/2");
+    assert_eq!(work(&key, cx), Some(Work::RemoveHost));
+
+    helm.push(CollectionChanges {
+        collection: Collection::SshQuestions,
+        meta: meta(&[]),
+        upsert: Vec::new(),
+        remove: vec![question.id],
+    });
+    helm.push(CollectionChanges {
+        collection: Collection::SshSignInCompletions,
+        meta: meta(&["registered-check"]),
+        upsert: vec![KeyedEntry {
+            key: "registered-check".into(),
+            value: json!({"attempt": "registered-check", "result": "ready"}),
+        }],
+        remove: Vec::new(),
+    });
+    settle(cx);
+    assert!(
+        helm.commands().is_empty(),
+        "a Ready waits for the removal reply"
+    );
+    assert_eq!(work(&key, cx), Some(Work::RemoveHost));
+
+    // The sign-in is over even if its completion ages out before the Remove reply arrives.
+    helm.push(CollectionChanges {
+        collection: Collection::SshSignInCompletions,
+        meta: meta(&[]),
+        upsert: Vec::new(),
+        remove: vec!["registered-check".into()],
+    });
+    // sleep-ok: cross the sign-in inactivity deadline while the fake helm still holds the Remove reply.
+    cx.executor()
+        .advance_clock(std::time::Duration::from_secs(151));
+    settle(cx);
+    assert!(helm.commands().is_empty());
+    assert_eq!(work(&key, cx), Some(Work::RemoveHost));
+
+    helm.reply(removal, 409, Some(json!({"error": "host busy"})));
+    settle(cx);
+    let (replay, body) = one_probe(&mut helm);
+    assert_eq!(
+        body["target"],
+        json!({"kind": "ssh-host", "host": 2, "destination": "dev@build-box"})
+    );
+    helm.reply(
+        replay,
+        404,
+        Some(json!({"error": "host no longer registered"})),
+    );
+    settle(cx);
+    assert_eq!(work(&key, cx), None);
 }
 
 /// SPEC.md, "Topology": "an existing entry is set up again from its own row", and the old app's rerun probed "the
@@ -715,7 +835,7 @@ fn re_run_probes_the_registered_destination_and_sets_up_under_the_hosts_key(
     assert_eq!(
         body,
         json!({
-            "target": { "kind": "ssh", "destination": "dev@build-box" },
+            "target": { "kind": "ssh-host", "host": 2, "destination": "dev@build-box" },
             "remote_farhelm": null,
             "remote_state_dir": null,
         })
