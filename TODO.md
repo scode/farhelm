@@ -313,9 +313,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Host auto-update may stall on 2FA prompts.** i THINK auto-updating of hosts may stop working when 2fa prompts are
-  involved. at least i had to click in an environment where i also have a 2fa prompt. tbd during planning. Plan:
-  `plans/queue/host-auto-update-after-2fa.md`.
 - **Dynamic network source for announcements.** add dynamic network source for announcements. we currently have hard
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning.

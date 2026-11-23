@@ -68,6 +68,7 @@ pub(crate) use setup_sign_in::{cancel as cancel_ssh_sign_in, list as ssh_sign_in
 
 #[cfg(test)]
 mod tests {
+    mod automatic_sign_in;
     mod macos_real_tests;
 
     #[allow(unused_imports)]
@@ -1625,7 +1626,10 @@ mod tests {
             .scan_automatic_updates(&mut attempted)
             .await
             .unwrap();
-        assert_eq!(attempted.get(&host), Some(&incarnation));
+        assert!(matches!(
+            attempted.get(&host),
+            Some(super::service::AttemptState::Attempted(seen)) if *seen == incarnation
+        ));
         assert!(
             backend.probe.lock().unwrap().is_none(),
             "eligible remote reached ordinary planning"
@@ -1766,7 +1770,10 @@ mod tests {
             .unwrap();
         assert!(backend.probe.lock().unwrap().is_none());
         assert!(service.memory.lock().await.runs.is_empty());
-        assert_eq!(attempted.get(&host), Some(&incarnation));
+        assert!(matches!(
+            attempted.get(&host),
+            Some(super::service::AttemptState::Attempted(seen)) if *seen == incarnation
+        ));
     }
 
     /// Stop and drop must both destroy a suspended, unaccepted admission. The
@@ -2266,7 +2273,10 @@ mod tests {
         let failed = wait_finished(&service, host).await;
         assert_eq!(failed.status, RunStatus::Failed);
         assert!(!service.memory.lock().await.busy.contains(&host));
-        assert_eq!(attempted.get(&host), Some(&original_incarnation));
+        assert!(matches!(
+            attempted.get(&host),
+            Some(super::service::AttemptState::Attempted(seen)) if *seen == original_incarnation
+        ));
         service
             .scan_automatic_updates(&mut attempted)
             .await

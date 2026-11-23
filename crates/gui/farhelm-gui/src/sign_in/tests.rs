@@ -406,8 +406,8 @@ fn an_ssh_question_mid_work_waits_without_taking_terminal_input(cx: &mut TestApp
     assert_eq!(command.body, Some(json!({ "action": "cancel" })));
 }
 
-/// A window left untouched since launch can still receive a later retry or reconnect question. The next key stays
-/// with the selected terminal even though the sidebar now has a live Answer action.
+/// A window left untouched since launch can still receive a later Sessions question. The next key
+/// stays with the selected terminal even though the sidebar now has a live Answer action.
 #[gpui::test]
 fn a_later_question_keeps_focus_in_an_untouched_window(cx: &mut TestAppContext) {
     let mut app = open(cx, &[], connected());
@@ -424,6 +424,70 @@ fn a_later_question_keeps_focus_in_an_untouched_window(cx: &mut TestAppContext) 
     assert!(terminal_focused(app.cx));
     keys(app.cx, "x");
     assert_eq!(app.program_input(), 1);
+}
+
+/// An automatic Update's Setup question arrives without a manual input mark. Keep the selected terminal
+/// focused even in an untouched window, and open the question only when the user presses Answer.
+#[gpui::test]
+fn an_automatic_setup_question_keeps_focus_in_an_untouched_window(cx: &mut TestAppContext) {
+    let mut app = open(cx, &[], connected());
+    app.terminal_live();
+    assert!(terminal_focused(app.cx), "premise: the terminal has focus");
+    let mut setup = question(FIRST, 2, "Setup verification code:", false);
+    setup.purpose = SshConnectionPurpose::Setup;
+    publish(&mut app.helm, &[setup], &[], app.cx);
+    assert_eq!(label(app.cx, ANSWER).as_deref(), Some("Answer"));
+    assert!(!any_open(app.cx));
+    assert!(terminal_focused(app.cx));
+    keys(app.cx, "x");
+    assert_eq!(app.program_input(), 1);
+    click(app.cx, ANSWER);
+    assert!(answer_focused(app.cx));
+}
+
+/// After a Sessions answer, a new Setup question on the very same host has its own attempt.
+/// It cannot inherit the Sessions focus handoff while the answer is still being acknowledged.
+#[gpui::test]
+fn automatic_setup_on_the_same_host_does_not_inherit_sessions_focus(cx: &mut TestAppContext) {
+    let mut app = open(cx, &[], connected());
+    app.terminal_live();
+    publish(
+        &mut app.helm,
+        &[question(FIRST, 2, "Sessions verification code:", false)],
+        &[],
+        app.cx,
+    );
+    click(app.cx, ANSWER);
+    assert!(
+        answer_focused(app.cx),
+        "premise: the Sessions question owned focus"
+    );
+    keys(app.cx, "7 enter");
+    let send = app
+        .helm
+        .commands()
+        .into_iter()
+        .find(|command| command.path == format!("/api/ssh-questions/{FIRST}"))
+        .expect("the Sessions answer was sent");
+
+    let mut setup = question(SECOND, 2, "Setup verification code:", false);
+    setup.purpose = SshConnectionPurpose::Setup;
+    publish(&mut app.helm, &[setup], &[FIRST], app.cx);
+    app.helm.reply(send.id, 204, None);
+    settle(app.cx);
+    assert_eq!(label(app.cx, ANSWER).as_deref(), Some("Answer"));
+    assert!(!any_open(app.cx));
+    assert_eq!(
+        focused_id(app.cx).as_deref(),
+        Some(ANSWER),
+        "closing the Sessions form returns focus to Answer"
+    );
+    click(app.cx, ANSWER);
+    assert!(answer_focused(app.cx));
+    assert_eq!(
+        label(app.cx, "ssh-sign-in-question-0").as_deref(),
+        Some("Setup verification code:")
+    );
 }
 
 /// An explicit Sign in renews the focus opportunity only for the host the user started. Its action uses the normal
