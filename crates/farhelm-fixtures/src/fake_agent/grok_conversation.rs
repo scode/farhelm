@@ -1,10 +1,9 @@
 //! A deterministic native-Grok conversation fixture for report-file tests.
 //!
-//! This is deliberately not a Grok simulator. It only makes the process and
-//! hook shapes Grok's attribution requires: an executable named `grok`
-//! launched with `--no-leader` (the test hard-links this fixture binary under
-//! that name and passes the flag), which fires the real `farhelm internal
-//! hook --vendor grok` as its direct child with Grok's own callback payloads.
+//! Tests launch this fixture as a versioned Grok image with `--no-leader`.
+//! It fires the real `farhelm internal hook --vendor grok` as its direct child
+//! with Grok's own callback payloads. A nested copy can report before its
+//! parent to exercise correction under the same terminal root.
 //! Everything after the fixture decides to fire a hook is real: the shipped
 //! hook binary, its recorded ancestry, the report file it drops, and the
 //! supervisor that applies it.
@@ -19,6 +18,8 @@
 //! - `select <uuid>` fires `SessionStart` (source `new`) for `<uuid>`, with a
 //!   selection timestamp that grows with every selection this process makes,
 //!   and prints `GROK-SELECTED:<uuid>` once the hook has exited.
+//! - `select-child <uuid>` runs a nested copy that writes the record pair,
+//!   selects it with one `SessionStart`, and exits. The parent keeps running.
 //! - `enrich <uuid>` writes `<uuid>`'s exact record pair under the record
 //!   home (`<uuid>/updates.jsonl` and its sibling `summary.json`, the shapes
 //!   Grok's verification reads) and fires `Stop` naming that record, then
@@ -36,9 +37,8 @@ const HOOK_BINARY_FLAG: &str = "--hook-binary";
 
 /// Run the fixture until `quit` or end of input.
 ///
-/// The hook binary is a flag, as in the Codex fixture, because this
-/// process's own executable is named `grok`: a hook launched through it
-/// would put a second native Grok in its own ancestry.
+/// The explicit hook binary keeps the reporter below the fixture whose
+/// process identity the supervisor should record.
 pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     let root = record_home.context("grok-conversation needs --record-home")?;
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
@@ -55,21 +55,28 @@ pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     for line in std::io::stdin().lock().lines() {
         let line = line?;
         match line.trim().split_once(' ') {
-            Some(("select", uuid)) => {
-                selections += 1;
-                // Strictly newer for every selection this process makes,
-                // which Grok's ordering fence requires of a new UUID.
+            Some((command @ ("select" | "select-ready"), uuid)) => {
+                // A child selects later than its parent's first report. A second
+                // child can then be refused only by the pin, not timestamp ordering.
+                let ready = command == "select-ready";
+                selections += if ready { 2 } else { 1 };
                 let timestamp = format!("2026-10-01T00:00:{selections:02}Z");
-                fire(
-                    &hook_binary,
-                    serde_json::json!({
-                        "sessionId": uuid,
-                        "hookEventName": "SessionStart",
-                        "source": "new",
-                        "timestamp": timestamp,
-                    }),
-                )?;
+                let mut payload = serde_json::json!({
+                    "sessionId": uuid,
+                    "hookEventName": "SessionStart",
+                    "source": "new",
+                    "timestamp": timestamp,
+                });
+                if ready {
+                    payload["transcriptPath"] =
+                        serde_json::to_value(write_record_pair(&root, uuid)?)?;
+                }
+                fire(&hook_binary, payload)?;
                 writeln!(out, "GROK-SELECTED:{uuid}\r")?;
+            }
+            Some(("select-child", uuid)) => {
+                select_in_child(&args, uuid)?;
+                writeln!(out, "GROK-CHILD-SELECTED:{uuid}\r")?;
             }
             Some(("enrich", uuid)) => {
                 let updates = write_record_pair(&root, uuid)?;
@@ -88,6 +95,30 @@ pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
         }
         out.flush()?;
     }
+    Ok(())
+}
+
+/// Run the same owned-backend command as a child so its real hook reports
+/// ancestry through the parent. A separate input pipe leaves the terminal
+/// with the parent, which will report its own first selection next.
+fn select_in_child(args: &[std::ffi::OsString], uuid: &str) -> anyhow::Result<()> {
+    let mut child = Command::new(std::env::current_exe()?)
+        .args(&args[1..])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::null())
+        .spawn()
+        .context("starting the nested Grok fixture")?;
+    let sent = write!(
+        child.stdin.take().context("nested Grok stdin is piped")?,
+        "select-ready {uuid}\nquit\n"
+    );
+    // The fixture's outer deadline must leave time for its hook's own deadline and exit.
+    let status = wait_bounded(&mut child, HOOK_CHILD_DEADLINE * 2, "nested Grok fixture")?;
+    sent.context("sending the nested Grok selection")?;
+    ensure!(
+        status.is_some_and(|status| status.success()),
+        "nested Grok fixture failed: {status:?}"
+    );
     Ok(())
 }
 

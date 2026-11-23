@@ -15573,11 +15573,10 @@ impl Supervisor {
     /// Every report arrives with the hook's recorded process chain already
     /// anchored at the session's current pane process, which ties it to the
     /// current launch (`report_files`). Codex attributes the innermost native
-    /// emitter and applies its durable launch pin; Grok requires one native
-    /// runtime in that chain, and OMP
-    /// through its launched runtime. Claude attributes the first non-trampoline
-    /// process above the hook and applies its durable pin under the capture claim,
-    /// without recognizing an executable or reading a vendor transcript.
+    /// emitter and applies its durable launch pin. Grok uses the first non-trampoline
+    /// process, verifies its `--no-leader` option and applies the same pin rules.
+    /// OMP verifies its launched runtime. Claude attributes the first non-trampoline
+    /// process and applies its pin without recognizing an executable or reading a transcript.
     ///
     /// ## Admission order
     ///

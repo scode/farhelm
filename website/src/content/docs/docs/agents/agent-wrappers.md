@@ -130,18 +130,16 @@ a **Restart** before the switch would have resumed. If the followed Codex exits 
 terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
 supply the conversation **Restart** needs.
 
-Grok accepts a wrapper that `exec`s Grok or stays resident as Grok's one parent process, unless that resident wrapper is
-itself named `grok` or its program is named `grok-` followed by anything. A deeper resident chain prevents Farhelm from
-following the conversation, leaving **Restart** unavailable. Its hooks still have to be
-[installed](/docs/agents/grok/#setup), and the wrapper must pass through its environment.
+Grok also works through wrappers that stay running, including a chain of wrappers. Pass through Grok's arguments and
+environment so [its hooks](/docs/agents/grok/#setup) can report from inside Farhelm.
 
 OMP accepts a prefix wrapper only when the wrapper `exec`s OMP, leaving no extra process between the session and OMP's
 own launcher. A resident wrapper can run OMP, but Farhelm will not follow its conversation, so **Restart** stays
 unavailable. The same process rule applies when you write a custom command.
 
 A compound command or prefix can keep Bash running above the wrapper. That extra process can prevent Farhelm from
-following Grok's or OMP's conversation when the wrapper also stays running, leaving **Restart** unavailable. Claude,
-Muse, Codex and Antigravity tolerate that extra process.
+following OMP's conversation when the wrapper also stays running, leaving **Restart** unavailable. Claude, Muse, Codex,
+Grok and Antigravity tolerate that extra process.
 
 Four variables travel in the environment rather than on the command line: `FARHELM_SESSION_ID` (which session this is —
 no sweep will claim a process that does not carry it), `FARHELM_AGENT_ID` (the same session id again, under a name that

@@ -4289,13 +4289,13 @@ no path values are stored in the notice.
   notification. An OS read error refuses with a retry message without changing the binding. Grok uses the same verdict
   policy for its exact pair. The existing final relaunch comparison still fences a conversation report racing Restart.
 
-  **Grok attribution, ordering, and exact-record validation.** Grok uses the same recorded and anchored ancestry,
-  capture claim, complete-binding CAS, ownership provenance, and mirror helper as Codex. Its corridor requires exactly
-  one native `grok` image with `--no-leader` in the option region, followed only by the hook-shaped reporter and the
-  same narrow shell trampoline. A nested Grok, foreign session runtime, missing option, or unreadable argv refuses the
-  report. This is the supported native corridor. The terminal's root process is accepted by position, so one resident
-  wrapper keeps capture, unless it looks like a Grok Farhelm does not recognise (argv[0] basename `grok`, or an image
-  basename `grok-*`): that refuses, so a recognised nested Grok cannot stand in for the session's own.
+  **Grok attribution, ordering, and exact-record validation.** Grok uses the shared positional corridor with one
+  additional requirement. The emitter selected after skipping hook trampolines must have a standalone `--no-leader` in
+  its option region. Missing emitter argv or an option beyond the `--` boundary cannot establish that it uses an owned
+  backend. Versioned images and resident wrappers can report through this corridor. Grok commits the shared process pin
+  and the proven locator at ownership version 1 under the capture claim. An unpinned launch, including one carried
+  across an upgrade, can accept a nested Grok's selection before the parent reports. A recorded ancestor's next
+  `SessionStart` corrects it with a once-per-launch `GrokPinCorrected` notification in the same transaction.
 
   The hook parser accepts the observed snake_case and camelCase spellings for session id, event name, and transcript
   path, and requires duplicate spellings to agree after event-name normalization. `SessionStart` alone selects a UUID
@@ -4307,8 +4307,9 @@ no path values are stored in the notice.
   timestamp, and current readiness. Its transition function runs under the shared claim after an authoritative row
   reload. A different UUID must have a strictly newer timestamp. The same UUID may advance its timestamp but cannot
   lower it; an equal repeat preserves an established path and may fill an absent one. Enrichment must match the selected
-  UUID and inherits its timestamp. This one locator transition supplies restart-stable ordering without a schema field,
-  event log, or retired-id set.
+  UUID and inherits its timestamp. On ancestor correction the new `SessionStart` has its own timestamp and record path
+  even when its timestamp is earlier than the displaced child's. Enrichment from an ancestor while a child is pinned is
+  acknowledged without changing the selection. This locator transition supplies restart-stable ordering.
 
   Readiness requires the bounded no-follow first record of the exact `updates.jsonl` to use the observed
   `_x.ai/session/update` method and carry the UUID at `params.sessionId`. Its sibling `summary.json` must be a complete,
@@ -4335,24 +4336,24 @@ no path values are stored in the notice.
   anchored chain — only the reporter plus a narrow trampoline between runtime and reporter; any other session-hosting
   runtime or unclassified intermediary below the emitter refuses. Codex attributes its hook-shaped reporter through
   shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry above it, and applies its durable
-  process pin. Claude, Muse and Antigravity select their emitter by position through the same narrow hook trampolines,
-  accept arbitrary ancestry above it, and use the shared pin with every recorded ancestor eligible to correct it. Grok
-  retains exactly one native image with the required `--no-leader` option. Admission runs five steps: cheap
-  envelope/kind/generation gating with no vendor I/O (the report file's discriminator check re-applied against the
-  fenced resolution, plus raw event/source/agent-identity validation before diagnostic sanitation); the unbounded
-  capture claim (one shared session-keyed `capture_locks` registry for report admission and readiness refresh, never the
-  lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind, generation, and the complete
-  prior binding; the mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the
-  report was made cannot change during verification, so there is no repeat walk); the atomic
-  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness reset, and, for
-  pinned kinds, the replacement pin and any correction notification together, with the exact prior pin as an additional
-  fence; and the mirror of only the committed result into the matching current-generation entry under the same claim.
-  Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only
-  reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside the identity,
-  so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
-  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
-  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
-  every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
+  process pin. Claude, Muse, Antigravity and Grok select their emitter by position through the same narrow hook
+  trampolines, accept arbitrary ancestry above it, and use the shared pin with every recorded ancestor eligible to
+  correct it. Grok checks `--no-leader` on the emitter. Admission runs five steps: cheap envelope/kind/generation gating
+  with no vendor I/O (the report file's discriminator check re-applied against the fenced resolution, plus raw
+  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
+  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
+  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
+  mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the report was made
+  cannot change during verification, so there is no repeat walk); the atomic generation-plus-complete-binding CAS
+  committing identity, locator, provenance, source, readiness reset, and, for pinned kinds, the replacement pin and any
+  correction notification together, with the exact prior pin as an additional fence; and the mirror of only the
+  committed result into the matching current-generation entry under the same claim. Rejection at any pre-write step
+  changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation passes take the same
+  claim and reload before mirroring, carrying the row's version beside the identity, so memory-derived offers apply the
+  same gate as row-derived ones without a second lookup — and a rejected report never triggers a readiness withdrawal
+  through them. Restart verification and lifecycle resets retain their durable generation/binding fences; they do not
+  all acquire this capture claim. The report claim has no time limit because every operation under it is local and no
+  hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established

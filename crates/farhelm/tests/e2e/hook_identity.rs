@@ -3237,16 +3237,46 @@ async fn a_report_made_while_no_supervisor_runs_is_applied_when_one_starts() {
     );
 }
 
-/// An executable named `grok` that runs the fixture binary: Grok attribution
-/// recognizes its native runtime by the kernel's image basename, so a
-/// symlink (which the kernel resolves) would not do; a hard link or copy
-/// does.
-fn native_grok_image(dir: &std::path::Path) -> std::path::PathBuf {
-    let image = dir.join("grok");
+/// A versioned Grok image reproduces what the kernel sees behind the vendor's
+/// launcher symlink. Link or copy the fixture so the image itself has that name.
+fn versioned_grok_image(dir: &std::path::Path) -> std::path::PathBuf {
+    let image = dir.join("grok-1.0.92-linux-x86_64");
     if std::fs::hard_link(fixtures_bin(), &image).is_err() {
-        std::fs::copy(fixtures_bin(), &image).expect("create the native Grok image");
+        std::fs::copy(fixtures_bin(), &image).expect("create the versioned Grok image");
     }
     image
+}
+
+/// Start an owned-backend Grok fixture whose Resume exposes the chosen UUID.
+async fn grok_fixture_session(
+    h: &Harness,
+    cwd: &std::path::Path,
+    records: &std::path::Path,
+    image: &std::path::Path,
+) -> farhelm_proto::SessionInfo {
+    let invocation = format!(
+        "{} fake-agent --script grok-conversation --record-home {} --hook-binary {} --no-leader",
+        shell_words::quote(&image.to_string_lossy()),
+        shell_words::quote(&records.to_string_lossy()),
+        shell_words::quote(farhelm_bin()),
+    );
+    h.client
+        .create_session_with_extras(
+            &cwd.to_string_lossy(),
+            declared_command(
+                &format!("{invocation} {{farhelm_args}}"),
+                farhelm_proto::LaunchHarness::Grok,
+                Some(&format!(
+                    "{invocation} --resume {{conversation}} {{farhelm_args}}"
+                )),
+            ),
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("create a Grok session")
 }
 
 /// Spec: when Grok selects a conversation and then enriches it twice while
@@ -3264,32 +3294,9 @@ async fn grok_selection_survives_enrichments_made_while_no_supervisor_runs() {
     let (h, _fixtures, serving) = hook_harness().await;
     let work = farhelm_teststate::tempdir().expect("workdir");
     let records = farhelm_teststate::tempdir().expect("private Grok records");
-    let images = farhelm_teststate::tempdir().expect("native Grok image directory");
-    let grok = native_grok_image(images.path());
-    let invocation = format!(
-        "{} fake-agent --script grok-conversation --record-home {} --hook-binary {} --no-leader",
-        shell_words::quote(&grok.to_string_lossy()),
-        shell_words::quote(&records.path().to_string_lossy()),
-        shell_words::quote(farhelm_bin()),
-    );
-    let session = h
-        .client
-        .create_session_with_extras(
-            &work.path().to_string_lossy(),
-            declared_command(
-                &format!("{invocation} {{farhelm_args}}"),
-                farhelm_proto::LaunchHarness::Grok,
-                Some(&format!(
-                    "{invocation} --resume {{conversation}} {{farhelm_args}}"
-                )),
-            ),
-            None,
-            WIDE_COLS,
-            ROWS,
-            farhelm_helm::CreateExtras::default(),
-        )
-        .await
-        .expect("create a Grok session");
+    let images = farhelm_teststate::tempdir().expect("Grok image directory");
+    let grok = versioned_grok_image(images.path());
+    let session = grok_fixture_session(&h, work.path(), records.path(), &grok).await;
     let (_chan, mut seen, mut rx) = h
         .client
         .attach_live(&session.id, WIDE_COLS, ROWS)
@@ -3354,6 +3361,176 @@ async fn grok_selection_survives_enrichments_made_while_no_supervisor_runs() {
             .is_none(),
         "both reports are settled and removed"
     );
+}
+
+/// Apply a real Grok hook after its fixture confirms the callback completed.
+/// A fresh output boundary keeps a repeated command from matching an earlier marker.
+async fn grok_report(
+    h: &Harness,
+    chan: u32,
+    rx: &mut TermStream,
+    seen: &mut Vec<u8>,
+    command: &str,
+    uuid: &str,
+    marker: &str,
+) {
+    let from = seen.len();
+    h.client
+        .send_keys(chan, format!("{command} {uuid}\r").into_bytes())
+        .await;
+    wait_for_after_from(rx, seen, from, uuid, &format!("{marker}:{uuid}"), 30).await;
+    h.sup.reconcile_for_test().await;
+}
+
+/// A nested Grok can select first, but a recorded parent corrects that choice on SessionStart.
+/// The child's timestamp is newer, so correcting the choice and keeping it when a second child
+/// reports both depend on the pin. A correction takes the parent's timestamp and record path.
+#[farhelm_testtrace::test]
+async fn grok_parent_corrects_a_child_first_selection() {
+    let (h, _fixtures) = fixture_harness_with_seams(|_| {}).await;
+    let work = farhelm_teststate::tempdir().expect("working directory");
+    let records = farhelm_teststate::tempdir().expect("private Grok records");
+    let images = farhelm_teststate::tempdir().expect("Grok image directory");
+    let grok = versioned_grok_image(images.path());
+    let session = grok_fixture_session(&h, work.path(), records.path(), &grok).await;
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach");
+    wait_for(&mut rx, &mut seen, "GROK-CONVERSATION READY", 20).await;
+    assert!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .is_none()
+    );
+
+    let child = "019a0000-0000-7000-8000-00000000c111";
+    let parent = "019a0000-0000-7000-8000-00000000c222";
+    // The fixture's first plain select is 2026-10-01T00:00:01Z, one second before its child.
+    const PARENT_SELECTED_AT: i64 = 1_790_812_801;
+    let locator_of = |snapshot: &SessionSnapshot| -> serde_json::Value {
+        serde_json::from_str(
+            snapshot
+                .captured_conversation
+                .as_deref()
+                .expect("selected conversation")
+                .strip_prefix(farhelm_proto::conversation::GROK_LOCATOR_PREFIX)
+                .expect("Grok locator"),
+        )
+        .expect("Grok locator JSON")
+    };
+    grok_report(
+        &h,
+        chan,
+        &mut rx,
+        &mut seen,
+        "select-child",
+        child,
+        "GROK-CHILD-SELECTED",
+    )
+    .await;
+    let initial = snapshot_of(&h, &session.id).await;
+    assert_eq!(
+        initial.restart_offer,
+        farhelm_proto::RestartOffer::Resume,
+        "{}",
+        hook_log(&h, &session.id)
+    );
+    assert_eq!(resumed_conversation(&initial.resume_argv), child);
+    assert_eq!(
+        locator_of(&initial)["selected_at"]["seconds"],
+        PARENT_SELECTED_AT + 1
+    );
+    assert!(
+        listed(&h.client, &session.id)
+            .await
+            .notifications
+            .is_empty()
+    );
+
+    grok_report(
+        &h,
+        chan,
+        &mut rx,
+        &mut seen,
+        "enrich",
+        parent,
+        "GROK-ENRICHED",
+    )
+    .await;
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.captured_conversation,
+        initial.captured_conversation
+    );
+    assert_eq!(
+        hook_log(&h, &session.id)
+            .lines()
+            .filter(|line| line.split_whitespace().nth(1) == Some("acked"))
+            .count(),
+        2,
+        "the parent's early Stop is acknowledged without taking over"
+    );
+
+    grok_report(
+        &h,
+        chan,
+        &mut rx,
+        &mut seen,
+        "select",
+        parent,
+        "GROK-SELECTED",
+    )
+    .await;
+    let corrected = snapshot_of(&h, &session.id).await;
+    let locator = locator_of(&corrected);
+    assert_eq!(
+        locator["session_id"],
+        parent,
+        "{}",
+        hook_log(&h, &session.id)
+    );
+    assert!(
+        locator["session_file"].is_null(),
+        "the parent reported no path"
+    );
+    assert_eq!(locator["selected_at"]["seconds"], PARENT_SELECTED_AT);
+    assert_ne!(corrected.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(corrected.capture_ownership_version, 1);
+    let notices = listed(&h.client, &session.id).await.notifications;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(notices[0].text.contains("child Grok process"));
+    assert!(!notices[0].resolved);
+
+    grok_report(
+        &h,
+        chan,
+        &mut rx,
+        &mut seen,
+        "select-child",
+        child,
+        "GROK-CHILD-SELECTED",
+    )
+    .await;
+    assert_eq!(
+        snapshot_of(&h, &session.id).await.captured_conversation,
+        corrected.captured_conversation
+    );
+    grok_report(
+        &h,
+        chan,
+        &mut rx,
+        &mut seen,
+        "enrich",
+        parent,
+        "GROK-ENRICHED",
+    )
+    .await;
+    let ready = snapshot_of(&h, &session.id).await;
+    assert_eq!(ready.restart_offer, farhelm_proto::RestartOffer::Resume);
+    assert_eq!(resumed_conversation(&ready.resume_argv), parent);
+    assert_eq!(listed(&h.client, &session.id).await.notifications, notices);
 }
 
 /// Spec: a report made under an earlier launch of a session is discarded
