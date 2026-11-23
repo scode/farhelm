@@ -15570,12 +15570,9 @@ impl Supervisor {
     /// generation: the credential survives relaunch, and the wire message
     /// carries no generation. Ordinary stale reporters are removed by the
     /// restart's whole-process-tree sweep before the replacement runs.
-    /// Every report arrives with the hook's recorded process chain already
-    /// anchored at the session's current pane process, which ties it to the
-    /// current launch (`report_files`). Codex and Grok attribute the first non-trampoline
-    /// process and apply its durable launch pin. Grok also verifies its `--no-leader` option.
-    /// OMP verifies its launched runtime. Claude attributes the first non-trampoline
-    /// process and applies its pin without recognizing an executable or reading a transcript.
+    /// A process-attributed report arrives with its recorded chain anchored
+    /// at the session's terminal root, which ties it to the current launch
+    /// (`report_files`).
     ///
     /// ## Admission order
     ///
@@ -15689,6 +15686,8 @@ impl Supervisor {
     /// routing them through the proof predicate would withdraw Restart offers.
     /// Every integration chooses its admission explicitly so a new kind cannot
     /// inherit another vendor's process or record rules.
+    /// **Default process attribution** in SPEC_impl.md describes the shared
+    /// positional pin rule and the evidence required for a different corridor.
     #[warn(clippy::wildcard_enum_match_arm)]
     async fn report_conversation_for_kind(
         &self,
