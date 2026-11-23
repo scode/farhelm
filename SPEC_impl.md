@@ -4507,21 +4507,24 @@ no path values are stored in the notice.
   **Report files.** The hook never talks to the supervisor and never waits for it. It reads the vendor's payload
   (bounded at 30 s, for a vendor that holds stdin open, under the 60 s outer timers Farhelm sets or documents; Pi and
   OMP keep their published 2 s child timers), records its process ancestry, writes the report atomically into
-  `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. It requires the launch's
-  complete credential environment, as before, but carries no token: the file sits in the supervisor's private state
-  directory, and attribution, not a secret, is what stops a nested agent's report. Each session has fixed slots, each
-  replaced by rename: `latest.json` for the single-report integrations, including Claude, Muse and Antigravity. Their
-  admitted SessionStart and Stop each select a conversation under the pin, so a verified report needs no separate
-  confirmation slot. Codex and Grok use `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's
-  later events), drained selection first. Enrichment is refused without its selection, and the separate slot keeps a
-  long outage's enrichments from evicting it. The directory is therefore bounded at two files with no queue, cap, or
-  eviction rule. Two hooks firing at once still race for a slot, and the later rename wins. A report that names a
-  sub-agent is never written, since it would take the slot of a pending report from the session's own agent and then be
-  refused; a nested runtime that carries no such marker (a second Grok started inside a Grok session, or any `agy` run
-  inside a Farhelm session, whose user-installed hooks are global) can still take that slot, within one pass while the
-  supervisor runs or across an outage, and is then refused. An Antigravity subagent sharing the main process can take
-  the slot the same way before its transcript check refuses it. The next verified main report captures the main
-  conversation again, or for the first time when nothing was captured yet.
+  `hook-reports/<session-id>/` under the state directory (the socket's parent), and exits 0. Muse Code 1.4.24 strips
+  Farhelm's environment from hook children, so both injected Muse callbacks carry `--session-id` and
+  `--supervisor-socket`. A complete explicit pair takes precedence. Without one the helper reads its existing
+  environment, which requires the session id, socket and token before writing a report. The token remains off the hook
+  command and out of the report. The file sits in the supervisor's private state directory, and the supervisor checks
+  the reporting process's ancestry before using it. Each session has fixed slots, each replaced by rename: `latest.json`
+  for the single-report integrations, including Claude, Muse and Antigravity. Their admitted SessionStart and Stop each
+  select a conversation under the pin, so a verified report needs no separate confirmation slot. Codex and Grok use
+  `selection.json` (`SessionStart`) and `enrichment.json` (Codex Stop; Grok's later events), drained selection first.
+  Enrichment is refused without its selection, and the separate slot keeps a long outage's enrichments from evicting it.
+  The directory is therefore bounded at two files with no queue, cap, or eviction rule. Two hooks firing at once still
+  race for a slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the
+  slot of a pending report from the session's own agent and then be refused; a nested runtime that carries no such
+  marker (a second Grok started inside a Grok session, or any `agy` run inside a Farhelm session, whose user-installed
+  hooks are global) can still take that slot, within one pass while the supervisor runs or across an outage, and is then
+  refused. An Antigravity subagent sharing the main process can take the slot the same way before its transcript check
+  refuses it. The next verified main report captures the main conversation again, or for the first time when nothing was
+  captured yet.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot

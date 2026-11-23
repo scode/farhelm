@@ -720,6 +720,7 @@ struct PositionalFixture {
     script: &'static str,
     resume_selector: &'static str,
     resume_marker: Option<&'static str>,
+    scrubs_hook_environment: bool,
     read_hooks: fn(&str) -> serde_json::Value,
 }
 
@@ -730,6 +731,7 @@ const CLAUDE_FIXTURE: PositionalFixture = PositionalFixture {
     script: "hook-report",
     resume_selector: "--resume",
     resume_marker: None,
+    scrubs_hook_environment: false,
     read_hooks: |argv| injected_settings(argv)["hooks"].clone(),
 };
 
@@ -740,6 +742,7 @@ const MUSE_FIXTURE: PositionalFixture = PositionalFixture {
     script: "muse-hook-report",
     resume_selector: "resume",
     resume_marker: Some("MUSE-RESUMED:"),
+    scrubs_hook_environment: true,
     read_hooks: |argv| {
         let words = shell_words::split(argv).expect("Muse argv boundaries");
         let hooks = words
@@ -806,6 +809,35 @@ fn assert_positional_hook(vendor: PositionalFixture, argv: &str, event: &str) {
     assert!(
         !words.iter().any(|word| word == "--announce"),
         "these scenarios disable announcements: {command}"
+    );
+}
+
+/// A stale fixture also reports successfully using the explicit flags. Require a fresh witness after this
+/// callback so the receipt of a report proves capture in the presence of the scrub.
+fn assert_hook_environment_scrubbed(vendor: PositionalFixture, fresh: &[u8], event: &str) {
+    if vendor.scrubs_hook_environment {
+        assert!(
+            String::from_utf8_lossy(fresh).contains(&format!("MUSE-HOOK-ENV-SCRUBBED: {event}")),
+            "the Muse fixture must remove Farhelm's variables for {event}"
+        );
+    }
+}
+
+/// Check the actual launcher output as well as the generated flags. The supervisor's synthetic token should
+/// reach the terminal child only in its environment. Avoid including argv or the token in the assertion output.
+async fn assert_launch_keeps_token_off_argv(h: &Harness, session: &str, argv: &str) {
+    // The live attachment proves Create has already stored the credential under this supervisor-local id.
+    let token = SessionStore::open(&h.state.path().join("supervisor.db"), false)
+        .await
+        .expect("open the running supervisor's store")
+        .session_token(session)
+        .await
+        .expect("read the launch credential")
+        .expect("the launched session has a credential");
+    assert!(!token.is_empty(), "the fixture session has a token");
+    assert!(
+        !argv.contains(&token),
+        "the actual launch arguments must not contain the session token"
     );
 }
 
@@ -1068,8 +1100,8 @@ async fn a_two_level_resident_wrapper_captures_and_resumes_claude() {
     two_level_resident_wrapper_captures_and_resumes(CLAUDE_FIXTURE).await;
 }
 
-/// Muse's versioned executable identity must not prevent capture below two
-/// resident wrappers, nor lose its exact resume selector on replacement.
+/// Muse reports below two resident wrappers even when the hook child loses every injected Farhelm variable.
+/// The exact conversation id must still reach its resume selector on replacement.
 #[farhelm_testtrace::test]
 async fn a_two_level_resident_wrapper_captures_and_resumes_muse() {
     two_level_resident_wrapper_captures_and_resumes(MUSE_FIXTURE).await;
@@ -1105,8 +1137,11 @@ async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixtu
         .await
         .expect("create two-level wrapper launch");
     let (chan, mut rx, mut seen) = attach_ready(&h, &session).await;
+    assert_launch_keeps_token_off_argv(&h, &session.id, &argv_marker(&seen)).await;
     let before_pids = assert_two_resident_wrappers(&h, &session.id, &seen, "start", vendor).await;
+    let before_report = seen.len();
     report(&h, chan, &mut rx, &mut seen, "conv-deep-wrapper").await;
+    assert_hook_environment_scrubbed(vendor, &seen[before_report..], "SessionStart");
     let before = snapshot_of(&h, &session.id).await;
     assert_eq!(
         before.captured_conversation.as_deref(),
@@ -1139,7 +1174,9 @@ async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixtu
         30,
     )
     .await;
-    let resumed = shell_words::split(&argv_marker(&seen)).expect("resumed fixture argv");
+    let argv = argv_marker(&seen);
+    assert_launch_keeps_token_off_argv(&h, &session.id, &argv).await;
+    let resumed = shell_words::split(&argv).expect("resumed fixture argv");
     assert!(
         resumed
             .windows(2)
@@ -1157,8 +1194,10 @@ async fn two_level_resident_wrapper_captures_and_resumes(vendor: PositionalFixtu
         before_pids[2], after_pids[2],
         "Restart must replace the emitter"
     );
-    assert_positional_hook(vendor, &argv_marker(&seen), "SessionStart");
+    assert_positional_hook(vendor, &argv, "SessionStart");
+    let before_report = seen.len();
     report(&h, chan, &mut rx, &mut seen, "conv-after-deep-resume").await;
+    assert_hook_environment_scrubbed(vendor, &seen[before_report..], "SessionStart");
     let after = snapshot_of(&h, &session.id).await;
     assert!(after.generation > before.generation);
     assert_eq!(
@@ -1482,7 +1521,9 @@ async fn child_first_capture_is_corrected_by_stop_and_resumes_parent(vendor: Pos
             .is_empty()
     );
 
+    let before_report = seen.len();
     stop_report(&h, chan, &mut rx, &mut seen, "conv-parent-stop").await;
+    assert_hook_environment_scrubbed(vendor, &seen[before_report..], "Stop");
     let parent = snapshot_of(&h, &session.id).await;
     assert_eq!(
         parent.captured_conversation.as_deref(),
@@ -1543,7 +1584,9 @@ async fn child_first_capture_is_corrected_by_stop_and_resumes_parent(vendor: Pos
     );
     assert_positional_hook(vendor, &argv, "Stop");
     assert!(snapshot_of(&h, &session.id).await.generation > parent.generation);
+    let before_report = seen.len();
     stop_report(&h, chan, &mut rx, &mut seen, "conv-resumed-turn").await;
+    assert_hook_environment_scrubbed(vendor, &seen[before_report..], "Stop");
     let resumed = snapshot_of(&h, &session.id).await;
     assert_eq!(
         resumed.captured_conversation.as_deref(),
@@ -2143,6 +2186,32 @@ fn a_hook_outside_a_farhelm_session_does_nothing_silently() {
         br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
         false,
     );
+}
+
+/// A half-specified launch-local destination must reach the hook's quiet handling. If the flags required each
+/// other at parse time, the same input would print an error on the vendor's terminal and fail the hook.
+#[farhelm_testtrace::test]
+fn an_incomplete_explicit_hook_destination_is_silent() {
+    let state = farhelm_teststate::tempdir().expect("isolated state");
+    let socket = state.path().join("supervisor.sock");
+    for flag in ["--session-id", "--supervisor-socket"] {
+        let mut cmd = hook_command_for("muse", &socket, "muse-launch");
+        cmd.env_remove(farhelm_supervisor::launch::SESSION_ID_ENV_VAR)
+            .env_remove(farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR)
+            .env_remove(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR)
+            .arg(flag)
+            .arg(if flag == "--session-id" {
+                "muse-launch".as_ref()
+            } else {
+                socket.as_os_str()
+            });
+        assert_silent(
+            cmd,
+            br#"{"session_id":"conv-x","hook_event_name":"SessionStart"}"#,
+            false,
+        );
+    }
+    assert_eq!(std::fs::read_dir(state.path()).unwrap().count(), 0);
 }
 
 /// Antigravity parses stdout as JSON even with no session credential or

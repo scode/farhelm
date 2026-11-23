@@ -265,12 +265,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Evidence shows Muse Code conversation reporting is broken (1.4.24).** During the `harness-drift-tests` live run on
-  Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no conversation report
-  arrived and Farhelm's hook helper never even wrote a diagnostic log line before teardown—indicating conversation
-  reporting is broken on current Muse Code so Restart cannot resume Muse conversations. Find out why the callback did
-  not fire and fix or adapt Farhelm's Muse integration. Plan: `plans/queue/fix-muse-conversation-reporting.md`.
-
 ### Tensorlake
 
 - **Agent-requested Tensorlake hosts.** Let an agent request a host by naming an existing recipe, behind the user's
