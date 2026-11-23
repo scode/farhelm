@@ -38,6 +38,16 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working. Plan:
   `plans/queue/codex-recipe-credentials-at-launch.md`.
 
+- **Revisit Clone and Replace with starting old no-permission sessions as YOLO.** On 2026-11-23 the landing monitor,
+  landing `remove-own-setting-permission` (#4669, #4672, #4673, fix #4685), accepted a consequence of migrating old
+  agent sessions that never chose a permission to YOLO: Clone, Replace with and Restart with of such a session now
+  preselect YOLO and pass the agent's bypass flags, where before they composed a Guarded launch for agents that offer
+  it, and a Clone of one makes YOLO the remembered default. Hosts that ask before YOLO launches still ask and offer to
+  start guarded instead; hosts set to start YOLO without asking start it silently. The release-notes draft says so. The
+  alternative was to leave those sessions' stored permission empty and rely on the rule that already counts an empty
+  permission as YOLO for confirmation, which keeps Clone and Replace with composing Guarded but departs from the
+  decision to migrate them to YOLO. Plan: `plans/queue/remove-own-setting-permission.md`.
+
 ## Near term
 
 - **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.
