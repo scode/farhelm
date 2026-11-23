@@ -2789,6 +2789,11 @@
       "reference": null
     },
     {
+      "golden": "session-list-guarded-replace",
+      "title": "Plain Replace's YOLO question offering Replace as guarded instead",
+      "reference": null
+    },
+    {
       "golden": "rename-dialog",
       "title": "The Rename editor as it opens: the current title, the field holding it with focus, Cancel and Save",
       "reference": "rename-dialog"

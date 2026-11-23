@@ -265,7 +265,10 @@ fn replace_rows_name_the_action_and_restart_rows_are_inactive(cx: &mut TestAppCo
         "the highlighted row's cap names the replacement"
     );
 
-    let mut source = super::draft_tests::session(codex(None, None, None));
+    // A Guarded source, so the strip's permission narrowing keeps the recent Codex setup (which composes as Guarded).
+    // A source with no recorded permission now restarts as YOLO, and its strip would hide that setup.
+    let mut source =
+        super::draft_tests::session(codex(None, None, Some(LaunchPermission::Guarded)));
     source.restart_offer = RestartOffer::Resume;
     let (mut helm, cx) = launcher_with_hosts(
         cx,

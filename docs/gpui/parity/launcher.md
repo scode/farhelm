@@ -865,7 +865,7 @@ whose detail is in the templates file's restart-with entry
 - "Restart with escapes and isolates peer refusal text":
   `launcher::restart_with_tests::a_restart_refusal_spells_out_hidden_characters`.
 - "restart with upgrades an older own-setting launch to guarded":
-  `launcher::restart_with_tests::guarded_over_an_older_own_setting_launch_is_an_edit`.
+  `launcher::restart_with_tests::guarded_over_an_older_launch_with_no_permission_is_an_edit`.
 - "a YOLO restart-with requires confirmation inside the dialog", "restart with can answer the YOLO question by
   restarting guarded" and "a YOLO command restart-with asks inside the dialog, worded for an assertion": the answers
   resending the restart in

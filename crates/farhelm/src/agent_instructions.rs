@@ -252,8 +252,8 @@ fn render(agent: &Command) -> String {
          \n\
          On a host that asks before YOLO launches, an agent may not start a launch treated as YOLO or any command\n\
          launch. This includes saved agent launches with no recorded permission and launches using custom flags.\n\
-         there is no override. If such a launch is refused, tell the user which host refused;\n\
-         they can allow it by turning on \"Start YOLO sessions without asking\" for that\n\
+         Nothing you pass changes that: there is no override. If such a launch is refused, tell the user which host\n\
+         refused; they can allow it by turning on \"Start YOLO sessions without asking\" for that\n\
          host. Neither command permission waives this rule for create, clone or spawn.\n\
          A plain restart is never refused this way, even for a YOLO session.\n\
          \n\
