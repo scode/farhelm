@@ -574,9 +574,10 @@ deleting its snapshots. Unfinished cleanup remains in the list with its error an
 and reopening Settings; running cleanup shows **Cleaning up…**. This operation state lasts until cleanup succeeds or the
 helm restarts. With a saved API key the section stays visible even when empty, with a small **Refresh** beside its
 heading. A read shows **Checking…**, then an empty success shows **None found · checked HH:MM** in the viewer's local
-time. A failed read shows its reason and keeps earlier rows rather than claiming an empty result. Farhelm never cleans
-it automatically. The repository's test-sandbox namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved
-prefixes never appear.
+time. If discovery fails, Settings shows **Could not refresh sandbox list** above previously discovered sandboxes and
+still updates the cleanup rows. A sandbox being cleaned up appears once, with its cleanup state, and its row goes away
+when cleanup finishes even if discovery is still unavailable. Farhelm never cleans it automatically. The repository's
+test-sandbox namespace `farhelm-sbx-` and sandboxes without Farhelm's reserved prefixes never appear.
 
 For Tensorlake, every recipe supplies a built snapshot and, on first use, a prepared snapshot for new hosts or sessions.
 The UI calls these artifacts snapshots, never templates, a word reserved for launch templates. Saving a recipe never

@@ -12,12 +12,13 @@ use super::{
     config::helm_tag,
 };
 use crate::AppState;
+use anyhow::Context as _;
 use axum::{
     extract::{Path, State},
     http::StatusCode,
     response::{IntoResponse, Response},
 };
-use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
+use farhelm_proto::tensorlake::{OrphanCleanup, OrphanDiscovery, OrphanSandbox, OrphanSandboxList};
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
@@ -95,47 +96,42 @@ impl Tensorlake {
         Ok((tag, known))
     }
 
-    /// Join live discovery with unfinished explicit cleanup. Termination
-    /// removes a sandbox from Tensorlake's list, so the helm retains its
-    /// canonical ID and display facts until snapshot cleanup succeeds.
-    ///
-    /// Discovery gives up at `reply_by` (see [`list_all_sandboxes_by`]), and
-    /// a discovery that ran out of time is treated like any other failed one:
-    /// unfinished cleanup is still listed. The bound counts from the request's
-    /// arrival, so the key read before the listing comes out of it, but
-    /// nothing bounds the local reads themselves, nor the ownership reads
-    /// after the listing, which can therefore add to the reply's wait. Those
-    /// stay after the listing on purpose: a host records its sandbox's name
-    /// before creating the sandbox, so reading ownership afterwards sees the
-    /// name of every sandbox the listing found, while reading it first would
-    /// show a sandbox created during the listing as not on this helm.
+    /// Keep cleanup state authoritative even if discovery fails. Snapshot it after discovery so a cleanup that
+    /// finished during the read disappears from the response, including during a provider outage.
     pub(crate) async fn orphan_sandboxes_by(
         &self,
         reply_by: tokio::time::Instant,
-    ) -> anyhow::Result<Vec<OrphanSandbox>> {
-        let discovered = async {
-            let key = self.api_key().await.map_err(anyhow::Error::msg)?;
-            Ok::<_, anyhow::Error>(list_all_sandboxes_by(reply_by, self.api(), &key).await?)
-        }
-        .await;
-        let sandboxes = match discovered {
-            Ok(sandboxes) => sandboxes,
-            Err(error) => {
-                let mut unfinished = self.0.orphan_cleanups.snapshot();
-                if unfinished.is_empty() {
-                    return Err(error);
-                }
-                // A vendor outage must not hide work the user already
-                // requested. Say that discovery is incomplete on these rows.
-                for row in &mut unfinished {
-                    row.state = format!("Sandbox list unavailable: {error}");
-                }
-                unfinished.sort_by(|a, b| a.name.cmp(&b.name));
-                return Ok(unfinished);
-            }
+    ) -> OrphanSandboxList {
+        let discovery = match self.discover_orphan_sandboxes_by(reply_by).await {
+            Ok(sandboxes) => OrphanDiscovery::Ok { sandboxes },
+            Err(error) => OrphanDiscovery::Failed {
+                reason: error.to_string(),
+            },
         };
-        let (tag, known) = self.known_sandboxes().await?;
-        let mut orphans = vec![];
+        let mut cleanups = self.0.orphan_cleanups.snapshot();
+        cleanups.sort_by(|a, b| a.name.cmp(&b.name));
+        OrphanSandboxList {
+            discovery,
+            cleanups,
+        }
+    }
+
+    /// Give local and provider reads the same deadline. A local stall must still let Settings get the cleanup snapshot.
+    /// Read ownership after listing because a host reserves its name before Create. Reading ownership first could list
+    /// a sandbox created during the vendor read as a leftover.
+    async fn discover_orphan_sandboxes_by(
+        &self,
+        reply_by: tokio::time::Instant,
+    ) -> anyhow::Result<Vec<OrphanSandbox>> {
+        let key = tokio::time::timeout_at(reply_by, self.api_key())
+            .await
+            .context("Farhelm timed out reading its Tensorlake settings")?
+            .map_err(anyhow::Error::msg)?;
+        let sandboxes = list_all_sandboxes_by(reply_by, self.api(), &key).await?;
+        let (tag, known) = tokio::time::timeout_at(reply_by, self.known_sandboxes())
+            .await
+            .context("Farhelm timed out checking which Tensorlake sandboxes it owns")??;
+        let mut by_id = HashMap::new();
         for sandbox in sandboxes {
             let Some(name) = sandbox.name else {
                 continue;
@@ -146,21 +142,17 @@ impl Tensorlake {
             if known.contains(&name) {
                 continue;
             }
-            orphans.push(OrphanSandbox {
-                id: sandbox.id,
-                from_another_helm: creator(&name).is_some_and(|other| other != tag.as_str()),
-                name,
-                created_at: sandbox.created_at,
-                state: status(sandbox.status).into(),
-                cleanup: None,
-            });
-        }
-        let mut by_id: HashMap<_, _> = orphans
-            .into_iter()
-            .map(|row| (row.id.clone(), row))
-            .collect();
-        for row in self.0.orphan_cleanups.snapshot() {
-            by_id.insert(row.id.clone(), row);
+            by_id.insert(
+                sandbox.id.clone(),
+                OrphanSandbox {
+                    id: sandbox.id,
+                    from_another_helm: creator(&name).is_some_and(|other| other != tag.as_str()),
+                    name,
+                    created_at: sandbox.created_at,
+                    state: status(sandbox.status).into(),
+                    cleanup: None,
+                },
+            );
         }
         let mut orphans: Vec<_> = by_id.into_values().collect();
         orphans.sort_by(|a, b| a.name.cmp(&b.name));
@@ -169,7 +161,7 @@ impl Tensorlake {
 
     /// [`Self::orphan_sandboxes_by`] with its bound starting now.
     #[cfg(test)]
-    pub(crate) async fn orphan_sandboxes(&self) -> anyhow::Result<Vec<OrphanSandbox>> {
+    pub(crate) async fn orphan_sandboxes(&self) -> OrphanSandboxList {
         self.orphan_sandboxes_by(tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND)
             .await
     }
@@ -305,15 +297,11 @@ fn status(status: SandboxStatus) -> &'static str {
     }
 }
 
-/// Protected Settings read. Failures remain visible, never an empty list,
-/// and a Tensorlake that does not answer within the host reply bound, counted
-/// from here, is one of them (see [`Tensorlake::orphan_sandboxes_by`]).
+/// Give Settings the result of bounded discovery and the current cleanup rows in the same reply.
+/// A provider timeout is a discovery failure, so Settings can keep the last discovered rows and apply current cleanup.
 pub(crate) async fn list(State(state): State<Arc<AppState>>) -> Response {
     let reply_by = tokio::time::Instant::now() + crate::sessions::HOST_REPLY_BOUND;
-    match state.tensorlake.orphan_sandboxes_by(reply_by).await {
-        Ok(list) => axum::Json(list).into_response(),
-        Err(error) => (StatusCode::BAD_GATEWAY, error.to_string()).into_response(),
-    }
+    axum::Json(state.tensorlake.orphan_sandboxes_by(reply_by).await).into_response()
 }
 
 /// Helm-owned deletion survives the confirming client closing mid-request,
@@ -499,7 +487,14 @@ mod tests {
             .await
             .unwrap()
             .unwrap();
-        let list = service.orphan_sandboxes().await.unwrap();
+        let OrphanSandboxList {
+            discovery: OrphanDiscovery::Ok { sandboxes: list },
+            cleanups,
+        } = service.orphan_sandboxes().await
+        else {
+            panic!("expected successful discovery");
+        };
+        assert!(cleanups.is_empty());
         assert_eq!(list.len(), 3, "{list:?}");
         assert!(
             !list
@@ -612,27 +607,34 @@ mod tests {
                 .is_empty(),
             "termination removed the sandbox from live discovery"
         );
-        let listed = service.orphan_sandboxes().await.unwrap();
-        assert_eq!(listed.len(), 1);
+        let listed = service.orphan_sandboxes().await;
+        assert_eq!(
+            listed.discovery,
+            OrphanDiscovery::Ok {
+                sandboxes: Vec::new()
+            }
+        );
+        assert_eq!(listed.cleanups.len(), 1);
         assert!(
-            !listed[0].from_another_helm,
+            !listed.cleanups[0].from_another_helm,
             "cleanup admission uses the same label rule as discovery"
         );
         assert!(
-            matches!(&listed[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused"))
+            matches!(&listed.cleanups[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused"))
         );
         std::fs::write(
             &config,
             r#"{"fail":{"list_sandboxes":{"status":503,"message":"discovery unavailable"}}}"#,
         )
         .unwrap();
-        let unavailable = service.orphan_sandboxes().await.unwrap();
+        let unavailable = service.orphan_sandboxes().await;
         assert_eq!(
-            unavailable[0].id, id,
-            "discovery failure cannot hide an unfinished operation"
+            unavailable.cleanups, listed.cleanups,
+            "an outage leaves the cleanup's state and error intact"
         );
-        assert!(unavailable[0].state.contains("discovery unavailable"));
-        std::fs::write(&config, "{}").unwrap();
+        assert!(
+            matches!(&unavailable.discovery, OrphanDiscovery::Failed { reason } if reason.contains("discovery unavailable"))
+        );
         let state = dir.path().join("fake/state.json");
         let mut model: serde_json::Value =
             serde_json::from_slice(&std::fs::read(&state).unwrap()).unwrap();
@@ -646,7 +648,22 @@ mod tests {
             "vendor no longer knows the terminated sandbox"
         );
         service.delete_orphan(&id).await.unwrap();
-        assert!(service.orphan_sandboxes().await.unwrap().is_empty());
+        let completed = service.orphan_sandboxes().await;
+        assert_eq!(completed.discovery, unavailable.discovery);
+        assert!(
+            completed.cleanups.is_empty(),
+            "the retry finished while discovery was still unavailable"
+        );
+        std::fs::write(&config, "{}").unwrap();
+        assert_eq!(
+            service.orphan_sandboxes().await,
+            OrphanSandboxList {
+                discovery: OrphanDiscovery::Ok {
+                    sandboxes: Vec::new()
+                },
+                cleanups: Vec::new()
+            }
+        );
         assert!(
             fake.list_snapshots(&key)
                 .await

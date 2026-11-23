@@ -1176,7 +1176,7 @@ async fn test_lists_sandboxes_with_the_saved_key() {
 // reply on the clock the bound runs on.
 
 use crate::sessions::HOST_REPLY_BOUND;
-use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
+use farhelm_proto::tensorlake::{OrphanCleanup, OrphanDiscovery, OrphanSandboxList};
 use std::time::Duration;
 use tokio::time::Instant;
 
@@ -1335,10 +1335,8 @@ async fn test_answers_at_the_reply_bound_while_tensorlake_stalls() {
 /// for, which a timeout must not change.
 ///
 /// Spec: with Tensorlake's listing parked, `GET /api/tensorlake/orphans`
-/// answers at `HOST_REPLY_BOUND` with a 502 saying Tensorlake did not answer
-/// within 20 seconds; once a cleanup has failed (its snapshot sweep refused),
-/// the same parked listing answers at the bound with that cleanup's row, its
-/// failure kept and its state saying the list was unavailable and why.
+/// answers at `HOST_REPLY_BOUND` with failed discovery and the current cleanup snapshot, even when it is empty.
+/// After a failed snapshot sweep, that same timeout keeps the cleanup's own state and failure intact.
 #[farhelm_testtrace::test]
 async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_cleanup() {
     let (harness, _state, root, fake) = fake_fixture().await;
@@ -1354,13 +1352,15 @@ async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_clean
         ["list_sandboxes"],
         "premise: the listing reached the fake and was parked there"
     );
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let empty: OrphanSandboxList = serde_json::from_str(&body).unwrap();
     assert_eq!(
-        (status, body.as_str()),
-        (
-            StatusCode::BAD_GATEWAY,
-            "Tensorlake did not answer within 20 seconds"
-        )
+        empty.discovery,
+        OrphanDiscovery::Failed {
+            reason: "Tensorlake did not answer within 20 seconds".into()
+        }
     );
+    assert!(empty.cleanups.is_empty());
     crate::rest_harness::assert_answered_at_reply_bound(waited, "the list");
 
     let id = plant_orphan(&fake).await;
@@ -1387,16 +1387,57 @@ async fn the_leftover_list_answers_at_the_reply_bound_and_keeps_unfinished_clean
     );
     assert_eq!(status, StatusCode::OK, "{body}");
     crate::rest_harness::assert_answered_at_reply_bound(waited, "the list");
-    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    let answer: OrphanSandboxList = serde_json::from_str(&body).unwrap();
+    assert_eq!(answer.discovery, empty.discovery);
+    let rows = answer.cleanups;
     assert_eq!(rows.len(), 1, "{rows:?}");
     assert_eq!(rows[0].id, id);
     assert!(
         matches!(&rows[0].cleanup, Some(OrphanCleanup::Failed { reason }) if reason.contains("sweep refused")),
         "{rows:?}"
     );
+    assert_eq!(rows[0].state, "Cleanup unfinished");
+}
+
+/// A stalled local key read has the same reply deadline as a stalled provider listing. Settings still gets the
+/// cleanup snapshot, and the failure names the local read because no provider request has started.
+#[farhelm_testtrace::test]
+async fn the_leftover_list_answers_at_the_reply_bound_when_the_local_key_read_stalls() {
+    let (harness, _state, root, _fake) = fake_fixture().await;
+    let db = harness.store.connection_for_test();
+    let (locked, lock_held) = tokio::sync::oneshot::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
+    let holder = tokio::task::spawn_blocking(move || {
+        let _guard = db.lock();
+        locked.send(()).unwrap();
+        let _ = released.recv();
+    });
+    lock_held.await.unwrap();
+    tokio::time::pause();
+    let reply = tokio::time::timeout(
+        HOST_REPLY_BOUND + PAST_THE_BOUND,
+        call(&harness, request("GET", "/api/tensorlake/orphans", None)),
+    );
+    let mut reply = std::pin::pin!(reply);
+    assert!(futures_util::poll!(&mut reply).is_pending());
+    tokio::time::advance(HOST_REPLY_BOUND + PAST_THE_BOUND).await;
+    let reply = reply.await;
+    release.send(()).unwrap();
+    holder.await.unwrap();
+
+    let (status, body) = reply.expect("a stalled local read must still leave time for the reply");
+    assert_eq!(status, StatusCode::OK, "{body}");
+    let list: OrphanSandboxList = serde_json::from_str(&body).unwrap();
     assert_eq!(
-        rows[0].state,
-        "Sandbox list unavailable: Tensorlake did not answer within 20 seconds"
+        list.discovery,
+        OrphanDiscovery::Failed {
+            reason: "Farhelm timed out reading its Tensorlake settings".into(),
+        }
+    );
+    assert!(list.cleanups.is_empty());
+    assert!(
+        fake_ops(&root).is_empty(),
+        "the local deadline fired before calling Tensorlake"
     );
 }
 
@@ -1454,7 +1495,14 @@ async fn deleting_a_leftover_answers_at_the_reply_bound_and_the_cleanup_finishes
     // snapshot listing is parked, so this read answers at once.
     let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    let answer: OrphanSandboxList = serde_json::from_str(&body).unwrap();
+    assert_eq!(
+        answer.discovery,
+        OrphanDiscovery::Ok {
+            sandboxes: Vec::new()
+        }
+    );
+    let rows = &answer.cleanups;
     assert!(
         matches!(
             rows.as_slice(),
@@ -1465,17 +1513,15 @@ async fn deleting_a_leftover_answers_at_the_reply_bound_and_the_cleanup_finishes
         "{rows:?}"
     );
 
-    // The deletion bumps the feed once its cleanup has ended, which is what
-    // makes Settings read the list again. Other bumps may come first, so each
-    // one is checked against the cleanup's own record, and the last rows seen
-    // are what a timeout reports.
+    // The deletion bumps the feed once its cleanup ends. Other bumps may come first, so each is checked against the
+    // cleanup snapshot. The last snapshot is kept for timeout diagnostics.
     bumps.borrow_and_update();
     set_fake_config(&root, serde_json::json!({}));
-    let mut last_rows = rows;
+    let mut last_rows = answer.cleanups;
     let finished = tokio::time::timeout(PAST_THE_BOUND, async {
         loop {
             bumps.changed().await.unwrap();
-            last_rows = harness.state.tensorlake.orphan_sandboxes().await.unwrap();
+            last_rows = harness.state.tensorlake.orphan_sandboxes().await.cleanups;
             if last_rows.is_empty() {
                 break;
             }
@@ -1495,7 +1541,16 @@ async fn deleting_a_leftover_answers_at_the_reply_bound_and_the_cleanup_finishes
         "the cleanup swept the sandbox's snapshot"
     );
     let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
-    assert_eq!((status, body.as_str()), (StatusCode::OK, "[]"));
+    assert_eq!(status, StatusCode::OK, "{body}");
+    assert_eq!(
+        serde_json::from_str::<OrphanSandboxList>(&body).unwrap(),
+        OrphanSandboxList {
+            discovery: OrphanDiscovery::Ok {
+                sandboxes: Vec::new()
+            },
+            cleanups: Vec::new()
+        }
+    );
 }
 
 /// Why: the Delete's timeout reply promises that the cleanup carries on and
@@ -1543,7 +1598,14 @@ async fn a_delete_whose_lookup_stalls_fails_before_the_reply_bound() {
     set_fake_config(&root, serde_json::json!({}));
     let (status, body) = call(&harness, request("GET", "/api/tensorlake/orphans", None)).await;
     assert_eq!(status, StatusCode::OK, "{body}");
-    let rows: Vec<OrphanSandbox> = serde_json::from_str(&body).unwrap();
+    let OrphanSandboxList {
+        discovery: OrphanDiscovery::Ok { sandboxes: rows },
+        cleanups,
+    } = serde_json::from_str(&body).unwrap()
+    else {
+        panic!("expected successful discovery: {body}");
+    };
+    assert!(cleanups.is_empty());
     assert!(
         matches!(
             rows.as_slice(),

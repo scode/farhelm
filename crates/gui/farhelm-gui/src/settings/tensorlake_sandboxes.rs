@@ -18,12 +18,13 @@
 //!   fleet notice while healthy (decided by the migration's coordinator on 2026-11-15).
 //! - **Rounds.** Each read starts a new round, and only the newest round's answer is shown: two reads can be out at once
 //!   (a Tensorlake host coming while the first read is out), and the UI channel answers them in order, so without this
-//!   the older answer would end "Checking…" and show its rows for a moment before the newer one replaced them. A Clear
-//!   also ends the round, so nothing a read still out answers is shown once the key is gone.
+//!   the older answer would end "Checking…" and show its rows for a moment before the newer one replaced them. An older
+//!   reply for the same key still proves which cached discoveries entered cleanup before the newer reply. A key change
+//!   invalidates that evidence too.
 //! - **What a read shows.** "Checking…" while the current round's read is out; then the rows, or "None found · checked
-//!   <time>" when there are none. A failed read shows the helm's reason and keeps the rows it had, rather than claiming
-//!   the account has none (SPEC.md). The helm stops listing at its host reply bound and answers like any other
-//!   unanswered Tensorlake call.
+//!   <time>" when there are none. A discovery failure keeps the last discovery rows and shows the reason above them.
+//!   Each answered read also gives the current cleanup rows, even during an outage. A cleanup supersedes discovery
+//!   by ID and removes the cached discovery row, so finishing cleanup cannot bring that row back during the outage.
 //! - **Delete always asks**, inline under the list, naming the sandbox, with focus on Cancel since it cannot be undone,
 //!   and the answer acts on the row as it was asked about. While a Delete is out, Refresh and every Delete are
 //!   unavailable. A row whose cleanup failed offers Retry cleanup, which asks the same question; a running cleanup shows
@@ -42,13 +43,14 @@
 //! elsewhere; Refresh does (the coordinator's list of re-reads above, 2026-11-15).
 
 use farhelm_helm_client::{Collections, Method};
-use farhelm_proto::tensorlake::{OrphanCleanup, OrphanSandbox};
+use farhelm_proto::tensorlake::{OrphanCleanup, OrphanDiscovery, OrphanSandbox, OrphanSandboxList};
 use farhelm_proto::ui_channel::{Availability, Collection, HostView};
 use gpui::{
     App, Context, Div, Entity, InteractiveElement as _, IntoElement, ParentElement as _, Render,
     Role, SharedString, StatefulInteractiveElement as _, Styled as _, Subscription, Window, div,
     px,
 };
+use std::collections::HashSet;
 
 use super::card;
 use super::choices;
@@ -88,16 +90,18 @@ type Sandboxed = Vec<i64>;
 /// The list, a view of its own that the Tensorlake section makes with itself and keeps for the opening.
 pub(super) struct Sandboxes {
     account: Entity<TensorlakeAccount>,
-    /// The rows as the last answered read listed them.
-    rows: Vec<OrphanSandbox>,
-    /// Why the last read failed, until a read answers; the rows from before stay.
-    failure: Option<HostText>,
+    /// Last successful discovery less any IDs the helm has since reported in cleanup.
+    last_discovered: Vec<OrphanSandbox>,
+    /// Current explicit cleanup from the last helm response, even if discovery failed.
+    cleanups: Vec<OrphanSandbox>,
+    /// List-level discovery or transport failure. Row cleanup failures remain attached to their rows.
+    discovery_error: Option<HostText>,
     /// Whether the current round's read is out.
     checking: bool,
-    /// When the last read that answered found the rows above: `None` before one answered, then the instant in seconds
+    /// When discovery last succeeded: `None` before that, then the instant in seconds
     /// since the epoch, worded as it is drawn, or `None` inside from a broken clock, which shows no time.
     checked_at: Option<Option<i64>>,
-    /// The current round: one more for every read started. An answer of another round is dropped.
+    /// The current round: one more for every read started. Only the current round can replace the displayed result.
     round: u64,
     /// The account state the list last acted on; `None` until the account read answers.
     key: Option<KeyState>,
@@ -121,8 +125,9 @@ impl Sandboxes {
         let observing = cx.observe(&account, |list: &mut Self, _, cx| list.follow_account(cx));
         let mut list = Sandboxes {
             account,
-            rows: Vec::new(),
-            failure: None,
+            last_discovered: Vec::new(),
+            cleanups: Vec::new(),
+            discovery_error: None,
             checking: false,
             checked_at: None,
             round: 0,
@@ -160,8 +165,9 @@ impl Sandboxes {
             self.read(cx);
         } else {
             self.round += 1;
-            self.rows.clear();
-            self.failure = None;
+            self.last_discovered.clear();
+            self.cleanups.clear();
+            self.discovery_error = None;
             self.checking = false;
             self.checked_at = None;
         }
@@ -190,38 +196,67 @@ impl Sandboxes {
         self.key.is_some_and(|(saved, _)| saved)
     }
 
-    /// Start a new round and read the list, the answer going to this view if it is still open and still on that round.
+    /// Start a new round. The UI channel answers reads in order, so superseded replies for this key can retire cached
+    /// discoveries before the current round applies its result. Only the current round can end "Checking…".
     fn read(&mut self, cx: &mut Context<Self>) {
         self.round += 1;
         self.checking = true;
         let round = self.round;
+        let key = self.key;
         let list = cx.weak_entity();
         choices::read_route(
             path(&["orphans"]),
             "GET /api/tensorlake/orphans",
             cx,
-            move |answer: Result<Vec<OrphanSandbox>, HostText>, cx| {
+            move |answer: Result<OrphanSandboxList, HostText>, cx| {
                 let _ = list.update(cx, |list, cx| {
+                    if list.key != key {
+                        return;
+                    }
                     if list.round == round {
                         list.answered(answer, cx);
+                    } else if let Ok(answer) = answer {
+                        list.forget_discoveries_in_cleanup(&answer.cleanups);
+                        cx.notify();
                     }
                 });
             },
         );
     }
 
-    /// The current round's read answered (the module docs).
-    fn answered(&mut self, answer: Result<Vec<OrphanSandbox>, HostText>, cx: &mut Context<Self>) {
+    /// Apply a cleanup snapshot even during failed discovery. Once cleanup supersedes a discovery row, forget that
+    /// row so it cannot reappear when cleanup ends during the outage. A transport failure gives no new snapshot.
+    fn answered(&mut self, answer: Result<OrphanSandboxList, HostText>, cx: &mut Context<Self>) {
         self.checking = false;
         match answer {
-            Ok(rows) => {
-                self.rows = rows;
-                self.failure = None;
-                self.checked_at = Some(age::seconds(ticker::wall_now(cx)));
+            Ok(OrphanSandboxList {
+                discovery,
+                cleanups,
+            }) => {
+                match discovery {
+                    OrphanDiscovery::Ok { sandboxes } => {
+                        self.last_discovered = sandboxes;
+                        self.discovery_error = None;
+                        self.checked_at = Some(age::seconds(ticker::wall_now(cx)));
+                    }
+                    OrphanDiscovery::Failed { reason } => {
+                        self.discovery_error = Some(HostText::from_host(reason));
+                    }
+                }
+                self.forget_discoveries_in_cleanup(&cleanups);
+                self.cleanups = cleanups;
             }
-            Err(reason) => self.failure = Some(reason),
+            Err(reason) => self.discovery_error = Some(reason),
         }
         cx.notify();
+    }
+
+    /// A cleanup row supersedes the matching cached discovery until discovery succeeds again. Even a superseded
+    /// reply may supply the only evidence of cleanup if it has finished by the time the current read answers.
+    fn forget_discoveries_in_cleanup(&mut self, cleanups: &[OrphanSandbox]) {
+        let cleanup_ids: HashSet<_> = cleanups.iter().map(|row| row.id.as_str()).collect();
+        self.last_discovered
+            .retain(|row| !cleanup_ids.contains(row.id.as_str()));
     }
 
     /// Refresh: read again. Does nothing while a read or a Delete is out, when Refresh is busy. Refresh is drawn only
@@ -283,13 +318,15 @@ impl Sandboxes {
         cx.notify();
     }
 
-    /// The user confirmed deleting `row`: send its Delete, and read the list again whatever it answers.
+    /// Read again after Delete. On success, remove the deleted ID immediately so a failed follow-up cannot keep
+    /// showing it as a leftover or a cleanup that needs retrying.
     fn delete(&mut self, row: OrphanSandbox, cx: &mut Context<Self>) {
         self.asked = None;
         if self.deleting {
             return;
         }
-        let path = match path(&["orphans", &row.id]) {
+        let id = row.id;
+        let path = match path(&["orphans", &id]) {
             Ok(path) => path,
             Err(error) => {
                 self.delete_failure = Some(HostText::from_host(error.to_string()));
@@ -307,8 +344,12 @@ impl Sandboxes {
             move |answer, cx| {
                 let _ = list.update(cx, |list, cx| {
                     list.deleting = false;
-                    if let Err(reason) = answer {
-                        list.delete_failure = Some(reason);
+                    match answer {
+                        Ok(_) => {
+                            list.last_discovered.retain(|row| row.id != id);
+                            list.cleanups.retain(|row| row.id != id);
+                        }
+                        Err(reason) => list.delete_failure = Some(reason),
                     }
                     if list.key_saved() {
                         list.read(cx);
@@ -332,8 +373,9 @@ impl Sandboxes {
     /// Whether the list is drawn: with a saved key, or while it still has something to show (the module docs).
     fn drawn(&self, cx: &App) -> bool {
         self.key_saved()
-            || !self.rows.is_empty()
-            || self.failure.is_some()
+            || !self.last_discovered.is_empty()
+            || !self.cleanups.is_empty()
+            || self.discovery_error.is_some()
             || self.asking_about(cx).is_some()
             || self.delete_failure.is_some()
     }
@@ -476,7 +518,10 @@ impl Render for Sandboxes {
         let zone = local_time::zone(cx);
         let status = if self.checking {
             Some(Self::status("Checking…".into(), cx))
-        } else if self.rows.is_empty() && self.failure.is_none() {
+        } else if self.last_discovered.is_empty()
+            && self.cleanups.is_empty()
+            && self.discovery_error.is_none()
+        {
             self.checked_at.map(|checked| {
                 let words = match checked {
                     Some(at) => format!("None found · checked {}", local_time::clock(at, zone)),
@@ -487,15 +532,26 @@ impl Render for Sandboxes {
         } else {
             None
         };
-        let rows = status.into_iter().map(IntoElement::into_any_element).chain(
-            self.rows
-                .iter()
-                .enumerate()
-                .map(|(index, row)| self.row(row, index, zone, cx).into_any_element()),
-        );
-        let failure = |id: &'static str, reason: &HostText| {
-            choices::host_failure_line(id, HostSentence::new(id).host(reason), cx)
-        };
+        let discovery_error = self.discovery_error.as_ref().map(|reason| {
+            choices::host_failure_line(
+                ERROR_ID,
+                HostSentence::new(ERROR_ID)
+                    .text("Could not refresh sandbox list: ")
+                    .host(reason),
+                cx,
+            )
+            .into_any_element()
+        });
+        let rows = discovery_error
+            .into_iter()
+            .chain(status.into_iter().map(IntoElement::into_any_element))
+            .chain(
+                self.last_discovered
+                    .iter()
+                    .chain(&self.cleanups)
+                    .enumerate()
+                    .map(|(index, row)| self.row(row, index, zone, cx).into_any_element()),
+            );
         div()
             .id(ID)
             .role(Role::Region)
@@ -514,16 +570,14 @@ impl Render for Sandboxes {
                         .cloned()
                         .map(IntoElement::into_any_element),
                 )
-                .chain(
-                    self.failure
-                        .as_ref()
-                        .map(|reason| failure(ERROR_ID, reason).into_any_element()),
-                )
-                .chain(
-                    self.delete_failure
-                        .as_ref()
-                        .map(|reason| failure(DELETE_ERROR_ID, reason).into_any_element()),
-                ),
+                .chain(self.delete_failure.as_ref().map(|reason| {
+                    choices::host_failure_line(
+                        DELETE_ERROR_ID,
+                        HostSentence::new(DELETE_ERROR_ID).host(reason),
+                        cx,
+                    )
+                    .into_any_element()
+                })),
                 cx,
             ))
             .child(choices::help(HELP, cx))
