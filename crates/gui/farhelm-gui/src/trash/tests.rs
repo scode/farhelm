@@ -586,9 +586,8 @@ fn the_can_is_outlined_when_empty_and_open_with_a_count_when_full(cx: &mut TestA
 
 /// Why this matters: SPEC.md has the can turn upside down and bob while space is freed, but stand still, upside down,
 /// under Reduce Motion, and the ticker caps animation at ten ticks a second. Specified: the bob's steps over one second
-/// are the old keyframes' (up three pixels and back, eight steps); with a host freeing space and normal motion the can
-/// is lifted at some tick within a second; under reduced motion it is upside down (emptying) but never lifted, and the
-/// ticker's count does not move.
+/// are the old keyframes' (up three pixels and back, eight steps). Turning on reduced motion while the can is lifted
+/// sets it down, still upside down, and leaves the ticker's count still.
 #[gpui::test]
 fn the_can_bobs_while_space_is_freed_and_stands_still_under_reduced_motion(
     cx: &mut TestAppContext,
@@ -603,37 +602,17 @@ fn the_can_bobs_while_space_is_freed_and_stands_still_under_reduced_motion(
         snapshot(&button, cx).emptying(),
         "the premise: space is being freed"
     );
-    let mut lifted = false;
-    for _ in 0..10 {
+    let lifted = (0..10).any(|_| {
         test_support::advance(cx, ticker::TICK);
-        lifted |= cx
-            .update(|_, cx| button.read(cx).lift(cx))
-            .is_some_and(|lift| lift > 0.);
-    }
-    assert!(lifted, "the can bobs");
-
-    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
-    // Right the can for a frame, so the bob drawn next starts under reduced motion.
-    push_hosts(&mut helm, &[epoch(local(), 1)]);
-    test_support::settle(cx);
-    answer_reads(&mut helm, |_| listing(&[], false));
-    test_support::settle(cx);
-    assert!(
-        !snapshot(&button, cx).emptying(),
-        "the premise: the can is upright"
-    );
-    assert_eq!(
-        cx.update(|_, cx| button.read(cx).lift(cx)),
-        None,
-        "and holds no bob"
-    );
-    push_hosts(&mut helm, &[epoch(local(), 2)]);
-    test_support::settle(cx);
-    answer_reads(&mut helm, |_| listing(&[checkout("a", Some(1))], true));
+        cx.update(|_, cx| button.read(cx).lift(cx))
+            .is_some_and(|lift| lift > 0.)
+    });
+    assert!(lifted, "premise: the can is lifted as it bobs");
+    cx.update(|_, cx| cx.set_reduce_motion(true));
     test_support::settle(cx);
     assert!(
         snapshot(&button, cx).emptying(),
-        "upside down under reduced motion too"
+        "the can still shows that space is being freed"
     );
     let before = cx.update(|_, cx| ticker::ticks(cx));
     test_support::advance(cx, std::time::Duration::from_secs(1));
@@ -644,8 +623,8 @@ fn the_can_bobs_while_space_is_freed_and_stands_still_under_reduced_motion(
     );
     assert_eq!(
         cx.update(|_, cx| button.read(cx).lift(cx)),
-        Some(0.),
-        "and the can stays put"
+        None,
+        "the previous lift is gone"
     );
 }
 

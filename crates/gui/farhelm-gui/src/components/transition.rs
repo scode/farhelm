@@ -25,12 +25,9 @@
 //!
 //! - It never loops on its own. Callers pass no GPUI `Animation`, only an element, so none is told to repeat. An id
 //!   that changes every frame defeats this, though: each frame is then a new entrance (see [`entrance`]).
-//! - Under reduced motion the element is drawn in its final state at once and no frame is asked for. The setting comes
-//!   from the ticker ([`crate::ticker::reduced_motion`]), not from GPUI's own flag, so that all of the motion the app's
-//!   own code draws follows one reading: the host's, read once at startup and handed to the ticker, which tests can
-//!   drive. GPUI's flag holds another: GPUI Kit's init writes its own reading of the platform into it (on Linux from
-//!   the desktop portal, followed live), which can differ from the host's, and under the test scheduler nothing writes
-//!   it at all. Kit's own motion (its text input's overscroll bounce, say) follows that flag, not the ticker.
+//! - Under reduced motion GPUI draws the final frame at once and asks for no further frame. Keep the animation
+//!   wrapper mounted so it preserves the original start time. Returning to full motion can show time remaining on
+//!   that timeline without starting the transition over. The warning outline uses full color while motion is reduced.
 //! - An inactive window gets the same transition as an active one. It is not paused, because a paused entrance is an
 //!   invisible one, and it is not skipped, because skipping it there and drawing it on activation would replay it: the
 //!   element would go from shown to transparent when the user came back.
@@ -72,11 +69,7 @@ pub const ENTRANCE: Duration = Duration::from_millis(200);
 pub fn entrance<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
     element: E,
-    cx: &App,
 ) -> AnyElement {
-    if ticker::reduced_motion(cx) {
-        return element.into_any_element();
-    }
     one_shot(
         id.into(),
         element,
@@ -108,11 +101,7 @@ pub const OUTLINE_FADE: Duration = Duration::from_millis(2500);
 pub fn slide_down<E: IntoElement + Styled + 'static>(
     id: impl Into<ElementId>,
     element: E,
-    cx: &App,
 ) -> AnyElement {
-    if ticker::reduced_motion(cx) {
-        return element.into_any_element();
-    }
     one_shot(
         id.into(),
         element.relative(),
@@ -135,15 +124,19 @@ pub fn outline_fade<E: IntoElement + Styled + 'static>(
     color: Hsla,
     cx: &App,
 ) -> AnyElement {
-    if ticker::reduced_motion(cx) {
-        return element.into_any_element();
-    }
+    let reduced = ticker::reduced_motion(cx);
     one_shot(
         id.into(),
         element,
         OUTLINE_FADE,
         css_ease_out,
-        move |element, progress| element.border_color(color.opacity(1. - progress)),
+        move |element, progress| {
+            if reduced {
+                element
+            } else {
+                element.border_color(color.opacity(1. - progress))
+            }
+        },
     )
     .into_any_element()
 }
@@ -161,9 +154,8 @@ pub(crate) fn recording_transition(
 }
 
 /// The one call to GPUI's animation in the GUI crates' own code. It builds the animation itself, as `Animation::new`'s
-/// one-shot default, and takes no `Animation` from its caller, so nothing it is handed is told to repeat. Callers in
-/// this module decide reduced motion before calling it, from the ticker rather than GPUI's own flag, except the
-/// agent-only recording transition (the module docs say why for both).
+/// one-shot default, so GPUI draws its last frame under reduced motion. The animator can supply a different
+/// still drawing, as the warning outline does to keep its border visible.
 #[allow(
     clippy::disallowed_methods,
     reason = "the component layer's one owner of one-shot transitions (SPEC_impl.md, \"Animation time: the ticker\")"

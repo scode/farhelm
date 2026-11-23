@@ -828,43 +828,47 @@ fn rest_on_held_stop_and_suspend(
 /// sent, because the fake answers in order.
 pub(super) fn session_list_deleting_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
     ticker::set_reduced_motion(true, cx);
-    session_list_then(
-        state,
-        |_, state, _, cx| {
-            let Some(operations) = session::current_operations(cx) else {
-                return;
-            };
-            let start = |key: &str, guard, cx: &mut App| {
-                if let Ok(command) = crate::session_list::delete::command(key, guard) {
-                    let _ = operations.update(cx, |operations, cx| {
-                        operations.start(&OpKey::session(key), command, cx, |_, _| {})
-                    });
-                }
-            };
-            start("c", DeleteGuard::Unconditional, cx);
-            let mut keep = state.keep.borrow_mut();
-            if let Some(helm) = keep
-                .iter_mut()
-                .find_map(|kept| kept.downcast_mut::<FakeHelm>())
-            {
-                for command in helm.commands() {
-                    let refused = command.path == "/api/sessions/c";
-                    let (status, body) = if refused {
-                        (
-                            409,
-                            Some(serde_json::json!("the session's host is not connected")),
-                        )
-                    } else {
-                        (200, None)
-                    };
-                    helm.reply(command.id, status, body);
-                }
-            }
-            drop(keep);
-            start("a", DeleteGuard::Unconditional, cx);
-        },
-        cx,
-    );
+    session_list_then(state, stage_deleting_rows, cx);
+}
+
+/// The preference change can redraw the list before the fake helm's snapshot arrives. Keep this step pending
+/// until the snapshot's operation store is live, so the capture cannot settle on a list with neither Delete.
+fn stage_deleting_rows(_: &Entity<SessionList>, state: &SceneState, _: &mut Window, cx: &mut App) {
+    let Some(operations) = session::current_operations(cx) else {
+        state.after.set(Some(stage_deleting_rows));
+        return;
+    };
+    let start = |key: &str, cx: &mut App| {
+        let command = crate::session_list::delete::command(key, DeleteGuard::Unconditional)
+            .expect("the fixture can build the Delete command");
+        operations
+            .update(cx, |operations, cx| {
+                operations.start(&OpKey::session(key), command, cx, |_, _| {})
+            })
+            .expect("the fixture can start the Delete");
+    };
+    start("c", cx);
+    let mut keep = state.keep.borrow_mut();
+    let helm = keep
+        .iter_mut()
+        .find_map(|kept| kept.downcast_mut::<FakeHelm>())
+        .expect("the scene keeps its connected fake helm");
+    let mut refused = false;
+    for command in helm.commands() {
+        let (status, body) = if command.path == "/api/sessions/c" {
+            refused = true;
+            (
+                409,
+                Some(serde_json::json!("the session's host is not connected")),
+            )
+        } else {
+            (200, None)
+        };
+        helm.reply(command.id, status, body);
+    }
+    assert!(refused, "the first Delete reached the fake helm");
+    drop(keep);
+    start("a", cx);
 }
 
 /// A host chosen over an empty listing (reference `session-list-filter-empty`): the rail with `buildbox` pressed, its

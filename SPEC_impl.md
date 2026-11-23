@@ -1326,21 +1326,23 @@ outside the actions module, so these rules cannot be bypassed by a second interc
 
 Owner: the ticker, one shared clock and animation ticker.
 
-It serves three kinds of time. Periodic animation ticks come at most 10 times a second and pause while the window is
-inactive. One-shot deadlines (hover delay, the approval card's pause, banner expiry, copy confirmation, "still waiting"
-thresholds) fire on time whether or not the window is active. It reads reduced motion from the OS. Wall-clock time is
-for text that says how long ago something happened (a session row's age, the details bar's, the stopped card's): the
-ticker reads the time of day from GPUI's scheduler, which tests advance like every other clock, and one shared 30-second
-clock, as in the old app, notifies each view that shows such text, whether or not its window is active and whatever the
-reduced-motion setting, because an age is information rather than motion and an inactive window is often still on
-screen. Counts of whole seconds (how long a Restart has waited, a host setup's elapsed time) are read the same way, and
-a shared one-second clock notifies each view that shows one on the same terms, for the same reason; it has its own loop,
-so a view that shows only ages is never woken every second. A view holds one clock handle for all its rows, and a view
-that draws an age or a count is drawn uncached, since the cache wrapper cannot see the time. No row or view runs its own
-timer. New code that shows a count of seconds holds the one-second clock rather than building one from a chain of
-deadlines; views written before that clock existed may still use such a chain until they are moved over. This carries
-over the old rule that nothing redraws on its own more than 10 times a second; without it, one animating row redraws its
-whole list at display rate.
+Periodic animation ticks come at most 10 times a second and reach only active windows. The ticker observes GPUI's live
+reduced-motion preference and cancels the animation loop when motion is reduced. When motion returns, it restarts the
+loop if any animation handles still live. GPUI Kit reads the Linux desktop portal at startup and follows its change
+signal. On macOS, the main window refreshes Kit's reading on activation before activating pending attention cues.
+One-shot deadlines (hover delay, the approval card's pause, banner expiry, copy confirmation, "still waiting"
+thresholds) fire on time regardless of activity or motion. Wall-clock time is for text that says how long ago something
+happened (a session row's age, the details bar's, the stopped card's): the ticker reads the time of day from GPUI's
+scheduler, which tests advance like every other clock, and one shared 30-second clock, as in the old app, notifies each
+view that shows such text, whether or not its window is active and whatever the reduced-motion setting, because an age
+is information rather than motion and an inactive window is often still on screen. Counts of whole seconds (how long a
+Restart has waited, a host setup's elapsed time) are read the same way, and a shared one-second clock notifies each view
+that shows one on the same terms, for the same reason; it has its own loop, so a view that shows only ages is never
+woken every second. A view holds one clock handle for all its rows, and a view that draws an age or a count is drawn
+uncached, since the cache wrapper cannot see the time. No row or view runs its own timer. New code that shows a count of
+seconds holds the one-second clock rather than building one from a chain of deadlines; views written before that clock
+existed may still use such a chain until they are moved over. This carries over the old rule that nothing redraws on its
+own more than 10 times a second; without it, one animating row redraws its whole list at display rate.
 
 One-shot transitions are the exception to the ten-a-second rule, and they do not go through the ticker. One owner in the
 component layer draws them (`components::entrance`, `slide_down` and `outline_fade`, in
@@ -1358,15 +1360,13 @@ ends: a bounded burst at the display's rate. Its callers pass no animation of th
 caller must keep the entrance's id the same from frame to frame, since an id that changes every frame starts a new
 entrance each frame, which never finishes and asks for a frame on every display frame. An inactive window gets the same
 transition as an active one: pausing it there leaves it invisible, and skipping it there would replay it when the window
-is activated. Under reduced motion the owner draws no motion, taking the setting from the ticker
-(`ticker::reduced_motion`) rather than from GPUI's own flag, so that all of the motion the app's own code draws follows
-one reading: the host's, read once at startup, which tests can drive. GPUI's flag holds GPUI Kit's own reading of the
-platform (on Linux from the desktop portal, followed live), which can differ from the host's, and under the test
-scheduler nothing writes it. The launcher's permission-escalation banner uses the same owner for its two motions, which
-SPEC.md "Creation" names: `components::slide_down`, the banner sliding into place over 200 ms, and
-`components::outline_fade`, the permission control's red outline fading over 2.5 s. Under reduced motion the entrance
-and the slide draw their final state at once, while the outline keeps its first, full color for as long as it is drawn:
-SPEC.md's "static outline while the banner is shown". `with_animations` and `with_spring` have no owner.
+is activated. The owner follows the same live GPUI preference as the ticker and Kit. It keeps an element's animation
+state through a preference change so an entrance that already finished does not play again. The launcher's
+permission-escalation banner uses the same owner for its two motions, which SPEC.md "Creation" names:
+`components::slide_down`, the banner sliding into place over 200 ms, and `components::outline_fade`, the permission
+control's red outline fading over 2.5 s. Under reduced motion the entrance and the slide draw their final state at once,
+while the outline keeps its first, full color for as long as it is drawn: SPEC.md's "static outline while the banner is
+shown". `with_animations` and `with_spring` have no owner.
 
 The banner's slide is a layout offset, `top` going from -12 pixels to 0 on an element drawn `relative`, in place of the
 old `translateY(-12px)`, for the same reason the pill is not scaled (a deviation). Only the fade is drawn (a deviation
@@ -1377,8 +1377,10 @@ each in-between size to the glyph atlas, which never evicts. The terminal scroll
 one-shot transition cannot express; it stays a recorded deviation.
 
 An attention cue uses the same one-shot owner to paint its flight and fade at display rate. When the setting calls for
-reduced motion, the layer stack shows a stationary flash and removes it through the ticker's one-shot deadline. A cue
-that arrives while its window is inactive waits for activation while its target still exists.
+reduced motion, the layer stack shows a stationary flash and removes it through the ticker's one-shot deadline. A flight
+already under way switches to that flash and keeps its original deadline. A cue that has shown the flash stays
+stationary for the rest of its lifetime. A cue that arrives while its window is inactive waits for activation while its
+target still exists.
 
 Enforced by the clock bans under "Work that finishes later"; by `disallowed-methods` on GPUI's
 `BackgroundExecutor::timer`, `request_animation_frame` and `on_next_frame` in the GUI crates outside the ticker, the
@@ -1386,13 +1388,15 @@ channel's watchdog and heartbeat, and the prompt's old-answer guard (`prompt::wh
 `with_animation` everywhere but the transition owner (`with_animations` and `with_spring` everywhere); by a test that an
 animating row redraws at most 10 times a second and not at all while the window is inactive; by a test that a view
 holding the clock redraws every 30 seconds in an inactive window under reduced motion and leaves no timer once it is
-gone; and by tests that an entrance follows CSS's `ease-out` to the element's own opacity, asks for no frame once it
-ends, starts opaque with no frame under reduced motion, and in an inactive window ends on time and does not play again
-when the window is activated; by tests that the banner's slide and the outline's fade run their course and end in place,
-and do not move under reduced motion; and by tests that the one-second clock redraws its holders every second, runs
-until its last holder goes, and wakes no view that holds only the 30-second clock. The wall clock itself is held by
-review, not by the clock bans: no lint stops GUI code from reading GPUI's scheduler clock outside the ticker, or a view
-from reading the time without holding a clock handle.
+gone; by open-window tests that a live motion change switches a flight to its stationary flash and pauses the cursor
+blink and status pulse while both clocks and one-shot deadlines keep going; and by tests that an entrance follows CSS's
+`ease-out` to the element's own opacity, asks for no frame once it ends, starts opaque with no frame under reduced
+motion, and in an inactive window ends on time and does not play again when the window is activated; by tests that the
+banner's slide and the outline's fade run their course and end in place, and do not move under reduced motion; and by
+tests that the one-second clock redraws its holders every second, runs until its last holder goes, and wakes no view
+that holds only the 30-second clock. The wall clock itself is held by review, not by the clock bans: no lint stops GUI
+code from reading GPUI's scheduler clock outside the ticker, or a view from reading the time without holding a clock
+handle.
 
 ### Clock times: local time
 

@@ -1178,7 +1178,8 @@ fn running_rows_redraw_the_list_four_times_a_second(cx: &mut TestAppContext) {
 /// own either. Skipping the redraws is not enough: a list that kept its pulse handle in an inactive window would keep
 /// the ticker's timer firing ten times a second with nothing to show for it. Specified: with a running row in an
 /// active window the tick count moves; once the window is inactive, a second leaves the tick count where it was; active
-/// again, the count moves again; under reduced motion, a second moves neither the tick count nor the list's renders.
+/// again, the count moves again. The list redraws for the preference change and then neither the tick count nor the
+/// list's render count moves over the next second.
 #[gpui::test]
 fn the_tickers_timer_stops_while_inactive_and_under_reduced_motion(cx: &mut TestAppContext) {
     let (_fake, cx) = open_main(cx, vec![listing(&["a"], &[session("a")])]);
@@ -1208,9 +1209,15 @@ fn the_tickers_timer_stops_while_inactive_and_under_reduced_motion(cx: &mut Test
     );
 
     cx.update(|_, cx| {
-        ticker::set_reduced_motion(true, cx);
         render_count::reset(cx);
+        cx.set_reduce_motion(true);
     });
+    test_support::settle(cx);
+    assert!(
+        cx.update(|_, cx| render_count::count("session-list", cx)) > 0,
+        "the live preference redraws the running row in its steady state"
+    );
+    cx.update(|_, cx| render_count::reset(cx));
     assert_eq!(ticks_in_a_second(cx), 0, "no ticks under reduced motion");
     assert_eq!(
         cx.update(|_, cx| render_count::count("session-list", cx)),

@@ -45,9 +45,8 @@ impl Spinner {
         }
     }
 
-    /// The step to draw, `0..8`. Under reduced motion no tick arrives, so the step stands still where it is: at 0 in
-    /// the shipped app, where the host sets reduced motion at startup before any turn exists. A turn already past its
-    /// first step when reduced motion is set stays at that step.
+    /// The step to draw, `0..8`. Under reduced motion the tick count freezes, so a new spinner starts at 0 and
+    /// an existing spinner holds its last step until motion resumes.
     pub fn step(&self, cx: &App) -> u8 {
         (self.ticks.count(cx) % u64::from(STEPS)) as u8
     }

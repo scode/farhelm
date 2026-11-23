@@ -143,13 +143,12 @@ fn an_entrance_fades_in_on_the_old_curve_and_ends_at_the_elements_own_opacity(
     let plain: Rc<RefCell<Vec<f32>>> = Rc::default();
     let dimmed: Rc<RefCell<Vec<f32>>> = Rc::default();
     let (plain_seen, dimmed_seen) = (plain.clone(), dimmed.clone());
-    let cx = open(cx, move |_, cx| {
+    let cx = open(cx, move |_, _| {
         div()
-            .child(entrance("plain", OpacityProbe::new(&plain_seen), cx))
+            .child(entrance("plain", OpacityProbe::new(&plain_seen)))
             .child(entrance(
                 "dimmed",
                 OpacityProbe::new(&dimmed_seen).opacity(0.5),
-                cx,
             ))
             .into_any_element()
     });
@@ -194,9 +193,7 @@ fn an_entrance_fades_in_on_the_old_curve_and_ends_at_the_elements_own_opacity(
 fn an_entrance_asks_for_no_frame_once_it_has_ended(cx: &mut TestAppContext) {
     let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
     let probe = seen.clone();
-    let cx = open(cx, move |_, cx| {
-        entrance("pill", OpacityProbe::new(&probe), cx).into_any_element()
-    });
+    let cx = open(cx, move |_, _| entrance("pill", OpacityProbe::new(&probe)));
     assert!(
         last_opacity(&seen) < 0.05,
         "the premise: the entrance has started"
@@ -220,32 +217,25 @@ fn an_entrance_asks_for_no_frame_once_it_has_ended(cx: &mut TestAppContext) {
     assert_eq!(next_frame(cx), 0, "nor ask for frames again");
 }
 
-/// SPEC.md: the pill's entrance is off under reduced motion, as the old stylesheet's `animation: none` under
-/// `prefers-reduced-motion` made it. The setting is the one the host hands the ticker. GPUI's own flag, which its
-/// animations read, is unset in tests (GPUI Kit writes it only outside the test scheduler), so an entrance that left
-/// the decision to GPUI would still fade here, which is what makes this test see whether the ticker is asked.
-/// Specified: with the ticker's reduced motion on, an element drawn through `entrance` is opaque in its very first
-/// frame and asks for no frame, and stays so as time passes.
+/// A pill shown under reduced motion starts opaque without asking for a frame. After the original duration has
+/// passed, re-enabling motion in the same window leaves it visible. If the reduced frame dropped the animation
+/// state, the same pill would disappear and fade in again.
 #[gpui::test]
 fn under_reduced_motion_an_entrance_starts_opaque_and_asks_for_no_frame(cx: &mut TestAppContext) {
     let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
     let shown = Rc::new(Cell::new(false));
     let (probe, showing) = (seen.clone(), shown.clone());
-    let cx = open(cx, move |_, cx| {
+    let cx = open(cx, move |_, _| {
         div()
             .when(showing.get(), |this| {
-                this.child(entrance("pill", OpacityProbe::new(&probe), cx))
+                this.child(entrance("pill", OpacityProbe::new(&probe)))
             })
             .into_any_element()
     });
-    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    cx.update(|_, cx| cx.set_reduce_motion(true));
     assert!(
         cx.update(|_, cx| ticker::reduced_motion(cx)),
-        "the premise: the ticker reports reduced motion"
-    );
-    assert!(
-        cx.update(|_, cx| !cx.reduce_motion()),
-        "the premise: GPUI's own flag is off"
+        "premise: the ticker follows the GPUI setting"
     );
 
     shown.set(true);
@@ -264,6 +254,19 @@ fn under_reduced_motion_an_entrance_starts_opaque_and_asks_for_no_frame(cx: &mut
         1.,
         "and still opaque partway through its time"
     );
+    advance(cx, ENTRANCE);
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    settle(cx);
+    assert_eq!(
+        last_opacity(&seen),
+        1.,
+        "restoring motion keeps the pill visible"
+    );
+    assert_eq!(
+        next_frame(cx),
+        0,
+        "the original entrance has already elapsed"
+    );
 }
 
 /// An entrance that starts in an inactive window must still end on time, and must not play again when the window is
@@ -281,10 +284,10 @@ fn in_an_inactive_window_an_entrance_ends_on_time_and_does_not_replay_on_activat
     let seen: Rc<RefCell<Vec<f32>>> = Rc::default();
     let shown = Rc::new(Cell::new(false));
     let (probe, showing) = (seen.clone(), shown.clone());
-    let cx = open(cx, move |_, cx| {
+    let cx = open(cx, move |_, _| {
         div()
             .when(showing.get(), |this| {
-                this.child(entrance("pill", OpacityProbe::new(&probe), cx))
+                this.child(entrance("pill", OpacityProbe::new(&probe)))
             })
             .into_any_element()
     });
@@ -431,8 +434,8 @@ fn last_border_alpha(seen: &Rc<RefCell<Vec<gpui::StyleRefinement>>>) -> f32 {
 fn the_banner_slides_down_into_place(cx: &mut TestAppContext) {
     let seen: Rc<RefCell<Vec<gpui::StyleRefinement>>> = Rc::default();
     let probe = seen.clone();
-    let cx = open(cx, move |_, cx| {
-        crate::components::slide_down("banner", StyleProbe::new(&probe), cx).into_any_element()
+    let cx = open(cx, move |_, _| {
+        crate::components::slide_down("banner", StyleProbe::new(&probe))
     });
     let start = last_top(&seen).expect("an offset in the first frame");
     assert!((start + 12.).abs() < 0.6, "starts 12 pixels up: {start}");
@@ -470,16 +473,21 @@ fn shown_under_reduced_motion(
     (seen, cx)
 }
 
-/// Under reduced motion the banner does not slide: it is drawn in place from its first frame. Why: SPEC.md, "Reduced
-/// motion replaces slide and fade".
+/// The banner sits in place while motion is reduced. Restoring motion after the slide's time leaves it in place,
+/// because a warning already present on screen has no entrance to play.
 #[gpui::test]
 fn under_reduced_motion_the_banner_does_not_slide(cx: &mut TestAppContext) {
-    let (seen, cx) = shown_under_reduced_motion(cx, |probe, cx| {
-        crate::components::slide_down("banner", probe, cx)
+    let (seen, cx) = shown_under_reduced_motion(cx, |probe, _| {
+        crate::components::slide_down("banner", probe)
     });
     assert!(!seen.borrow().is_empty(), "the premise: it was drawn");
-    assert_eq!(last_top(&seen), None, "no offset in its first frame");
+    assert_eq!(last_top(&seen), Some(0.), "in place in its first frame");
     assert_eq!(next_frame(cx), 0, "and no frame asked for");
+    advance(cx, crate::components::transition::SLIDE_DOWN * 2);
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    settle(cx);
+    assert_eq!(last_top(&seen), Some(0.), "the same banner stays in place");
+    assert_eq!(next_frame(cx), 0, "the original slide has elapsed");
 }
 
 /// SPEC.md: the permission control's thick red outline "fades after about two and a half seconds", and "Reduced motion
@@ -517,8 +525,8 @@ fn the_outline_fades(cx: &mut TestAppContext) {
     assert_eq!(last_border_alpha(&seen), 0., "ends transparent");
 }
 
-/// Under reduced motion the outline does not fade: it keeps its full color for as long as it is drawn. Why: SPEC.md,
-/// "Reduced motion replaces slide and fade with a static outline while the banner is shown".
+/// The outline keeps full color while motion is reduced. When the setting is turned off after the fade's original
+/// duration, the old warning has already reached the end of its fade.
 #[gpui::test]
 fn under_reduced_motion_the_outline_stays(cx: &mut TestAppContext) {
     let red = gpui::Hsla {
@@ -534,4 +542,16 @@ fn under_reduced_motion_the_outline_stays(cx: &mut TestAppContext) {
     advance(cx, crate::components::transition::OUTLINE_FADE * 2);
     redraw(cx);
     assert!(last_border_alpha(&seen) > 0.99, "and still, long after");
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    settle(cx);
+    assert_eq!(
+        last_border_alpha(&seen),
+        0.,
+        "the original fade has elapsed"
+    );
+    assert_eq!(
+        next_frame(cx),
+        0,
+        "restoring motion does not start a new fade"
+    );
 }

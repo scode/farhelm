@@ -46,7 +46,6 @@ mod agent;
 pub mod bundle;
 mod local_host;
 mod login_path;
-mod reduced_motion;
 mod second_launch;
 mod sound;
 pub mod state;
@@ -279,7 +278,6 @@ pub unsafe fn run() -> anyhow::Result<()> {
         }),
         tab_reach: Box::new(tab_reach::current),
         helm: Some(desktop.helm_endpoint()),
-        reduced_motion: reduced_motion::read(),
         licenses: licenses_text,
         window_frame: Some(frame_host(frame)),
         // Only the installed release bundle on a Mac starts one (`updater::start` decides); everywhere else the window

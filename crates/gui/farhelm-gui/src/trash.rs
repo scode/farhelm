@@ -759,9 +759,10 @@ impl Render for TrashButton {
         let (full, summary) = snapshot.summary();
         let (count, _) = snapshot.count();
         let emptying = snapshot.emptying();
-        // Held only while the can bobs and the window is active, as the list holds its pulse: a live handle keeps the
-        // ticker's timer running, which an inactive window has no use for.
-        let bobs = emptying && ticker::is_active(window, cx);
+        // A live handle keeps the timer running while its window is inactive. Under reduced motion, drop the
+        // lift and wiggle too so a toggle mid-animation settles the can into its still pose.
+        let moving = ticker::is_active(window, cx) && !ticker::reduced_motion(cx);
+        let bobs = emptying && moving;
         if bobs != self.bob.is_some() {
             self.bob = bobs.then(|| ticker::AnimationTicks::start(window, cx));
         }
@@ -769,19 +770,16 @@ impl Render for TrashButton {
         self.shown = window
             .use_keyed_state("checkout-trash-shown", cx, |_, _| ())
             .downgrade();
-        // A wiggle the cue asked for starts here, in an active window only, and only if this draw is of the button the
-        // cue saw drawn. It ends after its last keyframe, or as soon as the window goes inactive: ticks never come to an
-        // inactive window, so a wiggle held there would stay tilted and keep the ticker's timer running (the bob's
-        // rule above), and by the time the user is back the old 900 ms animation would long be over.
-        let active = ticker::is_active(window, cx);
-        if self.wiggle_asked.take() == Some(self.shown.entity_id()) && active {
+        // Consume the request on this draw. The archive cue belongs to the button it saw and should never play
+        // late when motion returns or the user comes back to the window.
+        if self.wiggle_asked.take() == Some(self.shown.entity_id()) && moving {
             self.wiggle = Some(ticker::AnimationTicks::start(window, cx));
         }
         let turn = self
             .wiggle
             .as_ref()
             .and_then(|wiggle| cue::wiggle_angle(wiggle.count(cx)))
-            .filter(|_| active);
+            .filter(|_| moving);
         if turn.is_none() {
             self.wiggle = None;
         }

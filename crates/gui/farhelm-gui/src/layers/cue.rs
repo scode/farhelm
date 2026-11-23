@@ -34,7 +34,8 @@ struct Cue {
 enum Motion {
     Pending,
     Playing {
-        moving: bool,
+        /// Once drawn as a stationary flash, keep that frame until this cue's original deadline.
+        moving: Cell<bool>,
         _expire: ticker::Deadline,
     },
     #[cfg(test)]
@@ -72,8 +73,11 @@ impl Cues {
         had_cues
     }
 
+    /// Paint a stationary flash as soon as reduced motion applies. A flight would otherwise jump to its
+    /// transparent last frame, and resuming it later could launch the comet again near the end of its lifetime.
     pub(super) fn draw(&self, cx: &App) -> Option<AnyElement> {
         let color = theme::color(theme::palette(cx).warn_bright);
+        let reduced = ticker::reduced_motion(cx);
         let entries: Vec<_> = self
             .entries
             .iter()
@@ -82,20 +86,26 @@ impl Cues {
                 if clipped.get() {
                     return None;
                 }
-                match cue.motion {
+                match &cue.motion {
                     Motion::Pending => None,
-                    Motion::Playing { moving: true, .. } => Some(cue_progress(
-                        ElementId::NamedInteger("attention-cue".into(), cue.id),
-                        TOTAL,
-                        move |value| {
-                            paint(anchor.clone(), clipped.clone(), Frame::at(value), color)
-                        },
-                    )),
-                    Motion::Playing { moving: false, .. } => {
-                        Some(paint(anchor, clipped, Frame::Flash(0.24), color))
+                    Motion::Playing { moving, .. } => {
+                        if reduced {
+                            moving.set(false);
+                        }
+                        if moving.get() {
+                            Some(cue_progress(
+                                ElementId::NamedInteger("attention-cue".into(), cue.id),
+                                TOTAL,
+                                move |value| {
+                                    paint(anchor.clone(), clipped.clone(), Frame::at(value), color)
+                                },
+                            ))
+                        } else {
+                            Some(paint(anchor, clipped, Frame::Flash(0.24), color))
+                        }
                     }
                     #[cfg(test)]
-                    Motion::Still(value) => Some(paint(anchor, clipped, Frame::at(value), color)),
+                    Motion::Still(value) => Some(paint(anchor, clipped, Frame::at(*value), color)),
                 }
             })
             .collect();
@@ -170,7 +180,7 @@ fn playing(id: u64, moving: bool, cx: &mut Context<LayerStack>) -> Motion {
         let _ = stack.update(cx, |stack, cx| retire(stack, id, cx));
     });
     Motion::Playing {
-        moving,
+        moving: Cell::new(moving),
         _expire: expire,
     }
 }
@@ -265,6 +275,18 @@ mod tests {
 
     use crate::components::{Button, HoverHelp};
     use crate::test_support::{bounds, click, focused_id, open, redraw, settle};
+
+    /// Check the actual painted flash at the target. A cue can own a slot without drawing anything visible.
+    fn stationary_flash_drawn(anchor: &Anchor, window: &Window, cx: &App) -> bool {
+        let flash =
+            gpui::Background::from(theme::color(theme::palette(cx).warn_bright).opacity(0.24));
+        let target = anchor.visible.get().expect("the target is in the clip");
+        let center = target.scale(window.scale_factor()).center();
+        window
+            .painted_quads()
+            .iter()
+            .any(|quad| quad.background == flash && quad.bounds.contains(&center))
+    }
 
     /// The same anchored button receives clicks and keeps its focus while the cue paints above it. Hiding
     /// that target retires the slot before any subsequent window can show it.
@@ -366,23 +388,64 @@ mod tests {
             window.activate_window();
         });
         settle(cx);
-        cx.update(|window, cx| {
-            let flash =
-                gpui::Background::from(theme::color(theme::palette(cx).warn_bright).opacity(0.24));
-            let target = anchor.borrow().as_ref().unwrap().visible.get().unwrap();
-            let center = target.scale(window.scale_factor()).center();
-            assert!(
-                window
-                    .painted_quads()
-                    .iter()
-                    .any(|quad| { quad.background == flash && quad.bounds.contains(&center) })
-            );
-        });
+        let anchor = anchor.borrow().clone().expect("target");
+        assert!(cx.update(|window, cx| stationary_flash_drawn(&anchor, window, cx)));
         cx.executor().advance_clock(STATIC_FLASH);
         settle(cx);
         cx.update(|window, cx| {
             let owner = stack(window, cx).expect("layer stack");
             assert!(owner.read(cx).cues.entries.is_empty());
+        });
+    }
+
+    /// A live preference change during flight must leave a visible stationary cue. Returning to full motion
+    /// keeps that flash until the original expiry, when a restarted flight would be cut short.
+    #[gpui::test]
+    fn reducing_motion_mid_flight_keeps_the_flash_until_the_original_deadline(
+        cx: &mut TestAppContext,
+    ) {
+        let anchor = Rc::new(RefCell::new(None));
+        let record = anchor.clone();
+        let cx = open(cx, move |window, cx| {
+            crate::test_support::anchor_element("cue-live-target", &record, window, cx)
+                .into_any_element()
+        });
+        let anchor = anchor.borrow().clone().expect("target");
+        cx.update(|window, cx| {
+            assert!(window.is_window_active() && !cx.reduce_motion());
+            assert!(request(&anchor, window, cx), "premise: the cue starts");
+        });
+        settle(cx);
+        let flown = Duration::from_millis(100);
+        cx.executor().advance_clock(flown);
+        settle(cx);
+        cx.update(|window, cx| {
+            let head = gpui::Background::from(theme::color(theme::palette(cx).warn_bright));
+            assert!(
+                window
+                    .painted_quads()
+                    .iter()
+                    .any(|quad| quad.background == head),
+                "premise: the comet's head is painted before reducing motion"
+            );
+            assert!(!stationary_flash_drawn(&anchor, window, cx));
+            cx.set_reduce_motion(true);
+        });
+        settle(cx);
+        assert!(cx.update(|window, cx| stationary_flash_drawn(&anchor, window, cx)));
+
+        cx.update(|_, cx| cx.set_reduce_motion(false));
+        settle(cx);
+        assert!(cx.update(|window, cx| stationary_flash_drawn(&anchor, window, cx)));
+        cx.executor()
+            .advance_clock(TOTAL - flown - Duration::from_millis(1));
+        settle(cx);
+        assert!(cx.update(|window, cx| stationary_flash_drawn(&anchor, window, cx)));
+        cx.executor().advance_clock(Duration::from_millis(1));
+        settle(cx);
+        cx.update(|window, cx| {
+            assert!(stack(window, cx).unwrap().read(cx).cues.entries.is_empty());
+            assert!(!stationary_flash_drawn(&anchor, window, cx));
         });
     }
 

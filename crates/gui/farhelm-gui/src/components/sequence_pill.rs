@@ -223,7 +223,7 @@ impl RenderOnce for SequencePill {
         };
         // Keyed on a fixed id: each armed sequence is a new pill view, so each gets its own entrance, and a redraw of the
         // same pill (a key typed) does not start it again.
-        let group = entrance("sequence-pill-entrance", group, cx);
+        let group = entrance("sequence-pill-entrance", group);
         div()
             .id("sequence-pill")
             .debug_selector(|| "sequence-pill".into())

@@ -8,8 +8,8 @@
 //!
 //! Here's the TLDR of how it works:
 //!
-//! - **The platform is the host's.** The GUI crates never query the platform (see the ticker on reduced motion), so the
-//!   process that embeds the GUI hands in its [`TimeZone`] (`bootstrap::Host::time_zone`). Without one, as in tests and
+//! - **The host supplies the time zone.** The process that embeds the GUI hands in its [`TimeZone`]
+//!   (`bootstrap::Host::time_zone`). Without one, as in tests and
 //!   the screenshot goldens, every time is UTC, which makes no test depend on the machine's time zone.
 //! - **Each instant gets its own offset.** A stamp from July shown in November keeps July's offset, as `date` or a
 //!   browser would show it. One offset applied to every stamp would put every time from the other side of a daylight

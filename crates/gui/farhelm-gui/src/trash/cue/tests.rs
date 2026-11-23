@@ -146,6 +146,27 @@ fn a_wiggle_ends_when_the_window_goes_inactive(cx: &mut TestAppContext) {
     assert_eq!(turn(cx), None, "it does not resume");
 }
 
+/// Reducing motion mid-wiggle must leave the can upright. The frozen animation tick would otherwise hold the tilt.
+#[gpui::test]
+fn a_wiggle_ends_when_motion_is_reduced(cx: &mut TestAppContext) {
+    let (mut fake, cx) = opened(cx);
+    let id = delete_b(&mut fake, cx);
+    fake.reply(id, 200, Some(json!({ "archived": true })));
+    test_support::settle(cx);
+    test_support::advance(cx, ticker::TICK);
+    assert!(
+        turn(cx).is_some_and(|angle| angle != 0.),
+        "premise: the can is tilted"
+    );
+    cx.update(|_, cx| cx.set_reduce_motion(true));
+    test_support::settle(cx);
+    assert_eq!(turn(cx), None, "upright under reduced motion");
+    assert!(!wiggling(cx), "the wiggle released its handle");
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    test_support::settle(cx);
+    assert_eq!(turn(cx), None, "the interrupted wiggle stays ended");
+}
+
 /// Why this matters: session disappearance alone is not proof a checkout moved (the protocol's `archived` flag says
 /// so), and an agent's Delete, a bare Delete and a refused one must not look like an archive here. Specified: b's
 /// Delete answered with a bare success (an empty outcome, and no body at all) or refused (409) wiggles nothing, and
