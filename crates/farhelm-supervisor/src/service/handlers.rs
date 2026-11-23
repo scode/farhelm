@@ -318,7 +318,7 @@ async fn handle_create_session(
     if let Some(named) = &named_start {
         let refusal = if github_checkout.is_some() {
             Some(
-                "named conversations require an ordinary user create in an existing folder"
+                "named conversations require an existing folder, not a new managed checkout"
                     .to_string(),
             )
         } else {

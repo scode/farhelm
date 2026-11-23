@@ -270,12 +270,15 @@ RESOLVE_ALL = " ".join(f"command -v {name};" for name in gui_agent.STAGED_AGENTS
 def launch_programs(source: str) -> list[str]:
     """The program names `fn program` in crates/farhelm-helm/src/launches.rs (`source`) maps the launch harnesses to,
     read from its same-line `LaunchHarness::X => "name"` arms. Fails when the function has an arm written any other way
-    (a constant, a call, a value on the next line), so such an entry fails the wrapper test instead of being skipped."""
+    (a constant, a call, a value on the next line), so such an entry fails the wrapper test instead of being skipped.
+    The one exception is the custom harness's `unreachable!` arm: a custom agent runs its registered command, never a
+    program this match names, and a staged run registers none."""
     body = source[source.index("fn program(harness: LaunchHarness)"):]
     body = body[: body.index("\n}\n")]
     programs = re.findall(r'LaunchHarness::\w+ => "([^"]+)"', body)
+    no_program = len(re.findall(r"LaunchHarness::Custom => unreachable!\(", body))
     arms = body.count("=>")
-    if arms != len(programs):
+    if arms != len(programs) + no_program:
         raise AssertionError(f"{arms} arms but {len(programs)} same-line quoted names in `fn program`: {body}")
     return programs
 
@@ -1426,8 +1429,9 @@ class ScenarioTest(unittest.TestCase):
         """A recent setup's choices reach the app in the wire's names, which it reads strictly, so the harness's lists
         must be the wire's own, or a scenario the harness accepts would fail the app's launch (or one it refuses would
         have worked). Specified against crates/farhelm-proto/src/launch.rs: the harnesses are every `LaunchHarness`
-        variant, the efforts every `LaunchEffort`, and the permissions every `LaunchPermission` but `custom`, which needs
-        flags a scenario cannot give, each in snake_case."""
+        variant but `custom`, which needs a registered custom agent a scenario cannot name, the efforts every
+        `LaunchEffort`, and the permissions every `LaunchPermission` but `custom`, which needs flags a scenario cannot
+        give, each in snake_case."""
         source = (REPO / "crates/farhelm-proto/src/launch.rs").read_text()
 
         def variants(name: str) -> list[str]:
@@ -1436,7 +1440,7 @@ class ScenarioTest(unittest.TestCase):
             words = re.findall(r"^\s*([A-Z]\w*),", body, re.MULTILINE)
             return [re.sub(r"(?<!^)([A-Z])", r"_\1", word).lower() for word in words]
 
-        self.assertEqual(sorted(gui_agent.LAUNCH_HARNESSES), sorted(variants("LaunchHarness")))
+        self.assertEqual(sorted(gui_agent.LAUNCH_HARNESSES + ("custom",)), sorted(variants("LaunchHarness")))
         self.assertEqual(sorted(gui_agent.LAUNCH_EFFORTS), sorted(variants("LaunchEffort")))
         self.assertEqual(sorted(gui_agent.LAUNCH_PERMISSIONS + ("custom",)), sorted(variants("LaunchPermission")))
 

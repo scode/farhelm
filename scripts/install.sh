@@ -322,7 +322,10 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
   # runs; anywhere else, the Installed one. It execs, so the chosen program
   # takes its place in the process tree (hook attribution walks that tree
   # and treats any extra process as an intermediary), and it passes
-  # arguments, environment and standard streams through untouched. Its own
+  # arguments, environment and standard streams through untouched, except
+  # for a custom agent's conversation reporter, whose output goes to
+  # /dev/null and whose exit is 0 even when the forwarder itself fails
+  # (custom-agent-contract.md). Its own
   # variables carry a prefix nothing exports, because assigning to a name
   # that came in exported would change the child's environment.
   write_forwarder() {

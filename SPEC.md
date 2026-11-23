@@ -4087,7 +4087,8 @@ Custom agents report their conversation explicitly through `farhelm custom-agent
 reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
 supervisor is down. Admission checks the current launch and uses ancestry to keep a nested agent's report from replacing
 its parent's capture. Plain Restart needs both a recorded conversation and a saved resume command. A named Restart with
-retains the old capture if the new launch can report. It clears the capture when the new launch has reporting disabled.
+keeps the old capture until a report from the new launch replaces it, and clears it in the relaunch when the new launch
+has reporting disabled.
 
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
 terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.

@@ -718,7 +718,12 @@ while read -r ignored; do :; done
     assert_eq!(removed.status(), reqwest::StatusCode::NO_CONTENT);
     let missing = spawn_agent_command_args(&arguments, &asker.id, &token, &socket).await;
     assert!(!missing.status.success());
-    assert!(String::from_utf8_lossy(&missing.stderr).contains("no longer registered"));
+    let refusal = String::from_utf8_lossy(&missing.stderr);
+    assert!(
+        refusal.contains("not a built-in agent type or a custom agent registered")
+            && refusal.contains("built-in types are"),
+        "a deleted ID is refused like any unknown one, with the built-in types: {refusal}"
+    );
     agent_command_args(
         &["restart", "--session", &live.id, "--stop-if-running"],
         &asker.id,

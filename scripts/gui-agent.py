@@ -1171,7 +1171,7 @@ def plan_scenario(document, directory: Path, user: str | None, source: str) -> d
 # The wire names of the launch choices a staged recent setup may carry: `LaunchHarness`, `LaunchEffort` and
 # `LaunchPermission` in crates/farhelm-proto/src/launch.rs (snake_case; scripts/test-gui-agent.py checks them against
 # that source). `custom` is left out of the permissions on purpose: it needs its own flags, which a scenario has no
-# field for.
+# field for. The `custom` harness is left out for the same reason: it needs a registered custom agent's ID.
 LAUNCH_HARNESSES = ("cursor", "codex", "claude", "muse", "goose", "pi", "omp", "open_code", "grok", "antigravity",
                     "bash", "zsh")
 LAUNCH_EFFORTS = ("off", "minimal", "low", "medium", "high", "xhigh", "max", "ultra")

@@ -3559,7 +3559,9 @@ mod tests {
             // the test compares the result with the frozen v26 DDL, which
             // has none of them.
             conn.execute_batch(
-                "DROP TABLE checkout_config_host;
+                "-- Schema 100 added registered custom agents, the newest table.
+                 DROP TABLE custom_agents;
+                 DROP TABLE checkout_config_host;
                  DROP TABLE checkout_config;
                  DROP TABLE launch_templates;
                  DROP TABLE session_notification_marks;

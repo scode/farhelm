@@ -10,3 +10,6 @@ A conversation ID you already know can be supplied under **More options** in the
 on a compatible CLI launch.
 
 `farhelm custom-agent spec` prints the wrapper contract for your installed version, including its change history.
+
+An agent that runs `farhelm agent create --agent` with a value that is neither a built-in agent type nor a custom agent
+registered on that helm is refused with the list of built-in types, as before custom agents.
