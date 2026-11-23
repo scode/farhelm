@@ -14,3 +14,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [pending] `toolkit-reduced-motion.md` — Follow GPUI's live reduced-motion setting everywhere and remove the desktop startup check
 - [pending] `fallback-unattachable-remembered-tab.md` — Fall back to the main terminal when a remembered shell tab receives an explicit initial attach refusal
 - [pending] `fix-muse-conversation-reporting.md` — Pass non-secret session identity args to Muse Code hooks across environment scrubbing
+- [pending] `button-restyle.md` — Restyle buttons and button-like controls without outlines, with the larger session toolbar
