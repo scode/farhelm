@@ -971,7 +971,9 @@ impl CredentialDelivery {
         if *stamp == Some(EndpointStamp::Cleared) {
             return Ok((guard, None));
         }
-        // Codex's old Absent stamp recorded a successful clear or no-op. Only Endpoint records a managed write.
+        // Only unreleased builds between #3081 and #3086 wrote a Codex Absent stamp without clearing anything; no
+        // release did. Released Farhelm records a managed Codex settings write only as Endpoint, so settings found under
+        // Absent are the user's own and stay as they are.
         let needs_cleanup = match agent {
             LegacySettings::Claude => stamp.is_some(),
             LegacySettings::Codex => matches!(stamp, Some(EndpointStamp::Endpoint { .. })),

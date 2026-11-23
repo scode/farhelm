@@ -1042,8 +1042,10 @@ async fn recipe_session_failure_cleanup_runs_after_the_202_and_retains_failed_cl
 }
 
 /// Endpoint delivery shares setup's injected backend. A credential failure
-/// remains a warning while connection completes, so an image
-/// with unreadable agent settings can still become a usable Farhelm host.
+/// remains a warning while connection completes, so a host whose managed
+/// launch credentials cannot be written still becomes a usable Farhelm host.
+/// A fresh host has no earlier settings write to clean up, so the failure is
+/// injected where every endpoint delivery writes: the private credentials file.
 #[farhelm_testtrace::test]
 async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
@@ -1072,7 +1074,7 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
         .unwrap()
         .unwrap();
     std::fs::write(f.root.path().join("backend/config.json"),
-        r#"{"default":{"fail_action":"read-agent-settings","message":"fictional-private-diagnostic"}}"#).unwrap();
+        r#"{"default":{"fail_action":"wrote-agent-credentials","message":"fictional-private-diagnostic"}}"#).unwrap();
     let accepted = f.add().await;
     let view = f.finish(accepted.host_id).await;
     assert_eq!(view.status, RunStatus::Completed);
@@ -1084,16 +1086,16 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
     assert_eq!(configure.status, StepStatus::Completed);
     assert_eq!(
         configure.message.as_deref(),
-        Some("could not read the agent settings")
+        Some("could not install the managed launch credentials")
     );
     assert_eq!(
         f.service
             .credential_delivery()
             .warning(accepted.host_id)
             .as_deref(),
-        Some("could not read the agent settings")
+        Some("could not install the managed launch credentials")
     );
-    f.assert_host_delivery(accepted.host_id, "read-agent-settings")
+    f.assert_host_delivery(accepted.host_id, "wrote-agent-credentials")
         .await;
     assert!(
         !serde_json::to_string(&view)
@@ -1122,7 +1124,10 @@ async fn credential_delivery_warning_does_not_abort_tensorlake_setup() {
 
 /// Codex modes need setup's credential step even without any API endpoint.
 /// Subscription seeds before the host connection becomes usable; None still
-/// reports a failed settings cleanup as a warning while connection continues.
+/// reports a failed removal of the managed launch credentials as a warning
+/// while connection continues. A fresh host has no earlier Codex settings
+/// write, so neither mode reads the agent settings or records a Codex
+/// settings cleanup: only an earlier endpoint write ever calls for one.
 #[farhelm_testtrace::test]
 async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
     use farhelm_proto::credentials::{CreateCredential, CredentialKind};
@@ -1144,7 +1149,7 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
                 .unwrap();
             recipe.codex_login_credential = Some("codex".into());
         } else {
-            std::fs::write(f.root.path().join("backend/config.json"), r#"{"default":{"fail_action":"read-agent-settings","message":"fictional-private-diagnostic"}}"#).unwrap();
+            std::fs::write(f.root.path().join("backend/config.json"), r#"{"default":{"fail_action":"remove-agent-credentials","message":"fictional-private-diagnostic"}}"#).unwrap();
         }
         f.harness
             .store
@@ -1165,11 +1170,11 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
         if !subscription {
             assert_eq!(
                 step.message.as_deref(),
-                Some("could not read the agent settings")
+                Some("could not remove the managed launch credentials")
             );
         }
         let events = std::fs::read_to_string(f.root.path().join("backend/events.jsonl")).unwrap();
-        f.assert_host_delivery(accepted.host_id, "read-agent-settings")
+        f.assert_host_delivery(accepted.host_id, "remove-agent-credentials")
             .await;
         assert!(
             !events.contains("fictional-setup-codex-secret")
@@ -1190,15 +1195,15 @@ async fn codex_subscription_and_none_enter_setup_without_an_endpoint() {
             .await
             .unwrap();
         let record: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert!(record["codex"].is_null(), "{record}");
         if subscription {
-            assert_eq!(record["codex"], "Cleared");
             let auth = record["codex_auth"].as_array().unwrap();
             assert_eq!(auth.len(), 3);
             assert_eq!(auth[0], "codex");
             assert_eq!(auth[1], 1);
             uuid::Uuid::parse_str(auth[2].as_str().unwrap()).unwrap();
         } else {
-            assert!(record["codex"].is_null() && record["codex_auth"].is_null());
+            assert!(record["codex_auth"].is_null(), "{record}");
         }
     }
 }
