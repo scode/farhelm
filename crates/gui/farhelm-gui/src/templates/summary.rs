@@ -73,7 +73,9 @@ pub fn parts(fields: &TemplateFields) -> Vec<Part> {
             LauncherKind::Command => "Command launch",
         });
     }
-    if let Some(agent) = fields.agent {
+    if let Some(Some(id)) = &fields.custom_agent {
+        summary.field(vec![Part::Host(id.clone())]);
+    } else if let Some(agent) = fields.agent {
         summary.words(harness_label(agent));
     }
     match &fields.model {

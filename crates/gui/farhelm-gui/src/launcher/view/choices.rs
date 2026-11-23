@@ -20,6 +20,7 @@
 //! An agent switch that made the shown permission more dangerous puts up the red banner, with Undo, and outlines the
 //! permission choices (`escalation`); the draft decides when.
 
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::{EFFORT_ORDER, compatible_efforts};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
@@ -35,8 +36,9 @@ use crate::components::{
 };
 use crate::focus::{self, Mark};
 use crate::harness;
-use crate::host_text::Line;
+use crate::host_text::{HostSentence, HostText, Line};
 use crate::launcher::draft::{Edit, Mode, RestartBaseline, harness_label};
+use crate::launcher::request::capitalized;
 use crate::launcher::words::{HARNESS_PICKER_ORDER, PERMISSION_DOCS, guarded_permission_help};
 use crate::permission::words::{
     DEFAULT_EFFORT_HELP, effort_label, permission_display, permission_help, permission_tooltip,
@@ -58,6 +60,12 @@ const APPROVAL_MODES: [LaunchPermission; 3] = [
     LaunchPermission::SmartApprove,
     LaunchPermission::Chat,
 ];
+
+#[derive(Clone, PartialEq)]
+enum HarnessChoice {
+    BuiltIn(LaunchHarness),
+    Custom(String),
+}
 
 impl Launcher {
     /// The agent-choice edit `edit` happened: its notice replaces the one shown (none clears it), the draft changed,
@@ -105,6 +113,31 @@ impl Launcher {
         self.draft.choose_effort(effort);
         self.notice = None;
         self.changed(cx);
+    }
+
+    /// Resolve a chip or search row against the pushed catalog at selection time.
+    pub(super) fn choose_custom_agent(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let agent = self
+            .store
+            .read(cx)
+            .collections()
+            .get::<CustomAgent>(id)
+            .cloned();
+        let Some(agent) = agent else {
+            self.notice = Some("That custom agent is no longer registered".into());
+            cx.notify();
+            return;
+        };
+        let wrapper = self.remembered_wrapper(LaunchHarness::Custom, cx);
+        let edit =
+            self.draft
+                .choose_custom_agent(&agent, self.catalog.as_deref(), wrapper.as_deref());
+        self.chose(edit, window, cx);
     }
 
     /// A permission chosen by hand. Leaving Custom empties its flags field with
@@ -204,6 +237,79 @@ impl Launcher {
             .children(permissions)
     }
 
+    /// Custom agents take raw contract values and use a fixed YOLO label because the wrapper owns permission handling.
+    pub(super) fn custom_agent_fields(&self, palette: &theme::Palette) -> Vec<AnyElement> {
+        const HELP: &str = "Lowercase letters, digits, hyphens and underscores. Leave blank to use the agent's default.";
+        let input =
+            |id, row_id, label, field: &crate::components::TextInputState, value: &str, changed| {
+                let error = if value.is_empty() {
+                    None
+                } else {
+                    farhelm_proto::custom_agents::validate_model_or_effort(value).err()
+                };
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(4.))
+                    .flex_1()
+                    .min_w_0()
+                    .child(row(
+                        row_id,
+                        label,
+                        self.launcher_input(id, field, label, HoverHelp::tooltip(HELP))
+                            .monospace()
+                            .invalid(error.is_some()),
+                        palette,
+                    ))
+                    .children(error.map(|error| {
+                        status_line("launcher-custom-value-error", capitalized(error), palette)
+                    }))
+                    .children(self.changed_marker(changed, palette))
+            };
+        let model = input(
+            "launcher-custom-model",
+            "launcher-custom-model-row",
+            "Model",
+            &self.custom_model,
+            self.draft.agent.model.as_deref().unwrap_or_default(),
+            Changed::Model,
+        );
+        let effort = input(
+            "launcher-custom-effort",
+            "launcher-custom-effort-row",
+            "Effort",
+            &self.custom_effort,
+            &self.draft.agent.custom_effort,
+            Changed::Effort,
+        );
+        let permissions = div().flex().items_center().gap(px(8.))
+            .child(div().px(px(8.)).py(px(4.)).rounded_full()
+                .bg(theme::color(palette.danger_bg_dim))
+                .text_color(theme::color(palette.danger))
+                .child("YOLO"))
+            .child(Button::new(
+                "launcher-permission-help", "About permission modes",
+                HoverHelp::tooltip("Custom agents always count as YOLO. Hosts that ask before YOLO launches still ask for confirmation."),
+                Role::Button,
+            ).content("?").tier(Tier::Neutral).square(MODEL_ROW_CONTROL_HEIGHT)
+                .on_click(|_, _, cx| cx.open_url(PERMISSION_DOCS)));
+        vec![
+            div()
+                .flex()
+                .gap(px(12.))
+                .child(model)
+                .child(effort)
+                .into_any_element(),
+            row(
+                "launcher-permissions-row",
+                "Permissions",
+                permissions,
+                palette,
+            )
+            .into_any_element(),
+        ]
+    }
+
     /// The shell chips and rule can wrap as a unit onto the same line as the last agent chips.
     /// Keep the separate shell IDs used to capture the shell choices in the docs.
     pub(super) fn harness_choices(
@@ -218,7 +324,7 @@ impl Launcher {
             RadioOption::new(
                 label,
                 HoverHelp::tooltip(format!("Use {label} for the session")),
-                harness,
+                HarnessChoice::BuiltIn(harness),
             )
             .mark(
                 harness::icon(glyph),
@@ -240,6 +346,38 @@ impl Launcher {
             .into_iter()
             .map(option)
             .fold(chips, RadioGroup::option);
+        let custom = self.store.read(cx).collections().ordered::<CustomAgent>();
+        let chips = if custom.is_empty() {
+            chips
+        } else {
+            let glyph = harness::glyph(LaunchHarness::Custom);
+            custom.into_iter().fold(
+                chips.separated_named_chips(
+                    "launcher-custom-row",
+                    "launcher-custom",
+                    Some("Custom"),
+                ),
+                |chips, agent| {
+                    let label = HostSentence::new(gpui::SharedString::from(format!(
+                        "launcher-custom-name-{}",
+                        agent.id
+                    )))
+                    .host(&HostText::from_host(agent.display_name.as_str()));
+                    chips.option(
+                        RadioOption::new(
+                            "",
+                            HoverHelp::tooltip(format!("Use custom agent {}", agent.id)),
+                            HarnessChoice::Custom(agent.id.clone()),
+                        )
+                        .catalog_label(agent.id.clone(), label.into())
+                        .mark(
+                            harness::icon(glyph),
+                            harness::ink(glyph, palette).unwrap_or(palette.fg_1),
+                        ),
+                    )
+                },
+            )
+        };
         let chips = shells
             .into_iter()
             .map(option)
@@ -247,10 +385,16 @@ impl Launcher {
                 chips.separated_chips("launcher-shells-row", "launcher-shells"),
                 RadioGroup::option,
             )
-            .chosen(self.draft.agent.harness)
+            .chosen(self.draft.agent.custom_agent.as_ref().map_or_else(
+                || self.draft.agent.harness.map(HarnessChoice::BuiltIn),
+                |id| Some(HarnessChoice::Custom(id.clone())),
+            ))
             .on_change(move |harness, window, cx| {
-                let _ = on_change.update(cx, |launcher, cx| {
-                    launcher.choose_harness(*harness, window, cx)
+                let _ = on_change.update(cx, |launcher, cx| match harness {
+                    HarnessChoice::BuiltIn(harness) => {
+                        launcher.choose_harness(*harness, window, cx)
+                    }
+                    HarnessChoice::Custom(id) => launcher.choose_custom_agent(id, window, cx),
                 });
             })
             .on_enter(move |window, cx| {

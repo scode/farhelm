@@ -156,6 +156,8 @@ type OnChange<V> = Rc<dyn Fn(&V, &mut Window, &mut App)>;
 /// hears when it is chosen.
 pub struct RadioOption<V> {
     label: SharedString,
+    key: Option<SharedString>,
+    host_label: Option<crate::host_text::Line>,
     help: HoverHelp,
     value: V,
     disabled: bool,
@@ -179,6 +181,8 @@ impl<V> RadioOption<V> {
     pub fn new(label: impl Into<SharedString>, help: HoverHelp, value: V) -> Self {
         RadioOption {
             label: label.into(),
+            key: None,
+            host_label: None,
             help,
             value,
             disabled: false,
@@ -187,6 +191,25 @@ impl<V> RadioOption<V> {
             description: None,
             preview: None,
         }
+    }
+
+    /// A catalog label can change or collide. Keep its focus identity on the ID and draw the label as host text.
+    pub(crate) fn catalog_label(
+        mut self,
+        id: impl Into<SharedString>,
+        label: crate::host_text::Line,
+    ) -> Self {
+        self.key = Some(id.into());
+        self.label = label.accessible_text();
+        self.host_label = Some(label);
+        self
+    }
+
+    fn label_element(&self) -> gpui::AnyElement {
+        self.host_label
+            .clone()
+            .unwrap_or_else(|| self.label.clone().into())
+            .into_any_element()
     }
 
     /// An unavailable option: drawn dimmed (a segment or chip whole, a plain radio's circle only, as a native radio's
@@ -260,7 +283,7 @@ pub struct RadioGroup<V: Clone + PartialEq + 'static> {
     role: Role,
     chosen: Option<V>,
     options: Vec<RadioOption<V>>,
-    chip_tail: Option<ChipTail>,
+    chip_tails: Vec<ChipTail>,
     disabled: bool,
     look: Look,
     card_columns: u16,
@@ -275,6 +298,7 @@ struct ChipTail {
     start: usize,
     id: &'static str,
     prefix: &'static str,
+    label: Option<&'static str>,
 }
 
 /// How a group draws its options; one at a time, so a single field rather than a flag per look. See the module docs.
@@ -324,7 +348,7 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
             role,
             chosen: None,
             options: Vec::new(),
-            chip_tail: None,
+            chip_tails: Vec::new(),
             disabled: false,
             look: Look::Segments,
             card_columns: CARD_COLUMNS,
@@ -384,12 +408,23 @@ impl<V: Clone + PartialEq + 'static> RadioGroup<V> {
 
     /// Group chips added after this call behind a vertical rule. They still share selection and keyboard order
     /// with the whole chooser. Their own prefix preserves stable control ids when two groups share a row.
-    pub(crate) fn separated_chips(mut self, id: &'static str, prefix: &'static str) -> Self {
+    pub(crate) fn separated_chips(self, id: &'static str, prefix: &'static str) -> Self {
+        self.separated_named_chips(id, prefix, None)
+    }
+
+    /// The label distinguishes a set of catalog choices without breaking the shared chooser's key order.
+    pub(crate) fn separated_named_chips(
+        mut self,
+        id: &'static str,
+        prefix: &'static str,
+        label: Option<&'static str>,
+    ) -> Self {
         debug_assert!(self.look == Look::Chips);
-        self.chip_tail = Some(ChipTail {
+        self.chip_tails.push(ChipTail {
             start: self.options.len(),
             id,
             prefix,
+            label,
         });
         self
     }
@@ -579,11 +614,13 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
             .enumerate()
             .map(|(index, option)| {
                 let prefix = self
-                    .chip_tail
-                    .as_ref()
-                    .filter(|tail| index >= tail.start)
+                    .chip_tails
+                    .iter()
+                    .rev()
+                    .find(|tail| index >= tail.start)
                     .map_or(self.id.as_ref(), |tail| tail.prefix);
-                format!("{prefix}-{}", option.label).into()
+                let key = option.key.as_ref().unwrap_or(&option.label);
+                format!("{prefix}-{key}").into()
             })
             .collect();
         let handles: Vec<FocusHandle> = ids
@@ -777,11 +814,13 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
         // innermost control's help (`with_hover_help`). It is also the group's accessible description, as every
         // control's is, except for the generic container, which takes no description (module docs).
         let group = super::with_hover_help(group, &self.id, &self.help, named, None, window, cx);
-        // Only the tail stays together. Earlier chips can use the rest of its line before the rule and the tail fit.
-        let tail = self
-            .chip_tail
-            .filter(|tail| tail.start < options.len())
-            .map(|tail| {
+        let mut tails = Vec::new();
+        // Split backwards so an earlier group's start still indexes the original options.
+        for tail in self.chip_tails.into_iter().rev() {
+            if tail.start >= options.len() {
+                continue;
+            }
+            tails.push(
                 div()
                     .id(tail.id)
                     .debug_selector(move || tail.id.into())
@@ -791,9 +830,17 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                     .border_l_1()
                     .border_color(theme::color(palette.border_dim))
                     .pl(px(CHIP_GAP))
-                    .children(options.split_off(tail.start))
-            });
-        group.children(options).children(tail)
+                    .children(tail.label.map(|label| {
+                        div()
+                            .text_size(metrics::TEXT_SM)
+                            .text_color(theme::color(palette.fg_1))
+                            .child(label)
+                    }))
+                    .when(tail.label.is_some(), |group| group.flex_wrap().min_w_0())
+                    .children(options.split_off(tail.start)),
+            );
+        }
+        group.children(options).children(tails.into_iter().rev())
     }
 }
 
@@ -1164,7 +1211,7 @@ fn contents<V>(
         );
     }
     match &option.description {
-        None if words => children.push(option.label.clone().into_any_element()),
+        None if words => children.push(option.label_element()),
         None => {}
         Some(description) => children.push(
             div()
@@ -1174,7 +1221,7 @@ fn contents<V>(
                 .flex_1()
                 .min_w_0()
                 .gap(px(DESCRIPTION_GAP))
-                .when(words, |column| column.child(option.label.clone()))
+                .when(words, |column| column.child(option.label_element()))
                 .child(
                     div()
                         .text_size(metrics::TEXT_SM)

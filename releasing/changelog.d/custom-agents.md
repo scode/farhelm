@@ -2,9 +2,9 @@
 kind: added
 ---
 
-Farhelm can launch registered custom agents with `farhelm agent create`, `farhelm spawn`, and launch templates.
-Use `--conversation` to start a resumable agent on a conversation ID you already know. A custom agent that reports
-its conversation ID and provides a resume command can also reopen its conversation on Restart.
+You can register your own agent in **Settings → Custom agents** and launch it from the desktop app, the CLI, or a
+template. Custom agents always run in YOLO mode and can resume a conversation on Restart if they support resumption
+and report its ID.
 
-Custom agents count as YOLO and supply their own reporting hook. The desktop registration and launcher controls
-arrive in the next change for this plan.
+A conversation ID you already know can be supplied under **More options** in the launcher or with `--conversation`
+on a compatible CLI launch.

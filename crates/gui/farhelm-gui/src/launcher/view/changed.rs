@@ -66,9 +66,17 @@ impl Launcher {
                 })?
             }
             (RestartBaseline::Agent(stored), Changed::Effort) => {
-                let previous = stored.effort.as_ref().and_then(|value| value.known());
-                (self.draft.agent.effort != previous)
-                    .then(|| words.text(format!(" · was {}", effort_word(previous))))?
+                (self.draft.agent.effort_value() != stored.effort).then(|| {
+                    let words = words.text(" · was ");
+                    match stored.effort.as_ref() {
+                        Some(value) if stored.harness.uses_custom_catalog() => {
+                            words.host(&HostText::from_host(value.as_cli_arg()))
+                        }
+                        previous => {
+                            words.text(effort_word(previous.and_then(|value| value.known())))
+                        }
+                    }
+                })?
             }
             (RestartBaseline::Agent(stored), Changed::Permissions) => {
                 (self.draft.agent.permissions != stored.permissions).then(|| {

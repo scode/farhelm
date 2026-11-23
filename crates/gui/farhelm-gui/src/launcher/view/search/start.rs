@@ -614,6 +614,21 @@ pub(super) fn typed_choice(
                 )),
             )
         }
+        Row::CustomAgent { .. } => {
+            let mark = harness::glyph(farhelm_proto::LaunchHarness::Custom);
+            (
+                words,
+                None,
+                Some((
+                    harness::icon(mark),
+                    if selected {
+                        ink
+                    } else {
+                        harness::ink(mark, palette).unwrap_or(quiet)
+                    },
+                )),
+            )
+        }
         Row::Folder(folder) => (
             HostSentence::new("launcher-result-folder").mono(&compact_match(
                 folder,

@@ -217,6 +217,11 @@ impl Launcher {
             harness: self.draft.agent.harness,
             model: self.draft.agent.model.as_deref(),
             catalog: self.catalog.as_deref(),
+            custom_agents: &self
+                .store
+                .read(cx)
+                .collections()
+                .ordered::<farhelm_proto::custom_agents::CustomAgent>(),
             catalog_pending: self.catalog.is_none() && self.catalog_error.is_none(),
             hosts: &hosts,
             templates: templates.as_deref(),
@@ -459,7 +464,7 @@ impl Launcher {
     /// field are still refused even when they name its current value").
     fn held_by_row(&self, row: &Row) -> Option<&'static str> {
         let (field, words) = match row {
-            Row::Harness(_) => (Field::AgentType, "agent type"),
+            Row::Harness(_) | Row::CustomAgent { .. } => (Field::AgentType, "agent type"),
             Row::Model { harness, .. } | Row::HistoryModel { harness, .. }
                 if self.draft.tab != Tab::Agent || self.draft.agent.harness != Some(*harness) =>
             {
@@ -499,6 +504,7 @@ impl Launcher {
             // Choosing an agent type makes the tab Agent itself; a model of the agent already chosen does not, so the
             // model row switches it first.
             Row::Harness(harness) => self.choose_harness(harness, window, cx),
+            Row::CustomAgent { id, .. } => self.choose_custom_agent(&id, window, cx),
             // Through the templates' application path, as a template shortcut's press in the open launcher: it waits
             // for the catalog read if that is out. A refusal changes nothing and is said below the field.
             Row::Template(name) => self.apply_batch(
@@ -895,6 +901,7 @@ fn environment_refusal(row: &Row) -> Option<&'static str> {
         | Row::Name(_)
         | Row::Host { .. }
         | Row::Harness(_)
+        | Row::CustomAgent { .. }
         | Row::Template(_)
         | Row::Model { .. }
         | Row::HistoryModel { .. }

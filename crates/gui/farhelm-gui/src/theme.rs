@@ -212,9 +212,9 @@ pub struct Palette {
     /// `--host-icon-*`, in the host color order lavender, orchid, teal, steel, sand, copper, red.
     pub host: [Token; 7],
     /// `--harness-*`, the agent marks' identity colors, ordered claude, muse, cursor, pi, omp, grok, opencode,
-    /// antigravity (`docs/harness-marks.md`, "Colors"). Codex, Goose and the Terminal mark have none: they
+    /// antigravity and custom (`docs/harness-marks.md`, "Colors"). Codex, Goose and the Terminal mark have none: they
     /// keep the agent track's `--fg-1`, as their owners' terms or Farhelm's own choice ask.
-    pub harness: [Token; 8],
+    pub harness: [Token; 9],
 }
 
 impl Palette {
@@ -321,6 +321,7 @@ pub const DARK: Palette = Palette {
         rgb_token(0xd8b839),
         rgb_token(0x83b94b),
         rgb_token(0xe85d9a),
+        rgb_token(0xd2b79a),
     ],
 };
 
@@ -411,6 +412,7 @@ pub const LIGHT: Palette = Palette {
         rgb_token(0x987f1e),
         rgb_token(0x638d37),
         rgb_token(0xc73c7a),
+        rgb_token(0x886349),
     ],
 };
 

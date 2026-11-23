@@ -134,7 +134,7 @@ impl Entry {
 
     /// A synonym names the setting it leads to. A section name is the way to list the whole section.
     fn synonyms(&self) -> &'static str {
-        match (self.section, self.target) {
+        match (&self.section, self.target) {
             (Section::Appearance, _) => "dark mode light theme color colour",
             (Section::Hosts, Target::Choice(Choice::AutoUpdateRemoteHosts)) => {
                 "update upgrade server"
@@ -156,6 +156,9 @@ impl Entry {
             (Section::Notifications, Target::Top) if self.id == SOUNDS_ID => "sound bell",
             (Section::Notifications, _) => "push phone",
             (Section::App, _) => "update upgrade version",
+            (Section::AddCustomAgent, _) => {
+                "wrapper registration harness conversation report resume"
+            }
             _ => "",
         }
     }
@@ -171,16 +174,17 @@ fn catalog(platform: Platform) -> Vec<Entry> {
     let mut entries = Vec::new();
     for section in Section::all() {
         let add = |id, label, help: &[&str], target| {
-            Entry::new(section, id, label, help.iter().copied(), target)
+            Entry::new(section.clone(), id, label, help.iter().copied(), target)
         };
         if section == Section::Notifications {
             entries.push(add(SOUNDS_ID, SOUNDS_LABEL, &[SOUNDS_HELP], Target::Top));
         }
         let section_choices = || {
+            let section = &section;
             Choice::ALL
                 .iter()
                 .copied()
-                .filter(move |choice| choice.section() == section)
+                .filter(move |choice| &choice.section() == section)
                 .map(Entry::choice)
         };
         // Results follow the drawing order. Every section draws its switches before its other controls, except App,
@@ -189,10 +193,10 @@ fn catalog(platform: Platform) -> Vec<Entry> {
         if !matches!(section, Section::Agent(_)) && !choices_last {
             entries.extend(section_choices());
         }
-        match section {
+        match &section {
             Section::Sessions | Section::Hosts => {}
             Section::Appearance => entries.push(Entry::new(
-                section,
+                section.clone(),
                 appearance::ID,
                 appearance::LABEL,
                 [appearance::HELP, appearance::TOOLTIP].into_iter().chain(
@@ -226,7 +230,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         &[tensorlake_key::STORAGE_WARNING],
                         Target::Top,
                     ),
-                    key_entry(section, Tensorlake),
+                    key_entry(section.clone(), Tensorlake),
                     add(ssh::ID, ssh::LABEL, &[ssh::HELP], Target::Top),
                     add(
                         sandboxes::ID,
@@ -264,7 +268,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         &[credentials::STORAGE_HELP, credentials::INTRO],
                         Target::Top,
                     ),
-                    key_entry(section, tensorlake_key::Place::Credentials),
+                    key_entry(section.clone(), tensorlake_key::Place::Credentials),
                 ]);
                 entries.extend(
                     credentials::search_lists()
@@ -274,7 +278,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
             Section::Terminal => {
                 use terminal::{TUNNEL_HELP, TUNNEL_ID, TUNNEL_LABEL, TUNNEL_TOOLTIP};
                 entries.push(Entry::new(
-                    section,
+                    section.clone(),
                     terminal::ID,
                     terminal::LABEL,
                     [terminal::HELP, terminal::TOOLTIP].into_iter().chain(
@@ -336,11 +340,11 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 ]);
             }
             Section::Agent(harness) => {
-                let trust = TrustAgent::for_harness(harness);
-                let hooks = HookAgent::for_harness(harness);
+                let trust = TrustAgent::for_harness(*harness);
+                let hooks = HookAgent::for_harness(*harness);
                 if let Some(agent) = trust {
                     entries.push(Entry::new(
-                        section,
+                        section.clone(),
                         agent.id(),
                         agent.label(),
                         std::iter::once(agent.tooltip().to_owned()).chain(agent.help()),
@@ -358,7 +362,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                 }
                 if let Some(agent) = hooks {
                     entries.push(Entry::new(
-                        section,
+                        section.clone(),
                         agent.id(),
                         super::hook_settings::LABEL,
                         [
@@ -393,7 +397,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                         ntfy::Field::Token => &[ntfy::TOKEN_CHANGED_HELP, ntfy::TOKEN_CLEAR_HELP],
                     };
                     entries.push(Entry::new(
-                        section,
+                        section.clone(),
                         id,
                         label,
                         std::iter::once(help).chain(extra.iter().copied()),
@@ -401,7 +405,7 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     ));
                 }
                 entries.push(Entry::new(
-                    section,
+                    section.clone(),
                     "ntfy-priority",
                     ntfy::PRIORITY_LABEL,
                     std::iter::once(ntfy::PRIORITY_HELP).chain(
@@ -427,6 +431,13 @@ fn catalog(platform: Platform) -> Vec<Entry> {
                     Target::AppUpdates,
                 ),
             ]),
+            Section::AddCustomAgent => entries.push(add(
+                section.button_id(),
+                "Custom agents",
+                &[super::custom_agents::COMMAND_HELP],
+                Target::Top,
+            )),
+            Section::CustomAgent(_) => {}
         }
         if choices_last {
             entries.extend(section_choices());
@@ -517,10 +528,10 @@ impl Search {
     }
 
     /// The navigation count describes the same rows as the results pane.
-    pub(super) fn section_count(&self, section: Section) -> usize {
+    pub(super) fn section_count(&self, section: &Section) -> usize {
         self.matches
             .iter()
-            .filter(|&&index| self.catalog[index].section == section)
+            .filter(|&&index| &self.catalog[index].section == section)
             .count()
     }
 
@@ -565,7 +576,7 @@ impl Search {
     /// The selected result in display order, or none while the query is blank or has no matches.
     pub(super) fn chosen(&self) -> Option<(Section, Target)> {
         let entry = &self.catalog[*self.matches.get(self.selected)?];
-        Some((entry.section, entry.target))
+        Some((entry.section.clone(), entry.target))
     }
 
     pub(super) fn focus(&self, window: &mut Window, cx: &mut App) {
@@ -674,7 +685,7 @@ impl Search {
             .matches
             .chunk_by(|&left, &right| self.catalog[left].section == self.catalog[right].section)
         {
-            let section = self.catalog[group[0]].section;
+            let section = &self.catalog[group[0]].section;
             let id = format!("settings-search-group-{}", section.key());
             rows.push(
                 card::heading(section.label(), None, None, cx)
@@ -767,7 +778,7 @@ impl Search {
         cx: &Context<SettingsDialog>,
     ) -> AnyElement {
         let weak = cx.weak_entity();
-        let (section, target) = (entry.section, entry.target);
+        let (section, target) = (entry.section.clone(), entry.target);
         let (excerpt, clipped) = entry.excerpt(&self.words);
         let excerpt = if clipped {
             format!("…{excerpt}")
@@ -808,7 +819,7 @@ impl Search {
         )
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |dialog, cx| {
-                dialog.open_search_target(section, target, window, cx)
+                dialog.open_search_target(section.clone(), target, window, cx)
             });
         })
         .into_any_element()

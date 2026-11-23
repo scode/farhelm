@@ -46,8 +46,9 @@ impl Launcher {
         let agent = &self.draft.agent;
         RecentFilter {
             harness: agent.harness,
+            custom_agent: agent.custom_agent.clone(),
             model: agent.model.clone(),
-            effort: agent.effort,
+            effort: agent.effort_value(),
             permissions: agent.permissions.filter(|_| agent.permissions_explicit),
         }
     }

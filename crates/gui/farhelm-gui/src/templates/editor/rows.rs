@@ -75,6 +75,8 @@ pub(super) struct Rows<'a> {
     pub(super) weak: &'a WeakEntity<TemplatesDialog>,
     pub(super) palette: &'a Palette,
     pub(super) hosts: &'a [HostView],
+    /// Registered agents join the Agent type chooser by stable ID.
+    pub(super) custom_agents: &'a [&'a farhelm_proto::custom_agents::CustomAgent],
     /// The pushed recipe catalog, empty before it arrives or while the helm cannot read it.
     pub(super) recipes: &'a [RecipeView],
     /// What the Custom words' input holds now, for the words the block under it shows (empty without the input).
@@ -292,17 +294,35 @@ impl Rows<'_> {
                  launcher before launching.",
             ),
             Field::Agent => {
-                let options = LaunchHarness::BUILT_INS
+                let mut options = LaunchHarness::BUILT_INS
                     .iter()
                     .filter(|agent| fields.kind != Some(LauncherKind::Command) || !agent.is_shell())
-                    .map(|&agent| (agent, harness_label(agent).to_owned()))
-                    .collect();
-                let chosen = fields.agent.unwrap_or(LaunchHarness::ALL[0]);
-                vec![self.choice(field, options, chosen, |editor, agent, window, cx| {
-                    editor.edit(window, cx, |editor| editor.draft.fields.agent = Some(agent))
-                })]
+                    .map(|&agent| ((agent, None), harness_label(agent).to_owned()))
+                    .collect::<Vec<_>>();
+                if fields.kind == Some(LauncherKind::Command) {
+                    options.push(((LaunchHarness::Custom, None), "Custom".into()));
+                }
+                options.extend(self.custom_agents.iter()
+                        .map(|agent| {
+                            (
+                                (LaunchHarness::Custom, Some(agent.id.clone())),
+                                format!("{} · {}", farhelm_proto::text::escaped(&agent.display_name), agent.id),
+                            )
+                        }));
+                let chosen = (fields.agent.unwrap_or(LaunchHarness::BUILT_INS[0]), fields.custom_agent.clone().flatten());
+                if !options.iter().any(|(key, _)| key == &chosen) {
+                    let label = match &chosen.1 {
+                        Some(id) => format!("{id} (registration unavailable)"),
+                        None => format!("{} (not offered)", harness_label(chosen.0)),
+                    };
+                    options.push((chosen.clone(), label));
+                }
+                vec![self.agent_choice(options, chosen)]
             }
             Field::Model => self.model(),
+            Field::Effort if fields.agent.is_some_and(LaunchHarness::uses_custom_catalog) => {
+                self.text_row(field, "Leave blank to use this custom agent's default. Use lowercase letters, digits, hyphens and underscores.")
+            }
             Field::Effort => {
                 let options = effort_options(fields, self.catalog);
                 let chosen = fields.effort.as_ref().and_then(Option::as_ref).and_then(|value| value.known());
@@ -318,6 +338,10 @@ impl Rows<'_> {
                 )]
             }
             Field::Permissions => self.permissions(),
+            Field::Yolo if fields.agent.is_some_and(LaunchHarness::uses_custom_catalog) => vec![
+                hint("templates-fixed-yolo", "Custom agents always run in YOLO mode.", palette)
+                    .into_any_element(),
+            ],
             Field::Yolo => vec![
                 self.choice(
                     field,
@@ -351,6 +375,60 @@ impl Rows<'_> {
             Field::Destination => self.destination(),
             Field::Name => self.session_name(),
         }
+    }
+
+    /// Keep the selector's value tied to the registration through a catalog push. Names can change or collide.
+    fn agent_choice(
+        &self,
+        options: Vec<((LaunchHarness, Option<String>), String)>,
+        chosen: (LaunchHarness, Option<String>),
+    ) -> AnyElement {
+        let key = |(agent, id): &(LaunchHarness, Option<String>)| {
+            id.as_ref().map_or_else(
+                || harness_label(*agent).to_owned(),
+                |id| format!("custom:{id}"),
+            )
+        };
+        let label = Field::Agent.label();
+        let help = HoverHelp::tooltip(format!("{label}: the value this template applies"));
+        let chosen = key(&chosen);
+        let entries = options
+            .iter()
+            .map(|(value, text)| {
+                let option = SelectOption::new(key(value), text.clone(), help.clone());
+                if value.0.uses_custom_catalog() {
+                    option.mark(crate::assets::Icon::HarnessCustom)
+                } else {
+                    option
+                }
+            })
+            .collect::<Vec<_>>();
+        let weak = self.weak.clone();
+        let control = Select::new("templates-agent", label, help, Role::ComboBox)
+            .options(entries)
+            .chosen(chosen)
+            .on_choose(move |selected, window, cx| {
+                let Some(((agent, id), _)) = options
+                    .iter()
+                    .find(|(value, _)| key(value) == selected.as_ref())
+                else {
+                    return;
+                };
+                let (agent, id) = (*agent, id.clone());
+                with_editor(&weak, window, cx, |editor, window, cx| {
+                    editor.edit(window, cx, |editor| {
+                        let fields = &mut editor.draft.fields;
+                        fields.agent = Some(agent);
+                        fields.custom_agent = agent.uses_custom_catalog().then_some(id);
+                        if agent.uses_custom_catalog() && fields.kind == Some(LauncherKind::Command)
+                        {
+                            fields.yolo = Some(true);
+                        }
+                    });
+                });
+            });
+        self.labelled(label, control.into_any_element())
+            .into_any_element()
     }
 
     /// A choice among `options` for `field` (the old `Choice`): segments for two to five options, a select for more,

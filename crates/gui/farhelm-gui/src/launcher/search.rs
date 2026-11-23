@@ -212,6 +212,11 @@ pub enum Row {
         label: HostText,
     },
     Harness(LaunchHarness),
+    /// A registration's ID selects it even after the display name changes.
+    CustomAgent {
+        id: String,
+        label: HostText,
+    },
     /// Apply the template of this name (as stored: host text).
     Template(String),
     /// A catalog model, with the agent type that owns it: choosing it chooses that agent type too.
@@ -250,6 +255,7 @@ pub enum Group {
     Names,
     Hosts,
     Harnesses,
+    CustomAgents,
     Shells,
     Templates,
     Models,
@@ -268,6 +274,7 @@ impl Group {
             Group::Names => "Session name",
             Group::Hosts => "Hosts",
             Group::Harnesses => "Harnesses",
+            Group::CustomAgents => "Custom agents",
             Group::Shells => "Shells",
             Group::Templates => "Templates",
             Group::Models => "Models",
@@ -289,6 +296,7 @@ impl Row {
             Row::Host { .. } => Group::Hosts,
             Row::Harness(harness) if harness.is_shell() => Group::Shells,
             Row::Harness(_) => Group::Harnesses,
+            Row::CustomAgent { .. } => Group::CustomAgents,
             Row::Template(_) => Group::Templates,
             Row::Model { latest: false, .. } => Group::OlderModels,
             Row::Model { latest: true, .. } | Row::HistoryModel { .. } => Group::Models,
@@ -319,6 +327,10 @@ impl Row {
                 };
                 sentence.text(format!("{label}: {}", harness_label(*harness)))
             }
+            Row::CustomAgent { id, label } => sentence
+                .host(label)
+                .text(" · ")
+                .mono(&HostText::from_host(id.as_str())),
             Row::Template(name) => sentence
                 .text("Template: ")
                 .host(&HostText::from_host(name.as_str())),
@@ -375,6 +387,7 @@ impl Row {
                 format!("Start a {} shell", harness_label(*harness))
             }
             Row::Harness(_) => "Use this agent for the session".to_owned(),
+            Row::CustomAgent { .. } => "Use this registered agent for the session".to_owned(),
             Row::Template(_) => "Apply this template's settings to the draft".to_owned(),
             Row::Model { .. } | Row::HistoryModel { .. } => {
                 "Use this model for the session".to_owned()
@@ -407,6 +420,7 @@ impl Row {
     fn exact_word(&self) -> Option<String> {
         match self {
             Row::Harness(harness) => Some(harness_word(*harness)),
+            Row::CustomAgent { id, .. } => Some(id.clone()),
             // Unicode lowercasing, as template names are matched (`crate::templates::rows::matches`).
             Row::Template(name) => Some(name.to_lowercase()),
             Row::Model { id, .. } | Row::HistoryModel { id, .. } => Some(id.to_ascii_lowercase()),
@@ -446,6 +460,7 @@ pub struct Inputs<'a> {
     pub model: Option<&'a str>,
     /// The catalog's models, or `None` while there are none to offer: its read is out, or it failed.
     pub catalog: Option<&'a [LaunchCatalogModel]>,
+    pub custom_agents: &'a [&'a farhelm_proto::custom_agents::CustomAgent],
     /// Whether the catalog's read is still out, which a `model:` query with no rows says ("Loading models…") instead
     /// of warning that nothing matched. A failed read is not pending: there is nothing to wait for, so it warns
     /// (SPEC.md allows the loading reason only for a pending list).
@@ -573,6 +588,19 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                 .filter(|harness| matches(&harness_word(**harness)))
                 .map(|harness| Row::Harness(*harness)),
         );
+        let unicode = value.to_lowercase();
+        rows.extend(
+            inputs
+                .custom_agents
+                .iter()
+                .filter(|agent| {
+                    matches(&agent.id) || agent.display_name.to_lowercase().contains(&unicode)
+                })
+                .map(|agent| Row::CustomAgent {
+                    id: agent.id.clone(),
+                    label: HostText::from_host(agent.display_name.as_str()),
+                }),
+        );
     }
     // Templates only under `tl:`: an unlabelled query is about the launch being built, and template names there would
     // crowd out its agent types and models (the old search's rule).
@@ -613,6 +641,10 @@ pub fn search(inputs: &Inputs<'_>) -> Results {
                     continue;
                 };
                 let owner = entry.selection.harness;
+                // A custom model belongs to its registration. The complete recent setup keeps that ID.
+                if owner.uses_custom_catalog() {
+                    continue;
+                }
                 let suggested = catalog.iter().any(|model| {
                     model.latest && model.harness == owner && model.id == owner.catalog_model_id(id)
                 });
@@ -765,6 +797,7 @@ fn default_index(
             // The documented bare shell words must stay shortcuts even if
             // the launch history has a custom model with the same name.
             Group::Shells,
+            Group::CustomAgents,
             Group::Efforts,
             Group::Permissions,
             Group::Models,
@@ -772,7 +805,7 @@ fn default_index(
             Group::Harnesses,
         ],
         Scope::Host => &[Group::Hosts],
-        Scope::Harness => &[Group::Harnesses, Group::Shells],
+        Scope::Harness => &[Group::Harnesses, Group::CustomAgents, Group::Shells],
         Scope::Model => &[Group::Models, Group::OlderModels],
         Scope::Effort => &[Group::Efforts],
         Scope::Perms => &[Group::Permissions],

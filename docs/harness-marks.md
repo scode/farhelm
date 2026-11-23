@@ -39,6 +39,7 @@ draws the mark. Several of the terms below forbid modification, and an unaltered
 | Grok        | block "G"                 | Farhelm original       | drawn here; retained independently of the current official kit                  |
 | Antigravity | rising chevron and bar    | Farhelm original       | drawn here independently of Google's artwork                                    |
 | OpenCode    | even-odd ring             | official, unaltered    | `packages/ui/src/assets/favicon/favicon-v3.svg` in `anomalyco/opencode` (MIT)   |
+| Custom      | plug and connection node  | Farhelm original       | drawn here for all user-registered agents                                       |
 | Terminal    | window with prompt        | Farhelm original       | drawn here                                                                      |
 | Bash        | window with `$_`          | Farhelm original       | drawn here                                                                      |
 | Zsh         | window with `%_`          | Farhelm original       | drawn here                                                                      |
@@ -154,6 +155,12 @@ originally vendored the two-path logo file; that design is two-tone, with a mid-
 `currentColor`, and its nested frames leave a one-pixel gap at 12px. The project's favicon (`favicon-v3.svg`) is a
 single even-odd ring, the small-size simplification OpenCode itself uses, so the sidebar now uses that path instead.
 
+### Custom agents
+
+Farhelm draws a plug connected to a node for its custom-agent contract. The same mark applies to any registration and to
+a command that declares the generic Custom agent type. The drawing has no upstream artwork. Its bounds are `x=1..11` and
+`y=2..10` in the shared box.
+
 ## Colors
 
 Bash and Zsh use the Terminal mark's frame and inherited grey. The prompt characters are stroked paths so they stay
@@ -174,6 +181,7 @@ selected mark uses white (`--on-fill`) instead. Geometry and sizing remain indep
 | Grok        | `#d8b839` / `#987f1e` | Farhelm gold on its original G. The [official favicon](https://grok.com/images/favicon.svg) is neutral; the current kit's no-alteration rule applies to official artwork, which is not used here.                                                                                                                                                            |
 | OpenCode    | `#83b94b` / `#638d37` | Farhelm yellow-green. The [brand page](https://opencode.ai/brand) and [favicon](https://opencode.ai/favicon-v3.svg) supply white/grey artwork. The MIT repository and [open-source terms](https://opencode.ai/legal/terms-of-service) remain the copyright basis; no separate color restriction was found on the checked pages.                              |
 | Antigravity | `#e85d9a` / `#c73c7a` | Farhelm rose-magenta, checked 2026-11-19. Against the sidebar and row hover, respectively, the contrast is 4.91:1 and 3.47:1 in Dark, and 4.11:1 and 3.74:1 in Light.                                                                                                                                                                                        |
+| Custom      | `#d2b79a` / `#886349` | Farhelm warm sand, checked against the sidebar and hover surfaces in both themes on 2026-11-22.                                                                                                                                                                                                                                                              |
 | Codex       | inherited grey        | The [OpenAI guidelines](https://openai.com/brand/) explicitly forbid adding blossom colors. Keep the existing one-color treatment; inherited grey is not the supplied black or white.                                                                                                                                                                        |
 | Goose       | inherited grey        | The [LF Projects policy](https://lfprojects.org/policies/trademark-policy/) still asks that logos have no color variations. Keep the existing one-color treatment described above.                                                                                                                                                                           |
 | Terminal    | inherited grey        | Farhelm's own non-agent mark; it retains the ordinary agent-track foreground.                                                                                                                                                                                                                                                                                |

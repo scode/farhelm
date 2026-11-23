@@ -86,14 +86,14 @@ fn decoded(launch: Value) -> SessionLaunch {
 
 /// The description's accessible name: the old row's text exactly, which is what a screen reader hears.
 fn described(launch: Value, screen_yolo: bool) -> String {
-    Description::of(&decoded(launch), screen_yolo)
+    Description::of(&decoded(launch), screen_yolo, None)
         .name()
         .to_string()
 }
 
 /// The description's hover help as its paragraphs' accessible names, each host value escaped.
 fn hovered(launch: Value, screen_yolo: bool) -> Vec<String> {
-    Description::of(&decoded(launch), screen_yolo)
+    Description::of(&decoded(launch), screen_yolo, None)
         .help("test-help")
         .iter()
         .map(|paragraph| paragraph.accessible_name().to_string())
@@ -546,7 +546,7 @@ fn the_hover_help_is_the_descriptions_paragraphs() {
         ]
     );
     assert_eq!(paragraphs.join("\n\n"), described(launch.clone(), false));
-    for paragraph in Description::of(&decoded(launch), false).help("help") {
+    for paragraph in Description::of(&decoded(launch), false, None).help("help") {
         let parts = format!("{paragraph:?}");
         if let Some(value) = parts.find("Mono(") {
             assert!(!parts[..value].contains("\\n"), "{parts}");
@@ -601,7 +601,7 @@ fn the_description_escapes_the_command_it_quotes() {
         "Command — Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked by \
          Farhelm — /opt/bin/<U+202E>evil-agent --some-flag"
     );
-    let help = Description::of(&decoded(launch), false).help("help");
+    let help = Description::of(&decoded(launch), false, None).help("help");
     let plain = HostSentence::new("help-0").text(help[0].accessible_name());
     assert_ne!(help, [plain], "the command is a host part of its own");
 }

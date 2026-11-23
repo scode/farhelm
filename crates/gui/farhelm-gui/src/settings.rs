@@ -73,6 +73,7 @@ mod containers_tests;
 #[cfg(test)]
 mod credential_tests;
 mod credentials;
+mod custom_agents;
 mod editing;
 mod file_types;
 #[cfg(test)]
@@ -230,15 +231,19 @@ fn open_dialog(
     cx: &mut App,
 ) -> Option<(LayerId, Entity<SettingsDialog>)> {
     // An inert window has no store to draw the switches from, and nothing to save through.
-    session::current_store(cx)?;
+    let store = session::current_store(cx)?;
     if focus::has_moved_on(mark, cx) {
         return None;
     }
-    let dialog = cx.new(|cx| SettingsDialog::new(section, window, cx));
+    let dialog = cx.new(|cx| {
+        cx.observe(&store, |_: &mut SettingsDialog, _, cx| cx.notify())
+            .detach();
+        SettingsDialog::new(section.clone(), window, cx)
+    });
     let container = cx.focus_handle();
     let start = dialog
         .read(cx)
-        .start(section, cx)
+        .start(&section, cx)
         .unwrap_or_else(|| container.clone());
     let layer = layers::open_dialog_with_shortcut(
         Dialog {
@@ -475,7 +480,7 @@ pub(crate) fn draft_input_for_opened(
 #[cfg(test)]
 pub(crate) fn draft_changed_for_opened(section: Section, cx: &App) -> bool {
     layers::last_opened::<SettingsDialog>(cx)
-        .is_some_and(|dialog| dialog.read(cx).section_edited(section, cx))
+        .is_some_and(|dialog| dialog.read(cx).section_edited(&section, cx))
 }
 
 /// Move an open golden to a second form, using the same page transition as its navigation.
@@ -589,7 +594,7 @@ const NO_AGENT_SETTINGS_ID: &str = "settings-agent-empty";
 ///
 /// Ordinary pages have an explicit order. Agent pages are derived from the launch harnesses so an agent appears even
 /// when Farhelm has no settings for it.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Section {
     Sessions,
     Appearance,
@@ -603,6 +608,9 @@ pub(crate) enum Section {
     Terminal,
     Checkouts,
     Agent(LaunchHarness),
+    /// The ID stays stable when the helm pushes a rename.
+    CustomAgent(String),
+    AddCustomAgent,
     Notifications,
     /// The desktop app's own automatic-updates switch, listed only while its updater runs ([`Section::listed`]).
     App,
@@ -632,12 +640,13 @@ impl Section {
                 .filter(|harness| !harness.is_shell())
                 .map(Section::Agent),
         )
+        .chain([Section::AddCustomAgent])
     }
 
     /// Whether the dialog lists this section in this app: every section in [`Section::all`], except App, which only a
     /// desktop app whose updater runs has (SPEC.md: "followed by **App** only in a desktop app whose updater is
     /// active"). The updater's own answer decides, so no platform or build is checked here.
-    fn listed(self, cx: &App) -> bool {
+    fn listed(&self, cx: &App) -> bool {
         match self {
             Section::App => crate::desktop::updates::runs(cx),
             Section::Sessions
@@ -650,17 +659,19 @@ impl Section {
             | Section::Terminal
             | Section::Checkouts
             | Section::Agent(_)
+            | Section::CustomAgent(_)
+            | Section::AddCustomAgent
             | Section::Notifications => true,
         }
     }
 
     /// Search uses the same stable suffix as the navigation button.
-    fn key(self) -> &'static str {
+    fn key(&self) -> &'static str {
         self.button_id().trim_start_matches("settings-section-")
     }
 
     /// Element IDs stay the same as settings move within a page or groups change position.
-    fn button_id(self) -> &'static str {
+    fn button_id(&self) -> &'static str {
         match self {
             Section::Sessions => "settings-section-sessions",
             Section::Appearance => "settings-section-appearance",
@@ -671,14 +682,16 @@ impl Section {
             Section::Credentials => "settings-section-credentials",
             Section::Terminal => "settings-section-terminal",
             Section::Checkouts => "settings-section-checkouts",
-            Section::Agent(harness) => crate::harness::settings_button_id(harness),
+            Section::Agent(harness) => crate::harness::settings_button_id(*harness),
+            Section::CustomAgent(_) => "settings-section-custom-agent",
+            Section::AddCustomAgent => "settings-section-add-custom-agent",
             Section::Notifications => "settings-section-notifications",
             Section::App => "settings-section-app",
         }
     }
 
     /// The section's name, on its button and as its heading.
-    fn label(self) -> &'static str {
+    fn label(&self) -> &'static str {
         match self {
             Section::Sessions => "Sessions",
             Section::Appearance => "Appearance",
@@ -689,14 +702,16 @@ impl Section {
             Section::Credentials => "Credentials",
             Section::Terminal => "Terminal",
             Section::Checkouts => "Checkouts",
-            Section::Agent(harness) => crate::harness::name(harness),
+            Section::Agent(harness) => crate::harness::name(*harness),
+            Section::CustomAgent(_) => "Custom agent",
+            Section::AddCustomAgent => "+ Add custom agent",
             Section::Notifications => "Notifications",
             Section::App => "App",
         }
     }
 
     /// The section's glyph on its button, the old app's (`settings_section_icon`).
-    fn icon(self) -> Icon {
+    fn icon(&self) -> Icon {
         match self {
             Section::Sessions => Icon::Sessions,
             Section::Appearance => Icon::Appearance,
@@ -707,7 +722,8 @@ impl Section {
             Section::Credentials => Icon::Lock,
             Section::Terminal => Icon::Terminal,
             Section::Checkouts => Icon::Branch,
-            Section::Agent(harness) => crate::harness::icon(crate::harness::glyph(harness)),
+            Section::Agent(harness) => crate::harness::icon(crate::harness::glyph(*harness)),
+            Section::CustomAgent(_) | Section::AddCustomAgent => Icon::HarnessCustom,
             Section::Notifications => Icon::Bell,
             Section::App => Icon::App,
         }
@@ -725,7 +741,7 @@ impl Section {
     /// the waiting sound's switch, could take focus: nothing in the app opens Settings there (only its golden and its
     /// tests do), and the ntfy form's tests walk Tab from the dialog itself. `None` for App as well, whose switch is
     /// not a preference [`Choice`]: [`SettingsDialog::start`] gives it its own handle.
-    fn first(self) -> Option<Choice> {
+    fn first(&self) -> Option<Choice> {
         match self {
             Section::Sessions => Some(Choice::SkipSessionConfirmations),
             Section::Appearance => None,
@@ -737,6 +753,7 @@ impl Section {
             Section::Terminal => None,
             Section::Checkouts => None,
             Section::Agent(_) => None,
+            Section::CustomAgent(_) | Section::AddCustomAgent => None,
             Section::Notifications => None,
             Section::App => None,
         }
@@ -801,6 +818,8 @@ pub(crate) struct SettingsDialog {
     /// The Recipes section, made the first time it is shown in this opening. Its rows are the pushed catalog; whether
     /// a key is saved comes from the shared account above, read then if no section has yet ([`recipes`]).
     recipes: Option<Entity<recipes::Recipes>>,
+    /// Drafts belong to this opening, including those a user leaves on another custom-agent page.
+    custom_agents: std::collections::BTreeMap<Option<String>, Entity<custom_agents::Editor>>,
     /// The result or trust hint waiting for a control to become available.
     focus_on: Option<Handover>,
     /// Set right after the layer opens; what the close controls dismiss.
@@ -895,6 +914,7 @@ impl SettingsDialog {
             tensorlake: None,
             tensorlake_section: None,
             recipes: None,
+            custom_agents: std::collections::BTreeMap::new(),
             focus_on: None,
             layer: None,
             _closing: cx.on_release(|_: &mut SettingsDialog, cx| cx.set_global(Closings)),
@@ -916,8 +936,8 @@ impl SettingsDialog {
     ///
     /// App's switch is not a preference [`Choice`], so it has its own handle, given only while App is listed: where no
     /// updater runs, the section draws nothing, and a handle with no element behind it could not take focus.
-    fn start(&self, section: Section, cx: &App) -> Option<FocusHandle> {
-        if section == Section::App {
+    fn start(&self, section: &Section, cx: &App) -> Option<FocusHandle> {
+        if *section == Section::App {
             return section.listed(cx).then(|| self.app.focus.clone());
         }
         let first = section.first()?;
@@ -939,7 +959,10 @@ impl SettingsDialog {
         if self.shown != section {
             self.page_scroll.set_offset(gpui::Point::default());
         }
-        self.shown = section;
+        self.shown = section.clone();
+        if let Some(key) = section.custom_agent_key() {
+            self.open_custom_editor(key, window, cx);
+        }
         if section == Section::Containers && self.containers.is_none() {
             self.containers = Some(cx.new(containers::Containers::new));
         }
@@ -1090,7 +1113,7 @@ impl SettingsDialog {
                 let switch = &self.hooks[agent.index()];
                 switch.state.available().then(|| switch.focus.clone())
             }
-            Target::AppUpdates => self.start(Section::App, cx),
+            Target::AppUpdates => self.start(&Section::App, cx),
             Target::AppCheck => Section::App
                 .listed(cx)
                 .then(|| self.app.check_focus.clone()),
@@ -1631,6 +1654,11 @@ impl SettingsDialog {
                 }
                 panels
             }
+            Section::CustomAgent(_) | Section::AddCustomAgent => self
+                .custom_editor()
+                .map(|editor| editor.clone().into_any_element())
+                .into_iter()
+                .collect(),
             Section::Notifications => std::iter::once(self.sounds(preferences, cx))
                 .chain(self.ntfy.iter().cloned().map(IntoElement::into_any_element))
                 .collect(),
@@ -1709,6 +1737,7 @@ impl Render for SettingsDialog {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let palette = theme::palette(cx);
         let store = session::current_store(cx);
+        self.sync_custom_agents(store.as_ref(), window, cx);
         let preferences = store
             .as_ref()
             .and_then(|store| preferences(store.read(cx).collections()))
@@ -1745,7 +1774,7 @@ impl Render for SettingsDialog {
         .on_click(dismiss(weak.clone()));
         // An open editor owns the row even if another form on this page is dirty. Delete confirmation replaces
         // the recipe editor's controls until the question is answered.
-        let editor_footer = match (searching, self.shown) {
+        let editor_footer = match (searching, &self.shown) {
             (false, Section::Recipes) => self
                 .recipes
                 .as_ref()
@@ -1756,6 +1785,9 @@ impl Render for SettingsDialog {
                 .as_ref()
                 .and_then(|credentials| credentials.read(cx).visible_editor())
                 .map(|editor| credentials::Editor::footer(&editor, cx)),
+            (false, Section::CustomAgent(_) | Section::AddCustomAgent) => self
+                .custom_editor()
+                .map(|editor| custom_agents::Editor::footer(editor, cx)),
             _ => None,
         };
         let pending = (!searching && editor_footer.is_none())
@@ -1803,7 +1835,8 @@ impl Render for SettingsDialog {
                             .child("has unsaved changes"),
                     ),
             )
-        } else if !confirming {
+        } else if !confirming && self.shown.custom_agent_key().is_none() {
+            // A custom registration stores its capability checkboxes together with the other draft fields.
             frame.note(FOOTER_NOTE)
         } else {
             frame

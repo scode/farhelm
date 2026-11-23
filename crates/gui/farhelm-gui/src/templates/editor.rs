@@ -100,9 +100,10 @@ const ADD_MENU_PAD: f32 = 8.;
 const PROMPT_ROWS: usize = 4;
 
 /// The fields the editor shows as a text input of their own. The others are choices, drawn without one.
-const TEXT_FIELDS: [Field; 7] = [
+const TEXT_FIELDS: [Field; 8] = [
     Field::Command,
     Field::Model,
+    Field::Effort,
     Field::Wrapper,
     Field::Resume,
     Field::Prompt,
@@ -622,6 +623,12 @@ impl Editor {
             }
             Text::Field(Field::Command) => fields.command.clone().unwrap_or_default(),
             Text::Field(Field::Model) => fields.model.clone().flatten().unwrap_or_default(),
+            Text::Field(Field::Effort) => fields
+                .effort
+                .as_ref()
+                .and_then(Option::as_ref)
+                .map_or("", |effort| effort.as_cli_arg())
+                .to_owned(),
             Text::Field(Field::Resume) => {
                 fields.resume_command.clone().flatten().unwrap_or_default()
             }
@@ -644,12 +651,7 @@ impl Editor {
                     .unwrap_or_default(),
             },
             Text::Field(
-                Field::Yolo
-                | Field::Agent
-                | Field::Effort
-                | Field::Permissions
-                | Field::Container
-                | Field::Host,
+                Field::Yolo | Field::Agent | Field::Permissions | Field::Container | Field::Host,
             ) => String::new(),
         };
         if self.read_only(which) {
@@ -669,6 +671,14 @@ impl Editor {
                 TEXT_FIELDS
                     .into_iter()
                     .filter(|field| field.is_set(&self.draft.fields))
+                    .filter(|field| {
+                        *field != Field::Effort
+                            || self
+                                .draft
+                                .fields
+                                .agent
+                                .is_some_and(farhelm_proto::LaunchHarness::uses_custom_catalog)
+                    })
                     .map(Text::Field),
             )
             .chain(
@@ -1008,12 +1018,23 @@ impl Editor {
             .unwrap_or_default();
         let recipes =
             session::current_store(cx).map(|store| Recipes::of(store.read(cx).collections()));
+        let store = session::current_store(cx);
+        let custom_agents = store
+            .as_ref()
+            .map(|store| {
+                store
+                    .read(cx)
+                    .collections()
+                    .ordered::<farhelm_proto::custom_agents::CustomAgent>()
+            })
+            .unwrap_or_default();
         let flags = self.typed_text(Text::Flags, cx);
         let rows = rows::Rows {
             editor: self,
             weak,
             palette,
             hosts: &hosts,
+            custom_agents: &custom_agents,
             // A catalog not yet pushed, or unreadable, lists nothing, as in the launcher: a stored recipe then shows
             // as retained until the catalog arrives.
             recipes: match &recipes {
@@ -1317,6 +1338,7 @@ fn apply_text(draft: &mut Draft, which: Text, text: String) {
         Text::Flags => fields.permission_flags = farhelm_proto::split_permission_flags(&text).ok(),
         Text::Field(Field::Command) => fields.command = Some(text),
         Text::Field(Field::Model) => fields.model = Some((!text.is_empty()).then_some(text)),
+        Text::Field(Field::Effort) => fields.effort = Some((!text.is_empty()).then(|| text.into())),
         Text::Field(Field::Resume) => {
             fields.resume_command = Some((!text.is_empty()).then_some(text));
         }
@@ -1343,12 +1365,7 @@ fn apply_text(draft: &mut Draft, which: Text, text: String) {
             }
         }
         Text::Field(
-            Field::Yolo
-            | Field::Agent
-            | Field::Effort
-            | Field::Permissions
-            | Field::Container
-            | Field::Host,
+            Field::Yolo | Field::Agent | Field::Permissions | Field::Container | Field::Host,
         ) => {}
     }
 }
@@ -1396,6 +1413,13 @@ pub(super) fn spec(which: Text, fields: &TemplateFields) -> TextSpec {
             "Model: type any model; suggestions follow the agent type this template sets",
             Some("Default, or type any model"),
             false,
+        ),
+        Text::Field(Field::Effort) => (
+            "templates-effort",
+            "Effort",
+            "Custom effort: lowercase letters, digits, hyphens and underscores",
+            Some("Default, or type an effort"),
+            true,
         ),
         Text::Field(Field::Wrapper) => (
             "templates-wrapper",
@@ -1446,12 +1470,7 @@ pub(super) fn spec(which: Text, fields: &TemplateFields) -> TextSpec {
         ),
         // Choices, which have no input; never asked for.
         Text::Field(
-            Field::Yolo
-            | Field::Agent
-            | Field::Effort
-            | Field::Permissions
-            | Field::Container
-            | Field::Host,
+            Field::Yolo | Field::Agent | Field::Permissions | Field::Container | Field::Host,
         ) => ("templates-choice", "", "", None, false),
     };
     TextSpec {

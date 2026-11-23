@@ -168,6 +168,44 @@ fn only_set_choices_narrow_the_setups() {
     assert!(ranked(&history, &other_model, None).is_empty());
 }
 
+/// The generic Custom harness spans many registrations, and a typed effort can be outside the built-in vocabulary.
+/// Only the selected registration and effort may survive the filter once both choices are set.
+#[test]
+fn custom_recents_filter_by_registration_and_raw_effort() {
+    let saved = LaunchSelection {
+        custom_agent: Some("acme-code".into()),
+        effort: Some(String::from("extra-deep").into()),
+        ..selection(LaunchHarness::Custom)
+    };
+    let history = history(vec![
+        launch("/w", saved.clone()),
+        launch(
+            "/w",
+            LaunchSelection {
+                custom_agent: Some("other-code".into()),
+                ..saved.clone()
+            },
+        ),
+        launch(
+            "/w",
+            LaunchSelection {
+                effort: Some(LaunchEffort::High.into()),
+                ..saved.clone()
+            },
+        ),
+    ]);
+    assert_eq!(ranked(&history, &RecentFilter::default(), None).len(), 3);
+    let filter = RecentFilter {
+        harness: Some(saved.harness),
+        custom_agent: saved.custom_agent.clone(),
+        effort: saved.effort.clone(),
+        ..RecentFilter::default()
+    };
+    let matching = ranked(&history, &filter, None);
+    assert_eq!(matching.len(), 1);
+    assert_eq!(matching[0].selection, saved);
+}
+
 /// Pi's omitted permission is YOLO, so a launch that omitted it and one that chose YOLO are one setup, and a YOLO
 /// filter finds it. Why: the helm launches both the same way (old `omitted_yolo_recents_group_and_filter_by_effective_mode`).
 #[test]

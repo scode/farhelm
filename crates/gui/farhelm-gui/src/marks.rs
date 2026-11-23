@@ -35,6 +35,7 @@ pub enum HarnessGlyph {
     Antigravity,
     Bash,
     Zsh,
+    Custom,
 }
 
 impl HarnessGlyph {
@@ -56,6 +57,7 @@ impl HarnessGlyph {
         HarnessGlyph::Antigravity,
         HarnessGlyph::Bash,
         HarnessGlyph::Zsh,
+        HarnessGlyph::Custom,
     ];
 
     /// The stable word naming this mark: the old UI's `data-glyph` value and the key its identity colors were
@@ -75,6 +77,7 @@ impl HarnessGlyph {
             HarnessGlyph::Terminal => "terminal",
             HarnessGlyph::Bash => "bash",
             HarnessGlyph::Zsh => "zsh",
+            HarnessGlyph::Custom => "custom",
         }
     }
 
@@ -94,6 +97,7 @@ impl HarnessGlyph {
             HarnessGlyph::Terminal => &TERMINAL,
             HarnessGlyph::Bash => &BASH,
             HarnessGlyph::Zsh => &ZSH,
+            HarnessGlyph::Custom => &CUSTOM,
         }
     }
 }
@@ -318,6 +322,23 @@ const GROK: HarnessMark = mark(
 // Bounds x=1..11 and y=2..10 already span ten units and center on (6, 6).
 const ANTIGRAVITY: HarnessMark = mark(
     &[fill(ANTIGRAVITY_GLYPH)],
+    bbox(1.0, 2.0, 10.0, 8.0),
+    0.0,
+    0.0,
+    1.0,
+);
+/// Farhelm's own plug and connection node identify the adapter contract on all custom agents.
+/// Bounds x=1..11 and y=2..10 already span ten units and center on (6, 6).
+const CUSTOM: HarnessMark = mark(
+    &[
+        fill(
+            "M1 3.75H3V2H4.5V3H6.25L7.5 4.25V5.25H8.5V6.75H7.5V7.75L6.25 9H4.5V10H3V8.25H1V6.75H3V5.25H1Z",
+        ),
+        MarkPath {
+            d: "M9.5 4.5A1.5 1.5 0 1 1 9.5 7.5A1.5 1.5 0 1 1 9.5 4.5ZM9.5 5.5A.5 .5 0 1 0 9.5 6.5A.5 .5 0 1 0 9.5 5.5Z",
+            paint: Paint::FillEvenOdd,
+        },
+    ],
     bbox(1.0, 2.0, 10.0, 8.0),
     0.0,
     0.0,

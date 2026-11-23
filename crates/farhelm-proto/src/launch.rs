@@ -673,6 +673,16 @@ impl From<LaunchEffort> for LaunchEffortValue {
     }
 }
 
+impl From<String> for LaunchEffortValue {
+    /// Keep the canonical stored representation when a free-text value has a built-in spelling.
+    fn from(effort: String) -> Self {
+        LaunchEffort::ALL
+            .into_iter()
+            .find(|known| known.as_cli_arg() == effort)
+            .map_or_else(|| Self::Custom(effort), Self::Known)
+    }
+}
+
 /// A permission choice that adds a deliberate harness flag.
 ///
 /// `Guarded` records explicit flags, rather than inferring safety from an

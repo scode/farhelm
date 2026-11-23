@@ -390,6 +390,8 @@ enum Key {
     Trash(String),
     /// A named credential of the helm's catalog, by its name, which the helm never changes after creation.
     Credential(String),
+    /// Serializes register, edit and delete on the same custom-agent ID.
+    CustomAgent(String),
     /// One terminal tab of a session, by the session's id and the tab's: apart from the session's own key and from its
     /// sibling tabs', so a tab closes beside the others and never makes the session's lifecycle actions busy.
     Tab(String, String),
@@ -471,6 +473,10 @@ impl OpKey {
     /// not created yet takes the key of the name it is being created under, which the helm keeps unique across kinds.
     pub fn credential(name: &str) -> OpKey {
         OpKey(Key::Credential(name.to_owned()))
+    }
+
+    pub(crate) fn custom_agent(id: &str) -> OpKey {
+        OpKey(Key::CustomAgent(id.to_owned()))
     }
 
     /// One terminal tab of a session, by the id the helm serves the session under and the tab's id

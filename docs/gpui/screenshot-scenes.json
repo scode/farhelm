@@ -2864,6 +2864,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-custom-agent",
+      "title": "Custom agent launch with free-text model and effort, conversation ID, and wrapper prefix",
+      "reference": null
+    },
+    {
       "golden": "launcher-shell-wrapper",
       "title": "A Bash launch with its Wrapper prefix field and help open",
       "reference": null
@@ -3077,6 +3082,11 @@
       "golden": "settings-claude",
       "title": "Claude Code's page with its trust switch, caution and hint switch",
       "reference": "settings-agent-trust"
+    },
+    {
+      "golden": "settings-custom-agent",
+      "title": "Saved custom agent with capability switches and start and resume previews",
+      "reference": null
     },
     {
       "golden": "settings-codex",

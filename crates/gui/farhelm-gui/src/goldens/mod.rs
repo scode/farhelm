@@ -110,6 +110,30 @@ const MAX_STAGING_FRAMES: usize = 24;
 /// get two consecutive identical ones. Unstable pixels fail here before any comparison with a reference.
 const MAX_SETTLE_FRAMES: usize = 6;
 
+/// Both views show the same registration to pin the identity and controls on either side of a launch.
+fn custom_agent() -> farhelm_proto::custom_agents::CustomAgent {
+    farhelm_proto::custom_agents::CustomAgent {
+        id: "acme-code".into(),
+        display_name: "Acme Code".into(),
+        command: "~/bin/acme-code".into(),
+        supports_resumption: true,
+        supports_reporting: true,
+    }
+}
+
+fn custom_agent_state() -> farhelm_proto::ui_channel::CollectionState {
+    use farhelm_proto::ui_channel::{Collection, CollectionState, KeyedEntry};
+    let agent = custom_agent();
+    CollectionState {
+        collection: Collection::CustomAgents,
+        meta: crate::test_support::meta(&[agent.id.as_str()]),
+        entries: vec![KeyedEntry {
+            key: agent.id.clone(),
+            value: serde_json::to_value(agent).expect("the fixture registration serializes"),
+        }],
+    }
+}
+
 /// One scene: a name, its size in logical pixels, what it draws, and what it sets up once its window exists.
 struct Scene {
     name: &'static str,
@@ -1127,6 +1151,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_more_options_setup,
     },
     Scene {
+        name: "launcher-custom-agent",
+        size: (1080., 1160.),
+        draw: session_lists_then,
+        setup: launcher_custom_agent_setup,
+    },
+    Scene {
         name: "launcher-shell-wrapper",
         size: (1080., 1040.),
         draw: session_lists_then,
@@ -1351,6 +1381,12 @@ static SCENES: &[Scene] = &[
         size: (800., 830.),
         draw: empty,
         setup: settings_claude_setup,
+    },
+    Scene {
+        name: "settings-custom-agent",
+        size: (800., 900.),
+        draw: settings_scroll_end,
+        setup: settings_custom_agent_setup,
     },
     Scene {
         name: "settings-codex",

@@ -71,6 +71,7 @@ impl Candidate {
             Some(LauncherKind::Agent) => {
                 fields.prompt = state.prompt.clone();
                 fields.agent = state.harness;
+                fields.custom_agent = state.custom_agent.clone().map(Some);
                 fields.model = state.model.clone().map(Some);
                 fields.effort = state.effort.map(Some);
                 // An explicit choice of the agent's default is saved as a reset (present, null); a passive one is not
@@ -88,6 +89,10 @@ impl Candidate {
             }
             Some(LauncherKind::Command) => {
                 fields.agent = state.command_agent;
+                fields.custom_agent = state
+                    .command_agent
+                    .filter(|agent| agent.uses_custom_catalog())
+                    .map(|_| state.command_custom_agent.clone());
                 fields.command = (!state.command.is_empty()).then(|| state.command.clone());
                 fields.yolo = state.yolo;
                 fields.resume_command = state.resume_command.clone().map(Some);
@@ -150,7 +155,11 @@ pub fn choice_text(field: Field, fields: &TemplateFields) -> Option<String> {
                 Some((first, _)) => format!("{first}…"),
                 None => prompt.clone(),
             }),
-        Field::Agent => fields.agent.map(|agent| harness_label(agent).to_owned()),
+        Field::Agent => fields
+            .custom_agent
+            .clone()
+            .flatten()
+            .or_else(|| fields.agent.map(|agent| harness_label(agent).to_owned())),
         Field::Model => fields.model.clone().flatten(),
         Field::Effort => fields
             .effort

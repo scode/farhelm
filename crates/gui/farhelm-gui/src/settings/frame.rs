@@ -19,13 +19,19 @@ enum Group {
     General,
     Placement,
     Agents,
+    CustomAgents,
 }
 
 impl Group {
-    const ALL: [Self; 3] = [Self::General, Self::Placement, Self::Agents];
+    const ALL: [Self; 4] = [
+        Self::General,
+        Self::Placement,
+        Self::Agents,
+        Self::CustomAgents,
+    ];
 
     /// Group and section order agree with the order used by the search catalog.
-    fn of(section: Section) -> Self {
+    fn of(section: &Section) -> Self {
         match section {
             Section::Sessions
             | Section::Appearance
@@ -39,6 +45,7 @@ impl Group {
             | Section::Recipes
             | Section::Tensorlake => Self::Placement,
             Section::Agent(_) => Self::Agents,
+            Section::CustomAgent(_) | Section::AddCustomAgent => Self::CustomAgents,
         }
     }
 
@@ -47,6 +54,7 @@ impl Group {
             Self::General => "General",
             Self::Placement => "Where sessions run",
             Self::Agents => "Agents",
+            Self::CustomAgents => "Custom agents",
         }
     }
 
@@ -55,6 +63,7 @@ impl Group {
             Self::General => palette.settings_general(),
             Self::Placement => palette.settings_placement(),
             Self::Agents => palette.settings_agents(),
+            Self::CustomAgents => palette.harness[8],
         }
     }
 }
@@ -67,7 +76,7 @@ enum Scope {
 }
 
 impl Scope {
-    fn of(section: Section) -> Self {
+    fn of(section: &Section) -> Self {
         match section {
             Section::Recipes | Section::Tensorlake | Section::Credentials => Self::Helm,
             Section::App => Self::Device,
@@ -78,7 +87,9 @@ impl Scope {
             | Section::Hosts
             | Section::Checkouts
             | Section::Containers
-            | Section::Agent(_) => Self::Hosts,
+            | Section::Agent(_)
+            | Section::CustomAgent(_)
+            | Section::AddCustomAgent => Self::Hosts,
         }
     }
 
@@ -101,8 +112,8 @@ impl Scope {
 
 impl Section {
     /// The page description belongs in the pinned heading so it remains available on long or scrolled forms.
-    fn description(self) -> &'static str {
-        match self {
+    fn description(&self) -> gpui::SharedString {
+        let description = match self {
             Self::Sessions => "How session commands and quick launches behave",
             Self::Appearance => "The interface colors",
             Self::Terminal => "Links and files clicked in a terminal",
@@ -114,7 +125,7 @@ impl Section {
             Self::Recipes => "Software and credentials for new containers and sandboxes",
             Self::Tensorlake => "Cloud sandboxes in your Tensorlake project",
             Self::Agent(harness) => match (
-                TrustAgent::for_harness(harness).is_some(),
+                TrustAgent::for_harness(*harness).is_some(),
                 harness.agent_kind().offers_persistent_hooks(),
             ) {
                 (true, true) => "Workspace trust and conversation hooks",
@@ -123,16 +134,19 @@ impl Section {
                 (false, false) => "",
             },
             Self::Credentials => "Secrets Farhelm hands to hosts for you",
-        }
+            Self::CustomAgent(id) => return format!("Custom agent · ID {id}").into(),
+            Self::AddCustomAgent => "Register an agent command for this helm",
+        };
+        description.into()
     }
 
     /// Pages with shared choices explain live updates once in the scope label's hover help.
-    fn has_live_choices(self, cx: &gpui::App) -> bool {
+    fn has_live_choices(&self, cx: &gpui::App) -> bool {
         match self {
             Self::App => crate::desktop::updates::upgrade_notes(cx).is_some(),
             Self::Agent(harness) => {
                 harness.agent_kind().offers_persistent_hooks()
-                    || TrustAgent::for_harness(harness)
+                    || TrustAgent::for_harness(*harness)
                         .and_then(TrustAgent::hint)
                         .is_some()
             }
@@ -143,13 +157,17 @@ impl Section {
             | Self::Hosts
             | Self::Checkouts
             | Self::Tensorlake => true,
-            Self::Containers | Self::Recipes | Self::Credentials => false,
+            Self::Containers
+            | Self::Recipes
+            | Self::Credentials
+            | Self::CustomAgent(_)
+            | Self::AddCustomAgent => false,
         }
     }
 
     /// Use the same glyph and role in the 20px section tile and the 32px page tile.
     /// The selected tile gets inverse ink so it stays legible on the accent fill.
-    fn tile(self, large: bool, selected: bool, palette: &theme::Palette) -> Div {
+    fn tile(&self, large: bool, selected: bool, palette: &theme::Palette) -> Div {
         let (side, corner, glyph) = if large {
             (32., 6., 17.)
         } else {
@@ -160,9 +178,8 @@ impl Section {
         // Group color belongs to the tile. Agent glyphs keep the same ink as their marks in the session list.
         let glyph_ink = theme::color(match self {
             _ if selected => palette.on_fill,
-            Self::Agent(harness) => {
-                crate::harness::ink(crate::harness::glyph(harness), palette).unwrap_or(palette.fg_1)
-            }
+            Self::Agent(harness) => crate::harness::ink(crate::harness::glyph(*harness), palette)
+                .unwrap_or(palette.fg_1),
             _ => hue,
         });
         div()
@@ -190,11 +207,15 @@ impl SettingsDialog {
             layers::beside_edge("settings-navigation-help-edge", window, cx).into_any_element();
         let scroll = scroll_handle("settings-navigation-scroll".into(), window, cx);
         let searching = self.search.active();
+        let registered = self.custom_sections(cx);
         let sections = Group::ALL.into_iter().filter_map(|group| {
-            let rows: Vec<_> = Section::all()
-                .filter(|&section| Group::of(section) == group && section.listed(cx))
+            let rows: Vec<_> = registered
+                .iter()
+                .cloned()
+                .chain(Section::all())
+                .filter(|section| Group::of(section) == group && section.listed(cx))
                 .filter_map(|section| {
-                    let count = searching.then(|| self.search.section_count(section));
+                    let count = searching.then(|| self.search.section_count(&section));
                     (count != Some(0)).then(|| self.section_button(section, count, cx))
                 })
                 .collect();
@@ -265,7 +286,9 @@ impl SettingsDialog {
         let weak = cx.weak_entity();
         let palette = theme::palette(cx);
         let selected = count.is_none() && section == self.shown;
-        let edited = self.section_edited(section, cx);
+        let edited = self.section_edited(&section, cx);
+        let display = section.display_label(cx);
+        let label = display.accessible_text();
         let content = div()
             .flex_1()
             .min_w_0()
@@ -273,7 +296,7 @@ impl SettingsDialog {
             .items_center()
             .gap(px(7.))
             .child(section.tile(false, selected, palette))
-            .child(div().flex_1().min_w_0().truncate().child(section.label()))
+            .child(div().flex_1().min_w_0().truncate().child(display))
             .when_some(count, |row, count| {
                 row.child(
                     div()
@@ -284,9 +307,9 @@ impl SettingsDialog {
             })
             .children(edited.then(|| super::editing::dot(selected, palette)));
         Button::new(
-            section.button_id(),
-            section.label(),
-            HoverHelp::tooltip(format!("Show {} settings", section.label())).beside_list(false),
+            section.nav_button_id(),
+            label.clone(),
+            HoverHelp::tooltip(format!("Show {label} settings")).beside_list(false),
             Role::Button,
         )
         .tier(Tier::Nav)
@@ -294,14 +317,14 @@ impl SettingsDialog {
         .content(content)
         .when_some(count, |button, count| {
             let matches = if count == 1 { "match" } else { "matches" };
-            button.accessible_name(format!("{} ({count} {matches})", section.label()))
+            button.accessible_name(format!("{label} ({count} {matches})"))
         })
         .when(edited, |button| {
             let name = count.map_or_else(
-                || format!("{} (unsaved changes)", section.label()),
+                || format!("{label} (unsaved changes)"),
                 |count| {
                     let matches = if count == 1 { "match" } else { "matches" };
-                    format!("{} ({count} {matches}, unsaved changes)", section.label())
+                    format!("{label} ({count} {matches}, unsaved changes)")
                 },
             );
             button.accessible_name(name)
@@ -309,7 +332,7 @@ impl SettingsDialog {
         .on_click(move |_, window, cx| {
             let _ = weak.update(cx, |dialog, cx| {
                 dialog.search.clear(window, cx);
-                dialog.show(section, window, cx);
+                dialog.show(section.clone(), window, cx);
             });
         })
     }
@@ -338,7 +361,7 @@ impl SettingsDialog {
                     .pt(px(10.))
                     .pb(px(16.))
                     .gap(px(SECTION_GAP))
-                    .children(self.body(self.shown, preferences, cx)),
+                    .children(self.body(self.shown.clone(), preferences, cx)),
             );
         div()
             .flex_1()
@@ -357,8 +380,14 @@ impl SettingsDialog {
 
     /// The scope tells readers where the controls apply without repeating that information under each switch.
     fn page_heading(&self, window: &mut Window, cx: &mut Context<Self>) -> AnyElement {
-        let section = self.shown;
+        let section = &self.shown;
         let scope = Scope::of(section);
+        let display = if *section == Section::AddCustomAgent {
+            "Add custom agent".into()
+        } else {
+            section.display_label(cx)
+        };
+        let description = section.description();
         let palette = theme::palette(cx);
         let scope_id = gpui::SharedString::from("settings-page-scope");
         let scope_line = div()
@@ -408,23 +437,23 @@ impl SettingsDialog {
                                     .id("settings-heading")
                                     .debug_selector(|| "settings-heading".into())
                                     .role(Role::Heading)
-                                    .aria_label(section.label())
-                                    .aria_description(section.description())
+                                    .aria_label(display.accessible_text())
+                                    .aria_description(description.clone())
                                     .text_size(px(16.))
                                     .line_height(px(20.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(section.label()),
+                                    .child(display),
                             )
                             .child(scope_line),
                     )
-                    .when(!section.description().is_empty(), |heading| {
+                    .when(!description.is_empty(), |heading| {
                         heading.child(
                             div()
                                 .text_size(px(12.))
                                 .line_height(px(16.))
                                 .text_color(theme::color(palette.fg_1))
                                 .truncate()
-                                .child(section.description()),
+                                .child(description),
                         )
                     }),
             )

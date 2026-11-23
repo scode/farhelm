@@ -70,6 +70,7 @@ struct SettingsFixture {
     tensorlake_key: bool,
     /// The query entered after opening, for results and empty search scenes.
     search: Option<&'static str>,
+    custom_agent: bool,
 }
 
 /// `entries` as a pushed collection's first snapshot, each filed under the key `key` gives it, in their order.
@@ -111,6 +112,7 @@ fn settings_scene_with(
         container_leftover,
         tensorlake_key,
         search,
+        custom_agent,
     } = fixture;
     let (mut helm, handle, events) = FakeHelm::new();
     let connection = session::start(handle, events, None, cx);
@@ -136,6 +138,9 @@ fn settings_scene_with(
     if !hosts.is_empty() {
         snapshot.push(crate::hosts::tests::hosts(&hosts));
     }
+    if custom_agent {
+        snapshot.push(super::custom_agent_state());
+    }
     helm.connect(snapshot);
     // The dialog reads the row from the store, which the snapshot reaches after this setup returns: open once the
     // connection has a UI session, and only once.
@@ -144,9 +149,10 @@ fn settings_scene_with(
     let helm = Rc::new(RefCell::new(helm));
     let answering = helm.clone();
     super::once_ui_session(state, helm, connection, cx, move |cx| {
+        let opened = section.clone();
         let _ = handle.update(cx, |_, window, cx| {
             let mark = Mark::take(cx);
-            crate::settings::open_at(section, &opener, &mark, window, cx);
+            crate::settings::open_at(section.clone(), &opener, &mark, window, cx);
             match recipe_editor {
                 Some(RecipeEditorFixture::New) => {
                     crate::settings::open_new_recipe_for_opened(window, cx);
@@ -168,11 +174,26 @@ fn settings_scene_with(
         }
         answer_settings_reads(
             &mut answering.borrow_mut(),
-            section,
+            opened,
             tensorlake_key,
             container_leftover,
         );
     });
+}
+
+/// Scroll the saved registration to its two capabilities and command previews. The pinned heading keeps its ID.
+pub(super) fn settings_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    settings_scene_with(
+        state,
+        crate::settings::Section::CustomAgent("acme-code".into()),
+        SettingsFixture {
+            custom_agent: true,
+            ..SettingsFixture::default()
+        },
+        window,
+        cx,
+    );
+    stage_scroll_end(state, false);
 }
 
 /// A later section in the same opening receives the same fake configuration as if it were the first.
@@ -999,10 +1020,10 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
     };
     let step = draft.step.get();
     let section = match step {
-        DraftStep::Edit | DraftStep::OpenNotifications => draft.section,
+        DraftStep::Edit | DraftStep::OpenNotifications => draft.section.clone(),
         DraftStep::EditNotifications => Section::Notifications,
         DraftStep::VerifyDraft => {
-            if settings::draft_changed_for_opened(draft.section, cx) {
+            if settings::draft_changed_for_opened(draft.section.clone(), cx) {
                 draft.step.set(DraftStep::Done);
             }
             return div().into_any_element();
@@ -1032,9 +1053,9 @@ pub(super) fn settings_edited(state: &SceneState, window: &mut Window, cx: &mut 
             .iter()
             .find_map(|item| item.downcast_ref::<Rc<RefCell<FakeHelm>>>())
             .expect("the second page reads from the scene's helm");
-        answer_settings_reads(&mut helm.borrow_mut(), section, false, false);
+        answer_settings_reads(&mut helm.borrow_mut(), section.clone(), false, false);
     }
-    if let Some(input) = settings::draft_input_for_opened(section, cx) {
+    if let Some(input) = settings::draft_input_for_opened(section.clone(), cx) {
         let text = match section {
             Section::Terminal => "md, txt, json, png, jpg, html",
             Section::Checkouts => "~/work/managed",

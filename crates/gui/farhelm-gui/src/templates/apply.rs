@@ -115,11 +115,11 @@ pub fn snapshot(draft: &LaunchDraft, hosts: &[HostView]) -> LauncherState {
             Tab::Command => LauncherKind::Command,
         }),
         harness: agent.harness,
-        custom_agent: None,
-        command_custom_agent: None,
+        custom_agent: agent.custom_agent.clone(),
+        command_custom_agent: command.custom_agent.clone(),
         model: agent.model.clone(),
         model_owner: agent.model_owner,
-        effort: agent.effort.map(Into::into),
+        effort: agent.effort_value(),
         permissions: agent.permissions,
         permission_flags: (agent.permissions == Some(LaunchPermission::Custom))
             .then(|| split_permission_flags(&agent.permission_flags).ok())
@@ -386,6 +386,13 @@ fn remove_held(fields: &mut TemplateFields, held: &LauncherState, draft: &Launch
         Some(LauncherKind::Command) => held.command_agent,
         _ => held.harness,
     };
+    let held_custom = match held.kind {
+        Some(LauncherKind::Command) => &held.command_custom_agent,
+        _ => &held.custom_agent,
+    };
+    if fields.custom_agent.as_ref() == Some(held_custom) {
+        fields.custom_agent = None;
+    }
     if fields.agent.is_some() && fields.agent == held_agent {
         fields.agent = None;
     }
@@ -444,7 +451,7 @@ fn restart_refusal(draft: &LaunchDraft, template: &LaunchTemplate) -> Option<Tem
     let fields = &template.fields;
     let field = if fields.kind.is_some() {
         "launch kind"
-    } else if fields.agent.is_some() {
+    } else if fields.agent.is_some() || fields.custom_agent.is_some() {
         "agent type"
     } else if fields.host.is_some() {
         "host"
@@ -508,6 +515,26 @@ fn replay(
         }
     }
 
+    // The shared fold already resolved which launch tab the ID belongs to. A changed registration
+    // invalidates a conversation ID entered for the old integration.
+    if fields.agent.is_some() || fields.custom_agent.is_some() {
+        match kind {
+            LauncherKind::Agent => {
+                if draft.agent.custom_agent != applied.custom_agent {
+                    draft.conversation.clear();
+                    draft.agent.model.clone_from(&applied.model);
+                    draft.agent.model_owner = applied.model_owner;
+                    draft.agent.custom_effort.clear();
+                }
+                draft.agent.custom_agent.clone_from(&applied.custom_agent);
+            }
+            LauncherKind::Command => draft
+                .command
+                .custom_agent
+                .clone_from(&applied.command_custom_agent),
+        }
+    }
+
     // 3. The agent launch's choices. The fold has refused any of these on the command kind.
     match &fields.model {
         Some(Some(id)) => {
@@ -535,7 +562,17 @@ fn replay(
         None => {}
     }
     if let Some(effort) = &fields.effort {
-        draft.choose_effort(effort.as_ref().and_then(|value| value.known()));
+        if applied
+            .harness
+            .is_some_and(LaunchHarness::uses_custom_catalog)
+        {
+            draft.agent.custom_effort = effort
+                .as_ref()
+                .map_or("", |value| value.as_cli_arg())
+                .to_owned();
+        } else {
+            draft.choose_effort(effort.as_ref().and_then(|value| value.known()));
+        }
     }
     if let Some(permissions) = fields.permissions {
         // A template's explicit reset asks for today's default. In Restart with, whose draft shows the permission the

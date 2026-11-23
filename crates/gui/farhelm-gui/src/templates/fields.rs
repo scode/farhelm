@@ -117,7 +117,7 @@ impl Field {
     pub fn is_set(self, fields: &TemplateFields) -> bool {
         match self {
             Field::Prompt => fields.prompt.is_some(),
-            Field::Agent => fields.agent.is_some(),
+            Field::Agent => fields.agent.is_some() || fields.custom_agent.is_some(),
             Field::Model => fields.model.is_some(),
             Field::Effort => fields.effort.is_some(),
             Field::Permissions => fields.permissions.is_some(),
@@ -164,7 +164,10 @@ impl Field {
     pub fn remove(self, fields: &mut TemplateFields) {
         match self {
             Field::Prompt => fields.prompt = None,
-            Field::Agent => fields.agent = None,
+            Field::Agent => {
+                fields.agent = None;
+                fields.custom_agent = None;
+            }
             Field::Model => fields.model = None,
             Field::Effort => fields.effort = None,
             Field::Permissions => {
@@ -237,6 +240,23 @@ impl Field {
                 "Bash and Zsh are shell session types. Choose one on the Agent tab.".to_owned(),
             );
         }
+        let custom = fields.agent.is_some_and(LaunchHarness::uses_custom_catalog);
+        if custom {
+            let custom_value = match self {
+                Field::Model => fields.model.as_ref().and_then(Option::as_deref),
+                Field::Effort => fields
+                    .effort
+                    .as_ref()
+                    .and_then(Option::as_ref)
+                    .map(|value| value.as_cli_arg()),
+                _ => None,
+            };
+            if let Some(value) = custom_value
+                && let Err(reason) = farhelm_proto::custom_agents::validate_model_or_effort(value)
+            {
+                return Some(reason.to_owned());
+            }
+        }
         let fits = if self == Field::Model {
             fields.kind == Some(LauncherKind::Agent) && !shell
         } else {
@@ -258,6 +278,7 @@ impl Field {
             );
         }
         if self == Field::Effort
+            && !custom
             && let Some(Some(chosen)) = &fields.effort
             && !chosen.known().is_some_and(|chosen| {
                 effort_options(fields, catalog)

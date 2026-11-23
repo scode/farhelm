@@ -28,7 +28,7 @@ use std::cmp::Reverse;
 use farhelm_proto::session_requests::{LaunchHistoryEntry, LaunchHistoryReply};
 use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{
-    GithubRepo, LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
+    GithubRepo, LaunchEffortValue, LaunchHarness, LaunchPermission, LaunchSelection, LaunchTarget,
     join_permission_flags,
 };
 
@@ -47,8 +47,10 @@ pub const ALL_DEFAULTS: &str = "Defaults";
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct RecentFilter {
     pub harness: Option<LaunchHarness>,
+    /// The harness groups every registration. An explicit ID narrows the history to that registration.
+    pub custom_agent: Option<String>,
     pub model: Option<String>,
-    pub effort: Option<LaunchEffort>,
+    pub effort: Option<LaunchEffortValue>,
     pub permissions: Option<LaunchPermission>,
 }
 
@@ -129,12 +131,17 @@ fn matches_filter(selection: &LaunchSelection, filter: &RecentFilter) -> bool {
         .harness
         .is_none_or(|harness| harness == selection.harness)
         && filter
+            .custom_agent
+            .as_ref()
+            .is_none_or(|id| selection.custom_agent.as_ref() == Some(id))
+        && filter
             .model
             .as_ref()
             .is_none_or(|model| selection.model.as_ref() == Some(model))
-        && filter.effort.is_none_or(|effort| {
-            selection.effort.as_ref().and_then(|value| value.known()) == Some(effort)
-        })
+        && filter
+            .effort
+            .as_ref()
+            .is_none_or(|effort| selection.effort.as_ref() == Some(effort))
         && filter.permissions.is_none_or(|permissions| {
             selection.harness.request_permission(selection.permissions) == Some(permissions)
         })
@@ -351,7 +358,10 @@ pub(super) fn summary_without_wrapper(selection: &LaunchSelection) -> String {
     }
     let mut words = format!(
         "{} · {} · Permissions: {}",
-        harness_label(selection.harness),
+        selection
+            .custom_agent
+            .as_deref()
+            .unwrap_or_else(|| harness_label(selection.harness)),
         summary_before_permissions(selection),
         permission_value(selection)
     );

@@ -269,6 +269,109 @@ pub(super) fn heading(cx: &mut VisualTestContext) -> Option<String> {
 
 // ---- Opening, the sections, and focus ------------------------------------------------------------------------------
 
+/// The catalog owns navigation even when it is empty. An external delete before a PUT settles takes the user
+/// back to Add while retaining the draft and its receipt. A delete confirmed on the page removes it entirely.
+#[gpui::test]
+fn creating_and_deleting_a_custom_agent_follows_the_catalog(cx: &mut TestAppContext) {
+    let collection = Collection::CustomAgents;
+    let (mut helm, cx, _gear) = open_rail_with(
+        cx,
+        &Preferences::default(),
+        vec![CollectionState {
+            collection,
+            meta: meta(&[]),
+            entries: vec![],
+        }],
+    );
+    open_settings(cx);
+    click_section(cx, Section::AddCustomAgent);
+    assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
+    fill(cx, "custom-agent-name", "Example Code");
+    fill(cx, "custom-agent-command", "~/bin/example-code");
+    into_view(cx, "custom-agent-resumption");
+    click(cx, "custom-agent-resumption");
+    assert_eq!(switch_on(cx, "custom-agent-resumption"), Some(true));
+    click(cx, "custom-agent-save");
+    let (create, body) = one_command(&mut helm, Method::Post, "/api/custom-agents");
+    assert_eq!(
+        body,
+        json!({
+            "id": "example-code",
+            "display_name": "Example Code",
+            "command": "~/bin/example-code",
+            "supports_resumption": true,
+            "supports_reporting": false,
+        })
+    );
+    helm.push(CollectionChanges {
+        collection,
+        meta: meta(&["example-code"]),
+        upsert: vec![KeyedEntry {
+            key: "example-code".into(),
+            value: body.clone(),
+        }],
+        remove: vec![],
+    });
+    helm.reply(create, 201, Some(body));
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Example Code"));
+
+    fill(cx, "custom-agent-command", "~/bin/example-v2");
+    click(cx, "custom-agent-save");
+    let (update, edited) = one_command(&mut helm, Method::Put, "/api/custom-agents/example-code");
+    assert_eq!(edited["command"], "~/bin/example-v2");
+    helm.push(CollectionChanges {
+        collection,
+        meta: meta(&[]),
+        upsert: vec![],
+        remove: vec!["example-code".into()],
+    });
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
+    helm.reply(
+        update,
+        404,
+        Some(json!({"error": "Custom agent is no longer registered"})),
+    );
+    settle(cx);
+    click_section(cx, Section::AddCustomAgent);
+    click(cx, "settings-section-custom-example-code");
+    assert_eq!(
+        label(cx, "custom-agent-save").as_deref(),
+        Some("Register again")
+    );
+    click(cx, "custom-agent-save");
+    let (register, recovered) = one_command(&mut helm, Method::Post, "/api/custom-agents");
+    assert_eq!(recovered, edited, "the refused PUT did not lose the edit");
+    helm.push(CollectionChanges {
+        collection,
+        meta: meta(&["example-code"]),
+        upsert: vec![KeyedEntry {
+            key: "example-code".into(),
+            value: recovered.clone(),
+        }],
+        remove: vec![],
+    });
+    helm.reply(register, 201, Some(recovered));
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Example Code"));
+
+    click(cx, "custom-agent-delete");
+    assert!(sent(&mut helm).is_empty(), "Delete asks first");
+    click(cx, "custom-agent-confirm-delete");
+    let (delete, _) = one_command(&mut helm, Method::Delete, "/api/custom-agents/example-code");
+    helm.push(CollectionChanges {
+        collection,
+        meta: meta(&[]),
+        upsert: vec![],
+        remove: vec!["example-code".into()],
+    });
+    helm.reply(delete, 204, None);
+    settle(cx);
+    assert_eq!(heading(cx).as_deref(), Some("Add custom agent"));
+    assert!(!drawn(cx, "settings-section-custom-example-code"));
+}
+
 /// SPEC.md, "Session list": "The gear always opens sessions and focuses its first switch". A Settings that opened on
 /// another section, or with focus outside it, would leave a keyboard user hunting for where they are. Specified: the
 /// gear's click opens one dialog showing the Sessions heading, with Skip session confirmations holding focus.
@@ -332,6 +435,8 @@ fn the_dialog_lists_only_the_sections_this_build_has(cx: &mut TestAppContext) {
             ("OpenCode".to_string(), Some(Toggled::False)),
             ("Grok".to_string(), Some(Toggled::False)),
             ("Antigravity".to_string(), Some(Toggled::False)),
+            ("Custom agents".to_string(), None),
+            ("+ Add custom agent".to_string(), Some(Toggled::False)),
         ]
     );
 }
@@ -377,6 +482,7 @@ fn app_is_listed_under_general_while_the_desktop_updater_runs(cx: &mut TestAppCo
             "OpenCode",
             "Grok",
             "Antigravity",
+            "+ Add custom agent",
         ]
     );
     click(cx, section_button(Section::App));

@@ -280,6 +280,8 @@ pub enum Icon {
     HarnessGrok,
     /// Antigravity: Farhelm's rising chevron and bar.
     HarnessAntigravity,
+    /// Custom agents share Farhelm's plug and connection node.
+    HarnessCustom,
     /// OpenCode: its favicon ring.
     HarnessOpenCode,
     /// A command no agent type was declared for: Farhelm's own window with a prompt.
@@ -442,6 +444,7 @@ impl Icon {
         Icon::HarnessOmp,
         Icon::HarnessGrok,
         Icon::HarnessAntigravity,
+        Icon::HarnessCustom,
         Icon::HarnessOpenCode,
         Icon::HarnessTerminal,
         Icon::HarnessBash,
@@ -548,6 +551,7 @@ impl Icon {
             Icon::HarnessOmp => "icons/harness-omp.svg",
             Icon::HarnessGrok => "icons/harness-grok.svg",
             Icon::HarnessAntigravity => "icons/harness-antigravity.svg",
+            Icon::HarnessCustom => "icons/harness-custom.svg",
             Icon::HarnessOpenCode => "icons/harness-opencode.svg",
             Icon::HarnessTerminal => "icons/harness-terminal.svg",
             Icon::HarnessBash => "icons/harness-bash.svg",
@@ -666,6 +670,9 @@ impl Assets {
             }
             "icons/harness-opencode.svg" => {
                 Some(include_bytes!("../assets/icons/harness-opencode.svg"))
+            }
+            "icons/harness-custom.svg" => {
+                Some(include_bytes!("../assets/icons/harness-custom.svg"))
             }
             "icons/harness-terminal.svg" => {
                 Some(include_bytes!("../assets/icons/harness-terminal.svg"))
