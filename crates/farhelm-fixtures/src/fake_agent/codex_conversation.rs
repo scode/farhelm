@@ -24,8 +24,8 @@ const CHILD_FLAG: &str = "--codex-child";
 /// The hook binary is supplied as a trailing argument because the real
 /// `farhelm-fixtures fake-agent` parser intentionally accepts vendor flags it
 /// does not understand. The fixture must not default to its own executable:
-/// its executable is named `codex` for kernel-basename validation, while a
-/// hook launched through it would add a second native Codex ancestor.
+/// its executable is named `codex` to mirror a stock install, while a hook
+/// launched through it would add a second Codex process to the ancestry.
 pub(super) fn run(record_home: Option<PathBuf>) -> anyhow::Result<()> {
     let root = record_home.context("codex-conversation needs --record-home")?;
     let args: Vec<std::ffi::OsString> = std::env::args_os().collect();
@@ -817,8 +817,9 @@ fn read_child_pipe(pipe: Option<impl Read>, what: &'static str) -> anyhow::Resul
 }
 
 /// Return the executable basename the kernel assigned this process, not the
-/// user-controlled argv0 spelling. The test reads this marker before relying
-/// on the production ancestry rule, whose whole predicate is this basename.
+/// user-controlled argv0 spelling. The test reads this marker to confirm the
+/// fixture reproduces a stock install's native `codex` image; attribution
+/// itself is positional and does not check the name.
 fn kernel_executable_basename() -> anyhow::Result<String> {
     #[cfg(target_os = "linux")]
     let path =

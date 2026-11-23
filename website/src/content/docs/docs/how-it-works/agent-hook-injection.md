@@ -106,7 +106,8 @@ as described below.
 
 ## Which launches get a reporter
 
-Grok needs `--no-leader`, which Farhelm passes when starting it. See [Grok setup](/docs/agents/grok/#setup).
+Grok needs `--no-leader`. Farhelm adds it when it composes a Grok launch; a custom command that declares Grok must
+include it. See [Grok setup](/docs/agents/grok/#setup).
 
 - **Claude, Codex, Muse, Goose, Pi or OMP picked in the session launcher** always gets its reporter, unless
   [you turned it off](#turning-it-off). Farhelm builds that command itself and knows where the reporter goes. With a
