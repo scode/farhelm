@@ -258,12 +258,15 @@ pub enum HelmMarker {
     /// [`crate::http::RECIPE_CAPTURE_CONFIRMATION_HEADER`]: recipe Delete
     /// can continue if the user accepts forgetting an unanswered capture.
     RecipeCaptureConfirmation,
+    /// [`crate::http::STOP_AND_SUSPEND_TIMEOUT_HEADER`]: the helm's wait for
+    /// Stop and suspend elapsed. The host state can still change.
+    StopAndSuspendReplyBound,
 }
 
 impl HelmMarker {
     /// Every marker, in the order a [`Reply`] lists them: what the helm
     /// checks a response's headers against.
-    pub const ALL: [HelmMarker; 7] = [
+    pub const ALL: [HelmMarker; 8] = [
         HelmMarker::Precondition,
         HelmMarker::CreateUnaccepted,
         HelmMarker::YoloConfirmation,
@@ -271,6 +274,7 @@ impl HelmMarker {
         HelmMarker::HostBusy,
         HelmMarker::EnvironmentUnasked,
         HelmMarker::RecipeCaptureConfirmation,
+        HelmMarker::StopAndSuspendReplyBound,
     ];
 
     /// The response header that states this marker, and the one value it
@@ -297,6 +301,10 @@ impl HelmMarker {
             HelmMarker::RecipeCaptureConfirmation => (
                 http::RECIPE_CAPTURE_CONFIRMATION_HEADER,
                 http::RECIPE_CAPTURE_CONFIRMATION_REQUIRED,
+            ),
+            HelmMarker::StopAndSuspendReplyBound => (
+                http::STOP_AND_SUSPEND_TIMEOUT_HEADER,
+                http::STOP_AND_SUSPEND_REPLY_BOUND,
             ),
         }
     }
@@ -1508,6 +1516,12 @@ mod tests {
                 "x-farhelm-recipe-capture-confirmation",
                 "confirmation-required",
                 "recipe_capture_confirmation",
+            ),
+            (
+                HelmMarker::StopAndSuspendReplyBound,
+                "x-farhelm-stop-and-suspend-timeout",
+                "helm-reply-bound",
+                "stop_and_suspend_reply_bound",
             ),
         ];
         assert_eq!(

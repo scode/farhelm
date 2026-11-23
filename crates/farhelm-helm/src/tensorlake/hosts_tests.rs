@@ -2751,6 +2751,8 @@ enum StopAnswer {
     Clean,
     /// Stopped, but with this cleanup notice: a tab it could not close.
     LeavesBehind(&'static str),
+    /// The supervisor's own deadline expired before the helm's reply bound.
+    TimedOut,
 }
 
 /// A supervisor peer that answers the helm's first `StopSession` as `answer`
@@ -2782,16 +2784,25 @@ fn stop_peer(
             else {
                 continue;
             };
-            let notice = match answer {
+            let reply = match answer {
                 StopAnswer::Never => None,
-                StopAnswer::Clean => Some(None),
-                StopAnswer::LeavesBehind(notice) => Some(Some(notice.to_string())),
+                StopAnswer::Clean => Some(ControlMsg::SessionStopped {
+                    req_id,
+                    notice: None,
+                }),
+                StopAnswer::LeavesBehind(notice) => Some(ControlMsg::SessionStopped {
+                    req_id,
+                    notice: Some(notice.to_string()),
+                }),
+                StopAnswer::TimedOut => Some(ControlMsg::Error {
+                    req_id,
+                    kind: farhelm_proto::ErrorKind::Timeout,
+                    message: "the supervisor could not finish stopping in time".into(),
+                    create_unaccepted: false,
+                }),
             };
-            if let Some(notice) = notice {
-                writer
-                    .write_control(&ControlMsg::SessionStopped { req_id, notice })
-                    .await
-                    .unwrap();
+            if let Some(reply) = reply {
+                writer.write_control(&reply).await.unwrap();
             }
             if let Some(arrived) = arrived.take() {
                 let _ = arrived.send(session_id);
@@ -2874,37 +2885,61 @@ async fn session_sandbox_helm(
     (harness, host)
 }
 
-/// Send the ordinary `POST /api/sessions/sess-1/stop-and-suspend` on `host`
-/// through the real router, on a task of its own, timed from just before the
-/// send (`crate::tensorlake::tests::spawn_call`).
+/// The raw route reply preserves the header the UI channel forwards. Status
+/// and text alone cannot distinguish the two 504s.
+struct StopAndSuspendReply {
+    status: axum::http::StatusCode,
+    marker: Option<axum::http::HeaderValue>,
+    body: String,
+    waited: Duration,
+}
+
+/// Send Stop and suspend on its own task so the test can observe which half
+/// reached its peer and measure the bound from the original send.
 fn spawn_stop_and_suspend(
     harness: &crate::rest_harness::Harness,
     host: HostId,
-) -> tokio::task::JoinHandle<(axum::http::StatusCode, String, Duration)> {
-    crate::tensorlake::tests::spawn_call(
-        harness,
-        crate::tensorlake::tests::request(
-            "POST",
-            &harness.session_uri(host, "/api/sessions/sess-1/stop-and-suspend"),
-            Some("{}".into()),
-        ),
-    )
+) -> tokio::task::JoinHandle<StopAndSuspendReply> {
+    use tower::ServiceExt;
+
+    let request = crate::tensorlake::tests::request(
+        "POST",
+        &harness.session_uri(host, "/api/sessions/sess-1/stop-and-suspend"),
+        Some("{}".into()),
+    );
+    let router = harness.router();
+    let started = tokio::time::Instant::now();
+    tokio::spawn(async move {
+        let (parts, body) = router.oneshot(request).await.unwrap().into_parts();
+        let bytes = axum::body::to_bytes(body, 1 << 16).await.unwrap();
+        StopAndSuspendReply {
+            status: parts.status,
+            marker: parts
+                .headers
+                .get("x-farhelm-stop-and-suspend-timeout")
+                .cloned(),
+            body: String::from_utf8(bytes.to_vec()).unwrap(),
+            waited: started.elapsed(),
+        }
+    })
 }
 
-/// The exact 504 text Stop and suspend answers with when it is still running
-/// at the host reply bound, whichever half is running then.
-const STOP_AND_SUSPEND_CARRIES_ON: &str = "Stop and suspend did not finish within 20 seconds; it \
-     carries on, suspending the environment only once Stop has finished cleanly, and the \
-     session list will show the result";
+/// The same text applies while Stop or Suspend is pending. It also applies
+/// if the work finishes by the time the reply reaches the user.
+const STOP_AND_SUSPEND_TIMEOUT_NOTICE: &str = "Stop and suspend did not finish within 20 seconds \
+    and may or may not still be running. The environment suspends only if Stop finishes cleanly. \
+    Check the session list for the result.";
 
-/// Wait for a Stop and suspend reply at the host reply bound: it must come
-/// no sooner than the bound and within a second of it on the tokio clock,
-/// with [`STOP_AND_SUSPEND_CARRIES_ON`].
-async fn carries_on_at_the_bound(
-    call: tokio::task::JoinHandle<(axum::http::StatusCode, String, Duration)>,
-) {
+/// Pin the helm deadline as the source of the notice. A 504 alone could have
+/// come from the supervisor and would need to be shown as a failure.
+async fn notice_at_the_bound(call: tokio::task::JoinHandle<StopAndSuspendReply>) {
     let bound = crate::sessions::HOST_REPLY_BOUND;
-    let (status, body, waited) = crate::tensorlake::tests::reply_of(call).await;
+    let StopAndSuspendReply {
+        status,
+        marker,
+        body,
+        waited,
+    } = crate::tensorlake::tests::reply_of(call).await;
     assert!(
         waited >= bound && waited < bound + Duration::from_secs(1),
         "the route answered after {waited:?}: {status} {body}"
@@ -2913,9 +2948,10 @@ async fn carries_on_at_the_bound(
         (status, body.as_str()),
         (
             axum::http::StatusCode::GATEWAY_TIMEOUT,
-            STOP_AND_SUSPEND_CARRIES_ON
+            STOP_AND_SUSPEND_TIMEOUT_NOTICE
         )
     );
+    assert_eq!(marker.unwrap(), "helm-reply-bound");
 }
 
 /// Why: Stop and suspend is one command with one reply, so one bound must
@@ -2925,7 +2961,7 @@ async fn carries_on_at_the_bound(
 /// Spec: with the supervisor answering the Stop cleanly and Tensorlake's
 /// suspend call held (both observed first), on a paused clock, the route
 /// answers 504 at `HOST_REPLY_BOUND`, counted from the send, with
-/// [`STOP_AND_SUSPEND_CARRIES_ON`], while the Suspend still holds the host's
+/// [`STOP_AND_SUSPEND_TIMEOUT_NOTICE`], while the Suspend still holds the host's
 /// provisioning lock and the sandbox still runs. Released, the Suspend
 /// finishes with nobody waiting: the host is Suspended with its completion
 /// time stored.
@@ -2947,7 +2983,7 @@ async fn stop_and_suspend_answers_at_the_reply_bound_and_suspends_after() {
     tokio::time::timeout(Duration::from_secs(10), gate.entered.notified())
         .await
         .expect("premise: the Suspend reached Tensorlake and is held there");
-    carries_on_at_the_bound(call).await;
+    notice_at_the_bound(call).await;
     assert!(
         harness
             .state
@@ -2991,7 +3027,7 @@ fn assert_no_suspend_asked(api: &FakeApi) {
 ///
 /// Spec: with the supervisor never answering the Stop (observed arriving),
 /// on a paused clock, the route answers 504 at `HOST_REPLY_BOUND` with
-/// [`STOP_AND_SUSPEND_CARRIES_ON`], with Tensorlake never asked to suspend
+/// [`STOP_AND_SUSPEND_TIMEOUT_NOTICE`], with Tensorlake never asked to suspend
 /// and the host still connected. With the supervisor's Stop leaving a tab
 /// open, the route answers within the bound with the 409 that says so and
 /// that the environment was not suspended, again with no suspend asked.
@@ -3007,7 +3043,7 @@ async fn stop_and_suspend_never_suspends_before_its_stop_finishes() {
     tokio::time::pause();
     let call = spawn_stop_and_suspend(&harness, host);
     stop_arrived(stopped).await;
-    carries_on_at_the_bound(call).await;
+    notice_at_the_bound(call).await;
     assert_no_suspend_asked(&api);
     assert!(
         harness
@@ -3031,7 +3067,12 @@ async fn stop_and_suspend_never_suspends_before_its_stop_finishes() {
     let (harness, host) = session_sandbox_helm(&api, peer).await;
     let call = spawn_stop_and_suspend(&harness, host);
     stop_arrived(stopped).await;
-    let (status, body, waited) = crate::tensorlake::tests::reply_of(call).await;
+    let StopAndSuspendReply {
+        status,
+        body,
+        waited,
+        ..
+    } = crate::tensorlake::tests::reply_of(call).await;
     assert!(waited < crate::sessions::HOST_REPLY_BOUND, "{waited:?}");
     assert_eq!(
         (status, body.as_str()),
@@ -3041,6 +3082,34 @@ async fn stop_and_suspend_never_suspends_before_its_stop_finishes() {
              terminal tab t1 could not be closed"
         )
     );
+    assert_no_suspend_asked(&api);
+}
+
+/// A supervisor Stop timeout prevents the Suspend even though the HTTP
+/// status matches the helm deadline. The desktop needs the failure without
+/// a continuation marker so it can report that Stop failed.
+#[farhelm_testtrace::test]
+async fn stop_and_suspend_returns_supervisor_timeout_without_helm_marker() {
+    let api = FakeApi::default().with_sandbox(
+        "sbx-1",
+        "farhelm-sess-k7q2-owned-abcd",
+        SandboxStatus::Running,
+    );
+    let (peer, stopped) = stop_peer(StopAnswer::TimedOut);
+    let (harness, host) = session_sandbox_helm(&api, peer).await;
+
+    let call = spawn_stop_and_suspend(&harness, host);
+    stop_arrived(stopped).await;
+    let StopAndSuspendReply {
+        status,
+        marker,
+        body,
+        waited,
+    } = crate::tensorlake::tests::reply_of(call).await;
+    assert!(waited < crate::sessions::HOST_REPLY_BOUND, "{waited:?}");
+    assert_eq!(status, axum::http::StatusCode::GATEWAY_TIMEOUT);
+    assert_eq!(body, "the supervisor could not finish stopping in time");
+    assert!(marker.is_none(), "the supervisor's 504 is a failure");
     assert_no_suspend_asked(&api);
 }
 

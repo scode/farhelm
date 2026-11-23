@@ -97,6 +97,12 @@ pub const ENVIRONMENT_UNASKED: &str = "nothing-decided";
 pub const RECIPE_CAPTURE_CONFIRMATION_HEADER: &str = "x-farhelm-recipe-capture-confirmation";
 /// The recipe Delete may forget that capture only with explicit consent.
 pub const RECIPE_CAPTURE_CONFIRMATION_REQUIRED: &str = "confirmation-required";
+/// Identifies the 504 from Stop and suspend's helm reply deadline. The work
+/// may still finish after this reply, so clients can show a notice and let
+/// the pushed host state settle it.
+pub const STOP_AND_SUSPEND_TIMEOUT_HEADER: &str = "x-farhelm-stop-and-suspend-timeout";
+/// The only value of [`STOP_AND_SUSPEND_TIMEOUT_HEADER`].
+pub const STOP_AND_SUSPEND_REPLY_BOUND: &str = "helm-reply-bound";
 /// The host-list `cause` for a local row whose supervisor is not running.
 ///
 /// The one unreachable cause a user can fix with a command on the machine they

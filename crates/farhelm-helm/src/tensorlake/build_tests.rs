@@ -2231,8 +2231,8 @@ async fn a_delete_local_state_refuses_answers_at_once_and_cancels_nothing() {
     f.api.hold_create.send_replace(false);
 }
 
-/// Wait for the helm to log that a request it had already answered as still
-/// running ended without success, and return that event's reply text.
+/// Wait for the late failure log and return its reply text. The caller
+/// already got the deadline reply and cannot see this diagnostic.
 ///
 /// The log comes from a task of its own that wakes once the request's work
 /// ends, so it may still be queued when the test sees the work's feed bump.
@@ -2240,8 +2240,7 @@ async fn a_delete_local_state_refuses_answers_at_once_and_cancels_nothing() {
 /// sleeping: the paused clock would make any sleep instant anyway, and the
 /// log task needs only to be scheduled, not any time to pass.
 async fn late_failure_logged() -> Option<String> {
-    const LATE_FAILURE: &str =
-        "a request the helm had already answered as still running ended without success";
+    const LATE_FAILURE: &str = "a request ended without success after the helm's deadline reply";
     let events = crate::test_capture::current();
     for _ in 0..1000 {
         if let Some(event) = crate::test_capture::matching(&events, LATE_FAILURE).pop() {

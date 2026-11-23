@@ -1256,11 +1256,9 @@ pub(in crate::tensorlake) fn spawn_call(
     })
 }
 
-/// Wait for a reply [`spawn_call`] started, failing once [`PAST_THE_BOUND`]
-/// has gone by after the bound without one.
-pub(in crate::tensorlake) async fn reply_of(
-    call: tokio::task::JoinHandle<(StatusCode, String, Duration)>,
-) -> (StatusCode, String, Duration) {
+/// Bound the test's own wait for an HTTP reply. A hung route must fail the
+/// test even if it never reaches the deadline under test.
+pub(in crate::tensorlake) async fn reply_of<T>(call: tokio::task::JoinHandle<T>) -> T {
     tokio::time::timeout(HOST_REPLY_BOUND + PAST_THE_BOUND, call)
         .await
         .expect("the route should answer within the host reply bound")

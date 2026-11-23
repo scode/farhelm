@@ -267,50 +267,52 @@ or staying listed with the reason only in the helm's log if it fails. An environ
 (`POST /api/hosts/{id}/suspend` and `/resume`) and a session's Stop and suspend
 (`POST /api/sessions/{id}/stop-and-suspend`) answer within the same bound, counted from their handler's start (in place
 of the accepted form, because their outcome already lands in the pushed host state). A Tensorlake Suspend may wait 60
-seconds for its sandbox and a Resume 120, and a container's change waits on its container host's commands, so a change
-still running at the bound replies 504 that it carries on. The change keeps the host's provisioning lock until it ends,
-and the host's state in the hosts and session lists then shows how it ended, a late failure reaching only the helm's
-log. Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account key) are
-local and answer as before; a container host checks its container over SSH first, inside the bound. Stop and suspend is
-one command with one reply, so one bound covers its Stop and its Suspend together; its reply at the bound says only that
-the environment is suspended once Stop has finished cleanly, which holds whichever half is still running, and a Stop
-that fails or leaves cleanup undone after the reply leaves the environment running. A session's environment Delete
-(`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned whole-environment Delete
-(`?delete_sandbox=true`) and the Retry of a failed destruction (`POST /api/hosts/{id}/retry-delete`) answer within the
-same bound, counted from their handler's start (following the maintainer's preference for bounded replies, in place of
-the accepted form). The first can wait 60 seconds for its host's turn among environment Deletes and 240 for the
-environment's supervisor, and the other two make host removal's provider calls, so each answers 504 at the bound and
-carries on. Refusals before anything is asked (not an environment session, a guarded or two-flag request, a busy
-provisioning lock once the Delete has its turn, a Retry for a host whose deletion has not failed) and a "nothing
-decided" decided in time, chiefly the one for a host the helm is not connected to, answer as before with their markers.
-Past the bound, a late `Deleted` removes the session from the pushed list without its count, a late seal shows through
-the seal record (the host `Deleting`, then gone or failed with Retry), as does a late Retry, and a late "nothing
-decided" or refusal leaves the session listed, the next Delete taking the warned lane once the host shows as not
-connected. A late failure of the whole-environment Delete reaches only the helm's log, as host removal's does, except on
-a host whose seal the helm already knew when that Delete began: the seal record then keeps the latest failure, shown
-with Retry, since the attempt records it before releasing the host's provisioning lock. A credential replacement waits
-the same bound, counted from its handler's start, for delivery to its hosts; being already saved, it is not refused, and
-the hosts still being delivered to are reported as not delivered (see "Named credential catalog"). The Tensorlake
-settings routes, which wait on Tensorlake's API rather than on a host, answer within the same bound, counted from their
-handler's start: the API key's Test and the list of Sandboxes not on this helm stop listing and answer the 502 of an
-unanswered Tensorlake call, the list still showing any unfinished cleanup, and a leftover sandbox's Delete, once its
-cleanup is recorded as running, replies that the cleanup carries on, which that list then shows (see "Tensorlake
-account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same bound, counted from its
-handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run for up to its own 30
-seconds, so a generation still running at the bound replies 504 that the creation carries on, and the settings read
-reports the key once it is written; a Create sent again meanwhile waits for that generation and answers its key. A
-recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from its handler's
-start: an unknown recipe, one a host uses and one already being deleted are refused at once from local state, before
-anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it carries on,
-and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the reason only in
-the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the recipe's save
-(`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An Update's
-confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes the host's
-provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's Suspend,
-Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that finishes, as a
-sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so a failed
-earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The automatic
-update still waits for the lock.
+seconds for its sandbox and a Resume 120, and a container's change waits on its container host's commands. Suspend and
+Resume reply 504 at the bound to say that the work carries on. The change keeps the host's provisioning lock until it
+ends, and the host's state in the hosts and session lists then shows how it ended, a late failure reaching only the
+helm's log. Tensorlake's refusals before anything changes (a busy host, a host that is not an environment, no account
+key) are local and answer as before; a container host checks its container over SSH first, inside the bound. Stop and
+suspend is one command with one reply, so one bound covers its Stop and its Suspend together. The helm's 504 at that
+bound carries the `StopAndSuspendReplyBound` marker and says that the operation may or may not still be running. A 504
+from the supervisor's Stop is an ordinary failure and arrives without the marker. The environment only suspends after a
+clean Stop.
+
+A session's environment Delete (`DELETE /api/sessions/{id}?delete_environment_session=true`), the warned
+whole-environment Delete (`?delete_sandbox=true`) and the Retry of a failed destruction
+(`POST /api/hosts/{id}/retry-delete`) answer within the same bound, counted from their handler's start (following the
+maintainer's preference for bounded replies, in place of the accepted form). The first can wait 60 seconds for its
+host's turn among environment Deletes and 240 for the environment's supervisor, and the other two make host removal's
+provider calls, so each answers 504 at the bound and carries on. Refusals before anything is asked (not an environment
+session, a guarded or two-flag request, a busy provisioning lock once the Delete has its turn, a Retry for a host whose
+deletion has not failed) and a "nothing decided" decided in time, chiefly the one for a host the helm is not connected
+to, answer as before with their markers. Past the bound, a late `Deleted` removes the session from the pushed list
+without its count, a late seal shows through the seal record (the host `Deleting`, then gone or failed with Retry), as
+does a late Retry, and a late "nothing decided" or refusal leaves the session listed, the next Delete taking the warned
+lane once the host shows as not connected. A late failure of the whole-environment Delete reaches only the helm's log,
+as host removal's does, except on a host whose seal the helm already knew when that Delete began: the seal record then
+keeps the latest failure, shown with Retry, since the attempt records it before releasing the host's provisioning lock.
+A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts; being
+already saved, it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named
+credential catalog"). The Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer
+within the same bound, counted from their handler's start: the API key's Test and the list of Sandboxes not on this helm
+stop listing and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a
+leftover sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list
+then shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
+bound, counted from its handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run
+for up to its own 30 seconds, so a generation still running at the bound replies 504 that the creation carries on, and
+the settings read reports the key once it is written; a Create sent again meanwhile waits for that generation and
+answers its key. A recipe's Delete (`DELETE /api/tensorlake/recipes/{name}`) answers within the same bound, counted from
+its handler's start: an unknown recipe, one a host uses and one already being deleted are refused at once from local
+state, before anything is cancelled; once its cleanup has started, a deletion still running at the bound replies that it
+carries on, and the recipe leaves the recipe list once it is deleted, or, if the cleanup fails, stays listed with the
+reason only in the helm's log until a second Delete runs the cleanup again and answers it. While the deletion runs, the
+recipe's save (`PUT`) and Build are refused with 409, so a save cannot be accepted and then lost with the row. An
+Update's confirmation (`POST /api/hosts/{id}/update` with its plan) needs no bound, because it does not wait: it takes
+the host's provisioning lock without waiting and is refused at once while another operation (such as a Tensorlake host's
+Suspend, Resume or removal, or a destination or alias change) holds it, saying to choose Update again once that
+finishes, as a sandbox's setup rerun is (see "Adding Tensorlake hosts"). The refusal comes before the run is claimed, so
+a failed earlier run and its Re-run stay as they were, and carries no busy marker, since its plan is already spent. The
+automatic update still waits for the lock.
 
 The helm runs each command through its existing HTTP router in process, so a command gets the same handlers, validation
 and authentication middleware as an HTTP request. There is no second, typed command API. A reply relays the response's
@@ -6844,10 +6846,11 @@ behavior. The helm's saved seal lets it finish destruction after a restart. The 
 if any, remains.
 
 Suspend and Resume reuse host lifecycle tasks. Stop and suspend completes ordinary Stop first, then applies the host
-Suspend rule to the whole resource; failure or incomplete Stop withholds Suspend. No path automatically resumes it. Bulk
-lifecycle conveniences remain deferred. Recipe recent setups carry recipe and place, never the disposable host's install
-identity. The ordinary per-host provisioning/lifecycle guard protects conflicting resource work; do not introduce new
-membership-specific locks or ordering.
+Suspend rule to the whole resource. Failure or incomplete Stop withholds Suspend. Its marked deadline reply leaves the
+outcome unknown as described in "The UI channel". No path automatically resumes it. Bulk lifecycle conveniences remain
+deferred. Recipe recent setups carry recipe and place, never the disposable host's install identity. The ordinary
+per-host provisioning/lifecycle guard protects conflicting resource work; do not introduce new membership-specific locks
+or ordering.
 
 Templates represent a recipe separately from the existing opaque install-identity host field; both together are an
 inapplicable Host field. Shared template application treats them as one placement choice. Clone resolves an owned source
