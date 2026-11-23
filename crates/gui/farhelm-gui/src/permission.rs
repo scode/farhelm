@@ -10,31 +10,28 @@
 //! The sidebar-and-session-view area built this first, in the session list's row marks; it moved here unchanged so
 //! that the approval cards, its second consumer, need not reach into the session list's private modules. It stays
 //! that area's code. What a surface says about the shield (the row's description, a card's chip words) is that
-//! surface's own; only the classification into the four drawings, and the drawings themselves, live here.
+//! surface's own. The classification and its drawings live here.
 //!
 //! [`words`] is the permission and effort choices' shared names and help (the launcher area's code, moved out of the
 //! launcher once other surfaces read them); it sits here because the same surfaces show both.
 
 pub(crate) mod words;
 
-use farhelm_proto::{LaunchPermission, SessionLaunch};
+use farhelm_proto::SessionLaunch;
 
 use crate::assets::Icon;
 use crate::harness;
 use crate::theme::{Palette, Token};
 
-/// The shield's four drawings, each with its ink (the old `data-glyph` tokens `yolo`, `shielded`, `own-setting`,
-/// `unknown`). Several launch permissions share a drawing; the description is what tells them apart.
+/// Drawings shared by launch modes with the same permission classification.
+/// Each surface can explain the specific mode in its description.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum Shield {
-    /// The slashed shield, in amber: an agent launch in YOLO or with custom flags (which Farhelm counts as YOLO), a
-    /// command asserted YOLO, or an agent seen in a mode without checks.
+    /// The slashed shield in amber covers YOLO, custom flags, agents with no
+    /// recorded permission, commands asserted YOLO, and observed bypass modes.
     Yolo,
     /// The plain shield, in green: an agent launch in guarded or an approval mode, or a command asserted not YOLO.
     Shielded,
-    /// The dashed shield, in the quiet foreground: an agent launch that forced no mode, so the agent's own setting
-    /// decides. Uncertainty, not an approval guarantee.
-    OwnSetting,
     /// The question mark, in amber: a command from before launch kinds, which carries no assertion.
     Unknown,
 }
@@ -45,46 +42,27 @@ impl Shield {
         match self {
             Shield::Yolo => Icon::PermissionYolo,
             Shield::Shielded => Icon::PermissionShielded,
-            Shield::OwnSetting => Icon::PermissionOwnSetting,
             Shield::Unknown => Icon::PermissionUnknown,
         }
     }
 
-    /// The shield's own ink: `--warn` for YOLO and the unclassified question mark, `--ok` for a shield, `--fg-1` for
-    /// the agent's own setting. A selected session row draws it in `--on-fill` instead.
+    /// Amber signals YOLO or a legacy launch whose permission is unknown.
+    /// A selected session row uses its selection foreground for either mark.
     pub(crate) const fn ink(self, palette: &Palette) -> Token {
         match self {
             Shield::Yolo | Shield::Unknown => palette.warn,
             Shield::Shielded => palette.ok,
-            Shield::OwnSetting => palette.fg_1,
         }
     }
 }
 
-/// The shield `launch` itself earns: an agent launch by its stored permission (none is the agent's own setting, and
-/// `farhelm_proto::yolo::selection_is_yolo` is the one rule for what counts as YOLO, custom flags included), a command
-/// launch by its assertion, a legacy launch the question mark. The caller
-/// handles a shell before reaching this classification.
+/// Use the stored permission for agent launches and the assertion for commands.
+/// The caller handles shells. Legacy records carry no permission assertion.
 fn launched(launch: &SessionLaunch) -> Shield {
-    match launch {
-        SessionLaunch::Agent { selection, .. } => {
-            match selection.harness.stored_permission(selection.permissions) {
-                None => Shield::OwnSetting,
-                Some(_) if farhelm_proto::yolo::selection_is_yolo(selection) => Shield::Yolo,
-                Some(
-                    LaunchPermission::Guarded
-                    | LaunchPermission::Approve
-                    | LaunchPermission::SmartApprove
-                    | LaunchPermission::Chat,
-                ) => Shield::Shielded,
-                // `selection_is_yolo` already answered these; kept as YOLO so a change to that rule can only make
-                // the shield louder here, never quieter.
-                Some(LaunchPermission::Yolo | LaunchPermission::Custom) => Shield::Yolo,
-            }
-        }
-        SessionLaunch::Command(command) if command.yolo => Shield::Yolo,
-        SessionLaunch::Command(_) => Shield::Shielded,
-        SessionLaunch::Legacy { .. } => Shield::Unknown,
+    match launch.yolo() {
+        Some(true) => Shield::Yolo,
+        Some(false) => Shield::Shielded,
+        None => Shield::Unknown,
     }
 }
 

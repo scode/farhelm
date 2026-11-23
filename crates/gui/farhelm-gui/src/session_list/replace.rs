@@ -37,7 +37,7 @@
 //! where a YOLO question for its Replace shows.
 
 use farhelm_helm_client::{ApiPath, Method, PathError};
-use farhelm_proto::session_requests::ReplaceSessionBody;
+use farhelm_proto::session_requests::{CreateSessionBody, ReplaceSessionBody};
 use farhelm_proto::ui_channel::SessionRow;
 use farhelm_proto::{DeleteGuard, SessionReplaceReply, SessionStatus};
 use gpui::{AnyWindowHandle, App, Context, IntoElement, SharedString, Styled, Window, px};
@@ -196,15 +196,16 @@ pub(crate) fn question(
 /// The session's plain Replace, `POST /api/sessions/{id}/replace`, as the route's shared client body
 /// ([`ReplaceSessionBody`], which the helm's tests decode into its own request type) with the source's Delete guard as
 /// its two flags, and `confirm_yolo` as `consent` says: set only for the Replace sent again after the user confirmed
-/// the YOLO question (see the module docs). No `with` (that is Replace with), and no retry key at all.
+/// the YOLO question. A guarded answer supplies a new launch through `with`.
 pub(crate) fn command(
     session: &str,
     guard: DeleteGuard,
     consent: bool,
+    with: Option<CreateSessionBody>,
 ) -> Result<Command, PathError> {
     let body = ReplaceSessionBody {
         confirm_yolo: consent,
-        with: None,
+        with,
         only_if_nothing_alive: guard.only_if_nothing_alive(),
         only_if_agent_ended: guard.only_if_agent_ended(),
     };
@@ -304,16 +305,18 @@ pub(crate) fn send(
         mark: Mark::take(cx),
         consent: false,
     };
-    start(key, sent, window, cx);
+    start(key, sent, None, window, cx);
 }
 
-/// The user confirmed the YOLO question of `key`'s Replace, asked on `surface` with `guard`, at `answer`: send the same
-/// Replace again with consent, its completion settling in `window` and counting "moved on" from that answer's press.
-pub(super) fn send_with_consent(
+/// Settle the YOLO question by sending a guarded replacement or confirming
+/// the original launch. Both preserve the source's Delete guard and count
+/// focus movement from this answer's press.
+pub(super) fn send_after_yolo_question(
     key: &str,
     guard: DeleteGuard,
     surface: Surface,
     answer: Mark,
+    guarded: Option<CreateSessionBody>,
     window: AnyWindowHandle,
     cx: &mut App,
 ) {
@@ -321,9 +324,9 @@ pub(super) fn send_with_consent(
         guard,
         surface,
         mark: answer,
-        consent: true,
+        consent: guarded.is_none(),
     };
-    start(key, sent, window, cx);
+    start(key, sent, guarded, window, cx);
 }
 
 /// Send `key`'s Replace as `sent` says through the operation store, its completion settling in `window`, and start its
@@ -331,14 +334,20 @@ pub(super) fn send_with_consent(
 /// is in flight ([`menu::refuse_for_host_change`]). A YOLO question's permanent answer confirmed then has already
 /// written its host's setting, which stays written while the Replace waits for the user to ask again. Returns whether
 /// it was sent.
-fn start(key: &str, sent: Sent, window: AnyWindowHandle, cx: &mut App) -> bool {
+fn start(
+    key: &str,
+    sent: Sent,
+    with: Option<CreateSessionBody>,
+    window: AnyWindowHandle,
+    cx: &mut App,
+) -> bool {
     if menu::refuse_for_host_change(key, Work::Replace, cx) {
         return false;
     }
     let source = key.to_owned();
     let started = super::start_request(
         &OpKey::session(key),
-        command(key, sent.guard, sent.consent),
+        command(key, sent.guard, sent.consent, with),
         cx,
         move |settled, cx| settle_sent(&source, sent, window, settled, cx),
     );
@@ -499,7 +508,7 @@ mod tests {
             DeleteGuard::AgentEnded,
             DeleteGuard::NothingAlive,
         ] {
-            let built = command("a", guard, false).unwrap();
+            let built = command("a", guard, false, None).unwrap();
             assert_eq!(built.work(), Work::Replace);
             assert_eq!(
                 built.path().as_str(),

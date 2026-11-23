@@ -2,5 +2,8 @@
 kind: changed
 ---
 
-Farhelm asks for the same confirmation for saved agent sessions with no recorded permission as it does for YOLO
-sessions. Their saved commands are kept. New Cursor sessions default to YOLO and still accept Custom flags.
+Saved agent sessions with no recorded permission now show the YOLO shield and ask for the same confirmation on Replace.
+New Cursor sessions default to YOLO and still accept Custom flags.
+
+Replace offers **Replace as guarded instead** for YOLO sessions whose agent supports Guarded. Confirming a plain YOLO
+replacement keeps the saved command.

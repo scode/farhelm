@@ -107,7 +107,7 @@ impl Launcher {
         self.changed(cx);
     }
 
-    /// A permission chosen by hand (`None` is the agent's own setting). Leaving Custom empties its flags field with
+    /// A permission chosen by hand. Leaving Custom empties its flags field with
     /// the draft's flags; choosing Custom moves focus on to its flags field, by key or click, as the old launcher did.
     /// The field appears only now, so the focus coordinator makes the move once a frame draws it, unless the user moves
     /// on first.
@@ -352,15 +352,6 @@ impl Launcher {
             HoverHelp::tooltip("Permissions: what the agent may do without asking you"),
             Role::Group,
         );
-        if harness.is_some_and(|harness| harness.omitted_permission().is_none()) {
-            group = group.option(RadioOption::new(
-                "Agent's own setting",
-                HoverHelp::tooltip(
-                    "Agent's own setting: Farhelm cannot force or classify this permission mode",
-                ),
-                None,
-            ));
-        }
         if harness.is_none_or(|harness| harness.offers_permission(LaunchPermission::Guarded)) {
             group = group.option(RadioOption::new(
                 permission_display(Some(LaunchPermission::Guarded)),

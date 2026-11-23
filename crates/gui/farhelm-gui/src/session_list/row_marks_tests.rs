@@ -361,11 +361,9 @@ fn the_agent_mark_draws_its_glyphs_picture(cx: &mut TestAppContext) {
 
 // ---- The permission shield ------------------------------------------------------------------------------------------
 
-/// SPEC.md: "Every session row carries one permission mark", whose meaning is the launch's: an agent launch's effective
-/// permission (custom or YOLO is YOLO; none is the agent's own setting, except for an agent whose older launches meant
-/// YOLO by storing none, such as Pi and OMP), a command's assertion, or nothing for a session from before launch kinds.
-/// Specified, case by case: the shield and its ink (`--warn` for YOLO and the question mark, `--ok` for a shield,
-/// `--fg-1` for the agent's own setting, `--on-fill` on the selected row), and each shield's picture.
+/// The row's shield follows the saved agent permission or a command's
+/// assertion. Missing agent permissions keep the YOLO warning color and
+/// legacy launches keep the question mark. Selection changes only the ink.
 #[test]
 fn the_shield_follows_the_launch_and_draws_its_mark() {
     let palette: &Palette = &theme::DARK;
@@ -390,7 +388,6 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
             Shield::Shielded,
         ),
         (agent("goose", json!("chat"), &["goose"]), Shield::Shielded),
-        // An older Pi launch stored no permission, which for Pi has always meant YOLO, not its own setting.
         (agent("pi", Value::Null, &["pi"]), Shield::Yolo),
         (command("codex --yolo", true, json!("codex")), Shield::Yolo),
         (command("codex", false, Value::Null), Shield::Shielded),
@@ -418,19 +415,11 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
     assert_eq!(Shield::Yolo.ink(palette), palette.warn);
     assert_eq!(Shield::Unknown.ink(palette), palette.warn);
     assert_eq!(Shield::Shielded.ink(palette), palette.ok);
-    assert_eq!(Shield::OwnSetting.ink(palette), palette.fg_1);
     assert_eq!(
-        [
-            Shield::Yolo,
-            Shield::Shielded,
-            Shield::OwnSetting,
-            Shield::Unknown
-        ]
-        .map(Shield::icon),
+        [Shield::Yolo, Shield::Shielded, Shield::Unknown].map(Shield::icon),
         [
             Icon::PermissionYolo,
             Icon::PermissionShielded,
-            Icon::PermissionOwnSetting,
             Icon::PermissionUnknown
         ]
     );

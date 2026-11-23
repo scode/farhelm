@@ -89,14 +89,17 @@ fn facts(summary: &Summary) -> Vec<(&'static str, String)> {
 
 /// The card is where a row's abbreviated facts are recorded in full (SPEC.md: "an abbreviation is never the only place
 /// a value is recorded"), so a missing or reworded fact loses information the row itself does not show. Specified, for
-/// a running session on the local host launched as the helm fixture's Codex agent (YOLO, model gpt-5, high effort):
+/// a running local Codex session with no recorded permission, model gpt-5 and high effort:
 /// title `Fix the widget`, status `Running` with its mark, agent line `Codex · YOLO · Model: gpt-5 · Effort: High`, and
 /// the facts Host `Local (this machine)` (with the host's mark), Directory `/home/user/src/a` unabbreviated, Started
 /// `2025-07-02 00:59:58` and Last active `2m · 2025-07-02 01:57:58`, each the viewer's local time two hours east of
 /// UTC with no zone named; no Checkout for an ordinary folder.
 #[test]
 fn a_running_sessions_card_names_its_agent_host_folder_and_times() {
-    let summary = summary_of(&local_session("a"));
+    let mut saved = agent("codex", Value::Null);
+    saved["selection"]["model"] = json!("gpt-5");
+    saved["selection"]["effort"] = json!("high");
+    let summary = summary_of(&local_session("a").launch(saved));
     assert_eq!(summary.title.raw(), "Fix the widget");
     assert_eq!(summary.status, Some(CardStatus::Live(Live::Running)));
     assert_eq!(summary.status.map(CardStatus::word), Some("Running"));

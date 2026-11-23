@@ -131,12 +131,11 @@ fn needs_harness(scope: Scope, value: &str, agent_without_harness: bool) -> bool
 // Rows
 // ---------------------------------------------------------------------------------------------------------------------
 
-/// A permission choice as the search offers it: the launch permissions plus the agent's own setting (no permission).
+/// A launch permission ordered and named for search.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SearchPermission {
     Yolo,
     Guarded,
-    OwnSetting,
     Custom,
     Approve,
     SmartApprove,
@@ -145,26 +144,24 @@ pub enum SearchPermission {
 
 impl SearchPermission {
     /// In the old search's candidate order.
-    const ALL: [SearchPermission; 7] = [
+    const ALL: [SearchPermission; 6] = [
         SearchPermission::Yolo,
         SearchPermission::Guarded,
-        SearchPermission::OwnSetting,
         SearchPermission::Custom,
         SearchPermission::Approve,
         SearchPermission::SmartApprove,
         SearchPermission::Chat,
     ];
 
-    /// The draft's permission for this choice: `None` for the agent's own setting.
-    pub const fn permission(self) -> Option<LaunchPermission> {
+    /// The permission that choosing the result writes to the draft.
+    pub const fn permission(self) -> LaunchPermission {
         match self {
-            SearchPermission::Yolo => Some(LaunchPermission::Yolo),
-            SearchPermission::Guarded => Some(LaunchPermission::Guarded),
-            SearchPermission::OwnSetting => None,
-            SearchPermission::Custom => Some(LaunchPermission::Custom),
-            SearchPermission::Approve => Some(LaunchPermission::Approve),
-            SearchPermission::SmartApprove => Some(LaunchPermission::SmartApprove),
-            SearchPermission::Chat => Some(LaunchPermission::Chat),
+            SearchPermission::Yolo => LaunchPermission::Yolo,
+            SearchPermission::Guarded => LaunchPermission::Guarded,
+            SearchPermission::Custom => LaunchPermission::Custom,
+            SearchPermission::Approve => LaunchPermission::Approve,
+            SearchPermission::SmartApprove => LaunchPermission::SmartApprove,
+            SearchPermission::Chat => LaunchPermission::Chat,
         }
     }
 
@@ -173,7 +170,6 @@ impl SearchPermission {
         match self {
             SearchPermission::Yolo => "yolo",
             SearchPermission::Guarded => "guarded",
-            SearchPermission::OwnSetting => "own",
             SearchPermission::Custom => "custom",
             SearchPermission::Approve => "approve",
             SearchPermission::SmartApprove => "smart approve",
@@ -186,7 +182,6 @@ impl SearchPermission {
         match self {
             SearchPermission::Yolo => "YOLO",
             SearchPermission::Guarded => "Guarded",
-            SearchPermission::OwnSetting => "Agent's own setting",
             SearchPermission::Custom => "Custom",
             SearchPermission::Approve => "Approve",
             SearchPermission::SmartApprove => "Smart approve",
@@ -197,11 +192,9 @@ impl SearchPermission {
     /// Whether `harness` offers this choice; with no harness, only YOLO and Guarded, the two a draft can hold before an
     /// agent type is chosen.
     fn offered_by(self, harness: Option<LaunchHarness>) -> bool {
-        match (harness, self.permission()) {
-            (None, _) => matches!(self, SearchPermission::Yolo | SearchPermission::Guarded),
-            // The agent's own setting is a choice only where omitting the permission is not itself a mode.
-            (Some(harness), None) => !harness.is_shell() && harness.omitted_permission().is_none(),
-            (Some(harness), Some(permission)) => harness.offers_permission(permission),
+        match harness {
+            None => matches!(self, SearchPermission::Yolo | SearchPermission::Guarded),
+            Some(harness) => harness.offers_permission(self.permission()),
         }
     }
 }
@@ -389,11 +382,8 @@ impl Row {
             Row::Effort(Some(_)) => "Use this reasoning effort for the session".to_owned(),
             Row::Effort(None) => DEFAULT_EFFORT_HELP.to_owned(),
             Row::Permission(permission) => match permission.permission() {
-                None => {
-                    "Use the agent's own setting, which Farhelm cannot force or classify".to_owned()
-                }
-                Some(LaunchPermission::Guarded) => guarded_permission_help(harness),
-                Some(permission) => permission_tooltip(permission).to_owned(),
+                LaunchPermission::Guarded => guarded_permission_help(harness),
+                permission => permission_tooltip(permission).to_owned(),
             },
             Row::UsePath(_) | Row::Folder(_) => {
                 "Use this folder: the session will start here".to_owned()

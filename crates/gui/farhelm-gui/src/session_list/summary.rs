@@ -78,11 +78,6 @@ pub(crate) const CLICK_HINT: &str = "Click to open";
 /// The footer's right half: where the row's other actions are.
 pub(crate) const ACTIONS_HINT: &str = "⋯ For actions";
 
-/// The permission value of an agent launch that stores none, the agent running under its own setting (the old
-/// `menu_header_summary_parts`' fallback). The launcher's footer says "Default" for the same thing, which reads as a
-/// choice Farhelm made; here it is the agent's.
-const AGENT_OWN_SETTING: &str = "Agent's own setting";
-
 /// The label column's width: `.session-summary-row`'s `grid-template-columns: 6rem …` at the old page's 16-pixel rem.
 const LABEL_WIDTH: Pixels = px(96.);
 
@@ -248,7 +243,7 @@ impl Summary {
 }
 
 /// The card's agent line, a sentence under `id`: the old `summary_parts`. An agent launch names its agent type as the
-/// launcher does (`Claude`, not the row's `Claude Code`), its stored permission (or the agent's own setting) and the
+/// launcher does (`Claude`, not the row's `Claude Code`), its effective saved permission and the
 /// choices it set explicitly before the permission (its model, effort and a retired container, as the launcher's
 /// recent setups name them, [`explicit_before_permissions`]), joined by ` · `. Any
 /// other launch names the program its recorded command line runs, in the monospace face. Then `, YOLO observed` when
@@ -266,13 +261,11 @@ pub(crate) fn agent_line(id: SharedString, row: &SessionRow) -> HostSentence {
             let permission = selection
                 .harness
                 .stored_permission(selection.permissions)
-                .map_or(AGENT_OWN_SETTING, |permission| {
-                    words::permission_display(Some(permission))
-                });
+                .unwrap_or(farhelm_proto::LaunchPermission::Yolo);
             line = line
                 .text(harness_label(selection.harness))
                 .text(" · ")
-                .text(permission);
+                .text(words::permission_display(Some(permission)));
             // The launcher's one rule for which choices are explicit and how each is worded (`Model: gpt-6`), each a
             // whole value escaped as the old card's peer runs were: the model is the host's text.
             for choice in explicit_before_permissions(selection) {

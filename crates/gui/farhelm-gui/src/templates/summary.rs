@@ -167,7 +167,7 @@ pub fn plain(fields: &TemplateFields) -> String {
 
 /// A permission choice as a summary names it (the old app's `permission_label`). With no agent type the choice cannot
 /// be resolved yet, so a reset says only that it depends on the agent. With one, it names what the launch would
-/// request: the guarded mode by that agent's own name for it, or the agent's own setting. A stored shell permission
+/// request, including the name of that agent's guarded mode. A stored shell permission
 /// still needs its own label, so an approval can describe exactly what the template saves.
 pub(crate) fn permission_label(
     agent: Option<LaunchHarness>,
@@ -189,7 +189,7 @@ pub(crate) fn permission_label(
             .unwrap_or_else(|| permission_display(Some(LaunchPermission::Guarded)))
             .to_owned(),
         Some(chosen) => permission_display(Some(chosen)).to_owned(),
-        None => "Agent's own setting".to_owned(),
+        None => permission_display(None).to_owned(),
     }
 }
 

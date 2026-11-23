@@ -7,8 +7,8 @@
 //! the frame. A row's menu button is `session-menu-<key>`, its Replace and Stop are `session-menu-replace` and
 //! `session-menu-stop`, a question's answers are `prompt-confirm` and `prompt-cancel`, and the lines under a row are
 //! named `session-outcome-<key>` (a refusal or a notice) and `session-replace-progress-label-<key>` (a long Replace).
-//! The YOLO question a Replace meets (the launcher's) names its answers `prompt-cancel`, `prompt-alternative-0` (the
-//! permanent answer) and `prompt-confirm` (the one-off answer), and its reason `yolo-reason`.
+//! The YOLO question keeps its reason at `yolo-reason`. A guarded replacement,
+//! when offered, is the first alternative, followed by the permanent host answer.
 
 use std::time::Duration;
 
@@ -121,8 +121,7 @@ pub(crate) fn consented(
 
 /// The helm's words for a YOLO refusal of a Replace on the fixtures' host, as its `YoloNeedsConfirmation` writes them.
 /// Written for the command line: the YOLO question never shows them.
-pub(crate) const YOLO_WORDS: &str = "buildbox asks before YOLO launches, and this launch is YOLO or uses the agent's own \
-                                     setting: nothing was started.";
+pub(crate) const YOLO_WORDS: &str = "buildbox asks before YOLO launches. Nothing was started.";
 
 /// The helm refuses command `id` for YOLO, as it does for a YOLO launch on a host that asks first: a 409 carrying the
 /// helm's YOLO marker.
@@ -672,8 +671,7 @@ fn a_refusal_shows_on_the_row_and_in_its_menu_until_the_next_operation(cx: &mut 
         "the refusal goes when the next Stop starts, not when it settles"
     );
 
-    let yolo = "buildbox asks before YOLO launches, and this launch is YOLO or uses the agent's own setting: nothing \
-                was started.";
+    let yolo = "buildbox asks before YOLO launches. Nothing was started.";
     choose(cx, "session-menu-b", "session-menu-replace");
     test_support::click(cx, "prompt-confirm");
     let [(replaced, _, _)] = pending(&mut fake)[..] else {
@@ -1039,6 +1037,9 @@ fn a_replace_after_the_user_opened_another_session_leaves_them_there(cx: &mut Te
 
 // ---- The YOLO question a Replace meets -----------------------------------------------------------------------------
 
+/// The standard Codex fixture offers Guarded before the permanent answer.
+pub(crate) const PERMANENT_REPLACE_ANSWER: &str = "prompt-alternative-1";
+
 /// The bounds a fresh frame draws the element `id` at, by the frame's own record (rows' items carry an id but no debug
 /// selector).
 pub(crate) fn node_bounds(cx: &mut VisualTestContext, id: &str) -> gpui::Bounds<Pixels> {
@@ -1112,6 +1113,93 @@ fn the_one_off_answer_replaces_again_with_consent_exactly_once(cx: &mut TestAppC
         "the replacement's terminal took focus"
     );
     assert_eq!(pending(&mut fake), [], "no second Replace");
+}
+
+/// A saved Codex session whose mode is unknown can be replaced in Guarded
+/// mode. Tab reaches that answer before the host setting, and answering sends
+/// one guarded Replace with the original deletion precondition and choices.
+/// A rename received while the question is open carries into the new session.
+#[gpui::test]
+fn guarded_answer_replaces_with_the_saved_choices_and_delete_guard(cx: &mut TestAppContext) {
+    let source = ended("a")
+        .host(2)
+        .title("Release notes")
+        .cwd("/work")
+        .launch(json!({
+            "kind": "agent",
+            "selection": {
+                "harness": "codex", "model": "gpt-6-astra", "effort": "high", "permissions": null,
+                "wrapper_prefix": ["env", "TERM=xterm"],
+            },
+            "start": ["env", "TERM=xterm", "codex", "{farhelm_args}"],
+            "resume": null,
+        }));
+    let renamed = source.clone().title("Final release notes");
+    let (mut helm, cx, id) = replacing_open(cx, source);
+    assert_eq!(guard_now(cx, "a"), Some(DeleteGuard::NothingAlive));
+    refuse_for_yolo(&mut helm, cx, id);
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-cancel"));
+    assert_eq!(
+        label_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Replace as guarded instead")
+    );
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some("prompt-alternative-0"));
+    test_support::keys(cx, "tab");
+    assert_eq!(focused_id(cx).as_deref(), Some(PERMANENT_REPLACE_ANSWER));
+    push(&mut helm, &["a", "b"], &[(renamed, 0)], cx);
+    assert_eq!(
+        label_of(cx, "session-row-a").as_deref(),
+        Some("Final release notes")
+    );
+    test_support::click(cx, "prompt-alternative-0");
+
+    let commands = helm.commands();
+    let [command] = commands.as_slice() else {
+        panic!(
+            "expected one guarded Replace, got {} requests",
+            commands.len()
+        );
+    };
+    assert_eq!(command.method, Method::Post);
+    assert_eq!(command.path, "/api/sessions/a/replace");
+    let body = command.body.as_ref().expect("the Replace body");
+    assert_eq!(body["confirm_yolo"], json!(false));
+    assert_eq!(body["only_if_nothing_alive"], json!(true));
+    assert_eq!(body["only_if_agent_ended"], json!(false));
+    let with = &body["with"];
+    assert_eq!(with["host"], json!(2));
+    assert_eq!(with["cwd"], json!("/work"));
+    assert_eq!(with["title"], json!("Final release notes"));
+    assert_eq!(with["confirm_yolo"], json!(false));
+    assert_eq!(
+        with["launch"],
+        json!({
+            "harness": "codex", "model": "gpt-6-astra", "effort": "high", "permissions": "guarded",
+            "wrapper_prefix": ["env", "TERM=xterm"],
+        })
+    );
+    assert!(!drawn(cx, "prompt-alternative-0"));
+}
+
+/// Custom flags may opt out of checks. The confirmation keeps those flags
+/// under the YOLO answers and offers no automatic guarded equivalent.
+#[gpui::test]
+fn replace_with_saved_custom_flags_offers_no_guarded_answer(cx: &mut TestAppContext) {
+    let source = ended("a").launch(json!({
+        "kind": "agent",
+        "selection": {"harness": "codex", "permissions": "custom", "permission_flags": ["--yolo"]},
+        "start": ["codex", "--yolo", "{farhelm_args}"],
+        "resume": null,
+    }));
+    let (mut helm, cx, id) = replacing_open(cx, source);
+    refuse_for_yolo(&mut helm, cx, id);
+    assert_eq!(
+        label_of(cx, "prompt-alternative-0").as_deref(),
+        Some("Start, and don't ask again on this host")
+    );
+    assert!(!drawn(cx, PERMANENT_REPLACE_ANSWER));
+    assert!(helm.commands().is_empty());
 }
 
 /// Where a fresh frame draws the element `id` inside `key`'s row item, by the frame's own parent links, if it does. For
@@ -1193,7 +1281,7 @@ fn the_permanent_answer_writes_the_host_setting_then_replaces_with_consent(
 ) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
     refuse_for_yolo(&mut fake, cx, id);
-    test_support::click(cx, "prompt-alternative-0");
+    test_support::click(cx, PERMANENT_REPLACE_ANSWER);
     let sent = fake.commands();
     let [write] = &sent[..] else {
         panic!("only the host write is out, not {} commands", sent.len());
@@ -1206,7 +1294,7 @@ fn the_permanent_answer_writes_the_host_setting_then_replaces_with_consent(
         cx,
     );
     assert!(
-        drawn_inside(cx, "prompt-alternative-0", "session-item-a"),
+        drawn_inside(cx, PERMANENT_REPLACE_ANSWER, "session-item-a"),
         "the question stays while its write is out"
     );
     choose(cx, "session-menu-a", "session-menu-replace");
@@ -1236,7 +1324,7 @@ pub(crate) enum ReplaceFrom {
 pub(crate) enum Consent {
     /// The one-off answer (`prompt-confirm`), which sends the Replace again at once.
     Once,
-    /// The permanent answer (`prompt-alternative-0`), which first writes the host's "Start YOLO sessions without
+    /// The permanent answer, which first writes the host's "Start YOLO sessions without
     /// asking" and sends the Replace again only once that write succeeds.
     StopAsking,
 }
@@ -1316,7 +1404,7 @@ pub(crate) fn nothing_alive_guard_survives(
     refuse_for_yolo(&mut fake, cx, id);
     // Only the YOLO question has a permanent answer; the Replace question has closed.
     assert!(
-        drawn(cx, "prompt-alternative-0"),
+        drawn(cx, PERMANENT_REPLACE_ANSWER),
         "the premise: the YOLO question is drawn"
     );
 
@@ -1329,14 +1417,14 @@ pub(crate) fn nothing_alive_guard_survives(
         "the premise: a's row now shows something alive"
     );
     assert!(
-        drawn(cx, "prompt-alternative-0"),
+        drawn(cx, PERMANENT_REPLACE_ANSWER),
         "the premise: the YOLO question is still drawn"
     );
 
     match consent {
         Consent::Once => test_support::click(cx, "prompt-confirm"),
         Consent::StopAsking => {
-            test_support::click(cx, "prompt-alternative-0");
+            test_support::click(cx, PERMANENT_REPLACE_ANSWER);
             let sent = fake.commands();
             let [write] = &sent[..] else {
                 panic!("only the host write is out, not {} commands", sent.len());
@@ -1457,7 +1545,7 @@ fn an_open_yolo_question_refuses_the_sessions_other_lifecycle_actions(cx: &mut T
 fn a_press_during_the_host_write_keeps_the_replacement_from_taking_focus(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
     refuse_for_yolo(&mut fake, cx, id);
-    test_support::click(cx, "prompt-alternative-0");
+    test_support::click(cx, PERMANENT_REPLACE_ANSWER);
     let sent = fake.commands();
     let [write] = &sent[..] else {
         panic!("only the host write is out, not {} commands", sent.len());
@@ -1488,7 +1576,7 @@ fn a_press_during_the_host_write_keeps_the_replacement_from_taking_focus(cx: &mu
 fn a_reset_drops_the_question(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_the_open_session(cx);
     refuse_for_yolo(&mut fake, cx, id);
-    test_support::click(cx, "prompt-alternative-0");
+    test_support::click(cx, PERMANENT_REPLACE_ANSWER);
     assert!(
         cx.update(|_, cx| super::replace_yolo::open("a", cx)),
         "the premise: the question is open, its write out"
@@ -1499,7 +1587,7 @@ fn a_reset_drops_the_question(cx: &mut TestAppContext) {
     test_support::settle(cx);
     pending(&mut fake);
     assert!(
-        !drawn(cx, "prompt-alternative-0"),
+        !drawn(cx, PERMANENT_REPLACE_ANSWER),
         "the question went with the reset"
     );
     choose(cx, "session-menu-a", "session-menu-replace");

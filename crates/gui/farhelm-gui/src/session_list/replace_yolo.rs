@@ -1,6 +1,6 @@
 //! A plain Replace that the helm refused because the source's host asks before YOLO launches: the launcher's YOLO
 //! question, drawn where that Replace was asked (the source's row, or the open session's header or interrupted card),
-//! and the Replace again with consent once the user confirms.
+//! then the saved launch with consent or a newly composed guarded replacement.
 //!
 //! SPEC.md, "Creation", the YOLO paragraph: the GUI answers that refusal "with a prominent confirmation, shown with the
 //! control or surface that started the launch and scrolled into view", and "a plain Replace's question, which arrives
@@ -25,7 +25,8 @@
 //!   Answering returns focus to what held it when the question arrived, which is where the Replace question left it.
 //! - **The answer.** The one-off answer, or the permanent answer once its host write has succeeded, sends the same
 //!   Replace again with `confirm_yolo` set: the source and the Delete guard the user's Replace question froze, on the
-//!   session's own key, at most once per question. Its success opens the replacement under Replace's own rule, counting
+//!   session's own key, at most once per question. The guarded answer carries the same guard and source key with a
+//!   guarded launch in the Replace-with body. Success opens the replacement under Replace's own rule, counting
 //!   "moved on" from that answer's press rather than from the original Replace (`super::replace`).
 //! - **While it is open** ([`open`]), the session's other lifecycle actions (Stop, Restart, Replace, Delete and Rename)
 //!   are refused and drawn unavailable, as for any open lifecycle confirmation (SPEC.md: "an open lifecycle
@@ -46,8 +47,9 @@
 
 use std::collections::HashMap;
 
-use farhelm_proto::DeleteGuard;
+use farhelm_proto::session_requests::CreateSessionBody;
 use farhelm_proto::ui_channel::{HostView, SessionRow};
+use farhelm_proto::{DeleteGuard, LaunchPermission};
 use gpui::{
     AnyElement, AnyWindowHandle, App, AppContext as _, Entity, Global, IntoElement,
     ParentElement as _, Styled as _, Window, div, px,
@@ -58,6 +60,7 @@ use crate::host_text::HostText;
 use crate::hosts::identity;
 use crate::launcher::entry::{self, YoloAsk};
 use crate::local_state;
+use crate::operations::{OpKey, Work};
 use crate::prompt::Inline;
 use crate::session::{self, PerSession};
 
@@ -180,10 +183,10 @@ pub(super) fn take_reveal(cx: &mut App) -> Option<String> {
 
 /// The helm refused `source`'s plain Replace, asked on `surface` with `guard` at the user's answer `mark`, because its
 /// host asks before YOLO launches: ask the launcher's question in `window` and keep it for `surface` to draw. Its
-/// answer sends the Replace again with consent ([`replace::send_with_consent`]). Returns whether it was asked: not when
+/// answer uses [`replace::send_after_yolo_question`]. Returns whether it was asked: not when
 /// the store holds no row for the source any more (its host and stored launch are what the question names) or the
 /// window is gone.
-pub(super) fn ask(
+pub(crate) fn ask(
     source: &str,
     guard: DeleteGuard,
     surface: Surface,
@@ -199,12 +202,56 @@ pub(super) fn ask(
         return false;
     };
     let (host, launch) = (row.host, row.info.launch.clone());
-    let host_name = host_name(row, collections.get::<HostView>(&HostView::key(row.host)));
+    let host_view = collections.get::<HostView>(&HostView::key(host));
+    let host_name = host_name(row, host_view);
+    let expected_incarnation = host_view.map(|host| host.incarnation);
     // The launcher runs this at most once per question (`entry::ask_yolo_for_replace`'s contract), and the operation
     // store refuses a second start on the session's key while one is out, so nothing here counts the calls.
     let key = source.to_owned();
-    let send_again = move |answer: Mark, window: &mut Window, cx: &mut App| {
-        replace::send_with_consent(&key, guard, surface, answer, window.window_handle(), cx);
+    let asked_launch = launch.clone();
+    let send_again = move |choice, answer: Mark, window: &mut Window, cx: &mut App| {
+        let with = match choice {
+            entry::ReplaceAnswer::Yolo => None,
+            entry::ReplaceAnswer::Guarded => {
+                let Some(store) = session::current_store(cx) else {
+                    return;
+                };
+                let Some(row) = store.read(cx).collections().get::<SessionRow>(&key) else {
+                    return;
+                };
+                // A concurrent rename can be visible by the time the user
+                // answers. Keep the offered launch and original connection.
+                if row.host != host || row.info.launch != asked_launch {
+                    if let Some(operations) = session::current_operations(cx) {
+                        let op_key = OpKey::session(&key);
+                        operations.update(cx, |operations, cx| {
+                            if operations.in_flight(&op_key).is_none() {
+                                operations.note(
+                                    &op_key,
+                                    Work::Replace,
+                                    HostText::from_host("This session changed while the question was open. Choose Replace again."),
+                                    cx,
+                                );
+                            }
+                        });
+                    }
+                    return;
+                }
+                let Some(guarded) = guarded_create(row, expected_incarnation) else {
+                    return;
+                };
+                Some(guarded)
+            }
+        };
+        replace::send_after_yolo_question(
+            &key,
+            guard,
+            surface,
+            answer,
+            with,
+            window.window_handle(),
+            cx,
+        );
     };
     let asked = window.update(cx, |_, window, cx| {
         entry::ask_yolo_for_replace(host, host_name, &launch, &mark, send_again, window, cx)
@@ -228,6 +275,32 @@ pub(super) fn ask(
         );
     });
     true
+}
+
+/// Carry the source's visible details into a guarded replacement. Replace
+/// with composes argv using current trust settings and enforces the original
+/// host incarnation and Delete guard.
+fn guarded_create(
+    row: &SessionRow,
+    expected_incarnation: Option<u64>,
+) -> Option<CreateSessionBody> {
+    let mut selection = row.info.launch.agent_selection()?.clone();
+    selection.permissions = Some(LaunchPermission::Guarded);
+    selection.permission_flags = None;
+    selection.workspace_trust = None;
+    selection.container = None;
+    Some(CreateSessionBody {
+        host: Some(row.host),
+        expected_incarnation,
+        cwd: row.info.cwd.clone(),
+        title: Some(row.info.title.clone()),
+        launch: Some(selection),
+        command: None,
+        prompt: None,
+        conversation: None,
+        confirm_yolo: false,
+        github_checkout: None,
+    })
 }
 
 /// The host's name as the question says it: the registry's display name ([`identity::display_name`]) while the

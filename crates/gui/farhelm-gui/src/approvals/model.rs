@@ -800,7 +800,7 @@ fn template_facts(fields: &TemplateFields, host_name: Option<&str>, facts: &mut 
     }
     if let Some(permissions) = &fields.permissions {
         // The template's stored label, worded as the templates summary words it; never classified as a launch, since
-        // an omitted permission in a template is not the agent's own setting of a stored launch.
+        // A template's omitted choice uses the default for the new launch.
         facts.push(value(
             "permissions",
             &crate::templates::summary::permission_label(fields.agent, *permissions),
@@ -920,7 +920,6 @@ pub struct Chips {
 pub enum ChipKind {
     Yolo,
     Guarded,
-    OwnSetting,
     Unknown,
     Approve,
     SmartApprove,
@@ -975,10 +974,10 @@ impl Chips {
         self.shield().ink(palette)
     }
 
-    /// Whether the chip warns: the YOLO shield (YOLO, custom flags, asserted YOLO, observed bypass) and the agent's own
-    /// setting, which hosts that ask before YOLO launches treat as YOLO.
+    /// Warn for any launch represented by the YOLO shield, including an
+    /// agent launch without a recorded permission mode.
     pub fn warning(&self) -> bool {
-        matches!(self.shield(), Shield::Yolo | Shield::OwnSetting)
+        self.shield() == Shield::Yolo
     }
 
     /// The words beside the chip: the guarded mode's own name when the card has it, else the meaning's description.
@@ -1012,7 +1011,6 @@ impl ChipKind {
             (Shield::Shielded, SessionLaunch::Legacy { .. }) | (Shield::Unknown, _) => {
                 ChipKind::Unknown
             }
-            (Shield::OwnSetting, _) => ChipKind::OwnSetting,
         }
     }
 
@@ -1021,7 +1019,6 @@ impl ChipKind {
         match self {
             ChipKind::Yolo => "YOLO",
             ChipKind::Guarded => "Guarded",
-            ChipKind::OwnSetting => "Own setting",
             ChipKind::Unknown => "Unknown",
             ChipKind::Approve => "Approve",
             ChipKind::SmartApprove => "Smart approve",
@@ -1036,9 +1033,6 @@ impl ChipKind {
         match self {
             ChipKind::Yolo => "Farhelm applies the host's YOLO rules to this launch",
             ChipKind::Guarded => "Guarded permission mode",
-            ChipKind::OwnSetting => {
-                "Agent's own setting — not classified; treated as YOLO on hosts that ask before YOLO launches"
-            }
             ChipKind::Unknown => {
                 "Unclassified — a command from before launch kinds, which Farhelm never classified"
             }

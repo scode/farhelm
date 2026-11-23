@@ -22,8 +22,8 @@
 //!   nothing, so the only launch is the one the answer sends. An edit of the draft retires the question, and the
 //!   write's success then starts nothing: the question it answered is gone.
 //!
-//! The sidebar's plain Replace asks the same question through `launcher::entry::ask_yolo_for_replace`, with its own
-//! retry and no guarded answer; an [`Owner`] is what differs between the two.
+//! Plain Replace shares the question and supplies its own actions. Its
+//! guarded button composes a guarded replacement when the saved agent offers it.
 //!
 //! Restart with asks the launcher's question too, offering the guarded answer only while a guarded restart would still
 //! change something ([`crate::launcher::draft::LaunchDraft::guarded_still_changes`]).
@@ -55,32 +55,29 @@ pub struct YoloAsk {
     host_name: HostText,
     reason: YoloReason,
     /// Whether the guarded alternative is offered.
-    guarded: bool,
+    pub(in crate::launcher) guarded: bool,
     /// The source warning beside this question. A lifecycle launcher sets it when drawing both together.
     source: Option<SourceConsent>,
 }
 
 impl YoloAsk {
-    /// What a plain Replace's question asks about: the source's host and its stored launch, which Replace relaunches
-    /// as it is. Never offers guarded: plain Replace keeps the stored launch (SPEC.md: the guarded answer is "in the
-    /// session launcher", for an explicit YOLO choice there).
+    /// Use the source's saved launch to explain a plain Replace refusal.
+    /// A saved YOLO choice can be recompiled as Guarded when the harness offers
+    /// it. Custom flags and command assertions have no guarded equivalent here.
     pub(in crate::launcher) fn for_stored_launch(
         host: i64,
         host_name: HostText,
         launch: &SessionLaunch,
     ) -> Self {
-        let reason = match launch {
-            SessionLaunch::Agent { selection, .. } => YoloReason::of_launch(Some(selection)),
-            SessionLaunch::Command(_) => YoloReason::of_launch(None),
-            // Plain Replace refuses a launch from before launch kinds, so its question never comes; were it asked, the
-            // stored command is the agent's own setting as far as Farhelm can tell.
-            SessionLaunch::Legacy { .. } => YoloReason::OwnSetting,
-        };
+        let selection = launch.agent_selection();
         YoloAsk {
             host,
             host_name,
-            reason,
-            guarded: false,
+            reason: YoloReason::of_launch(selection),
+            guarded: selection.is_some_and(|choice| {
+                choice.harness.stored_permission(choice.permissions) == Some(LaunchPermission::Yolo)
+                    && choice.harness.offers_permission(LaunchPermission::Guarded)
+            }),
             source: None,
         }
     }
@@ -172,16 +169,21 @@ impl Launcher {
         }
         let guarded = state.ask.guarded.then(|| {
             let launcher = cx.weak_entity();
-            Box::new(move |source, window: &mut Window, cx: &mut gpui::App| {
-                let mark = Mark::take(cx);
-                let _ = launcher.update(cx, |launcher, cx| {
-                    launcher
-                        .draft
-                        .choose_permissions(Some(LaunchPermission::Guarded));
-                    // A managed checkout's preview is stale after the switch; this waits for the new one.
-                    let _ = launcher.submit_or_wait_for_preview(source, mark, window, cx);
-                });
-            }) as GuardedAction
+            GuardedAction {
+                button: answer(
+                    "Start guarded session instead",
+                    "Start this session in guarded mode instead, where the agent's own safety checks stay on",
+                    Tier::Primary,
+                ),
+                run: Box::new(move |source, window, cx| {
+                    let mark = Mark::take(cx);
+                    let _ = launcher.update(cx, |launcher, cx| {
+                        launcher.draft.choose_permissions(Some(LaunchPermission::Guarded));
+                        // Changing permission invalidates a managed checkout's preview.
+                        let _ = launcher.submit_or_wait_for_preview(source, mark, window, cx);
+                    });
+                }),
+            }
         });
         let owner = launcher_owner(cx.weak_entity());
         state.inline = Some(ask_question(&state.ask, guarded, owner, mark, window, cx));
@@ -206,12 +208,35 @@ type LaunchAgain = Rc<dyn Fn(SourceConsent, Mark, &mut Window, &mut gpui::App)>;
 /// A plain Replace's retry with consent, the caller's own.
 pub(in crate::launcher) type Retry = Rc<dyn Fn(Mark, &mut Window, &mut gpui::App)>;
 
-/// The guarded alternative's action: switch the launch to Guarded and start it without consent.
-type GuardedAction = Box<dyn FnOnce(SourceConsent, &mut Window, &mut gpui::App)>;
+/// Start the guarded launch once, carrying any restart consent from the question.
+type RunGuarded = Box<dyn FnOnce(SourceConsent, &mut Window, &mut gpui::App)>;
+
+/// The guarded answer uses the original surface's verb and launch action.
+pub(in crate::launcher) struct GuardedAction {
+    button: Answer,
+    run: RunGuarded,
+}
+
+impl GuardedAction {
+    /// Replace owns the source and its delete guard. It needs only the mark
+    /// from this button's press to keep its existing focus behavior.
+    pub(in crate::launcher) fn replace(
+        run: impl FnOnce(Mark, &mut Window, &mut gpui::App) + 'static,
+    ) -> Self {
+        Self {
+            button: answer(
+                "Replace as guarded instead",
+                "Replace this session with a fresh one in guarded mode",
+                Tier::Primary,
+            ),
+            run: Box::new(move |_, window, cx| run(Mark::take(cx), window, cx)),
+        }
+    }
+}
 
 /// What owns a YOLO question and its launch: the launcher, for its own refused launches, or the sidebar's plain
-/// Replace, through `launcher::entry::ask_yolo_for_replace`. The question's words and answers are the same for both;
-/// only these differ.
+/// Replace, through `launcher::entry::ask_yolo_for_replace`. Both use the
+/// same one-off and permanent YOLO answers.
 #[derive(Clone)]
 pub(in crate::launcher) struct Owner {
     /// Send the launch again with consent, for the user's answer at the given mark.
@@ -310,14 +335,9 @@ fn question(ask: &YoloAsk, guarded: Option<GuardedAction>, owner: Owner) -> Ques
         Tier::Neutral,
     ));
     if let Some(guarded) = guarded {
-        question = question.alternative(
-            answer(
-                "Start guarded session instead",
-                "Start this session in guarded mode instead, where the agent's own safety checks stay on",
-                Tier::Primary,
-            ),
-            move |ask, window, cx| guarded(ask.source.unwrap_or_default(), window, cx),
-        );
+        question = question.alternative(guarded.button, move |ask, window, cx| {
+            (guarded.run)(ask.source.unwrap_or_default(), window, cx)
+        });
     }
     question
         .fallible_alternative(

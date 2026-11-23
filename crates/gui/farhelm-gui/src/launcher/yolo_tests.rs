@@ -68,7 +68,8 @@ fn each_yolo_launch_gets_its_own_reason() {
 
 /// SPEC.md: "an explicit YOLO choice on an agent that offers guarded mode also offers starting the same launch guarded
 /// instead". Offering it for anything else would quietly change a launch the user did not choose YOLO for. Specified:
-/// YOLO chosen on Codex offers guarded; an own-setting Codex launch, custom flags, Pi and a command do not.
+/// The composer offers Guarded for an explicit YOLO choice on Codex. Its
+/// other draft states and commands have no alternative here.
 #[test]
 fn only_an_explicit_yolo_choice_offers_guarded() {
     let chosen = selection(LaunchHarness::Codex, Some(LaunchPermission::Yolo));
@@ -451,7 +452,7 @@ fn replace_question(
             crate::host_text::HostText::from_host("host1"),
             &launch,
             &mark,
-            move |mark, _, cx| {
+            move |_, mark, _, cx| {
                 counted.set(counted.get() + 1);
                 moved.set(crate::focus::has_moved_on(&mark, cx));
             },
@@ -465,8 +466,8 @@ fn replace_question(
 }
 
 /// SPEC.md, "Creation": for a plain Replace the GUI answers the helm's YOLO refusal with the same confirmation, "shown
-/// with the control or surface that started the launch" (the sidebar's row, header or card), and with no guarded
-/// answer, since plain Replace keeps the stored launch; Cancel takes focus when the user has not moved on. Specified:
+/// with the control or surface that started the launch" (the sidebar's row, header or card). This command fixture
+/// has no Guarded choice. Cancel takes focus when the user has not moved on. Specified:
 /// the question opens focused on Cancel, says the command was asserted YOLO, offers the permanent answer first among
 /// the extras and nothing after it, and the one-off answer asks the caller to retry once.
 #[gpui::test]

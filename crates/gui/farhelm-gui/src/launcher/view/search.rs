@@ -488,7 +488,7 @@ impl Launcher {
             }
             Row::Effort(effort) => self.choose_effort(effort, cx),
             Row::Permission(permission) => {
-                self.choose_permissions(permission.permission(), window, cx)
+                self.choose_permissions(Some(permission.permission()), window, cx)
             }
             Row::UsePath(path) => {
                 // A folder taken from search is a pick, not typing: the folder list shows every recent folder again.

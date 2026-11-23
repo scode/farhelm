@@ -414,7 +414,6 @@ fn choice_words_before_a_harness_say_to_choose_one() {
         "max",
         "ultra",
         "default",
-        "own",
         "custom",
         "approve",
         "smart approve",
@@ -429,6 +428,7 @@ fn choice_words_before_a_harness_say_to_choose_one() {
             assert_eq!(command.rows(query), name(query.trim()), "{query}");
         }
     }
+    assert_eq!(agent.rows("own"), name("own"));
 }
 
 // ---- Empty results -------------------------------------------------------------------------------------------------

@@ -413,8 +413,8 @@ impl Permission {
                     "Farhelm asks you to confirm each of these launches on this host."
                 };
                 format!(
-                    "YOLO bypasses an agent's safety checks. Unclassified launches on the agent's own setting count \
-                     as YOLO too. {tail}"
+                    "YOLO bypasses an agent's safety checks. Farhelm also treats custom flags and saved agent launches \
+                     with no recorded permission as YOLO. {tail}"
                 )
             }
             Permission::OwnSessions => {
