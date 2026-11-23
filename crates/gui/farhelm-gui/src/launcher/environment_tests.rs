@@ -631,6 +631,7 @@ fn choosing_the_placement_already_chosen_keeps_a_numbered_name() {
 fn a_clones_default_name_goes_to_a_new_environment_as_a_base() {
     let repo = parse_github_repo("owner/repo").unwrap();
     let mut source = super::draft_tests::session(SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: "true".into(),
         yolo: false,
         agent: None,

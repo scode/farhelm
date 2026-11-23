@@ -27,9 +27,10 @@ pub(super) fn chosen(
     permissions: Option<LaunchPermission>,
 ) -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness,
         model: model.map(str::to_owned),
-        effort,
+        effort: effort.map(Into::into),
         permissions,
         permission_flags: None,
         workspace_trust: None,

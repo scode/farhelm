@@ -1,7 +1,66 @@
-//! Positional attribution of a Claude Code, Muse or Antigravity hook to its emitter.
+//! Positional attribution of a hook to its emitter for agents with no executable identity rule.
 //! Admission pins that process; ancestry alone does not establish authority.
 
 use super::*;
+
+/// The two reporter command grammars that can occupy the start of a positional corridor.
+#[derive(Clone, Copy)]
+pub(crate) enum PositionalReporter {
+    BuiltIn,
+    Custom,
+}
+
+impl PositionalReporter {
+    fn is_invocation(self, argv: &[Vec<u8>]) -> bool {
+        match self {
+            Self::BuiltIn => is_hook_invocation_argv(argv),
+            Self::Custom => matches!(argv, [_, group, verb, flag, _]
+                if group == b"custom-agent" && verb == b"report-conversation" && flag == b"--id"),
+        }
+    }
+
+    fn is_trampoline(self, exe: &[u8], argv: &[Vec<u8>]) -> bool {
+        match self {
+            Self::BuiltIn => is_hook_trampoline(exe, argv),
+            Self::Custom => is_custom_trampoline(exe, argv),
+        }
+    }
+}
+
+/// Skip the documented five-argument shell wrapper without treating more shell programs as report emitters.
+///
+/// The single supported expansion is the final quoted position parameter, supplied as its own argv element.
+/// Keep this shape in sync with the contract changelog in
+/// `website/src/content/docs/docs/agents/custom-agent-contract.md`.
+fn is_custom_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
+    let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
+    if !matches!(name, b"sh" | b"bash" | b"dash") {
+        return false;
+    }
+    let [_, flag, command, zero, id] = argv else {
+        return false;
+    };
+    if flag != b"-c" || zero != b"_" {
+        return false;
+    }
+    let Ok(id) = std::str::from_utf8(id) else {
+        return false;
+    };
+    if farhelm_proto::conversation::validate_named_conversation(id).is_err() {
+        return false;
+    }
+    let Some(prefix) = std::str::from_utf8(command)
+        .ok()
+        .and_then(|command| command.strip_suffix(r#" "$1""#))
+    else {
+        return false;
+    };
+    !has_unquoted_shell_syntax(prefix)
+        && shell_words::split(prefix).is_ok_and(|words| {
+            matches!(words.as_slice(), [exe, group, verb, flag]
+                if !exe.is_empty() && group == "custom-agent" && verb == "report-conversation" && flag == "--id")
+        })
+}
 
 /// The emitter and every possible correcting ancestor through the pane anchor.
 /// Ancestors are nearest-first and exclude the emitter and hook trampolines
@@ -37,12 +96,15 @@ pub(crate) struct PositionalAttribution {
 /// Trampoline skipping is load-bearing, not tidiness: whether the hook's
 /// `sh -c` survives as a link or `exec`s the hook depends on the shell,
 /// and the position of the emitter must not depend on that.
-pub(crate) fn positional_corridor(chain: &[ChainLink]) -> Result<PositionalAttribution, String> {
+pub(crate) fn positional_corridor(
+    chain: &[ChainLink],
+    grammar: PositionalReporter,
+) -> Result<PositionalAttribution, String> {
     let reporter = chain
         .first()
         .ok_or_else(|| "the hook ancestry is empty".to_string())?;
     match reporter.argv.as_deref() {
-        Some(argv) if is_hook_invocation_argv(argv) => {}
+        Some(argv) if grammar.is_invocation(argv) => {}
         _ => {
             return Err("the reporting process is not the supported hook invocation".to_string());
         }
@@ -56,7 +118,7 @@ pub(crate) fn positional_corridor(chain: &[ChainLink]) -> Result<PositionalAttri
                 || !chain[index]
                     .argv
                     .as_deref()
-                    .is_some_and(|argv| is_hook_trampoline(&chain[index].exe, argv))
+                    .is_some_and(|argv| grammar.is_trampoline(&chain[index].exe, argv))
         })
         .ok_or_else(|| "the hook reporter is itself the pane process".to_string())?;
     let link = &chain[emitter];

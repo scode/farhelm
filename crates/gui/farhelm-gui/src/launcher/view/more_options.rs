@@ -274,6 +274,7 @@ const fn conversation_label(harness: LaunchHarness) -> &'static str {
         | LaunchHarness::Codex
         | LaunchHarness::Muse
         | LaunchHarness::Antigravity
+        | LaunchHarness::Custom
         | LaunchHarness::Grok => "Conversation ID",
         LaunchHarness::Bash | LaunchHarness::Zsh => "Conversation ID",
     }

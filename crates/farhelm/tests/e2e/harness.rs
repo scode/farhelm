@@ -1506,6 +1506,7 @@ pub(crate) fn declared_command(
     resume: Option<&str>,
 ) -> farhelm_proto::SessionLaunch {
     farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+        custom_agent: None,
         command: command.to_string(),
         yolo: false,
         agent: Some(agent),

@@ -36,6 +36,7 @@ pub(crate) const fn glyph(harness: LaunchHarness) -> HarnessGlyph {
         LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         LaunchHarness::Bash => HarnessGlyph::Bash,
         LaunchHarness::Zsh => HarnessGlyph::Zsh,
+        LaunchHarness::Custom => HarnessGlyph::Terminal,
     }
 }
 
@@ -53,7 +54,7 @@ pub(crate) const fn kind_glyph(kind: AgentKind) -> HarnessGlyph {
         AgentKind::Omp => HarnessGlyph::Omp,
         AgentKind::Grok => HarnessGlyph::Grok,
         AgentKind::Muse => HarnessGlyph::Muse,
-        AgentKind::Generic => HarnessGlyph::Terminal,
+        AgentKind::Custom | AgentKind::Generic => HarnessGlyph::Terminal,
     }
 }
 
@@ -75,6 +76,7 @@ pub(crate) const fn name(harness: LaunchHarness) -> &'static str {
         LaunchHarness::OpenCode => "OpenCode",
         LaunchHarness::Bash => "Bash",
         LaunchHarness::Zsh => "Zsh",
+        LaunchHarness::Custom => "Custom agent",
     }
 }
 
@@ -93,6 +95,7 @@ pub(crate) const fn settings_button_id(harness: LaunchHarness) -> &'static str {
         LaunchHarness::OpenCode => "settings-section-opencode",
         LaunchHarness::Bash => "settings-section-bash",
         LaunchHarness::Zsh => "settings-section-zsh",
+        LaunchHarness::Custom => "settings-section-custom-agent",
     }
 }
 
@@ -118,7 +121,8 @@ pub(crate) const fn screen_yolo_mode(harness: LaunchHarness) -> Option<&'static 
         | LaunchHarness::Antigravity
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 

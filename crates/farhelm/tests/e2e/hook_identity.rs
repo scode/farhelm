@@ -2121,6 +2121,303 @@ fn a_hook_with_no_supervisor_is_silent_and_leaves_its_report() {
     );
 }
 
+/// A custom agent's public reporter must work without a running supervisor or a readable stdin.
+/// Invalid arguments keep the last valid report in its slot.
+#[farhelm_testtrace::test]
+fn custom_agent_report_is_silent_and_preserves_the_last_valid_id() {
+    const CONTRACT: &str =
+        "website/src/content/docs/docs/agents/custom-agent-contract.md, Contract changelog";
+    let state = farhelm_teststate::tempdir().expect("state dir");
+    let socket = state.path().join("supervisor.sock");
+    let command = |args: &[&str]| {
+        let mut cmd = std::process::Command::new(farhelm_bin());
+        cmd.args(["custom-agent", "report-conversation"])
+            .args(args)
+            .env(
+                farhelm_supervisor::launch::SESSION_ID_ENV_VAR,
+                "custom-fixture",
+            )
+            .env(
+                farhelm_supervisor::launch::SESSION_TOKEN_ENV_VAR,
+                "not-a-real-token",
+            )
+            .env(farhelm_supervisor::launch::SUPERVISOR_SOCK_ENV_VAR, &socket)
+            .stdin(std::process::Stdio::piped())
+            .stdout(std::process::Stdio::piped())
+            .stderr(std::process::Stdio::piped());
+        cmd
+    };
+    assert!(!socket.exists(), "premise: the reporter has no supervisor");
+    assert_silent(command(&["--id", "conv-custom"]), b"", true);
+    let slot = farhelm_supervisor::hook_report::session_dir(state.path(), "custom-fixture")
+        .expect("valid fixture session id")
+        .join(farhelm_supervisor::hook_report::Slot::Latest.file_name());
+    let original = std::fs::read(&slot).expect(CONTRACT);
+    let report: farhelm_supervisor::hook_report::HookReport =
+        serde_json::from_slice(&original).expect(CONTRACT);
+    assert_eq!(
+        report.vendor,
+        farhelm_proto::ReportVendor::Custom,
+        "{CONTRACT}"
+    );
+    assert_eq!(report.conversation, "conv-custom", "{CONTRACT}");
+    assert!(
+        report.ancestry.is_some_and(|links| !links.is_empty()),
+        "{CONTRACT}"
+    );
+    assert_eq!(
+        sole_hook_log_outcome(state.path(), "custom-fixture"),
+        "written conv-custom -"
+    );
+
+    for args in [
+        &[][..],
+        &["--id", "pi:reserved"][..],
+        &["--bad-flag"][..],
+        &["--id=other-conversation"][..],
+    ] {
+        assert_silent(command(args), b"", true);
+        assert_eq!(std::fs::read(&slot).unwrap(), original, "{CONTRACT}");
+    }
+    let log = hook_log_at(state.path(), "custom-fixture");
+    assert_eq!(
+        log.lines()
+            .filter(|line| line.contains(" bad-payload "))
+            .count(),
+        4,
+        "{CONTRACT}: {log}"
+    );
+}
+
+/// The same wrapper can run outside Farhelm without leaving files in its environment.
+#[farhelm_testtrace::test]
+fn public_custom_reporter_is_a_silent_noop_without_session_environment() {
+    let outside = farhelm_teststate::tempdir().expect("outside dir");
+    let mut cmd = std::process::Command::new(farhelm_bin());
+    cmd.env_clear()
+        .env("HOME", outside.path())
+        .current_dir(outside.path())
+        .args(["custom-agent", "report-conversation", "--id", "outside"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped());
+    assert_silent(cmd, b"", true);
+    assert!(
+        std::fs::read_dir(outside.path()).unwrap().next().is_none(),
+        "the public reporter writes no files outside a session"
+    );
+}
+
+/// An actual custom wrapper exercises the public reporter, shell trampoline, and current launch's authority.
+/// A child-first report initially resumes the child, the parent corrects it through the documented shell grammar,
+/// and subsequent nested reports leave the parent's Restart target alone.
+#[farhelm_testtrace::test]
+async fn custom_agent_positional_report_corrects_to_the_parent_and_restarts_it() {
+    use farhelm_proto::{CommandLaunch, LaunchHarness, SessionLaunch};
+    let (h, _fixtures, serving) = hook_harness().await;
+    let work = farhelm_teststate::tempdir().expect("custom agent working directory");
+    let script = work.path().join("custom-fixture.sh");
+    std::fs::write(
+        &script,
+        r#"if [ "$#" -gt 0 ]; then printf 'CUSTOM-RESUMED:%s\n' "$1"; fi
+printf 'CUSTOM-READY\n'
+while IFS=' ' read -r action id; do
+    case "$action" in
+        parent)
+            /bin/sh -c 'farhelm custom-agent report-conversation --id "$1"' _ "$id"
+            ;;
+        child)
+            /bin/sh -c '
+                farhelm custom-agent report-conversation --id "$1" &&
+                printf "CUSTOM-CHILD:%s\n" "$1"
+            ' _ "$id"
+            ;;
+        *) exit 91 ;;
+    esac
+    [ "$?" -eq 0 ] || exit 92
+    printf 'CUSTOM-REPORTED:%s\n' "$id"
+done
+"#,
+    )
+    .expect("write controlled custom wrapper");
+    let script = script.to_string_lossy();
+    let invoke = format!("exec /bin/sh {}", shell_words::quote(&script));
+    let launch = SessionLaunch::Command(CommandLaunch {
+        command: format!("{invoke} {{farhelm_args}}"),
+        yolo: true,
+        agent: Some(LaunchHarness::Custom),
+        custom_agent: None,
+        resume: Some(format!("{invoke} {{conversation}} {{farhelm_args}}")),
+    });
+    let session = h
+        .client
+        .create_session_with_extras(
+            &work.path().to_string_lossy(),
+            launch,
+            None,
+            WIDE_COLS,
+            ROWS,
+            farhelm_helm::CreateExtras::default(),
+        )
+        .await
+        .expect("launch a custom command using the public reporter contract");
+    let (chan, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach to the custom agent");
+    wait_for(&mut rx, &mut seen, "CUSTOM-READY", 20).await;
+    assert!(
+        snapshot_of(&h, &session.id)
+            .await
+            .captured_conversation
+            .is_none(),
+        "the agent has not reported a conversation yet"
+    );
+
+    for (action, id, outcome, count, expected) in [
+        ("child", "conv-child-first", "acked", 1, "conv-child-first"),
+        ("parent", "conv-parent", "acked", 2, "conv-parent"),
+        ("child", "conv-child-later", "refused", 1, "conv-parent"),
+    ] {
+        let from = seen.len();
+        h.client
+            .send_keys(chan, format!("{action} {id}\r").into_bytes())
+            .await;
+        let complete = format!("CUSTOM-REPORTED:{id}");
+        if action == "child" {
+            wait_for_after_from(
+                &mut rx,
+                &mut seen,
+                from,
+                &format!("CUSTOM-CHILD:{id}"),
+                &complete,
+                20,
+            )
+            .await;
+        } else {
+            wait_for(&mut rx, &mut seen, &complete, 20).await;
+        }
+        h.sup.reconcile_for_test().await;
+        wait_for_hook_log_words(h.state.path(), &session.id, outcome, count).await;
+        let snapshot = snapshot_of(&h, &session.id).await;
+        assert_eq!(
+            snapshot.captured_conversation.as_deref(),
+            Some(expected),
+            "custom-agent-contract.md, Contract changelog: {}",
+            hook_log(&h, &session.id),
+        );
+    }
+    let before = snapshot_of(&h, &session.id).await;
+    h.client
+        .restart_session(&session.id, true)
+        .await
+        .expect("restart the custom command");
+    drop(rx);
+    let (_, mut seen, mut rx) = h
+        .client
+        .attach_live(&session.id, WIDE_COLS, ROWS)
+        .await
+        .expect("attach to the restarted custom command");
+    wait_for(&mut rx, &mut seen, "CUSTOM-RESUMED:conv-parent", 20).await;
+    assert!(snapshot_of(&h, &session.id).await.generation > before.generation);
+    serving.stop().await;
+}
+
+/// A catalog executable's tilde is resolved on the launch host even when the resulting
+/// path contains a space and a wrapper receives the executable as quoted argv.
+/// With reporting turned off, a valid report cannot supply an identity even though a resume command is present.
+#[farhelm_testtrace::test]
+async fn custom_agent_resolves_home_relative_command_with_and_without_a_wrapper() {
+    use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch};
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let work = farhelm_teststate::tempdir().expect("custom agent working directory");
+    let home = work.path().join("custom agent home");
+    std::fs::create_dir(&home).expect("isolated home with a space");
+    let executable = home.join("custom-fixture");
+    std::fs::write(
+        &executable,
+        r#"#!/bin/sh
+if [ "$1" = wrapped ]; then
+    farhelm custom-agent report-conversation --id conv-disabled || exit 93
+fi
+printf 'CUSTOM-EXECUTED:%s\n' "$1"
+read -r finish
+"#,
+    )
+    .expect("write fixture program");
+    std::fs::set_permissions(&executable, std::fs::Permissions::from_mode(0o700))
+        .expect("enable execution of the fixture");
+    let (h, _fixtures) = fixture_harness_with_seams(|seams| {
+        seams.user_home = Some(home.clone());
+    })
+    .await;
+    let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
+
+    for (wrapper_prefix, arg) in [(None, "plain"), (Some(vec!["exec".to_owned()]), "wrapped")] {
+        let mut start = wrapper_prefix.clone().unwrap_or_default();
+        start.extend([
+            "~/custom-fixture".to_owned(),
+            arg.to_owned(),
+            "{farhelm_args}".to_owned(),
+        ]);
+        let mut resume = start.clone();
+        resume.insert(resume.len() - 1, "{conversation}".to_owned());
+        let launch = SessionLaunch::Agent {
+            selection: LaunchSelection {
+                harness: LaunchHarness::Custom,
+                custom_agent: Some("tilde-fixture".into()),
+                model: None,
+                effort: None,
+                permissions: Some(LaunchPermission::Yolo),
+                permission_flags: None,
+                wrapper_prefix,
+                container: None,
+                workspace_trust: None,
+            },
+            start,
+            resume: Some(resume),
+            custom_reporting: Some(false),
+        };
+        let session = h
+            .client
+            .create_session_with_extras(
+                &work.path().to_string_lossy(),
+                launch,
+                None,
+                WIDE_COLS,
+                ROWS,
+                farhelm_helm::CreateExtras::default(),
+            )
+            .await
+            .expect("start using the custom-agent contract");
+        let (_, mut seen, mut rx) = h
+            .client
+            .attach_live(&session.id, WIDE_COLS, ROWS)
+            .await
+            .expect("attach to the custom program");
+        wait_for(&mut rx, &mut seen, &format!("CUSTOM-EXECUTED:{arg}"), 20).await;
+        if arg == "wrapped" {
+            h.sup.reconcile_for_test().await;
+            wait_for_hook_log_words(h.state.path(), &session.id, "refused", 1).await;
+            let log = hook_log(&h, &session.id);
+            assert!(
+                log.contains("conversation reporting is disabled for this launch"),
+                "{log}"
+            );
+        }
+        let snapshot = snapshot_of(&h, &session.id).await;
+        assert!(snapshot.captured_conversation.is_none());
+        assert_eq!(
+            snapshot.restart_offer,
+            farhelm_proto::RestartOffer::NoConversationReporting,
+            "custom-agent-contract.md, Contract changelog",
+        );
+    }
+    serving.stop().await;
+}
+
 /// A vendor that never closes the hook's stdin cannot hold it past its
 /// budget either.
 ///

@@ -67,9 +67,11 @@ mod positional;
 pub(crate) use codex::codex_corridor;
 pub(crate) use grok::grok_corridor;
 pub(crate) use omp::omp_corridor;
-pub(crate) use positional::positional_corridor;
+pub(crate) use positional::{PositionalReporter, positional_corridor};
 #[cfg(test)]
-use positional::positional_corridor as claude_corridor;
+fn claude_corridor(chain: &[ChainLink]) -> Result<positional::PositionalAttribution, String> {
+    positional_corridor(chain, PositionalReporter::BuiltIn)
+}
 
 /// The only distinction the sweep draws between one live process and
 /// another.
@@ -4074,7 +4076,8 @@ mod tests {
             corridor_link(11, "/opt/test/wrapper", &["resident-wrapper"]),
             corridor_link(10, "/opt/test/outer", &["outer-wrapper"]),
         ];
-        let attributed = positional_corridor(&chain).expect("Muse callback reaches its emitter");
+        let attributed = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("Muse callback reaches its emitter");
         assert_eq!(attributed.emitter, claude_identity(12));
         assert_eq!(
             attributed.ancestors,
@@ -4088,6 +4091,59 @@ mod tests {
         ProcessIdentity {
             pid,
             start: u64::from(pid) * 1000,
+        }
+    }
+
+    /// A short-lived hook shell may survive or exec the reporter. Only the documented positional
+    /// trampoline gets skipped, so a child session's own script remains its own emitter.
+    #[farhelm_testtrace::test]
+    fn custom_reporter_uses_only_its_documented_positional_trampoline() {
+        const CONTRACT: &str =
+            "website/src/content/docs/docs/agents/custom-agent-contract.md, Contract changelog";
+        let reporter = || {
+            corridor_link(
+                12,
+                "/opt/test/bin/farhelm",
+                &[
+                    "farhelm",
+                    "custom-agent",
+                    "report-conversation",
+                    "--id",
+                    "conv-123",
+                ],
+            )
+        };
+        let source = || corridor_link(10, "/opt/test/custom", &["acme-code"]);
+        let direct = vec![reporter(), source()];
+        let from = |chain: &[ChainLink]| {
+            positional_corridor(chain, PositionalReporter::Custom)
+                .expect(CONTRACT)
+                .emitter
+        };
+        assert_eq!(from(&direct), claude_identity(10), "{CONTRACT}");
+        assert!(
+            positional_corridor(&direct, PositionalReporter::BuiltIn).is_err(),
+            "{CONTRACT}"
+        );
+
+        for (script, emitter) in [
+            (r#"farhelm custom-agent report-conversation --id "$1""#, 10),
+            (
+                r#"farhelm custom-agent report-conversation --id "$1"; :"#,
+                11,
+            ),
+            (
+                r#"farhelm custom-agent report-conversation --id "$1" | cat"#,
+                11,
+            ),
+        ] {
+            let trampoline = corridor_link(11, "/bin/sh", &["sh", "-c", script, "_", "conv-123"]);
+            let chain = vec![reporter(), trampoline, source()];
+            assert_eq!(
+                from(&chain),
+                claude_identity(emitter),
+                "{CONTRACT}: {script}"
+            );
         }
     }
 

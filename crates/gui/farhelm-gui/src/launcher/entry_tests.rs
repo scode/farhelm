@@ -522,6 +522,7 @@ fn clone_shows_its_copied_folder_and_name_escaped_and_editable(cx: &mut TestAppC
 fn a_managed_clones_numbered_name_spells_out_its_source_title(cx: &mut TestAppContext) {
     let mut source = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
         farhelm_proto::CommandLaunch {
+            custom_agent: None,
             command: "true".into(),
             yolo: false,
             agent: None,

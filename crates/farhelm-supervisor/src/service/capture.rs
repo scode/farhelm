@@ -427,6 +427,7 @@ mod tests {
     ) -> Arc<SessionEntry> {
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
         entry.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template: None,
@@ -580,6 +581,7 @@ mod tests {
         let mut published = entry_with(None, crate::store::LastOutcome::Running);
         published.info.id = id.to_string();
         published.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template: None,
@@ -1138,6 +1140,7 @@ mod tests {
         let mut hints = crate::service::hints::test_support::HintProbe::attach(&sup).await;
         let mut entry = entry_with(None, crate::store::LastOutcome::Running);
         entry.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind: AgentKind::Claude,
             wrapper_prefix_words: 0,
             resume_template: Some(vec![

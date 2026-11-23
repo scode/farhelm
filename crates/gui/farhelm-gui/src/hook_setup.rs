@@ -31,6 +31,7 @@ impl HookAgent {
             | AgentKind::Pi
             | AgentKind::Omp
             | AgentKind::Muse
+            | AgentKind::Custom
             | AgentKind::Generic => None,
         }
     }

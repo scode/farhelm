@@ -40,10 +40,11 @@ fn session_list_body() -> SessionListBody {
     // commands are the ones a session launched from these choices carries,
     // and `invocation` is what the listing derives from them.
     let launch = crate::launches::compile(LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-5".to_string()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
         container: None,

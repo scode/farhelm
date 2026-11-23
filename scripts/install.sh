@@ -346,6 +346,13 @@ aarch64-apple-darwin|farhelm-desktop-aarch64-apple-darwin.tar.gz|farhelm-desktop
 # FARHELM_VERSION_LOCK_FD, into the program started next, which adopts it. A
 # farhelm that predates version locks rejects the claim as an unknown command
 # (exit status 2) and is started without one, as before.
+if [ "${1:-}" = custom-agent ] && [ "${2:-}" = report-conversation ]; then
+  # This callback runs on the agent's terminal. If the forwarder cannot get
+  # as far as exec, it still owes the quiet exit in custom-agent-contract.md.
+  # An exec that succeeds replaces this shell and handles its own exit.
+  trap 'exit 0' 0
+  exec >/dev/null 2>&1
+fi
 farhelm_forwarder_self=$0
 case $farhelm_forwarder_self in
   */*) ;;

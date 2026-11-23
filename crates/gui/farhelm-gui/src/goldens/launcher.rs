@@ -285,7 +285,7 @@ fn launcher_templates() -> CollectionState {
     let fields = [
         TemplateFields {
             agent: Some(LaunchHarness::Claude),
-            effort: Some(Some(LaunchEffort::High)),
+            effort: Some(Some(LaunchEffort::High.into())),
             ..Default::default()
         },
         TemplateFields {

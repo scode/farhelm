@@ -115,6 +115,7 @@ fn a_picked_folder_ends_checkout_mode_and_each_choice_counts() {
 fn restart_with_holds_its_destination() {
     let session = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
         farhelm_proto::CommandLaunch {
+            custom_agent: None,
             command: "codex".into(),
             yolo: false,
             agent: Some(farhelm_proto::LaunchHarness::Codex),
@@ -140,6 +141,7 @@ fn restart_with_holds_its_destination() {
 fn a_checkout_ignores_an_untouched_copied_title() {
     let session = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
         farhelm_proto::CommandLaunch {
+            custom_agent: None,
             command: "true".into(),
             yolo: false,
             agent: None,
@@ -1406,6 +1408,7 @@ fn checkout_session(
 ) -> farhelm_proto::SessionInfo {
     let mut info = super::draft_tests::session(farhelm_proto::SessionLaunch::Command(
         farhelm_proto::CommandLaunch {
+            custom_agent: None,
             command: "true".into(),
             yolo: false,
             agent: None,

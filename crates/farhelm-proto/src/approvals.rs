@@ -608,6 +608,7 @@ mod tests {
             source: None,
             prompt: Some("go".into()),
             launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                custom_agent: None,
                 command: "with-endpoint codex".into(),
                 agent: Some(crate::LaunchHarness::Codex),
                 yolo: false,
@@ -667,6 +668,7 @@ mod tests {
             source: None,
             prompt: None,
             launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                custom_agent: None,
                 command: "true".into(),
                 agent: None,
                 yolo: false,
@@ -756,6 +758,7 @@ mod tests {
                 launch_kind: None,
             },
             launch: crate::SessionLaunch::Command(crate::CommandLaunch {
+                custom_agent: None,
                 command: "codex".into(),
                 agent: Some(crate::LaunchHarness::Codex),
                 yolo: false,
@@ -851,7 +854,9 @@ mod tests {
             title: None,
             source: None,
             launch: crate::SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: crate::LaunchSelection {
+                    custom_agent: None,
                     harness: crate::LaunchHarness::Codex,
                     model: None,
                     effort: None,

@@ -65,9 +65,11 @@ impl Launcher {
                     }
                 })?
             }
-            (RestartBaseline::Agent(stored), Changed::Effort) => (self.draft.agent.effort
-                != stored.effort)
-                .then(|| words.text(format!(" · was {}", effort_word(stored.effort))))?,
+            (RestartBaseline::Agent(stored), Changed::Effort) => {
+                let previous = stored.effort.as_ref().and_then(|value| value.known());
+                (self.draft.agent.effort != previous)
+                    .then(|| words.text(format!(" · was {}", effort_word(previous))))?
+            }
             (RestartBaseline::Agent(stored), Changed::Permissions) => {
                 (self.draft.agent.permissions != stored.permissions).then(|| {
                     words.text(format!(" · was {}", permission_word(stored.permissions)))

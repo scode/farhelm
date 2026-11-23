@@ -274,11 +274,11 @@ fn an_unplaced_row_draws_no_host_mark_and_keeps_its_slot(cx: &mut TestAppContext
 // ---- The agent mark -------------------------------------------------------------------------------------------------
 
 /// SPEC.md: the agent mark comes from the launch, never from parsing the command. Every agent type must have its own
-/// mark, the one named for it (a swapped arm would mark Pi as OMP). Specified: every `LaunchHarness` maps to the glyph
+/// mark, the one named for it (a swapped arm would mark Pi as OMP). Each built-in `LaunchHarness` maps to the glyph
 /// whose token is the harness's own wire name with its underscore dropped (`open_code` is the `opencode` mark).
 #[test]
 fn every_agent_type_draws_the_mark_named_for_it() {
-    for harness in LaunchHarness::ALL {
+    for harness in LaunchHarness::BUILT_INS {
         let wire = serde_json::to_value(harness).unwrap();
         assert_eq!(
             harness::glyph(*harness).token(),

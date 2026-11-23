@@ -89,8 +89,8 @@ impl FakeHarness {
                     LaunchHarness::OpenCode => "opencode",
                     LaunchHarness::Grok => "grok",
                     LaunchHarness::Antigravity => "agy",
-                    LaunchHarness::Bash | LaunchHarness::Zsh => {
-                        unreachable!("the vendor fixture covers agent executables")
+                    LaunchHarness::Bash | LaunchHarness::Zsh | LaunchHarness::Custom => {
+                        unreachable!("the vendor fixture covers built-in agent executables")
                     }
                 })
                 .to_string_lossy()
@@ -128,12 +128,15 @@ impl FakeHarness {
                     "--model".to_string(),
                     model.clone(),
                 ]),
-                LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                    unreachable!("this launch type has no model")
+                LaunchHarness::Grok
+                | LaunchHarness::Bash
+                | LaunchHarness::Zsh
+                | LaunchHarness::Custom => {
+                    unreachable!("the fixture has no model flag for this launch type")
                 }
             }
         }
-        if let Some(effort) = selection.effort {
+        if let Some(effort) = &selection.effort {
             match selection.harness {
                 LaunchHarness::Codex => argv.extend([
                     "-c".to_string(),
@@ -154,8 +157,11 @@ impl FakeHarness {
                 }
                 LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
                 LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-                LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                    unreachable!("this launch type has no effort")
+                LaunchHarness::Grok
+                | LaunchHarness::Bash
+                | LaunchHarness::Zsh
+                | LaunchHarness::Custom => {
+                    unreachable!("the fixture has no effort flag for this launch type")
                 }
             }
         }
@@ -172,7 +178,8 @@ impl FakeHarness {
                 | LaunchHarness::Pi
                 | LaunchHarness::Omp
                 | LaunchHarness::Bash
-                | LaunchHarness::Zsh => None,
+                | LaunchHarness::Zsh
+                | LaunchHarness::Custom => None,
             };
             if let Some(flag) = flag {
                 argv.push(flag.to_string());
@@ -307,7 +314,8 @@ pub(crate) fn fake_agent_launch(
         LaunchHarness::Cursor
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     };
     let resume = suffix.map(|suffix| {
         let mut resume = argv.clone();
@@ -319,6 +327,7 @@ pub(crate) fn fake_agent_launch(
     let mut start = argv;
     start.push("{farhelm_args}".to_string());
     farhelm_proto::SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start,
         resume,
@@ -620,8 +629,11 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Omp
             | LaunchHarness::Antigravity
             | LaunchHarness::OpenCode => "--model",
-            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                unreachable!("this launch type has no model")
+            LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
+                unreachable!("the fixture has no model flag for this launch type")
             }
         };
         assert!(
@@ -639,7 +651,7 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             );
         }
     }
-    if let Some(effort) = selection.effort {
+    if let Some(effort) = &selection.effort {
         let expected = match selection.harness {
             LaunchHarness::Codex => format!("model_reasoning_effort={}", effort.as_cli_arg()),
             LaunchHarness::Claude | LaunchHarness::Antigravity => effort.as_cli_arg().to_string(),
@@ -648,8 +660,11 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => effort.as_cli_arg().to_string(),
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                unreachable!("this launch type has no effort")
+            LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
+                unreachable!("the fixture has no effort flag for this launch type")
             }
         };
         let flag = match selection.harness {
@@ -660,8 +675,11 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             LaunchHarness::Pi | LaunchHarness::Omp => "--thinking",
             LaunchHarness::OpenCode => unreachable!("OpenCode has no supported effort"),
             LaunchHarness::Cursor => unreachable!("Cursor has no supported effort"),
-            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                unreachable!("this launch type has no effort")
+            LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
+                unreachable!("the fixture has no effort flag for this launch type")
             }
         };
         assert!(
@@ -713,7 +731,8 @@ fn assert_forwarded(argv: &str, selection: &LaunchSelection) {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => return,
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => return,
         };
         assert!(
             words.iter().any(|word| word == flag),
@@ -743,6 +762,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
 
     for harness in defaults {
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness,
             model: None,
@@ -769,6 +789,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
 
     let explicit = [
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Cursor,
             model: Some("composer-2.5".to_string()),
@@ -779,6 +800,7 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Grok,
             model: None,
@@ -789,46 +811,51 @@ async fn structured_launches_forward_to_ready_processes_and_survive_a_fresh_gene
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Antigravity,
             model: Some("gemini-4-neon".into()),
-            effort: Some(LaunchEffort::Xhigh),
+            effort: Some(LaunchEffort::Xhigh.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("release/candidate'42;$literal".to_string()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Claude,
             model: Some("claude-fable-5".to_string()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
-            effort: Some(LaunchEffort::Xhigh),
+            effort: Some(LaunchEffort::Xhigh.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
             workspace_trust: None,
         },
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/grok-4.6".to_string()),
@@ -982,10 +1009,11 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-6-astra".to_string()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
         container: None,
@@ -1085,10 +1113,11 @@ async fn restricted_raw_data_is_refused() {
     let h = harness().await;
     let fixture = fake_harness();
     let selection = LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: LaunchHarness::Codex,
         model: Some("gpt-6-astra".to_string()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         permissions: Some(LaunchPermission::Yolo),
         wrapper_prefix: None,
         container: None,
@@ -1385,6 +1414,7 @@ mod decoder_tests {
     #[test]
     fn omp_approval_mode_witness_rejects_wrong_shapes() {
         let base = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".to_string()),

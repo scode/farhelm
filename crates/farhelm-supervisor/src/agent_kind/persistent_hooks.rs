@@ -100,6 +100,7 @@ async fn planned_files(
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => anyhow::bail!("this agent has no persistent conversation hooks"),
     })
 }

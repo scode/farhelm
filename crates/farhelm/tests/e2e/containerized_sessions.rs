@@ -11,7 +11,9 @@ use farhelm_proto::{ContainerConfig, LaunchHarness, LaunchSelection, SessionLaun
 /// The selected harness supplies metadata only and spends no vendor turns.
 fn launch(container: Option<ContainerConfig>) -> SessionLaunch {
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,

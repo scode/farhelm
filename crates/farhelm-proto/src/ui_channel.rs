@@ -329,6 +329,8 @@ pub enum Collection {
     SshSignInCompletions,
     /// Launch templates, as `GET /api/templates` serves them, keyed by name.
     Templates,
+    /// The helm's user-registered agent catalog, keyed by its immutable launch IDs.
+    CustomAgents,
     /// Shared notices about hosts, as `GET /api/notices` serves them, keyed
     /// by notice id.
     Notices,

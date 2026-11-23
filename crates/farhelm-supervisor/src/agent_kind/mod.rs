@@ -76,7 +76,7 @@
 //!   `docs/harness-marks.md`. The launcher's harness names and permission
 //!   names are `harness_label` and `permission_name` in
 //!   `crates/gui/farhelm-gui/src/launcher/draft.rs`; its harness chip order
-//!   (checked against `LaunchHarness::ALL`), Guarded's help before an agent
+//!   (checked against `LaunchHarness::BUILT_INS`), Guarded's help before an agent
 //!   is chosen and the Cursor support notice are in
 //!   `crates/gui/farhelm-gui/src/launcher/words.rs`, the permission and effort
 //!   names and help every surface shares are in
@@ -84,7 +84,7 @@
 //!   and its conversation selector's label is `conversation_label` in
 //!   `launcher/view/more_options.rs`. The desktop and helm check one-time
 //!   selectors with `farhelm_proto::conversation::validate_launch_conversation`.
-//!   The agent pages in Settings come from `LaunchHarness::ALL`. Their workspace trust controls use
+//!   The built-in agent pages in Settings come from `LaunchHarness::BUILT_INS`. Their workspace trust controls use
 //!   `TrustAgent` in `crates/gui/farhelm-gui/src/settings/agent_trust.rs`
 //!   (a harness with no workspace-trust setting has no variant there,
 //!   as the helm's `trust_column` refuses it), whose exhaustive methods hold
@@ -134,6 +134,9 @@
 //!   explicit per-kind event, record-verification and correction-notice policies.
 //! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor;
 //!   Claude, Muse and Antigravity share `procs/positional.rs` without executable recognition.
+//!   Custom agents use the same process pin with a separate reporter invocation grammar.
+//!   Changes to their wrapper and reporter behavior belong in the contract changelog in
+//!   `website/src/content/docs/docs/agents/custom-agent-contract.md`.
 //! - **Reporter assets and hook entry points:** `pi_extension.rs` chooses and
 //!   materializes which extension a kind loads; the extensions themselves
 //!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
@@ -233,6 +236,7 @@ pub(crate) fn prompt_delivery(kind: AgentKind) -> Option<PromptDelivery> {
         | AgentKind::Grok
         | AgentKind::Antigravity
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => None,
     }
 }
@@ -842,6 +846,7 @@ fn hook_command(
         farhelm_proto::ReportVendor::Grok => "grok",
         farhelm_proto::ReportVendor::Antigravity => "antigravity",
         farhelm_proto::ReportVendor::Muse => "muse",
+        farhelm_proto::ReportVendor::Custom => "custom",
     };
     // The `--vendor` flag is the report envelope's discriminator, sourced
     // from the vendor-specific entry point rather than inferred from the
@@ -874,6 +879,7 @@ pub fn integration_for(kind: AgentKind) -> Option<&'static dyn AgentIntegration>
         AgentKind::Grok => Some(&GrokIntegration),
         AgentKind::Antigravity => Some(&AntigravityIntegration),
         AgentKind::Muse => Some(&MuseIntegration),
+        AgentKind::Custom => Some(&CustomIntegration),
         AgentKind::Generic => None,
     }
 }
@@ -925,6 +931,32 @@ struct GrokIntegration;
 
 /// Antigravity reports from user-installed hooks, independent of launch flags.
 struct AntigravityIntegration;
+
+/// Custom agents supply their own reporter. Injecting hooks or expecting a report on a timer
+/// would let Farhelm's assumptions about an unfamiliar program affect its terminal.
+struct CustomIntegration;
+
+impl AgentIntegration for CustomIntegration {
+    fn record_header_has_prelude(&self, _first_line: &str) -> bool {
+        false
+    }
+
+    fn farhelm_args(&self, _phase: LaunchPhase, _policy: &HookPolicy<'_>) -> FarhelmArgs {
+        FarhelmArgs::none()
+    }
+
+    fn inject_hooks(&self, argv: Vec<String>, _policy: &HookPolicy<'_>) -> HookInjection {
+        HookInjection {
+            argv,
+            hooked: false,
+            log: HookLog::Silent,
+        }
+    }
+
+    fn parse_record(&self, _text: &str) -> anyhow::Result<Option<RecordCorrelators>> {
+        Ok(None)
+    }
+}
 
 impl AgentIntegration for GooseIntegration {
     fn record_header_has_prelude(&self, _first_line: &str) -> bool {
@@ -1894,7 +1926,8 @@ pub(crate) fn edits_config_for_workspace_trust(harness: LaunchHarness) -> bool {
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Pi
-        | LaunchHarness::Zsh => false,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => false,
     }
 }
 
@@ -1911,6 +1944,8 @@ pub(crate) fn edits_config_for_workspace_trust(harness: LaunchHarness) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct IntegrationSnapshot {
     pub kind: AgentKind,
+    /// The reporting capability belongs to the stored launch, so catalog changes cannot grant or revoke it.
+    pub custom_reporting: Option<bool>,
     /// Stored selection words before the composed program. OMP's launch
     /// provenance must classify the agent command behind this prefix, while
     /// its runtime process corridor remains as strict as before. The same count
@@ -1932,6 +1967,7 @@ impl IntegrationSnapshot {
     pub fn of(launch: &SessionLaunch) -> IntegrationSnapshot {
         IntegrationSnapshot {
             kind: launch.agent_kind(),
+            custom_reporting: launch.custom_reporting(),
             wrapper_prefix_words: match launch {
                 SessionLaunch::Agent { selection, .. } => {
                     selection.wrapper_prefix.as_ref().map_or(0, Vec::len)
@@ -1945,7 +1981,11 @@ impl IntegrationSnapshot {
     /// This session's integration, or `None` when it has none — the one
     /// gate every capture path passes through.
     pub fn integration(&self) -> Option<&'static dyn AgentIntegration> {
-        integration_for(self.kind)
+        if self.custom_reporting == Some(false) {
+            None
+        } else {
+            integration_for(self.kind)
+        }
     }
 
     /// Whether restarting this session can resume its own conversation,
@@ -2018,6 +2058,7 @@ impl IntegrationSnapshot {
             | AgentKind::Goose
             | AgentKind::Muse
             | AgentKind::Antigravity
+            | AgentKind::Custom
             | AgentKind::Generic => self.plain_id_offer(captured),
         }
     }
@@ -2101,6 +2142,7 @@ impl IntegrationSnapshot {
             | AgentKind::Goose
             | AgentKind::Muse
             | AgentKind::Antigravity
+            | AgentKind::Custom
             | AgentKind::Generic => {
                 if is_reserved_locator_token(conversation)
                     || !is_plausible_conversation_id(conversation)
@@ -2160,7 +2202,7 @@ pub fn ownership_proof_implemented(kind: AgentKind) -> bool {
     match kind {
         AgentKind::Codex | AgentKind::Grok | AgentKind::Omp => true,
         AgentKind::Claude | AgentKind::Goose | AgentKind::Pi => false,
-        AgentKind::Muse | AgentKind::Antigravity | AgentKind::Generic => false,
+        AgentKind::Muse | AgentKind::Antigravity | AgentKind::Custom | AgentKind::Generic => false,
     }
 }
 
@@ -2182,6 +2224,7 @@ fn accepts_unversioned_ownership(kind: AgentKind) -> bool {
         | AgentKind::Grok
         | AgentKind::Antigravity
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => false,
     }
 }
@@ -2200,6 +2243,7 @@ pub fn locator_vendor(kind: AgentKind) -> Option<LocatorVendor> {
         | AgentKind::Grok
         | AgentKind::Antigravity
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => None,
     }
 }
@@ -2214,6 +2258,7 @@ pub fn verifies_resume_target(kind: AgentKind) -> bool {
         | AgentKind::Goose
         | AgentKind::Muse
         | AgentKind::Antigravity
+        | AgentKind::Custom
         | AgentKind::Generic => false,
     }
 }
@@ -2238,6 +2283,7 @@ pub fn unverified_resume_refusal(kind: AgentKind) -> Option<&'static str> {
         | AgentKind::Grok
         | AgentKind::Antigravity
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => None,
     }
 }
@@ -2262,6 +2308,7 @@ pub fn conversation_report_slot(
         | ReportVendor::Pi
         | ReportVendor::Omp
         | ReportVendor::Muse
+        | ReportVendor::Custom
         | ReportVendor::Antigravity => Slot::Latest,
     }
 }
@@ -2290,6 +2337,7 @@ pub fn foreground_source_refusal(
         | ReportVendor::Pi
         | ReportVendor::Grok
         | ReportVendor::Antigravity
+        | ReportVendor::Custom
         | ReportVendor::Muse => None,
     }
 }
@@ -2308,6 +2356,7 @@ pub fn agent_kind_of_vendor(vendor: farhelm_proto::ReportVendor) -> AgentKind {
         farhelm_proto::ReportVendor::Grok => AgentKind::Grok,
         farhelm_proto::ReportVendor::Antigravity => AgentKind::Antigravity,
         farhelm_proto::ReportVendor::Muse => AgentKind::Muse,
+        farhelm_proto::ReportVendor::Custom => AgentKind::Custom,
     }
 }
 
@@ -2319,7 +2368,11 @@ pub fn accepts_reported_conversation(kind: AgentKind, value: &str) -> bool {
         AgentKind::Omp => parse_locator(LocatorVendor::Omp, value).is_ok(),
         AgentKind::Grok => grok::GrokLocator::parse(value).is_ok(),
         AgentKind::Codex => codex::CodexLocator::parse(value).is_ok(),
-        AgentKind::Claude | AgentKind::Goose | AgentKind::Muse | AgentKind::Antigravity => {
+        AgentKind::Claude
+        | AgentKind::Goose
+        | AgentKind::Muse
+        | AgentKind::Antigravity
+        | AgentKind::Custom => {
             !is_reserved_locator_token(value) && is_plausible_conversation_id(value)
         }
         AgentKind::Generic => false,
@@ -2453,7 +2506,8 @@ fn antigravity_trust_slot(
         | LaunchHarness::OpenCode
         | LaunchHarness::Pi
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 
@@ -2679,7 +2733,9 @@ impl AgentHooks {
             | AgentKind::Pi
             | AgentKind::Omp
             | AgentKind::Muse => !self.allows(kind),
-            AgentKind::Grok | AgentKind::Antigravity | AgentKind::Generic => false,
+            AgentKind::Grok | AgentKind::Antigravity | AgentKind::Custom | AgentKind::Generic => {
+                false
+            }
         }
     }
 }
@@ -2849,7 +2905,7 @@ pub fn executable_basename(kind: AgentKind) -> Option<&'static str> {
         AgentKind::Omp => Some("omp"),
         AgentKind::Grok => Some("grok"),
         AgentKind::Antigravity => Some("agy"),
-        AgentKind::Muse | AgentKind::Generic => None,
+        AgentKind::Muse | AgentKind::Custom | AgentKind::Generic => None,
     }
 }
 
@@ -2862,6 +2918,7 @@ mod tests {
     /// snapshots come only from [`IntegrationSnapshot::of`].
     fn test_snapshot(kind: AgentKind, resume_template: Option<Vec<String>>) -> IntegrationSnapshot {
         IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template,
@@ -3224,6 +3281,7 @@ mod tests {
         assert_ne!(alias, canonical);
         let cwd = alias.to_str().unwrap();
         let mut selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Antigravity,
             model: None,
             effort: None,
@@ -4135,6 +4193,7 @@ mod tests {
         // the unfillable template, but previously stored state still needs
         // to avoid advertising a restart command that cannot be run.
         let unfillable = IntegrationSnapshot {
+            custom_reporting: None,
             kind: AgentKind::Generic,
             wrapper_prefix_words: 0,
             resume_template: Some(vec![

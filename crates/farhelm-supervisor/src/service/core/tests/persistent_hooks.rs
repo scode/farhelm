@@ -25,6 +25,7 @@ async fn prepare_grok(
     .expect("supervisor with isolated vendor home");
     let command = "grok {farhelm_args}";
     let launch = SessionLaunch::Command(farhelm_proto::session_launch::CommandLaunch {
+        custom_agent: None,
         command: command.into(),
         yolo: false,
         agent: Some(LaunchHarness::Grok),

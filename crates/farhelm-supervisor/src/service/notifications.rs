@@ -33,6 +33,7 @@
 //!   ancestor corrects a child-first conversation choice.
 //! - [`NotificationKind::MusePinCorrected`]: the same correction for Muse.
 //! - [`NotificationKind::AntigravityPinCorrected`]: the same correction for Antigravity.
+//! - [`NotificationKind::CustomPinCorrected`]: the same correction for a custom-agent report.
 //! - [`NotificationKind::OldTerminal`]: nothing any more. Earlier releases'
 //!   ticker recorded it while something of a session still ran in an old
 //!   tmux terminal; this release ends those terminals at startup and
@@ -89,6 +90,8 @@ pub(crate) enum NotificationKind {
     MusePinCorrected,
     /// An Antigravity process above the previously pinned reporter took over capture.
     AntigravityPinCorrected,
+    /// A custom agent's ancestor replaced the conversation first reported by its child.
+    CustomPinCorrected,
     /// Something in the session still ran in an old terminal (its agent in
     /// a tmux pane, or an open tmux tab), which an upcoming release would
     /// forcibly terminate: earlier releases recorded it, one per session.
@@ -107,7 +110,7 @@ pub(crate) enum NotificationKind {
 }
 
 impl NotificationKind {
-    const ALL: [Self; 11] = [
+    const ALL: [Self; 12] = [
         Self::HookSilent,
         Self::HookNotAdded,
         Self::ResumeWithdrawn,
@@ -116,6 +119,7 @@ impl NotificationKind {
         Self::ClaudePinCorrected,
         Self::MusePinCorrected,
         Self::AntigravityPinCorrected,
+        Self::CustomPinCorrected,
         Self::OldTerminal,
         Self::OldTerminalEnded,
         Self::PodmanStopFailed,
@@ -135,6 +139,7 @@ impl NotificationKind {
             | Self::ClaudePinCorrected
             | Self::MusePinCorrected
             | Self::AntigravityPinCorrected
+            | Self::CustomPinCorrected
             | Self::OldTerminal
             | Self::OldTerminalEnded
             | Self::PodmanStopFailed => false,
@@ -156,6 +161,7 @@ impl NotificationKind {
             | NotificationKind::ClaudePinCorrected
             | NotificationKind::MusePinCorrected
             | NotificationKind::AntigravityPinCorrected
+            | NotificationKind::CustomPinCorrected
             | NotificationKind::OldTerminal
             | NotificationKind::OldTerminalEnded
             | NotificationKind::PodmanStopFailed => false,
@@ -174,6 +180,7 @@ impl NotificationKind {
             NotificationKind::ClaudePinCorrected => "claude_pin_corrected",
             NotificationKind::MusePinCorrected => "muse_pin_corrected",
             NotificationKind::AntigravityPinCorrected => "antigravity_pin_corrected",
+            NotificationKind::CustomPinCorrected => "custom_pin_corrected",
             NotificationKind::OldTerminal => "old_terminal",
             NotificationKind::OldTerminalEnded => "old_terminal_ended",
             NotificationKind::PodmanStopFailed => "podman_stop_failed",
@@ -213,6 +220,10 @@ pub(crate) const ANTIGRAVITY_PIN_CORRECTED_TEXT: &str = "Farhelm had been follow
     reported by another process in this session. A Restart before now would have resumed that \
     conversation. \
     Farhelm now follows the conversation reported by the Antigravity process that started it.";
+
+/// Preserve the fact that an earlier Restart would have used the child process's conversation.
+pub(crate) const CUSTOM_PIN_CORRECTED_TEXT: &str = "Farhelm was following a conversation reported by a child \
+    process in this session. Restart now uses the conversation reported by its parent.";
 
 /// Explain the missed report using the same agent name and timing as Restart.
 ///

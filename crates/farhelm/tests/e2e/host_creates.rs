@@ -483,7 +483,9 @@ async fn codex_recipe_endpoint_follows_start_and_resume_without_serializing_the_
     publish(first_url, FIRST);
     let program = agent.to_string_lossy().into_owned();
     let launch = SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -987,6 +989,7 @@ async fn a_wrapper_launch_runs_its_wrapper_in_the_host() {
     )
     .await;
     let selection = farhelm_proto::LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
@@ -1968,7 +1971,9 @@ async fn a_retry_of_a_create_interrupted_in_tmux_is_refused() {
 /// `launch_sentinel_error_status.rs`).
 fn unexecutable_agent(program: &Path) -> farhelm_proto::SessionLaunch {
     farhelm_proto::SessionLaunch::Agent {
+        custom_reporting: None,
         selection: farhelm_proto::LaunchSelection {
+            custom_agent: None,
             harness: farhelm_proto::LaunchHarness::Goose,
             model: None,
             effort: None,

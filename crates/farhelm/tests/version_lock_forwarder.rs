@@ -248,6 +248,52 @@ fn a_program_whose_version_is_held_exclusively_refuses_to_run() {
     );
 }
 
+/// A custom agent calls the versioned PATH entry. If the exclusive lock blocks forwarding, the
+/// CLI never starts and the forwarder itself must preserve the callback's silent success.
+#[farhelm_testtrace::test]
+fn the_forwarder_keeps_a_custom_report_quiet_during_an_exclusive_version_hold() {
+    const CONTRACT: &str = "custom-agent-contract.md, Contract changelog";
+    let root = farhelm_teststate::tempdir().expect("isolated root");
+    let (forwarder, program) = fake_bundle(root.path());
+    let deleter = File::open(&program).expect("open the fixture version");
+    deleter.try_lock().expect("hold the version exclusively");
+    assert!(version_is_held(&program), "the version cannot run yet");
+
+    let mut child = ChildGuard(
+        Command::new(&forwarder)
+            .args(["custom-agent", "report-conversation", "--id", "conv"])
+            .env_clear()
+            .env("PATH", "/usr/bin:/bin")
+            .stdin(Stdio::null())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("start the PATH entry"),
+    );
+    let stdout = child.0.stdout.take().expect("stdout");
+    let stderr = child.0.stderr.take().expect("stderr");
+    let deadline = Instant::now() + DEADLINE;
+    assert_eq!(
+        child.wait_until(deadline, CONTRACT).code(),
+        Some(0),
+        "{CONTRACT}"
+    );
+    assert_eq!(
+        read_line_by(stdout, deadline, "reporter stdout"),
+        None,
+        "{CONTRACT}"
+    );
+    assert_eq!(
+        read_line_by(stderr, deadline, "reporter stderr"),
+        None,
+        "{CONTRACT}"
+    );
+    assert!(
+        version_is_held(&program),
+        "the exclusive hold outlives the callback"
+    );
+}
+
 /// The whole chain through the shipped forwarder text, as a smoke test of
 /// the parts the other tests prove separately: a program started through the
 /// forwarder holds its version while it runs, and nothing holds it after it

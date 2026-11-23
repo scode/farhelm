@@ -62,10 +62,12 @@ fn clone_draft() -> LaunchDraft {
     info.working_copy = None;
     info.github_repo = None;
     info.launch = SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-6-luna".into()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             workspace_trust: None,

@@ -279,6 +279,7 @@ fn resolve_with(
             };
             LaunchRequest::Agent {
                 selection: LaunchSelection {
+                    custom_agent: None,
                     permission_flags: state.permission_flags,
                     wrapper_prefix: state.wrapper_prefix,
                     container: state.container,
@@ -305,6 +306,7 @@ fn resolve_with(
                 ));
             };
             LaunchRequest::Command(CommandLaunch {
+                custom_agent: None,
                 command: state.command,
                 yolo,
                 agent: state.command_agent,
@@ -557,7 +559,7 @@ mod tests {
             TemplateFields {
                 agent: Some(LaunchHarness::Codex),
                 model: Some(Some("gpt-6.1-sol".to_string())),
-                effort: Some(Some(LaunchEffort::High)),
+                effort: Some(Some(LaunchEffort::High.into())),
                 destination: folder("/srv/a"),
                 name: Some("from-template".to_string()),
                 ..Default::default()
@@ -583,7 +585,7 @@ mod tests {
         };
         assert_eq!(selection.harness, LaunchHarness::Codex);
         assert_eq!(selection.model.as_deref(), Some("gpt-6-luna"));
-        assert_eq!(selection.effort, Some(LaunchEffort::High));
+        assert_eq!(selection.effort, Some(LaunchEffort::High.into()));
         assert_eq!(selection.container, None);
 
         let resolved = resolve(
@@ -684,6 +686,7 @@ mod tests {
         assert_eq!(
             resolved.launch,
             SessionLaunch::Command(CommandLaunch {
+                custom_agent: None,
                 command: "claude {farhelm_args}".to_string(),
                 yolo: false,
                 agent: Some(LaunchHarness::Claude),

@@ -10,7 +10,9 @@ use crate::harness::*;
 /// their deliberately absent program belongs to an unwrapped agent launch.
 fn unexecutable_agent(program: &std::path::Path) -> farhelm_proto::SessionLaunch {
     farhelm_proto::SessionLaunch::Agent {
+        custom_reporting: None,
         selection: farhelm_proto::LaunchSelection {
+            custom_agent: None,
             harness: farhelm_proto::LaunchHarness::Goose,
             model: None,
             effort: None,

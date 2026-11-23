@@ -750,7 +750,7 @@ fn model_rows_follow_the_chosen_agent() {
 fn every_agent_type_is_discoverable() {
     let draft = Draft::agent(None);
     let harnesses = draft.rows("harness:");
-    assert_eq!(harnesses.len(), LaunchHarness::ALL.len());
+    assert_eq!(harnesses.len(), LaunchHarness::BUILT_INS.len());
     assert!(harnesses.windows(2).any(|pair| {
         pair == [
             Row::Harness(LaunchHarness::Claude),
@@ -874,6 +874,7 @@ fn launch(cwd: &str, harness: LaunchHarness, model: Option<&str>) -> LaunchHisto
         canonical_cwd: Some(cwd.to_owned()),
         cwd: cwd.to_owned(),
         selection: LaunchSelection {
+            custom_agent: None,
             harness,
             model: model.map(str::to_owned),
             effort: None,
@@ -1016,7 +1017,7 @@ fn history_rows_match_the_raw_folder() {
 #[test]
 fn recent_setups_match_their_place_agent_and_model() {
     let mut claude = launch("/w", LaunchHarness::Claude, None);
-    claude.selection.effort = Some(LaunchEffort::Max);
+    claude.selection.effort = Some(LaunchEffort::Max.into());
     let draft = with_history(None, vec![claude.clone()], &[]);
     assert_eq!(
         draft.rows("clau"),
@@ -1205,7 +1206,7 @@ fn no_history_offers_no_history_rows() {
 #[test]
 fn history_row_words() {
     let mut codex = launch("/w\u{202e}", LaunchHarness::Codex, Some("model\u{202e}one"));
-    codex.selection.effort = Some(LaunchEffort::High);
+    codex.selection.effort = Some(LaunchEffort::High.into());
     codex.selection.permissions = Some(LaunchPermission::Yolo);
     let row = recent(codex);
     assert_eq!(

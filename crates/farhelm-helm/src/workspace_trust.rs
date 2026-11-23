@@ -150,6 +150,7 @@ mod tests {
     #[test]
     fn no_trust_policy_preserves_literal_command_words() {
         let launch = SessionLaunch::Command(CommandLaunch {
+            custom_agent: None,
             command: "codex --trust-workspace --no-approve {farhelm_args}".into(),
             yolo: false,
             agent: Some(LaunchHarness::Codex),
@@ -169,8 +170,9 @@ mod tests {
     /// launch; supported ones return it unchanged for the existing trust branch.
     #[test]
     fn no_trust_policy_distinguishes_agent_capability_without_rewriting() {
-        for harness in LaunchHarness::ALL.iter().copied() {
+        for harness in LaunchHarness::BUILT_INS.iter().copied() {
             let launch = launches::compile(LaunchSelection {
+                custom_agent: None,
                 harness,
                 model: None,
                 effort: None,
@@ -220,6 +222,7 @@ mod tests {
             (vec!["--mode", "auto"], Some(true)),
         ] {
             let mut selection = LaunchSelection {
+                custom_agent: None,
                 harness: LaunchHarness::Antigravity,
                 model: None,
                 effort: None,

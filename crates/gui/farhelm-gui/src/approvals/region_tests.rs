@@ -402,6 +402,7 @@ fn session(name: &str) -> ApprovalSession {
 /// A command launch whose command line is long enough to need its box's whole width and more.
 fn long_command() -> SessionLaunch {
     SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: format!("run-agent --flag {} --then resume", "segment/".repeat(30)),
         yolo: false,
         agent: None,
@@ -426,7 +427,9 @@ fn wrapped_agent_launch() -> SessionLaunch {
             .collect()
     };
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Claude,
             model: None,
             effort: None,

@@ -53,6 +53,7 @@ const ANTIGRAVITY: PinCase = PinCase {
 /// must not withdraw a capture that already worked before the pin existed.
 async fn seed_pin_session(sup: &Arc<Supervisor>, id: &str, case: PinCase) {
     let integration = IntegrationSnapshot {
+        custom_reporting: None,
         kind: case.kind,
         wrapper_prefix_words: 0,
         resume_template: Some(vec![

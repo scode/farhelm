@@ -78,6 +78,7 @@ fn agent_launch(selection: LaunchSelection) -> SessionLaunch {
 
 fn codex() -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness: LaunchHarness::Codex,
         model: None,
         effort: None,
@@ -280,7 +281,7 @@ fn an_agent_create_body_carries_the_draft() {
     assert!(body.command.is_none());
     let launch = body.launch.expect("an agent launch");
     assert_eq!(launch.harness, LaunchHarness::Claude);
-    assert_eq!(launch.effort, Some(LaunchEffort::High));
+    assert_eq!(launch.effort, Some(LaunchEffort::High.into()));
     assert_eq!(
         launch.permissions,
         Some(LaunchPermission::Guarded),
@@ -321,6 +322,7 @@ fn each_agent_types_create_carries_only_what_it_takes() {
     };
     // The whole launch the old specs matched: these four choices and nothing else.
     let launch = |harness, model: Option<&str>, effort, permissions| LaunchSelection {
+        custom_agent: None,
         harness,
         model: model.map(str::to_owned),
         effort,
@@ -362,7 +364,7 @@ fn each_agent_types_create_carries_only_what_it_takes() {
                 draft.choose_effort(Some(Max));
                 draft.choose_permissions(Some(Approve));
             },
-            launch(Omp, Some("x-ai/grok-4.6"), Some(Max), Some(Approve)),
+            launch(Omp, Some("x-ai/grok-4.6"), Some(Max.into()), Some(Approve)),
         ),
         (
             "OpenCode after Codex's High, with a typed model sent as written",
@@ -457,6 +459,7 @@ fn a_command_create_body_sends_the_command_as_written() {
     assert_eq!(
         body.command,
         Some(CommandLaunch {
+            custom_agent: None,
             command: "claude {farhelm_args}".into(),
             yolo: true,
             agent: Some(LaunchHarness::Claude),
@@ -556,7 +559,7 @@ fn restart_with_needs_an_edit_and_sends_it() {
         .restart_body(target(&hosts, None), Some(&launch), true)
         .expect("an edit");
     let with = body.with.expect("an agent edit");
-    assert_eq!(with.effort, Some(LaunchEffort::Low));
+    assert_eq!(with.effort, Some(LaunchEffort::Low.into()));
     assert_eq!(
         with.permission_flags,
         Some(vec!["--sandbox".to_owned(), "danger full".to_owned()])
@@ -624,6 +627,7 @@ fn a_named_conversation_alone_restarts_the_stored_launch() {
 fn restart_with_names_its_command_and_host_problems() {
     let hosts = hosts();
     let stored = CommandLaunch {
+        custom_agent: None,
         command: "claude {farhelm_args}".into(),
         yolo: false,
         agent: Some(LaunchHarness::Claude),

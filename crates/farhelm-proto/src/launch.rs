@@ -62,11 +62,38 @@ crate::enum_with_all! {
         Bash,
         /// An interactive Zsh shell on the host's PATH.
         Zsh,
+        /// A user-provided integration whose catalog ID travels beside the harness.
+        Custom,
     }
 }
 
 #[warn(clippy::wildcard_enum_match_arm)]
 impl LaunchHarness {
+    /// Picker lists that only show release-supplied choices omit the custom catalog marker.
+    pub const BUILT_INS: &'static [Self] = match Self::ALL.split_last() {
+        Some((Self::Custom, rest)) => rest,
+        _ => panic!("the custom catalog marker must follow the built-in harnesses"),
+    };
+
+    /// Custom launches resolve an ID in the helm's user catalog and use that entry's separate literal command.
+    pub const fn uses_custom_catalog(self) -> bool {
+        match self {
+            Self::Custom => true,
+            Self::Cursor
+            | Self::Codex
+            | Self::Claude
+            | Self::Muse
+            | Self::Goose
+            | Self::Pi
+            | Self::Omp
+            | Self::OpenCode
+            | Self::Grok
+            | Self::Antigravity
+            | Self::Bash
+            | Self::Zsh => false,
+        }
+    }
+
     /// Plain shells use the same structured launch path as agents, but have
     /// no agent permission mode or conversation to resume.
     pub const fn is_shell(self) -> bool {
@@ -81,7 +108,8 @@ impl LaunchHarness {
             | Self::Omp
             | Self::OpenCode
             | Self::Grok
-            | Self::Antigravity => false,
+            | Self::Antigravity
+            | Self::Custom => false,
         }
     }
 
@@ -93,9 +121,11 @@ impl LaunchHarness {
     /// facts, independent of reporting kind.
     pub const fn supports_initial_prompt(self, named: bool) -> bool {
         match self {
-            LaunchHarness::Goose | LaunchHarness::Pi | LaunchHarness::Bash | LaunchHarness::Zsh => {
-                false
-            }
+            LaunchHarness::Goose
+            | LaunchHarness::Pi
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => false,
             LaunchHarness::Muse => !named,
             LaunchHarness::Cursor
             | LaunchHarness::Codex
@@ -116,6 +146,7 @@ impl LaunchHarness {
         match self {
             LaunchHarness::Goose => Err("Goose does not accept an initial prompt".into()),
             LaunchHarness::Pi => Err("Pi cannot accept an arbitrary literal initial prompt".into()),
+            LaunchHarness::Custom => Err("a custom agent does not accept an initial prompt".into()),
             LaunchHarness::Bash | LaunchHarness::Zsh => {
                 Err("a shell session does not accept an initial prompt".into())
             }
@@ -138,15 +169,24 @@ impl LaunchHarness {
     /// That turns "a new harness is missing from this picker" into a build
     /// failure at the list that needs a decision about where it goes.
     pub const fn is_ordering_of_all(order: &[LaunchHarness]) -> bool {
-        if order.len() != Self::ALL.len() {
+        Self::is_ordering(order, Self::ALL)
+    }
+
+    /// The fixed part of a picker is exhaustive over built-in harnesses. The custom choices are data.
+    pub const fn is_ordering_of_built_ins(order: &[LaunchHarness]) -> bool {
+        Self::is_ordering(order, Self::BUILT_INS)
+    }
+
+    const fn is_ordering(order: &[LaunchHarness], expected: &[LaunchHarness]) -> bool {
+        if order.len() != expected.len() {
             return false;
         }
         let mut i = 0;
-        while i < Self::ALL.len() {
+        while i < expected.len() {
             let mut seen = 0;
             let mut j = 0;
             while j < order.len() {
-                if order[j] as usize == Self::ALL[i] as usize {
+                if order[j] as usize == expected[i] as usize {
                     seen += 1;
                 }
                 j += 1;
@@ -182,6 +222,7 @@ impl LaunchHarness {
             LaunchHarness::Omp => AgentKind::Omp,
             LaunchHarness::Grok => AgentKind::Grok,
             LaunchHarness::Antigravity => AgentKind::Antigravity,
+            LaunchHarness::Custom => AgentKind::Custom,
         }
     }
 
@@ -205,7 +246,8 @@ impl LaunchHarness {
             | LaunchHarness::Grok
             | LaunchHarness::Antigravity
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => self.agent_kind(),
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => self.agent_kind(),
         }
     }
 
@@ -228,7 +270,8 @@ impl LaunchHarness {
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => false,
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => false,
         }
     }
 
@@ -250,7 +293,8 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::OpenCode
-            | LaunchHarness::Antigravity => true,
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Custom => true,
             LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => false,
         }
     }
@@ -285,7 +329,8 @@ impl LaunchHarness {
             | LaunchHarness::Grok
             | LaunchHarness::Antigravity
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => Cow::Borrowed(model),
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => Cow::Borrowed(model),
         }
     }
 
@@ -304,7 +349,8 @@ impl LaunchHarness {
             | LaunchHarness::Goose
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::Antigravity => true,
+            | LaunchHarness::Antigravity
+            | LaunchHarness::Custom => true,
             LaunchHarness::Cursor
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
@@ -323,6 +369,7 @@ impl LaunchHarness {
             LaunchHarness::Cursor
             | LaunchHarness::Pi
             | LaunchHarness::OpenCode
+            | LaunchHarness::Custom
             | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
             LaunchHarness::Bash | LaunchHarness::Zsh => None,
             LaunchHarness::Codex
@@ -416,7 +463,8 @@ impl LaunchHarness {
             | LaunchHarness::Pi
             | LaunchHarness::OpenCode
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => &[],
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => &[],
         }
     }
 
@@ -437,7 +485,8 @@ impl LaunchHarness {
             | LaunchHarness::Omp
             | LaunchHarness::Muse
             | LaunchHarness::Cursor
-            | LaunchHarness::OpenCode => true,
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Custom => true,
             LaunchHarness::Bash | LaunchHarness::Zsh => false,
         }
     }
@@ -457,6 +506,7 @@ impl LaunchHarness {
             | LaunchHarness::Muse
             | LaunchHarness::Cursor
             | LaunchHarness::OpenCode
+            | LaunchHarness::Custom
             | LaunchHarness::Bash
             | LaunchHarness::Zsh => false,
         }
@@ -475,7 +525,8 @@ impl LaunchHarness {
             | LaunchHarness::Antigravity
             | LaunchHarness::Pi
             | LaunchHarness::Omp
-            | LaunchHarness::Muse => true,
+            | LaunchHarness::Muse
+            | LaunchHarness::Custom => true,
             LaunchHarness::Goose
             | LaunchHarness::Cursor
             | LaunchHarness::OpenCode
@@ -528,7 +579,7 @@ impl LaunchHarness {
                 permission,
                 LaunchPermission::Yolo | LaunchPermission::Custom
             ),
-            LaunchHarness::Pi | LaunchHarness::OpenCode => {
+            LaunchHarness::Pi | LaunchHarness::OpenCode | LaunchHarness::Custom => {
                 matches!(permission, LaunchPermission::Yolo)
             }
             LaunchHarness::Bash | LaunchHarness::Zsh => false,
@@ -538,9 +589,8 @@ impl LaunchHarness {
 
 /// An explicit reasoning-effort value requested from a structured harness.
 ///
-/// The release-owned catalog decides which values each harness and known model
-/// support. Keeping the wire vocabulary closed means a misspelled effort is
-/// rejected at the HTTP boundary instead of becoming an unreviewed CLI flag.
+/// The release-owned catalog and built-in controls use this closed vocabulary.
+/// Wire and stored selections accept custom values through [`LaunchEffortValue`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum LaunchEffort {
@@ -585,6 +635,41 @@ impl LaunchEffort {
             Self::Max => "max",
             Self::Ultra => "ultra",
         }
+    }
+}
+
+/// The launch and template wire shape is one string for both built-in and custom efforts.
+///
+/// Match the known vocabulary first so existing selections round-trip in their old spelling.
+/// A built-in harness still needs a known, compatible effort before argv can be composed.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum LaunchEffortValue {
+    Known(LaunchEffort),
+    Custom(String),
+}
+
+impl LaunchEffortValue {
+    /// A release-catalog value, if the string belongs to the built-in effort vocabulary.
+    pub fn known(&self) -> Option<LaunchEffort> {
+        match self {
+            Self::Known(effort) => Some(*effort),
+            Self::Custom(_) => None,
+        }
+    }
+
+    /// The exact spelling carried through the wire and supplied to a custom wrapper.
+    pub fn as_cli_arg(&self) -> &str {
+        match self {
+            Self::Known(effort) => effort.as_cli_arg(),
+            Self::Custom(effort) => effort,
+        }
+    }
+}
+
+impl From<LaunchEffort> for LaunchEffortValue {
+    fn from(effort: LaunchEffort) -> Self {
+        Self::Known(effort)
     }
 }
 
@@ -648,8 +733,11 @@ impl LaunchPermission {
 #[serde(deny_unknown_fields)]
 pub struct LaunchSelection {
     pub harness: LaunchHarness,
+    /// A required catalog ID for custom agent launches. Omission preserves existing launch fingerprints.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_agent: Option<String>,
     pub model: Option<String>,
-    pub effort: Option<LaunchEffort>,
+    pub effort: Option<LaunchEffortValue>,
     pub permissions: Option<LaunchPermission>,
     /// Literal permission arguments, present exactly for a Custom choice.
     /// Stored as words so clones and resumes preserve argument boundaries;
@@ -970,7 +1058,8 @@ mod tests {
                     super::LaunchHarness::Goose
                     | super::LaunchHarness::Pi
                     | super::LaunchHarness::Bash
-                    | super::LaunchHarness::Zsh => unreachable!(),
+                    | super::LaunchHarness::Zsh
+                    | super::LaunchHarness::Custom => unreachable!(),
                     super::LaunchHarness::Cursor
                     | super::LaunchHarness::Codex
                     | super::LaunchHarness::Claude
@@ -1168,6 +1257,7 @@ mod tests {
             ),
             (Bash, false, false, None, false),
             (Zsh, false, false, None, false),
+            (Custom, true, true, Some(LaunchPermission::Yolo), true),
         ];
         assert_eq!(expected.len(), LaunchHarness::ALL.len());
         for (harness, model, effort, omitted, only_yolo) in expected {
@@ -1207,7 +1297,8 @@ mod tests {
             | LaunchHarness::Grok
             | LaunchHarness::Antigravity
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => {}
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {}
         }
         let all = [Guarded, Yolo, Custom, Approve, SmartApprove, Chat];
         for (harness, offered) in [
@@ -1226,6 +1317,7 @@ mod tests {
             (LaunchHarness::Antigravity, &[Guarded, Yolo, Custom][..]),
             (LaunchHarness::Bash, &[][..]),
             (LaunchHarness::Zsh, &[][..]),
+            (LaunchHarness::Custom, &[Yolo][..]),
         ] {
             for permission in all {
                 assert_eq!(
@@ -1242,6 +1334,7 @@ mod tests {
     #[test]
     fn omitted_optional_choices_round_trip_as_none() {
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: None,
@@ -1456,6 +1549,7 @@ mod tests {
     #[test]
     fn explicit_workspace_trust_values_serialize() {
         let mut selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Muse,
             model: None,

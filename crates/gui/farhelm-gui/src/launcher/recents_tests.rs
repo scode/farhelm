@@ -18,6 +18,7 @@ use super::recents::{
 /// `harness` with every choice left to its default.
 fn selection(harness: LaunchHarness) -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness,
         model: None,
         effort: None,
@@ -145,7 +146,7 @@ fn default_and_explicit_models_and_two_folders_stay_apart() {
 fn only_set_choices_narrow_the_setups() {
     let saved = LaunchSelection {
         model: Some("gpt-5".into()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         ..selection(LaunchHarness::Codex)
     };
     let history = history(vec![
@@ -373,7 +374,7 @@ fn the_environments_launches_merge_by_each_sources_next_launch() {
 fn summaries_name_the_setup() {
     let saved = LaunchSelection {
         model: Some("gpt-6-astra".into()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         permissions: Some(LaunchPermission::Yolo),
         ..selection(LaunchHarness::Codex)
     };

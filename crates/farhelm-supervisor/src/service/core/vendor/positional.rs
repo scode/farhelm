@@ -6,6 +6,7 @@
 //! the conversation.
 
 use super::super::*;
+use crate::procs::PositionalReporter;
 
 /// Evidence a vendor needs beyond the pinned process for a selecting report.
 enum RecordCheck {
@@ -14,12 +15,12 @@ enum RecordCheck {
 }
 
 /// Facts selected by per-kind dispatch, separate from the shared authority rules.
-/// All three vendors currently emit Stop. Keeping the spelling here makes adopting
-/// another vendor's end-of-turn policy an explicit decision.
+/// Built-in vendors currently emit Stop. The public custom reporter has no event selector.
 pub(in crate::service::core) struct PositionalReportPolicy {
     kind: AgentKind,
     name: &'static str,
-    quiet_event: &'static str,
+    quiet_event: Option<&'static str>,
+    grammar: PositionalReporter,
     record_check: RecordCheck,
     correction_kind: crate::service::notifications::NotificationKind,
     correction_text: &'static str,
@@ -28,7 +29,8 @@ pub(in crate::service::core) struct PositionalReportPolicy {
 pub(in crate::service::core) const CLAUDE: PositionalReportPolicy = PositionalReportPolicy {
     kind: AgentKind::Claude,
     name: "Claude",
-    quiet_event: "Stop",
+    quiet_event: Some("Stop"),
+    grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::None,
     correction_kind: crate::service::notifications::NotificationKind::ClaudePinCorrected,
     correction_text: crate::service::notifications::CLAUDE_PIN_CORRECTED_TEXT,
@@ -39,7 +41,8 @@ pub(in crate::service::core) const CLAUDE: PositionalReportPolicy = PositionalRe
 pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalReportPolicy {
     kind: AgentKind::Muse,
     name: "Muse",
-    quiet_event: "Stop",
+    quiet_event: Some("Stop"),
+    grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::None,
     correction_kind: crate::service::notifications::NotificationKind::MusePinCorrected,
     correction_text: crate::service::notifications::MUSE_PIN_CORRECTED_TEXT,
@@ -50,10 +53,22 @@ pub(in crate::service::core) const MUSE: PositionalReportPolicy = PositionalRepo
 pub(in crate::service::core) const ANTIGRAVITY: PositionalReportPolicy = PositionalReportPolicy {
     kind: AgentKind::Antigravity,
     name: "Antigravity",
-    quiet_event: "Stop",
+    quiet_event: Some("Stop"),
+    grammar: PositionalReporter::BuiltIn,
     record_check: RecordCheck::AntigravityMainTranscript,
     correction_kind: crate::service::notifications::NotificationKind::AntigravityPinCorrected,
     correction_text: crate::service::notifications::ANTIGRAVITY_PIN_CORRECTED_TEXT,
+};
+
+/// A custom report has only a literal ID and the current launch's positional process evidence.
+pub(in crate::service::core) const CUSTOM: PositionalReportPolicy = PositionalReportPolicy {
+    kind: AgentKind::Custom,
+    name: "custom agent",
+    quiet_event: None,
+    grammar: PositionalReporter::Custom,
+    record_check: RecordCheck::None,
+    correction_kind: crate::service::notifications::NotificationKind::CustomPinCorrected,
+    correction_text: crate::service::notifications::CUSTOM_PIN_CORRECTED_TEXT,
 };
 
 impl Supervisor {
@@ -82,8 +97,9 @@ impl Supervisor {
         } = report;
         let kind = policy.kind;
         let name = policy.name;
-        let stop = hook_event_name.as_ref().and_then(serde_json::Value::as_str)
-            == Some(policy.quiet_event);
+        let stop = policy.quiet_event.is_some_and(|quiet| {
+            hook_event_name.as_ref().and_then(serde_json::Value::as_str) == Some(quiet)
+        });
         if !crate::agent_kind::accepts_reported_conversation(kind, &conversation) {
             return Err(RequestError::new(
                 ErrorKind::InvalidRequest,
@@ -117,7 +133,15 @@ impl Supervisor {
                 "this session has moved on to another launch",
             ));
         }
-        let attribution = crate::procs::positional_corridor(&chain)
+        // A registration can be edited or deleted while a session is running. Use the capability
+        // stored on this launch under the same capture claim that fences its generation.
+        if row.launch.custom_reporting() == Some(false) {
+            return Err(RequestError::new(
+                ErrorKind::InvalidRequest,
+                "conversation reporting is disabled for this launch",
+            ));
+        }
+        let attribution = crate::procs::positional_corridor(&chain, policy.grammar)
             .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         let stored_pin = self.store.report_pin(id).await.map_err(|_| {
             RequestError::new(

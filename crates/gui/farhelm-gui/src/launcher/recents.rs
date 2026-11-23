@@ -34,7 +34,7 @@ use farhelm_proto::{
 
 use super::draft::{checkout_label, harness_label, joined};
 use crate::host_text::HostText;
-use crate::permission::words::{effort_label, permission_display};
+use crate::permission::words::{launch_effort_label, permission_display};
 
 /// The strip's row count (`matching_recents`' `take(3)`).
 pub const STRIP_ROWS: usize = 3;
@@ -132,9 +132,9 @@ fn matches_filter(selection: &LaunchSelection, filter: &RecentFilter) -> bool {
             .model
             .as_ref()
             .is_none_or(|model| selection.model.as_ref() == Some(model))
-        && filter
-            .effort
-            .is_none_or(|effort| selection.effort == Some(effort))
+        && filter.effort.is_none_or(|effort| {
+            selection.effort.as_ref().and_then(|value| value.known()) == Some(effort)
+        })
         && filter.permissions.is_none_or(|permissions| {
             selection.harness.request_permission(selection.permissions) == Some(permissions)
         })
@@ -305,8 +305,8 @@ pub fn explicit_before_permissions(selection: &LaunchSelection) -> Vec<String> {
     if let Some(model) = &selection.model {
         words.push(format!("Model: {model}"));
     }
-    if selection.effort.is_some() {
-        words.push(format!("Effort: {}", effort_label(selection.effort)));
+    if let Some(effort) = &selection.effort {
+        words.push(format!("Effort: {}", launch_effort_label(Some(effort))));
     }
     if selection.container.is_some() {
         words.push("container".to_owned());
@@ -319,7 +319,7 @@ pub fn summary_before_permissions(selection: &LaunchSelection) -> String {
     let mut words = format!(
         "Model: {} · Effort: {}",
         selection.model.as_deref().unwrap_or("Default"),
-        effort_label(selection.effort)
+        launch_effort_label(selection.effort.as_ref())
     );
     if selection.container.is_some() {
         words.push_str(" · container");

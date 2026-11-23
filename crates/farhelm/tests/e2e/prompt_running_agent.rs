@@ -200,6 +200,7 @@ async fn create_recorder(
         shell_words::quote(&pid_path.to_string_lossy()),
     );
     let launch = CommandLaunch {
+        custom_agent: None,
         command,
         yolo: false,
         agent,

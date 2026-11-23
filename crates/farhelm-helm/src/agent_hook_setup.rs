@@ -25,6 +25,7 @@ fn opt_in_column(kind: AgentKind) -> Option<&'static str> {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => None,
     }
 }

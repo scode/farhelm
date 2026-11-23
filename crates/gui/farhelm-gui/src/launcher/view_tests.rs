@@ -363,10 +363,12 @@ pub(super) fn codex(
     permissions: Option<LaunchPermission>,
 ) -> SessionLaunch {
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: model.map(str::to_owned),
-            effort,
+            effort: effort.map(Into::into),
             permissions,
             permission_flags: None,
             workspace_trust: None,

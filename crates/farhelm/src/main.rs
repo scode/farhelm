@@ -134,6 +134,11 @@ enum Cmd {
         #[command(subcommand)]
         command: AgentCmd,
     },
+    /// Report conversation identity from a custom agent.
+    CustomAgent {
+        #[command(subcommand)]
+        command: CustomAgentCmd,
+    },
     /// Edit the helm's stored configuration. The helm itself runs inside the
     /// desktop app; nothing here starts one.
     Helm {
@@ -156,6 +161,16 @@ enum Cmd {
     Internal {
         #[command(subcommand)]
         command: InternalCmd,
+    },
+}
+
+/// The public entry points for user-authored integrations.
+#[derive(Subcommand)]
+enum CustomAgentCmd {
+    /// Record a conversation ID from the current custom agent session.
+    ReportConversation {
+        #[arg(long, required = true)]
+        id: Option<String>,
     },
 }
 
@@ -1082,6 +1097,7 @@ impl LaunchFlags {
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         TemplateFields {
+            custom_agent: None,
             target: None,
             prompt: self.prompt.clone().or_else(|| self.prompt_file.clone()),
             permission_flags: None,
@@ -1091,7 +1107,7 @@ impl LaunchFlags {
                 .model
                 .as_ref()
                 .map(|model| (model != "default").then(|| model.clone())),
-            effort: self.effort.map(|choice| choice.0),
+            effort: self.effort.map(|choice| choice.0.map(Into::into)),
             permissions: self.permissions.map(|choice| choice.0),
             wrapper_prefix: self.wrapper.as_ref().map(|prefix| Some(prefix.0.clone())),
             container: None,
@@ -1656,6 +1672,8 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
         command,
         Cmd::Internal {
             command: InternalCmd::Hook { .. } | InternalCmd::GooseHook
+        } | Cmd::CustomAgent {
+            command: CustomAgentCmd::ReportConversation { .. },
         }
     );
     match version_lock::hold_for_process(&exe, inherited.as_deref()) {
@@ -1747,11 +1765,40 @@ fn main() -> anyhow::Result<()> {
                 command: InternalCmd::Askpass { question },
             },
         }
+    } else if arguments.next().is_some_and(|word| word == "custom-agent")
+        && arguments
+            .next()
+            .is_some_and(|word| word == "report-conversation")
+    {
+        // Admission recognizes this exact argv shape. Keep malformed invocations quiet and
+        // update the contract changelog in custom-agent-contract.md if the grammar changes.
+        let id = if arguments.next().is_some_and(|word| word == "--id") {
+            arguments
+                .next()
+                .and_then(|word| word.into_string().ok())
+                .filter(|_| arguments.next().is_none())
+        } else {
+            None
+        };
+        Cli {
+            command: Cmd::CustomAgent {
+                command: CustomAgentCmd::ReportConversation { id },
+            },
+        }
     } else {
         Cli::parse()
     };
     hold_own_version(&cli.command)?;
     match cli.command {
+        Cmd::CustomAgent {
+            command: CustomAgentCmd::ReportConversation { id },
+        } => {
+            std::panic::set_hook(Box::new(|_| {}));
+            let env = SessionEnv::from_env();
+            let (credential, hook_log) = env.hook_inputs(None, None);
+            hook::run_custom_report(credential, id.as_deref(), hook_log.as_deref());
+            Ok(())
+        }
         Cmd::Uninstall(options) => uninstall::run(options),
         Cmd::Licenses => {
             print!("{}", licenses_text());

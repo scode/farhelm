@@ -143,6 +143,7 @@ fn session(launch: SessionLaunch) -> SessionInfo {
 /// opens it.
 fn restart_session(model: Option<&str>) -> SessionInfo {
     let selection = LaunchSelection {
+        custom_agent: None,
         harness: LaunchHarness::Codex,
         model: model.map(str::to_owned),
         effort: None,
@@ -153,6 +154,7 @@ fn restart_session(model: Option<&str>) -> SessionInfo {
         container: None,
     };
     let mut session = session(SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start: vec!["codex".into(), "{farhelm_args}".into()],
         resume: Some(vec![
@@ -203,7 +205,7 @@ fn templates_stack_with_the_later_winning_where_they_overlap() {
         TemplateFields {
             agent: Some(LaunchHarness::Codex),
             model: Some(Some("gpt-6-luna".into())),
-            effort: Some(Some(LaunchEffort::High)),
+            effort: Some(Some(LaunchEffort::High.into())),
             name: Some("codex-work".into()),
             ..TemplateFields::default()
         },
@@ -439,7 +441,7 @@ fn an_older_model_template_applies_its_inferred_agent_to_the_draft() {
             "older model",
             TemplateFields {
                 model: Some(Some(id.into())),
-                effort: effort.map(Some),
+                effort: effort.map(|value| Some(value.into())),
                 ..TemplateFields::default()
             },
         );
@@ -568,7 +570,7 @@ fn a_template_fills_the_resume_command_and_a_null_effort_resets_the_choice() {
         TemplateFields {
             agent: Some(LaunchHarness::Codex),
             model: Some(Some("gpt-6-luna".into())),
-            effort: Some(Some(LaunchEffort::High)),
+            effort: Some(Some(LaunchEffort::High.into())),
             ..TemplateFields::default()
         },
     );
@@ -879,6 +881,7 @@ fn the_snapshot_reads_a_chosen_repository_as_the_destination() {
 fn replace_with_drops_an_equal_host_and_refuses_another() {
     let fixture = Fixture::new();
     let session = session(SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: "make dev".into(),
         yolo: false,
         agent: None,
@@ -958,7 +961,7 @@ fn restart_with_refuses_a_change_to_a_held_field() {
     type Change = fn(&mut TemplateFields);
     let fixture = Fixture::new();
     let low = TemplateFields {
-        effort: Some(Some(LaunchEffort::Low)),
+        effort: Some(Some(LaunchEffort::Low.into())),
         ..TemplateFields::default()
     };
     fixture
@@ -1029,7 +1032,7 @@ fn restart_with_applies_a_partial_agent_template_and_sends_its_choices() {
         "resume-settings",
         TemplateFields {
             model: Some(Some("gpt-6-luna".into())),
-            effort: Some(Some(LaunchEffort::Low)),
+            effort: Some(Some(LaunchEffort::Low.into())),
             permissions: Some(None),
             wrapper_prefix: Some(Some(vec!["env".into(), "RESUME_MODE=1".into()])),
             ..TemplateFields::default()
@@ -1041,9 +1044,10 @@ fn restart_with_applies_a_partial_agent_template_and_sends_its_choices() {
     assert_eq!(
         body.with,
         Some(LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-6-luna".into()),
-            effort: Some(LaunchEffort::Low),
+            effort: Some(LaunchEffort::Low.into()),
             permissions: Some(LaunchPermission::Guarded),
             permission_flags: None,
             workspace_trust: None,
@@ -1063,6 +1067,7 @@ fn restart_with_applies_a_partial_agent_template_and_sends_its_choices() {
 fn restart_with_applies_a_partial_command_template_and_sends_it() {
     let fixture = Fixture::new();
     let mut session = session(SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: "claude {farhelm_args}".into(),
         yolo: false,
         agent: Some(LaunchHarness::Claude),
@@ -1088,6 +1093,7 @@ fn restart_with_applies_a_partial_command_template_and_sends_it() {
     assert_eq!(
         body.with_command,
         Some(CommandLaunch {
+            custom_agent: None,
             command: command.into(),
             yolo: true,
             agent: Some(LaunchHarness::Claude),
@@ -1201,6 +1207,7 @@ fn the_snapshot_reads_identities_and_skips_unparsed_text() {
 fn restart_with_refuses_clearing_a_commands_resume() {
     let fixture = Fixture::new();
     let mut session = session(SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: "codex {farhelm_args}".into(),
         yolo: false,
         agent: Some(LaunchHarness::Codex),

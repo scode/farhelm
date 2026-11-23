@@ -147,7 +147,9 @@ impl Launcher {
         );
         let stored = match &self.draft.mode {
             Mode::RestartWith(restart) => match &restart.baseline {
-                RestartBaseline::Agent(selection) => selection.effort,
+                RestartBaseline::Agent(selection) => {
+                    selection.effort.as_ref().and_then(|value| value.known())
+                }
                 RestartBaseline::Command(_) => None,
             },
             Mode::New | Mode::Clone | Mode::ReplaceWith { .. } => None,

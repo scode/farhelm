@@ -15,16 +15,22 @@ pub const CODEX_LOCATOR_PREFIX: &str = "codex:";
 /// Prefix on stored Grok locators.
 pub const GROK_LOCATOR_PREFIX: &str = "grok:";
 
+/// Encoded locators cannot be reused as literal IDs in a custom agent's resume arguments.
+///
+/// Keep the contract changelog in `website/src/content/docs/docs/agents/custom-agent-contract.md`
+/// up to date when this vocabulary changes.
+pub const RESERVED_LOCATOR_PREFIXES: [&str; 4] = [
+    PI_LOCATOR_PREFIX,
+    OMP_LOCATOR_PREFIX,
+    CODEX_LOCATOR_PREFIX,
+    GROK_LOCATOR_PREFIX,
+];
+
 /// Whether a token claims Farhelm's encoded locator format. Even a malformed locator keeps its prefix reserved.
 pub fn is_reserved_locator_token(value: &str) -> bool {
-    [
-        PI_LOCATOR_PREFIX,
-        OMP_LOCATOR_PREFIX,
-        CODEX_LOCATOR_PREFIX,
-        GROK_LOCATOR_PREFIX,
-    ]
-    .into_iter()
-    .any(|prefix| value.starts_with(prefix))
+    RESERVED_LOCATOR_PREFIXES
+        .into_iter()
+        .any(|prefix| value.starts_with(prefix))
 }
 
 /// Whether a bare id can occupy one literal resume argument. A leading dash would introduce an option. A Farhelm
@@ -57,4 +63,43 @@ pub fn validate_launch_conversation(harness: LaunchHarness, value: &str) -> Resu
         return Err("session file paths do not expand ~; use an absolute or relative path".into());
     }
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The public reporter and named launch pass IDs through the same literal argument boundary.
+    /// Encoded locator prefixes stay reserved even when the rest of the locator is malformed.
+    #[farhelm_testtrace::test]
+    fn named_conversation_ids_keep_the_custom_agent_contract() {
+        const CONTRACT: &str =
+            "website/src/content/docs/docs/agents/custom-agent-contract.md, Contract changelog";
+        for id in ["conv-123", "repo/path:123", &"a".repeat(128)] {
+            assert!(validate_named_conversation(id).is_ok(), "{id}: {CONTRACT}");
+        }
+        for id in [
+            "",
+            "-arg",
+            "a b",
+            "a\nb",
+            "a'b",
+            "a\"b",
+            "a\\b",
+            "é",
+            "{conversation}",
+            &"a".repeat(129),
+        ] {
+            assert!(
+                validate_named_conversation(id).is_err(),
+                "{id:?}: {CONTRACT}"
+            );
+        }
+        for prefix in RESERVED_LOCATOR_PREFIXES {
+            assert!(
+                validate_named_conversation(prefix).is_err(),
+                "{prefix}: {CONTRACT}"
+            );
+        }
+    }
 }

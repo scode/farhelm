@@ -603,6 +603,7 @@ async fn a_structured_agent_wrapper_forwards_start_resume_and_environment() {
     .await;
     let _accepting = ServeTask::spawn(&h.sup, h.state.path()).await;
     let selection = farhelm_proto::LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: Some(model.to_string()),

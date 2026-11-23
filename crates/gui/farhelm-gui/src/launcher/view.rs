@@ -2005,7 +2005,7 @@ impl Launcher {
                 ),
             ))
             .chain(
-                LaunchHarness::ALL
+                LaunchHarness::BUILT_INS
                     .iter()
                     .filter(|harness| !harness.is_shell())
                     .map(|harness| {
@@ -2032,7 +2032,7 @@ impl Launcher {
                     .options(options)
                     .chosen(self.draft.command.agent.map_or(NO_AGENT, harness_label))
                     .on_choose(move |value, window, cx| {
-                        let agent = LaunchHarness::ALL
+                        let agent = LaunchHarness::BUILT_INS
                             .iter()
                             .copied()
                             .find(|harness| !harness.is_shell() && harness_label(*harness) == value.as_ref());
