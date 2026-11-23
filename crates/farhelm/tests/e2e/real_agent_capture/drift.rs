@@ -18,8 +18,11 @@ const COLS: u16 = 115;
 const ROWS: u16 = 35;
 const START_LIMIT: Duration = Duration::from_secs(90);
 const TURN_LIMIT: Duration = Duration::from_secs(180);
+/// How long an unchanged trust prompt stays on screen before the same answer is sent again. A key the dialog drops
+/// would otherwise strand the case until START_LIMIT.
+const TRUST_RETRY: Duration = Duration::from_secs(3);
 // Spell the prefix separately so neither the prompt echo nor Turn 1 can supply the recall witness.
-const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on one line. No tools.";
+const RECALL_PROMPT: &str = "Join R E C A L L, a hyphen, and my test label on one line. Reply with only that line. No tools.";
 
 /// An unavailable prerequisite gives no verdict. Once a turn succeeds, a startup or resume refusal is a failure.
 #[derive(Debug)]
@@ -97,7 +100,10 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
                 "agy",
                 Some("gemini-3.8-flash"),
                 Some(LaunchEffort::Low),
-                &["antigravity", "type a message"][..],
+                // Not the bare name: 1.5.14's "Welcome to the Antigravity CLI ... Signing in..." splash, shown before
+                // its trust prompt, contains it, and a prompt typed into the splash is lost. 1.5.14's composer has
+                // "? for shortcuts" under the input box.
+                &["? for shortcuts", "type a message"][..],
                 Some("antigravity"),
                 Some(HookWitness::MatchingIdentity),
                 false,
@@ -457,11 +463,16 @@ impl<'a> Terminal<'a> {
         Ok(())
     }
 
-    /// Await an interactive screen. Trust responses are sent only once per rendered prompt, and never for the
-    /// launch-only smoke cases, which already establish that the CLI entered its TUI.
+    /// Await an interactive screen. A trust response is sent once per newly rendered prompt, and again when that
+    /// same rendering is still on screen after TRUST_RETRY; launch-only smoke cases never answer, since reaching the
+    /// prompt already establishes that the CLI entered its TUI.
+    ///
+    /// The retry exists because Claude Code 2.1.330 lost the answer twice in a row on 2026-11-22: once it reset the
+    /// selection to "No, exit" after the Enter, and once the Down never registered. Answering each rendering only
+    /// once then waited out START_LIMIT on an unchanged dialog. Answering the same dialog by hand worked every time.
     async fn ready(&mut self, profile: &Harness, turned: bool) -> DriftResult {
         let deadline = tokio::time::Instant::now() + START_LIMIT;
-        let mut answered = None;
+        let mut answered: Option<(String, tokio::time::Instant)> = None;
         loop {
             let rendered = self.host.screen_tail(SCREEN_BYTES);
             let text = rendered.to_lowercase();
@@ -470,11 +481,12 @@ impl<'a> Terminal<'a> {
                 if profile.hook_witness.is_none() {
                     return Ok(());
                 }
-                if answered.as_ref() != Some(&rendered)
-                    && let Some(keys) = trust_answer(&text)
-                {
+                let unanswered = answered
+                    .as_ref()
+                    .is_none_or(|(screen, at)| *screen != rendered || at.elapsed() >= TRUST_RETRY);
+                if unanswered && let Some(keys) = trust_answer(&text) {
                     self.client.send_keys(self.channel, keys.to_vec()).await;
-                    answered = Some(rendered);
+                    answered = Some((rendered, tokio::time::Instant::now()));
                 }
             } else if profile.composer.iter().any(|marker| text.contains(marker)) {
                 return Ok(());
@@ -533,12 +545,22 @@ struct TurnExpectation<'a> {
 }
 
 impl TurnExpectation<'_> {
-    /// Full-line matching allows common answer bullets and casing. A word embedded in the prompt is just input echo.
+    /// A reply is a line that starts with the expected word, after common answer bullets and in any casing. Models
+    /// add to a bare "OK" despite the prompt (goose and OMP's defaults answered "OK (test label ... noted)." and
+    /// "OK — test label ... noted." on 2026-11-22), so text after the word counts as long as a non-alphanumeric
+    /// character ends the word. A word later in a line, such as one embedded in the prompt echo, is not a reply.
     fn saw_reply(&self, text: &str) -> bool {
         text.lines().map(str::trim).any(|line| {
-            line.trim_start_matches(['•', '●', '✦', '◆', '-', '*'])
-                .trim()
-                .eq_ignore_ascii_case(self.reply)
+            let line = line
+                .trim_start_matches(['•', '●', '✦', '◆', '-', '*'])
+                .trim_start();
+            line.get(..self.reply.len()).is_some_and(|word| {
+                word.eq_ignore_ascii_case(self.reply)
+                    && !line[self.reply.len()..]
+                        .chars()
+                        .next()
+                        .is_some_and(char::is_alphanumeric)
+            })
         })
     }
 
@@ -721,8 +743,9 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         let code_word = format!("FH{}", random[..8].to_ascii_uppercase());
         // Both turns can be answered from the conversation. A tool approval would strand the terminal on a dialog
         // that has nothing to do with whether the agent remembered the word.
-        let prompt =
-            format!("Remember test label {code_word}. Reply with O and K joined. No tools.");
+        let prompt = format!(
+            "Remember test label {code_word}. Reply with O and K joined into one word, and nothing else. No tools."
+        );
         first.type_text(&prompt, false).await?;
         first.client.send_keys(first.channel, b"\r".to_vec()).await;
         let hook_log = state.path().join("hook-log").join(format!("{id}.log"));
@@ -875,12 +898,31 @@ mod tests {
         let argv = ["resume".into(), "original".into()];
         let expected = after_restart(&argv);
         let screen = format!(
-            "Remember test label FH78C1E9AF. Reply with O and K joined. No tools.\n• OK\n› {RECALL_PROMPT}"
+            "Remember test label FH78C1E9AF. Reply with O and K joined into one word, and nothing else. No tools.\n• OK\n› {RECALL_PROMPT}"
         );
         assert!(!expected.saw_reply(&screen));
         assert!(!expected.saw_reply("I can't remember the code word."));
         assert!(!expected.saw_reply("› RECALL-FH78C1E9AF"));
         assert!(!expected.saw_reply("The code is RECALL-FH78C1E9AF."));
+        // A longer token that merely starts with the label is a different answer.
+        assert!(!expected.saw_reply("RECALL-FH78C1E9AF0"));
+    }
+
+    /// Weak models decorate the answer they were told to give alone; the word still has to open the line.
+    #[farhelm_testtrace::test]
+    fn a_reply_may_continue_after_the_expected_word() {
+        let turn_one = TurnExpectation {
+            reply: "OK",
+            acked_before: 0,
+            original_argv: None,
+            hook_witness: HookWitness::Fresh,
+        };
+        assert!(turn_one.saw_reply("OK (test label FH2713A357 noted)."));
+        assert!(turn_one.saw_reply(" OK — test label FH98E78B3E noted."));
+        assert!(turn_one.saw_reply("◆ ok"));
+        assert!(!turn_one.saw_reply("OKAY"));
+        assert!(!turn_one.saw_reply("Noted, OK."));
+        assert!(!turn_one.saw_reply("O"));
     }
 
     /// A recalled word proves access to history, while the accepted report must preserve the resume identity.
