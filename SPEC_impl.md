@@ -9128,11 +9128,16 @@ Close stays aligned to the input. Query notices and refusals have their own boun
 at any form scroll position. At a wide size `DialogFrame` hosts two independently scrolling regions. The command pane
 paints the same grouped search rows as the narrow field popover, using the search's default row and ordering. Its empty
 state reads the ordinary history filter and template catalog. Its keyboard highlight follows the setup or template's
-identity without moving focus out of the editor. Tab, Escape and outside clicks clear the highlight or close results
-before the parent dialog handles dismissal. Held-field reasons come from the same rules as application, including the
-template's no-op treatment of equal held values. Narrow windows use the existing popover and field anchor. The form
-remembers the last applied template with edits or the setup that filled it until Reset. The footer retains its own
-bounded notices and names the launch target through the main action's accessible name.
+identity without moving focus out of the editor. Clicks and explicit keyboard picks resolve that identity again at
+dispatch. A host history choice carries the recorded installation from the frame or keypress that offered it, so a
+replacement installation with the same rows cannot satisfy the earlier pick. A model also offered by the helm's history
+of launches into new environments does not depend on the host's installation. The stale-choice refusal clears the
+highlight and closes results with the query intact so the warning can show below the field. Tab, Escape and outside
+clicks clear the highlight or close results before the parent dialog handles dismissal. Held-field reasons come from the
+same rules as application, including the template's no-op treatment of equal held values. Narrow windows use the
+existing popover and field anchor. The form remembers the last applied template with edits or the setup that filled it
+until Reset. The footer retains its own bounded notices and names the launch target through the main action's accessible
+name.
 
 The launcher's initial prompt is a separate optional field in its draft. The agent tab's template snapshot retains it
 when the agent is unset or supported; a request requires a selected supported agent. Recent setups leave the draft alone

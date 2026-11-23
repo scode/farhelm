@@ -6,6 +6,8 @@
 //! Every step ends in one of the shared harness's step helpers, so the focus and layer invariants are checked after
 //! each.
 
+use farhelm_proto::launcher::LaunchTemplate;
+use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, RestartOffer};
 use gpui::{TestAppContext, VisualTestContext};
 
@@ -15,15 +17,27 @@ use super::recents_view_tests::{
 };
 use super::view_tests::{
     answer_catalog, click_in_body, codex, draft, fixture_hosts, launcher_on, launcher_with_hosts,
-    name_of, read, search_focused, search_text, selected_state, shown_refusal,
+    name_of, read, retarget_history_host, search_focused, search_text, selected_state,
+    shown_refusal,
 };
 use crate::layers;
-use crate::test_support::{self, keys, settle};
+use crate::test_support::{self, keys, settle, withdraw_presented_choice};
 
 /// Whether the search results were drawn in the last frame.
 fn results_shown(cx: &mut VisualTestContext) -> bool {
     test_support::frame(cx);
     cx.debug_bounds("launcher-search-results").is_some()
+}
+
+/// The rejection is beneath the command field with the query still ready to edit.
+pub(super) fn assert_stale_choice(cx: &mut VisualTestContext, query: &str) {
+    assert_eq!(
+        name_of(cx, "launcher-search-refusal").as_deref(),
+        Some("That choice is no longer available; choose a current result")
+    );
+    assert_eq!(search_text(cx), query);
+    assert!(search_focused(cx));
+    assert!(!results_shown(cx), "the results cannot cover the warning");
 }
 
 /// Type `text` into the focused field, as one input, and let it settle.
@@ -744,6 +758,31 @@ fn the_command_field_shows_a_searchable_short_host_example(cx: &mut TestAppConte
     assert_eq!(draft(cx).host, Some(2));
 }
 
+/// A host result can be withdrawn between paint and click. In a narrow launcher the old popover must close so the
+/// inline warning is visible, with the query and destination still intact.
+#[gpui::test]
+fn clicking_a_withdrawn_host_result_preserves_the_query(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[0, 1]),
+    );
+    cx.simulate_resize(crate::bootstrap::MIN_WINDOW_SIZE);
+    settle(cx);
+    assert!(search_focused(cx));
+    type_in(cx, "host:host2");
+    assert!(name_of(cx, "launcher-search-option-0").is_some_and(|name| name.contains("host2")));
+    let at = test_support::center(cx, "launcher-search-option-0");
+    cx.update(|window, cx| {
+        withdraw_presented_choice::<HostView>("2", cx);
+        test_support::click_before_redraw(at, window, cx);
+    });
+    settle(cx);
+    assert_stale_choice(cx, "host:host2");
+    assert_eq!(draft(cx).host, Some(1));
+    assert!(creates(&mut helm, cx).is_empty());
+}
+
 /// Replace with keeps its host fixed. Even if the user has scrolled the form down, taking a host result must explain
 /// that refusal at the command field and leave the launch action reachable.
 #[gpui::test]
@@ -939,6 +978,51 @@ fn a_tl_row_applies_its_template_and_keeps_the_launch_kind(cx: &mut TestAppConte
     let applied = draft(cx);
     assert_eq!(applied.tab, Tab::Command, "the template's launch kind");
     assert_eq!(applied.command.command, "true");
+}
+
+/// With and without a query, clicking a template from a catalog frame that has since changed keeps the draft intact.
+/// The template would edit the folder if the handler accidentally used the withdrawn row.
+#[gpui::test]
+fn clicking_a_withdrawn_template_warns_in_both_lists(cx: &mut TestAppContext) {
+    for (query, id) in [
+        ("tl:partial", "launcher-search-option-0"),
+        ("", "launcher-template-partial"),
+    ] {
+        let (mut helm, cx) = new_launcher_with_templates(cx, None);
+        if !query.is_empty() {
+            assert!(search_focused(cx));
+            type_in(cx, query);
+        }
+        assert_eq!(name_of(cx, id).as_deref(), Some("Template: partial"));
+        let at = test_support::center(cx, id);
+        cx.update(|window, cx| {
+            withdraw_presented_choice::<LaunchTemplate>("partial", cx);
+            test_support::click_before_redraw(at, window, cx);
+        });
+        settle(cx);
+        assert_stale_choice(cx, query);
+        assert_eq!(draft(cx).folder.value(), "~");
+        assert!(creates(&mut helm, cx).is_empty());
+    }
+}
+
+/// The empty field normally launches with Enter. A removed template must consume the Enter meant for that template.
+#[gpui::test]
+fn enter_on_a_withdrawn_empty_pane_template_cannot_launch(cx: &mut TestAppContext) {
+    let mut launch = LaunchDraft::new(Some(1), "~".into(), None);
+    launch.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = launcher_with_templates_on(cx, None, launch);
+    assert!(search_focused(cx));
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, "launcher-template-partial"), Some(true));
+    cx.update(|_, cx| withdraw_presented_choice::<LaunchTemplate>("partial", cx));
+    settle(cx);
+    assert_eq!(name_of(cx, "launcher-template-partial"), None);
+    assert!(search_focused(cx));
+    keys(cx, "enter");
+    assert_stale_choice(cx, "");
+    assert_eq!(draft(cx).folder.value(), "~");
+    assert!(creates(&mut helm, cx).is_empty());
 }
 
 /// Taking a template from the empty command field applies its edits once and keeps the editor ready for a query.
@@ -1497,6 +1581,61 @@ fn a_reconnect_preserves_the_template_arrow_choice(cx: &mut TestAppContext) {
     assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
     keys(cx, "enter");
     assert_eq!(draft(cx).agent.harness, Some(LaunchHarness::Goose));
+}
+
+/// The default host row is still usable after the arrow-picked host goes away. Enter belongs to the explicit
+/// choice even then, and another Enter reopens search so the user can choose what's left.
+#[gpui::test]
+fn enter_on_a_withdrawn_typed_host_does_not_take_the_default(cx: &mut TestAppContext) {
+    let (mut helm, cx) = launcher_with_hosts(
+        cx,
+        LaunchDraft::new(Some(1), "~".into(), None),
+        fixture_hosts(&[0, 1, 2]),
+    );
+    assert!(search_focused(cx));
+    type_in(cx, "host:host");
+    keys(cx, "down");
+    assert!(name_of(cx, "launcher-search-option-1").is_some_and(|name| name.contains("host2")));
+    assert_eq!(selected_state(cx, "launcher-search-option-1"), Some(true));
+    cx.update(|_, cx| withdraw_presented_choice::<HostView>("2", cx));
+    settle(cx);
+    assert!(name_of(cx, "launcher-search-option-1").is_some_and(|name| name.contains("host3")));
+    assert_eq!(selected_state(cx, "launcher-search-option-0"), Some(false));
+    assert!(search_focused(cx));
+    keys(cx, "enter");
+    assert_stale_choice(cx, "host:host");
+    assert!(creates(&mut helm, cx).is_empty());
+    keys(cx, "enter");
+    assert!(results_shown(cx));
+    keys(cx, "down enter");
+    assert_eq!(draft(cx).host, Some(3));
+    assert_eq!(search_text(cx), "");
+    assert_eq!(name_of(cx, "launcher-search-refusal"), None);
+}
+
+/// Matching folder text on the same registry row does not identify the installation that offered it.
+#[gpui::test]
+fn enter_refuses_a_folder_from_the_previous_installation(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_launcher(cx);
+    let answer = saved_folder("/srv/project");
+    answer_history(&mut helm, cx, &answer);
+    assert!(search_focused(cx));
+    type_in(cx, "folder:project");
+    let row = "launcher-search-option-0";
+    let saved = Some("Use this path: /srv/project");
+    assert_eq!(name_of(cx, row).as_deref(), saved);
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, row), Some(true));
+    retarget_history_host(&mut helm, cx);
+    assert_ne!(name_of(cx, row).as_deref(), saved);
+    answer_history(&mut helm, cx, &answer);
+    assert_eq!(name_of(cx, row).as_deref(), saved);
+    assert_eq!(selected_state(cx, row), Some(false));
+    let before = draft(cx).folder.value().to_owned();
+    keys(cx, "enter");
+    assert_stale_choice(cx, "folder:project");
+    assert_eq!(draft(cx).folder.value(), &before);
+    assert!(creates(&mut helm, cx).is_empty());
 }
 
 /// A catalog answer may add models or replace a past model. Unrelated changes keep the user's chosen agent.

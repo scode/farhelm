@@ -12,8 +12,9 @@
 //!   the results and keeps what was typed; Escape with them closed is the dialog's (it closes the launcher).
 //! - **Enter** on an empty field presses the main action unless Down moved its highlight into the empty pane.
 //!   In that case it takes the highlighted setup or template. With text, Enter reopens closed results, takes the highlighted row of open
-//!   ones, and does nothing when they offer no row (their message stays). A held Enter does nothing (SPEC.md: "A held
-//!   Enter never launches"), so holding it after a pick cannot launch the pick.
+//!   ones, and does nothing when they offer no default row (their message stays). A vanished explicit choice consumes
+//!   Enter, keeps the query and shows an inline warning. A held Enter does nothing (SPEC.md: "A held Enter never
+//!   launches"), so holding it after a pick cannot launch the pick.
 //! - **Taking a row** (Enter or a click) makes the one edit it names through the same draft method a hand edit uses,
 //!   then empties the box and closes the results, with focus back in the box for the next word; choosing Custom moves
 //!   focus on to its flags, as choosing it by hand does. An agent type or model taken on the Command tab switches to
@@ -58,9 +59,9 @@ use crate::components::{HoverHelp, OptionRow, Role, ScrollBox, Vertical, key_chi
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::hosts::identity::short_name;
-use crate::launcher::draft::{Field, Mode, Tab};
+use crate::launcher::draft::{Field, Install, Mode, Tab};
 use crate::launcher::recents::{
-    SetupKey, destination_label, permission_presentation, summary_before_permissions,
+    SetupKey, destination_label, permission_presentation, setup_key, summary_before_permissions,
     summary_without_wrapper, wrapper_summary,
 };
 use crate::launcher::request::capitalized;
@@ -90,8 +91,8 @@ const COMMAND_FIELD_TEXT_SIZE: f32 = 14.5;
 const COMMAND_NOTICE_HEIGHT: f32 = 88.;
 /// The results' element id (`.launch-composer-search-results`), which tests find them by.
 const SEARCH_RESULTS: &str = "launcher-search-results";
-/// Why a saved folder or recent setup from an earlier host's history changed nothing, as the old launcher said it.
-const STALE_ROW: &str = "That result belongs to an earlier host; choose a current result";
+/// A row was offered when the user chose it, but that choice no longer exists.
+const STALE_ROW: &str = "That choice is no longer available; choose a current result";
 
 /// The right side still needs room for the address and several agent controls to share rows.
 const MIN_WIDE_FORM_WIDTH: f32 = 650.;
@@ -112,8 +113,63 @@ pub(super) fn command_pane_fits(window: &Window) -> bool {
     reason = "at most two are held (the form's source and the keyboard target); boxing would gain nothing"
 )]
 pub(super) enum SetupSource {
-    Recent(Option<i64>, SetupKey),
+    Recent(Option<Install>, SetupKey),
     Template(String),
+}
+
+impl SetupSource {
+    /// A host's setup belongs to the installation that offered it. New-environment history belongs to the helm.
+    pub(super) fn recent(entry: &LaunchHistoryEntry, host: Option<&HostView>) -> Self {
+        let install = if entry.target.is_none() {
+            host.map(Install::of)
+        } else {
+            None
+        };
+        Self::Recent(install, setup_key(entry))
+    }
+}
+
+/// Identity captured when an arrow or a presented row makes an explicit choice. Host history rows also carry the
+/// installation that offered them, even when the next installation happens to offer an identical row.
+#[derive(Clone)]
+struct SearchChoice {
+    row: Row,
+    history_install: Option<Install>,
+}
+
+impl SearchChoice {
+    /// Bind just the choices that depend on the host's history. A model already offered by the helm is independent
+    /// of the installation, even if the same model was also in the current host's history.
+    fn new(row: &Row, launcher: &Launcher, cx: &App) -> Self {
+        let host_history = match row {
+            Row::Folder(_) => true,
+            Row::HistoryModel { id, harness } => !launcher.has_environment_model(*harness, id),
+            Row::Recent { entry, .. } => entry.target.is_none(),
+            _ => false,
+        };
+        let history_install = if host_history {
+            launcher.chosen_host(cx).map(Install::of)
+        } else {
+            None
+        };
+        Self {
+            row: row.clone(),
+            history_install,
+        }
+    }
+
+    /// Resolve against the current results without falling back to a different row or installation.
+    fn position(&self, results: &Results, host: Option<&HostView>) -> Option<usize> {
+        if let Some(install) = &self.history_install
+            && host.map(Install::of).as_ref() != Some(install)
+        {
+            return None;
+        }
+        results
+            .rows
+            .iter()
+            .position(|row| same_search_choice(row, &self.row))
+    }
 }
 
 /// What the search box holds besides the draft and its own text. None of it is shared with another surface.
@@ -133,8 +189,8 @@ pub(super) struct SearchBox {
     /// Why the last row taken changed nothing (a field this launcher holds fixed), said below the field until the next
     /// keystroke in it or the next row taken.
     refusal: Option<HostSentence>,
-    /// A deliberate arrow pick follows the row when a live update inserts or removes choices before it.
-    typed_choice: Option<Row>,
+    /// A deliberate arrow pick survives live updates until Enter can take it or explain its disappearance.
+    typed_choice: Option<SearchChoice>,
 }
 
 impl Launcher {
@@ -177,31 +233,15 @@ impl Launcher {
         self.search_box.pane_revealed = None;
     }
 
-    /// A host's history can disappear during a reconnect. Keep explicit picks from the template and model
-    /// catalogs, and from helm-wide environment history, since those rows do not come from that connection.
-    pub(super) fn reset_host_history_highlight(&mut self) {
-        let from_host = match self.search_box.typed_choice.as_ref() {
-            Some(Row::Folder(_) | Row::HistoryModel { .. }) => true,
-            Some(Row::Recent { entry, .. }) => entry.target.is_none(),
-            _ => false,
-        };
-        if from_host {
-            self.reset_search_highlight();
-        }
-    }
-
     /// Whether the results are open: opened by the box and not since closed by the layer manager.
     pub(super) fn search_open(&self, window: &Window, cx: &App) -> bool {
         self.search_box.inline_results || self.search_box.list.is_open(window, cx)
     }
 
     /// Resolve a deliberate arrow pick by identity. A missing row takes Enter with it until another choice is made.
-    fn search_highlight(&self, results: &Results) -> Option<usize> {
+    fn search_highlight(&self, results: &Results, cx: &App) -> Option<usize> {
         if let Some(picked) = &self.search_box.typed_choice {
-            return results
-                .rows
-                .iter()
-                .position(|row| same_search_choice(row, picked));
+            return picked.position(results, self.chosen_host(cx));
         }
         (results.default < results.rows.len()).then_some(results.default)
     }
@@ -229,6 +269,7 @@ impl Launcher {
         cx: &mut Context<Self>,
     ) {
         if self.search.text(cx).is_empty() && command_pane_fits(window) {
+            self.search_box.refusal = None;
             self.step_start_choice(arrow, cx);
             return;
         }
@@ -236,9 +277,10 @@ impl Launcher {
             return;
         }
         let results = self.search_results(cx);
-        let from = self.search_highlight(&results);
-        self.search_box.typed_choice =
-            step(from, arrow, results.rows.len()).map(|index| results.rows[index].clone());
+        let from = self.search_highlight(&results, cx);
+        self.search_box.refusal = None;
+        self.search_box.typed_choice = step(from, arrow, results.rows.len())
+            .map(|index| SearchChoice::new(&results.rows[index], self, cx));
         cx.notify();
     }
 
@@ -252,7 +294,7 @@ impl Launcher {
             if command_pane_fits(window)
                 && let Some(row) = self.search_box.start_highlight.clone()
             {
-                self.take_start_highlight(&row, window, cx);
+                self.take_start_choice(&row, true, window, cx);
                 return;
             }
             self.close_search(window, cx);
@@ -266,9 +308,35 @@ impl Launcher {
             return;
         }
         let results = self.search_results(cx);
-        if let Some(index) = self.search_highlight(&results) {
+        if let Some(index) = self.search_highlight(&results, cx) {
             self.take_search_row(results.rows[index].clone(), window, cx);
+        } else if self.search_box.typed_choice.is_some() {
+            self.refuse_stale_choice(window, cx);
         }
+    }
+
+    /// A click can arrive after the frame that offered its row is already out of date. Reuse the current choice
+    /// when its identity still matches, and otherwise preserve the query for another choice.
+    fn take_drawn_search_row(
+        &mut self,
+        picked: &SearchChoice,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let mut results = self.search_results(cx);
+        if let Some(index) = picked.position(&results, self.chosen_host(cx)) {
+            self.take_search_row(results.rows.swap_remove(index), window, cx);
+        } else {
+            self.refuse_stale_choice(window, cx);
+        }
+    }
+
+    /// Consume the stale choice. Closing results exposes the inline warning even in the narrow popover layout.
+    fn refuse_stale_choice(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        self.search_box.refusal =
+            Some(HostSentence::new("launcher-refusal-reason").text(STALE_ROW));
+        self.close_search(window, cx);
+        cx.notify();
     }
 
     /// Take `row`, from Enter or a click: refuse it below the field when it would change a field this launcher holds
@@ -303,8 +371,7 @@ impl Launcher {
     /// Why taking `row` would change nothing, in the old launcher's words where it had some: a field this launcher
     /// holds fixed ([`Self::held_by_row`]), a folder row or Browse while a new environment is chosen
     /// ([`environment_refusal`]), a recent setup carrying a retired container choice or, in Replace with, a new
-    /// environment ([`KEEPS_ENVIRONMENT`]), or a saved folder or recent setup
-    /// from a history that is no longer the chosen host's (the host changed after the row was drawn).
+    /// environment ([`KEEPS_ENVIRONMENT`]), or a host, template or history row since withdrawn.
     fn search_row_refusal(&self, row: &Row, cx: &App) -> Option<String> {
         if let Some(reason) = self.held_row_reason(row) {
             return Some(reason);
@@ -336,6 +403,18 @@ impl Launcher {
                     .iter()
                     .any(|folder| folder.display_cwd == *path)
             }),
+            Row::Host { id, .. } => self
+                .store
+                .read(cx)
+                .collections()
+                .get::<HostView>(&HostView::key(*id))
+                .is_none_or(|host| host.is_session_owned),
+            Row::Template(name) => self
+                .store
+                .read(cx)
+                .collections()
+                .get::<farhelm_proto::launcher::LaunchTemplate>(name)
+                .is_none(),
             _ => false,
         };
         stale.then(|| STALE_ROW.to_owned())
@@ -416,19 +495,7 @@ impl Launcher {
                 self.sync_fields(window, cx);
                 self.changed(cx);
             }
-            // The rows were built from the store a moment ago; a host that has gone since is not chosen.
-            Row::Host { id, .. } => {
-                let offered = self
-                    .store
-                    .read(cx)
-                    .collections()
-                    .ordered::<HostView>()
-                    .iter()
-                    .any(|host| host.id == id && !host.is_session_owned);
-                if offered {
-                    self.pick_host(id, window, cx);
-                }
-            }
+            Row::Host { id, .. } => self.pick_host(id, window, cx),
             // Choosing an agent type makes the tab Agent itself; a model of the agent already chosen does not, so the
             // model row switches it first.
             Row::Harness(harness) => self.choose_harness(harness, window, cx),
@@ -806,8 +873,7 @@ fn same_search_choice(a: &Row, b: &Row) -> bool {
             },
         ) => a == b && x == y,
         (Row::Recent { entry: a, .. }, Row::Recent { entry: b, .. }) => {
-            a.host == b.host
-                && crate::launcher::recents::setup_key(a) == crate::launcher::recents::setup_key(b)
+            a.host == b.host && setup_key(a) == setup_key(b)
         }
         _ => a == b,
     }
@@ -871,7 +937,7 @@ fn draw_search_rows(
     let (_, query) = scoped(&text);
     let results = launcher.search_results(cx);
     let harness = launcher.draft.agent.harness;
-    let active = launcher.search_highlight(&results);
+    let active = launcher.search_highlight(&results, cx);
     // With rows the area is a list box; with none, it holds only its message, which is the status line the old
     // area was (`role="status"`).
     let list = if results.rows.is_empty() {
@@ -931,7 +997,7 @@ fn draw_search_rows(
                 _ => HoverHelp::sentence(refusal.unwrap_or(help)),
             };
             let weak = weak.clone();
-            let taken = row.clone();
+            let taken = SearchChoice::new(row, launcher, cx);
             let content = if inline {
                 start::typed_choice(
                     launcher,
@@ -959,9 +1025,9 @@ fn draw_search_rows(
                     .disabled(disabled)
                     .child(content)
                     .on_click(move |_, window, cx| {
-                        let row = taken.clone();
-                        let _ = weak
-                            .update(cx, |launcher, cx| launcher.take_search_row(row, window, cx));
+                        let _ = weak.update(cx, |launcher, cx| {
+                            launcher.take_drawn_search_row(&taken, window, cx)
+                        });
                     })
                     .into_any_element(),
             );

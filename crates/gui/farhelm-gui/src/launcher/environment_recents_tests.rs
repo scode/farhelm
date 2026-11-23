@@ -23,7 +23,11 @@ use super::environment_launch_tests::{
 };
 use super::environment_tests::recipe_json;
 use super::folder_default_tests::edit_draft;
-use super::view_tests::{draft, fixture_hosts, launcher_with_hosts, name_of};
+use super::search_view_tests::type_in;
+use super::view_tests::{
+    draft, fixture_hosts, launcher_with_hosts, name_of, retarget_history_host, search_focused,
+    search_text, selected_state,
+};
 use crate::test_support::{self, keys, meta, settle};
 
 /// Replace with's refusal of a new environment's setup, the old launcher's words.
@@ -123,6 +127,42 @@ fn an_environment_setup_shows_by_a_chosen_recipe_with_no_host_connected(cx: &mut
         (taken.target, taken.folder.value().as_str()),
         (Some(container("api")), "~")
     );
+}
+
+/// A past model from helm-wide history remains an explicit choice while the selected host's history is re-read.
+#[gpui::test]
+fn a_past_model_from_environment_history_survives_host_retargeting(cx: &mut TestAppContext) {
+    let opened = LaunchDraft::new(Some(1), "/tmp".into(), None);
+    let hosts = fixture_hosts(&[0]);
+    let (mut helm, cx) = launcher_with_hosts(cx, opened, hosts);
+    let mut recent = environment("api", None, 2);
+    recent["selection"]["model"] = json!("env-model-newer");
+    let mut earlier = environment("api", None, 1);
+    earlier["selection"]["model"] = json!("env-model-earlier");
+    assert!(answer(&mut helm, cx, &[recent, earlier]).is_empty());
+    assert!(search_focused(cx));
+    type_in(cx, "model:env-model");
+    let default = "launcher-search-option-0";
+    let row = "launcher-search-option-1";
+    let text = Some("Model: env-model-earlier (Codex, past launch)");
+    // The nondefault row distinguishes retaining the explicit choice from silently restoring the default.
+    assert_eq!(
+        name_of(cx, default).as_deref(),
+        Some("Model: env-model-newer (Codex, past launch)")
+    );
+    assert_eq!(selected_state(cx, default), Some(true));
+    assert_eq!(name_of(cx, row).as_deref(), text);
+    keys(cx, "down");
+    assert_eq!(selected_state(cx, row), Some(true));
+
+    retarget_history_host(&mut helm, cx);
+    assert_eq!(name_of(cx, row).as_deref(), text);
+    assert_eq!(selected_state(cx, row), Some(true));
+    assert!(search_focused(cx));
+    keys(cx, "enter");
+    assert_eq!(draft(cx).agent.model.as_deref(), Some("env-model-earlier"));
+    assert_eq!(search_text(cx), "");
+    assert_eq!(name_of(cx, "launcher-search-refusal"), None);
 }
 
 /// What the launcher shows after a recent setup restores its placement must be what Launch sends, and never an ordinary

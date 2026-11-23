@@ -27,7 +27,7 @@ use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::harness_label;
 use crate::launcher::recents::{
     ALL_DEFAULTS, destination_label, explicit_before_permissions, permission_presentation,
-    selection_summary, setup_key, uses_guarded_default, wrapper_summary,
+    selection_summary, uses_guarded_default, wrapper_summary,
 };
 use crate::templates::{rows, summary};
 use crate::theme::{self, Palette, metrics};
@@ -46,10 +46,10 @@ enum StartRow {
 }
 
 impl StartRow {
-    /// A recent setup is offered by a particular host's history. An identical setup on another host is another row.
-    fn key(&self, host: Option<i64>) -> SetupSource {
+    /// Keep a host's setup tied to the offered installation even when the registry row keeps its id.
+    fn key(&self, host: Option<&HostView>) -> SetupSource {
         match self {
-            Self::Recent(entry, _) => SetupSource::Recent(host, setup_key(entry)),
+            Self::Recent(entry, _) => SetupSource::recent(entry, host),
             Self::Template(row) => SetupSource::Template(row.name.clone()),
         }
     }
@@ -87,7 +87,7 @@ impl Launcher {
     /// From the field, only Down enters the list. Moving above its first row gives Enter back to Launch.
     pub(super) fn step_start_choice(&mut self, direction: Vertical, cx: &mut Context<Self>) {
         let (rows, _) = self.start_rows(cx);
-        let host = self.draft.host;
+        let host = self.chosen_host(cx);
         let from = self
             .search_box
             .start_highlight
@@ -103,18 +103,27 @@ impl Launcher {
         cx.notify();
     }
 
-    /// Resolve the key against the choices available at the keypress. A retired highlight must never launch the draft.
-    pub(super) fn take_start_highlight(
+    /// Resolve the presented choice again at dispatch. A withdrawn choice consumes its Enter or click and explains
+    /// the refusal before the old highlight disappears.
+    pub(super) fn take_start_choice(
         &mut self,
         key: &SetupSource,
+        keyboard: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        let (rows, _) = self.start_rows(cx);
-        if let Some(row) = rows.iter().find(|row| row.key(self.draft.host) == *key) {
-            self.take_start_row(row.result(), true, window, cx);
+        if !command_pane_fits(window) || !self.search.text(cx).is_empty() {
+            return;
         }
-        cx.notify();
+        let (rows, _) = self.start_rows(cx);
+        if let Some(row) = rows
+            .iter()
+            .find(|row| row.key(self.chosen_host(cx)) == *key)
+        {
+            self.take_start_row(row.result(), keyboard, window, cx);
+        } else {
+            self.refuse_stale_choice(window, cx);
+        }
     }
 
     /// An empty-list recent setup can submit after filling; a query result and a template only apply their choice.
@@ -125,10 +134,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if !command_pane_fits(window)
-            || !self.search.text(cx).is_empty()
-            || self.row_disabled(&row, cx).is_some()
-        {
+        if self.row_disabled(&row, cx).is_some() {
             return;
         }
         let Row::Recent { entry, .. } = row else {
@@ -146,7 +152,8 @@ impl Launcher {
                 }
             }
             Err(RecentRefusal::Retired) => self.notice = Some(RETIRED_CONTAINER_REASON.into()),
-            Err(RecentRefusal::Stale | RecentRefusal::Held | RecentRefusal::KeepsEnvironment) => {}
+            Err(RecentRefusal::Stale) => self.refuse_stale_choice(window, cx),
+            Err(RecentRefusal::Held | RecentRefusal::KeepsEnvironment) => {}
         }
         cx.notify();
     }
@@ -264,7 +271,7 @@ impl Launcher {
                 children.push(command_heading(id, label, palette));
                 previous = Some(recent);
             }
-            let key = row.key(self.draft.host);
+            let key = row.key(self.chosen_host(cx));
             let active = self.search_box.start_highlight.as_ref() == Some(&key);
             let selected = active || self.search_box.source.as_ref() == Some(&key);
             if active {
@@ -326,7 +333,7 @@ impl Launcher {
                     .child(contents)
                     .on_click(move |_, window, cx| {
                         let _ = action.update(cx, |launcher, cx| {
-                            launcher.take_start_row(taken.clone(), false, window, cx);
+                            launcher.take_start_choice(&key, false, window, cx);
                         });
                     })
                     .into_any_element(),

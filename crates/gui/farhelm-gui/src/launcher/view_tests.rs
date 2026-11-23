@@ -6,7 +6,9 @@
 //! of the shared harness's step helpers, so the focus and layer invariants are checked after each.
 
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::{Collection, CollectionState, HostView, KeyedEntry};
+use farhelm_proto::ui_channel::{
+    Collection, CollectionChanges, CollectionState, HostView, KeyedEntry,
+};
 use farhelm_proto::{
     LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer, SessionLaunch,
 };
@@ -52,6 +54,28 @@ pub(crate) fn fixture_hosts(positions: &[usize]) -> CollectionState {
             })
             .collect(),
     }
+}
+
+/// Replace the fixture's connected host installation, keeping its registry id. A pick keyed only by host id
+/// would still match the new installation, so callers check both the old history's removal and the next choice.
+pub(super) fn retarget_history_host(helm: &mut FakeHelm, cx: &mut VisualTestContext) {
+    let mut hosts = fixture_hosts(&[0]);
+    let host = &mut hosts.entries[0].value;
+    host["identity"] = serde_json::json!("replacement-installation");
+    host["state"]["identity"] = host["identity"].clone();
+    host["incarnation"] = serde_json::json!(host["incarnation"].as_u64().unwrap() + 1);
+    helm.push(CollectionChanges {
+        collection: hosts.collection,
+        meta: hosts.meta,
+        upsert: hosts.entries,
+        remove: Vec::new(),
+    });
+    settle(cx);
+    cx.update(|_, cx| {
+        let store = crate::session::current_store(cx).unwrap();
+        let host = store.read(cx).collections().get::<HostView>("1").unwrap();
+        assert_eq!(host.identity.as_deref(), Some("replacement-installation"));
+    });
 }
 
 /// The real main view over the fake helm with one host, session `a` and the preferences, and the launcher opened on
