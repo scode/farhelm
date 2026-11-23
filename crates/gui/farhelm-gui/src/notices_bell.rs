@@ -342,7 +342,7 @@ pub(crate) fn bell(
     let help = HoverHelp::tooltip(bell_help(unread)).beside();
     let help = if selected { help.ring_on_fill() } else { help };
     let button = Button::new(id.clone(), bell_label(&title, unread), help, Role::Button)
-        .tier(Tier::Readout { focus_fill: false })
+        .tier(Tier::Readout)
         .expanded(open)
         .focus(&focus)
         .content(glyph)

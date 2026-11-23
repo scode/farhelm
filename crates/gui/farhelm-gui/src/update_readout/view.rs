@@ -8,8 +8,8 @@
 //!   both and turn the glyph a quarter; a press checks for updates now. During a check or an install the glyph spins
 //!   instead (eight steps a turn, from the ticker) and the words beside it say which. A reinstall, interrupted-install
 //!   or withdrawal warning turns the version amber with a `⚠` before it, and the press still retries.
-//! - **The update-menu toggle** once an update is installed: the version in red with `↑` before it (and `⚠` before
-//!   that when a warning stands). A press opens the menu beside it, with Restart to update and What's new.
+//! - **The update-menu toggle** once an update is installed: a red pill with the version and `↑` (and an amber `⚠`
+//!   when a warning stands). A press opens the menu beside it, with Restart to update and What's new.
 //! - **The inline status** after either: Checking… or Installing…, Up to date for about five seconds, or Check failed,
 //!   a button that dismisses it. While an update waits, progress gets a ring of its own, since the toggle has no glyph
 //!   to spin.
@@ -29,10 +29,10 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, InteractiveElement as _,
-    IntoElement, ParentElement as _, Render, SharedString, StatefulInteractiveElement as _,
-    Styled as _, Subscription, Transformation, Window, div, prelude::FluentBuilder as _, px,
-    radians, svg,
+    AnyElement, App, AppContext as _, Context, Entity, FocusHandle, FontWeight,
+    InteractiveElement as _, IntoElement, ParentElement as _, Render, SharedString,
+    StatefulInteractiveElement as _, Styled as _, Subscription, Transformation, Window, div,
+    prelude::FluentBuilder as _, px, radians, svg,
 };
 
 use super::{
@@ -272,7 +272,7 @@ impl VersionReadout {
             readout_help(check_help(&readout.tooltip)),
             Role::Button,
         )
-        .tier(Tier::Readout { focus_fill: false })
+        .tier(Tier::Readout)
         .accessible_name(format!(
             "Farhelm {}; check for updates. {}",
             farhelm_proto::BUILD_VERSION,
@@ -302,11 +302,11 @@ impl VersionReadout {
         .on_click(|_, _, cx| updates::check_now(cx))
     }
 
-    /// The update-menu toggle: red, with the update arrow, and the menu beside it.
+    /// The tinted pill stays distinguishable from the ordinary check control while an update waits for restart.
     fn toggle(&self, readout: &Readout, cx: &mut Context<Self>) -> Button {
         let palette = theme::palette(cx);
         let open = self.menu.is_some();
-        let marks = marks(readout_marks(readout), palette.danger, palette);
+        let marks = marks(readout_marks(readout), palette.danger_strong, palette);
         let view = cx.weak_entity();
         Button::new(
             "app-version-toggle",
@@ -314,7 +314,7 @@ impl VersionReadout {
             readout_help(readout.tooltip.clone()),
             Role::Button,
         )
-        .tier(Tier::Readout { focus_fill: true })
+        .tier(Tier::UpdateReady { pulsing: false })
         .accessible_name(format!(
             "Farhelm {}, update ready: {}",
             farhelm_proto::BUILD_VERSION,
@@ -328,8 +328,9 @@ impl VersionReadout {
                 .flex_row()
                 .items_center()
                 .min_w_0()
+                .font_weight(FontWeight::BOLD)
                 .children(marks)
-                .child(version_text(palette.danger)),
+                .child(version_text(palette.danger_strong)),
         )
         .on_click(move |_, window, cx| {
             let _ = view.update(cx, |readout, cx| readout.toggle_menu(window, cx));
@@ -371,7 +372,7 @@ impl VersionReadout {
                     readout_help(readout.tooltip.clone()),
                     Role::Button,
                 )
-                .tier(Tier::Readout { focus_fill: false })
+                .tier(Tier::Readout)
                 .accessible_name("Check failed; dismiss update check status")
                 .content(
                     div()

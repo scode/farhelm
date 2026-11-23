@@ -311,9 +311,8 @@ pub(super) fn version_readout_outcomes_setup(
     focus_readout(state, 3, 1, window, cx);
 }
 
-/// Rows of the update-menu toggle once an update is installed: red with `↑` before the version; with a withdrawal
-/// (`⚠` in `--warn`, then `↑`, the rest red); and the toggle with keyboard focus (the accent ring and the control-hover
-/// fill, the one readout control a focused fill is ported for), which the setup gives it.
+/// Rows of the update-menu toggle once an update is installed. The resting pill puts `↑` before the version, the
+/// withdrawal row adds an amber `⚠`, and the focused row draws the accent ring over the resting red tint.
 fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
     let withdrawn = Readout {
         withdrawn: true,
@@ -355,7 +354,7 @@ pub(super) fn version_readout_menu(state: &SceneState, _: &mut Window, cx: &mut 
 
 /// The toggle pressed: its menu open beside it (10 pixels past its right edge, 4 above its top), headed "Farhelm update"
 /// and "An installed update is ready", with Restart to update (focus on it, as a menu opens) and What's new. The toggle
-/// keeps the readout's look with the menu open: no fill (the old toggle drew nothing for its expanded state).
+/// keeps its resting red tint with the menu open.
 pub(super) fn version_readout_menu_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     let readout = kept_readouts(state)
         .first()

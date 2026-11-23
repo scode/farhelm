@@ -20,6 +20,47 @@ use crate::test_support::{bounds, center, check, click, frame, keys, open, redra
 
 use super::{tooltip, wait_hover_delay};
 
+/// The update menu uses its red warning tint while open so the version continues to show that a restart is pending.
+/// Hover and the reminder pulse deepen the same tint. Keyboard focus leaves the pill's resting fill under the ring.
+#[test]
+fn pending_update_pill_keeps_its_tint_when_the_menu_opens() {
+    use crate::theme::{DARK, LIGHT};
+
+    for palette in [&DARK, &LIGHT] {
+        for expanded in [false, true] {
+            let pill = |pulsing| {
+                Button::new(
+                    "update-ready",
+                    "Update ready",
+                    HoverHelp::tooltip("Restart"),
+                    Role::Button,
+                )
+                .tier(Tier::UpdateReady { pulsing })
+                .expanded(expanded)
+            };
+            let idle = pill(false);
+            assert_eq!(
+                idle.colors(palette),
+                (
+                    Some(palette.danger_wash),
+                    palette.danger_wash_hover,
+                    None,
+                    palette.danger_strong
+                ),
+            );
+            assert_eq!(idle.fill(palette, false, true), Some(palette.danger_wash));
+            assert_eq!(
+                idle.fill(palette, true, true),
+                Some(palette.danger_wash_hover)
+            );
+            assert_eq!(
+                pill(true).fill(palette, false, false),
+                Some(palette.danger_wash_hover)
+            );
+        }
+    }
+}
+
 /// A click activates an enabled button, and a disabled one ignores it: the old app's disabled buttons were inert, and a
 /// dimmed button that still acted would send a command the user was told was unavailable.
 #[gpui::test]
