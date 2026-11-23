@@ -35,6 +35,9 @@
 //! The desktop app's record of the supervisor it started
 //! (`crate::managed_supervisor`) uses this tier too: a record lost to a
 //! crash would leave the app treating its own supervisor as foreign.
+//! The repository cache selector (`crate::repo_cache`) uses it so retiring
+//! the previous directory cannot leave a crash-reverted selector pointing
+//! at that retired directory.
 //!
 //! **Best-effort atomic** ([`overwrite_private_file_sync`]). Write a fresh 0600
 //! temp file, `fsync` it, `rename` it over the destination; no fsync of
@@ -441,10 +444,8 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
 }
 
 /// Durability-bearing write: temp file, `fsync` the file, REPLACING
-/// rename, `fsync` the parent directory. See the module docs for which
-/// file class this is for (today: the launch shim's exec-failure
-/// sentinel, and the desktop app's record of the supervisor it started,
-/// `managed_supervisor`) and why it alone pays for both fsyncs.
+/// rename, `fsync` the parent directory. The module docs list the file
+/// classes that need both fsyncs.
 ///
 /// Synchronous and callable with no tokio runtime present — load-bearing,
 /// not incidental: the launch shim (`launch::exec_launch_spec`) runs
@@ -452,12 +453,8 @@ fn write_staged(path: &Path, bytes: &[u8], seam: &dyn FaultSeam, tier: Tier) -> 
 /// runtime (`main.rs` never builds one for `internal launch`, to avoid
 /// paying for a runtime the successful-`exec` path replaces entirely), so
 /// this function must work as plain, blocking I/O. There is no async
-/// wrapper: nothing on the supervisor's async side writes a
-/// durability-bearing file today (the shim and the desktop app's
-/// supervisor record are both written synchronously), so one would have
-/// no caller — add it
-/// if and when one exists, per the same reasoning that removed the
-/// asymmetric one this module used to carry.
+/// wrapper. The desktop app's supervisor record and cache selector writes
+/// also run on synchronous paths.
 pub fn write_durable_sync(path: &Path, bytes: &[u8], seam: &dyn FaultSeam) -> io::Result<()> {
     write_staged(path, bytes, seam, Tier::Durable)
 }
