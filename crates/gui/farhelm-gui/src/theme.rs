@@ -178,6 +178,9 @@ pub struct Palette {
     /// `color-mix(in srgb, var(--danger) 14%, transparent)`, as `0xRRGGBBAA`: the red wash behind a loud question,
     /// the old YOLO confirmation's `.yolo-confirmation` background.
     pub danger_wash: Token,
+    /// The pending-update pill's deeper tint for hover and the reminder. Each theme leaves the 12-pixel version
+    /// and warning legible against the resulting sidebar color.
+    pub danger_wash_hover: Token,
     /// `color-mix(in srgb, var(--danger) 20%, var(--bg-2))`, worked out: the launcher's permission-escalation banner,
     /// the old `.permission-escalation-banner` background.
     pub danger_tint: Token,
@@ -283,6 +286,7 @@ pub const DARK: Palette = Palette {
     danger_bg_dim: rgb_token(0x3a292f),
     // `--danger` at 14% alpha (0x24 is 14% of 255, rounded).
     danger_wash: rgba_token(0xee8a8a24),
+    danger_wash_hover: rgba_token(0xee8a8a39),
     danger_tint: rgb_token(0x50404a),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
@@ -371,6 +375,7 @@ pub const LIGHT: Palette = Palette {
     danger_bg_dim: rgb_token(0xfae9ec),
     // `--danger` at 14% alpha (0x24 is 14% of 255, rounded).
     danger_wash: rgba_token(0xa63e4d24),
+    danger_wash_hover: rgba_token(0xa63e4d2a),
     danger_tint: rgb_token(0xedd8db),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),

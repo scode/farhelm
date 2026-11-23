@@ -107,13 +107,12 @@ pub enum Tier {
     /// `.inline-link`: a button that reads as a link in running text: the link color, underlined, with no fill, edge
     /// or padding. The focus ring is every control's.
     Link,
-    /// `.app-version-check`, `.app-version-toggle` and `.app-update-failure`: the sidebar header's version readout and
-    /// its status, controls that keep the look of the text they sit in. No padding, edge or fill, at rest or under the
-    /// pointer, and the inks are the content's own; keyboard focus draws every control's ring. `focus_fill` adds the
-    /// control-hover fill under that ring, which only the update-menu toggle had (the old sheet's `.btn:focus-visible`
-    /// fill outranked the toggle's `background: none`, and its own hover rule took the fill away again under the
-    /// pointer).
-    Readout { focus_fill: bool },
+    /// Inline controls that keep the look of the text they sit in, such as the version check and its failure status.
+    /// Keyboard focus draws a ring around their unfilled text box.
+    Readout,
+    /// The version readout while an installed update awaits restart. Its red tint stays visible with the menu open.
+    /// The reminder can deepen that tint without moving the button or its menu anchor.
+    UpdateReady { pulsing: bool },
     /// `.app-settings-navigation button`: an entry of a navigation list (Settings' sections), as wide as its list, its
     /// icon and label at the left 8 pixels apart, 13-pixel text on a 16-pixel line, a 28-pixel row around Settings'
     /// 20-pixel section tiles (`NAV_PAD`; the old sheet's row was 34 pixels high), the primary ink at rest, and the label
@@ -246,7 +245,7 @@ pub(crate) const TOOLBAR_ACTION_GAP: Pixels = px(8.);
 /// Every button's line height but where a tier or look sets its own: `.btn`'s `line-height: 1.4` at its 12-pixel text,
 /// 16.8 pixels rounded to 17.
 const LINE: f32 = 17.;
-/// The edge every tier but `Tier::Link` and `Tier::Readout` draws, transparent where the tier has no edge color (`.btn`'s
+/// The edge ordinary button tiers draw, transparent where the tier has no edge color (`.btn`'s
 /// `border: 1px solid`). The render draws it with `border_1`; this names it for [`Button::toolbar_height`].
 const EDGE: f32 = 1.;
 
@@ -538,7 +537,7 @@ impl Button {
     }
 
     /// The button opens something, and `expanded` says whether it is open now: `aria-expanded`, and the pressed look
-    /// while it is (see the module docs), except in [`Tier::Readout`], which keeps the look of its text. On a button
+    /// while it is (see the module docs). [`Tier::Readout`] and [`Tier::UpdateReady`] keep their own look. On a button
     /// that is also [`Button::pressed`], the pressed look wins.
     pub fn expanded(mut self, expanded: bool) -> Self {
         self.expanded = Some(expanded);
@@ -753,11 +752,11 @@ impl Button {
             );
         }
         // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
-        // management shows) keeps its pressed look, as the old sheet drew it. The readout's update toggle had no open
-        // look at all: it keeps the look of its text while its menu is open.
+        // management shows) keeps its pressed look. The update pill keeps its red tint while its menu is open so it
+        // still signals that a restart is pending.
         if self.expanded == Some(true)
             && self.open_look
-            && !matches!(self.tier, Tier::Readout { .. })
+            && !matches!(self.tier, Tier::Readout | Tier::UpdateReady { .. })
         {
             return (
                 Some(palette.accent_fill_hover),
@@ -830,7 +829,17 @@ impl Button {
                 palette.tunnel_fg,
             ),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
-            Tier::Readout { .. } => (None, theme::TRANSPARENT, None, palette.fg_1),
+            Tier::Readout => (None, theme::TRANSPARENT, None, palette.fg_1),
+            Tier::UpdateReady { pulsing } => (
+                Some(if pulsing {
+                    palette.danger_wash_hover
+                } else {
+                    palette.danger_wash
+                }),
+                palette.danger_wash_hover,
+                None,
+                palette.danger_strong,
+            ),
             Tier::HostUpdate { required } => {
                 let ink = if required {
                     palette.danger_strong
@@ -912,22 +921,19 @@ impl Button {
     ///   drew only the ring, so the pointer still draws their hover fill over it;
     /// - a quick-launch bolt, lit or not, also not a `.btn`, which drew no fill at all (the pointer still draws the
     ///   hover fill, the departure [`Tier::QuickMark`] describes);
-    /// - the Settings section list's entries, which drew the ring alone, and the readout's controls but the update-menu
-    ///   toggle (see [`Tier::Readout`]).
+    /// - the Settings section list's entries, the inline readout controls and the pending-update pill, where the ring
+    ///   leaves the existing tint or text box visible.
     ///
-    /// NOTE: The unit tests call this directly. Its two call sites in `render` (the background away from the pointer
-    /// and the hover style) have no render-level test: nothing in the test harness reads a drawn background, and no
-    /// golden draws any of the tiers above focused in the state listed. A change there must keep passing `focused` to
-    /// both.
+    /// The unit tests call this directly to cover both the resting and hover background lookups. The focused version
+    /// readout golden also checks that `render` keeps the pill's tint under its focus ring.
     pub(super) fn fill(&self, palette: &Palette, hovered: bool, focused: bool) -> Option<Token> {
         let (rest, hover, _, _) = self.colors(palette);
         match self.tier {
             Tier::TerminalTab if self.pressed == Some(true) && focused => rest,
             _ if hovered => Some(hover),
             _ if !focused => rest,
-            Tier::Nav | Tier::Readout { focus_fill: false } | Tier::QuickMark { .. } => rest,
+            Tier::Nav | Tier::Readout | Tier::UpdateReady { .. } | Tier::QuickMark { .. } => rest,
             Tier::TemplateRow | Tier::IconChoice => rest,
-            Tier::Readout { focus_fill: true } => Some(palette.control_hover),
             _ => Some(hover),
         }
     }
@@ -941,9 +947,13 @@ impl RenderOnce for Button {
             Tier::ColorChoice => px(COLOR_CHOICE_SIZE / 2.),
             Tier::Waiting => metrics::RADIUS_MD,
             Tier::NumberKey { .. } => metrics::RADIUS_CAP,
+            Tier::UpdateReady { .. } => px(5.),
             _ => metrics::RADIUS_SM,
         };
-        let bordered = !matches!(self.tier, Tier::Link | Tier::Readout { .. });
+        let bordered = !matches!(
+            self.tier,
+            Tier::Link | Tier::Readout | Tier::UpdateReady { .. }
+        );
         let focus = self.focus.clone().unwrap_or_else(|| {
             focus::control_handle(
                 ElementId::Name(format!("{}-focus", self.id).into()),
@@ -978,11 +988,10 @@ impl RenderOnce for Button {
             {
                 (px(COMPACT_PAD.0), px(COMPACT_PAD.1))
             }
-            Tier::Rail
-            | Tier::Link
-            | Tier::Readout { .. }
-            | Tier::IconChoice
-            | Tier::FieldRemove => (px(0.), px(0.)),
+            Tier::Rail | Tier::Link | Tier::Readout | Tier::IconChoice | Tier::FieldRemove => {
+                (px(0.), px(0.))
+            }
+            Tier::UpdateReady { .. } => (px(2.), px(7.)),
             Tier::ColorChoice => (px(COLOR_CHOICE_PAD), px(COLOR_CHOICE_PAD)),
             Tier::Chip => (px(CHIP_PAD.0), px(CHIP_PAD.1)),
             Tier::Nav => (px(NAV_PAD.0), px(NAV_PAD.1)),
@@ -1025,7 +1034,8 @@ impl RenderOnce for Button {
             | Tier::Rail
             | Tier::Chip
             | Tier::Link
-            | Tier::Readout { .. }
+            | Tier::Readout
+            | Tier::UpdateReady { .. }
             | Tier::Nav
             | Tier::QuickMark { .. }
             | Tier::NumberKey { .. }
@@ -1134,8 +1144,7 @@ impl RenderOnce for Button {
             .when(self.joined == Some(JoinSide::Left), |button| {
                 button.rounded_tl(px(0.)).rounded_bl(px(0.))
             })
-            // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
-            // words around them; every other tier keeps the 1-pixel edge.
+            // Inline controls sit on the text line. The update pill takes its box from padding and tint alone.
             .when(bordered, |button| button.border_1())
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
@@ -1145,7 +1154,7 @@ impl RenderOnce for Button {
                 !matches!(
                     self.tier,
                     Tier::Link
-                        | Tier::Readout { .. }
+                        | Tier::Readout
                         | Tier::Nav
                         | Tier::TemplateRow
                         | Tier::BrowseRow
@@ -1250,6 +1259,7 @@ impl RenderOnce for Button {
             button = button.child(super::focus_ring(px(-3.).into(), ring_color).rounded(
                 match self.tier {
                     Tier::NumberKey { .. } | Tier::Waiting => metrics::RADIUS_CAP + px(3.),
+                    Tier::UpdateReady { .. } => radius + px(3.),
                     _ => metrics::RADIUS_SM + px(3.),
                 },
             ));
@@ -1287,7 +1297,8 @@ impl RenderOnce for Button {
                     | Tier::Rail
                     | Tier::Chip
                     | Tier::Link
-                    | Tier::Readout { .. }
+                    | Tier::Readout
+                    | Tier::UpdateReady { .. }
                     | Tier::Nav
                     | Tier::QuickMark { .. }
                     | Tier::NumberKey { .. }
