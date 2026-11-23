@@ -30,6 +30,25 @@ pub(crate) enum PinDecision {
 }
 
 impl ReportPin {
+    /// Prepare the pin to write after the caller has admitted a report.
+    ///
+    /// The first report from an emitter defines which ancestors may correct it.
+    /// A later snapshot can end at a different anchor, so preserve the stored
+    /// bytes when the same emitter reports again.
+    pub(crate) fn replacement_json(
+        previous: Option<(&str, &Self)>,
+        emitter: ProcessIdentity,
+        ancestors: Vec<ProcessIdentity>,
+    ) -> serde_json::Result<String> {
+        match previous {
+            Some((stored, pin)) if pin.process == emitter => Ok(stored.to_owned()),
+            _ => serde_json::to_string(&Self {
+                process: emitter,
+                ancestors,
+            }),
+        }
+    }
+
     /// Release a dead pin only for a report outside its recorded process chain.
     /// Recorded ancestors take precedence even after the pinned child exits.
     /// The complete incoming chain fences descendants across exec, which can

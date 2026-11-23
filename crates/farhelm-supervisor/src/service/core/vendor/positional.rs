@@ -6,6 +6,7 @@
 //! the conversation.
 
 use super::super::*;
+use crate::agent_kind::report_pin::{PinDecision, ReportPin};
 use crate::procs::PositionalReporter;
 
 /// Evidence a vendor needs beyond the pinned process for a selecting report.
@@ -149,7 +150,6 @@ impl Supervisor {
                 format!("could not read the {name} reporting-process pin"),
             )
         })?;
-        use crate::agent_kind::report_pin::{PinDecision, ReportPin};
         let pin = stored_pin
             .as_deref()
             .map(serde_json::from_str::<ReportPin>)
@@ -160,41 +160,20 @@ impl Supervisor {
                     format!("the {name} reporting-process pin is invalid"),
                 )
             })?;
-        let decision = match pin.as_ref() {
-            None => PinDecision::Accept,
-            Some(pin) => {
-                let initial = pin.judge(attribution.emitter, true, &chain);
-                if initial == PinDecision::Refuse {
-                    // Only positive evidence of exit, PID reuse or a non-running
-                    // process permits release. An unreadable process is unknown.
-                    // The historical Claude-named test seam exercises this
-                    // shared liveness boundary for all positional vendors.
-                    let evidence = match self
-                        .seams
-                        .faults
-                        .claude_pin_process_fault()
-                        .and_then(|fault| fault(pin.process.pid))
-                    {
-                        Some(reason) => Err(reason),
-                        None => crate::procs::read_process(pin.process.pid),
-                    };
-                    let live = match evidence {
-                        Ok(process) => process.is_some_and(|(_, start, state)| {
-                            start == pin.process.start
-                                && state == crate::procs::ProcessState::Running
-                        }),
-                        // A nested agent can report at every turn. Unknown
-                        // liveness still retains the pin, but an ordinary Stop
-                        // refusal must not become a warning on every turn.
-                        Err(_) if stop => return Ok(()),
-                        Err(reason) => return Err(RequestError::new(ErrorKind::Conflict, reason)),
-                    };
-                    pin.judge(attribution.emitter, live, &chain)
-                } else {
-                    initial
-                }
-            }
-        };
+        let decision =
+            match super::judge_report_pin(pin.as_ref(), attribution.emitter, &chain, |pid| {
+                // The historical Claude seam covers liveness for this entire admission path.
+                self.seams
+                    .faults
+                    .claude_pin_process_fault()
+                    .and_then(|fault| fault(pid))
+            }) {
+                Ok(decision) => decision,
+                // A nested agent can report at every turn. Unknown liveness
+                // retains the pin, and a quiet Stop need not warn on every turn.
+                Err(_) if stop => return Ok(()),
+                Err(reason) => return Err(RequestError::new(ErrorKind::Conflict, reason)),
+            };
         if decision == PinDecision::Refuse {
             // Returning before the writer and finish helper keeps the report
             // acknowledged without changing capture or logging a refusal.
@@ -227,23 +206,12 @@ impl Supervisor {
             }
         }
         let correction = decision == PinDecision::Correct;
-        let replacement_pin = if decision == PinDecision::Accept
-            && pin
-                .as_ref()
-                .is_some_and(|pin| pin.process == attribution.emitter)
-        {
-            // Preserve correction authority from the winning report even when a
-            // later chain ends at a different anchor or loses an ancestor.
-            stored_pin
-                .clone()
-                .expect("the accepted pin was loaded from storage")
-        } else {
-            serde_json::to_string(&ReportPin {
-                process: attribution.emitter,
-                ancestors: attribution.ancestors,
-            })
-            .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?
-        };
+        let replacement_pin = ReportPin::replacement_json(
+            stored_pin.as_deref().zip(pin.as_ref()),
+            attribution.emitter,
+            attribution.ancestors,
+        )
+        .map_err(|error| RequestError::new(ErrorKind::Internal, error.to_string()))?;
         // The fault substitutes for the writer so tests exercise this path's
         // failure handling without making the database unusable for assertions.
         let injected = self
