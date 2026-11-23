@@ -19,3 +19,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`brick-test-remote-mac-uninstall`](reports/brick-test-remote-mac-uninstall.report.md) landed 2026-11-23 in #4700, #4702, #4703, #4710: Extend release brick test P1 with a Tart-managed remote Mac uninstall pass
 - [`remove-host-signin-lock`](reports/remove-host-signin-lock.report.md) landed 2026-11-23 in #4714, #4718: Stop removing an SSH host from blocking on open sign-in prompts and probes
 - [`button-restyle`](reports/button-restyle.report.md) landed 2026-11-23 in #4691, #4699, #4704, #4711, #4712, #4720: Restyle buttons and button-like controls without outlines, with the larger session toolbar
+- [`eye-catching-pending-upgrade`](reports/eye-catching-pending-upgrade.report.md) landed 2026-11-23 in #4706, #4719, #4722: Highlight pending desktop updates with a tinted red pill and periodic reminder animation
