@@ -141,6 +141,17 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
 
+- **Fix false terminal hyperlink mismatch warnings and ignore concealed hyperlink cells.** Hovering a program's OSC 8
+  hyperlink can falsely warn "Link text does not match where it goes" when the label puts a URL after a non-address
+  prefix (such as `ticket-42(https://example.test/tickets/42)`, `ticket-42(example.test/tickets/42)`, or a wrapped
+  `label (url)` joined across rows without a space), because the address detector accepts non-scheme punctuation like
+  `(` before `://` and non-host punctuation before a scheme-less `host/path`. Separately, concealed (`SGR 8` / `HIDDEN`)
+  cells inside an OSC 8 hyperlink are still read into the mismatch check and included in clickable/underlined ranges
+  even though their glyphs are not drawn, letting invisible text trigger false warnings or hide a real destination
+  mismatch. Tighten both URL-shape checks (keeping Unicode-letter homoglyph and userinfo detection intact) and exclude
+  concealed cells from OSC 8 label inspection, relabel detection, and interactive/underlined ranges while preserving OSC
+  8 cell ownership over prose URL and file-path detection underneath. Plan: `plans/queue/osc8-link-disclosure-fixes.md`.
+
 ### Plan follow-up
 
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
