@@ -741,8 +741,8 @@ enum Runs {
 /// A launch's Permissions row, its choices and the full text of what it runs. A new session's card shows the start
 /// command and the resume command, because a later plain Restart runs that resume command without another check
 /// against the agent YOLO rule, on the grounds that the user approved it here; a restart's card shows only the resume
-/// command, which is all a restart runs. What a card shows is the stored launch: settings that changed since never
-/// reinterpret it.
+/// command, which is all a restart runs. On a named start, the card's start command includes the one-time selector.
+/// Settings changes never reinterpret the argv the card already showed.
 fn launch_facts(launch: &SessionLaunch, runs: Runs, facts: &mut Vec<Fact>) {
     facts.extend(Chips::of(launch, false, Detail::Launch).map(Fact::Permission));
     match launch {
@@ -754,6 +754,9 @@ fn launch_facts(launch: &SessionLaunch, runs: Runs, facts: &mut Vec<Fact>) {
         }
         SessionLaunch::Agent { selection, .. } => {
             facts.push(value("agent", &word(&selection.harness)));
+            if let Some(id) = selection.custom_agent.as_deref() {
+                facts.push(value("custom agent", id));
+            }
             facts.push(optional("model", selection.model.clone()));
             facts.push(optional("effort", selection.effort.as_ref().map(word)));
             if let Some(words) = &selection.permission_flags {
@@ -774,6 +777,9 @@ fn launch_facts(launch: &SessionLaunch, runs: Runs, facts: &mut Vec<Fact>) {
             facts.push(resume(launch));
             if let Some(agent) = command.agent {
                 facts.push(value("declared agent", &word(&agent)));
+                if let Some(id) = command.custom_agent.as_deref() {
+                    facts.push(value("custom agent", id));
+                }
             }
         }
         SessionLaunch::Legacy { invocation, .. } => {
@@ -806,6 +812,16 @@ fn template_facts(fields: &TemplateFields, host_name: Option<&str>, facts: &mut 
     }
     if let Some(agent) = &fields.agent {
         facts.push(value("agent", &word(agent)));
+    }
+    // The registration's stable ID distinguishes templates whose launch kind and agent both say Custom.
+    if let Some(custom_agent) = &fields.custom_agent {
+        facts.push(
+            custom_agent
+                .as_ref()
+                .map_or(Fact::Words("custom agent", "none"), |id| {
+                    value("custom agent", id)
+                }),
+        );
     }
     if let Some(model) = &fields.model {
         facts.push(optional("model", model.clone()));

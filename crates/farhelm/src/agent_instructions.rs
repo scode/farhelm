@@ -298,6 +298,14 @@ fn render(agent: &Command) -> String {
          this session is on screen. If no helm is connected to this host, ask the user to open\n\
          Farhelm and check that this host is connected, then retry.\n",
     );
+    out.push_str(
+        "\nCustom agents registered in Settings → Custom agents can be launched anywhere --agent TYPE is accepted, using the\n\
+         custom agent's ID (for example --agent acme-code). Custom agents accept free-text --model and --effort values matching\n\
+         [a-z0-9_-], always count as YOLO, and do not accept --prompt. Use --conversation ID on create or spawn to start any\n\
+         agent that supports resumption directly on an existing conversation ID. If the user asks you (via $farhelm or\n\
+         directly) to write or update a custom agent wrapper script for Farhelm, run `farhelm custom-agent spec` to read the\n\
+         exact custom-agent contract before writing it.\n",
+    );
     out
 }
 
@@ -861,8 +869,8 @@ mod tests {
     /// than HOST because the value is a name from the hosts listing, every
     /// launch flag renders with the value it takes, and the hidden refusals
     /// for the removed `--invocation`, `--profile` and `--profile-id` must
-    /// not render. The initial prompt's literal and file inputs must both
-    /// remain discoverable in this usage line.
+    /// not render. The one-time conversation selector and both initial
+    /// prompt inputs must remain discoverable in this usage line.
     ///
     /// Both lines exceed [`MAX_USAGE_WIDTH`], so this also pins what an
     /// over-wide verb looks like in the REAL text rather than only in
@@ -872,7 +880,7 @@ mod tests {
     fn a_creating_verb_renders_its_real_command_line() {
         let lines = verb_lines(&agent_command());
         for expected in [
-            "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--host <NAME>] \
+            "farhelm agent create [--cwd <DIR>] [--gh <REPO>] [--conversation <ID>] [--host <NAME>] \
              [--recipe <NAME>] [--container-host <NAME>] [--prompt <TEXT>] [--prompt-file <PATH>] [--template <NAME>] \
              [--agent <TYPE>] [--model <ID>] [--effort <LEVEL>] [--permissions <MODE>] \
              [--wrapper <COMMAND>] [--command <CMD>] [--yolo] [--no-yolo] \

@@ -349,6 +349,8 @@ pub(crate) fn unexpected_reply(what: &str, reply: &ControlMsg, mutating: bool) -
 pub(crate) struct SpawnArgs {
     pub(crate) cwd: Option<PathBuf>,
     pub(crate) title: Option<String>,
+    /// A one-time selector for the child's launch, separate from its reusable choices.
+    pub(crate) conversation: Option<String>,
     pub(crate) launch: SpawnLaunch,
     pub(crate) parent: Option<String>,
     pub(crate) idempotency_key: Option<String>,
@@ -416,6 +418,7 @@ pub(crate) async fn spawn_session(env: &SessionEnv, args: SpawnArgs) -> anyhow::
             host: None,
             templates,
             edits,
+            conversation: args.conversation,
             intent_key: args.idempotency_key,
             confirm_yolo: false,
             spawn: Some(farhelm_proto::SpawnPlacement {

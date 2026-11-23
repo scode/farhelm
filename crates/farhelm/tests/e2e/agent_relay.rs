@@ -450,6 +450,7 @@ async fn initial_prompt_create_relay_preserves_literal_message() {
     let _helm = connect_helm(&h.sup, handler.clone()).await;
     let mut peer = SessionPeer::connect(&h.sup, &session.id, &token).await;
     let verb = AgentVerb::Create {
+        conversation: None,
         host: Some("host".into()),
         templates: vec![],
         edits: farhelm_proto::launcher::TemplateFields {

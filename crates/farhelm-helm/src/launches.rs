@@ -713,6 +713,79 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     })
 }
 
+/// Compile one registration snapshot. Existing sessions keep these argv and reporting capabilities
+/// even if the registry entry is later edited or deleted.
+/// See `website/src/content/docs/docs/agents/custom-agent-contract.md`, `## Contract changelog`,
+/// before changing any wrapper arguments.
+pub(crate) fn compile_custom(
+    selection: LaunchSelection,
+    agent: &farhelm_proto::custom_agents::CustomAgent,
+) -> Result<SessionLaunch, String> {
+    use farhelm_proto::custom_agents::validate_model_or_effort;
+
+    if !selection.harness.uses_custom_catalog()
+        || selection.custom_agent.as_deref() != Some(&agent.id)
+    {
+        return Err("the launch must name the custom agent it uses".into());
+    }
+    agent.validate()?;
+    let mut selection = normalize_selection(selection);
+    if selection.permissions != Some(LaunchPermission::Yolo) {
+        return Err("custom agents use YOLO permissions".into());
+    }
+    if selection.workspace_trust.is_some() {
+        return Err("custom agents have no workspace trust switch".into());
+    }
+    if selection.container.is_some() {
+        return Err(farhelm_proto::RETIRED_CONTAINER_REASON.into());
+    }
+    farhelm_proto::check_permission_flags(
+        selection.permissions,
+        selection.permission_flags.as_deref(),
+    )?;
+    farhelm_proto::check_wrapper_prefix(selection.wrapper_prefix.as_deref())?;
+
+    selection.model = selection.model.filter(|model| !model.is_empty());
+    selection.effort = selection
+        .effort
+        .filter(|effort| !effort.as_cli_arg().is_empty());
+    let mut start = selection.wrapper_prefix.clone().unwrap_or_default();
+    start.push(agent.command.clone());
+    for (flag, value) in [
+        ("--model", selection.model.as_deref()),
+        (
+            "--effort",
+            selection.effort.as_ref().map(|effort| effort.as_cli_arg()),
+        ),
+    ] {
+        if let Some(value) = value {
+            validate_model_or_effort(value).map_err(|reason| format!("{flag}: {reason}"))?;
+            start.extend([flag.to_owned(), value.to_owned()]);
+        }
+    }
+    let resume = agent.supports_resumption.then(|| {
+        let mut resume = start.clone();
+        resume.extend(
+            [
+                "--resume",
+                CONVERSATION_PLACEHOLDER,
+                FARHELM_ARGS_PLACEHOLDER,
+            ]
+            .map(str::to_owned),
+        );
+        resume
+    });
+    start.push(FARHELM_ARGS_PLACEHOLDER.to_owned());
+    let launch = SessionLaunch::Agent {
+        selection,
+        start,
+        resume,
+        custom_reporting: Some(agent.supports_reporting),
+    };
+    launch.validate_new()?;
+    Ok(launch)
+}
+
 /// Which all-hosts opt-in governs this harness's structured launches.
 /// The compiler itself never reads configuration: callers resolve this fact
 /// into the selection before composition, preserving exact YOLO verification.
@@ -1420,6 +1493,108 @@ mod tests {
         session_launch::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER},
     };
     use std::collections::{BTreeMap, BTreeSet};
+
+    /// A wrapper implements these literal flags. Keep the ordinary launch reusable and put the one-time
+    /// conversation only in the argv used for the named start.
+    #[farhelm_testtrace::test]
+    fn custom_agent_compiler_pins_the_wrapper_contract() {
+        const CONTRACT: &str =
+            "website/src/content/docs/docs/agents/custom-agent-contract.md, Contract changelog";
+        let registration = farhelm_proto::custom_agents::CustomAgent {
+            id: "acme-code".into(),
+            display_name: "Acme Code".into(),
+            command: "~/bin/acme-code".into(),
+            supports_resumption: true,
+            supports_reporting: false,
+        };
+        let mut input = selection(LaunchHarness::Custom);
+        input.custom_agent = Some(registration.id.clone());
+        input.wrapper_prefix = Some(vec!["exec".into()]);
+        input.model = Some("fast-v2".into());
+        input.effort = Some(farhelm_proto::LaunchEffortValue::Custom("deep_work".into()));
+        let launch = super::compile_custom(input.clone(), &registration).expect(CONTRACT);
+        assert_eq!(launch.yolo(), Some(true), "{CONTRACT}");
+        assert_eq!(launch.custom_reporting(), Some(false), "{CONTRACT}");
+        assert_eq!(
+            launch.start_argv().unwrap(),
+            [
+                "exec",
+                "~/bin/acme-code",
+                "--model",
+                "fast-v2",
+                "--effort",
+                "deep_work",
+                "{farhelm_args}"
+            ],
+            "{CONTRACT}"
+        );
+        assert_eq!(
+            launch.resume_argv().unwrap().unwrap(),
+            [
+                "exec",
+                "~/bin/acme-code",
+                "--model",
+                "fast-v2",
+                "--effort",
+                "deep_work",
+                "--resume",
+                "{conversation}",
+                "{farhelm_args}"
+            ],
+            "{CONTRACT}"
+        );
+        let named = super::named_start(&launch, "conv-1".into()).expect(CONTRACT);
+        assert_eq!(
+            named.argv,
+            [
+                "exec",
+                "~/bin/acme-code",
+                "--model",
+                "fast-v2",
+                "--effort",
+                "deep_work",
+                "--resume",
+                "conv-1",
+                "{farhelm_args}"
+            ],
+            "{CONTRACT}"
+        );
+
+        let launch_only = farhelm_proto::custom_agents::CustomAgent {
+            supports_resumption: false,
+            supports_reporting: true,
+            ..registration.clone()
+        };
+        input.model = Some(String::new());
+        input.effort = None;
+        let bare = super::compile_custom(input.clone(), &launch_only).expect(CONTRACT);
+        assert_eq!(
+            bare.start_argv().unwrap(),
+            ["exec", "~/bin/acme-code", "{farhelm_args}"],
+            "{CONTRACT}"
+        );
+        assert!(bare.resume_argv().unwrap().is_none(), "{CONTRACT}");
+        assert!(
+            super::named_start(&bare, "conv-1".into()).is_err(),
+            "{CONTRACT}"
+        );
+        assert!(
+            bare.validate_initial_prompt(Some("hello"), false).is_err(),
+            "{CONTRACT}"
+        );
+
+        input.permissions = Some(LaunchPermission::Guarded);
+        assert!(
+            super::compile_custom(input.clone(), &registration).is_err(),
+            "{CONTRACT}"
+        );
+        input.permissions = None;
+        input.model = Some("not one token".into());
+        assert!(
+            super::compile_custom(input, &registration).is_err(),
+            "{CONTRACT}"
+        );
+    }
 
     /// A family lookup needs one current row per harness. Duplicate IDs would
     /// otherwise make exact lookup and effort validation depend on table order.

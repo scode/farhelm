@@ -557,6 +557,16 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if let Some(prompt) = &template.fields.prompt {
         check_initial_prompt(prompt)?;
     }
+    if let Some(Some(id)) = &template.fields.custom_agent {
+        crate::custom_agents::validate_id(id).map_err(str::to_owned)?;
+        if template
+            .fields
+            .agent
+            .is_some_and(|agent| !agent.uses_custom_catalog())
+        {
+            return Err("a custom agent ID needs the custom agent type".into());
+        }
+    }
     if let Some(Some(LaunchEffortValue::Custom(effort))) = &template.fields.effort {
         // A modifier with no agent can acquire its harness from an earlier template. An
         // explicit built-in agent still uses the closed effort vocabulary when saved.

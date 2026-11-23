@@ -884,6 +884,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                 host,
                 templates,
                 edits,
+                conversation,
                 intent_key,
                 spawn,
             } => {
@@ -897,6 +898,7 @@ impl AgentRequestHandler for HelmAgentRequests {
                             host: host.map(NonEmptyString::into_string),
                             templates,
                             edits,
+                            conversation,
                             spawn,
                         },
                         intent_key,
@@ -1212,6 +1214,7 @@ enum ParsedAgentVerb {
         host: Option<NonEmptyString>,
         templates: Vec<String>,
         edits: farhelm_proto::launcher::TemplateFields,
+        conversation: Option<String>,
         intent_key: Option<String>,
         spawn: Option<farhelm_proto::SpawnPlacement>,
     },
@@ -1331,6 +1334,7 @@ impl ParsedAgentVerb {
                 host,
                 templates,
                 edits,
+                conversation,
                 intent_key,
                 confirm_yolo: _,
                 spawn,
@@ -1338,6 +1342,7 @@ impl ParsedAgentVerb {
                 host: optional_host(host)?,
                 templates,
                 edits,
+                conversation,
                 intent_key,
                 spawn,
             },
@@ -1535,6 +1540,8 @@ struct LaunchEditsRequest {
     host: Option<String>,
     templates: Vec<String>,
     edits: farhelm_proto::launcher::TemplateFields,
+    /// A one-time start target. It never becomes part of the saved launch or the template.
+    conversation: Option<String>,
     spawn: Option<farhelm_proto::SpawnPlacement>,
 }
 
@@ -1561,6 +1568,7 @@ impl LaunchEditsRequest {
                 .spawn
                 .as_ref()
                 .and_then(|placement| placement.parent.as_deref()),
+            conversation: self.conversation.as_deref(),
         }
         .digest()
         .map(Some)
@@ -1597,6 +1605,10 @@ enum AgentRequestDigest<'a> {
         edits: &'a farhelm_proto::launcher::TemplateFields,
         spawned: bool,
         parent: Option<&'a str>,
+        // An omitted selector retains the exact original digest. A retry with a different
+        // conversation must refuse rather than return a session on the wrong conversation.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        conversation: Option<&'a str>,
     },
     /// `farhelm agent clone`, with its overrides as given (absent stays
     /// absent, distinct from an override that repeats the source's value).
@@ -2006,7 +2018,14 @@ async fn create_for_agent(
         if intent_key.is_some() {
             return Err(keyed_environment_refusal());
         }
-        return launch_environment_for_agent(state, origin, asking_session, plan).await;
+        return launch_environment_for_agent(
+            state,
+            origin,
+            asking_session,
+            plan,
+            edits.conversation,
+        )
+        .await;
     }
     // A key's record lives only on the host the first attempt reached, so a
     // retry has to reach that same host to be matched against it. A host
@@ -2043,6 +2062,12 @@ async fn create_for_agent(
     };
     let mut resolved = resolve_agent_create(state, origin, scope, &edits).await?;
     if resolved.resolution.github_repo.is_some() {
+        if edits.conversation.is_some() {
+            return Err(crate::sessions::invalid_request(
+                "--conversation cannot start in a new managed checkout; choose an existing folder"
+                    .into(),
+            ));
+        }
         // Only the helm turns session-authenticated repository intent into
         // a checkout payload. Recovery must precede preview and the card:
         // a taken path may be this approved attempt's own allocation.
@@ -2123,6 +2148,18 @@ async fn create_for_agent(
         Some(_) => LaunchVerb::Spawn,
         None => LaunchVerb::Create,
     };
+    let launch = resolved.resolution.launch.as_launch();
+    let named_start = edits
+        .conversation
+        .map(|value| {
+            crate::launches::named_start(launch, value).map_err(crate::sessions::invalid_request)
+        })
+        .transpose()?;
+    if named_start.is_some() {
+        launch
+            .validate_initial_prompt(resolved.resolution.prompt.as_deref(), true)
+            .map_err(crate::sessions::invalid_request)?;
+    }
     let agent_wrapper_supplied = resolved.resolution.agent_wrapper_supplied;
     let wrapper_approved = approve_launch(
         state,
@@ -2141,6 +2178,7 @@ async fn create_for_agent(
             agent_wrapper_supplied,
             source: None,
         },
+        named_start.as_ref(),
     )
     .await?;
     dispatch_agent_create(
@@ -2149,6 +2187,7 @@ async fn create_for_agent(
         asking_session,
         resolved,
         AgentCreateDispatch {
+            named_start,
             intent_key,
             parent,
             spawned,
@@ -2308,6 +2347,7 @@ async fn create_checkout_for_agent(
                         agent_wrapper_supplied: recovery.agent_wrapper_supplied,
                         source: None,
                     },
+                    None,
                 )
                 .await?;
             }
@@ -2376,6 +2416,7 @@ async fn create_checkout_for_agent(
             agent_wrapper_supplied: resolution.agent_wrapper_supplied,
             source: None,
         },
+        None,
     )
     .await?;
     // Every other agent mutation leaves a line in the helm log; a clone is the
@@ -2429,12 +2470,14 @@ async fn resolve_agent_create(
         return inherited_spawn_resolution(&views, origin, edits, placement);
     }
     let templates = state.store.launch_templates().await?;
+    let custom_agents = state.store.custom_agents().await?;
     let resolution = if edits.spawn.is_some() {
         crate::agent_launch::resolve(
             &templates,
             &edits.templates,
             &edits.edits,
             &crate::agent_launch::template_host_identities(&views),
+            &custom_agents,
             true,
             edits.host.is_some(),
         )?
@@ -2465,6 +2508,7 @@ async fn resolve_agent_create(
                 known_hosts: &crate::agent_launch::template_host_identities(&views),
                 known_recipes: &recipes,
                 known_places: &places,
+                custom_agents: &custom_agents,
             },
             edits.host.is_some(),
         )?;
@@ -2550,7 +2594,11 @@ fn inherited_spawn_resolution(
         name: name.clone(),
         ..Default::default()
     };
-    if !edits.templates.is_empty() || edits.edits != only_folder_and_title || edits.host.is_some() {
+    if !edits.templates.is_empty()
+        || edits.edits != only_folder_and_title
+        || edits.host.is_some()
+        || edits.conversation.is_some()
+    {
         return Err(crate::sessions::invalid_request(
             "--inherit-agent is exclusive with every launch flag and template".to_string(),
         ));
@@ -2611,6 +2659,19 @@ struct LaunchApproval {
     source: Option<farhelm_proto::approvals::ApprovalSession>,
 }
 
+/// Show the exact one-time argv under review while keeping the stored launch reusable.
+fn launch_for_approval(
+    mut launch: farhelm_proto::SessionLaunch,
+    named_start: Option<&farhelm_proto::NamedConversationStart>,
+) -> farhelm_proto::SessionLaunch {
+    if let (Some(named), farhelm_proto::SessionLaunch::Agent { start, .. }) =
+        (named_start, &mut launch)
+    {
+        start.clone_from(&named.argv);
+    }
+    launch
+}
+
 /// The gate in front of every new session an agent asks for: the agent YOLO
 /// rule, then the user's approval, then the rule, the request's own
 /// connection and the target host's connection all rechecked for the time the
@@ -2629,6 +2690,7 @@ async fn approve_launch(
     origin: AgentOrigin,
     asking_session: &str,
     approval: LaunchApproval,
+    named_start: Option<&farhelm_proto::NamedConversationStart>,
 ) -> anyhow::Result<bool> {
     let wrapper_card = matches!(
         crate::yolo_guard::check_agent_wrapper(
@@ -2659,6 +2721,7 @@ async fn approve_launch(
         source,
         ..
     } = approval;
+    let approved_launch = launch_for_approval(approved_launch, named_start);
     let action = if wrapper_card {
         ApprovalAction::LaunchWithAgentWrapper {
             prompt,
@@ -2944,6 +3007,8 @@ async fn cached_launch(state: &AppState, key: &SessionKey) -> Option<farhelm_pro
 /// The per-attempt inputs of an agent create's dispatch, beside its
 /// resolution.
 struct AgentCreateDispatch {
+    /// Compiled after trust resolution so the displayed argv and the dispatched argv agree.
+    named_start: Option<farhelm_proto::NamedConversationStart>,
     intent_key: Option<String>,
     parent: Option<String>,
     spawned: bool,
@@ -3024,7 +3089,7 @@ async fn dispatch_agent_create(
             &client,
             crate::sessions::CreateSpec {
                 prompt: resolution.prompt,
-                named_start: None,
+                named_start: dispatch.named_start,
                 cwd: resolution.cwd,
                 mode: resolution.launch,
                 title: resolution.title,
@@ -3246,6 +3311,11 @@ async fn write_template_for_agent(
         };
         fields.host = Some(identity);
         host_name = Some(name);
+    }
+    if let Some(Some(id)) = &fields.custom_agent
+        && state.store.custom_agent(id).await?.is_none()
+    {
+        return Err(crate::custom_agents::missing_agent());
     }
     let before = find_template(state, &name).await?;
     let template = match (&before, create) {
@@ -3729,7 +3799,11 @@ fn merge_template_fields(
         name_kind,
     } = edits;
     farhelm_proto::launcher::TemplateFields {
-        custom_agent: custom_agent.or(existing.custom_agent),
+        custom_agent: if agent.is_some_and(|agent| !agent.uses_custom_catalog()) {
+            None
+        } else {
+            custom_agent.or(existing.custom_agent)
+        },
         prompt: prompt.or(existing.prompt),
         kind: kind.or(existing.kind),
         agent: agent.or(existing.agent),
@@ -4010,6 +4084,7 @@ async fn clone_for_agent(
                     .await,
             ),
         },
+        None,
     )
     .await?;
     // The source row is authoritative only while it still belongs to the
@@ -4218,7 +4293,7 @@ async fn create_environment_for_agent(
     let plan = plan_environment_create(state, origin, &templates, edits, Some(explicit))
         .await?
         .context("an explicit recipe always leaves a recipe target")?;
-    launch_environment_for_agent(state, origin, asking_session, plan).await
+    launch_environment_for_agent(state, origin, asking_session, plan, None).await
 }
 
 /// Resolve a create that may land in a new environment, `None` when its
@@ -4291,6 +4366,7 @@ async fn plan_environment_create(
         .map(|row| farhelm_proto::Place::PodmanHost(row.id))
         .collect();
     let views = crate::hosts::host_views(state).await?;
+    let custom_agents = state.store.custom_agents().await?;
     let (resolution, target) = crate::agent_launch::resolve_placed(
         &stored,
         templates,
@@ -4299,6 +4375,7 @@ async fn plan_environment_create(
             known_hosts: &crate::agent_launch::template_host_identities(&views),
             known_recipes: &recipes,
             known_places: &places,
+            custom_agents: &custom_agents,
         },
         false,
     )?;
@@ -4438,6 +4515,7 @@ async fn clone_environment_for_agent(
                 client: source_client,
             }),
         },
+        None,
     )
     .await
 }
@@ -4462,6 +4540,7 @@ async fn launch_environment_for_agent(
     origin: AgentOrigin,
     asking_session: &str,
     plan: PlannedEnvironmentLaunch,
+    conversation: Option<String>,
 ) -> anyhow::Result<AgentReply> {
     let recipe = plan.target.recipe().to_string();
     let place = plan.target.place();
@@ -4525,14 +4604,16 @@ async fn launch_environment_for_agent(
         &state.store.resolve_checkout_config(None).await?,
     )?;
     let shown = launch.as_launch().clone();
-    let request = crate::sessions::CreateReq::for_agent_environment(
+    let mut request = crate::sessions::CreateReq::for_agent_environment(
         launch,
         plan.agent_wrapper_supplied,
         plan.prompt.clone(),
         plan.title.clone(),
         plan.repo.clone(),
+        conversation,
     )?;
-    request.validate_sandbox_launch()?;
+    let named_start = request.prepare_sandbox_launch(&state.store).await?;
+    let shown = launch_for_approval(shown, named_start.as_ref());
     crate::environment::ProviderHandle::preflight_agent_launch(place, &state.tensorlake)
         .await
         .map_err(|error| {
@@ -4988,6 +5069,7 @@ pub(crate) fn command_create(
     intent_key: Option<&str>,
 ) -> AgentVerb {
     AgentVerb::Create {
+        conversation: None,
         host: Some(host.to_string()),
         templates: Vec::new(),
         edits: farhelm_proto::launcher::TemplateFields {
@@ -5307,6 +5389,7 @@ mod tests {
         assert_eq!(intent_key.as_deref(), Some(""));
         let ParsedAgentVerb::Create { host, edits, .. } =
             ParsedAgentVerb::parse(AgentVerb::Create {
+                conversation: None,
                 host: None,
                 templates: vec![],
                 edits: farhelm_proto::launcher::TemplateFields {
@@ -8613,6 +8696,7 @@ mod tests {
     /// A create naming only templates (and `key`), with no flags.
     fn template_create(templates: &[&str], key: Option<&str>) -> AgentVerb {
         AgentVerb::Create {
+            conversation: None,
             host: None,
             templates: templates.iter().map(|name| name.to_string()).collect(),
             edits: farhelm_proto::launcher::TemplateFields::default(),
@@ -8846,7 +8930,7 @@ mod tests {
     /// Spec: the request digest covers the request as the agent sent it and
     /// nothing else. For a create: the `--host` name, the template list (in
     /// order), the flags (a sample here: title, folder, and a reset to the
-    /// default), whether it is a spawn and its parent. For a clone:
+    /// default), a one-time conversation, whether it is a spawn and its parent. For a clone:
     /// the source, the host name, and each override, an absent override
     /// distinct from one that names a value. A create and a clone never
     /// share a digest, and an inheriting spawn sends none. One request of
@@ -8862,6 +8946,7 @@ mod tests {
         use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
         let create =
             |host: Option<&str>, templates: &[&str], edits: TemplateFields| LaunchEditsRequest {
+                conversation: None,
                 host: host.map(str::to_string),
                 templates: templates.iter().map(|name| name.to_string()).collect(),
                 edits,
@@ -8912,6 +8997,12 @@ mod tests {
         for variant in &variants {
             assert_ne!(fingerprint(variant), base, "{:?}", variant.edits);
         }
+        let mut named = create(Some("a"), &["x", "y"], TemplateFields::default());
+        named.conversation = Some("conv-a".into());
+        let named_a = fingerprint(&named);
+        assert_ne!(named_a, base);
+        named.conversation = Some("conv-b".into());
+        assert_ne!(fingerprint(&named), named_a);
         let mut spawned = create(None, &["x", "y"], TemplateFields::default());
         let unspawned = fingerprint(&spawned);
         spawned.spawn = Some(farhelm_proto::SpawnPlacement::default());
@@ -8964,6 +9055,7 @@ mod tests {
         assert_eq!(distinct.len(), clones.len(), "{clones:?}");
         assert_eq!(clone(None, None), clone(None, None));
         let as_create = AgentRequestDigest::Create {
+            conversation: None,
             host: Some("a"),
             templates: &[],
             edits: &TemplateFields::default(),
@@ -8982,6 +9074,7 @@ mod tests {
         // field, or a change inside `TemplateFields` or its enums), which
         // must get a new tag rather than an updated constant.
         let pinned_create = AgentRequestDigest::Create {
+            conversation: None,
             host: Some("builder"),
             templates: &["base".to_string()],
             edits: &TemplateFields {
@@ -9098,6 +9191,7 @@ mod tests {
         )
         .await;
         let request = LaunchEditsRequest {
+            conversation: None,
             host: None,
             templates: vec!["builder-shell".to_string()],
             edits: farhelm_proto::launcher::TemplateFields::default(),
@@ -9129,6 +9223,7 @@ mod tests {
             }
         };
         let dispatch = || AgentCreateDispatch {
+            named_start: None,
             intent_key: None,
             parent: None,
             spawned: false,
@@ -9194,6 +9289,7 @@ mod tests {
         let (h, _local, remote) = creating_fleet(client_side, vec![session("asker", 1)]).await;
         let handler = HelmAgentRequests::for_state(&h.state);
         let spawn = |templates: Vec<String>| AgentVerb::Create {
+            conversation: None,
             host: None,
             templates,
             edits: farhelm_proto::launcher::TemplateFields {
@@ -10939,6 +11035,7 @@ mod tests {
                 origin_of(&h, local),
                 "asker",
                 AgentVerb::Create {
+                    conversation: None,
                     host: Some("user@builder".to_string()),
                     templates: Vec::new(),
                     edits: farhelm_proto::launcher::TemplateFields {
@@ -11120,6 +11217,7 @@ mod tests {
                 })
                 .unwrap();
                 let request = AgentVerb::Create {
+                    conversation: None,
                     host: (!spawned).then(|| "user@builder".to_string()),
                     templates: vec![],
                     edits: TemplateFields {
@@ -11241,6 +11339,7 @@ mod tests {
             .unwrap();
         let origin = origin_of(&h, local);
         let request = LaunchEditsRequest {
+            conversation: None,
             host: Some("user@builder".into()),
             templates: vec![],
             edits: TemplateFields {
@@ -11313,6 +11412,7 @@ mod tests {
             "asker",
             resolved,
             AgentCreateDispatch {
+                named_start: None,
                 intent_key: None,
                 parent: None,
                 spawned: false,
@@ -11483,6 +11583,7 @@ mod tests {
                 }
             } else {
                 AgentVerb::Create {
+                    conversation: None,
                     host: Some("user@builder".into()),
                     templates: vec![],
                     edits: TemplateFields {
@@ -11643,6 +11744,7 @@ mod tests {
                     origin,
                     "asker",
                     AgentVerb::Create {
+                        conversation: None,
                         host: Some("user@builder".into()),
                         templates: vec![],
                         edits: farhelm_proto::launcher::TemplateFields {
@@ -11807,6 +11909,7 @@ mod tests {
         let _gui = h.state.manager.ui_seat().hold();
         let handler = HelmAgentRequests::for_state(&h.state);
         let request = AgentVerb::Create {
+            conversation: None,
             host: Some("user@builder".into()),
             templates: vec![],
             edits: farhelm_proto::launcher::TemplateFields {
@@ -12000,6 +12103,7 @@ mod tests {
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, local);
         let request = AgentVerb::Create {
+            conversation: None,
             host: Some("user@builder".into()),
             templates: vec!["named".into()],
             edits: Default::default(),
@@ -12347,6 +12451,7 @@ mod tests {
         let origin = origin_of(&h, local);
 
         let agent_launch = |permissions| AgentVerb::Create {
+            conversation: None,
             host: Some("user@builder".to_string()),
             templates: Vec::new(),
             edits: farhelm_proto::launcher::TemplateFields {
@@ -12660,6 +12765,7 @@ mod tests {
                             origin,
                             "asker",
                             AgentVerb::Create {
+                                conversation: None,
                                 host: None,
                                 templates: Vec::new(),
                                 edits: farhelm_proto::launcher::TemplateFields {
@@ -12781,6 +12887,7 @@ mod tests {
                     origin_of(&h, remote),
                     "asker",
                     AgentVerb::Create {
+                        conversation: None,
                         host: None,
                         templates: Vec::new(),
                         edits: farhelm_proto::launcher::TemplateFields {
@@ -12850,6 +12957,7 @@ mod tests {
             resume: None,
         };
         let spawn = |templates: Vec<String>| AgentVerb::Create {
+            conversation: None,
             host: None,
             templates,
             edits: farhelm_proto::launcher::TemplateFields {
@@ -12964,6 +13072,7 @@ mod tests {
                     origin,
                     "asker",
                     AgentVerb::Create {
+                        conversation: None,
                         host: None,
                         templates: Vec::new(),
                         edits: farhelm_proto::launcher::TemplateFields {
@@ -13085,6 +13194,7 @@ mod tests {
         let handler = HelmAgentRequests::for_state(&h.state);
         let origin = origin_of(&h, remote);
         let spawn = || AgentVerb::Create {
+            conversation: None,
             host: None,
             templates: Vec::new(),
             edits: farhelm_proto::launcher::TemplateFields {
@@ -15832,9 +15942,12 @@ mod tests {
             *stored = selection.clone();
         }
         assert!(
-            crate::sessions::resolve_launch_request(farhelm_proto::LaunchRequest::Agent {
-                selection: selection.clone(),
-            })
+            crate::sessions::resolve_launch_request(
+                farhelm_proto::LaunchRequest::Agent {
+                    selection: selection.clone()
+                },
+                None,
+            )
             .is_err(),
             "premise: today's catalog refuses this stored selection"
         );
@@ -15895,6 +16008,7 @@ mod tests {
             false,
             None,
             Some("copy".into()),
+            None,
             None,
         )
         .unwrap();
@@ -17062,6 +17176,7 @@ mod tests {
                                 None,
                             ),
                             Verb::CreateWithPrompt => AgentVerb::Create {
+                                conversation: None,
                                 host: Some("user@builder".into()),
                                 templates: vec![],
                                 edits: farhelm_proto::launcher::TemplateFields {
@@ -17079,6 +17194,7 @@ mod tests {
                                 spawn: None,
                             },
                             Verb::Spawn => AgentVerb::Create {
+                                conversation: None,
                                 host: None,
                                 templates: vec![],
                                 edits: command_template("echo matrix-create"),
@@ -17636,6 +17752,7 @@ mod tests {
                     origin,
                     "asker",
                     AgentVerb::Create {
+                        conversation: None,
                         host: None,
                         templates: vec![],
                         edits: farhelm_proto::launcher::TemplateFields {
@@ -17871,6 +17988,7 @@ mod tests {
             (
                 "YOLO create",
                 AgentVerb::Create {
+                    conversation: None,
                     host: Some("user@builder".into()),
                     templates: vec![],
                     edits: farhelm_proto::launcher::TemplateFields {
@@ -17900,6 +18018,7 @@ mod tests {
             (
                 "ordinary spawn",
                 AgentVerb::Create {
+                    conversation: None,
                     host: None,
                     templates: vec![],
                     edits: command_template("matrix command"),
@@ -17914,6 +18033,7 @@ mod tests {
             (
                 "inherited spawn",
                 AgentVerb::Create {
+                    conversation: None,
                     host: None,
                     templates: vec![],
                     edits: farhelm_proto::launcher::TemplateFields {

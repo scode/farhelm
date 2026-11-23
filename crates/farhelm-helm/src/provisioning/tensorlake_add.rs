@@ -340,13 +340,13 @@ impl ProvisioningService {
         state: Arc<crate::AppState>,
         recipe: String,
         place: farhelm_proto::Place,
-        request: crate::sessions::CreateReq,
+        mut request: crate::sessions::CreateReq,
         name_kind: Option<farhelm_proto::launcher::TemplateNameKind>,
     ) -> anyhow::Result<(
         RunAccepted,
         tokio::sync::oneshot::Receiver<anyhow::Result<farhelm_proto::SessionInfo>>,
     )> {
-        request.validate_sandbox_launch()?;
+        request.prepare_sandbox_launch(&state.store).await?;
         let request = request.with_environment_target(farhelm_proto::LaunchTarget::Environment {
             recipe: recipe.clone(),
             place,

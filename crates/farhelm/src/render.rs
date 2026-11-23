@@ -192,7 +192,10 @@ pub(crate) fn template_sets_cell(template: &farhelm_proto::AgentTemplate) -> Str
             LauncherKind::Command => "command launch".to_string(),
         });
     }
-    if let Some(agent) = fields.agent {
+    // A registered ID is the value the CLI accepts for this choice.
+    if let Some(Some(id)) = &fields.custom_agent {
+        parts.push(format!("agent {}", quoted(id)));
+    } else if let Some(agent) = fields.agent {
         parts.push(format!("agent {}", word(serde_json::to_value(agent))));
     }
     if let Some(model) = &fields.model {
@@ -574,6 +577,17 @@ mod tests {
             ),
             "agent open_code, model \"big\", effort default, permissions guarded, host (no longer registered), \
              title \"x, yolo\" (base name)"
+        );
+        assert_eq!(
+            cell(
+                TemplateFields {
+                    agent: Some(farhelm_proto::LaunchHarness::Custom),
+                    custom_agent: Some(Some("acme-code".into())),
+                    ..Default::default()
+                },
+                None,
+            ),
+            "agent \"acme-code\""
         );
         assert_eq!(
             cell(
