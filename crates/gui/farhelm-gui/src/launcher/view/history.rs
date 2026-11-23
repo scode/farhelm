@@ -107,9 +107,9 @@ impl Launcher {
             self.history.answered = None;
         }
         self.history.failed = None;
-        // The folder list belongs to this history. The command field can also offer rows from other sources.
+        // The folder list has an index into this history. The command field keeps the earlier installation on its
+        // explicit choice so the next Enter can explain why that choice disappeared.
         self.drop_folder_highlight();
-        self.reset_host_history_highlight();
         if let Some(key) = key {
             self.send_history_read(key, cx);
         }
@@ -199,6 +199,20 @@ impl Launcher {
             self.launch_history(cx),
             self.history.environment.as_deref().unwrap_or_default(),
         )
+    }
+
+    /// A past model with this exact spelling and harness remains available from the helm after a host change.
+    /// The search already coalesces the same model from both histories into one row.
+    pub(super) fn has_environment_model(
+        &self,
+        harness: farhelm_proto::LaunchHarness,
+        id: &str,
+    ) -> bool {
+        self.history.environment.as_ref().is_some_and(|entries| {
+            entries.iter().any(|entry| {
+                entry.selection.harness == harness && entry.selection.model.as_deref() == Some(id)
+            })
+        })
     }
 
     /// Carry a verified answer through Suspend so the same installation's repository setup can still be chosen.

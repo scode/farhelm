@@ -6,13 +6,18 @@
 //! recent rows lead with the harness"), and the Replace with hint of `replace.spec.ts`.
 
 use farhelm_helm_client::fake::{FakeCommand, FakeHelm};
+use farhelm_proto::ui_channel::HostView;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer};
 use gpui::{TestAppContext, VisualTestContext};
 use serde_json::{Value, json};
 
 use super::draft::{LaunchDraft, Tab};
-use super::view_tests::{click_in_body, codex, draft, fixture_hosts, launcher_with_hosts, name_of};
-use crate::test_support::{self, keys, settle};
+use super::search_view_tests::assert_stale_choice;
+use super::view_tests::{
+    click_in_body, codex, draft, fixture_hosts, launcher_with_hosts, name_of,
+    retarget_history_host, search_focused,
+};
+use crate::test_support::{self, keys, settle, withdraw_presented_choice};
 
 /// `harness` launched with `model`, `effort` and `permissions`.
 pub(super) fn chosen(
@@ -210,6 +215,53 @@ fn a_click_fills_and_enter_launches(cx: &mut TestAppContext) {
     assert_eq!(body["launch"]["harness"], json!("codex"));
     assert_eq!(body["launch"]["model"], json!("enter-model"));
     assert_eq!(body["launch"]["permissions"], json!("yolo"));
+}
+
+/// A replacement installation can have the same recent setup. The old highlight cannot launch that setup.
+#[gpui::test]
+fn enter_on_a_withdrawn_empty_pane_recent_cannot_launch(cx: &mut TestAppContext) {
+    let mut launch = LaunchDraft::new(Some(1), "/tmp".into(), None);
+    launch.choose_harness(LaunchHarness::Codex, None, None);
+    let (mut helm, cx) = launcher_with_hosts(cx, launch, fixture_hosts(&[0]));
+    answer_history(&mut helm, cx, &two_setups());
+    assert!(search_focused(cx));
+    keys(cx, "down");
+    let row = "launcher-recent-0";
+    let setup = name_of(cx, row).expect("the old installation offers the setup");
+    assert!(recent_highlighted(cx, row));
+
+    retarget_history_host(&mut helm, cx);
+    assert!(!strip_shown(cx));
+    answer_history(&mut helm, cx, &two_setups());
+    assert_eq!(name_of(cx, row).as_deref(), Some(setup.as_str()));
+    assert!(!recent_highlighted(cx, row));
+    assert!(search_focused(cx));
+    keys(cx, "enter");
+    assert_stale_choice(cx, "");
+    assert!(draft(cx).agent.model.is_none());
+    assert!(creates(&mut helm, cx).is_empty());
+    keys(cx, "enter");
+    let sent = creates(&mut helm, cx);
+    let [create] = sent.as_slice() else {
+        panic!("another Enter should launch the existing form: {sent:?}");
+    };
+    assert!(create.body.as_ref().unwrap()["launch"]["model"].is_null());
+}
+
+/// Click the rendered setup after the live store withdraws its host and before the command pane can redraw.
+#[gpui::test]
+fn clicking_a_withdrawn_empty_pane_recent_warns(cx: &mut TestAppContext) {
+    let (mut helm, cx) = new_in_tmp(cx, &two_setups());
+    assert!(name_of(cx, "launcher-recent-0").is_some_and(|name| name.contains("enter-model")));
+    let at = test_support::center(cx, "launcher-recent-0");
+    cx.update(|window, cx| {
+        withdraw_presented_choice::<HostView>("1", cx);
+        test_support::click_before_redraw(at, window, cx);
+    });
+    settle(cx);
+    assert_stale_choice(cx, "");
+    assert!(draft(cx).agent.model.is_none());
+    assert!(creates(&mut helm, cx).is_empty());
 }
 
 /// Up at the first recent gives Enter back to the draft, so browsing a saved setup cannot change the next launch.

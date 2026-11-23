@@ -1163,6 +1163,12 @@ static SCENES: &[Scene] = &[
         setup: launcher_narrow_setup,
     },
     Scene {
+        name: "launcher-stale-choice",
+        size: (720., 900.),
+        draw: session_lists_then,
+        setup: launcher_stale_choice_setup,
+    },
+    Scene {
         name: "launcher-yolo-question",
         size: (1080., 1160.),
         draw: session_lists_then,

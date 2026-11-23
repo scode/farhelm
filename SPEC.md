@@ -1171,14 +1171,19 @@ agent choice is independent of that destination:
   ordinary text color, while permission danger stays red. Spaces alone ask for a search or an empty box and never
   launch. Escape or a click outside search closes its rows or message without clearing the query. Enter on a nonempty
   query with the area closed first reopens it; a separate Enter picks the visible highlighted row, or leaves the
-  explanation in place when there is none. Enter on a choice button (launch-kind tab, harness, effort, or permissions)
-  applies that choice and then launches through the ordinary Launch path, or shows its refusal beside Launch; custom
-  instead selects the mode and focuses its required flags editor. Enter on the closed host picker, agent-type or effort
-  dropdown, YOLO radios, or Resume checkbox launches with the values shown, without changing them; those native controls
-  retain their Space and arrow behavior. Action buttons keep their normal press. The search box, model field, YOLO
-  confirmation, and save-as-template panel keep their own Enter rules. In the editable folder field, Enter chooses an
-  arrow-highlighted dropdown entry without launching; with no highlighted entry it launches as before. A held Enter
-  never launches.
+  explanation in place when there is none.
+
+  If an explicitly highlighted choice disappears before Enter, or a clicked row has already disappeared, the field shows
+  "That choice is no longer available; choose a current result", keeps the query and clears the highlight. That Enter
+  applies no choice and launches nothing. The same rule applies to the empty field's recent setups and templates.
+
+  Enter on a choice button (launch-kind tab, harness, effort, or permissions) applies that choice and then launches
+  through the ordinary Launch path, or shows its refusal beside Launch; custom instead selects the mode and focuses its
+  required flags editor. Enter on the closed host picker, agent-type or effort dropdown, YOLO radios, or Resume checkbox
+  launches with the values shown, without changing them; those native controls retain their Space and arrow behavior.
+  Action buttons keep their normal press. The search box, model field, YOLO confirmation, and save-as-template panel
+  keep their own Enter rules. In the editable folder field, Enter chooses an arrow-highlighted dropdown entry without
+  launching; with no highlighted entry it launches as before. A held Enter never launches.
 
   A key or click may act before a frame shows an arriving background update, with destructive confirmations and launches
   that retire a session (Replace with) limited to the action and consent already shown.

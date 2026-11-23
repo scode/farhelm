@@ -780,6 +780,31 @@ pub(crate) fn click_before_redraw(position: Point<Pixels>, window: &mut Window, 
     }
 }
 
+/// Withdraw an entry after the frame that offered it. Dispatching in the same update lets the old row's handler
+/// see a missing entry, which a fake helm event followed by settling would have removed from the screen first.
+pub(crate) fn withdraw_presented_choice<T: farhelm_helm_client::collections::Pushed>(
+    key: &str,
+    cx: &mut App,
+) {
+    use farhelm_helm_client::collections::decode_changes;
+    use farhelm_proto::ui_channel::CollectionChanges;
+
+    let store = crate::session::current_store(cx).unwrap();
+    let collections = store.read(cx).collections();
+    assert!(collections.get::<T>(key).is_some(), "{key} was offered");
+    let mut meta = collections.meta(T::COLLECTION).unwrap().clone();
+    meta.order.retain(|entry| entry != key);
+    let changes = decode_changes(CollectionChanges {
+        collection: T::COLLECTION,
+        meta,
+        upsert: Vec::new(),
+        remove: vec![key.into()],
+    })
+    .unwrap();
+    store.update(cx, |store, cx| store.apply(&changes, cx));
+    assert!(store.read(cx).collections().get::<T>(key).is_none());
+}
+
 /// The pair of platform events for a left click. Tests can put several of these in the same frame.
 pub(crate) fn click_at(position: Point<Pixels>) -> [gpui::PlatformInput; 2] {
     use gpui::{MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput};

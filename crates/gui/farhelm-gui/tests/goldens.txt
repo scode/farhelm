@@ -160,6 +160,8 @@ linux/launcher-shell-wrapper--dark.png 4d989293e8857e9009ac598fe4de3afe747a0fbb
 linux/launcher-shell-wrapper--light.png 72e6db731fa7d4c9d32cd956bd6c4c9b463aa10e
 linux/launcher-shell-wrapper-note--dark.png 6b1e452c690e865b2f60166270655a7ac6106cea
 linux/launcher-shell-wrapper-note--light.png 83545ec4bc8b1b518fa27e979fed4086a959fa3c
+linux/launcher-stale-choice--dark.png e66c9ace37d5fc79e34178e6635c5c82a523fd03
+linux/launcher-stale-choice--light.png e866b6af0ed67063a0c42cfb34f648a5ca2ad5fd
 linux/launcher-yolo-question--dark.png 8add0893ee9bca937e503e7bb2950f58256ef48e
 linux/launcher-yolo-question--light.png c358ff1488c006e2ad5ae47d3b28f8ab1ca9ae0c
 linux/linux-title-bar--dark.png 46842af44551445cbb6fba4a4be0b6d321874947

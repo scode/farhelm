@@ -2884,6 +2884,11 @@
       "reference": null
     },
     {
+      "golden": "launcher-stale-choice",
+      "title": "A narrow launcher with the search text and warning after a template disappeared",
+      "reference": null
+    },
+    {
       "golden": "launcher-managed-checkout",
       "title": "Managed checkout with Host and Repository together and the previewed Folder below",
       "reference": null

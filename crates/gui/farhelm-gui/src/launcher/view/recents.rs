@@ -11,7 +11,7 @@ use super::{Launcher, host_name_with_phase, search::SetupSource};
 use crate::components::HoverHelp;
 use crate::host_text::{HostSentence, HostText};
 use crate::launcher::draft::{DestinationKind, Field};
-use crate::launcher::recents::{DraftDestination, RecentFilter, placement, setup_key, strip};
+use crate::launcher::recents::{DraftDestination, RecentFilter, placement, strip};
 
 /// Why a new environment's setup is not taken in Replace with, the old launcher's words for a placement where the mode
 /// keeps the source's (decided by the launcher area on 2026-11-16: the row is shown and refused, not left out).
@@ -127,7 +127,7 @@ impl Launcher {
                 self.folder_picked();
             }
         }
-        self.search_box.source = Some(SetupSource::Recent(self.draft.host, setup_key(entry)));
+        self.search_box.source = Some(SetupSource::recent(entry, self.chosen_host(cx)));
         self.notice = None;
         self.sync_fields(window, cx);
         self.changed(cx);

@@ -257,14 +257,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Explain stale launcher choices.** In the empty command field, Enter on a recent setup that has disappeared can do
-  nothing without saying why. Clicking a search result for a host that just vanished can also clear the query without
-  selecting anything. In `launcher/view/search.rs` and `search/start.rs`, use the existing stale-result warning before
-  dropping either choice. Keep the search text, and keep a withdrawn keyboard selection from falling through to Launch.
-  A missing explicit host or recent choice in typed results should use the same warning. Preserve the history reset when
-  the host installation changes so an old choice cannot match a different installation. Plan:
-  `plans/queue/explain-stale-launcher-choices.md`.
-
 - **Name the program a Stop or Delete approval would end.** An agent can request Stop or Delete of a Bash or Zsh
   session, but the approval card says it would stop an agent. The card in `approvals/model.rs` needs the resolved
   target's launch kind from `ApprovalSession`. Carry that fact compatibly and use program-neutral wording if an older

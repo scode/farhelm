@@ -14,7 +14,7 @@ use crate::launcher::environment_tests::{account, recipe_json};
 use crate::session_list::SessionList;
 use crate::session_list::host_rail::tests::texts_within;
 use crate::session_list::tests::{preferences_state, session};
-use crate::test_support::{click_before_redraw, meta};
+use crate::test_support::{click_before_redraw, meta, withdraw_presented_choice};
 
 /// Show the temporary capsule with the launcher hidden and the fake's Resume still outstanding.
 pub(super) fn launcher_wake_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
@@ -131,6 +131,7 @@ enum LauncherScene {
     ShellWrapper,
     ShellWrapperNote,
     RepositoryRefusal,
+    StaleChoice,
     Results,
     Restart,
     Replace,
@@ -209,6 +210,11 @@ pub(super) fn launcher_replace_setup(state: &SceneState, window: &mut Window, cx
 /// Open a template query at the minimum width so the screenshot proves the popover fallback is reachable.
 pub(super) fn launcher_narrow_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::Narrow, window, cx);
+}
+
+/// Show the warning at the narrow width, where the old results popover would otherwise cover it.
+pub(super) fn launcher_stale_choice_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::StaleChoice, window, cx);
 }
 
 /// Ask the ordinary inline YOLO question, leaving the real launcher actions and both panes drawn around it.
@@ -520,7 +526,7 @@ fn answer_new_reads(
     // Query scenes can return here with the results pane already replacing the template list.
     let shows_templates = !matches!(
         scene,
-        LauncherScene::Narrow | LauncherScene::RepositoryRefusal
+        LauncherScene::Narrow | LauncherScene::RepositoryRefusal | LauncherScene::StaleChoice
     );
     if !catalog_drawn || (shows_templates && !catalog_template) {
         state.after.set(Some(answer_new_reads));
@@ -552,7 +558,7 @@ fn answer_new_reads(
         state.after.set(Some(pick_grok));
     } else if matches!(
         scene,
-        LauncherScene::Narrow | LauncherScene::RepositoryRefusal
+        LauncherScene::Narrow | LauncherScene::RepositoryRefusal | LauncherScene::StaleChoice
     ) {
         if scene == LauncherScene::RepositoryRefusal && repository_answered {
             state.after.set(Some(wait_for_launcher_results));
@@ -669,6 +675,7 @@ fn type_launcher_query(
     );
     let (query, stage): (&str, super::AfterDrawn) = match launcher_scene(state) {
         LauncherScene::Narrow => ("tl:", wait_for_launcher_results),
+        LauncherScene::StaleChoice => ("tl:Bench", click_withdrawn_template),
         LauncherScene::RepositoryRefusal => ("gh:acme", answer_new_reads),
         _ => ("build", wait_for_launcher_results),
     };
@@ -681,6 +688,59 @@ fn type_launcher_query(
             .set(Some(std::time::Duration::from_millis(160)));
     }
     state.after.set(Some(stage));
+}
+
+/// Dispatch the click against the template's last frame after its removal has reached the store.
+fn click_withdrawn_template(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let ready = window.driver_nodes().iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-search-option-0")
+            && node.label.as_deref() == Some("Template: Bench run")
+            && !node.visible_bounds.is_empty()
+    });
+    if !ready {
+        state.after.set(Some(click_withdrawn_template));
+        return;
+    }
+    withdraw_presented_choice::<LaunchTemplate>("Bench run", cx);
+    assert!(click_control(window, cx, "launcher-search-option-0"));
+    state.after.set(Some(wait_for_stale_choice_warning));
+}
+
+/// Capture after both the refusal and the retained query have painted, with the form uncovered.
+fn wait_for_stale_choice_warning(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    let visible_warning = nodes.iter().any(|node| {
+        node.element_id.as_deref() == Some("launcher-search-refusal")
+            && node.label.as_deref()
+                == Some("That choice is no longer available; choose a current result")
+            && !node.visible_bounds.is_empty()
+    });
+    if !visible_warning {
+        state.after.set(Some(wait_for_stale_choice_warning));
+        return;
+    }
+    assert!(!nodes.iter().any(|node| {
+        matches!(
+            node.element_id.as_deref(),
+            Some("launcher-command-pane" | "launcher-search-results")
+        )
+    }));
+    assert!(
+        texts_within(nodes, "launcher-search-row")
+            .iter()
+            .any(|line| line.text.as_ref() == "tl:Bench" && !line.visible_bounds.is_empty()),
+        "the original query remains visible"
+    );
 }
 
 /// The frame must include the actual results and the pane only when there is room for both columns.
