@@ -55,8 +55,10 @@ pub struct TerminalLink {
     /// later redraws of other rows, and a label spread over rows is judged whole by the display itself. Empty for a
     /// printed web address, whose text is its target (`uri`).
     pub label: String,
-    /// Whether a multi-row OSC 8 label has another visible stretch with the same tag on this row. Revealing
-    /// that stretch can change the disclosure to a warning even when the hovered stretch itself stays the same.
+    /// Whether a multi-row OSC 8 label has another visible stretch with the same tag on this row. A second
+    /// stretch appearing (new output, or a reveal) can change the disclosure to a warning even when the hovered
+    /// stretch itself stays the same. Nothing reads this field directly: it is part of the link's equality, which
+    /// is how a resting hover's destination display learns that it must be judged again.
     pub osc_label_ambiguous: bool,
 }
 
@@ -428,7 +430,7 @@ impl GridModel {
     }
 
     /// Raw OSC 8 ownership at a real cell, even when conceal keeps it out of `link_at`.
-    /// Use the same visibility and padding boundaries as the link lookup.
+    /// Uses the same row lookup and wide-glyph padding boundary as `link_at`.
     pub(crate) fn has_osc_link_at(&self, position: Position) -> bool {
         self.selection_line(position.line)
             .is_some_and(|(cols, row)| {

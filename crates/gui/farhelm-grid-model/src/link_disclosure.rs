@@ -15,14 +15,21 @@ use url::Url;
 /// Address-shaped labels begin with a scheme, `www.`, or a dotted host followed by a path. Scheme and host
 /// letters include Unicode so a lookalike still enters the comparison. The optional userinfo keeps a familiar
 /// name before an `@` from hiding a different host. A leading dot can be the first visible character of an
-/// ambiguous host fragment, which still needs to warn.
+/// ambiguous host fragment, which still needs to warn. The classes are allow-lists, so they only see text that
+/// `INVISIBLE` has already cleaned: no format character or combining mark reaches them.
 static ADDRESS: LazyLock<Regex> = LazyLock::new(|| {
     constant_regex(concat!(
         r"(?i)^(?:(?P<scheme>\p{L}[\p{L}\p{N}+.-]*://)|www\.|",
         r"(?:[\p{L}\p{N}._%+~!$&'*,;=-]+(?::[\p{L}\p{N}._%+~!$&'*,;=-]*)?@)?",
-        r"\.?[\p{L}\p{N}\p{M}_-]+(?:\.[\p{L}\p{N}\p{M}_-]+)*\.\p{L}{2,}(?::[0-9]+)?/)"
+        r"\.?[\p{L}\p{N}_-]+(?:\.[\p{L}\p{N}_-]+)*\.\p{L}{2,}(?::[0-9]+)?/)"
     ))
 });
+/// Characters that draw nothing of their own, or only modify the glyph before them: format characters such as
+/// a zero-width space or a directionality mark, and combining marks such as a variation selector. The supervisor
+/// keeps zero-width characters with the preceding cell, so a label can carry them anywhere while the screen shows
+/// a clean address. Recognition ignores them so such a label still counts as an address; the comparison then
+/// parses the original text, where they make the parse fail or name a different place.
+static INVISIBLE: LazyLock<Regex> = LazyLock::new(|| constant_regex(r"[\p{Cf}\p{M}]"));
 static LEADING_BLANKS: LazyLock<Regex> = LazyLock::new(|| {
     constant_regex(
         &r"^(?:[^\p{L}\p{N}\x00-\x7F]|[\u{115F}\u{1160}\u{3164}\u{FFA0}]|[%s])+"
@@ -55,10 +62,11 @@ enum AddressShape {
     Host,
 }
 
-/// Judge lookalike punctuation and leading blanks only when recognizing the address. Parse the original
-/// text in the form recognized here, so a lookalike scheme cannot be reinterpreted as a host.
+/// Judge lookalike punctuation, leading blanks and invisible characters only when recognizing the address.
+/// Parse the original text in the form recognized here, so a lookalike scheme cannot be reinterpreted as a host.
 fn address_shape(text: &str) -> Option<AddressShape> {
     let text = LEADING_BLANKS.replace(text, "");
+    let text = INVISIBLE.replace_all(&text, "");
     let gated: String = text
         .chars()
         .map(|ch| match ch {
@@ -66,6 +74,7 @@ fn address_shape(text: &str) -> Option<AddressShape> {
             | '\u{fe55}' => ':',
             '\u{2215}' | '\u{2044}' | '\u{29f8}' | '\u{ff0f}' | '\u{2571}' => '/',
             '\u{3002}' | '\u{ff0e}' | '\u{ff61}' | '\u{2024}' => '.',
+            '\u{ff20}' | '\u{fe6b}' => '@',
             other => other,
         })
         .collect();
@@ -309,8 +318,9 @@ mod tests {
         for case in oracle["policy"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
             let uri = case["uri"].as_str().unwrap();
-            // The oracle records the old client's acceptance of literal escape notation as part of a scheme.
-            // The actual directionality character still triggers the warning.
+            // The oracle records the old client's acceptance of literal escape notation as part of a scheme. Like
+            // any label that opens with an ASCII bracket or quote, it is no longer an address, so it gets the
+            // ordinary display of the real destination. The actual directionality character still warns.
             let expected = if text.trim_matches(is_js_space) == "<U+202E>https://example.com/x" {
                 false
             } else {
@@ -374,6 +384,24 @@ mod tests {
             "example.test@other.test/x",
             "example.test:secret@other.test/x",
             "example.test:example!@other.test/x",
+        ] {
+            assert!(mismatch(label, "https://other.test/x"), "{label:?}");
+        }
+    }
+
+    /// Zero-width characters ride along with the visible cell before them, so a label can look exactly like a
+    /// familiar address while carrying one in its scheme, its host or before a credentials `@`. A lookalike `@`
+    /// can stand in for the real one. Each must still warn rather than count as prose.
+    #[test]
+    fn invisible_characters_inside_an_address_still_warn() {
+        for label in [
+            "ht\u{200b}tps://example.test/x",
+            "http\u{34f}s://example.test/x",
+            "http\u{fe0f}s://example.test/x",
+            "exam\u{200b}ple.test/x",
+            "example.test\u{200b}@other.test/x",
+            "example.test\u{ff20}other.test/x",
+            "example.test\u{fe6b}other.test/x",
         ] {
             assert!(mismatch(label, "https://other.test/x"), "{label:?}");
         }
