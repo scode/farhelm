@@ -28,8 +28,8 @@ use farhelm_supervisor::launch::{
     SESSION_ID_ENV_VAR, SESSION_TOKEN_ENV_VAR, SUPERVISOR_SOCK_ENV_VAR,
 };
 use farhelm_supervisor::service::hook_log_path;
-use std::ffi::OsString;
-use std::path::PathBuf;
+use std::ffi::{OsStr, OsString};
+use std::path::{Path, PathBuf};
 
 // ---------------------------------------------------------------------------
 // The injected session environment
@@ -163,6 +163,37 @@ impl SessionEnv {
             session_id: self.session_id.as_ref()?.to_str()?.to_string(),
             state_dir: socket.parent()?.to_path_buf(),
         })
+    }
+
+    /// Resolve a report destination and its log from a complete launch-local pair or the existing environment.
+    /// Muse strips the injected variables from hook children. Its explicit pair names the same report directory
+    /// without carrying the token that authenticates socket requests. The supervisor still owns report attribution.
+    /// A partial pair can fall back to the environment as a whole. Mixing sources could put a report on the wrong host.
+    pub(crate) fn hook_inputs(
+        &self,
+        session_id: Option<&OsStr>,
+        supervisor_socket: Option<&Path>,
+    ) -> (Option<HookCredential>, Option<PathBuf>) {
+        let (Some(id), Some(socket)) = (session_id, supervisor_socket) else {
+            return (self.hook_credential(), self.hook_log());
+        };
+        let (Some(id), Some(state_dir)) = (
+            id.to_str(),
+            socket
+                .to_str()
+                .and_then(|socket| Path::new(socket).parent()),
+        ) else {
+            return (None, None);
+        };
+        // The log and the report must use the same valid session component. A malformed explicit id names neither.
+        if farhelm_supervisor::hook_report::session_dir(state_dir, id).is_none() {
+            return (None, None);
+        }
+        let credential = HookCredential {
+            session_id: id.to_owned(),
+            state_dir: state_dir.to_path_buf(),
+        };
+        (Some(credential), Some(hook_log_path(state_dir, id)))
     }
 }
 
@@ -805,6 +836,46 @@ mod tests {
             .hook_log()
             .is_none()
         );
+    }
+
+    /// A launch-local destination survives Muse's scrub and takes precedence over inherited values.
+    /// Resolve both the file and the report together so a partial destination cannot mix two sessions.
+    #[farhelm_testtrace::test]
+    fn the_hook_uses_a_complete_explicit_pair_before_its_environment() {
+        let id = OsStr::new("muse-session");
+        let socket = Path::new("/muse state/supervisor.sock");
+        for env in [SessionEnv::default(), full_env()] {
+            let (credential, log) = env.hook_inputs(Some(id), Some(socket));
+            let credential = credential.expect("the pair supplies the report destination");
+            assert_eq!(credential.session_id, "muse-session");
+            assert_eq!(credential.state_dir, Path::new("/muse state"));
+            assert_eq!(
+                log.unwrap(),
+                Path::new("/muse state/hook-log/muse-session.log")
+            );
+        }
+        for (id, socket) in [(Some(id), None), (None, Some(socket))] {
+            let (credential, log) = SessionEnv::default().hook_inputs(id, socket);
+            assert!(credential.is_none() && log.is_none());
+            let (credential, log) = full_env().hook_inputs(id, socket);
+            assert_eq!(credential.unwrap().session_id, "s-1");
+            assert_eq!(log.unwrap(), Path::new("/state/hook-log/s-1.log"));
+        }
+    }
+
+    /// A malformed explicit id or a non-UTF-8 socket cannot name the report or the log. The pair is authoritative even
+    /// if a valid, unrelated launch environment was inherited.
+    #[farhelm_testtrace::test]
+    fn a_malformed_explicit_hook_pair_is_silent() {
+        let socket = Path::new("/muse state/supervisor.sock");
+        let unreadable = Path::new("/state").join(not_utf8()).join("supervisor.sock");
+        for (id, socket) in [
+            ("other/session", socket),
+            ("muse-session", unreadable.as_path()),
+        ] {
+            let (credential, log) = full_env().hook_inputs(Some(OsStr::new(id)), Some(socket));
+            assert!(credential.is_none() && log.is_none());
+        }
     }
 
     /// Spec: the hook reports only with all three values, drops its report

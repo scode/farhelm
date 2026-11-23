@@ -38,7 +38,9 @@ Farhelm does not guess which conversation to resume from files on disk. See the 
 [OMP's report-only contract and limits](/docs/agents/omp/).
 
 [Muse 1.4.14 or later](/docs/agents/muse/#restarting-a-conversation) accepts hooks for each launch, with no plugin to
-install and no changes to its saved configuration.
+install and no changes to its saved configuration. Muse Code 1.4.24 strips Farhelm's environment variables from its
+hooks. Farhelm gives each hook its report destination in the command it builds so your conversation can still be picked
+up by **Restart**.
 
 [Cursor has basic launch support only](/docs/agents/cursor/): it uses no hook or status wrapper and has no conversation
 tracking, so its sessions cannot be restarted; replace starts one over.
@@ -168,9 +170,9 @@ keeps only its newest report, except Codex and Grok. For Claude, Muse and Antigr
 end-of-turn reports name the current conversation too. Codex and Grok keep the report that starts a conversation apart
 from the latest report that confirms its saved files. Codex confirms at the end of a turn; Grok can also confirm when
 you submit a prompt. This keeps confirmation from overwriting the conversation it belongs to while Farhelm is closed, so
-the directory stays tiny however long the supervisor is away. Outside a farhelm session there is no session environment,
-so identity reporting exits immediately and saves nothing. The Antigravity callback still returns its empty JSON object.
-Other callbacks can still output the line described below if passed `--announce`.
+the directory stays tiny however long the supervisor is away. A hook with neither a complete launch destination nor
+Farhelm's session environment exits without saving a report. The Antigravity callback still returns its empty JSON
+object. Other callbacks can still output the line described below if passed `--announce`.
 
 The hook writes diagnostics to Farhelm's log. For Claude, Codex and Muse, `--announce` adds a line to stdout telling the
 agent that `$farhelm ...` in your message means the `farhelm agent` CLI and that `farhelm agent instructions` explains
@@ -362,9 +364,10 @@ into a failure. Pi and OMP can also lose the hook's line when the agent's own tw
 **3. Confirm the reporter is active.** Use `ps -o args= -p <agent pid>` for injected reporters. Claude's flags are
 `--settings` followed by a JSON blob with `SessionStart` and `Stop` entries naming the farhelm binary; Codex's are
 `--no-daemon --dangerously-bypass-hook-trust` plus three `-c` overrides for `features.hooks=true`, `hooks.SessionStart`,
-and `hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary.
-For Grok, use `/hooks` inside Grok and confirm that the `SessionStart`, `UserPromptSubmit`, and `Stop` entries name the
-absolute Farhelm command. For Antigravity, use `/hooks` to check for Farhelm's `SessionStart` and `Stop` hooks.
+and `hooks.Stop`. Muse's are `-c hooks=<JSON>` with `SessionStart` and `Stop` command entries naming the Farhelm binary
+and carrying `--session-id` and `--supervisor-socket`. For Grok, use `/hooks` inside Grok and confirm that the
+`SessionStart`, `UserPromptSubmit`, and `Stop` entries name the absolute Farhelm command. For Antigravity, use `/hooks`
+to check for Farhelm's `SessionStart` and `Stop` hooks.
 
 In every one of these failure cases the session keeps working. The only thing at stake is which conversation the restart
 offer points at. Without an accepted report, a new session cannot be restarted, but if you know the conversation's id

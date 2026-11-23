@@ -1329,10 +1329,8 @@ pub fn report_conversation_at_start(conversation: &str) -> anyhow::Result<()> {
 /// Claude/Codex run the product binary selected for this fixture, using the
 /// vendor entry point the supervisor injects into the hook configuration.
 /// Muse runs the actual injected command from its own launch's hooks table.
-/// The environment is inherited untouched because
-/// that is where the session credential lives (`FARHELM_SESSION_ID` and
-/// friends, injected at launch); nothing here has to know those names, and
-/// a test that had to set them would be faking the very thing under test.
+/// The Muse fixture also strips Farhelm's variables from its hook children, so capture has to use the
+/// destination in the real launch's injected command.
 ///
 /// The payload names the current conversation and callback. `source` belongs
 /// to SessionStart; [`stop_hook_report`] deliberately omits it for Stop.
@@ -1342,6 +1340,7 @@ fn hook_report(shape: RecordShape, conversation: &str, out: &mut impl Write) -> 
         let injected = injected_report_command(shape, "SessionStart")?;
         let mut command = std::process::Command::new("sh");
         command.args(["-c", &injected]);
+        scrub_muse_hook_environment(&mut command, "SessionStart", out)?;
         return run_report_hook(
             command,
             serde_json::json!({
@@ -1398,10 +1397,44 @@ fn stop_hook_report(
         "hook_event_name": "Stop",
     });
     if shape == RecordShape::Muse {
+        scrub_muse_hook_environment(&mut command, "Stop", out)?;
         payload["transcript_path"] = serde_json::Value::Null;
         payload["stop_hook_active"] = serde_json::Value::Bool(false);
     }
     run_report_hook(command, payload, conversation, out)
+}
+
+/// Observe the launch environment and its removal before the actual callback starts. The test needs a witness that
+/// the callback lost its environment, since the explicit destination would also work with every variable intact.
+fn scrub_muse_hook_environment(
+    command: &mut std::process::Command,
+    event: &str,
+    out: &mut impl Write,
+) -> anyhow::Result<()> {
+    use farhelm_supervisor::launch::{
+        SESSION_ID_ENV_VAR, SESSION_TOKEN_ENV_VAR, SUPERVISOR_SOCK_ENV_VAR,
+    };
+
+    for (name, _) in std::env::vars_os() {
+        if name.as_encoded_bytes().starts_with(b"FARHELM_") {
+            command.env_remove(name);
+        }
+    }
+    for required in [
+        SESSION_ID_ENV_VAR,
+        SESSION_TOKEN_ENV_VAR,
+        SUPERVISOR_SOCK_ENV_VAR,
+    ] {
+        anyhow::ensure!(
+            std::env::var_os(required).is_some()
+                && command
+                    .get_envs()
+                    .any(|(name, value)| name == required && value.is_none()),
+            "the Muse fixture did not remove an inherited launch variable: {required}"
+        );
+    }
+    writeln!(out, "MUSE-HOOK-ENV-SCRUBBED: {event}")?;
+    Ok(())
 }
 
 /// Run one real report callback under a deadline and expose its silence result.

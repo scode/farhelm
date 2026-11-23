@@ -25,22 +25,32 @@ impl AgentIntegration for MuseIntegration {
         inject_hook_argv_tail(self, AgentKind::Muse, argv, policy, hook_refusal)
     }
 
-    /// Attach launch-local callbacks, announcing instructions only at session start.
-    /// The shell command is quoted before JSON serialization so neither layer
-    /// can split the Farhelm executable. The outer timeout leaves margin beyond
-    /// the reporter's own budget, as Claude's hook does.
-    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
-        let command = hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Muse);
-        let stop = hook_command(
-            hook_exe,
-            AgentInstructions::Off,
-            farhelm_proto::ReportVendor::Muse,
+    /// The callbacks carry their report destination because Muse can scrub every Farhelm variable
+    /// from hook children. The session token belongs to authenticated requests and stays off this command.
+    fn hook_argv(
+        &self,
+        hook_exe: &str,
+        policy: &HookPolicy<'_>,
+    ) -> Result<Vec<String>, &'static str> {
+        let socket = policy
+            .supervisor_socket
+            .ok_or("the supervisor socket path is not UTF-8")?;
+        let destination = format!(
+            " --session-id {} --supervisor-socket {}",
+            farhelm_proto::text::shell_quote(policy.session_id),
+            farhelm_proto::text::shell_quote(socket),
         );
+        // Shell quoting precedes JSON serialization. Only SessionStart carries the instruction pointer.
+        let with_destination = |instructions| {
+            hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Muse) + &destination
+        };
+        let command = with_destination(policy.instructions);
+        let stop = with_destination(AgentInstructions::Off);
         let hooks = serde_json::json!({
             "SessionStart": [{"hooks": [{"type": "command", "command": command, "timeout": 60}]}],
             "Stop": [{"hooks": [{"type": "command", "command": stop, "timeout": 60}]}]
         });
-        vec!["-c".into(), format!("hooks={hooks}")]
+        Ok(vec!["-c".into(), format!("hooks={hooks}")])
     }
 }
 
@@ -68,24 +78,30 @@ fn hook_refusal(argv: &[String]) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// Start and resume both attach reporters through an explicit placeholder;
-    /// opting out removes both the arguments and the silent-hook tripwire.
-    #[farhelm_testtrace::test]
-    fn muse_placeholder_arguments_honor_hook_policy_on_start_and_resume() {
-        let policy = HookPolicy {
+    fn policy() -> HookPolicy<'static> {
+        HookPolicy {
             hooks: &AgentHooks::All,
             instructions: AgentInstructions::On,
             exe: Some("/opt/farhelm"),
             vendor_extension: None,
             codex_endpoint: None,
-        };
+            session_id: "session-1",
+            supervisor_socket: Some("/state path/with'quote\"and\\slash/supervisor.sock"),
+        }
+    }
+
+    /// Start and resume both attach reporters through an explicit placeholder;
+    /// opting out removes both the arguments and the silent-hook tripwire.
+    #[farhelm_testtrace::test]
+    fn muse_placeholder_arguments_honor_hook_policy_on_start_and_resume() {
+        let policy = policy();
         for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
             let active = MuseIntegration.farhelm_args(phase, &policy);
             assert!(active.hooked);
             assert!(active.env.is_empty());
             assert_eq!(
                 active.args,
-                MuseIntegration.hook_argv("/opt/farhelm", AgentInstructions::On)
+                MuseIntegration.hook_argv("/opt/farhelm", &policy).unwrap()
             );
             let disabled = MuseIntegration.farhelm_args(
                 phase,
@@ -100,6 +116,19 @@ mod tests {
                 disabled.log,
                 HookLog::Skipped(HOOKS_DISABLED_REASON)
             ));
+            let unreadable = MuseIntegration.farhelm_args(
+                phase,
+                &HookPolicy {
+                    supervisor_socket: None,
+                    ..policy
+                },
+            );
+            assert!(!unreadable.hooked);
+            assert!(unreadable.args.is_empty());
+            assert!(matches!(
+                unreadable.log,
+                HookLog::Skipped("the supervisor socket path is not UTF-8")
+            ));
         }
     }
 
@@ -109,7 +138,11 @@ mod tests {
     fn muse_hook_argv_roundtrips_json_and_shell_quoting() {
         let exe = "/opt/a path/with'quote\"and\\slash/farhelm";
         for instructions in [AgentInstructions::On, AgentInstructions::Off] {
-            let args = MuseIntegration.hook_argv(exe, instructions);
+            let policy = HookPolicy {
+                instructions,
+                ..policy()
+            };
+            let args = MuseIntegration.hook_argv(exe, &policy).unwrap();
             assert_eq!(args[0], "-c");
             let hooks: serde_json::Value =
                 serde_json::from_str(args[1].strip_prefix("hooks=").unwrap()).unwrap();
@@ -121,6 +154,12 @@ mod tests {
                 if event == "SessionStart" && instructions.announces() {
                     expected.push("--announce");
                 }
+                expected.extend([
+                    "--session-id",
+                    policy.session_id,
+                    "--supervisor-socket",
+                    policy.supervisor_socket.unwrap(),
+                ]);
                 assert_eq!(argv, expected);
             }
         }
@@ -130,13 +169,7 @@ mod tests {
     /// still receive Farhelm's reporter. No process environment is consulted.
     #[farhelm_testtrace::test]
     fn muse_legacy_injection_preserves_user_hook_overrides() {
-        let policy = HookPolicy {
-            hooks: &AgentHooks::All,
-            instructions: AgentInstructions::On,
-            exe: Some("/opt/farhelm"),
-            vendor_extension: None,
-            codex_endpoint: None,
-        };
+        let policy = policy();
         for words in [
             vec!["muse", "-c", "hooks={}"],
             vec!["muse", "--config", "hooks.SessionStart=[]"],
@@ -165,7 +198,7 @@ mod tests {
             assert_eq!(&injected.argv[..argv.len()], &argv);
             assert_eq!(
                 &injected.argv[argv.len()..],
-                MuseIntegration.hook_argv("/opt/farhelm", AgentInstructions::On)
+                MuseIntegration.hook_argv("/opt/farhelm", &policy).unwrap()
             );
         }
     }

@@ -485,16 +485,20 @@ pub trait AgentIntegration: Send + Sync {
     /// (SPEC.md "Paths that are not valid UTF-8"), and the hook policy's
     /// `exe` being `None` makes the caller skip this method and log why.
     ///
-    /// `instructions` selects whether the embedded command gets
+    /// The policy selects whether the embedded command gets
     /// `--announce`, which makes the hook print one pointer line the agent
     /// reads (`farhelm`'s `hook::POINTER_LINE`). It is a parameter for the
     /// same reason `hook_exe` is one — the policy is resolved once at
     /// supervisor startup and handed down — and it rides INSIDE the
     /// vendor's own quoting rather than beside it, so it cannot be
-    /// appended by a caller after the fact.
-    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
-        let _ = (hook_exe, instructions);
-        Vec::new()
+    /// appended by a caller after the fact. A kind whose hook needs launch
+    /// inputs it cannot represent returns a reason to log instead of a tail.
+    fn hook_argv(
+        &self,
+        _hook_exe: &str,
+        _policy: &HookPolicy<'_>,
+    ) -> Result<Vec<String>, &'static str> {
+        Ok(Vec::new())
     }
 
     /// This kind's whole launch-time hook decision: whether and how to
@@ -593,7 +597,10 @@ fn hook_tail_args(
     let Some(exe) = policy.exe else {
         return FarhelmArgs::skipped(EXE_NOT_UTF8_REASON);
     };
-    let tail = integration.hook_argv(exe, policy.instructions);
+    let tail = match integration.hook_argv(exe, policy) {
+        Ok(tail) => tail,
+        Err(reason) => return FarhelmArgs::skipped(reason),
+    };
     // Grok reports through its own configured callbacks and has no tail;
     // claiming it hooked would arm the tripwire against nothing.
     if tail.is_empty() {
@@ -662,6 +669,11 @@ pub struct HookPolicy<'a> {
     pub vendor_extension: Option<&'a str>,
     /// The managed Codex provider descriptor from the same snapshot as the child environment.
     pub codex_endpoint: Option<&'a crate::recipe_credentials::CodexEndpoint>,
+    /// The Farhelm session id, which can be named on a per-launch hook command.
+    pub session_id: &'a str,
+    /// The supervisor socket from the launch spec, if it can be represented in vendor configuration.
+    /// Muse needs its parent directory even when the agent scrubs the hook's environment.
+    pub supervisor_socket: Option<&'a str>,
 }
 
 /// The skip reason for a kind whose hooks `FARHELM_AGENT_HOOKS` turned off.
@@ -757,7 +769,10 @@ fn inject_hook_argv_tail(
     let Some(exe) = policy.exe else {
         return HookInjection::skipped(argv, EXE_NOT_UTF8_REASON);
     };
-    let tail = integration.hook_argv(exe, policy.instructions);
+    let tail = match integration.hook_argv(exe, policy) {
+        Ok(tail) => tail,
+        Err(reason) => return HookInjection::skipped(argv, reason),
+    };
     // An integration that offers no tail does not use this hook form.
     // Silently, and WITHOUT the injected line: claiming flags were injected
     // when none were would arm the caller's tripwire against a launch that
@@ -808,16 +823,10 @@ pub(crate) fn with_launch_environment(argv: Vec<String>, assignments: &[String])
     }
 }
 
-/// The command string the integrations embed in their vendor's hook
-/// configuration: farhelm's own binary, shell-quoted, running
-/// `internal hook`.
+/// The shared base command for a vendor callback: Farhelm's own binary, shell-quoted, running `internal hook`.
 ///
-/// Shared rather than copied because the vendors differ only in
-/// how they QUOTE this string, never in what it says — and a flag that
-/// reached one vendor's launches but not the other's would be a difference
-/// nobody chose. Shell-quoted because these vendors run a hook's `command`
-/// through a shell rather than exec'ing it, so an unquoted path containing
-/// a space would be split into arguments neither can find (verified).
+/// This owns the common flags and shell quoting. A vendor can append launch-local inputs, as Muse does for its
+/// destination, before serializing the complete command into its own configuration format.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn hook_command(
     hook_exe: &str,
@@ -1339,8 +1348,16 @@ impl AgentIntegration for ClaudeIntegration {
     /// on the hook process; `farhelm internal hook` budgets 30 seconds
     /// internally (`hook.rs`), leaving scheduling margin before the vendor's
     /// own timer can make a busy-supervisor report look lost.
-    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
-        let command = hook_command(hook_exe, instructions, farhelm_proto::ReportVendor::Claude);
+    fn hook_argv(
+        &self,
+        hook_exe: &str,
+        policy: &HookPolicy<'_>,
+    ) -> Result<Vec<String>, &'static str> {
+        let command = hook_command(
+            hook_exe,
+            policy.instructions,
+            farhelm_proto::ReportVendor::Claude,
+        );
         let stop_command = hook_command(
             hook_exe,
             AgentInstructions::Off,
@@ -1364,7 +1381,7 @@ impl AgentIntegration for ClaudeIntegration {
                 }]
             }
         });
-        vec!["--settings".to_string(), settings.to_string()]
+        Ok(vec!["--settings".to_string(), settings.to_string()])
     }
 }
 
@@ -1428,10 +1445,14 @@ impl AgentIntegration for CodexIntegration {
     /// JSON, and Codex runs a hook's `command` through a shell exactly as
     /// Claude does — so [`hook_command`]'s shell quoting comes first and
     /// the RESULT of that quoting is what gets TOML-escaped.
-    fn hook_argv(&self, hook_exe: &str, instructions: AgentInstructions) -> Vec<String> {
+    fn hook_argv(
+        &self,
+        hook_exe: &str,
+        policy: &HookPolicy<'_>,
+    ) -> Result<Vec<String>, &'static str> {
         let command = toml_basic_string(&hook_command(
             hook_exe,
-            instructions,
+            policy.instructions,
             farhelm_proto::ReportVendor::Codex,
         ));
         // Only the selecting hook announces instructions. Stop runs every turn
@@ -1441,7 +1462,7 @@ impl AgentIntegration for CodexIntegration {
             AgentInstructions::Off,
             farhelm_proto::ReportVendor::Codex,
         ));
-        vec![
+        Ok(vec![
             "--dangerously-bypass-hook-trust".to_string(),
             "-c".to_string(),
             "features.hooks=true".to_string(),
@@ -1453,7 +1474,7 @@ impl AgentIntegration for CodexIntegration {
             format!(
                 "hooks.Stop=[{{hooks=[{{type=\"command\",command={stop_command},timeout=60}}]}}]"
             ),
-        ]
+        ])
     }
 }
 
@@ -2873,23 +2894,23 @@ mod tests {
                 ),
                 (AgentHooks::All, None, Some(EXE_NOT_UTF8_REASON)),
             ] {
-                let expansion = CodexIntegration.farhelm_args(
-                    phase,
-                    &HookPolicy {
-                        hooks: &hooks,
-                        instructions: AgentInstructions::On,
-                        exe,
-                        vendor_extension: None,
-                        codex_endpoint: None,
-                    },
-                );
+                let policy = HookPolicy {
+                    hooks: &hooks,
+                    instructions: AgentInstructions::On,
+                    exe,
+                    vendor_extension: None,
+                    codex_endpoint: None,
+                    session_id: "session-1",
+                    supervisor_socket: Some("/state/supervisor.sock"),
+                };
+                let expansion = CodexIntegration.farhelm_args(phase, &policy);
                 assert_eq!(expansion.args[0], "--no-daemon");
                 assert!(expansion.env.is_empty());
                 assert_eq!(expansion.hooked, skipped.is_none());
                 match (skipped, expansion.log) {
                     (None, HookLog::Injected) => assert_eq!(
                         &expansion.args[1..],
-                        CodexIntegration.hook_argv("/opt/farhelm", AgentInstructions::On)
+                        CodexIntegration.hook_argv("/opt/farhelm", &policy).unwrap()
                     ),
                     (Some(expected), HookLog::Skipped(actual)) => {
                         assert_eq!(actual, expected);
@@ -2922,6 +2943,8 @@ mod tests {
                         exe: Some("/opt/farhelm"),
                         vendor_extension: None,
                         codex_endpoint: Some(&endpoint),
+                        session_id: "session-1",
+                        supervisor_socket: Some("/state/supervisor.sock"),
                     },
                 );
                 assert_eq!(
@@ -2963,6 +2986,8 @@ mod tests {
             exe: Some("/opt/farhelm"),
             vendor_extension: Some("/state/extension.js"),
             codex_endpoint: None,
+            session_id: "session-1",
+            supervisor_socket: Some("/state/supervisor.sock"),
         };
         let argv = |program: &str| vec![program.to_string()];
         let decide = |kind: AgentKind, program: &str| {
@@ -4252,6 +4277,15 @@ mod tests {
     #[farhelm_testtrace::test]
     fn hook_argv_survives_a_path_hostile_to_both_quoting_layers() {
         let hostile_path = r#"/tmp/a b's "q" \dir/farhelm"#;
+        let policy = HookPolicy {
+            hooks: &AgentHooks::All,
+            instructions: AgentInstructions::On,
+            exe: Some(hostile_path),
+            vendor_extension: None,
+            codex_endpoint: None,
+            session_id: "session-1",
+            supervisor_socket: Some("/state/supervisor.sock"),
+        };
         // The default (announcing) shape, which is what ships. The `off`
         // shape is checked at the end, against the same path.
         // Each vendor's command names its own adapter after `hook`: the
@@ -4270,7 +4304,7 @@ mod tests {
         let expected_words = expected_words_for("claude");
 
         // --- Claude: `["--settings", <json>]` ---
-        let claude_argv = ClaudeIntegration.hook_argv(hostile_path, AgentInstructions::On);
+        let claude_argv = ClaudeIntegration.hook_argv(hostile_path, &policy).unwrap();
         assert_eq!(
             claude_argv.len(),
             2,
@@ -4307,7 +4341,7 @@ mod tests {
         );
 
         // --- Codex: selecting and confirming callbacks are separate. ---
-        let codex_argv = CodexIntegration.hook_argv(hostile_path, AgentInstructions::On);
+        let codex_argv = CodexIntegration.hook_argv(hostile_path, &policy).unwrap();
         assert_eq!(codex_argv.len(), 7);
         assert_eq!(
             codex_argv[0], "--dangerously-bypass-hook-trust",
@@ -4360,14 +4394,18 @@ mod tests {
         // into it — a mistake that would produce a path argument nobody
         // can exec, and only for users with a space in their install
         // directory.
+        let silent = HookPolicy {
+            instructions: AgentInstructions::Off,
+            ..policy
+        };
         for (kind, argv) in [
             (
                 "claude",
-                ClaudeIntegration.hook_argv(hostile_path, AgentInstructions::Off),
+                ClaudeIntegration.hook_argv(hostile_path, &silent).unwrap(),
             ),
             (
                 "codex",
-                CodexIntegration.hook_argv(hostile_path, AgentInstructions::Off),
+                CodexIntegration.hook_argv(hostile_path, &silent).unwrap(),
             ),
         ] {
             let rendered = argv.join(" ");

@@ -3006,18 +3006,20 @@ fn with_farhelm_args_using(
     exe: Option<&str>,
     vendor_extension: Option<&str>,
     codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
+    supervisor_socket: Option<&str>,
     session: &str,
 ) -> FarhelmArgsExpansion {
+    let policy = crate::agent_kind::HookPolicy {
+        hooks,
+        instructions,
+        exe,
+        vendor_extension,
+        codex_endpoint,
+        session_id: session,
+        supervisor_socket,
+    };
     let FarhelmArgsMode::Expand(phase) = mode else {
-        let (argv, hooked, skipped) = legacy_hook_injection(
-            argv,
-            snapshot,
-            hooks,
-            instructions,
-            exe,
-            vendor_extension,
-            session,
-        );
+        let (argv, hooked, skipped) = legacy_hook_injection(argv, snapshot, &policy);
         // The opt-out is checked here as well as by reason: several legacy
         // injections inspect the command's shape before the opt-out, so a
         // refused shape can come back with its own reason even when the user
@@ -3030,16 +3032,7 @@ fn with_farhelm_args_using(
         return (argv, Vec::new(), hooked, skip, Vec::new());
     };
     let expansion = match snapshot.integration() {
-        Some(integration) => integration.farhelm_args(
-            phase,
-            &crate::agent_kind::HookPolicy {
-                hooks,
-                instructions,
-                exe,
-                vendor_extension,
-                codex_endpoint,
-            },
-        ),
+        Some(integration) => integration.farhelm_args(phase, &policy),
         None => crate::agent_kind::FarhelmArgs::none(),
     };
     let mut skip = None;
@@ -3123,15 +3116,16 @@ fn with_hook_argv_using(
     vendor_extension: Option<&str>,
     session: &str,
 ) -> (Vec<String>, bool) {
-    let (argv, hooked, _skipped) = legacy_hook_injection(
-        argv,
-        snapshot,
+    let policy = crate::agent_kind::HookPolicy {
         hooks,
         instructions,
         exe,
         vendor_extension,
-        session,
-    );
+        codex_endpoint: None,
+        session_id: session,
+        supervisor_socket: Some("/state/supervisor.sock"),
+    };
+    let (argv, hooked, _skipped) = legacy_hook_injection(argv, snapshot, &policy);
     (argv, hooked)
 }
 
@@ -3198,23 +3192,13 @@ fn with_hook_argv_using(
 fn legacy_hook_injection(
     argv: Vec<String>,
     snapshot: &IntegrationSnapshot,
-    hooks: &crate::agent_kind::AgentHooks,
-    instructions: crate::agent_kind::AgentInstructions,
-    exe: Option<&str>,
-    vendor_extension: Option<&str>,
-    session: &str,
+    policy: &crate::agent_kind::HookPolicy<'_>,
 ) -> (Vec<String>, bool, Option<&'static str>) {
     let Some(integration) = snapshot.integration() else {
         return (argv, false, None);
     };
-    let policy = crate::agent_kind::HookPolicy {
-        hooks,
-        instructions,
-        exe,
-        vendor_extension,
-        codex_endpoint: None,
-    };
-    let injection = integration.inject_hooks(argv, &policy);
+    let session = policy.session_id;
+    let injection = integration.inject_hooks(argv, policy);
     let mut skipped = None;
     match injection.log {
         crate::agent_kind::HookLog::Silent => {}
@@ -3230,7 +3214,7 @@ fn legacy_hook_injection(
         crate::agent_kind::HookLog::Injected => info!(
             session = %session,
             kind = ?snapshot.kind,
-            announce = instructions.announces(),
+            announce = policy.instructions.announces(),
             "conversation hook flags injected"
         ),
     }
@@ -3255,12 +3239,11 @@ fn legacy_hook_injection(
 /// ## One derivation for the writer and the deleter
 ///
 /// The writer (the `farhelm internal hook` process) is short-lived and
-/// knows nothing about the supervisor beyond the environment variables the
-/// agent was launched with, so its environment reader (`SessionEnv::hook_log`
-/// in `crates/farhelm/src/agent_client.rs`) takes the state directory to be
-/// the PARENT of `FARHELM_SUPERVISOR_SOCK` (the socket is
-/// [`Supervisor::socket_path`], `<state_dir>/supervisor.sock`) and calls
-/// this same function with it. Both sides share it because nothing would
+/// derives the state directory from the socket path Farhelm supplied in
+/// the environment or on the Muse hook command (`SessionEnv` in
+/// `crates/farhelm/src/agent_client.rs`). The socket is
+/// [`Supervisor::socket_path`], `<state_dir>/supervisor.sock`. Both sides
+/// share the log path because nothing would
 /// notice a disagreement at runtime: delete ignores a missing file, so the
 /// only symptom would be per-session trace files that accumulate forever.
 pub fn hook_log_path(state_dir: &Path, session_id: &str) -> PathBuf {
@@ -14487,6 +14470,9 @@ impl Supervisor {
 
     /// [`with_farhelm_args_using`] with this supervisor's resolved hook
     /// policy: the one place a spawn's argv gets Farhelm's own arguments.
+    /// Each launch input it forwards stays a separate argument, as in
+    /// [`with_farhelm_args_using`], so a call site names every one.
+    #[allow(clippy::too_many_arguments)]
     fn with_farhelm_args(
         &self,
         argv: Vec<String>,
@@ -14494,6 +14480,7 @@ impl Supervisor {
         snapshot: &IntegrationSnapshot,
         vendor_extension: Option<&str>,
         codex_endpoint: Option<&crate::recipe_credentials::CodexEndpoint>,
+        supervisor_socket: &Path,
         session: &str,
     ) -> FarhelmArgsExpansion {
         with_farhelm_args_using(
@@ -14505,6 +14492,7 @@ impl Supervisor {
             Some(self.session_farhelm_exe_str.as_str()),
             vendor_extension,
             codex_endpoint,
+            supervisor_socket.to_str(),
             session,
         )
     }
@@ -14661,13 +14649,16 @@ impl Supervisor {
             None => None,
         };
         // The descriptor can be written to the launch spec. The token goes through the terminal host's child
-        // environment below this boundary, using the same snapshot so a rotation cannot split the two.
+        // environment below this boundary, using the same snapshot so a rotation cannot split the two. The hook and
+        // the injected environment name the same state directory even if the vendor strips variables.
+        let supervisor_sock = Self::socket_path(&self.state_dir);
         let (argv, env, hooked, hook_skip, shell_arguments) = self.with_farhelm_args(
             argv,
             args_mode,
             snapshot,
             vendor_extension.as_deref(),
             codex_endpoint,
+            &supervisor_sock,
             id,
         );
         // The message is literal user data, including whole arguments that
@@ -14744,7 +14735,7 @@ impl Supervisor {
             // the agent's process and everything it forks.
             session_id: id.to_string(),
             session_token: session_token.to_string(),
-            supervisor_sock: Self::socket_path(&self.state_dir),
+            supervisor_sock,
             farhelm_bin_dir: self.session_bin_dir().to_path_buf(),
             browser_command: self.browser_command(),
             scope_waypoint_expected: !scope_prefix.is_empty(),
@@ -31257,7 +31248,19 @@ exit 1
     ) -> Vec<String> {
         crate::agent_kind::integration_for(kind)
             .expect("an integrated kind")
-            .hook_argv(exe, instructions)
+            .hook_argv(
+                exe,
+                &crate::agent_kind::HookPolicy {
+                    hooks: &crate::agent_kind::AgentHooks::All,
+                    instructions,
+                    exe: Some(exe),
+                    vendor_extension: None,
+                    codex_endpoint: None,
+                    session_id: "session-1",
+                    supervisor_socket: Some("/state/supervisor.sock"),
+                },
+            )
+            .expect("the test supplies its hook destination")
     }
 
     /// Spec (SPEC.md, Status): a launch Farhelm could not add its
@@ -31295,6 +31298,7 @@ exit 1
                 Some("/opt/farhelm"),
                 extension,
                 None,
+                Some("/state/supervisor.sock"),
                 "session-1",
             )
             .3
@@ -31407,6 +31411,7 @@ exit 1
                 Some("/opt/farhelm"),
                 Some("/opt/extension.ts"),
                 None,
+                Some("/state/supervisor.sock"),
                 "session-1",
             );
             (argv, env, hooked)
@@ -31464,6 +31469,7 @@ exit 1
                 None,
                 None,
                 None,
+                Some("/state/supervisor.sock"),
                 "session-1",
             );
             assert_eq!(expanded, around("codex", vec!["--no-daemon".to_string()]));

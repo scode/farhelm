@@ -1422,17 +1422,15 @@ enum InternalCmd {
     ///
     /// Farhelm injects `<farhelm_exe> internal hook` for vendors with a
     /// per-launch hook surface. Grok and Antigravity use callbacks configured
-    /// by the user. Either way it
-    /// runs below the agent, inside the user's terminal, with the session
-    /// credential in its environment. Everything it needs to report arrives
-    /// on stdin or in that environment. See `hook.rs` for the silence and
-    /// budget contract this arm exists to honour.
+    /// by the user. The hook runs below the agent inside the user's terminal.
+    /// Muse gets its session and socket on the launch-local command because
+    /// it scrubs the hook's environment. Other commands get their destination
+    /// from the environment. See `hook.rs` for the silence and budget contract.
     Hook {
         /// Print [`hook::POINTER_LINE`] on stdout after reporting, so the
         /// agent learns `farhelm agent instructions` exists.
         ///
-        /// The one flag, and it exists because the decision is the
-        /// SUPERVISOR's: `FARHELM_AGENT_INSTRUCTIONS` is read once when
+        /// The decision is the SUPERVISOR's: `FARHELM_AGENT_INSTRUCTIONS` is read once when
         /// the supervisor starts, and a hook process launched by an
         /// already-running supervisor must obey the setting that
         /// supervisor started with rather than whatever the variable says
@@ -1449,6 +1447,12 @@ enum InternalCmd {
         /// internally, keeping the persisted declaration unchanged.
         #[arg(long, value_enum)]
         vendor: HookVendor,
+        /// The Farhelm session that owns this launch-local report. The socket names its state directory.
+        #[arg(long)]
+        session_id: Option<std::ffi::OsString>,
+        /// The supervisor's socket path. Its parent holds reports even when the supervisor is offline.
+        #[arg(long)]
+        supervisor_socket: Option<PathBuf>,
     },
     /// The credential-free MCP reporter Goose retains in session metadata.
     GooseHook,
@@ -2066,7 +2070,12 @@ fn main() -> anyhow::Result<()> {
                 );
                 Ok(())
             }
-            InternalCmd::Hook { announce, vendor } => {
+            InternalCmd::Hook {
+                announce,
+                vendor,
+                session_id,
+                supervisor_socket,
+            } => {
                 // No tracing init, and this one is necessity rather than
                 // belt and braces: init_tracing logs to stderr at `info`,
                 // and this process's stderr is the AGENT's terminal. A
@@ -2090,10 +2099,10 @@ fn main() -> anyhow::Result<()> {
                 // ("may `farhelm spawn` dial?") all-or-nothing. The log path
                 // and the credential need different subsets of the values,
                 // and a half-configured environment must still get its log
-                // line; see `SessionEnv::hook_log`.
+                // line; see `SessionEnv::hook_inputs`.
                 let env = SessionEnv::from_env();
-                let hook_log = env.hook_log();
-                let credential = env.hook_credential();
+                let (credential, hook_log) =
+                    env.hook_inputs(session_id.as_deref(), supervisor_socket.as_deref());
 
                 let vendor = vendor.report_vendor();
                 hook::run_with(

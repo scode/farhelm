@@ -7,7 +7,9 @@
 //! the first event can select a UUID and later events can supply its exact
 //! record path. In every case this module runs as a short-lived child below
 //! the agent process, inside the agent's terminal, with the session's
-//! identity already in its environment. It reads one JSON payload from
+//! report destination supplied by Farhelm. Muse carries the destination
+//! on its launch-local command because it strips the hook's environment.
+//! It reads one JSON payload from
 //! stdin, records its own process ancestry, and drops the report as a file
 //! into the session's drop directory under the supervisor's state directory
 //! (`farhelm_supervisor::hook_report`), where the supervisor applies it on
@@ -47,14 +49,16 @@
 //!    Overrunning the vendor's own hook timeout is exactly the failure that
 //!    shows up in the agent's UI, so the read is bounded by [`HOOK_BUDGET`];
 //!    see [`run_with`] for why that forces a detached reader thread.
-//! 4. **No credential, no IDENTITY work.** Without the three injected
-//!    environment values (session id, session token, supervisor socket)
-//!    this is not a Farhelm launch (someone ran the agent outside Farhelm
-//!    with its callback still configured); the run logs `no-credential` and
-//!    stops without writing a report. The token is not written anywhere —
-//!    the report file sits in the supervisor's private state directory and
-//!    needs none — but its presence is still what marks a real launch. This
-//!    rule is scoped to identity capture only: [`announce`] needs no
+//! 4. **Identity reporting needs a complete launch destination.** An
+//!    explicit pair of session id and supervisor socket names where to
+//!    drop the report. The environment path still requires all three
+//!    injected values (session id, socket and session token), so a callback
+//!    left in a user's configuration outside Farhelm does no identity work.
+//!    The token authenticates socket requests. The report needs only the
+//!    destination and the supervisor checks its ancestry when it reads it.
+//!    A missing destination stops reporting with `no-credential` when a log
+//!    path is available. This rule is scoped to identity capture only:
+//!    [`announce`] needs no
 //!    credential at all and still prints [`POINTER_LINE`] whenever
 //!    `--announce` was passed — the pointer is a fact about the launch, not
 //!    about whether a report can be made.
@@ -265,8 +269,8 @@ pub fn write_response(out: &mut impl std::io::Write, vendor: ReportVendor, annou
 /// a real farhelm session already carries those variables and would
 /// otherwise drop reports into a live supervisor's state directory. The
 /// environment read stays in the `main.rs` arm; everything testable takes
-/// the destination as a value. It exists only for a complete credential
-/// (contract rule 4), although the token itself is not carried.
+/// the destination as a value. Either input form in contract rule 4 can
+/// supply it. Neither form stores an authentication token in this value.
 pub struct HookCredential {
     /// The farhelm session this hook is reporting for — the identity whose
     /// drop directory receives the report, not the vendor's conversation id.
@@ -1661,6 +1665,33 @@ mod tests {
             ancestry.first().map(|link| link.pid),
             Some(std::process::id()),
             "the recorded chain starts at the reporting process"
+        );
+    }
+
+    /// A Muse callback that received only a launch-local pair writes its payload and diagnostic under that session.
+    #[farhelm_testtrace::test]
+    fn muse_writes_from_an_explicit_pair_after_its_environment_was_scrubbed() {
+        let dir = tempfile::tempdir().expect("private state directory");
+        let socket = dir.path().join("supervisor.sock");
+        let id = std::ffi::OsStr::new("muse-launch");
+        let env = crate::agent_client::SessionEnv::default();
+        let (destination, log) = env.hook_inputs(Some(id), Some(&socket));
+        run_with(
+            destination,
+            Cursor::new(MUSE_PAYLOAD.as_bytes()),
+            TEST_BUDGET,
+            log.clone(),
+            ReportVendor::Muse,
+        );
+        let slot = hook_report::session_dir(dir.path(), "muse-launch")
+            .expect("valid id")
+            .join(hook_report::Slot::Latest.file_name());
+        let report: HookReport = serde_json::from_slice(&std::fs::read(slot).unwrap()).unwrap();
+        assert_eq!(report.vendor, ReportVendor::Muse);
+        assert_eq!(report.conversation, "01a18601-735c-7de3-b1dd-a97e6d57db34");
+        assert!(
+            single_line(&log.unwrap())
+                .ends_with(" written 01a18601-735c-7de3-b1dd-a97e6d57db34 startup")
         );
     }
 
