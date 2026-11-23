@@ -503,7 +503,7 @@ async fn cancelling_an_automatic_setup_question_waits_for_a_new_incarnation() {
         fixture.completion(&question.attempt).await,
         SshSignInOutcome::Failed { .. }
     ));
-    // Following completion, a preference wake must still be unable to admit another attempt on this connection.
+    // Following completion, a fleet change wake must still be unable to admit another attempt on this connection.
     let expected = *scans.borrow_and_update() + 1;
     fixture.harness.manager.events().bump();
     wait_for_automatic_scan(&mut scans, expected).await;
