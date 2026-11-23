@@ -1422,9 +1422,9 @@ coverage through a scope edit.
         """Stop the whole run after a harness failure or a failed bonus check.
 
 A preparation or automation error means the harness is unreliable, so nothing
-else runs until a new run, with one exception: a P0 pair the maintainer has
-already released (`cleanup --discard-failed` after deciding its retention).
-P0 fixtures are independent, and a relaunch that never brought the candidate
+else runs until a new run, with one exception: a P0 or P1 pair the maintainer
+has already released (`cleanup --discard-failed` after deciding its retention).
+Those pairs' fixtures are independent, and a relaunch that never brought the candidate
 back ends as an automation error too, so a broken updater must not keep the
 installer pair from showing whether the supervisors brick. A failed bonus
 check stops bonus coverage, the only work left by then. Product failures in P0,
