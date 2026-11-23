@@ -246,6 +246,7 @@ impl CellText {
             ranges,
             evidence: (first.saturating_sub(2)..=last.saturating_add(2)).collect(),
             label: String::new(),
+            osc_label_ambiguous: false,
         })
     }
 }
@@ -316,9 +317,9 @@ impl GridModel {
     }
 
     /// The printed path covering `position`, unless a program hyperlink or a printed web address owns that cell:
-    /// those come first, as they did in the old client, so a path never replaces a program's explicit target.
+    /// those come first, so a path never replaces a program's explicit target, even in concealed cells.
     pub fn path_link_at(&self, position: Position) -> Option<TerminalLink> {
-        if self.link_at(position).is_some() {
+        if self.has_osc_link_at(position) || self.link_at(position).is_some() {
             return None;
         }
         self.path_links(position.line)

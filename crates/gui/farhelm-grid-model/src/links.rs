@@ -2,10 +2,13 @@
 //! Search windows and generated OSC 8 identity rules match the MIT/xterm-derived
 //! client (LICENSE-PORTED). Opening and disclosure admission belong to the UI.
 
-use crate::{GridModel, Link, Position, Selection, SelectionMode, constant_regex};
+use crate::{
+    GridModel, GridRow, GridRun, Link, Position, Selection, SelectionMode, constant_regex,
+    style_flags,
+};
 use regex::Regex;
 use std::{
-    collections::{BTreeMap, BTreeSet},
+    collections::{BTreeMap, BTreeSet, HashMap},
     sync::{Arc, LazyLock},
 };
 use url::Url;
@@ -52,6 +55,9 @@ pub struct TerminalLink {
     /// later redraws of other rows, and a label spread over rows is judged whole by the display itself. Empty for a
     /// printed web address, whose text is its target (`uri`).
     pub label: String,
+    /// Whether a multi-row OSC 8 label has another visible stretch with the same tag on this row. Revealing
+    /// that stretch can change the disclosure to a warning even when the hovered stretch itself stays the same.
+    pub osc_label_ambiguous: bool,
 }
 
 impl TerminalLink {
@@ -153,8 +159,16 @@ fn host_prefixed(text: &str) -> bool {
         .starts_with(&format!("{}://{auth}{host}{port}", url.scheme()).to_lowercase())
 }
 
+/// Conceal removes a run from visible OSC 8 identity, including continuation across a row boundary.
+/// Raw tags still hold their cells against printed-link fallback.
+fn visible_link(run: &GridRun) -> Option<&Arc<Link>> {
+    run.link
+        .as_ref()
+        .filter(|_| run.style.flags & style_flags::HIDDEN == 0)
+}
+
 /// Resolve numeric emulator-generated ids only through contiguous pieces of the
-/// same URI. The per-question cache bounds repeated row lookbacks to linear work
+/// same URI that the terminal draws. The per-question cache bounds repeated row lookbacks to linear work
 /// and shares existing Arc<Link> values rather than cloning long target strings.
 pub(super) struct Identities<'a> {
     model: &'a GridModel,
@@ -180,7 +194,7 @@ impl<'a> Identities<'a> {
             .is_some_and(|(a, b)| generated(a) && generated(b) && a.uri == b.uri)
     }
 
-    /// Index of the preceding row's link run at a soft-wrap seam. A padding run has no link text or identity.
+    /// Index of the preceding row's visible link at a soft-wrap seam. Padding and conceal break the seam.
     fn previous_piece(&self, line: u64) -> Option<usize> {
         let (_, row) = self.model.selection_line(line)?;
         let first = row.runs.first().filter(|run| run.col == 0)?;
@@ -195,7 +209,7 @@ impl<'a> Identities<'a> {
             .partition_point(|run| run.col < text_end)
             .checked_sub(1)?;
         let last = &row.runs[index];
-        (last.col + last.width >= text_end && Self::joins(last.link.as_ref(), first.link.as_ref()))
+        (last.col + last.width >= text_end && Self::joins(visible_link(last), visible_link(first)))
             .then_some(index)
     }
 
@@ -229,20 +243,20 @@ impl<'a> Identities<'a> {
             let text_end = row.text_columns(cols);
             let mut keys: Vec<Option<Arc<Link>>> = Vec::with_capacity(row.runs.len());
             for (index, run) in row.runs.iter().enumerate() {
-                if run.col >= text_end {
+                let Some(link) = visible_link(run).filter(|_| run.col < text_end) else {
                     keys.push(None);
                     continue;
-                }
+                };
                 let before = index.checked_sub(1).and_then(|i| row.runs.get(i));
                 let key = if before.is_some_and(|before| {
                     before.col + before.width == run.col
-                        && Self::joins(before.link.as_ref(), run.link.as_ref())
+                        && Self::joins(visible_link(before), Some(link))
                 }) {
                     keys[index - 1].clone()
                 } else if let Some(above) = above.filter(|_| index == 0) {
                     above.clone()
                 } else {
-                    run.link.clone()
+                    Some(link.clone())
                 };
                 keys.push(key);
             }
@@ -252,9 +266,20 @@ impl<'a> Identities<'a> {
     }
 }
 
+impl GridRow {
+    /// Any program link owning cells in this text interval. Concealed and inert links also own their cells,
+    /// so neither a printed URL nor a pathname can take over.
+    fn has_osc_link(&self, from: u16, to: u16) -> bool {
+        self.runs
+            .iter()
+            .any(|run| run.link.is_some() && run.col < to && run.col + run.width > from)
+    }
+}
+
 impl GridModel {
-    /// Every OSC 8 stretch on this row precedes plain URLs, and even an inert OSC target keeps its cells. Text detection
-    /// walks only the pinned 2048-character neighboring window and preserves UTF-16 ownership across soft wraps.
+    /// Every visible OSC 8 stretch on this row precedes plain URLs. All OSC targets keep ownership of their cells.
+    /// Text detection walks only the pinned 2048-character neighboring window and preserves UTF-16 ownership across
+    /// soft wraps.
     /// Concealed cells break a printed URL: a plain click opens its address without showing it first, so it may only
     /// open what the terminal actually draws.
     pub fn row_links(&self, line: u64) -> Vec<TerminalLink> {
@@ -264,8 +289,9 @@ impl GridModel {
         let mut identities = Identities::new(self);
         let keys = identities.row(line);
         let mut found: Vec<TerminalLink> = Vec::new();
+        let mut previous_stretch = HashMap::new();
         let text_end = row.text_columns(cols);
-        for (run, key) in row.runs.iter().zip(keys) {
+        for (run, key) in row.runs.iter().zip(&keys) {
             let Some(key) = key else { continue };
             let end = (run.col + run.width).min(text_end);
             let text = if end < run.col + run.width && run.is_plain_flow() {
@@ -304,6 +330,16 @@ impl GridModel {
             {
                 last += 1;
             }
+            // A lone row's stretches have separate disclosures. If the label crosses rows, a second visible
+            // stretch here prevents reconstructing it, even when our own range and label did not change.
+            let earlier = if first != last {
+                previous_stretch.insert((key.id.as_str(), key.uri.as_str()), found.len())
+            } else {
+                None
+            };
+            if let Some(index) = earlier {
+                found[index].osc_label_ambiguous = true;
+            }
             found.push(TerminalLink {
                 kind: LinkKind::Osc { id: key.id.clone() },
                 uri: key.uri.clone(),
@@ -314,6 +350,7 @@ impl GridModel {
                 )],
                 evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
                 label: text.to_owned(),
+                osc_label_ambiguous: earlier.is_some(),
             });
         }
         let Some((first, last)) = self.url_window(line) else {
@@ -353,11 +390,7 @@ impl GridModel {
                 if from >= to {
                     continue;
                 }
-                if row
-                    .runs
-                    .iter()
-                    .any(|run| run.link.is_some() && run.col < to && run.col + run.width > from)
-                {
+                if row.has_osc_link(from, to) {
                     ranges.clear();
                     break;
                 }
@@ -380,6 +413,7 @@ impl GridModel {
                     ranges,
                     evidence: (first.saturating_sub(1)..=last.saturating_add(1)).collect(),
                     label: String::new(),
+                    osc_label_ambiguous: false,
                 });
             }
         }
@@ -391,6 +425,16 @@ impl GridModel {
         self.row_links(position.line)
             .into_iter()
             .find(|link| link.covers(position))
+    }
+
+    /// Raw OSC 8 ownership at a real cell, even when conceal keeps it out of `link_at`.
+    /// Use the same visibility and padding boundaries as the link lookup.
+    pub(crate) fn has_osc_link_at(&self, position: Position) -> bool {
+        self.selection_line(position.line)
+            .is_some_and(|(cols, row)| {
+                position.col < row.text_columns(cols)
+                    && row.has_osc_link(position.col, position.col + 1)
+            })
     }
 
     /// Bound the neighboring search in UTF-16 units. A real blank anywhere in a neighboring row ends that side.

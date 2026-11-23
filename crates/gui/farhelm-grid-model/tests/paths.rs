@@ -8,7 +8,8 @@
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
 use farhelm_grid_model::{
-    GridModel, GridOutput, LinkKind, Position, Selection, SelectionMode, TerminalLink, web_target,
+    GridModel, GridOutput, LinkKind, Position, Selection, SelectionMode, TerminalLink, style_flags,
+    web_target,
 };
 use serde_json::{Value, json};
 
@@ -112,6 +113,39 @@ fn paths(model: &GridModel, line: u64) -> Vec<String> {
         .into_iter()
         .map(|(path, _, _)| path)
         .collect()
+}
+
+/// Conceal removes a program hyperlink's hit range without giving the cells back to printed paths. The
+/// same concealed text without an OSC 8 tag still follows the ordinary file-path rule.
+#[test]
+fn a_concealed_program_link_keeps_ownership_over_a_printed_path() {
+    let label = "src/example.rs";
+    let width = label.len() as u16;
+    let concealed = [i64::from(style_flags::HIDDEN), -1, -1];
+    let position = Position { line: 0, col: 2 };
+    let plain = lines(vec![(
+        width,
+        json!({"w":false,"r":[[0,width,label,concealed]]}),
+    )]);
+    assert_eq!(plain.path_link_at(position).unwrap().uri, label);
+
+    let tagged = linked_lines(
+        vec![(width, json!({"w":false,"r":[[0,width,label,concealed,0]]}))],
+        vec![json!(["tag", "file:///work/other.rs"])],
+    );
+    assert_eq!(
+        paths(&tagged, 0),
+        [label],
+        "the path recognizer still sees the text"
+    );
+    assert!(
+        tagged.link_at(position).is_none(),
+        "conceal removes the OSC hit range"
+    );
+    assert!(
+        tagged.path_link_at(position).is_none(),
+        "the raw tag prevents fallback"
+    );
 }
 
 /// Replaces "paths exclude diagnostic locations, prose punctuation, URLs and versions". The table pins SPEC.md's
