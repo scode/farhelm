@@ -722,22 +722,25 @@ systemd or SSH substrate ran.
   captures complete only after a successful full run. An update and a publisher require exclusive access to the capture
   directory. A comparison keeps the new PNG only when the reference is missing, unreadable or differs, at the reported
   path under this checkout's `target/gui-goldens/compare-*/`. Its fetched references belong to the same run. A broken
-  scene is reported alongside the others, and later scenes still run. Run it when anything under
-  `crates/gui/farhelm-gui/` that draws, its fonts, or GPUI or GPUI Kit change; CI does not run it yet. The development
-  profile optimizes the PNG, renderer and UI dependencies used here. In a single-process planning trial on Linux, this
-  reduced the 328-picture update from 668 to 89 seconds of render time with identical files. At that point the update
-  encoded each PNG twice. Expect a rebuild when first switching to this profile. For visual review, render the scenes
-  the change touches using `--scene 'settings-*'` (repeatable, in compare or update mode). When that run prints
-  `golden changes page:`, give the reviewer the entire `target/gui-goldens/changes/` directory along with the intended
-  design. A render with no differences produces no page. Batch fixes from source and visual review, then re-render the
-  touched scenes once per round. Before publishing, run one full `--update` and inspect any page it reports to see the
-  effects of shared components across the catalog. Treat an unintended changed scene on the page as a finding. Only a
-  full successful update can produce a completion marker. Additional Cargo build options go before a bare `--`. Only
-  libtest output options are supported after it, and `--scene` is the selector. The runner builds the test binary once
-  and splits the scenes among four processes by default, capped at available CPUs and selected scenes. A comparison
-  writes highlights from the pixels it already has. An update gives the same binary only the changed picture pairs that
-  have references after rendering. Use `--jobs N` to change the process budget for both, including `--jobs 1` for a
-  serial run. Use Cargo's `-j N` before `--` to limit build jobs. Parallel output is grouped by process.
+  scene is reported alongside the others, and later scenes still run. Run the comparison only during development and
+  landing when drawing code under `crates/gui/farhelm-gui/`, its fonts, GPUI, or GPUI Kit change. Mesa or font stack
+  updates on hosted CI and release runners can change exact pixels, and fetching the references directly requires access
+  to a private repository. The release gate runs desktop unit tests on Linux and macOS and a headless Wayland end-to-end
+  smoke test on Linux (`scripts/gui-e2e-smoke.py`). The development profile optimizes the PNG, renderer and UI
+  dependencies used here. In a single-process planning trial on Linux, this reduced the 328-picture update from 668 to
+  89 seconds of render time with identical files. At that point the update encoded each PNG twice. Expect a rebuild when
+  first switching to this profile. For visual review, render the scenes the change touches using `--scene 'settings-*'`
+  (repeatable, in compare or update mode). When that run prints `golden changes page:`, give the reviewer the entire
+  `target/gui-goldens/changes/` directory along with the intended design. A render with no differences produces no page.
+  Batch fixes from source and visual review, then re-render the touched scenes once per round. Before publishing, run
+  one full `--update` and inspect any page it reports to see the effects of shared components across the catalog. Treat
+  an unintended changed scene on the page as a finding. Only a full successful update can produce a completion marker.
+  Additional Cargo build options go before a bare `--`. Only libtest output options are supported after it, and
+  `--scene` is the selector. The runner builds the test binary once and splits the scenes among four processes by
+  default, capped at available CPUs and selected scenes. A comparison writes highlights from the pixels it already has.
+  An update gives the same binary only the changed picture pairs that have references after rendering. Use `--jobs N` to
+  change the process budget for both, including `--jobs 1` for a serial run. Use Cargo's `-j N` before `--` to limit
+  build jobs. Parallel output is grouped by process.
 - `python3 -B scripts/test-check-gui-goldens.py` — checks the golden runner with a stand-in renderer: private comparison
   references and captures keep earlier failures available, the renderer holds the update's capture lock, and a full
   update receives a completion marker only after rendering. Failed, incomplete or selected updates cannot be published.

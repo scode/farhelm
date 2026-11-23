@@ -75,19 +75,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   the cache wrapper, the one large lever, which drops a cached view's screen-reader information unless GPUI is patched
   to replay it. Look into caching with that patch, or another way to cut per-element cost.
 
-- **Decide whether the GPUI screenshot goldens belong in the release process, and how.** The goal is that releases run
-  the GUI's visual checks. `scripts/check-gui-goldens.py` compares every GUI component and dialog, pixel for pixel, with
-  a reference picture. Today it runs only during development and landings: its reference pictures live outside this
-  repository, in the private storage repository `scripts/gui-goldens.py` fetches from (moved there on 2026-11-16 to keep
-  main's history small), and the release runners cannot read it. Decide first whether exact pixel equality belongs in a
-  release at all. The pictures come from a software rasterizer, so a GPUI or GPUI Kit bump that touches rendering shifts
-  all of them at once, and a runner with a different Mesa or font version can too. So far they have mostly confirmed
-  intended changes; their one clear catch was two changes that broke the Trash dialog together (#3662). The options
-  include exact comparison, a tolerance-based comparison, or keeping them a development-only check. Only then pick where
-  the pictures live so a release can reach them (a read token for the release runners, a public store, another home, or
-  back in the repository), and add them to the release workflow next to the end-to-end GUI smoke. Plan:
-  `plans/queue/gui-goldens-in-releases.md`.
-
 - **Recognize Muse Code questions and approvals.** Detect questions and approval dialogs during a conversation from real
   Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
   provider or a documented provider fixture protocol that can ask a real question. Plan:
