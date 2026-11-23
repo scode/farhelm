@@ -30,15 +30,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ## Plan decisions to revisit
 
-- **Revisit deferring the Codex credential migration.** On 2026-11-22 the landing monitor answered
-  `recipe-credentials-in-launch-env`'s second block on the maintainer's behalf: the plan moves Claude's recipe
-  credentials into the launch environment now and leaves Codex's delivery as it is, settings writes included, with the
-  Codex migration recorded as a Plan follow-up. The executor found that Codex 0.171.0 launch overrides cannot keep a
-  leftover settings bearer away from a tokenless endpoint: leaving the token out keeps the stale bearer, and an empty
-  one sends an empty Authorization header. The alternative was to widen the plan to find and verify a way to isolate
-  Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working. Plan:
-  `plans/queue/codex-recipe-credentials-at-launch.md`.
-
 - **Revisit Clone and Replace with starting old no-permission sessions as YOLO.** On 2026-11-23 the landing monitor,
   landing `remove-own-setting-permission` (#4669, #4672, #4673, fix #4685), accepted a consequence of migrating old
   agent sessions that never chose a permission to YOLO: Clone, Replace with and Restart with of such a session now
@@ -265,15 +256,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   another read is pending when the old delete reply arrives, and that pending read fails, the can can still show removal
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
-
-- **Move Codex recipe endpoint credentials out of its settings.** Farhelm can overwrite a concurrent save to
-  `~/.codex/config.toml` when it delivers a recipe endpoint. Keep the `farhelm` provider ID so existing sessions can
-  restart and the launcher can open saved conversations by ID. In an isolated Codex 0.171.0 loopback probe, a launch
-  override that omitted the token field sent the stale settings bearer to the new endpoint (recorder
-  `c235a277-a9fb-497d-a323-ebb0538a8976`). Explicitly clearing the field sent an empty Authorization header (recorder
-  `59601200-f69b-4179-99a6-a94f4a685ec5`). Find an override or compatible isolation mechanism that preserves saved
-  conversations, user settings and requests to tokenless endpoints without an Authorization header. Plan:
-  `plans/queue/codex-recipe-credentials-at-launch.md`.
 
 - **Explain stale launcher choices.** In the empty command field, Enter on a recent setup that has disappeared can do
   nothing without saying why. Clicking a search result for a host that just vanished can also clear the query without

@@ -431,17 +431,17 @@ waiting, including in folded progress. Every base uses this path for new hosts. 
 keeps ordinary user-manager preparation, inspection and installation, and Update keeps its ordinary installation path.
 Rerunning an interrupted initial create first recovers that create's saved installation facts, rather than using the
 recipe's latest prepared snapshot. Hosts created before recipes always built snapshots still skip snapshot building on
-setup recovery. Claude Code gets recipe authentication through the processes Farhelm launches. Codex gets a Farhelm
-model provider or subscription login through its usual settings files. Credential delivery also runs before each
-connection becomes usable and when a named token is replaced. Updates rely on that connection-time delivery. Credential
-files are private from the start of upload. A sandbox that already contains Farhelm supervisor state in a user-supplied
-base is refused during preparation, where the recipe row shows the failure, or on first ordinary setup: it would copy
-another host's identity. Prepared snapshots carry no supervisor state, so each clone creates its own identity on boot.
-Farhelm does not connect to a supervisor whose copied state it refused, including after the helm restarts. Failed setup
-keeps the host and its sandbox listed; rerunning continues against the same sandbox. When a create's outcome is unknown
-and the sandbox is not yet visible, setup and Delete sandbox keep the host listed until that request settles. A later
-retry finds and cleans up a sandbox that appeared after the failed reply; absence settles only after 15 minutes from the
-create request.
+setup recovery. Claude Code gets recipe authentication through the processes Farhelm launches. Codex gets its recipe API
+endpoint at launch and reads a recipe Subscription login from its usual `auth.json`. Credential delivery runs before
+each connection becomes usable and when a named token is replaced. Updates rely on that connection-time delivery.
+Credential files are private from the start of upload. A sandbox that already contains Farhelm supervisor state in a
+user-supplied base is refused during preparation, where the recipe row shows the failure, or on first ordinary setup: it
+would copy another host's identity. Prepared snapshots carry no supervisor state, so each clone creates its own identity
+on boot. Farhelm does not connect to a supervisor whose copied state it refused, including after the helm restarts.
+Failed setup keeps the host and its sandbox listed; rerunning continues against the same sandbox. When a create's
+outcome is unknown and the sandbox is not yet visible, setup and Delete sandbox keep the host listed until that request
+settles. A later retry finds and cleans up a sandbox that appeared after the failed reply; absence settles only after 15
+minutes from the create request.
 
 Confirmed 2026-10-10: a host entry is one logical host from the user's point of view. Correcting its destination, or
 adopting a new identity for it, changes the machine or installation behind the entry, not which host it is to the user;
@@ -529,12 +529,20 @@ Each agent's recipe choice is **None | API endpoint | Subscription**. API endpoi
 endpoint tokens; Subscription requires a named login for that agent from Credentials. Switching modes retains each draft
 but saves only the selected choice. Claude Subscription supplies `CLAUDE_CODE_OAUTH_TOKEN`. Claude API endpoint supplies
 `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`. Farhelm stores those variables in a private file in the host's
-supervisor state directory and reads it for each new process it starts, including terminal tabs and Restart. Processes
-that are already running keep their environment. None removes the managed file. The upgrade makes a one-time cleanup of
-the three legacy keys in `~/.claude/settings.json` when a previous Farhelm delivery stamped that file. Claude may show
-its own first-run setup once on a new host, which the user completes. Farhelm leaves that first-run and onboarding
-metadata to Claude. Codex None and Subscription remove `model_provider` only when it selects `farhelm`, and remove
-`experimental_bearer_token` from that provider table, preserving the table and unrelated configuration.
+supervisor state directory and reads it for each new process it starts, including terminal tabs and Restart. The upgrade
+makes a one-time cleanup of the three legacy keys in `~/.claude/settings.json` when a previous Farhelm delivery stamped
+that file. Claude may show its own first-run setup once on a new host, which the user completes. Farhelm leaves that
+first-run and onboarding metadata to Claude.
+
+Codex API endpoint supplies its provider when Farhelm starts or resumes a Codex session, including Restart and opening a
+saved conversation by ID. The provider still uses the ID `farhelm`. Its optional bearer is kept in the private state
+file alongside Claude's and goes into the environment of new sessions and tabs. A Codex command typed into a tab uses
+the shell's ordinary Codex configuration. On upgrade, a stamp for an earlier Farhelm endpoint authorizes one cleanup of
+`model_provider` when it selects `farhelm` and `experimental_bearer_token` from that provider table. The table and
+unrelated settings are preserved. After that cleanup, delivery leaves `~/.codex/config.toml` alone. On a clean host or a
+host whose only previous bearer was Farhelm's, a tokenless endpoint sends no Authorization header.
+
+Running processes keep their environment. None removes that agent's managed entries from the private state file.
 
 For each agent, credentials belong either to Farhelm (API endpoint or Subscription) or to the base image and host
 (None). When Farhelm supplies credentials, credentials for that agent already in the image or host configuration give
