@@ -38,7 +38,7 @@
 
 [package]
 name = "farhelm-desktop"
-version = "0.0.0-unreleased"
+version = "0.45.0-rc.1"
 description = "Farhelm desktop app (the native window, with the helm embedded)"
 repository = "https://github.com/scode/farhelm"
 homepage = "https://github.com/scode/farhelm"
