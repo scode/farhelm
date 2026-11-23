@@ -75,9 +75,29 @@ class ProfileTests(unittest.TestCase):
         profile = self.load()
         self.assertEqual(profile.values['guest_tester']['authorization'], str(self.root / 'consent.json'))
         self.assertEqual(profile.values['guest_tester']['auth_source'], str(self.root / 'fixture-login.json'))
+        self.assertNotIn('remote_mac_base', profile.values, 'saved runs compare their exact profile snapshots')
         self.data['guest_tester']['settings']['codex'] = 'relative/codex'
         self.write()
         with self.assertRaisesRegex(Refused, 'absolute'):
+            self.load()
+
+    def test_remote_mac_base_is_optional_and_pinned_like_the_primary_mac(self):
+        """Resolve the default when preparing a pair and validate an explicit alternate base."""
+        self.assertNotIn('remote_mac_base', self.load().values)
+        remote = {'name': 'remote-mac-base', 'mac_address': '02:00:00:00:00:AB'}
+        self.data['remote_mac_base'] = remote
+        self.write()
+        self.assertEqual(self.load().values['remote_mac_base'], dict(remote, mac_address='02:00:00:00:00:ab'))
+        self.data['remote_mac_base'] = self.data['mac_base']
+        self.write()
+        self.assertEqual(self.load().values['remote_mac_base'], self.data['mac_base'])
+        self.data['remote_mac_base'] = self.data['linux_base']
+        self.write()
+        with self.assertRaisesRegex(Refused, 'remote Mac and Linux bases must be different'):
+            self.load()
+        self.data['remote_mac_base'] = dict(remote, name='../wrong')
+        self.write()
+        with self.assertRaisesRegex(Refused, 'plain local Tart name'):
             self.load()
 
     def test_legacy_format_cannot_smuggle_native_fields_and_references_stay_private(self):

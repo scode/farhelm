@@ -14,8 +14,13 @@ import os
 from pathlib import Path
 import platform
 import re
+import shlex
 import shutil
 import subprocess
+import sys
+
+
+PEER_ROLES = {'linux': 'linux', 'mac': 'remote-mac'}
 
 
 class ProbeError(RuntimeError):
@@ -66,6 +71,7 @@ def paths(home, environ):
         values.update(directory / name for name in ('farhelm', 'farhelm-desktop', 'farhelm-supervisor'))
     values.add(home / '.local/bin/.farhelm-installation')
     values.add(home / 'Applications/.farhelm-app.lock')
+    values.add(home / 'Library/LaunchAgents/io.farhelm.supervisor.plist')
     bundle = 'org.scode.farhelm.desktop'
     values.add(home / ('Library/Preferences/' + bundle + '.plist'))
     values.add(home / ('Library/Saved Application State/' + bundle + '.savedState'))
@@ -111,7 +117,7 @@ not match merely because it lives under a farhelm-brick-test evidence tree.
     # farhelm, but retain the truncated legacy supervisor name as residue too.
     running = [name for name in names if Path(name).name in {*executables, 'farhelm-supervi'}]
     services = []
-    if role == 'mac':
+    if role in ('mac', 'remote-mac'):
         row = command(['/bin/launchctl', 'list'], runner)
         receipts.append(row)
         services.extend(line for line in required(row).splitlines() if 'farhelm' in line.lower())
@@ -134,7 +140,7 @@ not match merely because it lives under a farhelm-brick-test evidence tree.
             'services': services, 'commands': receipts}
 
 
-def require_clean_pair(value):
+def require_clean_pair(value, peer_role='linux'):
     """Require both guests' concrete absence observations rather than a lone clean label.
 
 This validates the deterministic helper's receipt at host import. It supplements
@@ -142,13 +148,17 @@ the operator's review of actual command events; a same-user model is not an
 adversarial security boundary. Missing roles or contradictory dirty observations
 cannot become a passing fixture checkpoint through its top-level boolean.
 """
+    if peer_role not in PEER_ROLES.values():
+        raise ProbeError('unknown peer fixture role')
+    expected_roles = {'mac', peer_role}
     if (not isinstance(value, dict) or type(value.get('format')) is not int or value['format'] != 1 or value.get('clean') is not True
             or value.get('error') or not isinstance(value.get('observations'), list)
             or len(value['observations']) != 2):
-        raise ProbeError('fixture receipt needs a clean Mac and Linux pair')
+        peer_name = 'Linux' if peer_role == 'linux' else 'remote Mac'
+        raise ProbeError(f'fixture receipt needs a clean Mac and {peer_name} pair')
     roles = set()
     for row in value['observations']:
-        if not isinstance(row, dict) or row.get('role') not in ('mac', 'linux') or row['role'] in roles:
+        if not isinstance(row, dict) or row.get('role') not in expected_roles or row['role'] in roles:
             raise ProbeError('fixture receipt has missing or duplicate guest roles')
         roles.add(row['role'])
         if not Path(row.get('home', '')).is_absolute() or set(row.get('xdg', {})) != {'XDG_STATE_HOME', 'XDG_CONFIG_HOME'}:
@@ -163,7 +173,7 @@ cannot become a passing fixture checkpoint through its top-level boolean.
             raise ProbeError('fixture receipt contains residue or missing observations')
         commands = row.get('commands', [])
         expected = [['/bin/ps', '-axo', 'comm=']]
-        if row['role'] == 'mac':
+        if row['role'] in ('mac', 'remote-mac'):
             expected.append(['/bin/launchctl', 'list'])
         else:
             for scope in ('--user', '--system'):
@@ -181,7 +191,8 @@ cannot become a passing fixture checkpoint through its top-level boolean.
         if any(Path(line.strip()).name in {'farhelm', 'farhelm-desktop', 'farhelm-supervisor', 'farhelm-supervi'}
                for line in commands[0]['stdout'].splitlines()):
             raise ProbeError('fixture process receipt contradicts absence')
-        if row['role'] == 'mac' and any('farhelm' in line.lower() for line in commands[1]['stdout'].splitlines()):
+        if row['role'] in ('mac', 'remote-mac') and any(
+                'farhelm' in line.lower() for line in commands[1]['stdout'].splitlines()):
             raise ProbeError('fixture launch-agent receipt contradicts absence')
         if row['role'] == 'linux':
             managers = [item for item in commands if item['argv'][0] == '/usr/bin/systemctl' and item['argv'][2] == 'show']
@@ -190,31 +201,47 @@ cannot become a passing fixture checkpoint through its top-level boolean.
     return value
 
 
-def merge_peer(remote):
-    """Require a completed Linux observation without mistaking dirty state for SSH failure."""
+def merge_peer(remote, peer_role='linux'):
+    """Require the expected peer's completed probe, distinguishing residue from SSH failure."""
     if len(remote.stdout) + len(remote.stderr) > 512 * 1024:
         raise ProbeError('peer fixture observation exceeded its output bound')
     if remote.returncode not in (0, 1) or remote.stderr.strip():
         raise ProbeError('pinned peer fixture observation failed')
     peer = json.loads(remote.stdout)
-    if peer.get('format') != 1 or len(peer.get('observations', [])) != 1 or peer['observations'][0].get('role') != 'linux':
+    if peer.get('format') != 1 or len(peer.get('observations', [])) != 1 or peer['observations'][0].get('role') != peer_role:
         raise ProbeError('pinned peer returned an unexpected fixture receipt')
     if peer.get('error') or type(peer.get('clean')) is not bool or remote.returncode != int(not peer['clean']):
         raise ProbeError('pinned peer cleanliness and completion disagree')
     return peer['observations']
 
 
+def peer_probe(alias):
+    """Use only a run-specific strict-pinning alias, with Python suited to that peer.
+
+The helper is piped over SSH and has no checkout imports on the other side.
+Both Macs use the same prepared Python installation, even when their paths
+need quoting in the peer login shell.
+"""
+    match = re.fullmatch(r'fh-(linux|mac)-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', alias)
+    if not match:
+        raise ProbeError('peer inspection requires a prepared run-specific alias')
+    peer_role = PEER_ROLES[match[1]]
+    interpreter = sys.executable if peer_role == 'remote-mac' else '/usr/bin/python3'
+    command = shlex.join([interpreter, '-', '--role', peer_role])
+    return peer_role, ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes', alias, command]
+
+
 def main():
     """Collect guest-local and pinned-peer observations into one exclusive private receipt."""
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--role', choices=('mac', 'linux'), required=True)
+    parser.add_argument('--role', choices=('mac', 'linux', 'remote-mac'), required=True)
     parser.add_argument('--ssh-alias')
     parser.add_argument('--output', type=Path)
     args = parser.parse_args()
-    expected = 'Darwin' if args.role == 'mac' else 'Linux'
+    expected = 'Linux' if args.role == 'linux' else 'Darwin'
     if platform.system() != expected:
         raise ProbeError('role does not match this guest platform')
-    if args.role == 'mac':
+    if expected == 'Darwin':
         virtual = command(['/usr/sbin/sysctl', '-n', 'kern.hv_vmm_present'])
         if required(virtual).strip() != '1':
             raise ProbeError('Mac fixture inspection requires a virtualized guest')
@@ -222,12 +249,12 @@ def main():
     try:
         value['observations'].append(probe(args.role, Path.home(), os.environ))
         if args.ssh_alias:
-            if args.role != 'mac' or not re.fullmatch(r'fh-linux-[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}', args.ssh_alias):
-                raise ProbeError('peer inspection requires the prepared run-specific Linux alias')
-            remote = subprocess.run(['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-                                     args.ssh_alias, '/usr/bin/python3', '-', '--role', 'linux'],
+            if args.role != 'mac':
+                raise ProbeError('peer inspection must start from the GUI Mac')
+            peer_role, argv = peer_probe(args.ssh_alias)
+            remote = subprocess.run(argv,
                                     input=Path(__file__).read_bytes(), capture_output=True, timeout=180)
-            value['observations'].extend(merge_peer(remote))
+            value['observations'].extend(merge_peer(remote, peer_role))
         value['clean'] = all(row['clean'] for row in value['observations'])
     except (OSError, ValueError, RuntimeError, subprocess.SubprocessError) as error:
         value['error'] = str(error)
