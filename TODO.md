@@ -472,6 +472,9 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   is treated as YOLO on this host. Local (this machine) asks before every YOLO launch. Nothing has been started." with
   Cancel, "Start, and don't ask again on this host" and "Start YOLO session anyway".) Plan:
   `plans/queue/remove-own-setting-permission.md`.
+- **Make a pending upgrade more eye-catching.** when there is an upgrade pending, make it a little more "eyey catching".
+  in addition to being read, let's have some kind of "animation" like a bouncing arrow or something point at it every 15
+  minutes while its being used or something liek that (details tbd during planning of todo item)
 
 ## Mid term
 
