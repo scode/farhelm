@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`codex-recipe-credentials-at-launch`](reports/codex-recipe-credentials-at-launch.report.md) landed 2026-11-23 in #4679, #4680, #4693: Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
-- [`wayland-clipboard-file-paste`](reports/wayland-clipboard-file-paste.report.md) landed 2026-11-23 in #4682: Read text/uri-list local files in Wayland clipboard paste with same-offer fallback
 - [`toolkit-reduced-motion`](reports/toolkit-reduced-motion.report.md) landed 2026-11-23 in #4681, #4687, #4707: Follow GPUI's live reduced-motion setting everywhere and remove the desktop startup check
 - [`fallback-unattachable-remembered-tab`](reports/fallback-unattachable-remembered-tab.report.md) landed 2026-11-23 in #4690, #4695: Fall back to the main terminal when a remembered shell tab receives an explicit initial attach refusal
 - [`fix-muse-conversation-reporting`](reports/fix-muse-conversation-reporting.report.md) landed 2026-11-23 in #4696, #4708: Pass non-secret session identity args to Muse Code hooks across environment scrubbing
