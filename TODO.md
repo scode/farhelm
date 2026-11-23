@@ -143,14 +143,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
-- **Attribute Grok and Codex hook reports to the process that ran the hook.** A live drift run on 2026-11-22 showed Grok
-  1.0.92's hooks firing but every report refused ("the session pane looks like a Grok runtime that is not the recognised
-  emitter"): Grok's installer links `~/.grok/bin/grok` to a versioned `~/.grok/downloads/grok-<version>-linux-x86_64`,
-  and Grok's attribution accepts only the names `grok` and `grok-linux-x86_64`, so Restart cannot resume Grok sessions
-  on such installs. Move Grok and Codex to the rule Claude, Muse and Antigravity already use (the process that ran the
-  hook, plus the first-report pin), and write it down as the default for every agent, with a name or launch-shape rule
-  only where evidence shows the default does not work. Plan: `plans/queue/positional-hook-attribution.md`.
-
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read

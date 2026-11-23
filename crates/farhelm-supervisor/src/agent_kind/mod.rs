@@ -136,8 +136,10 @@
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
 //!   exhaustive matches. Claude, Muse and Antigravity share `vendor/positional.rs` with
 //!   explicit per-kind event, record-verification and correction-notice policies.
-//! - **Process-tree attribution:** `procs/<kind>.rs`, each kind's corridor;
-//!   Claude, Muse and Antigravity share `procs/positional.rs` without executable recognition.
+//! - **Process-tree attribution:** `procs/positional.rs` and the durable `ReportPin`
+//!   are the default for a new agent. Grok adds an emitter option check. OMP keeps
+//!   its launch-shape proof in `procs/omp.rs`. See **Default process attribution**
+//!   in SPEC_impl.md for the evidence required for an exception.
 //!   Custom agents use the same process pin with a separate reporter invocation grammar.
 //!   Changes to their wrapper and reporter behavior belong in the contract changelog in
 //!   `website/src/content/docs/docs/agents/custom-agent-contract.md`.

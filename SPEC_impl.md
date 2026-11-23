@@ -4314,22 +4314,42 @@ no path values are stored in the notice.
   Grok discovers its reporter in the agent's configuration. The per-launch opt-in controls whether the supervisor sets
   up Farhelm's file there.
 
-  **Shared attribution framework and the five-step admission.** Attribution is shared mechanics in two halves, not Codex
-  code. Collection runs in the hook, when it makes its report: from the hook itself upwards, at most 64 `Running` edges,
-  the hook's own start token verified first, each edge capturing its image (an unreadable one ends collection there) and
-  its argv (optional evidence: `/proc` exe plus bounded NUL cmdline on Linux, a bounded `KERN_PROCARGS2` argv reader on
-  macOS, 64 KiB per process and 1 MiB per walk, with over-budget or truncated argv recorded as missing rather than
-  prefix-matched), plus the working directory of Bun and Node processes, whose relative entry spelling OMP attribution
-  resolves. Collection does not know the terminal, so it climbs until the ancestry ends, a process cannot be read, or a
-  budget runs out, and notes why it stopped; every edge and image is then re-read, and the chain is cut below the first
-  one that changed (an exec between observation and re-read). Anchoring runs in the supervisor, when it applies the
-  report: the chain must contain the session's current terminal root process (its terminal host's child), by pid and
-  start token pinned while that process ran, and by pid alone for a child that had already exited when its host was
-  adopted (`procs::TerminalAnchor`), and is cut there; it must be one unbroken line of parents within the depth and argv
-  budgets, re-checked because the chain is now file input. Every launch runs a new root process, so anchoring is also
-  what ties a report to its launch, for every vendor. Codex, Claude, Muse, Antigravity and Grok select their emitter by
-  position through narrow hook trampolines, accept arbitrary ancestry above it, and use the shared pin with every
-  recorded ancestor eligible to correct it. Grok checks `--no-leader` on the emitter. OMP verifies its own launch shape.
+  **Shared attribution framework and the five-step admission.** Collection runs in the hook, when it makes its report:
+  from the hook itself upwards, at most 64 `Running` edges, the hook's own start token verified first, each edge
+  capturing its image (an unreadable one ends collection there) and its argv (optional evidence: `/proc` exe plus
+  bounded NUL cmdline on Linux, a bounded `KERN_PROCARGS2` argv reader on macOS, 64 KiB per process and 1 MiB per walk,
+  with over-budget or truncated argv recorded as missing rather than prefix-matched), plus the working directory of Bun
+  and Node processes, whose relative entry spelling OMP attribution resolves. Collection does not know the terminal, so
+  it climbs until the ancestry ends, a process cannot be read, or a budget runs out, and notes why it stopped; every
+  edge and image is then re-read, and the chain is cut below the first one that changed (an exec between observation and
+  re-read). Anchoring runs in the supervisor, when it applies the report: the chain must contain the session's current
+  terminal root process (its terminal host's child), by pid and start token pinned while that process ran, and by pid
+  alone for a child that had already exited when its host was adopted (`procs::TerminalAnchor`), and is cut there; it
+  must be one unbroken line of parents within the depth and argv budgets, re-checked because the chain is now file
+  input. Every launch runs a new root process, so anchoring is also what ties a report to its launch.
+
+  **Default process attribution.** Use position plus a durable process pin when adding attribution for any agent. Start
+  at the reporter's parent and skip only narrow shell trampolines that directly run the hook. Take the first process
+  left in the chain. The terminal root ends the search even if it resembles a trampoline. The first admitted report pins
+  the emitter and records its ancestors through the root. Later reports can keep that binding from the same emitter or
+  correct it from a recorded ancestor according to the vendor's record and event policy. Claude, Codex, Muse, Grok and
+  Antigravity use this rule. Grok also requires `--no-leader` on the emitter to establish an owned backend.
+
+  Add an executable-name or launch-shape rule only when recorded evidence shows what position plus pin cannot
+  distinguish. OMP is the launch-shape exception. Its extension's TUI context check excludes delegated callbacks inside
+  the same process. A second interactive OMP can pass that check and report first under positional attribution. The
+  recorded launch descriptor and the corridor distinguish the launched runtime from that nested case, as pinned by
+  `a_nested_omp_runtime_is_refused` and described under **The OMP ownership proof** below.
+
+  A child can become the first pinned emitter when the parent's report is lost. In a live Grok session carried across an
+  upgrade with an older conversation and no pin, a nested Grok's newer `SessionStart` can replace that conversation. The
+  recorded parent's next `SessionStart` can correct the choice and the Restart target.
+
+  A short-lived emitter can leave a pin that is already dead on the next report. A recorded ancestor can still correct
+  the choice according to the vendor's event rules. Otherwise a dead pin releases for a fresh emitter only when the
+  incoming report's chain omits the pinned process identity. Codex accepts a valid report from a shell in that position.
+  Grok requires the emitter's own backend option even when the process will exit after the hook.
+
   Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O (the report file's discriminator
   check re-applied against the fenced resolution, plus raw event/source/agent-identity validation before diagnostic
   sanitation); the unbounded capture claim (one shared session-keyed `capture_locks` registry for report admission and
@@ -4539,10 +4559,10 @@ no path values are stored in the notice.
   race for a slot, and the later rename wins. A report that names a sub-agent is never written, since it would take the
   slot of a pending report from the session's own agent and then be refused; a nested runtime that carries no such
   marker (a second Grok started inside a Grok session, or any `agy` run inside a Farhelm session, whose user-installed
-  hooks are global) can still take that slot, within one pass while the supervisor runs or across an outage, and is then
-  refused. An Antigravity subagent sharing the main process can take the slot the same way before its transcript check
-  refuses it. The next verified main report captures the main conversation again, or for the first time when nothing was
-  captured yet.
+  hooks are global) can still take that slot within one pass or across an outage. The existing pin can refuse it when
+  applied. With no pin, the first admitted report can select its own conversation. An Antigravity subagent sharing the
+  main process can take the slot the same way before its transcript check refuses it. A later verified report from a
+  recorded ancestor can correct a child-first selection.
 
   The supervisor applies waiting reports on recursive file-watch events and at the start of every reconciliation pass
   (`capture_now`: the 2 s ticker, startup, reload, Restart) and does nothing while it is not recording. It takes a slot
