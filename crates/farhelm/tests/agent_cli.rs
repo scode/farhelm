@@ -2001,6 +2001,7 @@ fn create_sends_every_flag_and_prints_only_the_new_id_on_stdout() {
             request,
             AgentVerb::Create {
                 host: Some("builder".to_string()),
+                conversation: None,
                 templates: Vec::new(),
                 edits: farhelm_proto::launcher::TemplateFields {
                     kind: Some(farhelm_proto::launcher::LauncherKind::Command),
@@ -2745,7 +2746,7 @@ fn create_refuses_retired_and_malformed_launch_flags() {
             ][..],
             &["--yolo"][..],
         ),
-        // An unknown agent type lists the real ones.
+        // A spelling that cannot be either agent type lists the built-in choices.
         (
             &[
                 "create",
@@ -2757,10 +2758,10 @@ fn create_refuses_retired_and_malformed_launch_flags() {
                 "sh {farhelm_args}",
                 "--no-yolo",
                 "--agent",
-                "bogus",
+                "not an ID",
             ][..],
             &[
-                "\"bogus\" is not an agent type",
+                "\"not an ID\" is not an agent type",
                 "claude",
                 "codex",
                 "open_code",

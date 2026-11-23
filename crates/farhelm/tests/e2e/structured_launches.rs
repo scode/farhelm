@@ -1044,6 +1044,7 @@ async fn explicit_spawn_inheritance_relays_the_parents_stored_launch() {
         .ask(
             &parent.id,
             AgentVerb::Create {
+                conversation: None,
                 host: None,
                 templates: Vec::new(),
                 edits: TemplateFields {

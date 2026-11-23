@@ -1187,6 +1187,11 @@ pub(crate) struct CreateReq {
     /// composing one again and recording it as the user's own choice.
     #[serde(skip)]
     agent: Option<AgentEnvironmentCreate>,
+    /// The user's compiled launch at environment admission. Provisioning can take
+    /// minutes, so catalog edits made while it runs must not change the command
+    /// or capabilities this request starts with. Destination trust still applies at create.
+    #[serde(skip)]
+    prepared_user_launch: Option<SessionLaunch>,
     /// Sent only by this create, never retained as a recent setup or launch.
     prompt: Option<String>,
     /// A selector for this start only, never part of history or templates.
@@ -1311,6 +1316,7 @@ impl CreateReq {
         prompt: Option<String>,
         title: Option<String>,
         repo: Option<String>,
+        conversation: Option<String>,
     ) -> anyhow::Result<CreateReq> {
         let (selection, command) = match launch.as_launch() {
             farhelm_proto::SessionLaunch::Agent { selection, .. } => {
@@ -1335,8 +1341,9 @@ impl CreateReq {
                 agent_wrapper_supplied,
                 wrapper_approved: agent_wrapper_supplied,
             }),
+            prepared_user_launch: None,
             prompt,
-            conversation: None,
+            conversation,
             cwd: "~".into(),
             launch: selection,
             command,
@@ -1368,10 +1375,14 @@ impl CreateReq {
         }
     }
 
-    /// Refuse an invalid recipe launch before any sandbox can start billing.
+    /// Refuse an invalid recipe launch before any sandbox can start billing,
+    /// and carry the checked launch into provisioning.
     /// Placement belongs to the recipe route, and Folder means the new home;
     /// accepting an installed host or stale folder here would disguise reuse.
-    pub(crate) fn validate_sandbox_launch(&self) -> anyhow::Result<()> {
+    pub(crate) async fn prepare_sandbox_launch(
+        &mut self,
+        store: &store::HelmStore,
+    ) -> anyhow::Result<Option<farhelm_proto::NamedConversationStart>> {
         if self
             .launch
             .as_ref()
@@ -1413,22 +1424,25 @@ impl CreateReq {
                 ));
             }
         }
-        // Ordinary create consumes its selectors. Validate a copy here so a
-        // future local refusal applies before billing as well as before RPC.
-        // An agent's environment launch is already composed (a clone copies
-        // its source's stored launch, which today's catalog need not offer
-        // any more); only a fresh client choice is compiled here.
+        // The public selectors still describe the recipe launch for history.
+        // Compile their copy so a catalog edit cannot swap the executable
+        // after admission. Agent launches already carry their approved command.
         let launch = match &self.agent {
             Some(agent) => agent.launch.as_launch().clone(),
-            None => create_mode(&mut self.clone())?,
+            None => create_mode(store, &mut self.clone()).await?,
         };
         launch
             .validate_initial_prompt(self.prompt.as_deref(), self.conversation.is_some())
             .map_err(invalid_request)?;
-        if let Some(conversation) = &self.conversation {
-            launches::named_start(&launch, conversation.clone()).map_err(invalid_request)?;
+        let named_start = self
+            .conversation
+            .as_ref()
+            .map(|id| launches::named_start(&launch, id.clone()).map_err(invalid_request))
+            .transpose()?;
+        if self.agent.is_none() {
+            self.prepared_user_launch = Some(launch);
         }
-        Ok(())
+        Ok(named_start)
     }
 }
 
@@ -1955,7 +1969,7 @@ async fn create_session_request(
     // An agent's environment launch arrives composed and approved; compiling
     // its selection again could refuse a clone's historical choices.
     let ordinary_mode = if req.github_checkout.is_none() && req.agent.is_none() {
-        Some(create_mode(&mut req)?)
+        Some(create_mode(&state.store, &mut req).await?)
     } else {
         None
     };
@@ -2629,7 +2643,10 @@ async fn create_fresh_session_resolved(
             // An agent's approval already fixed this trust choice. Reading
             // Settings again here must not change the approved launch.
             Some(mode) => mode,
-            None => configured_launch_workspace_trust(create_mode(&mut req)?, &config)?,
+            None => configured_launch_workspace_trust(
+                create_mode(&state.store, &mut req).await?,
+                &config,
+            )?,
         };
         Ok((github_checkout, mode))
     }
@@ -2763,6 +2780,7 @@ pub(crate) async fn create_agent_checkout(
     let req = CreateReq {
         environment_target: None,
         agent: None,
+        prepared_user_launch: None,
         prompt: resolution.prompt,
         conversation: None,
         cwd: String::new(),
@@ -2803,11 +2821,18 @@ pub(crate) async fn create_agent_checkout(
 /// both are worth making loudly rather than picking a winner. A body naming
 /// BOTH an agent launch and a command launch has no honest reading; a body
 /// naming NEITHER says nothing about what to run at all.
-fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
+async fn create_mode(
+    store: &store::HelmStore,
+    req: &mut CreateReq,
+) -> anyhow::Result<SessionLaunch> {
     if let Some(message) = req.retired.refusal() {
         return Err(invalid_request(message.to_string()));
     }
-    match (req.launch.take(), req.command.take()) {
+    let selectors = (req.launch.take(), req.command.take());
+    if let Some(launch) = req.prepared_user_launch.take() {
+        return Ok(launch);
+    }
+    match selectors {
         (Some(_), Some(_)) => Err(invalid_request(
             "a create names exactly one of launch or command: each is a complete launch and \
              there is no honest way to merge the two"
@@ -2818,8 +2843,12 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
              body names neither, so there is nothing to launch"
                 .to_string(),
         )),
-        (Some(selection), None) => resolve_launch_request(LaunchRequest::Agent { selection }),
-        (None, Some(command)) => resolve_launch_request(LaunchRequest::Command(command)),
+        (Some(selection), None) => {
+            resolve_registered_launch(store, LaunchRequest::Agent { selection }).await
+        }
+        (None, Some(command)) => {
+            resolve_registered_launch(store, LaunchRequest::Command(command)).await
+        }
     }
 }
 
@@ -2830,7 +2859,10 @@ fn create_mode(req: &mut CreateReq) -> anyhow::Result<SessionLaunch> {
 /// `InvalidRequest`. Incoming workspace trust is retained on the wire only
 /// for compatibility; the destination-aware composition phase supplies it
 /// from Settings after this local validation succeeds.
-pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<SessionLaunch> {
+pub(crate) fn resolve_launch_request(
+    request: LaunchRequest,
+    custom: Option<&farhelm_proto::custom_agents::CustomAgent>,
+) -> anyhow::Result<SessionLaunch> {
     match request {
         LaunchRequest::Agent { mut selection } => {
             if selection.container.is_some() {
@@ -2841,13 +2873,46 @@ pub(crate) fn resolve_launch_request(request: LaunchRequest) -> anyhow::Result<S
             // Keep the strict wire field for stored data and old clients,
             // but only Settings may supply it for a newly composed launch.
             selection.workspace_trust = None;
-            crate::launches::compile(selection).map_err(invalid_request)
+            if selection.harness.uses_custom_catalog() {
+                if selection.custom_agent.is_none() {
+                    return Err(invalid_request("select a registered custom agent".into()));
+                }
+                crate::launches::compile_custom(
+                    selection,
+                    custom.ok_or_else(crate::custom_agents::missing_agent)?,
+                )
+                .map_err(invalid_request)
+            } else {
+                crate::launches::compile(selection).map_err(invalid_request)
+            }
         }
         LaunchRequest::Command(command) => {
             command.validate().map_err(invalid_request)?;
+            if let Some(id) = &command.custom_agent
+                && !custom.is_some_and(|agent| &agent.id == id)
+            {
+                return Err(crate::custom_agents::missing_agent());
+            }
             Ok(SessionLaunch::Command(command))
         }
     }
+}
+
+/// Read the one registration a fresh selection uses. A plain Restart or clone keeps its compiled launch and never
+/// crosses this boundary, so later catalog edits cannot rewrite those commands.
+async fn resolve_registered_launch(
+    store: &store::HelmStore,
+    request: LaunchRequest,
+) -> anyhow::Result<SessionLaunch> {
+    let id = match &request {
+        LaunchRequest::Agent { selection } => selection.custom_agent.as_deref(),
+        LaunchRequest::Command(command) => command.custom_agent.as_deref(),
+    };
+    let custom = match id {
+        Some(id) => store.custom_agent(id).await?,
+        None => None,
+    };
+    resolve_launch_request(request, custom.as_ref())
 }
 
 #[cfg(test)]
@@ -2898,9 +2963,15 @@ mod workspace_trust_tests {
             Some(true),
             "premise: Settings trust a managed Codex checkout"
         );
-        let req =
-            CreateReq::for_agent_environment(approved, true, None, None, Some("acme/web".into()))
-                .unwrap();
+        let req = CreateReq::for_agent_environment(
+            approved,
+            true,
+            None,
+            None,
+            Some("acme/web".into()),
+            None,
+        )
+        .unwrap();
         assert!(matches!(
             req.origin(),
             CreateOrigin::Agent {
@@ -2987,7 +3058,8 @@ mod workspace_trust_tests {
                     container: None,
                     workspace_trust: trust,
                 };
-                let resolved = resolve_launch_request(LaunchRequest::Agent { selection }).unwrap();
+                let resolved =
+                    resolve_launch_request(LaunchRequest::Agent { selection }, None).unwrap();
                 assert_eq!(
                     resolved.agent_selection().unwrap().workspace_trust,
                     None,
@@ -3483,7 +3555,10 @@ async fn resolve_and_restart_session(
     let id = key.session_id.as_str();
     // Resolved before routing: a malformed edit is the caller's to fix
     // wherever the session lives.
-    let with = with.map(resolve_launch_request).transpose()?;
+    let with = match with {
+        Some(request) => Some(resolve_registered_launch(&state.store, request).await?),
+        None => None,
+    };
     if let Some(value) = conversation.as_ref() {
         let launch = with.as_ref().ok_or_else(|| {
             invalid_request("a named restart requires Restart with an agent launch".into())
@@ -4761,7 +4836,7 @@ async fn replace_session_inner(
                 // catalog is allowed to compile or refuse its launch.
                 None
             } else {
-                Some(create_mode(with)?)
+                Some(create_mode(&state.store, with).await?)
             }
         }
         None => None,

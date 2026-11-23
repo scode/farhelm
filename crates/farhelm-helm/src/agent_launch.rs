@@ -22,6 +22,7 @@
 //! whether this is a spawn and how a `--host` name resolves; this module
 //! reports only the host identity a template named.
 
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::{
     LaunchTemplate, LauncherKind, LauncherState, TemplateContext, TemplateDestination,
     TemplateFields, TemplateNameKind, TemplateRefusal, apply_template, apply_templates,
@@ -88,6 +89,7 @@ pub(crate) fn template_host_row<'v>(views: &'v [HostView], identity: &str) -> Op
 fn flag_for(field: &str) -> &'static str {
     match field {
         "model" => "--model",
+        "custom agent" => "--agent",
         "initial prompt" => "--prompt/--prompt-file",
         "effort" => "--effort",
         "permissions" => "--permissions",
@@ -124,6 +126,7 @@ pub(crate) fn resolve(
     templates: &[String],
     edits: &TemplateFields,
     known_hosts: &[String],
+    custom_agents: &[CustomAgent],
     spawn: bool,
     host_given: bool,
 ) -> anyhow::Result<Resolution> {
@@ -135,6 +138,7 @@ pub(crate) fn resolve(
             known_hosts,
             known_recipes: &[],
             known_places: &[],
+            custom_agents,
         },
         spawn,
         host_given,
@@ -153,6 +157,8 @@ pub(crate) struct Placement<'a> {
     pub(crate) known_hosts: &'a [String],
     pub(crate) known_recipes: &'a [String],
     pub(crate) known_places: &'a [farhelm_proto::Place],
+    /// The same catalog snapshot supplies the ID and both compiled command lines.
+    pub(crate) custom_agents: &'a [CustomAgent],
 }
 
 /// Resolve a hostless, non-spawn create whose templates or flags may place
@@ -279,7 +285,7 @@ fn resolve_with(
             };
             LaunchRequest::Agent {
                 selection: LaunchSelection {
-                    custom_agent: None,
+                    custom_agent: state.custom_agent,
                     permission_flags: state.permission_flags,
                     wrapper_prefix: state.wrapper_prefix,
                     container: state.container,
@@ -306,7 +312,7 @@ fn resolve_with(
                 ));
             };
             LaunchRequest::Command(CommandLaunch {
-                custom_agent: None,
+                custom_agent: state.command_custom_agent,
                 command: state.command,
                 yolo,
                 agent: state.command_agent,
@@ -314,7 +320,12 @@ fn resolve_with(
             })
         }
     };
-    let launch = crate::sessions::resolve_launch_request(request)?;
+    let id = match &request {
+        LaunchRequest::Agent { selection } => selection.custom_agent.as_deref(),
+        LaunchRequest::Command(command) => command.custom_agent.as_deref(),
+    };
+    let registered = id.and_then(|id| placement.custom_agents.iter().find(|agent| agent.id == id));
+    let launch = crate::sessions::resolve_launch_request(request, registered)?;
     // A template switch can leave an earlier prompt dormant. Only the final
     // program can receive it. The fold already refused an explicit unsupported edit.
     let prompt = state.prompt.filter(|_| {
@@ -367,6 +378,7 @@ mod tests {
             &["wrapped".into()],
             &TemplateFields::default(),
             &[],
+            &[],
             false,
             false,
         )
@@ -380,6 +392,7 @@ mod tests {
                 container: None,
                 ..Default::default()
             },
+            &[],
             &[],
             false,
             false,
@@ -410,6 +423,7 @@ mod tests {
                 ..Default::default()
             },
             &[],
+            &[],
             false,
             false,
         )
@@ -429,6 +443,7 @@ mod tests {
                 ..TemplateFields::default()
             },
             &[],
+            &[],
             false,
             false,
         )
@@ -447,6 +462,7 @@ mod tests {
                 ..Default::default()
             },
             &[],
+            &[],
             false,
             false,
         )
@@ -455,6 +471,64 @@ mod tests {
     }
 
     use super::*;
+
+    /// A CLI effort override is folded after its template has selected the registration. `default`
+    /// clears the template's effort, and a Command declaration keeps the ID without composing its command.
+    #[farhelm_testtrace::test]
+    fn custom_agent_choices_follow_template_and_command_rules() {
+        let catalog = [CustomAgent {
+            id: "acme-code".into(),
+            display_name: "Acme Code".into(),
+            command: "acme-code".into(),
+            supports_resumption: true,
+            supports_reporting: false,
+        }];
+        let template = LaunchTemplate {
+            name: "acme".into(),
+            fields: serde_json::from_value(serde_json::json!({
+                "kind": "agent", "agent": "custom", "custom_agent": "acme-code",
+                "effort": "deep_work", "destination": {"folder":"/work"},
+            }))
+            .unwrap(),
+        };
+        let named = ["acme".into()];
+        let resolved = resolve(
+            std::slice::from_ref(&template),
+            &named,
+            &TemplateFields {
+                effort: Some(None),
+                ..Default::default()
+            },
+            &[],
+            &catalog,
+            false,
+            false,
+        )
+        .unwrap();
+        assert_eq!(
+            resolved.launch.start_argv().unwrap(),
+            ["acme-code", "{farhelm_args}"]
+        );
+        assert_eq!(resolved.launch.custom_reporting(), Some(false));
+
+        let command = serde_json::from_value(serde_json::json!({
+            "kind":"command", "agent":"custom", "custom_agent":"acme-code", "yolo":true,
+            "command":"exec alternate {farhelm_args}", "destination":{"folder":"/work"},
+        }))
+        .unwrap();
+        let resolved = resolve(&[], &[], &command, &[], &catalog, false, false).unwrap();
+        assert_eq!(resolved.launch.custom_agent(), Some("acme-code"));
+        assert_eq!(
+            resolved.launch.display_command(),
+            "exec alternate {farhelm_args}"
+        );
+        assert_eq!(
+            resolved.launch.custom_reporting(),
+            None,
+            "the Command declaration supplies its own report contract"
+        );
+        assert!(resolve(&[], &[], &command, &[], &[], false, false).is_err());
+    }
     use farhelm_proto::{LaunchEffort, LaunchHarness};
 
     fn template(name: &str, fields: TemplateFields) -> LaunchTemplate {
@@ -512,6 +586,7 @@ mod tests {
             ),
         ];
         let placement = Placement {
+            custom_agents: &[],
             known_hosts: &["identity-builder".to_string()],
             known_recipes: &["dev".to_string()],
             known_places: &[farhelm_proto::Place::PodmanHost(7)],
@@ -573,6 +648,7 @@ mod tests {
                 ..Default::default()
             },
             &[],
+            &[],
             false,
             false,
         )
@@ -596,6 +672,7 @@ mod tests {
                 name: Some("explicit".to_string()),
                 ..Default::default()
             },
+            &[],
             &[],
             false,
             false,
@@ -628,6 +705,7 @@ mod tests {
                 &["named".into()],
                 &TemplateFields::default(),
                 &[],
+                &[],
                 false,
                 false,
             )
@@ -643,6 +721,7 @@ mod tests {
                         name_kind: supplied,
                         ..Default::default()
                     },
+                    &[],
                     &[],
                     false,
                     false,
@@ -679,6 +758,7 @@ mod tests {
                 ..Default::default()
             },
             &[],
+            &[],
             false,
             false,
         )
@@ -699,7 +779,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            message(resolve(&[], &[], &no_folder, &[], false, false).unwrap_err())
+            message(resolve(&[], &[], &no_folder, &[], &[], false, false).unwrap_err())
                 .contains("--cwd")
         );
         let no_agent = TemplateFields {
@@ -707,7 +787,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            message(resolve(&[], &[], &no_agent, &[], false, false).unwrap_err())
+            message(resolve(&[], &[], &no_agent, &[], &[], false, false).unwrap_err())
                 .contains("--agent")
         );
         let no_yolo = TemplateFields {
@@ -717,7 +797,7 @@ mod tests {
             ..Default::default()
         };
         assert!(
-            message(resolve(&[], &[], &no_yolo, &[], false, false).unwrap_err())
+            message(resolve(&[], &[], &no_yolo, &[], &[], false, false).unwrap_err())
                 .contains("--no-yolo")
         );
     }
@@ -763,6 +843,7 @@ mod tests {
             &["nope".to_string()],
             &TemplateFields::default(),
             &[],
+            &[],
             false,
             false,
         );
@@ -776,6 +857,7 @@ mod tests {
                 destination: folder("/w"),
                 ..Default::default()
             },
+            &[],
             &[],
             false,
             false,
@@ -791,6 +873,7 @@ mod tests {
             &["checkout".to_string()],
             &TemplateFields::default(),
             &[],
+            &[],
             false,
             false,
         );
@@ -799,6 +882,7 @@ mod tests {
             &stored,
             &["checkout".to_string()],
             &TemplateFields::default(),
+            &[],
             &[],
             true,
             false,
@@ -815,6 +899,7 @@ mod tests {
                 ..Default::default()
             },
             &[],
+            &[],
             false,
             false,
         );
@@ -829,6 +914,7 @@ mod tests {
             &["elsewhere".to_string()],
             &TemplateFields::default(),
             &hosts,
+            &[],
             true,
             false,
         );
@@ -843,6 +929,7 @@ mod tests {
                 ..Default::default()
             },
             &hosts,
+            &[],
             false,
             false,
         )

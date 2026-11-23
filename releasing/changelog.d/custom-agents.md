@@ -2,8 +2,9 @@
 kind: added
 ---
 
-Farhelm can track the conversation of a custom tool that calls `farhelm custom-agent report-conversation`, so a
-session with a resume command can reopen that conversation on Restart.
+Farhelm can launch registered custom agents with `farhelm agent create`, `farhelm spawn`, and launch templates.
+Use `--conversation` to start a resumable agent on a conversation ID you already know. A custom agent that reports
+its conversation ID and provides a resume command can also reopen its conversation on Restart.
 
-The custom agent supplies its own reporting hook. This is the first part of custom agent support. Registration in
-Settings and the launcher arrive in the remaining changes for this plan.
+Custom agents count as YOLO and supply their own reporting hook. The desktop registration and launcher controls
+arrive in the next change for this plan.

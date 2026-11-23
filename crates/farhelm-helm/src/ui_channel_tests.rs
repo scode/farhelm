@@ -1405,7 +1405,7 @@ async fn changes_of(ws: &mut WsTestClient, collection: Collection) -> Collection
 /// routes serve it: the session rows decode as the proto type under their
 /// served ids, hosts are keyed by registry id, preferences and the
 /// announcement queue are one entry each, and the empty lists (approvals,
-/// templates, notices, host progress, recipes and their places) are
+/// templates, custom agents, notices, host progress, recipes and their places) are
 /// available, empty collections.
 #[farhelm_testtrace::test]
 async fn the_snapshot_on_open_holds_every_collection_as_served() {
@@ -1430,6 +1430,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
             Collection::SshQuestions,
             Collection::SshSignInCompletions,
             Collection::Templates,
+            Collection::CustomAgents,
             Collection::Notices,
             Collection::Announcements,
             Collection::HostProgress,
@@ -1470,6 +1471,7 @@ async fn the_snapshot_on_open_holds_every_collection_as_served() {
         Collection::SshQuestions,
         Collection::SshSignInCompletions,
         Collection::Templates,
+        Collection::CustomAgents,
         Collection::Notices,
         Collection::HostProgress,
         Collection::Recipes,

@@ -316,7 +316,7 @@ async fn handle_create_session(
         return;
     }
     if let Some(named) = &named_start {
-        let refusal = if github_checkout.is_some() || request_fingerprint.is_some() {
+        let refusal = if github_checkout.is_some() {
             Some(
                 "named conversations require an ordinary user create in an existing folder"
                     .to_string(),
@@ -431,8 +431,8 @@ async fn handle_create_session(
         // replaying a launch shaped by stale data. A fresh-checkout create binds
         // the helm's resolved checkout intent beside it (R1.4's versioned
         // discriminant, now `github_checkout_v4`). An agent's create binds the
-        // request the agent sent instead (`agent_request_fingerprint`), so a
-        // retry of that request replays even when what it names was edited.
+        // request the agent sent instead (`agent_request_fingerprint`), including
+        // its conversation ID, so a retry replays even when a template was edited.
         let idempotency = intent_key.map(|intent_key| IntentClaim {
             intent_key,
             fingerprint: match request_fingerprint.as_deref() {
@@ -3703,6 +3703,7 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
             host,
             templates,
             edits,
+            conversation,
             intent_key,
             confirm_yolo: _,
             spawn,
@@ -3716,6 +3717,9 @@ fn validate_agent_verb(verb: &AgentVerb) -> Result<(), String> {
                 );
             }
             validate_templates(templates)?;
+            if let Some(value) = conversation {
+                farhelm_proto::conversation::validate_named_conversation(value)?;
+            }
             // The flags carry the folder, title, command and resume command:
             // the create payload `validate_create_fields` bounds, counted as
             // the JSON they travel as.
@@ -4427,6 +4431,7 @@ mod tests {
     /// placement and no launch of its own (or a forged one, in `forged`).
     fn inheriting_spawn(forged: Option<SessionLaunch>) -> AgentVerb {
         AgentVerb::Create {
+            conversation: None,
             host: None,
             templates: Vec::new(),
             edits: farhelm_proto::launcher::TemplateFields::default(),
@@ -7235,6 +7240,7 @@ mod tests {
         use farhelm_proto::launcher::{TemplateDestination, TemplateFields};
         let create = |host: Option<&str>, edits: TemplateFields, intent_key: Option<&str>| {
             AgentVerb::Create {
+                conversation: None,
                 host: host.map(str::to_string),
                 templates: Vec::new(),
                 edits,
@@ -7268,6 +7274,7 @@ mod tests {
         assert!(empty_host.unwrap_err().contains("empty"));
 
         let spawn_with_host = validate_agent_verb(&AgentVerb::Create {
+            conversation: None,
             host: Some("h".to_string()),
             templates: Vec::new(),
             edits: folder("/w"),
@@ -7279,6 +7286,7 @@ mod tests {
 
         let with_templates = |templates: Vec<String>| {
             validate_agent_verb(&AgentVerb::Create {
+                conversation: None,
                 host: Some("h".to_string()),
                 templates,
                 edits: TemplateFields::default(),

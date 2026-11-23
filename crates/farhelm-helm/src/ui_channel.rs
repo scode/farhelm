@@ -289,6 +289,12 @@ pub(crate) fn production_collections() -> Vec<CollectionSpec> {
             selected: None,
         },
         CollectionSpec {
+            collection: Collection::CustomAgents,
+            path: |_| "/api/custom-agents".to_string(),
+            split: |body| split_keyed_array(body, "custom_agents", "id"),
+            selected: None,
+        },
+        CollectionSpec {
             collection: Collection::Notices,
             path: |_| "/api/notices".to_string(),
             split: |body| split_keyed_array(body, "notices", "id"),

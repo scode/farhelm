@@ -338,7 +338,7 @@ pub struct FolderHistoryEntry {
 /// history and the ladder future migrations extend. Crate-visible so tests
 /// that migrate an older database can assert it lands on the current version
 /// without pinning a number every later schema change would break.
-pub(crate) const SCHEMA_VERSION: i64 = 99;
+pub(crate) const SCHEMA_VERSION: i64 = 100;
 
 /// The host row owns its pending destruction record, so forgetting the host also clears the seal.
 const ADD_ENVIRONMENT_SEAL: &str = "ALTER TABLE hosts ADD COLUMN environment_sealed_at INTEGER;";
@@ -3221,13 +3221,15 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
               {TENSORLAKE_ACCOUNT_SCHEMA}
               {TENSORLAKE_RECIPES_SCHEMA}
               {CREDENTIALS_SCHEMA}
+              {custom_agents_schema}
               {podman_place_claims_schema}
               -- Must equal SCHEMA_VERSION exactly — see the Rust comment
               -- above this whole `execute_batch` call for what goes wrong
               -- when the two drift.
-              PRAGMA user_version = 99;",
+              PRAGMA user_version = 100;",
             announcement_schema = crate::announcements::SCHEMA,
             notice_schema = crate::notices::SCHEMA,
+            custom_agents_schema = crate::custom_agents::SCHEMA,
             podman_place_claims_schema = podman::PLACE_CLAIMS_SCHEMA,
         ))
         .context("creating schema")?;
@@ -5242,6 +5244,13 @@ fn apply_schema(conn: &mut Connection, creation_build: &str) -> anyhow::Result<(
         tx.execute_batch("PRAGMA user_version = 99;")
             .context("migrating helm.db to schema version 99")?;
         version = 99;
+    }
+    if version == 99 {
+        tx.execute_batch(crate::custom_agents::SCHEMA)
+            .context("creating the custom agent catalog")?;
+        tx.execute_batch("PRAGMA user_version = 100;")
+            .context("migrating helm.db to schema version 100")?;
+        version = 100;
     }
     if version == SCHEMA_VERSION {
         // Nothing to change; commit the otherwise-empty transaction to

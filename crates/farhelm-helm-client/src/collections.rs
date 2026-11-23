@@ -491,6 +491,40 @@ mod tests {
         .unwrap()
     }
 
+    /// A catalog entry is looked up by its stable ID. A display-name edit replaces the same entry,
+    /// and a removal clears that lookup so a live session can fall back to showing its ID.
+    #[test]
+    fn custom_agents_are_pushed_by_registration_id() {
+        let id = "acme-code";
+        let entry = |name| KeyedEntry {
+            key: id.into(),
+            value: json!({"id": id, "display_name": name, "command": "acme-code",
+                "supports_reporting":true, "supports_resumption":false}),
+        };
+        let mut collections = Collections::default();
+        collections.install(&[state(
+            Collection::CustomAgents,
+            &[id],
+            vec![entry("Acme Code")],
+        )]);
+        assert_eq!(
+            collections.ordered::<CustomAgent>()[0].display_name,
+            "Acme Code"
+        );
+        collections.apply(&changes(
+            Collection::CustomAgents,
+            &[id],
+            vec![entry("Renamed")],
+            &[],
+        ));
+        assert_eq!(
+            collections.ordered::<CustomAgent>()[0].display_name,
+            "Renamed"
+        );
+        collections.apply(&changes(Collection::CustomAgents, &[], vec![], &[id]));
+        assert!(collections.ordered::<CustomAgent>().is_empty());
+    }
+
     /// The generic apply is the GUI's only model of pushed state, so install, upsert, remove and metadata replacement
     /// must compose to exactly what a fresh snapshot of the end state holds; `check_against` is the oracle.
     #[test]

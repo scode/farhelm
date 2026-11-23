@@ -899,6 +899,25 @@ fn a_template_card_shows_every_field_it_sets() {
     assert_eq!(summary(&action), "Create a launch template");
 }
 
+/// The approval distinguishes which registered agent a template will run and an edit that clears that choice.
+#[test]
+fn a_template_card_names_the_custom_agent_registration() {
+    let card = |custom_agent| ApprovalAction::TemplateWrite {
+        name: "review".into(),
+        replaces_existing: true,
+        fields: TemplateFields {
+            agent: Some(LaunchHarness::Custom),
+            custom_agent,
+            ..TemplateFields::default()
+        },
+        host_name: None,
+    };
+    assert!(
+        facts(&card(Some(Some("acme-code".into())))).contains(&value("custom agent", "acme-code"))
+    );
+    assert!(facts(&card(Some(None))).contains(&Fact::Words("custom agent", "none")));
+}
+
 /// Historical container fields describe a retired choice, not a runnable option, and an explicit reset stays distinct
 /// from a field the template leaves alone.
 #[test]

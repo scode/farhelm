@@ -83,6 +83,9 @@ enum Cmd {
         /// Optional display title; omitted derives from the directory.
         #[arg(long)]
         title: Option<String>,
+        /// Start the child on an existing conversation the agent can reopen.
+        #[arg(long, value_name = "ID")]
+        conversation: Option<String>,
         /// Removed with agent profiles; its parser refuses every value, so
         /// a caller following older instructions gets a refusal naming the
         /// replacement rather than clap's "unexpected argument".
@@ -347,6 +350,9 @@ enum AgentCmd {
         /// Create a fresh managed checkout of this GitHub repository on the target host.
         #[arg(long, alias = "github", value_name = "REPO", conflicts_with = "cwd", value_parser = parse_checkout_repo)]
         gh: Option<String>,
+        /// Start on an existing conversation the selected agent can reopen.
+        #[arg(long, value_name = "ID", conflicts_with_all = ["gh", "recipe"])]
+        conversation: Option<String>,
         /// Host to create on, by the name `farhelm agent hosts` shows.
         /// Required unless a template sets the host or --recipe is given,
         /// and always with `--idempotency-key`.
@@ -718,6 +724,7 @@ impl AgentCmd {
                 container_host,
                 launch,
                 title,
+                conversation,
                 idempotency_key,
                 ..
             } => {
@@ -743,6 +750,7 @@ impl AgentCmd {
                         host: host.clone(),
                         templates: launch.templates.clone(),
                         edits,
+                        conversation: conversation.clone(),
                         intent_key: idempotency_key.clone(),
                         confirm_yolo: false,
                         spawn: None,
@@ -880,10 +888,29 @@ fn refuse_invocation(_value: &str) -> Result<String, String> {
     )
 }
 
-/// Parse `--agent`'s agent type by its protocol spelling, listing every
-/// agent type when the value names none.
-fn parse_agent_type(value: &str) -> Result<farhelm_proto::LaunchHarness, String> {
-    serde_json::from_value(serde_json::Value::String(value.to_string())).map_err(|_| {
+/// `--agent` can name a built-in or the stable ID of a helm registration. The CLI has no
+/// catalog connection while parsing flags, so the helm checks that ID before use.
+#[derive(Debug, Clone)]
+struct AgentTypeChoice {
+    harness: farhelm_proto::LaunchHarness,
+    custom_agent: Option<String>,
+}
+
+/// Preserve built-in wire spellings and aliases before interpreting the token as a custom catalog ID.
+fn parse_agent_type(value: &str) -> Result<AgentTypeChoice, String> {
+    if let Ok(harness) = serde_json::from_value(serde_json::Value::String(value.to_owned())) {
+        return Ok(AgentTypeChoice {
+            harness,
+            custom_agent: None,
+        });
+    }
+    if farhelm_proto::custom_agents::validate_id(value).is_ok() {
+        return Ok(AgentTypeChoice {
+            harness: farhelm_proto::LaunchHarness::Custom,
+            custom_agent: Some(value.to_owned()),
+        });
+    }
+    Err({
         let types: Vec<String> = farhelm_proto::LaunchHarness::ALL
             .iter()
             .filter_map(|harness| match serde_json::to_value(harness) {
@@ -892,7 +919,7 @@ fn parse_agent_type(value: &str) -> Result<farhelm_proto::LaunchHarness, String>
             })
             .collect();
         format!(
-            "{value:?} is not an agent type; the agent types are {}",
+            "{value:?} is not an agent type or custom agent ID; built-in types are {}",
             types.join(", ")
         )
     })
@@ -919,44 +946,22 @@ fn parse_wrapper_prefix(value: &str) -> Result<WrapperPrefix, String> {
     farhelm_proto::split_wrapper_prefix(value).map(WrapperPrefix)
 }
 
-/// Parse a launch choice by its protocol spelling, or `default`, listing
-/// every spelling when the value names none.
-fn parse_choice<T: serde::de::DeserializeOwned + serde::Serialize>(
-    value: &str,
-    all: &[T],
-    what: &str,
-) -> Result<Choice<T>, String> {
+/// A template can select the agent after this flag is parsed. The helm applies its vocabulary then.
+fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffortValue>, String> {
     if value == "default" {
         return Ok(Choice(None));
     }
-    serde_json::from_value(serde_json::Value::String(value.to_string()))
-        .map(|choice| Choice(Some(choice)))
-        .map_err(|_| {
-            let words: Vec<String> = all
-                .iter()
-                .filter_map(|choice| match serde_json::to_value(choice) {
-                    Ok(serde_json::Value::String(word)) => Some(word),
-                    _ => None,
-                })
-                .collect();
-            format!(
-                "{value:?} is not {what}; the choices are {}, or default",
-                words.join(", ")
-            )
-        })
-}
-
-/// `--effort`'s parser; see [`parse_choice`].
-fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffort>, String> {
-    parse_choice(value, &farhelm_proto::LaunchEffort::ALL, "an effort")
+    farhelm_proto::custom_agents::validate_model_or_effort(value).map_err(str::to_owned)?;
+    serde_json::from_value(serde_json::Value::String(value.to_owned()))
+        .map(|effort| Choice(Some(effort)))
+        .map_err(|error| error.to_string())
 }
 
 /// Parse explicit permissions without advertising the older `default` alias.
 ///
 /// The alias still means request omission, so existing callers keep the
 /// harness's admission default (guarded where offered, YOLO for Goose,
-/// Pi and OpenCode). Reasoning effort
-/// has a separate default vocabulary and still uses [`parse_choice`].
+/// Pi and OpenCode).
 fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermission>, String> {
     if value == "custom" {
         return Err(
@@ -984,7 +989,8 @@ fn parse_permissions(value: &str) -> Result<Choice<farhelm_proto::LaunchPermissi
 
 /// The ids of every [`LaunchFlags`] argument, which `spawn --inherit-agent`
 /// conflicts with: a spawn either reuses its own launch or describes one.
-const LAUNCH_FLAG_IDS: [&str; 13] = [
+const LAUNCH_FLAG_IDS: [&str; 14] = [
+    "conversation",
     "prompt",
     "prompt_file",
     "templates",
@@ -1024,18 +1030,17 @@ struct LaunchFlags {
     /// in order. `farhelm agent templates` lists them.
     #[arg(long = "template", value_name = "NAME", allow_hyphen_values = true)]
     templates: Vec<String>,
-    /// Agent type, such as claude or codex (an unknown value lists them
-    /// all). With --command, the agent type the command runs, which then
-    /// needs {farhelm_args}.
+    /// Built-in agent type, such as claude or codex, or a registered custom agent ID.
+    /// With --command, declares its agent type. The command needs {farhelm_args}.
     #[arg(long, value_name = "TYPE", value_parser = parse_agent_type)]
-    agent: Option<farhelm_proto::LaunchHarness>,
+    agent: Option<AgentTypeChoice>,
     /// Model for an agent launch, as the agent type names it; `default`
     /// leaves it to the agent type.
     #[arg(long, value_name = "ID", allow_hyphen_values = true)]
     model: Option<String>,
     /// Reasoning effort for an agent launch, or `default`.
     #[arg(long, value_name = "LEVEL", value_parser = parse_effort)]
-    effort: Option<Choice<farhelm_proto::LaunchEffort>>,
+    effort: Option<Choice<farhelm_proto::LaunchEffortValue>>,
     /// Permission mode for an agent launch (guarded, yolo, approve,
     /// smart_approve, chat), where supported. `default` remains an alias for
     /// omission; agents that offer guarded default to it, while Goose, Pi
@@ -1097,17 +1102,21 @@ impl LaunchFlags {
     ) -> farhelm_proto::launcher::TemplateFields {
         use farhelm_proto::launcher::{LauncherKind, TemplateDestination, TemplateFields};
         TemplateFields {
-            custom_agent: None,
+            custom_agent: self
+                .agent
+                .as_ref()
+                .filter(|agent| agent.harness.uses_custom_catalog())
+                .map(|agent| agent.custom_agent.clone()),
             target: None,
             prompt: self.prompt.clone().or_else(|| self.prompt_file.clone()),
             permission_flags: None,
             kind: self.command.as_ref().map(|_| LauncherKind::Command),
-            agent: self.agent,
+            agent: self.agent.as_ref().map(|agent| agent.harness),
             model: self
                 .model
                 .as_ref()
                 .map(|model| (model != "default").then(|| model.clone())),
-            effort: self.effort.map(|choice| choice.0.map(Into::into)),
+            effort: self.effort.as_ref().map(|choice| choice.0.clone()),
             permissions: self.permissions.map(|choice| choice.0),
             wrapper_prefix: self.wrapper.as_ref().map(|prefix| Some(prefix.0.clone())),
             container: None,
@@ -1807,6 +1816,7 @@ fn main() -> anyhow::Result<()> {
         Cmd::Spawn {
             cwd,
             title,
+            conversation,
             inherit_agent,
             launch,
             parent,
@@ -1818,6 +1828,7 @@ fn main() -> anyhow::Result<()> {
                 SpawnArgs {
                     cwd,
                     title,
+                    conversation,
                     launch: if inherit_agent {
                         SpawnLaunch::Inherit
                     } else if launch.any() {
@@ -3574,12 +3585,8 @@ mod tests {
         );
     }
 
-    /// Spec: `--agent` given something that is not an agent type is refused
-    /// with the list of agent types, and an unknown effort or permission
-    /// with its choices.
-    ///
-    /// Why: SPEC.md requires the list in the refusal; the caller is an
-    /// agent whose only way to recover is the message.
+    /// Invalid agent and effort spellings fail before a connection, with guidance the caller can act on.
+    /// A syntactically valid custom ID and effort reach the helm for catalog-aware validation.
     #[farhelm_testtrace::test]
     fn an_unknown_launch_choice_lists_the_choices() {
         let create = |extra: &[&str]| {
@@ -3593,14 +3600,14 @@ mod tests {
                 Err(error) => error.to_string(),
             }
         };
-        let agent = create(&["--agent", "gpt"]);
+        let agent = create(&["--agent", "Not An ID"]);
         assert!(
             agent.contains("is not an agent type") && agent.contains("codex, claude"),
             "{agent}"
         );
-        let effort = create(&["--agent", "codex", "--effort", "huge"]);
+        let effort = create(&["--agent", "codex", "--effort", "two words"]);
         assert!(
-            effort.contains("high") && effort.contains("or default"),
+            effort.contains("lowercase letters") && effort.contains("256"),
             "{effort}"
         );
         let permissions = create(&["--agent", "codex", "--permissions", "free"]);
@@ -3612,6 +3619,47 @@ mod tests {
             !permissions.contains("or default"),
             "the compatibility alias is not the visible permission vocabulary: {permissions}"
         );
+    }
+
+    /// The agent ID and effort compose with templates, while the start selector travels only on Create.
+    #[farhelm_testtrace::test]
+    fn custom_create_keeps_the_named_start_outside_template_edits() {
+        let cli = Cli::try_parse_from([
+            "farhelm",
+            "agent",
+            "create",
+            "--agent",
+            "acme-code",
+            "--effort",
+            "deep_work",
+            "--conversation",
+            "conv-1",
+            "--cwd",
+            "/work",
+            "--host",
+            "this machine",
+        ])
+        .unwrap();
+        let Cmd::Agent { command } = cli.command else {
+            panic!("not the agent command")
+        };
+        let Some(farhelm_proto::AgentVerb::Create {
+            edits,
+            conversation,
+            ..
+        }) = command.verb()
+        else {
+            panic!("not a create verb");
+        };
+        assert_eq!(edits.agent, Some(farhelm_proto::LaunchHarness::Custom));
+        assert_eq!(edits.custom_agent, Some(Some("acme-code".into())));
+        assert_eq!(
+            edits.effort,
+            Some(Some(farhelm_proto::LaunchEffortValue::Custom(
+                "deep_work".into()
+            )))
+        );
+        assert_eq!(conversation.as_deref(), Some("conv-1"));
     }
 
     /// Guarded is explicit intent, while the old default spelling remains

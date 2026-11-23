@@ -567,6 +567,175 @@ async fn agent_command_args(
     String::from_utf8(output.stdout).expect("the command's stdout is UTF-8")
 }
 
+/// The catalog supplies both start commands and the reporting flag. A CLI named start follows the host's YOLO
+/// rule, and after deletion only the already compiled session can restart on its reported conversation.
+#[farhelm_testtrace::test]
+async fn a_custom_named_start_uses_the_catalog_and_restarts_after_removal() {
+    use std::os::unix::fs::PermissionsExt as _;
+
+    let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    let supervisor = supervisor_process().await;
+    let helm = start_helm(supervisor.state.path()).await;
+    let client = client_with_secret(&helm.secret);
+    await_local_host(&client, &helm.base).await;
+    let work = farhelm_teststate::tempdir().expect("fixture work directory");
+    let cwd = work.path().to_str().expect("UTF-8 fixture path");
+    let command = work.path().join("acme-code");
+    let observed = work.path().join("observed-starts");
+    std::fs::write(
+        &command,
+        r#"#!/bin/sh
+model= effort= conversation=
+while [ "$#" -ne 0 ]; do
+    [ "$#" -ge 2 ] || exit 91
+    case "$1" in
+        --model) model=$2 ;;
+        --effort) effort=$2 ;;
+        --resume) conversation=$2 ;;
+        *) exit 92 ;;
+    esac
+    shift 2
+done
+printf '%s %s %s\n' "$model" "$effort" "$conversation" >> observed-starts
+farhelm custom-agent report-conversation --id "$conversation" || exit 93
+while read -r ignored; do :; done
+"#,
+    )
+    .unwrap();
+    std::fs::set_permissions(&command, std::fs::Permissions::from_mode(0o700)).unwrap();
+    let catalog = format!("{}/api/custom-agents", helm.base);
+    let (status, body) = post(
+        &client,
+        &catalog,
+        serde_json::json!({
+            "id": "acme-code", "display_name": "Acme Code", "command": command,
+            "supports_resumption": true, "supports_reporting": true,
+        }),
+    )
+    .await;
+    assert_eq!(status, reqwest::StatusCode::CREATED, "{body}");
+    let (status, body) = post(&client, &format!("{}/api/sessions", helm.base), serde_json::json!({
+        "cwd": cwd, "command": {"command": fixture_cmd("fake-agent --script basic"), "yolo": false},
+    })).await;
+    assert!(status.is_success(), "create the asking session: {body}");
+    let asker: SessionInfo = serde_json::from_str(&body).unwrap();
+    let token = session_token(supervisor.state.path(), &asker.id).await;
+    let socket = supervisor.state.path().join("supervisor.sock");
+
+    let response = client.put(format!("{}/api/templates/acme", helm.base)).json(&serde_json::json!({
+        "kind": "agent", "agent": "custom", "custom_agent": "acme-code", "model": "test-model", "effort": "deep_work",
+    })).send().await.unwrap();
+    assert!(
+        response.status().is_success(),
+        "save the custom template: {}",
+        response.text().await.unwrap()
+    );
+    let arguments = [
+        "create",
+        "--host",
+        "this machine",
+        "--cwd",
+        cwd,
+        "--template",
+        "acme",
+        "--effort",
+        "high",
+        "--conversation",
+        "conv-1",
+    ];
+    let denied = spawn_agent_command_args(&arguments, &asker.id, &token, &socket).await;
+    assert!(!denied.status.success());
+    assert!(String::from_utf8_lossy(&denied.stderr).contains("asks before YOLO"));
+    assert!(
+        !observed.exists(),
+        "the default host guard must refuse before execution"
+    );
+
+    allow_agents_without_asking(&client, &helm.base).await;
+    let mut keyed_arguments = arguments.to_vec();
+    keyed_arguments.extend(["--idempotency-key", "named-create"]);
+    let created_id = agent_command_args(&keyed_arguments, &asker.id, &token, &socket).await;
+    // Identical requests replay the named create. Changing only the conversation must refuse
+    // the old key so the caller cannot mistake the original session for a different conversation.
+    let replay = agent_command_args(&keyed_arguments, &asker.id, &token, &socket).await;
+    assert_eq!(replay, created_id);
+    let mut changed_arguments = arguments;
+    *changed_arguments.last_mut().unwrap() = "conv-2";
+    let mut changed_arguments = changed_arguments.to_vec();
+    changed_arguments.extend(["--idempotency-key", "named-create"]);
+    let changed = spawn_agent_command_args(&changed_arguments, &asker.id, &token, &socket).await;
+    assert!(!changed.status.success());
+    let error = String::from_utf8_lossy(&changed.stderr);
+    assert!(error.contains("intent key"), "{error}");
+    let session_url = format!("{}/api/sessions/{}", helm.base, created_id.trim());
+    let observed_paths = |lines| {
+        let observed = &observed;
+        async move {
+            let records = tokio::fs::read_to_string(observed)
+                .await
+                .unwrap_or_default();
+            assert!(
+                records.lines().count() <= lines,
+                "unexpected wrapper invocation: {records}"
+            );
+            Ok(records)
+        }
+    };
+    let first = wait_for_listing_with(
+        || observed_paths(1),
+        20,
+        "named custom agent argv",
+        |records| records.ends_with('\n'),
+    )
+    .await;
+    assert_eq!(first, "test-model high conv-1\n");
+    let read_session = || async {
+        let session: SessionInfo = serde_json::from_value(get_json(&client, &session_url).await)?;
+        Ok(session)
+    };
+    let live = wait_for_listing_with(
+        read_session,
+        20,
+        "the named conversation is acknowledged",
+        |session| session.restart_offer == farhelm_proto::RestartOffer::Resume,
+    )
+    .await;
+    assert_eq!(live.launch.custom_agent(), Some("acme-code"));
+    assert!(
+        !live
+            .launch
+            .start_argv()
+            .unwrap()
+            .iter()
+            .any(|arg| arg == "conv-1")
+    );
+
+    let removed = client
+        .delete(format!("{catalog}/acme-code"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(removed.status(), reqwest::StatusCode::NO_CONTENT);
+    let missing = spawn_agent_command_args(&arguments, &asker.id, &token, &socket).await;
+    assert!(!missing.status.success());
+    assert!(String::from_utf8_lossy(&missing.stderr).contains("no longer registered"));
+    agent_command_args(
+        &["restart", "--session", &live.id, "--stop-if-running"],
+        &asker.id,
+        &token,
+        &socket,
+    )
+    .await;
+    let repeated = wait_for_listing_with(
+        || observed_paths(2),
+        20,
+        "stored custom resume argv",
+        |records| records.lines().count() == 2 && records.ends_with('\n'),
+    )
+    .await;
+    assert_eq!(repeated, "test-model high conv-1\ntest-model high conv-1\n");
+}
+
 /// The rows of `output` that the CLI marked with its current-row marker.
 ///
 /// The marker is the one value in either listing that neither the CLI nor

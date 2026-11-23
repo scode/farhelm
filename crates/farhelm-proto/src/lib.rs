@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_88` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_89` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 88;
+pub const PROTOCOL_VERSION: u32 = 89;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -2064,6 +2064,9 @@ pub enum AgentVerb {
         /// destination folder and `--title` the session's name.
         #[serde(default)]
         edits: crate::launcher::TemplateFields,
+        /// Select an existing conversation for this start only. The launch and templates remain reusable.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        conversation: Option<String>,
         /// The create's idempotency key. The helm sends the target a digest
         /// of this request beside it (`CreateSession::request_fingerprint`),
         /// so a retry repeating the request returns the first attempt's
@@ -6042,6 +6045,8 @@ mod tests {
     /// grid row.
     /// Version 87 requires supervisors that understand the Codex provider descriptor in the private recipe credentials
     /// file. An older supervisor would refuse a launch after the helm installed that descriptor.
+    /// Version 88 adds custom agent launches and conversation reporting.
+    /// Version 89 requires the agent relay to honor a named conversation on Create. An older helm would ignore it.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6052,8 +6057,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_88() {
-        assert_eq!(PROTOCOL_VERSION, 88);
+    fn protocol_version_is_pinned_at_89() {
+        assert_eq!(PROTOCOL_VERSION, 89);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -9946,6 +9951,7 @@ mod tests {
             req_id: 9,
             session_id: "s1".to_string(),
             request: AgentVerb::Create {
+                conversation: None,
                 host: Some("builder".to_string()),
                 templates: vec!["my-codex".to_string()],
                 edits: crate::launcher::TemplateFields {
@@ -9989,6 +9995,7 @@ mod tests {
             req_id: 10,
             session_id: "s1".to_string(),
             request: AgentVerb::Create {
+                conversation: None,
                 host: None,
                 templates: Vec::new(),
                 edits: crate::launcher::TemplateFields {

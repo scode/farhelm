@@ -146,6 +146,7 @@ fn inheriting_spawn(
                 host,
                 templates,
                 edits,
+                conversation,
                 intent_key,
                 confirm_yolo,
                 spawn: Some(spawn),
@@ -156,6 +157,7 @@ fn inheriting_spawn(
         panic!("an inheriting spawn must be relayed as an agent create: {request:?}");
     };
     assert_eq!(host, None, "a spawn names no host");
+    assert!(conversation.is_none());
     assert!(templates.is_empty());
     assert!(!confirm_yolo, "the CLI never sends the YOLO override");
     assert!(spawn.inherit_agent);
@@ -372,6 +374,7 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
                     host,
                     templates,
                     edits,
+                    conversation,
                     intent_key,
                     confirm_yolo,
                     spawn,
@@ -382,6 +385,7 @@ fn a_spawn_with_launch_flags_is_relayed_to_the_helm() {
             panic!("a flag spawn must send an agent create: {request:?}");
         };
         assert_eq!(host, None, "a spawn names no host");
+        assert!(conversation.is_none());
         assert_eq!(templates, ["base"]);
         assert_eq!(
             edits,

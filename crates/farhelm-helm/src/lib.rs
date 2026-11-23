@@ -139,6 +139,7 @@ mod ntfy;
 /// `/api/credentials` — the named credential catalog: saved secrets can be
 /// replaced but are never returned.
 mod credentials;
+mod custom_agents;
 /// `/api/tensorlake` and the Tensorlake API client: the account side of
 /// Tensorlake sandbox hosts (the API key, Farhelm's own ssh key for
 /// sandboxes, and the helm tag their names carry), plus the recipes under
@@ -529,6 +530,14 @@ fn api_router(state: Arc<AppState>) -> Router {
             get(sessions::list_sessions).post(sessions::create_session),
         )
         .route("/api/launch-catalog", get(sessions::launch_catalog))
+        .route(
+            "/api/custom-agents",
+            get(custom_agents::list).post(custom_agents::create),
+        )
+        .route(
+            "/api/custom-agents/{id}",
+            axum::routing::put(custom_agents::save).delete(custom_agents::delete),
+        )
         .route(
             "/api/environment-sessions",
             axum::routing::post(sessions::create_environment_session),

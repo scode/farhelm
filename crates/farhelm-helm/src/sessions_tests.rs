@@ -7,6 +7,62 @@ use super::{resolve_owner, store};
 use crate::rest_harness::{self, WsTestClient, silent_supervisor};
 use std::time::Duration;
 
+/// Admitting a recipe freezes its custom executable and capabilities through the provisioning wait.
+/// A concurrent catalog edit should apply only to launches admitted after it.
+#[farhelm_testtrace::test]
+async fn a_recipe_create_carries_the_admitted_custom_agent_snapshot() {
+    let h = rest_harness::FleetBuilder::new().await.start().await;
+    let definition = serde_json::json!({
+        "id": "acme-code", "display_name": "Acme Code", "command": "first-agent",
+        "supports_resumption": true, "supports_reporting": true
+    });
+    let (status, body) = post_text(&h, "/api/custom-agents", definition.clone()).await;
+    assert_eq!(status, axum::http::StatusCode::CREATED, "{body}");
+    let request_json = serde_json::json!({
+        "cwd": "~",
+        "conversation": "conv-1",
+        "launch": { "harness": "custom", "custom_agent": "acme-code", "model": "sparse" },
+    });
+    let mut request: super::CreateReq = serde_json::from_value(request_json.clone()).unwrap();
+    let named = request
+        .prepare_sandbox_launch(&h.store)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(
+        named.argv,
+        [
+            "first-agent",
+            "--model",
+            "sparse",
+            "--resume",
+            "conv-1",
+            "{farhelm_args}"
+        ]
+    );
+
+    let mut edited = definition;
+    edited["command"] = serde_json::json!("second-agent");
+    edited["supports_resumption"] = serde_json::json!(false);
+    let (status, body) = put_json(&h, "/api/custom-agents/acme-code", edited).await;
+    assert!(status.is_success(), "{status}: {body}");
+    let mut fresh: super::CreateReq = serde_json::from_value(request_json).unwrap();
+    assert!(
+        fresh.prepare_sandbox_launch(&h.store).await.is_err(),
+        "the current definition no longer supports a named start"
+    );
+    assert!(matches!(request.origin(), super::CreateOrigin::User));
+    let admitted = super::create_mode(&h.store, &mut request).await.unwrap();
+    assert_eq!(
+        admitted.start_argv().unwrap(),
+        ["first-agent", "--model", "sparse", "{farhelm_args}"]
+    );
+    assert_eq!(
+        super::launches::named_start(&admitted, "conv-1".into()).unwrap(),
+        named
+    );
+}
+
 /// Captured create authority expires independently of bounded suggestion data.
 mod captured_create_history {
     use super::super::{
@@ -640,12 +696,15 @@ async fn assert_new_environment_checkout(root: Option<&'static str>, canonical_r
         farhelm_proto::ErrorKind::InvalidRequest
     );
     assert!(refused.to_string().contains("Choose the recipe"));
-    let request: super::CreateReq = serde_json::from_value(serde_json::json!({
+    let mut request: super::CreateReq = serde_json::from_value(serde_json::json!({
         "cwd": "", "title": "review", "command": { "command": "true", "yolo": false },
         "github_checkout": { "repo": "acme/project", "title": "review" },
     }))
     .unwrap();
-    request.validate_sandbox_launch().unwrap();
+    request
+        .prepare_sandbox_launch(&h.state.store)
+        .await
+        .unwrap();
     let session = tokio::time::timeout(
         Duration::from_secs(15),
         super::create_in_session_sandbox(&h.state, owned, request, Some(TemplateNameKind::Base)),
