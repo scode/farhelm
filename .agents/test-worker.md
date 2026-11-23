@@ -64,7 +64,15 @@ sudo.
   invocation id printed at startup. Collection reports when the run is still active or its evidence is gone.
 
 A full build of the workspace with the GUI and its tests takes about 55 GB of `target/` on the worker, and incremental
-builds only add to it, so a run that finds less than 15 GB free cleans `target/` first and says so in its summary.
+builds only add to it, so every run (`rust`, `gui` and `run` alike) starts by holding its checkout to its own share of
+the disk: its build output (`target/` and the vendored crates' own `target/` directories) is at most 60 GB, and the run
+starts with 55 GB free, room for a cold build. When either is missed the run cleans up after itself, removing rustc's
+incremental caches first and all of its build output only if that is not enough, and its summary's `disk:` line says
+what it did. A checkout's build output can therefore not grow round after round until the disk fills; the check runs
+only at a run's start, though, so two checkouts building at once can still need more room than each saw. If the room is
+still missing once the checkout's output is gone, the run stops at once with status 75 and a
+`disk: FULL BY OTHER WORKLOADS` line naming how much the rest of the disk uses; it never touches another checkout's
+tree.
 
 Read each `summary.txt` like a recorded run: the substrate lines (architecture, the systemd user manager, Podman, tmux,
 self-ssh), the summary and failures, and the runtime `SKIPPED` count from the retained output. A failed run's recorder
@@ -83,11 +91,12 @@ changing its files, so its stamp and artifacts always come from one invocation.
 ## When the worker cannot be used
 
 An unattended flow never waits on the worker. When it is unreachable, its lock is held by something else, bootstrap
-fails, or its setup is broken in a way the maintainer can likely fix quickly (a stopped VM, a full disk, a lost tailnet
-login), notify the maintainer with the problem in one line (`plans/AGENTS.md`, "Notifications"). If nothing changes
-within 10 minutes, run that round's suites the other way (boats, when the maintainer has allowed them, or locally) and
-say so in the round's notes; this is the maintainer's choice of 2026-11-19, so that a flow is never stuck on the worker.
-A test that fails on the worker is a finding like any other, not a reason to switch.
+fails, or its setup is broken in a way the maintainer can likely fix quickly (a stopped VM, a disk that a run reports
+`FULL BY OTHER WORKLOADS`, a lost tailnet login), notify the maintainer with the problem in one line (`plans/AGENTS.md`,
+"Notifications"). If nothing changes within 10 minutes, run that round's suites the other way (boats, when the
+maintainer has allowed them, or locally) and say so in the round's notes; this is the maintainer's choice of 2026-11-19,
+so that a flow is never stuck on the worker. A test that fails on the worker is a finding like any other, not a reason
+to switch.
 
 ## What it does not cover
 

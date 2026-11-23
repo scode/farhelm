@@ -110,6 +110,152 @@ class WorkloadStatTest(unittest.TestCase):
         self.assertFalse(is_live_group_member("123 (thread) name) " + " ".join(fields), 456))
 
 
+DISK_STUBS = {
+    # Sizes come from the fixture's environment and from what is left of the build output: rustc's incremental caches
+    # under target/ account for FIXTURE_INCREMENTAL_GB, the rest of target/ for FIXTURE_REST_GB and a vendored crate's
+    # own target/ for FIXTURE_VENDOR_GB, so pruning and removing change what is measured. FIXTURE_DF_BROKEN makes df
+    # print nothing.
+    "own": """#!/bin/bash
+own=0
+[ -d target ] && own=$FIXTURE_REST_GB
+[ -d target/debug/incremental ] && own=$((own + FIXTURE_INCREMENTAL_GB))
+[ -d vendor/crate/target ] && own=$((own + FIXTURE_VENDOR_GB))
+echo "$own"
+""",
+    "du": '#!/bin/bash\nprintf "%sG\\ttotal\\n" "$(own)"\n',
+    "df": """#!/bin/bash
+[ -n "${FIXTURE_DF_BROKEN:-}" ] && exit 1
+own=$(own)
+case "$*" in
+*avail*) printf "Avail\\n %sG\\n" "$((FIXTURE_DISK_GB - FIXTURE_OTHERS_GB - own))" ;;
+*used*) printf "Used\\n %sG\\n" "$((FIXTURE_OTHERS_GB + own))" ;;
+esac
+""",
+    # The guard removes build output itself; cargo must never be needed for it.
+    "cargo": '#!/bin/bash\necho "cargo $*" >>"$FIXTURE_LOG"\nexit 0\n',
+}
+
+
+class DiskGuardTest(unittest.TestCase):
+    """The worker's disk guard (`keep_disk_free` in remote/env.sh) against stand-in df, du and cargo.
+
+    Why: a checkout reused round after round grows its own build output until a build runs out of space halfway, which
+    then looks like the worker's problem (the landing monitor's own tree filled a 135 GB disk on 2026-11-23). The guard
+    must hold each checkout to its own share and clean up after itself, cheapest first, and blame the rest of the disk
+    only when the room is still missing with this checkout's build output gone.
+    """
+
+    def guard(self, *, incremental, rest, others, vendor=0, disk=135, df_broken=False):
+        """Run keep_disk_free in a tree whose build output measures `incremental` + `rest` GB under target/ and `vendor`
+        GB under a vendored crate's target/, on a `disk` GB file system that other workloads fill with `others` GB.
+
+        Returns its output (with a final `status=N` line), the cargo commands it ran, and the paths left of the build
+        output, relative to the tree (an empty list once it is all gone). A file outside the build output is placed in
+        the tree too, and every test checks that it survives."""
+        root = Path(self.enterContext(tempfile.TemporaryDirectory(prefix="fh-disk-guard.")))
+        stubs = root / "bin"
+        stubs.mkdir()
+        for name, content in DISK_STUBS.items():
+            (stubs / name).write_text(content)
+            (stubs / name).chmod(0o700)
+        tree = root / "src"
+        (tree / "target/debug/incremental/crate-1").mkdir(parents=True)
+        (tree / "target/debug/deps").mkdir(parents=True)
+        (tree / "vendor/crate/target/debug").mkdir(parents=True)
+        (tree / "vendor/crate/src").mkdir(parents=True)
+        (tree / "vendor/crate/src/lib.rs").write_text("// source, never build output\n")
+        log = root / "cargo.log"
+        log.touch()
+        env = {
+            "PATH": f"{stubs}:{os.defpath}",
+            "HOME": str(root),
+            "FIXTURE_INCREMENTAL_GB": str(incremental),
+            "FIXTURE_REST_GB": str(rest),
+            "FIXTURE_VENDOR_GB": str(vendor),
+            "FIXTURE_OTHERS_GB": str(others),
+            "FIXTURE_DISK_GB": str(disk),
+            "FIXTURE_LOG": str(log),
+        }
+        if df_broken:
+            env["FIXTURE_DF_BROKEN"] = "1"
+        script = f'. "{HARNESS / "remote" / "env.sh"}"; keep_disk_free; echo "status=$?"'
+        result = subprocess.run(
+            ["bash", "-c", script], cwd=tree, env=env, capture_output=True, text=True, timeout=WAIT_SECONDS
+        )
+        self.assertTrue((tree / "vendor/crate/src/lib.rs").exists(), "only build output may ever be removed")
+        left = sorted(
+            str(p.relative_to(tree))
+            for top in (tree / "target", tree / "vendor/crate/target")
+            if top.exists()
+            for p in [top, *top.rglob("*")]
+        )
+        return result.stdout, log.read_text().split("\n")[:-1], left
+
+    def test_a_tree_within_its_budget_with_room_to_build_is_left_alone(self):
+        """Spec: 40 GB of build output (under the 60 GB budget) with 95 GB free: nothing is removed, cargo never runs,
+        and the summary line states the free space and the output's size."""
+        out, cargo, left = self.guard(incremental=20, rest=20, others=0)
+        self.assertIn("disk: 95 GB free; this checkout's build output is 40 GB\n", out)
+        self.assertIn("status=0", out)
+        self.assertEqual(cargo, [])
+        self.assertIn("target/debug/incremental", left)
+
+    def test_a_tree_over_its_budget_drops_incremental_caches_before_anything_else(self):
+        """Spec: 70 GB of build output (over budget) of which 50 GB are incremental caches, on an otherwise empty disk:
+        the caches go, the compiled dependencies stay, and the run proceeds."""
+        out, cargo, left = self.guard(incremental=50, rest=20, others=0)
+        self.assertIn("this checkout's build output is 20 GB (its incremental caches were removed first)", out)
+        self.assertIn("status=0", out)
+        self.assertEqual(cargo, [])
+        self.assertNotIn("target/debug/incremental", left)
+        self.assertIn("target/debug/deps", left)
+
+    def test_a_disk_short_of_room_drops_incremental_caches_even_within_budget(self):
+        """Spec: 40 GB of build output (within budget) but only 35 GB free because others use 60 GB: dropping the 20 GB
+        of incremental caches makes the 55 GB of room, so that is all that goes and the run proceeds. Why: free space
+        alone must trigger the cleanup; the budget is not the only reason to clean."""
+        out, cargo, left = self.guard(incremental=20, rest=20, others=60)
+        self.assertIn("disk: 55 GB free; this checkout's build output is 20 GB (its incremental caches were removed", out)
+        self.assertIn("status=0", out)
+        self.assertIn("target/debug/deps", left)
+
+    def test_a_tree_still_over_budget_after_pruning_loses_all_its_build_output(self):
+        """Spec: 75 GB of build output with only 5 GB in incremental caches: pruning is not enough, so target/ is
+        removed, without needing cargo, and the run proceeds with room to build."""
+        out, cargo, left = self.guard(incremental=5, rest=70, others=0)
+        self.assertIn("this checkout's build output is 0 GB (its build output was removed first)", out)
+        self.assertIn("status=0", out)
+        self.assertEqual(cargo, [])
+        self.assertEqual(left, [])
+
+    def test_vendored_crates_build_output_counts_as_this_checkouts(self):
+        """Spec: 10 GB under target/ and 60 GB under a vendored crate's own target/ is 70 GB of this checkout's build
+        output, over budget: it is cleaned like target/, and the crate's sources stay. Why: the vendored crates build
+        outside the workspace; leaving their output out would let it grow unchecked and be blamed on other workloads."""
+        out, cargo, left = self.guard(incremental=0, rest=10, vendor=60, others=0)
+        self.assertIn("this checkout's build output is 0 GB (its build output was removed first)", out)
+        self.assertIn("status=0", out)
+        self.assertEqual(left, [])
+
+    def test_a_disk_full_of_other_workloads_stops_the_run_after_cleaning_only_this_tree(self):
+        """Spec: a small 10 GB tree on a disk others fill with 100 GB: this checkout removes its own output first, then,
+        still short of room for a build, says how much the rest of the disk uses and returns 1 so the run stops before
+        a build fails halfway. Why: only then is a full disk someone else's problem worth telling the maintainer."""
+        out, cargo, left = self.guard(incremental=5, rest=5, others=100)
+        self.assertIn("disk: FULL BY OTHER WORKLOADS", out)
+        self.assertIn("other trees and files on the worker use 100 GB", out)
+        self.assertIn("status=1", out)
+        self.assertEqual(left, [])
+
+    def test_a_disk_reading_that_fails_removes_nothing(self):
+        """Spec: when df prints nothing, the guard says the free space is unknown, removes nothing and lets the run
+        proceed. Why: reading a failed df as zero free would wipe a healthy tree and blame other workloads."""
+        out, cargo, left = self.guard(incremental=50, rest=20, others=0, df_broken=True)
+        self.assertIn("disk: free space unknown", out)
+        self.assertIn("status=0", out)
+        self.assertIn("target/debug/incremental", left)
+
+
 @unittest.skipUnless(
     all(shutil.which(name, path=os.defpath) for name in ("setsid", "flock", "rsync")), "Linux worker tools required",
 )
@@ -127,6 +273,9 @@ class WorkerTest(unittest.TestCase):
         self.executable(fake_bin / "flock", FLOCK)
         for name in ("sudo", "cargo", "rustup", "systemctl", "podman", "tailscale"):
             self.executable(fake_bin / name, '#!/bin/bash\nprintf "%s\\n" "$0" >>"$FIXTURE_WORKER_HOME/unsafe"\nexit 99\n')
+        # Every run checks the disk first (`keep_disk_free`); report ample room so these tests never depend on how full
+        # the machine running them is, and so its cleanup (which would call the refused cargo above) never starts.
+        self.executable(fake_bin / "df", '#!/bin/bash\nprintf "Avail\\n 500G\\n"\n')
         self.config = self.root / "test-worker.conf"
         self.config.write_text("destination=fixture-worker\n")
         self.env = {
