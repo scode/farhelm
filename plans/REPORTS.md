@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`tensorlake-leftovers-discovery-failure`](reports/tensorlake-leftovers-discovery-failure.report.md) landed 2026-11-23 in #4675: Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
 - [`codex-recipe-credentials-at-launch`](reports/codex-recipe-credentials-at-launch.report.md) landed 2026-11-23 in #4679, #4680, #4693: Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
 - [`explain-stale-launcher-choices`](reports/explain-stale-launcher-choices.report.md) landed 2026-11-23 in #4684: Show inline stale-choice warning and keep query when a New Session launcher choice disappears
 - [`approval-card-program-wording`](reports/approval-card-program-wording.report.md) landed 2026-11-23 in #4688, #4694: Name the shell or main program accurately in Stop and Delete approval cards
