@@ -16,7 +16,8 @@
 //!   not close a tab), which the operation's completion records there with [`crate::operations::Operations::note`]. The
 //!   store keeps either until the key's next start or a reset, whoever starts that work, so an editor or a later header
 //!   needs no call here. A Stop and suspend deadline uses the same slot in neutral ink and clears once the host is
-//!   suspended or deleting. Refusals and partial failures keep the existing danger style. A Stop,
+//!   suspended or deleting, and carries no operation name in front of its words. Refusals and partial results are
+//!   drawn in the danger ink. A Stop,
 //!   Replace, Restart, seen-toggle, pin or move line carries its operation's name in front of the words, as that slot
 //!   did, and a Rename or Delete refusal shows the words alone, as before. The open session's header shows the same
 //!   line below its top row ([`pane_line`]), as the old header's error lines did.
@@ -62,8 +63,9 @@ pub(crate) const PROGRESS_SHOWS_AFTER: Duration = Duration::from_secs(2);
 // ---- The words -------------------------------------------------------------------------------------------------------
 
 /// The name a line about `work` carries in front of the host's words on the row, as the old app's error slot did:
-/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a notice alike. Other prefixes also name the action
-/// the user took, including Mark read and Mark unread. A Rename or a
+/// "Stop: ", "Replace: " and "Restart: ", for a refusal and a partial result alike, but never for a Stop and suspend
+/// deadline notice ([`crate::operations::Tone::Notice`]), which [`sentence`] leaves unprefixed. Other prefixes also
+/// name the action the user took, including Mark read and Mark unread. A Rename or a
 /// Delete refusal (an environment Delete's included) shows the words alone, as it did before Stop and Replace came, and
 /// a save belongs to an editor, which shows its own refusal. Exhaustive, so a new kind of work decides.
 pub(super) fn prefix(work: Work) -> Option<&'static str> {

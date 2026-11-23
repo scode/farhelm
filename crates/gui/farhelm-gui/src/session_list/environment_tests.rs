@@ -783,8 +783,8 @@ fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut Te
     );
 }
 
-/// The helm's wording is deliberately provisional. Keep the fixture long enough to exercise line wrapping in the
-/// sidebar and the menu as well as the selected session.
+/// The helm's wording is deliberately noncommittal about whether the work still runs. Keep the fixture long enough to
+/// exercise line wrapping in the sidebar and the menu as well as the selected session.
 pub(crate) const STOP_AND_SUSPEND_NOTICE: &str = "Stop and suspend did not finish within 20 seconds and may or may not still be running. \
      The environment suspends only if Stop finishes cleanly. Check the session list for the result.";
 
@@ -856,7 +856,9 @@ fn a_marked_stop_and_suspend_timeout_shows_until_the_host_suspends(cx: &mut Test
     );
 }
 
-/// The host push can beat the deadline reply. A notice is already obsolete in either settling phase.
+/// The host push can beat the deadline reply. A notice is already obsolete in either settling phase, so none may
+/// survive on a settled host. This pins that outcome, not the mechanism: the reply's own check and the session list's
+/// clearing of settled notices each prevent it, so the test passes with either alone.
 #[gpui::test]
 fn a_marked_reply_does_not_create_a_notice_on_a_settled_host(cx: &mut TestAppContext) {
     let mut host = environment_host(Provider::Container, connected());

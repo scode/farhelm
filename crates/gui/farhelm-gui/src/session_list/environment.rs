@@ -50,12 +50,13 @@
 //!   own per-host hold did, and share only the activity read ([`read_activity`]) and the commands
 //!   ([`suspend_command`], [`resume_command`]) with these: neither surface waits for the other's request, which the
 //!   pushed phase and the helm's lifecycle lock coordinate, as they did in the old app.
-//! - **The 20-second bound and the pushed phase.** Suspend and Resume keep their existing 504 handling. For Stop and
-//!   suspend, only the helm's marked 504 means the outcome is unknown. Its notice can show during Stop, before the
-//!   host phase moves, and clears on Suspended, Deleting or another session action. A supervisor timeout remains a
-//!   failure ([`settle`]). The row and header show
-//!   **Suspending…** or **Resuming…** from the pushed phase until it settles ([`pending`]), and the commands of every
-//!   session on that host, Delete and Clone included, stay refused while that phase shows the provider's change running
+//! - **The 20-second bound and the pushed phase.** A Suspend or Resume 504 is dropped rather than shown as a failure:
+//!   the helm answers it at its host reply bound while the change goes on, and the pushed phase shows how the change
+//!   goes. For Stop and suspend, only the helm's marked 504 means the outcome is unknown. Its notice can show during
+//!   Stop, before the host phase moves, and clears on Suspended, Deleting or another session action. A supervisor
+//!   timeout remains a failure ([`settle`]). The row and header show **Suspending…** or **Resuming…** from the pushed
+//!   phase until it settles ([`pending`]), and the commands of every session on that host, Delete and Clone included,
+//!   stay refused while that phase shows the provider's change running
 //!   ([`held`]), as the old claim lasted for the whole change. Any other refusal stays on the session's key and shows on
 //!   the row and the header as a lifecycle refusal does (`super::outcome`, with the action name before the helm's
 //!   words). The changing phase is `HostStateView::TensorlakeChanging` for every provider, despite its name: a
@@ -104,8 +105,11 @@ pub(super) const SUSPENDED_HELP: &str =
 /// The badge's word.
 pub(super) const SUSPENDED: &str = "Suspended";
 
-/// The HTTP gateway timeout status. Suspend, Resume and environment Delete keep treating 504 as continuing work.
-/// Stop and suspend requires the helm's reply-bound marker because a supervisor Stop can also answer 504.
+/// The HTTP gateway timeout status. Suspend, Resume and environment Delete treat a 504 as work that carries on past the
+/// helm's host reply bound (`within_host_reply_bound_saying` in the helm's sessions module), here, in the environment
+/// Delete (`super::environment_delete`) and in the Hosts panel's Suspend and Resume (`crate::hosts::lifecycle`). Stop
+/// and suspend requires the helm's reply-bound marker as well, because a supervisor's own Stop timeout also answers
+/// 504 and is a failure.
 pub(crate) const CARRIES_ON: u16 = 504;
 
 // ---- What a session's environment is --------------------------------------------------------------------------------
@@ -695,6 +699,8 @@ fn settle(asked: &Asked, settled: &Settled, cx: &mut App) {
     if stop_and_suspend && !refusal.has(HelmMarker::StopAndSuspendReplyBound) {
         return;
     }
+    // A host already suspended or deleting has settled the outcome, so no notice. The session list's own pass
+    // (`forget_settled_notices`) would clear one recorded here too; checking first keeps it from ever being recorded.
     let show_notice = stop_and_suspend
         && !session::current_store(cx)
             .is_some_and(|store| notice_settled(store.read(cx).collections(), asked.host));

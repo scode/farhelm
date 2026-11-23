@@ -518,7 +518,10 @@ pub(super) async fn delete_whole_environment(
 /// the outcome is still unknown. Either half can settle while the reply is
 /// in flight. The environment suspends only if Stop finishes cleanly, and a
 /// late failure reaches the helm's log while the session list continues to
-/// show the current session and host state.
+/// show the current session and host state. Decided by the migration's
+/// orchestrator on 2026-11-15 together with the host's Suspend and Resume
+/// (`crate::tensorlake::lifecycle::suspend`), whose outcome likewise lands in
+/// the pushed host state.
 pub(crate) async fn stop_and_suspend(
     State(state): State<Arc<AppState>>,
     AxPath(id): AxPath<String>,
