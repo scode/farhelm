@@ -3717,9 +3717,11 @@ pub(crate) async fn rename_session(
 /// suspend (`crate::tensorlake::lifecycle::suspend` and `resume`,
 /// `sandbox::stop_and_suspend`), which can wait far longer than the bound: a
 /// Tensorlake Resume up to two minutes, a container's change on its container
-/// host's commands, and Stop and suspend can spend the whole bound on Stop.
-/// The host's state in the hosts and session lists shows the result of the
-/// lifecycle change. Stop and suspend has one bound over both steps and
+/// host's commands, and Stop and suspend can spend the whole bound on Stop
+/// (decided by the migration's orchestrator on 2026-11-15, in place of the
+/// accepted form, since their outcome already lands in the pushed host
+/// state). The host's state in the hosts and session lists shows the result
+/// of the lifecycle change. Stop and suspend has one bound over both steps and
 /// marks the deadline reply so the client can distinguish it from a Stop
 /// timeout reported by the supervisor.
 ///
