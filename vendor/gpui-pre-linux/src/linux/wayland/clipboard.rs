@@ -7,14 +7,15 @@ use std::{
 
 use calloop::{LoopHandle, PostAction};
 use filedescriptor::Pipe;
+use std::{cell::Cell, path::PathBuf, rc::Rc};
 use strum::IntoEnumIterator;
-use wayland_client::{Connection, protocol::wl_data_offer::WlDataOffer};
+use wayland_client::{Connection, Proxy, protocol::wl_data_offer::WlDataOffer};
 use wayland_protocols::wp::primary_selection::zv1::client::zwp_primary_selection_offer_v1::ZwpPrimarySelectionOfferV1;
 
 use crate::linux::platform::{PIPE_READ_TIMEOUT, read_fd_with_timeout};
 use gpui::{
-    BackgroundExecutor, ClipboardEntry, ClipboardItem, ClipboardReadError, Image, ImageFormat,
-    Task, hash,
+    BackgroundExecutor, ClipboardEntry, ClipboardItem, ClipboardReadError, ExternalPaths,
+    ForegroundExecutor, Image, ImageFormat, Task, hash,
 };
 
 /// Text mime types that we'll offer to other programs.
@@ -37,6 +38,8 @@ pub(crate) struct Clipboard {
     // External clipboard
     cached_read: Option<ClipboardItem>,
     current_offer: Option<DataOffer<WlDataOffer>>,
+    /// Selection events can supersede a proxy that is still alive in the compositor.
+    offer_generation: Rc<Cell<u64>>,
     cached_primary_read: Option<ClipboardItem>,
     current_primary_offer: Option<DataOffer<ZwpPrimarySelectionOfferV1>>,
 }
@@ -90,6 +93,138 @@ mod attachment_clipboard_tests {
             assert_eq!(offer.payload_mime_type(), expected);
         }
     }
+
+    /// An offer advertises flavors before any payload arrives. The test reader can then supply exactly the bytes
+    /// a producer would write, and record which flavors the paste actually requested.
+    fn offer_with(mimes: &[&str]) -> DataOffer<NoReceive> {
+        let mut offer = DataOffer::new(NoReceive);
+        for mime in mimes {
+            offer.add_mime_type((*mime).into());
+        }
+        offer
+    }
+
+    /// A file manager's mixed offer can contain comments, blank lines, and non-file URIs. Only local files become
+    /// attachments, in their original order, and the presence of a local file ends MIME selection.
+    #[test]
+    fn attachment_clipboard_prefers_local_files_from_a_mixed_list() {
+        let offer = offer_with(&["text/plain", "image/png", FILE_LIST_MIME_TYPE]);
+        let item = smol::block_on(offer.read_payload(
+            || true,
+            |mime, format| {
+                assert_eq!(mime, FILE_LIST_MIME_TYPE);
+                assert_eq!(format, None);
+                Task::ready(decode_payload(
+                    b"# files\r\nfile:///files/a%20b\r\n\r\nhttps://example.org/a\n\xff\n\
+                      file://server/files/c\nfile://server/c:/remote\nfile:///files/invalid%q0\n\
+                      file://localhost/files/d\nfile:/files/e\nfile:relative\n"
+                        .to_vec(),
+                    true,
+                    format,
+                ))
+            },
+        ))
+        .unwrap()
+        .unwrap();
+        let [ClipboardEntry::ExternalPaths(paths)] = item.entries.as_slice() else {
+            panic!("a valid file list supplies a file payload");
+        };
+        assert_eq!(
+            paths.0.as_slice(),
+            [
+                PathBuf::from("/files/a b"),
+                PathBuf::from("/files/d"),
+                PathBuf::from("/files/e"),
+            ]
+        );
+    }
+
+    /// Copy Link may advertise a URI list and text together. The text must still paste, and an offered image
+    /// keeps its precedence over text when the URI list yields no local files.
+    #[test]
+    fn attachment_clipboard_falls_back_on_the_same_offer() {
+        let link = "https://localhost/guide";
+        for (mimes, fallback) in [
+            (vec![FILE_LIST_MIME_TYPE, "text/plain"], "text/plain"),
+            (
+                vec!["image/png", FILE_LIST_MIME_TYPE, "text/plain"],
+                "image/png",
+            ),
+        ] {
+            let offer = offer_with(&mimes);
+            let mut requested = Vec::new();
+            let item = smol::block_on(offer.read_payload(
+                || true,
+                |mime, format| {
+                    requested.push(mime.to_owned());
+                    let bytes = if mime == "image/png" {
+                        b"image".as_slice()
+                    } else {
+                        link.as_bytes()
+                    };
+                    Task::ready(decode_payload(
+                        bytes.to_vec(),
+                        mime == FILE_LIST_MIME_TYPE,
+                        format,
+                    ))
+                },
+            ))
+            .unwrap()
+            .unwrap();
+            assert_eq!(requested, [FILE_LIST_MIME_TYPE, fallback]);
+            if fallback == "image/png" {
+                let [ClipboardEntry::Image(image)] = item.entries.as_slice() else {
+                    panic!("the image outranks text");
+                };
+                assert_eq!(image.format, ImageFormat::Png);
+                assert_eq!(image.bytes.as_slice(), b"image");
+            } else {
+                assert_eq!(item.text().as_deref(), Some(link));
+            }
+        }
+    }
+
+    /// A selection change while the file pipe is open ends that paste. The old reply supplies no text from either
+    /// the old or new selection, even though the original offer had plain text available.
+    #[test]
+    fn attachment_clipboard_cancels_if_the_offer_expires_mid_read() {
+        let offer = offer_with(&[FILE_LIST_MIME_TYPE, "text/plain"]);
+        let live = Cell::new(true);
+        let mut requested = Vec::new();
+        let result = smol::block_on(offer.read_payload(
+            || live.get(),
+            |mime, _| {
+                requested.push(mime.to_owned());
+                live.set(false);
+                Task::ready(Ok(None))
+            },
+        ));
+        assert!(result.unwrap().is_none());
+        assert_eq!(requested, [FILE_LIST_MIME_TYPE]);
+
+        let result = smol::block_on(offer.read_payload(
+            || live.get(),
+            |_, _| panic!("an expired offer cannot receive"),
+        ));
+        assert!(result.unwrap().is_none());
+    }
+
+    /// A stalled or failed pipe is a transfer failure. Only a successfully read empty list permits a new request.
+    #[test]
+    fn attachment_clipboard_does_not_fall_back_after_a_pipe_error() {
+        let offer = offer_with(&[FILE_LIST_MIME_TYPE, "text/plain"]);
+        let result = smol::block_on(offer.read_payload(
+            || true,
+            |mime, _| {
+                assert_eq!(mime, FILE_LIST_MIME_TYPE);
+                Task::ready(Err(ClipboardReadError::UnsupportedContent))
+            },
+        ));
+        assert!(matches!(
+            result,
+            Err(ClipboardReadError::UnsupportedContent)
+        ));
+    }
 }
 
 pub(crate) trait ReceiveData {
@@ -131,9 +266,7 @@ impl<T: ReceiveData> DataOffer<T> {
         self.mime_types.iter().any(|t| t == mime_type)
     }
 
-    /// Payload-oriented async reads choose an offered image before text. Keep
-    /// the old synchronous editor API's ordering and cache independent. Aliases
-    /// retain their actual offered MIME name when requesting the producer's data.
+    /// The async fallback prefers images over text and requests the exact offered MIME, including aliases.
     fn payload_mime_type(&self) -> Option<(&str, Option<ImageFormat>)> {
         for format in ImageFormat::iter() {
             if let Some(mime) = self
@@ -149,6 +282,69 @@ impl<T: ReceiveData> DataOffer<T> {
                 .iter()
                 .find(|mime| mime.as_str() == *preferred)
                 .map(|mime| (mime.as_str(), None))
+        })
+    }
+
+    /// An empty file list permits fallback on this offer. Losing the offer or failing to read its pipe ends the
+    /// request. The caller supplies the current-selection check independently of the lifetime of the Wayland proxy.
+    async fn read_payload(
+        &self,
+        is_current: impl Fn() -> bool,
+        mut read: impl FnMut(
+            &str,
+            Option<ImageFormat>,
+        ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>>,
+    ) -> Result<Option<ClipboardItem>, ClipboardReadError> {
+        let files = self
+            .has_mime_type(FILE_LIST_MIME_TYPE)
+            .then_some((FILE_LIST_MIME_TYPE, None));
+        for (mime, format) in files.into_iter().chain(self.payload_mime_type()) {
+            if !is_current() {
+                return Ok(None);
+            }
+            let result = read(mime, format).await;
+            if !is_current() {
+                return Ok(None);
+            }
+            if let Some(item) = result? {
+                return Ok(Some(item));
+            }
+        }
+        Ok(None)
+    }
+
+    /// Request one flavor on the Wayland thread. Only the pipe and its representation cross to the background worker.
+    fn receive_payload(
+        &self,
+        connection: &Connection,
+        executor: &BackgroundExecutor,
+        mime: &str,
+        format: Option<ImageFormat>,
+    ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
+        let pipe = match Pipe::new() {
+            Ok(pipe) => pipe,
+            Err(error) => {
+                log::error!("creating async clipboard pipe: {error}");
+                return Task::ready(Err(ClipboardReadError::Unavailable));
+            }
+        };
+        self.inner.receive_data(mime.to_owned(), unsafe {
+            BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
+        });
+        let fd = pipe.read;
+        drop(pipe.write);
+        if let Err(error) = connection.flush() {
+            log::error!("flushing async clipboard receive: {error}");
+            return Task::ready(Err(ClipboardReadError::Unavailable));
+        }
+        let file_list = mime == FILE_LIST_MIME_TYPE;
+        executor.spawn(async move {
+            // Dropping the paste can cancel later work, but a pipe read already running keeps its per-poll timeout.
+            let bytes = read_fd_with_timeout(fd, PIPE_READ_TIMEOUT).map_err(|error| {
+                log::error!("reading async clipboard pipe: {error}");
+                ClipboardReadError::UnsupportedContent
+            })?;
+            decode_payload(bytes, file_list, format)
         })
     }
 
@@ -211,6 +407,68 @@ impl<T: ReceiveData> DataOffer<T> {
     }
 }
 
+/// URI list comments, malformed lines and non-local URLs do not contribute file paths. Decode each line separately
+/// so a damaged entry cannot hide neighboring local files.
+fn parse_file_uri_list(bytes: &[u8]) -> ExternalPaths {
+    ExternalPaths(
+        bytes
+            .split(|byte| *byte == b'\n')
+            .filter_map(|line| std::str::from_utf8(line).ok())
+            .map(str::trim)
+            .filter(|line| !line.is_empty() && !line.starts_with('#'))
+            .filter_map(local_file_uri)
+            .collect(),
+    )
+}
+
+/// The URL parser can repair malformed input, including dropping a remote authority before a drive-letter path.
+/// Use the parser's syntax notices to keep those repaired URLs out of the local file list.
+fn local_file_uri(line: &str) -> Option<PathBuf> {
+    if !line.get(..6)?.eq_ignore_ascii_case("file:/") {
+        return None;
+    }
+    let invalid = Cell::new(false);
+    let note_violation = |violation| {
+        // A file URI can use a single slash when it gives an absolute path without an authority.
+        if violation != url::SyntaxViolation::ExpectedFileDoubleSlash {
+            invalid.set(true);
+        }
+    };
+    let url = url::Url::options()
+        .syntax_violation_callback(Some(&note_violation))
+        .parse(line)
+        .ok()?;
+    if invalid.get() || url.query().is_some() || url.fragment().is_some() {
+        return None;
+    }
+    url.to_file_path().ok()
+}
+
+/// A URI list with no local files supplies no attachment. A readable image or text supplies its usual payload.
+fn decode_payload(
+    bytes: Vec<u8>,
+    file_list: bool,
+    format: Option<ImageFormat>,
+) -> Result<Option<ClipboardItem>, ClipboardReadError> {
+    let item = if file_list {
+        let paths = parse_file_uri_list(&bytes);
+        if paths.0.is_empty() {
+            return Ok(None);
+        }
+        ClipboardItem {
+            entries: vec![ClipboardEntry::ExternalPaths(paths)],
+        }
+    } else if let Some(format) = format {
+        let id = hash(&bytes);
+        ClipboardItem::from(Image { format, bytes, id })
+    } else {
+        ClipboardItem::new_string(
+            String::from_utf8(bytes).map_err(|_| ClipboardReadError::UnsupportedContent)?,
+        )
+    };
+    Ok(Some(item))
+}
+
 impl Clipboard {
     pub fn new(connection: Connection, loop_handle: LoopHandle<'static, ()>) -> Self {
         Self {
@@ -223,6 +481,7 @@ impl Clipboard {
 
             cached_read: None,
             current_offer: None,
+            offer_generation: Rc::new(Cell::new(0)),
             cached_primary_read: None,
             current_primary_offer: None,
         }
@@ -237,6 +496,8 @@ impl Clipboard {
     }
 
     pub fn set_offer(&mut self, data_offer: Option<DataOffer<WlDataOffer>>) {
+        self.offer_generation
+            .set(self.offer_generation.get().wrapping_add(1));
         self.cached_read = None;
         self.current_offer = data_offer;
     }
@@ -284,14 +545,14 @@ impl Clipboard {
         Some(item)
     }
 
-    /// Issue receive/flush while the Wayland event-loop state is borrowed, then
-    /// move only the pipe to the existing background executor. Neither the offer
-    /// nor a client RefCell borrow crosses the await. This read does not update
-    /// the synchronous cache: its image-first representation may differ, and a
-    /// later selection must not inherit this captured offer's result.
+    /// Keep the captured offer on the Wayland thread so fallback can request another flavor after the first pipe
+    /// finishes. A selection change or loss of focus cancels the read even if the proxy still exists. The foreground
+    /// task owns a proxy and connection clone, so it never holds a client borrow across the background read.
     pub fn read_async(
         &self,
-        executor: &BackgroundExecutor,
+        background: &BackgroundExecutor,
+        foreground: &ForegroundExecutor,
+        has_focus: impl Fn() -> bool + 'static,
     ) -> Task<Result<Option<ClipboardItem>, ClipboardReadError>> {
         let Some(offer) = self.current_offer.as_ref() else {
             return Task::ready(Ok(None));
@@ -299,42 +560,18 @@ impl Clipboard {
         if offer.has_mime_type(&self.self_mime) {
             return Task::ready(Ok(self.contents.clone()));
         }
-        let Some((mime, format)) = offer.payload_mime_type() else {
-            return Task::ready(Ok(None));
-        };
-        let pipe = match Pipe::new() {
-            Ok(pipe) => pipe,
-            Err(error) => {
-                log::error!("creating async clipboard pipe: {error}");
-                return Task::ready(Err(ClipboardReadError::Unavailable));
-            }
-        };
-        offer.inner.receive_data(mime.to_owned(), unsafe {
-            BorrowedFd::borrow_raw(pipe.write.as_raw_fd())
-        });
-        let fd = pipe.read;
-        drop(pipe.write);
-        if let Err(error) = self.connection.flush() {
-            log::error!("flushing async clipboard receive: {error}");
-            return Task::ready(Err(ClipboardReadError::Unavailable));
-        }
-        executor.spawn(async move {
-            // This uses the backend's existing per-poll timeout. Dropping the
-            // GUI waiter prevents admission, but does not interrupt a blocking
-            // read already executing on this worker thread.
-            let bytes = read_fd_with_timeout(fd, PIPE_READ_TIMEOUT).map_err(|error| {
-                log::error!("reading async clipboard pipe: {error}");
-                ClipboardReadError::UnsupportedContent
-            })?;
-            let item = if let Some(format) = format {
-                let id = hash(&bytes);
-                ClipboardItem::from(Image { format, bytes, id })
-            } else {
-                ClipboardItem::new_string(
-                    String::from_utf8(bytes).map_err(|_| ClipboardReadError::UnsupportedContent)?,
+        let offer = offer.clone();
+        let connection = self.connection.clone();
+        let generation = self.offer_generation.clone();
+        let captured = generation.get();
+        let background = background.clone();
+        foreground.spawn(async move {
+            offer
+                .read_payload(
+                    || generation.get() == captured && has_focus() && offer.inner.is_alive(),
+                    |mime, format| offer.receive_payload(&connection, &background, mime, format),
                 )
-            };
-            Ok(Some(item))
+                .await
         })
     }
 

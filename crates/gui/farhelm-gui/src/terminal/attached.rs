@@ -1612,10 +1612,9 @@ impl AttachedTerminal {
     ///
     /// Which it is, is the attachments' rule ([`attachments::classify`]): files first, then images, then text, so a
     /// Finder copy on macOS, which carries the file's path as text too, attaches the file and types no path. An attached
-    /// file's host path is typed once its upload completes ([`AttachedTerminal::attachment_uploaded`]). The vendored
-    /// Wayland read never reports a file list, only an image or text, so a file copied on Linux pastes whatever text
-    /// its file manager offers (usually its path). Text goes out as one group of the input mapping's paste parts, so a
-    /// paste of any size (the old app's test pasted over a megabyte) arrives whole and in order or not at all.
+    /// file's host path is typed once its upload completes ([`AttachedTerminal::attachment_uploaded`]). On Wayland a
+    /// file manager's URI list supplies local files, while a browser's link can still supply plain text. Text goes out
+    /// as one group of the input mapping's paste parts, so large pastes arrive whole and in order.
     /// Bracketed paste, its markers, line endings and the sanitizing that strips an embedded end marker so the paste
     /// cannot end early are all the supervisor's (`grid_input.rs`), so nothing here rewrites the text.
     ///

@@ -1505,14 +1505,23 @@ impl WaylandConnection {
         self.0.borrow_mut().clipboard.read()
     }
 
-    /// Prepare the offer on the platform thread; only its pipe read runs in the
-    /// background. All state borrows end before the returned task can be awaited.
+    /// Wayland selection offers expire with keyboard focus as well as selection changes. Reuse the current focus
+    /// state and the platform executor between pipe reads, without keeping the client alive or borrowed.
     pub(crate) fn read_from_clipboard_async(
         &self,
     ) -> gpui::Task<Result<Option<gpui::ClipboardItem>, gpui::ClipboardReadError>> {
         let state = self.0.borrow();
         let common = state.common.borrow();
-        state.clipboard.read_async(&common.background_executor)
+        let client = Rc::downgrade(&self.0);
+        state.clipboard.read_async(
+            &common.background_executor,
+            &common.foreground_executor,
+            move || {
+                client
+                    .upgrade()
+                    .is_some_and(|state| state.borrow().keyboard_focused_window.is_some())
+            },
+        )
     }
 
     pub(crate) fn active_window(&self) -> Option<AnyWindowHandle> {
