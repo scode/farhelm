@@ -260,10 +260,11 @@ pub struct CheckoutPreparation {
     /// fields. Verified here defensively (shape, no shell metacharacters)
     /// before any process runs: fail closed on anything unexpected.
     pub clone_url: String,
-    /// Host-local object cache derived by the supervisor, never supplied by
+    /// Host-local object cache key derived by the supervisor, never supplied by
     /// a create request. Older launch specs deserialize with an empty path;
     /// an unstarted preparation then fails its clone stage rather than bypassing
-    /// the cache. A Ready preparation still needs no Git work on restart.
+    /// the cache. The physical path is resolved under the repo lock at launch.
+    /// A Ready preparation still needs no Git work on restart.
     #[serde(default)]
     pub repo_cache_path: PathBuf,
     /// The allocated target directory, accepted as an absolute path. May
@@ -2132,32 +2133,10 @@ pub(crate) fn clone_from_repo_cache(
         let lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
         verify_target_after_lock()?;
-        crate::repo_cache::clear_git_locks(cache, &lock)
-            .map_err(|e| format!("could not clear cache Git locks: {e}"))?;
-
-        // argv, never shell text. init is deliberately idempotent, including
-        // after an interrupted first fetch; stale Git locks were cleared above.
-        let mut init = make_git();
-        init.args(["init", "--bare", "-q"]).arg(cache);
-        run_preparation_child_process(&mut init, "cache init")?;
-
-        let mut fetch = make_git();
-        // This is our own bare cache, named explicitly so Git's
-        // safe.bareRepository=explicit policy need not be relaxed. Only the
-        // background caller may pay the consolidation cost during this fetch;
-        // keeping it foreground there makes the same flock cover all cleanup.
-        match cleanup {
-            CacheCleanup::Defer => fetch.args(NO_AUTO_GIT_CLEANUP),
-            CacheCleanup::Run => fetch.args(CACHE_CLEANUP_CONFIG),
-        };
-        fetch.arg("--git-dir").arg(cache).args([
-            "fetch",
-            "--prune",
-            clone_url,
-            "+refs/heads/*:refs/heads/*",
-            "+refs/tags/*:refs/tags/*",
-        ]);
-        run_preparation_child_process(&mut fetch, "cache fetch")?;
+        let physical = crate::repo_cache::refresh(cache, &lock, |path| {
+            init_and_fetch(path, clone_url, cleanup, &mut make_git)
+                .map_err(|detail| format!("{}: {detail}", path.display()))
+        })?;
 
         // Git before 2.55.0 can lose a cached commit's tree during dissociation
         // when the reference's commit-graph covers it ("unable to parse commit").
@@ -2168,10 +2147,11 @@ pub(crate) fn clone_from_repo_cache(
             .args(["-c", "core.commitGraph=false"])
             .args(NO_AUTO_GIT_CLEANUP)
             .args(["clone", "--reference"])
-            .arg(cache)
+            .arg(&physical)
             .args(["--dissociate", "--", clone_url])
             .arg(target);
-        run_preparation_child_process(&mut clone, "clone")?;
+        run_preparation_child_process(&mut clone, "clone")
+            .map_err(|detail| format!("{}: {detail}", physical.display()))?;
         lock.mark_used()
             .map_err(|e| format!("could not record cache use: {e}"))?;
         Ok(())
@@ -2179,26 +2159,57 @@ pub(crate) fn clone_from_repo_cache(
     result.map_err(|detail| format!("repository cache {}: {detail}", cache.display()))
 }
 
+/// Populate one bare cache. Checkout recovery can run the same Git sequence
+/// again in a fresh directory while the caller continues to hold the flock.
+fn init_and_fetch(
+    physical: &Path,
+    clone_url: &str,
+    cleanup: CacheCleanup,
+    make_git: &mut impl FnMut() -> std::process::Command,
+) -> Result<(), String> {
+    let mut init = make_git();
+    init.args(["init", "--bare", "-q"]).arg(physical);
+    run_preparation_child_process(&mut init, "cache init")?;
+
+    let mut fetch = make_git();
+    // Explicit --git-dir satisfies safe.bareRepository=explicit. Foreground
+    // cleanup, when allowed, stays inside the repository flock's lifetime.
+    match cleanup {
+        CacheCleanup::Defer => fetch.args(NO_AUTO_GIT_CLEANUP),
+        CacheCleanup::Run => fetch.args(CACHE_CLEANUP_CONFIG),
+    };
+    fetch.arg("--git-dir").arg(physical).args([
+        "fetch",
+        "--prune",
+        clone_url,
+        "+refs/heads/*:refs/heads/*",
+        "+refs/tags/*:refs/tags/*",
+    ]);
+    run_preparation_child_process(&mut fetch, "cache fetch")
+}
+
 /// Consolidate an existing cache when the background attempt has no spare to build.
 /// Use the same permanent lock and pack threshold as a background refresh. Both
 /// detachment settings keep cleanup inside this guard's lifetime; this does not
-/// create a cache or count maintenance as a successful checkout for eviction.
+/// replace a cache on failure or count maintenance as a checkout for eviction.
 pub(crate) fn consolidate_repo_cache(
     cache: &Path,
     mut make_git: impl FnMut() -> std::process::Command,
 ) -> Result<(), String> {
     let result = (|| {
         validate_repo_cache_path(cache)?;
-        let _lock =
+        let lock =
             crate::repo_cache::acquire(cache).map_err(|e| format!("could not lock cache: {e}"))?;
-        crate::repo_cache::clear_git_locks(cache, &_lock)
-            .map_err(|e| format!("could not clear cache Git locks: {e}"))?;
+        let physical = crate::repo_cache::current(cache, &lock)
+            .map_err(|e| format!("could not read cache selection: {e}"))?;
+        let path = physical.as_deref().unwrap_or(cache);
         let mut gc = make_git();
         gc.args(CACHE_CLEANUP_CONFIG)
             .arg("--git-dir")
-            .arg(cache)
+            .arg(path)
             .args(["gc", "--auto"]);
         run_preparation_child_process(&mut gc, "cache cleanup")
+            .map_err(|detail| format!("{}: {detail}", path.display()))
     })();
     result.map_err(|detail| format!("repository cache {}: {detail}", cache.display()))
 }
@@ -4029,6 +4040,27 @@ exec sleep 60
             self.tmp.path().join("bin")
         }
 
+        /// Inspect the cache published by a completed preparation. A failed
+        /// first fetch must leave no selection even if it started writing Git objects.
+        fn selected_cache(&self) -> Option<PathBuf> {
+            let key = &self.preparation.repo_cache_path;
+            let lock = crate::repo_cache::acquire(key).unwrap();
+            crate::repo_cache::current(key, &lock).unwrap()
+        }
+
+        /// Give a test control of the Git contents in a selected generation
+        /// before launching a shim or running the background cleanup.
+        fn seed_cache(&self, mut populate: impl FnMut(&Path)) -> PathBuf {
+            let key = &self.preparation.repo_cache_path;
+            let lock = crate::repo_cache::acquire(key).unwrap();
+            assert!(crate::repo_cache::current(key, &lock).unwrap().is_none());
+            crate::repo_cache::refresh(key, &lock, |physical| {
+                populate(physical);
+                Ok(())
+            })
+            .unwrap()
+        }
+
         /// The path the D-suite fakes hang their stage markers and argv
         /// records off (`marker.git`, `marker.hook.argv`, ...).
         ///
@@ -4369,7 +4401,9 @@ exec sleep 60
 
     /// Record each Git stage separately and require init → fetch → clone.
     /// Only clone writes the completion marker; a repeated preparation fails
-    /// instead of overwriting its evidence. Failure wiring targets clone unless
+    /// instead of overwriting its evidence. The call log also records refused
+    /// repeats so tests can distinguish an error before and after retrying.
+    /// Failure wiring targets clone unless
     /// a stage-specific `.fail` file asks init or fetch to refuse. Fetch and clone
     /// both begin with `-c`, so their configuration keys distinguish the stages;
     /// the exact-argv test separately holds the whole command shape to account.
@@ -4383,6 +4417,7 @@ case "$1:$2" in
     -c:core.commitGraph=false) stage=clone; record="{argv_record}" ;;
     *) echo "unexpected Git stage" >&2; exit 98 ;;
 esac
+printf '%s\n' "$stage" >> "{argv_record}.calls"
 if [ -f "$record.count" ]; then
     echo "fake git: repeated $stage" >&2
     exit 99
@@ -4391,7 +4426,6 @@ case "$stage" in
     fetch) [ -f "{argv_record}.init.done" ] || exit 97 ;;
     clone) [ -f "{argv_record}.fetch.done" ] || exit 96 ;;
 esac
-printf '%s\n' "$stage" >> "{argv_record}.calls"
 i=0
 for a in "$@"; do
     printf '%s' "$a" > "$record.$i"
@@ -4847,7 +4881,11 @@ printf 'AGENT-RAN\n'
             "the shim must complete the preparation without error: \
              status={status:?} report={report} terminal={terminal}"
         );
-        let cache = fixture.preparation.repo_cache_path.to_str().unwrap();
+        let physical = fixture
+            .selected_cache()
+            .expect("preparation published a cache");
+        assert_ne!(physical, fixture.preparation.repo_cache_path);
+        let cache = physical.to_str().unwrap();
         let prefix = marker.with_extension("git.argv");
         assert_eq!(
             std::fs::read_to_string(format!("{}.calls", prefix.display())).unwrap(),
@@ -4968,7 +5006,8 @@ printf 'AGENT-RAN\n'
     }
 
     /// Cache failures are clone-stage failures, and stop before checkout, hook
-    /// or agent. Distinct init/fetch markers identify which real stage refused.
+    /// or agent. A first-use failure has no warm cache to replace, so the shim
+    /// makes one attempt and leaves the cache unselected.
     #[farhelm_testtrace::test]
     fn cache_git_failure_has_no_plain_clone_fallback() {
         for stage in ["init", "fetch"] {
@@ -4976,22 +5015,32 @@ printf 'AGENT-RAN\n'
             let prefix = fixture.marker().with_extension("git.argv");
             std::fs::write(format!("{}.{}.fail", prefix.display(), stage), "").unwrap();
             let (report, terminal, _) = fixture.run_shim_in_child();
-            assert!(
-                PathBuf::from(format!("{}.{}.count", prefix.display(), stage)).exists(),
-                "failing stage must have run"
+            assert_eq!(
+                std::fs::read_to_string(format!("{}.calls", prefix.display())).unwrap(),
+                if stage == "init" {
+                    "init\n"
+                } else {
+                    "init\nfetch\n"
+                },
+                "first-use failure must not trigger a fresh retry or a plain clone"
             );
             assert!(
                 report.contains(&format!("cache {stage} exited with status 44")),
                 "{report}: {terminal}"
             );
             assert!(report.contains(fixture.preparation.repo_cache_path.to_str().unwrap()));
+            let (init, _) = read_recorded_argv(&prefix.with_extension("argv.init"));
+            let physical = init.last().unwrap();
+            assert_ne!(Path::new(physical), fixture.preparation.repo_cache_path);
+            assert!(
+                report.contains(physical),
+                "error must name the Git directory: {report}"
+            );
+            assert!(!Path::new(physical).exists());
             assert!(
                 matches!(fixture.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
             );
-            assert!(
-                !PathBuf::from(format!("{}.count", prefix.display())).exists(),
-                "checkout clone must not run"
-            );
+            assert!(fixture.selected_cache().is_none());
             assert!(!fixture.marker().with_extension("hook").exists());
             assert!(!fixture.marker().with_extension("agent").exists());
         }
@@ -6386,7 +6435,7 @@ printf 'AGENT-RAN\n'
             "#!/bin/sh\nprintf 'EXPLICIT-POLICY-AGENT-RAN\\n'\n",
         );
         assert!(
-            !fixture.preparation.repo_cache_path.exists(),
+            fixture.selected_cache().is_none(),
             "premise: cache starts absent"
         );
         let child_path = format!(
@@ -6418,7 +6467,7 @@ printf 'AGENT-RAN\n'
             terminal.contains("EXPLICIT-POLICY-AGENT-RAN"),
             "agent did not run: {terminal}"
         );
-        assert!(fixture.preparation.repo_cache_path.join("objects").is_dir());
+        assert!(fixture.selected_cache().unwrap().join("objects").is_dir());
         assert_eq!(
             std::fs::read_to_string(Path::new(&fixture.preparation.cwd).join("tracked.txt"))
                 .unwrap(),
@@ -6486,9 +6535,9 @@ printf 'AGENT-RAN\n'
 
         let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
         fixture.install_script("fake-agent", "#!/bin/sh\nexit 0\n");
-        let cache = &fixture.preparation.repo_cache_path;
-        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-        git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+        let cache = fixture.seed_cache(|cache| {
+            git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+        });
         git(&[
             "-C",
             cache.to_str().unwrap(),
@@ -6614,9 +6663,9 @@ printf 'AGENT-RAN\n'
         let upstream_url = format!("file://{}", work.display());
         let fixture = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
         fixture.install_script("fake-agent", "#!/bin/sh\nexit 0\n");
-        let cache = &fixture.preparation.repo_cache_path;
-        std::fs::create_dir_all(cache.parent().unwrap()).unwrap();
-        git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+        let cache = fixture.seed_cache(|cache| {
+            git(&["init", "--bare", "-q", cache.to_str().unwrap()]);
+        });
 
         // Each fetch transfers a new commit over a transport that produces a
         // pack. Suppress consolidation only during setup and force even these
@@ -6717,7 +6766,7 @@ printf 'AGENT-RAN\n'
         );
         // The production cleanup helper uses the same isolated real Git as
         // setup, after the shim has returned and released its cache flock.
-        consolidate_repo_cache(cache, || {
+        consolidate_repo_cache(&fixture.preparation.repo_cache_path, || {
             let mut command = std::process::Command::new("git");
             command
                 .env_clear()
@@ -6762,8 +6811,9 @@ printf 'AGENT-RAN\n'
     /// must produce a checkout holding the tracked file's content, with
     /// the GitHub origin preserved and no dependency on cached objects. A second
     /// checkout observes a new upstream commit, while pull refs never enter the
-    /// cache; stale packed-ref locks cannot prevent pruning a deleted branch, and
-    /// removing the cache leaves both ordinary clones intact.
+    /// cache. A failed upstream fetch preserves the warm cache. A lock blocking
+    /// Git's ref writes sends the next checkout to a different cache path, and
+    /// removing that cache leaves both ordinary clones intact.
     #[farhelm_testtrace::test]
     fn d2_real_git_offline_clones_the_instead_of_fixture() {
         let setup = tempfile::tempdir().unwrap();
@@ -6773,16 +6823,19 @@ printf 'AGENT-RAN\n'
 
         // Setup git commands run in the test process with their
         // environment isolated ON THE COMMAND (never the process).
-        let isolated_git = |args: &[&str]| -> std::process::Output {
-            std::process::Command::new("git")
-                .args(args)
-                .env("GIT_CONFIG_GLOBAL", "/dev/null")
+        let git_command = || {
+            let mut git = std::process::Command::new("git");
+            git.env("GIT_CONFIG_GLOBAL", "/dev/null")
                 .env("GIT_CONFIG_SYSTEM", "/dev/null")
+                .env("GIT_CONFIG_COUNT", "0")
                 .env_remove("GIT_DIR")
                 .env_remove("GIT_WORK_TREE")
                 .env_remove("GIT_INDEX_FILE")
-                .output()
-                .expect("run setup git")
+                .env_remove("GIT_CONFIG_PARAMETERS");
+            git
+        };
+        let isolated_git = |args: &[&str]| -> std::process::Output {
+            git_command().args(args).output().expect("run setup git")
         };
         // Fixture premise: one commit with a tracked file, mirrored into
         // a bare repo, and the bare repo actually HAS that commit.
@@ -6901,7 +6954,9 @@ printf 'AGENT-RAN\n'
             .expect("tracked file in the checkout");
         assert_eq!(tracked, "tracked content\n");
         let checkout = fixture.tmp.path().join("checkout");
-        let cache = &fixture.preparation.repo_cache_path;
+        let cache = fixture
+            .selected_cache()
+            .expect("first checkout published a cache");
         assert!(!checkout.join(".git/objects/info/alternates").exists());
         let origin = isolated_git(&[
             "-C",
@@ -6934,6 +6989,41 @@ printf 'AGENT-RAN\n'
             "the post-clone hook ran in the checkout"
         );
         assert!(agent_marker.exists(), "the agent ran after the real clone");
+
+        // An unavailable local remote exercises two actual fetch failures
+        // without a network dependency. The next launch must still find the
+        // same warm ref at the same physical path.
+        let cache_key = &fixture.preparation.repo_cache_path;
+        let missing_remote = setup.path().join("missing.git");
+        let failed_checkout = setup.path().join("failed-checkout");
+        assert!(!missing_remote.exists());
+        let unavailable = clone_from_repo_cache(
+            cache_key,
+            missing_remote.to_str().unwrap(),
+            &failed_checkout,
+            CacheCleanup::Defer,
+            git_command,
+            || Ok(()),
+        )
+        .unwrap_err();
+        assert_eq!(
+            unavailable.matches("cache fetch exited").count(),
+            2,
+            "{unavailable}"
+        );
+        assert!(!failed_checkout.exists());
+        assert_eq!(fixture.selected_cache().as_ref(), Some(&cache));
+        let warm_ref = isolated_git(&[
+            "--git-dir",
+            cache.to_str().unwrap(),
+            "rev-parse",
+            "refs/heads/pruned",
+        ]);
+        assert!(warm_ref.status.success());
+        assert_eq!(
+            String::from_utf8(warm_ref.stdout).unwrap().trim(),
+            original_head
+        );
 
         // Mutate only the owned upstream fixture, then prove the second cache
         // fetch advances the ordinary checkout to that new commit.
@@ -7005,7 +7095,7 @@ printf 'AGENT-RAN\n'
         );
         assert!(String::from_utf8_lossy(&prune.stderr).contains("packed-refs.lock"));
         let mut second = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
-        second.preparation.repo_cache_path = cache.clone();
+        second.preparation.repo_cache_path = cache_key.clone();
         second.install_script("fake-agent", "#!/bin/sh\nprintf 'AGENT-RAN\\n'\n");
         let second_path = format!(
             "{}:{}",
@@ -7019,10 +7109,24 @@ printf 'AGENT-RAN\n'
         );
         assert!(report.is_empty(), "{report}: {terminal}");
         assert_eq!(second.state().unwrap(), PreparationState::Ready);
-        assert!(!cache.join("packed-refs.lock").exists());
-        let retained =
-            isolated_git(&["-C", cache_dir, "show-ref", "--verify", "refs/heads/pruned"]);
-        assert!(!retained.status.success());
+        let replacement = second
+            .selected_cache()
+            .expect("retry published a replacement");
+        assert_ne!(replacement, cache);
+        assert!(
+            !cache.exists(),
+            "successful replacement retires the old path"
+        );
+        let replacement_refs = isolated_git(&[
+            "-C",
+            replacement.to_str().unwrap(),
+            "for-each-ref",
+            "--format=%(refname)",
+        ]);
+        assert!(replacement_refs.status.success());
+        let replacement_refs = String::from_utf8(replacement_refs.stdout).unwrap();
+        assert!(replacement_refs.lines().any(|r| r == "refs/tags/v1"));
+        assert!(!replacement_refs.lines().any(|r| r == "refs/heads/pruned"));
         assert_eq!(
             std::fs::read_to_string(Path::new(&second.preparation.cwd).join("tracked-file.txt"))
                 .unwrap(),
@@ -7035,8 +7139,63 @@ printf 'AGENT-RAN\n'
             updated
         );
 
-        std::fs::remove_dir_all(cache).unwrap();
-        for cwd in [&fixture.preparation.cwd, &second.preparation.cwd] {
+        // A loose ref lock exercises the same recovery without requiring any
+        // particular packed-ref layout. Rewind the upstream branch to make the
+        // next fetch write the ref and prove Git rejects the planted lock.
+        let head_ref = isolated_git(&["-C", bare_dir, "symbolic-ref", "HEAD"]);
+        assert!(head_ref.status.success());
+        let head_ref = String::from_utf8(head_ref.stdout).unwrap();
+        let head_ref = head_ref.trim();
+        let ref_lock = replacement.join(format!("{head_ref}.lock"));
+        assert!(
+            replacement.join(head_ref).is_file(),
+            "premise: fresh cache has a loose branch ref"
+        );
+        std::fs::write(&ref_lock, "interrupted ref update").unwrap();
+        assert!(
+            isolated_git(&["-C", bare_dir, "update-ref", head_ref, &original_head])
+                .status
+                .success()
+        );
+        let blocked = isolated_git(&[
+            "--git-dir",
+            replacement.to_str().unwrap(),
+            "fetch",
+            "--prune",
+            bare_dir,
+            "+refs/heads/*:refs/heads/*",
+        ]);
+        assert!(
+            !blocked.status.success(),
+            "premise: the loose lock blocks ref updates"
+        );
+        assert!(String::from_utf8_lossy(&blocked.stderr).contains(&format!("{head_ref}.lock")));
+        let third = setup.path().join("third-checkout");
+        clone_from_repo_cache(
+            cache_key,
+            bare_dir,
+            &third,
+            CacheCleanup::Defer,
+            git_command,
+            || Ok(()),
+        )
+        .unwrap();
+        let latest_cache = fixture.selected_cache().unwrap();
+        assert_ne!(latest_cache, replacement);
+        assert!(!replacement.exists());
+        let third_head = isolated_git(&["-C", third.to_str().unwrap(), "rev-parse", "HEAD"]);
+        assert!(third_head.status.success());
+        assert_eq!(
+            String::from_utf8(third_head.stdout).unwrap().trim(),
+            original_head
+        );
+
+        std::fs::remove_dir_all(latest_cache).unwrap();
+        for cwd in [
+            fixture.preparation.cwd.as_str(),
+            second.preparation.cwd.as_str(),
+            third.to_str().unwrap(),
+        ] {
             assert!(!Path::new(cwd).join(".git/objects/info/alternates").exists());
             let fsck = isolated_git(&["-C", cwd, "fsck", "--connectivity-only"]);
             assert!(
@@ -7046,8 +7205,8 @@ printf 'AGENT-RAN\n'
             );
         }
 
-        // A local I/O error fails before an otherwise valid remote can clone.
-        // Sharing the same upstream fixture rules out remote failure as cause.
+        // An upgrade can leave a plain file at the legacy path. Migration
+        // builds from the same remote and retires that file after publication.
         let broken = PrepFixture::new("https://github.com/example/repo.git", None, "/bin/sh");
         std::fs::create_dir_all(broken.preparation.repo_cache_path.parent().unwrap()).unwrap();
         std::fs::write(&broken.preparation.repo_cache_path, "not a Git directory").unwrap();
@@ -7063,20 +7222,16 @@ printf 'AGENT-RAN\n'
             &envs,
             &["GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE"],
         );
-        assert!(
-            report.contains("could not clear cache Git locks")
-                && report.contains(broken.preparation.repo_cache_path.to_str().unwrap()),
-            "{report}: {terminal}"
+        assert!(report.is_empty(), "{report}: {terminal}");
+        assert_eq!(broken.state().unwrap(), PreparationState::Ready);
+        assert!(broken.selected_cache().unwrap().join("objects").is_dir());
+        assert!(!broken.preparation.repo_cache_path.exists());
+        assert_eq!(
+            std::fs::read_to_string(Path::new(&broken.preparation.cwd).join("tracked-file.txt"))
+                .unwrap(),
+            "tracked content\n"
         );
-        assert!(
-            matches!(broken.state().unwrap(), PreparationState::Failed { stage, .. } if stage == "clone")
-        );
-        assert!(
-            !Path::new(&broken.preparation.cwd)
-                .join("tracked-file.txt")
-                .exists()
-        );
-        assert!(!terminal.contains("AGENT-RAN"));
+        assert!(terminal.contains("AGENT-RAN"));
     }
 
     // ---------------------------------------------------------------------

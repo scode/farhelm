@@ -141,41 +141,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
   costs in the app.
 
-- **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
-  preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
-  job, while holding Farhelm's own exclusive cache lock (`clear_git_locks` in
-  `crates/farhelm-supervisor/src/repo_cache.rs`, called from `launch.rs`; SPEC_impl.md says cache Git processes "end
-  with their preparation job"). The landing review left three gaps, bundled here for one decision on which to fix:
-  - **A Git that outlives Farhelm can race a later launch.** Git's own lock file used to be the backstop: a Git process
-    still running after Farhelm's lock was released made the next fetch fail cleanly. Now Farhelm deletes that file. If
-    Farhelm's processes are killed by hand with SIGKILL during background cache cleanup, its `git` keeps running with
-    nothing to stop it, and a later launch can then race it on the cache's branch list. Nothing in Farhelm does this
-    itself. Recommended fix: on Linux, have the kernel end cache Git processes when their parent dies (a parent-death
-    signal on the spawned `git`), which also makes SPEC_impl.md's "end with their preparation job" true. Even an
-    ordinary termination signal lets Git run its own cleanup just after Farhelm's lock is released; the worst case found
-    is that launch's checkout failing once and a retry succeeding. Without the fix, soften that SPEC_impl.md wording.
-  - **Reftable storage and per-branch history logs are not covered.** The repair removes the lock files of Git's default
-    branch storage (`packed-refs.lock`, `HEAD.lock`, `config.lock`, `shallow.lock` and per-reference locks under
-    `refs/`). A cache using Git's newer reftable storage, or with per-branch history logs (`logs/`) turned on, can leave
-    locks it does not remove, and checkouts then fail as before the plan. Farhelm turns on neither, but cache Git runs
-    with the user's own Git settings, so a global `init.defaultRefFormat` or `core.logAllRefUpdates` setting can. Either
-    remove those locks too or run cache Git with the settings pinned.
-  - **A cache path that is a plain file gives a misleading error.** When the cache path is a file instead of a
-    directory, a checkout fails with "could not clear cache Git locks: Not a directory" rather than Git's own error. No
-    working cache is affected, but the message points at the lock repair, not the broken cache. The test that pins the
-    new message would change with it.
-
-  The plan's test covers one planted `packed-refs.lock` on a launch's checkout; the walk through `refs/`, the refusal to
-  follow a symlinked `refs/`, and the repair on the background cleanup path are untested and worth covering with
-  whichever fix lands. Recorded by the maintainer on 2026-11-18 from the plan's review.
-
-  Sent back unplanned on 2026-11-21: the maintainer does not want these gaps patched one by one. Their words: "We need
-  to fundamentally rethink this. This cannot be this complicated. We cannot rely on these implementation details and
-  whatever in Git; we need to fundamentally redesign this." Planning research that day also found that the parent-death
-  signal recommended above would not cover background cleanup, where `git gc` hands the branch-list rewrite to a child
-  process the signal does not reach, and that it is Linux-only while the cache runs on Macs too. Plan:
-  `plans/queue/repo-cache-lock-redesign.md`.
-
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
   installed beside Farhelm. It is needed while Update can reach a host still carrying that copy: any release from 0.23.0

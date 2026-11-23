@@ -3604,14 +3604,15 @@ footer. These readers require the dialog's choices and current footer. The GUI a
 session's structured launch. The read and draw paths apply to the recognized question in every directory. Pi uses its
 project-resource approval flag without a trust recognizer.
 
-Each host caches repository objects at `<state_dir>/repo-cache/<owner>/<name>.git`, derived from the validated,
-lowercased repository pair. The supervisor passes that absolute path in the preparation's `repo_cache_path`; it is not
-request input and does not change the frozen fingerprints. Old launch specs deserialize with an empty path, then refuse
-the clone stage rather than bypassing the cache. A Ready restart skips Git and needs no cache path.
+Each host derives a cache key, `<state_dir>/repo-cache/<owner>/<name>.git`, from the validated, lowercased repository
+pair. The supervisor passes that absolute key in the preparation's `repo_cache_path`. It is host-local and leaves the
+request fingerprints unchanged. Old launch specs deserialize with an empty path and refuse to start the clone stage. A
+Ready restart skips Git and needs no cache path.
 
 The shim takes the working-copy preparation lock first, then a blocking flock on the permanent sibling `<name>.lock`.
-Both descriptors are CLOEXEC. While holding the repository lock it runs these commands in the session terminal, with the
-same launch markers, environment scrubbing and `GIT_TERMINAL_PROMPT=1` as the clone:
+Both descriptors are CLOEXEC. `<name>.git:current` holds the UUID of the selected bare cache directory,
+`<name>.git:gen-<uuid>`. The shim resolves that path under the repository lock and runs these commands in the session
+terminal, with the existing launch markers, environment scrubbing and `GIT_TERMINAL_PROMPT=1`:
 
 ```text
 git init --bare -q <cache>
@@ -3619,29 +3620,35 @@ git -c gc.auto=0 -c maintenance.auto=false --git-dir <cache> fetch --prune <http
 git -c core.commitGraph=false -c gc.auto=0 -c maintenance.auto=false clone --reference <cache> --dissociate -- <https url> <cwd>
 ```
 
-The fetch names the bare cache explicitly so Git's `safe.bareRepository=explicit` policy remains in force. Bare init is
-idempotent, including after an interrupted initial fetch. Command-line refspecs keep the cache to branches and tags
-without writing a remote configuration. Automatic gc and maintenance are disabled for the visible refresh and clone; the
-existing background worker consolidates after the clone stage instead. A later launch can still wait while that worker
-holds the cache lock. Plain `--reference`, rather than `--reference-if-able`, makes an unavailable cache fail the clone
-stage; `--dissociate` copies the borrowed objects so the checkout has no alternates and keeps its GitHub origin. The
-clone alone disables commit-graph reads to avoid Git before 2.55.0 losing a cached commit's tree during dissociation;
-this command-local workaround can go once Git 2.55 is the minimum (upstream fix `3d8e4004c6`). The lock stays held
-through dissociation, then its modification time records successful use. There is no timeout or fallback. Cache errors
-name the path and use the existing `Failed{stage: clone}` state; `CloneStarted` covers the whole sequence, including
-restart refusal after interruption.
+The fetch names the bare cache explicitly so Git's `safe.bareRepository=explicit` policy remains in force. Command-line
+refspecs keep the cache to branches and tags without writing a remote configuration. Automatic gc and maintenance are
+disabled for the visible refresh and clone; the existing background worker consolidates after the clone stage instead. A
+later launch can still wait while that worker holds the cache lock. Plain `--reference`, rather than
+`--reference-if-able`, makes an unavailable cache fail the clone stage; `--dissociate` copies the borrowed objects so
+the checkout has no alternates and keeps its GitHub origin. The clone alone disables commit-graph reads to avoid Git
+before 2.55.0 losing a cached commit's tree during dissociation; this command-local workaround can go once Git 2.55 is
+the minimum (upstream fix `3d8e4004c6`). The lock stays held through dissociation, then its modification time records
+successful use. There is no timeout or fallback. Cache errors name the path and use the existing `Failed{stage: clone}`
+state; `CloneStarted` covers the whole sequence, including restart refusal after interruption.
 
-Before cache Git work, under that same exclusive flock, Farhelm removes leftover `packed-refs.lock`, `HEAD.lock`,
-`config.lock`, `shallow.lock` and lock files beneath real `refs/` directories. Git children do not inherit the flock and
-end with their preparation job, so these locks have no live owner when repair runs; genuine Git failures still fail.
+Git manages its own locks inside the bare cache. If init or fetch fails in the selected directory, Farhelm runs those
+steps once in a fresh generation. It publishes the new selector atomically and syncs its parent before removing the
+previous generation. A failed rebuild leaves the previous selection in place. A Git child can survive its owner's abrupt
+termination and reopen an absolute filename after Farhelm's flock is released. A replacement uses its own path so the
+child can only reach the cache it started on. A host with no selector, including one with a pre-upgrade cache at
+`<name>.git`, builds in a fresh path on the first checkout. The old path stays in place until publication succeeds.
+Background cleanup alone runs `git gc --auto` on the selected cache (or the legacy path before migration) and leaves
+recovery to checkout preparation.
 
 Supervisor startup sweeps `repo-cache/` on a blocking worker. It enumerates the permanent locks and tries each without
-waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes leftover
-`<name>.git.trash`, then renames a cache unused for more than 30 days to that trash path before removing it recursively.
-An interrupted eviction therefore leaves only trash to finish at the next startup, never a partially removed live cache.
-`remove_dir_all` does not follow directory symlinks. Lock files are never unlinked: a waiting shim still holds their
-inode, and replacing it would allow two owners. One empty lock file per repository ever cached is the accepted leftover.
-A sweep failure is logged and leaves unused caches for a later startup; it does not prevent sessions from starting.
+waiting, skipping a cache still in use by a shim that survived supervisor restart. Under the lock it removes unselected
+generations, leftover staged selector writes and legacy `<name>.git.trash`. Exact private names with canonical UUIDs
+identify interrupted work without overlapping valid repository names. The sweep clears and syncs the selector for a
+cache unused for more than 30 days before removing its directory. If a legacy cache is still present at eviction, the
+sweep moves it out of its original slot before deleting it. A malformed selector leaves the affected generations in
+place for diagnosis. The sweep unlinks obsolete files and symlinks and recursively removes real directories. Lock files
+persist because a waiting shim can still hold their inode. One empty lock file per repository ever cached is the
+accepted leftover. A sweep failure is logged and leaves unused caches for a later startup. Sessions can still start.
 
 Spare-checkout recovery uses a sibling `<name>.spare.json` record containing outstanding namespace locations and their
 directory identities, plus the intended or retained ready spare's identity. A namespace is the owner directory under
