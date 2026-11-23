@@ -156,7 +156,8 @@ fn trust_column(harness: LaunchHarness) -> anyhow::Result<&'static str> {
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => {
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => {
             anyhow::bail!("this harness has no workspace-trust setting")
         }
     }
@@ -188,7 +189,8 @@ fn agent_trust_state(
         | LaunchHarness::OpenCode
         | LaunchHarness::Grok
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => {
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => {
             anyhow::bail!("this harness has no workspace-trust setting")
         }
     };
@@ -3870,6 +3872,7 @@ mod tests {
                 migration_session(&format!("history-{sequence}"), 1_700_000_000 + sequence);
             entry.creation_seq = Some(sequence as u64);
             entry.launch = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some(format!("model-{sequence}")),
@@ -3888,10 +3891,11 @@ mod tests {
             title: "history title".into(),
             creation_seq: Some(9_999),
             launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".into()),
-                effort: Some(farhelm_proto::LaunchEffort::High),
+                effort: Some(farhelm_proto::LaunchEffort::High.into()),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
                 wrapper_prefix: None,
                 container: None,

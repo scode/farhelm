@@ -79,6 +79,7 @@ fn boxed(key: &'static str, raw: &str) -> Fact {
 /// An agent launch selection with nothing chosen beyond the agent type.
 fn selection(harness: LaunchHarness) -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness,
         model: None,
         effort: None,
@@ -93,6 +94,7 @@ fn selection(harness: LaunchHarness) -> LaunchSelection {
 /// An agent launch of `selection` whose start is `start`, without resume.
 fn agent(selection: LaunchSelection, start: &[&str]) -> SessionLaunch {
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start: start.iter().map(|word| (*word).to_owned()).collect(),
         resume: None,
@@ -102,6 +104,7 @@ fn agent(selection: LaunchSelection, start: &[&str]) -> SessionLaunch {
 /// A command launch with its assertion and optional resume.
 fn command(command: &str, yolo: bool, resume: Option<&str>) -> SessionLaunch {
     SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: command.to_owned(),
         yolo,
         agent: None,
@@ -559,6 +562,7 @@ fn an_agent_wrapper_card_names_the_agents_prefix() {
     let words = ["with-endpoint", "\"$PROFILE\"", "--"];
     let placeholder = farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER;
     let launch = SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
             wrapper_prefix: Some(words.iter().map(|word| (*word).to_owned()).collect()),
             ..selection(LaunchHarness::Claude)
@@ -803,6 +807,7 @@ fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
             launch_kind: None,
         },
         launch: SessionLaunch::Command(CommandLaunch {
+            custom_agent: None,
             command: "secret command".into(),
             yolo: false,
             agent: Some(LaunchHarness::Claude),
@@ -1542,6 +1547,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
         &["codex"],
     );
     let declared = SessionLaunch::Command(CommandLaunch {
+        custom_agent: None,
         command: "agent".into(),
         yolo: false,
         agent: Some(LaunchHarness::Claude),
@@ -1562,6 +1568,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
     let guarded_chips = || chip_of(&codex);
     let placeholder = farhelm_proto::session_launch::FARHELM_ARGS_PLACEHOLDER;
     let wrapped = SessionLaunch::Agent {
+        custom_reporting: None,
         selection: LaunchSelection {
             wrapper_prefix: Some(vec!["wrap".into(), "--".into()]),
             ..selection(LaunchHarness::Claude)
@@ -1709,7 +1716,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
                     kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
                     agent: Some(LaunchHarness::Codex),
                     model: Some(None),
-                    effort: Some(Some(farhelm_proto::LaunchEffort::High)),
+                    effort: Some(Some(farhelm_proto::LaunchEffort::High.into())),
                     ..TemplateFields::default()
                 },
                 host_name: None,

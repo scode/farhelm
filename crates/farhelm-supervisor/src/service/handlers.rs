@@ -4355,10 +4355,11 @@ mod tests {
                 crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string(),
             ]),
             Some(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some("gpt-6-astra".to_string()),
-                effort: Some(farhelm_proto::LaunchEffort::High),
+                effort: Some(farhelm_proto::LaunchEffort::High.into()),
                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                 wrapper_prefix: None,
                 container: None,
@@ -8175,6 +8176,7 @@ mod tests {
         let mut entry = entry_with(None, LastOutcome::Running);
         entry.info.id = id.to_string();
         entry.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template: None,
@@ -9932,6 +9934,7 @@ mod tests {
                     inherit_agent: false,
                     cwd: "/".to_string(),
                     launch: Some(SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                        custom_agent: None,
                         command: "claude {farhelm_args}".to_string(),
                         yolo: false,
                         agent: Some(LaunchHarness::Claude),
@@ -10060,6 +10063,7 @@ mod tests {
                     host_tabs: crate::service::core::host_tab_cell(Vec::new()),
                 },
                 snapshot: IntegrationSnapshot {
+                    custom_reporting: None,
                     kind: AgentKind::Generic,
                     wrapper_prefix_words: 0,
                     resume_template: None,
@@ -10252,6 +10256,7 @@ mod tests {
                 host_tabs: crate::service::core::host_tab_cell(Vec::new()),
             },
             snapshot: IntegrationSnapshot {
+                custom_reporting: None,
                 kind: AgentKind::Generic,
                 wrapper_prefix_words: 0,
                 resume_template: None,

@@ -68,7 +68,7 @@ struct Harness {
     update_override: Option<UpdateOverride>,
 }
 
-/// Adding an agent requires a deliberate test profile. Shell sessions have no reporting contract.
+/// Each built-in agent needs a deliberate test profile for checking its vendor's behavior.
 #[warn(clippy::wildcard_enum_match_arm)]
 fn profile(kind: LaunchHarness) -> Option<Harness> {
     use LaunchHarness::*;
@@ -179,7 +179,7 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
             false,
             None,
         ),
-        Bash | Zsh => return None,
+        Bash | Zsh | Custom => return None,
     };
     Some(Harness {
         binary,
@@ -643,9 +643,10 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         None => None,
     };
     let launch = farhelm_helm::compile_agent_launch(LaunchSelection {
+        custom_agent: None,
         harness: kind,
         model: profile.model.map(str::to_owned),
-        effort: profile.effort,
+        effort: profile.effort.map(Into::into),
         // Exercise the two launch-only agents' actual permission flags without sending either a prompt.
         permissions: profile
             .hook_witness
@@ -795,7 +796,7 @@ async fn run_case(kind: LaunchHarness) {
 /// Register the ignored entry points the manual runner discovers. These tests spend real vendor turns.
 macro_rules! drift_cases {
     ($($name:ident => $kind:ident),+ $(,)?) => {
-        const _: () = assert!(LaunchHarness::is_ordering_of_all(&[
+        const _: () = assert!(LaunchHarness::is_ordering_of_built_ins(&[
             $(LaunchHarness::$kind,)+ LaunchHarness::Bash, LaunchHarness::Zsh,
         ]));
         $(

@@ -546,7 +546,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
         && (selection.effort.is_some() || selection.permissions.is_some())
     {
         argv.push("env".to_string());
-        if let Some(effort) = selection.effort {
+        if let Some(effort) = &selection.effort {
             argv.push(format!("GOOSE_THINKING_EFFORT={}", effort.as_cli_arg()));
         }
         if let Some(permission) = selection.permissions {
@@ -593,12 +593,15 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
                 "--model".to_string(),
                 model.clone(),
             ]),
-            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+            LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
                 unreachable!("selection validated without a supported model")
             }
         }
     }
-    if let Some(effort) = selection.effort {
+    if let Some(effort) = &selection.effort {
         match selection.harness {
             LaunchHarness::Codex => argv.extend([
                 "-c".to_string(),
@@ -618,7 +621,10 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             LaunchHarness::Pi | LaunchHarness::Omp => {
                 argv.extend(["--thinking".to_string(), effort.as_cli_arg().to_string()])
             }
-            LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => {
+            LaunchHarness::Grok
+            | LaunchHarness::Bash
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
                 unreachable!("selection validated without a supported effort")
             }
         }
@@ -663,7 +669,8 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
             | LaunchHarness::Pi
             | LaunchHarness::Omp
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => None,
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => None,
         };
         if let Some(flag) = flag {
             argv.push(flag.to_string());
@@ -699,6 +706,7 @@ pub(crate) fn compile(selection: LaunchSelection) -> Result<SessionLaunch, Strin
     });
     argv.push(FARHELM_ARGS_PLACEHOLDER.to_string());
     Ok(SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start: argv,
         resume,
@@ -725,7 +733,8 @@ pub(crate) fn workspace_trust_enabled(
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => false,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => false,
     }
 }
 
@@ -744,7 +753,8 @@ pub(crate) fn workspace_trust_pins_approval_cwd(harness: LaunchHarness) -> bool 
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => false,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => false,
     }
 }
 
@@ -767,7 +777,8 @@ pub(crate) fn workspace_trust_blocked_by_selection(selection: &LaunchSelection) 
         | LaunchHarness::OpenCode
         | LaunchHarness::Pi
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => false,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => false,
     }
 }
 
@@ -803,7 +814,8 @@ fn trust_custom_tail_len(selection: &LaunchSelection) -> usize {
         | LaunchHarness::OpenCode
         | LaunchHarness::Pi
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => 0,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => 0,
     }
 }
 
@@ -850,7 +862,8 @@ fn workspace_trust_arguments(
         | LaunchHarness::OpenCode
         | LaunchHarness::Omp
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => &[],
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => &[],
     }
 }
 
@@ -872,6 +885,7 @@ pub(crate) fn with_workspace_trust(
         selection,
         start,
         resume,
+        ..
     } = &mut launch
     else {
         return Ok(launch);
@@ -934,7 +948,8 @@ fn resume_arguments(harness: LaunchHarness) -> Option<&'static [&'static str]> {
         LaunchHarness::Cursor
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 
@@ -973,7 +988,8 @@ pub(crate) fn named_start(
             | LaunchHarness::Grok
             | LaunchHarness::Antigravity
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => {
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => {
                 return Err("this agent launch has no resume command".into());
             }
         };
@@ -1008,6 +1024,7 @@ pub(crate) fn test_agent_launch(selection: LaunchSelection) -> SessionLaunch {
         FARHELM_ARGS_PLACEHOLDER.to_string(),
     ];
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start,
         resume: None,
@@ -1030,6 +1047,7 @@ fn program(harness: LaunchHarness) -> &'static str {
         LaunchHarness::Antigravity => "agy",
         LaunchHarness::Bash => "bash",
         LaunchHarness::Zsh => "zsh",
+        LaunchHarness::Custom => unreachable!("the built-in compiler has no catalog command"),
     }
 }
 
@@ -1038,6 +1056,18 @@ fn program(harness: LaunchHarness) -> &'static str {
 /// The catalog constrains an entered model and effort; an omitted model is
 /// valid for every harness and is resolved by that harness when it starts.
 fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
+    if selection.harness.uses_custom_catalog() || selection.custom_agent.is_some() {
+        return Err("a custom agent needs a helm catalog entry".into());
+    }
+    let effort = selection
+        .effort
+        .as_ref()
+        .map(|value| {
+            value
+                .known()
+                .ok_or_else(|| format!("unknown built-in effort {}", value.as_cli_arg()))
+        })
+        .transpose()?;
     farhelm_proto::check_wrapper_prefix(selection.wrapper_prefix.as_deref())?;
     if let Some(container) = &selection.container {
         container.validate()?;
@@ -1077,7 +1107,7 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             .clone()
             .find(|entry| entry.harness == selection.harness)
         {
-            if let Some(effort) = selection.effort
+            if let Some(effort) = effort
                 && !known.efforts.contains(&effort)
             {
                 return Err(format!(
@@ -1093,7 +1123,7 @@ fn validate_selection(selection: &LaunchSelection) -> Result<(), String> {
             ));
         }
     }
-    if let Some(effort) = selection.effort
+    if let Some(effort) = effort
         && !harness_efforts(selection.harness).contains(&effort)
     {
         return Err(format!(
@@ -1156,7 +1186,9 @@ fn harness_efforts(harness: LaunchHarness) -> &'static [LaunchEffort] {
         LaunchHarness::Goose => GOOSE_EFFORTS,
         LaunchHarness::Pi => PI_EFFORTS,
         LaunchHarness::Omp => OMP_EFFORTS,
-        LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh => &[],
+        LaunchHarness::Grok | LaunchHarness::Bash | LaunchHarness::Zsh | LaunchHarness::Custom => {
+            &[]
+        }
         LaunchHarness::Antigravity => ANTIGRAVITY_EFFORTS,
     }
 }
@@ -1168,7 +1200,7 @@ mod tests {
     /// later Clone reuse the one-time conversation or widen ordinary Restart.
     #[test]
     fn named_start_uses_resume_argv_without_storing_the_selector() {
-        for harness in LaunchHarness::ALL {
+        for harness in LaunchHarness::BUILT_INS {
             let launch = super::compile(selection(*harness)).unwrap();
             let before = launch.clone();
             let named = super::named_start(&launch, "named-target".into());
@@ -1448,11 +1480,11 @@ mod tests {
         for effort in [LaunchEffort::Low, LaunchEffort::Medium, LaunchEffort::High] {
             let codex = compile(LaunchSelection {
                 model: Some("gpt-6-astra".into()),
-                effort: Some(effort),
+                effort: Some(effort.into()),
                 ..selection(LaunchHarness::Codex)
             })
             .unwrap();
-            assert_eq!(codex.selection.effort, Some(effort));
+            assert_eq!(codex.selection.effort, Some(effort.into()));
         }
         let cursor = compile(LaunchSelection {
             model: Some("gpt-6-astra".into()),
@@ -1487,6 +1519,7 @@ mod tests {
             selection,
             start: _,
             resume,
+            ..
         } = &launch
         else {
             panic!("compile always makes an agent launch");
@@ -1519,7 +1552,7 @@ mod tests {
     /// and an upgraded one spawn alike.
     #[farhelm_testtrace::test]
     fn every_agent_type_composes_start_and_resume_with_farhelm_args() {
-        for harness in LaunchHarness::ALL.iter().copied() {
+        for harness in LaunchHarness::BUILT_INS.iter().copied() {
             let launch = super::compile(selection(harness)).expect("default compiles");
             launch
                 .validate_new()
@@ -1544,6 +1577,7 @@ mod tests {
                 | LaunchHarness::OpenCode
                 | LaunchHarness::Bash
                 | LaunchHarness::Zsh => None,
+                LaunchHarness::Custom => unreachable!("only built-in choices are in this matrix"),
             };
             let expected = suffix.map(|suffix| {
                 let mut resume = start[..start.len() - 1].to_vec();
@@ -1602,7 +1636,7 @@ mod tests {
             "'two words'".to_string(),
             "--".to_string(),
         ];
-        for harness in LaunchHarness::ALL {
+        for harness in LaunchHarness::BUILT_INS {
             let bare = super::compile(selection(*harness)).expect("bare agent compiles");
             let wrapped = super::compile(LaunchSelection {
                 wrapper_prefix: Some(prefix.clone()),
@@ -1665,6 +1699,7 @@ mod tests {
 
     fn selection(harness: LaunchHarness) -> LaunchSelection {
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness,
             model: None,
@@ -1736,6 +1771,7 @@ mod tests {
         for model in [None, Some("composer-2.5"), Some("custom[effort=high]")] {
             for permissions in [None, Some(LaunchPermission::Yolo)] {
                 let input = LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: LaunchHarness::Cursor,
                     model: model.map(str::to_owned),
@@ -1771,7 +1807,7 @@ mod tests {
             }
         }
         let mut input = selection(LaunchHarness::Cursor);
-        input.effort = Some(LaunchEffort::High);
+        input.effort = Some(LaunchEffort::High.into());
         assert!(compile(input).is_err());
         let mut input = selection(LaunchHarness::Cursor);
         input.permissions = Some(LaunchPermission::Approve);
@@ -1848,6 +1884,7 @@ mod tests {
                 selection,
                 start,
                 resume,
+                ..
             } = launch
             else {
                 panic!("agent launch")
@@ -1875,10 +1912,11 @@ mod tests {
     #[test]
     fn explicit_choices_use_each_harnesses_documented_flags() {
         let codex = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-5.6-terra".to_string()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -1897,10 +1935,11 @@ mod tests {
         );
 
         let claude = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Claude,
             model: Some("claude-fable-5".to_string()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -1919,10 +1958,11 @@ mod tests {
         );
 
         let muse = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Muse,
             model: Some("muse-spark-1.3-contributor".to_string()),
-            effort: Some(LaunchEffort::Xhigh),
+            effort: Some(LaunchEffort::Xhigh.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -1941,6 +1981,7 @@ mod tests {
         );
 
         let opencode = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/grok-4.6".to_string()),
@@ -1970,6 +2011,7 @@ mod tests {
         );
 
         let bare = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("private-zen-model".to_string()),
@@ -2031,6 +2073,7 @@ mod tests {
         for bare in overlapping {
             for typed in [bare.to_string(), format!("opencode/{bare}")] {
                 let opencode = LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: LaunchHarness::OpenCode,
                     model: Some(typed.clone()),
@@ -2096,10 +2139,11 @@ mod tests {
     #[test]
     fn opencode_refuses_an_unsupported_effort() {
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::OpenCode,
             model: Some("opencode/glm-5.3".to_string()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: None,
             wrapper_prefix: None,
             container: None,
@@ -2170,7 +2214,7 @@ mod tests {
     fn a_custom_model_id_is_quoted_as_one_argv_element() {
         let mut input = selection(LaunchHarness::Muse);
         input.model = Some("release/candidate'42;$literal".to_string());
-        input.effort = Some(LaunchEffort::Xhigh);
+        input.effort = Some(LaunchEffort::Xhigh.into());
         let compiled = compile(input).unwrap();
         assert_eq!(compiled.agent_kind, AgentKind::Muse);
         assert_eq!(
@@ -2226,10 +2270,11 @@ mod tests {
     fn muse_contributor_catalog_stops_at_xhigh() {
         for effort in [LaunchEffort::Max, LaunchEffort::Ultra] {
             let selection = LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Muse,
                 model: Some("muse-spark-1.3-contributor".to_string()),
-                effort: Some(effort),
+                effort: Some(effort.into()),
                 permissions: None,
                 wrapper_prefix: None,
                 container: None,
@@ -2247,10 +2292,11 @@ mod tests {
     #[test]
     fn goose_and_pi_compile_their_native_openrouter_contracts() {
         let goose = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Goose,
             model: Some("x-ai/grok-4.6".into()),
-            effort: Some(LaunchEffort::Max),
+            effort: Some(LaunchEffort::Max.into()),
             permissions: Some(LaunchPermission::SmartApprove),
             wrapper_prefix: None,
             container: None,
@@ -2273,10 +2319,11 @@ mod tests {
         );
 
         let pi = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Pi,
             model: Some("x-ai/grok-4.6".into()),
-            effort: Some(LaunchEffort::Minimal),
+            effort: Some(LaunchEffort::Minimal.into()),
             permissions: None,
             wrapper_prefix: None,
             container: None,
@@ -2304,6 +2351,7 @@ mod tests {
     #[test]
     fn goose_maps_every_permission_without_unsolicited_overrides() {
         let base = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Goose,
             model: Some("z-ai/glm-5.3".into()),
@@ -2362,6 +2410,7 @@ mod tests {
     #[test]
     fn pi_accepts_only_its_yolo_label_without_an_approve_flag() {
         let base = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Pi,
             model: Some("z-ai/glm-5.3".into()),
@@ -2413,10 +2462,11 @@ mod tests {
     fn omp_compiles_its_native_openrouter_contract_with_an_explicit_approval_mode() {
         // Every optional flag at once, with the OMP-specific Approve mode.
         let full = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("x-ai/grok-4.6".into()),
-            effort: Some(LaunchEffort::Minimal),
+            effort: Some(LaunchEffort::Minimal.into()),
             permissions: Some(LaunchPermission::Approve),
             wrapper_prefix: None,
             container: None,
@@ -2441,10 +2491,11 @@ mod tests {
 
         // YOLO carries its own approval-mode value, never a bare flag.
         let yolo = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
-            effort: Some(LaunchEffort::Xhigh),
+            effort: Some(LaunchEffort::Xhigh.into()),
             permissions: Some(LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -2468,6 +2519,7 @@ mod tests {
 
         // An omitted OMP permission is Farhelm's explicit Guarded default.
         let omitted = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("z-ai/glm-5.3".into()),
@@ -2519,6 +2571,7 @@ mod tests {
 
         // A custom id stays one literal argv element under OMP's contract.
         let custom = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Omp,
             model: Some("release/candidate'42;$literal".to_string()),
@@ -2553,10 +2606,11 @@ mod tests {
         for effort in super::OMP_EFFORTS {
             assert!(
                 compile(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: LaunchHarness::Omp,
                     model: Some("z-ai/glm-5.3".into()),
-                    effort: Some(*effort),
+                    effort: Some((*effort).into()),
                     permissions: None,
                     wrapper_prefix: None,
                     container: None,
@@ -2568,10 +2622,11 @@ mod tests {
         }
         assert!(
             compile(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Omp,
                 model: Some("z-ai/glm-5.3".into()),
-                effort: Some(LaunchEffort::Ultra),
+                effort: Some(LaunchEffort::Ultra.into()),
                 permissions: None,
                 wrapper_prefix: None,
                 container: None,
@@ -2585,6 +2640,7 @@ mod tests {
         for permission in [LaunchPermission::SmartApprove, LaunchPermission::Chat] {
             assert!(
                 compile(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: LaunchHarness::Omp,
                     model: Some("z-ai/glm-5.3".into()),
@@ -2641,6 +2697,7 @@ mod tests {
         );
 
         let permissive = compile(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Grok,
             model: None,
@@ -2689,12 +2746,12 @@ mod tests {
             assert_eq!(row.family, family);
             let mut choice = selection(LaunchHarness::Antigravity);
             choice.model = Some(id.into());
-            choice.effort = Some(LaunchEffort::Xhigh);
+            choice.effort = Some(LaunchEffort::Xhigh.into());
             assert_eq!(super::compile(choice).is_ok(), accepts_xhigh, "{id}");
         }
         let mut choice = selection(LaunchHarness::Antigravity);
         choice.model = Some("gemini-custom".into());
-        choice.effort = Some(LaunchEffort::Xhigh);
+        choice.effort = Some(LaunchEffort::Xhigh.into());
         choice.permissions = Some(LaunchPermission::Yolo);
         let launch = super::compile(choice).expect("custom Antigravity model");
         let expected = [
@@ -2735,6 +2792,7 @@ mod tests {
         for harness in [LaunchHarness::Goose, LaunchHarness::Pi, LaunchHarness::Omp] {
             assert!(
                 compile(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness,
                     model: Some("z-ai/glm-5.3".into()),
@@ -2749,6 +2807,7 @@ mod tests {
         }
         assert!(
             compile(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Pi,
                 model: Some("z-ai/glm-5.3".into()),
@@ -2832,7 +2891,7 @@ mod tests {
     /// This also pins the old false forms that retained sessions still use.
     #[test]
     fn stored_trust_replacement_matches_current_composition() {
-        for harness in LaunchHarness::ALL
+        for harness in LaunchHarness::BUILT_INS
             .iter()
             .copied()
             .filter(|harness| harness.offers_workspace_trust())
@@ -2889,6 +2948,7 @@ mod tests {
             let mut resume = prefix;
             resume.extend(suffix.clone());
             let source = SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: choice,
                 start,
                 resume: Some(resume),
@@ -2899,6 +2959,7 @@ mod tests {
                 selection,
                 start,
                 resume,
+                ..
             } = cleared
             else {
                 panic!("agent")
@@ -2968,9 +3029,10 @@ mod tests {
                 let mut old_resume = original.clone();
                 old_resume.extend(suffix.iter().map(|word| (*word).to_string()));
                 let selection = LaunchSelection {
+                    custom_agent: None,
                     harness,
                     model: Some(model.into()),
-                    effort: Some(LaunchEffort::High),
+                    effort: Some(LaunchEffort::High.into()),
                     permissions,
                     permission_flags: None,
                     wrapper_prefix: None,
@@ -2994,6 +3056,7 @@ mod tests {
                         selection,
                         start,
                         resume,
+                        ..
                     } = normalized
                     else {
                         panic!("agent")
@@ -3041,7 +3104,7 @@ mod tests {
             super::with_workspace_trust(command.clone(), None).unwrap(),
             command
         );
-        for harness in LaunchHarness::ALL
+        for harness in LaunchHarness::BUILT_INS
             .iter()
             .copied()
             .filter(|harness| !harness.offers_workspace_trust())

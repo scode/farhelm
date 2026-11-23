@@ -25,7 +25,9 @@ pub(super) const HARNESS_PICKER_ORDER: [LaunchHarness; 12] = [
     LaunchHarness::Bash,
     LaunchHarness::Zsh,
 ];
-const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_PICKER_ORDER));
+const _: () = assert!(LaunchHarness::is_ordering_of_built_ins(
+    &HARNESS_PICKER_ORDER
+));
 
 /// The page the permission help button opens: the docs' explanation of every agent's permission modes, as the old
 /// launcher's "?" did.
@@ -56,7 +58,8 @@ pub(super) const fn agent_note(harness: LaunchHarness) -> Option<&'static str> {
         | LaunchHarness::Omp
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 
@@ -76,4 +79,6 @@ pub(super) const HARNESS_SEARCH_ORDER: [LaunchHarness; 12] = [
     LaunchHarness::Bash,
     LaunchHarness::Zsh,
 ];
-const _: () = assert!(LaunchHarness::is_ordering_of_all(&HARNESS_SEARCH_ORDER));
+const _: () = assert!(LaunchHarness::is_ordering_of_built_ins(
+    &HARNESS_SEARCH_ORDER
+));

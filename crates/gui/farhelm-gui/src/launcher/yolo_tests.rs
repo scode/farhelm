@@ -21,6 +21,7 @@ use crate::test_support::{self, any_open, focused_id, keys, settle};
 /// An agent selection on `harness` with `permissions`, nothing else chosen.
 fn selection(harness: LaunchHarness, permissions: Option<LaunchPermission>) -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness,
         model: None,
         effort: None,
@@ -437,6 +438,7 @@ fn replace_question(
     };
     let (counted, moved) = (retries.count.clone(), retries.moved_on.clone());
     let launch = farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+        custom_agent: None,
         command: "true".into(),
         yolo: true,
         agent: None,

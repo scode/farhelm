@@ -58,7 +58,9 @@ fn launch(host: &str) -> PendingApproval {
             repo: None,
             title: Some("child".to_owned()),
             launch: SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: LaunchSelection {
+                    custom_agent: None,
                     harness: LaunchHarness::Claude,
                     model: None,
                     effort: None,
@@ -272,6 +274,7 @@ fn the_command_box_shows_a_carriage_return_before_a_newline(cx: &mut TestAppCont
         panic!("expected a launch approval");
     };
     let command = CommandLaunch {
+        custom_agent: None,
         command: "echo A \\\r\necho B".to_owned(),
         yolo: true,
         agent: None,

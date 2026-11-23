@@ -416,7 +416,7 @@ fn restart_with_refuses_a_held_change_from_a_sequence_or_the_chord_whole(cx: &mu
         template(
             "allowed-low",
             TemplateFields {
-                effort: Some(Some(LaunchEffort::Low)),
+                effort: Some(Some(LaunchEffort::Low.into())),
                 ..TemplateFields::default()
             },
         ),
@@ -431,7 +431,7 @@ fn restart_with_refuses_a_held_change_from_a_sequence_or_the_chord_whole(cx: &mu
             "held-bolt",
             TemplateFields {
                 kind: Some(LauncherKind::Command),
-                effort: Some(Some(LaunchEffort::Low)),
+                effort: Some(Some(LaunchEffort::Low.into())),
                 ..TemplateFields::default()
             },
         ),
@@ -492,7 +492,7 @@ fn restart_with_applies_matching_shortcuts_without_restarting(cx: &mut TestAppCo
             TemplateFields {
                 kind: Some(LauncherKind::Agent),
                 agent: Some(LaunchHarness::Codex),
-                effort: Some(Some(LaunchEffort::Low)),
+                effort: Some(Some(LaunchEffort::Low.into())),
                 ..TemplateFields::default()
             },
         ),

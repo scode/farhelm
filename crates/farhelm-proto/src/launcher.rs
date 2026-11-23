@@ -17,7 +17,7 @@
 
 use serde::{Deserialize, Serialize};
 
-use crate::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
+use crate::{LaunchEffort, LaunchEffortValue, LaunchHarness, LaunchPermission, LaunchSelection};
 
 // ---------------------------------------------------------------------------
 // The model catalog and agent-type reconciliation
@@ -158,6 +158,16 @@ pub fn reconcile_harness_selection(
         selection.permissions = None;
     }
     selection.harness = harness;
+    if harness.uses_custom_catalog() {
+        if source != harness {
+            selection.model = None;
+            selection.effort = None;
+        }
+        selection.permissions = harness.request_permission(selection.permissions);
+        selection.workspace_trust = None;
+        return (selection, Some(harness));
+    }
+    selection.custom_agent = None;
     if !harness.offers_model() {
         // Grok exposes no model, effort or workspace-trust choice. Clear retained values at the harness
         // boundary so a recent setup or prior selection cannot manufacture a
@@ -210,8 +220,10 @@ pub fn reconcile_harness_selection(
     {
         selection.model = None;
     }
-    if selection.effort.is_some_and(|effort| {
-        !compatible_efforts(harness, selection.model.as_deref(), catalog).contains(&effort)
+    if selection.effort.as_ref().is_some_and(|effort| {
+        effort.known().is_none_or(|known| {
+            !compatible_efforts(harness, selection.model.as_deref(), catalog).contains(&known)
+        })
     }) {
         selection.effort = None;
     }
@@ -292,6 +304,13 @@ pub struct TemplateFields {
     pub kind: Option<LauncherKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent: Option<LaunchHarness>,
+    /// The catalog ID accompanies the active draft's custom harness. Null clears it explicitly.
+    #[serde(
+        default,
+        deserialize_with = "present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub custom_agent: Option<Option<String>>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -303,7 +322,7 @@ pub struct TemplateFields {
         deserialize_with = "present",
         skip_serializing_if = "Option::is_none"
     )]
-    pub effort: Option<Option<LaunchEffort>>,
+    pub effort: Option<Option<LaunchEffortValue>>,
     #[serde(
         default,
         deserialize_with = "present",
@@ -538,6 +557,18 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if let Some(prompt) = &template.fields.prompt {
         check_initial_prompt(prompt)?;
     }
+    if let Some(Some(LaunchEffortValue::Custom(effort))) = &template.fields.effort {
+        // A modifier with no agent can acquire its harness from an earlier template. An
+        // explicit built-in agent still uses the closed effort vocabulary when saved.
+        if template
+            .fields
+            .agent
+            .is_some_and(|agent| !agent.uses_custom_catalog())
+        {
+            return Err(format!("unknown built-in effort {effort:?}"));
+        }
+        crate::custom_agents::validate_model_or_effort(effort).map_err(str::to_owned)?;
+    }
     crate::check_permission_flags(
         template.fields.permissions.flatten(),
         template.fields.permission_flags.as_deref(),
@@ -601,6 +632,37 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(test)]
+mod custom_effort_tests {
+    use super::*;
+
+    /// A saved built-in template keeps its closed effort vocabulary. A modifier may defer its harness
+    /// until application, and a custom template carries the literal value to its wrapper.
+    #[farhelm_testtrace::test]
+    fn free_text_effort_needs_a_compatible_agent() {
+        for (agent, effort, accepted) in [
+            (Some(LaunchHarness::Codex), "high", true),
+            (Some(LaunchHarness::Codex), "long_run", false),
+            (Some(LaunchHarness::Custom), "long_run", true),
+            (None, "long_run", true),
+            (None, "two words", false),
+        ] {
+            let value = serde_json::json!({"agent": agent, "effort": effort});
+            let fields: TemplateFields = serde_json::from_value(value).unwrap();
+            assert_eq!(serde_json::to_value(&fields).unwrap()["effort"], effort);
+            let template = LaunchTemplate {
+                name: "effort".into(),
+                fields,
+            };
+            assert_eq!(
+                check_template_shape(&template).is_ok(),
+                accepted,
+                "{agent:?} {effort}"
+            );
+        }
+    }
+}
+
 /// Everything the launcher holds, as templates read and edit it.
 ///
 /// The agent type is the one field the two launch kinds share (SPEC.md,
@@ -613,13 +675,15 @@ pub struct LauncherState {
     pub prompt: Option<String>,
     pub kind: Option<LauncherKind>,
     pub harness: Option<LaunchHarness>,
+    /// Catalog ID for the structured agent draft. The Command draft stores its own declaration.
+    pub custom_agent: Option<String>,
     pub model: Option<String>,
     /// Which agent type `model` was entered for when it is a custom id (the
     /// launcher's own record of the same fact), so a later change of agent
     /// type clears it exactly as it does by hand
     /// ([`reconcile_harness_selection`]).
     pub model_owner: Option<LaunchHarness>,
-    pub effort: Option<LaunchEffort>,
+    pub effort: Option<LaunchEffortValue>,
     pub permissions: Option<LaunchPermission>,
     /// Words stay paired with Custom through template application. Replacing
     /// the permission or changing agents must clear this source-agent intent.
@@ -635,6 +699,8 @@ pub struct LauncherState {
     pub command: String,
     pub yolo: Option<bool>,
     pub command_agent: Option<LaunchHarness>,
+    /// A Command draft can declare a catalog agent or use the unregistered custom integration.
+    pub command_custom_agent: Option<String>,
     pub resume_command: Option<String>,
     pub host: Option<String>,
     /// Placement selects either an installed host or a fresh recipe sandbox.
@@ -757,8 +823,9 @@ pub fn apply_template(
                     wrapper_prefix: next.wrapper_prefix.clone(),
                     container: next.container.clone(),
                     harness: next.harness.unwrap_or(agent),
+                    custom_agent: next.custom_agent.clone(),
                     model: next.model.clone(),
-                    effort: next.effort,
+                    effort: next.effort.clone(),
                     permissions: next.permissions,
                     workspace_trust: next.workspace_trust,
                 };
@@ -770,6 +837,7 @@ pub fn apply_template(
                 );
                 next.model_owner = owner;
                 next.harness = Some(selection.harness);
+                next.custom_agent = selection.custom_agent;
                 next.model = selection.model;
                 next.effort = selection.effort;
                 next.permissions = selection.permissions;
@@ -784,8 +852,30 @@ pub fn apply_template(
                     "Bash and Zsh are shell session types. Choose one on the Agent tab.".into(),
                 ));
             }
-            LauncherKind::Command => next.command_agent = Some(agent),
+            LauncherKind::Command => {
+                next.command_agent = Some(agent);
+                if !agent.uses_custom_catalog() {
+                    next.command_custom_agent = None;
+                }
+            }
         }
+    }
+    if let Some(id) = &fields.custom_agent {
+        let (harness, selected_id) = match kind {
+            LauncherKind::Agent => (next.harness, &mut next.custom_agent),
+            LauncherKind::Command => (next.command_agent, &mut next.command_custom_agent),
+        };
+        if let Some(id) = id {
+            if !harness.is_some_and(LaunchHarness::uses_custom_catalog) {
+                return Err(refuse(
+                    "custom agent",
+                    "select the custom agent type first".into(),
+                ));
+            }
+            crate::custom_agents::validate_id(id)
+                .map_err(|reason| refuse("custom agent", reason.into()))?;
+        }
+        *selected_id = id.clone();
     }
 
     // A prompt-only template needs no selected harness yet. The final create
@@ -864,7 +954,10 @@ pub fn apply_template(
                     // (`LaunchHarness::catalog_model_id`).
                     let spelled = harness.catalog_model_id(model);
                     let mut known = context.catalog.iter().filter(|entry| entry.id == spelled);
-                    if !known.clone().any(|entry| entry.harness == harness)
+                    if harness.uses_custom_catalog() {
+                        crate::custom_agents::validate_model_or_effort(model)
+                            .map_err(|reason| refuse("model", reason.into()))?;
+                    } else if !known.clone().any(|entry| entry.harness == harness)
                         && known.any(|entry| entry.latest)
                     {
                         return Err(refuse(
@@ -880,8 +973,9 @@ pub fn apply_template(
                             wrapper_prefix: next.wrapper_prefix.clone(),
                             container: next.container.clone(),
                             harness,
+                            custom_agent: next.custom_agent.clone(),
                             model: Some(model.clone()),
-                            effort: next.effort,
+                            effort: next.effort.clone(),
                             permissions: next.permissions,
                             workspace_trust: next.workspace_trust,
                         },
@@ -901,22 +995,28 @@ pub fn apply_template(
                 }
             }
         }
-        if let Some(effort) = fields.effort {
-            if let Some(effort) = effort
-                && (!harness.offers_effort()
-                    || (!context.catalog.is_empty()
-                        && !compatible_efforts(harness, next.model.as_deref(), context.catalog)
-                            .contains(&effort)))
-            {
-                return Err(refuse(
-                    "effort",
-                    format!(
-                        "{} is not offered by {label} for this model",
-                        effort.as_cli_arg()
-                    ),
-                ));
+        if let Some(effort) = &fields.effort {
+            if let Some(effort) = effort {
+                if harness.uses_custom_catalog() {
+                    crate::custom_agents::validate_model_or_effort(effort.as_cli_arg())
+                        .map_err(|reason| refuse("effort", reason.into()))?;
+                } else if !harness.offers_effort()
+                    || effort.known().is_none_or(|known| {
+                        !context.catalog.is_empty()
+                            && !compatible_efforts(harness, next.model.as_deref(), context.catalog)
+                                .contains(&known)
+                    })
+                {
+                    return Err(refuse(
+                        "effort",
+                        format!(
+                            "{} is not offered by {label} for this model",
+                            effort.as_cli_arg()
+                        ),
+                    ));
+                }
             }
-            next.effort = effort;
+            next.effort = effort.clone();
         }
         if let Some(permissions) = fields.permissions {
             if let Some(permission) = permissions
@@ -1430,6 +1530,7 @@ mod tests {
                 .is_none()
         );
         let selection = crate::LaunchSelection {
+            custom_agent: None,
             harness: crate::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -1468,6 +1569,7 @@ mod tests {
             crate::LaunchHarness::Muse,
         ] {
             let before = crate::LaunchSelection {
+                custom_agent: None,
                 harness,
                 model: None,
                 effort: None,
@@ -1721,21 +1823,21 @@ mod tests {
         let state = LauncherState {
             harness: Some(LaunchHarness::Claude),
             model: Some("claude-fable-5".into()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             ..LauncherState::default()
         };
         let codex = template(
             "codex",
             TemplateFields {
                 agent: Some(LaunchHarness::Codex),
-                effort: Some(Some(LaunchEffort::Low)),
+                effort: Some(Some(LaunchEffort::Low.into())),
                 ..TemplateFields::default()
             },
         );
         let applied = apply_template(&state, &codex, &context(&catalog, &[], false)).unwrap();
         assert_eq!(applied.harness, Some(LaunchHarness::Codex));
         assert_eq!(applied.model, None, "Claude's model does not move to Codex");
-        assert_eq!(applied.effort, Some(LaunchEffort::Low));
+        assert_eq!(applied.effort, Some(LaunchEffort::Low.into()));
 
         let command = template(
             "as-command",
@@ -1810,14 +1912,14 @@ mod tests {
             TemplateFields {
                 agent: Some(LaunchHarness::Codex),
                 model: Some(Some("gpt-6-luna".into())),
-                effort: Some(Some(LaunchEffort::High)),
+                effort: Some(Some(LaunchEffort::High.into())),
                 ..TemplateFields::default()
             },
         );
         let project = template(
             "myproject",
             TemplateFields {
-                effort: Some(Some(LaunchEffort::Low)),
+                effort: Some(Some(LaunchEffort::Low.into())),
                 name: Some("webbuilder".into()),
                 ..TemplateFields::default()
             },
@@ -1829,7 +1931,7 @@ mod tests {
         )
         .unwrap();
         assert_eq!(stacked.model.as_deref(), Some("gpt-6-luna"));
-        assert_eq!(stacked.effort, Some(LaunchEffort::Low));
+        assert_eq!(stacked.effort, Some(LaunchEffort::Low.into()));
         assert_eq!(stacked.name.as_deref(), Some("webbuilder"));
 
         let reset = template(
@@ -1841,7 +1943,11 @@ mod tests {
         );
         let applied = apply_template(&stacked, &reset, &context(&catalog, &[], false)).unwrap();
         assert_eq!(applied.model, None);
-        assert_eq!(applied.effort, Some(LaunchEffort::Low), "left out, kept");
+        assert_eq!(
+            applied.effort,
+            Some(LaunchEffort::Low.into()),
+            "left out, kept"
+        );
     }
 
     /// Historical trust values remain decodable without becoming edits or
@@ -1919,7 +2025,7 @@ mod tests {
                 TemplateFields {
                     agent: Some(LaunchHarness::Codex),
                     model: Some(Some("gpt-6-luna".into())),
-                    effort: Some(Some(LaunchEffort::High)),
+                    effort: Some(Some(LaunchEffort::High.into())),
                     workspace_trust: Some(Some(trust)),
                     ..TemplateFields::default()
                 },
@@ -1995,7 +2101,7 @@ mod tests {
             (
                 LauncherState::default(),
                 TemplateFields {
-                    effort: Some(Some(LaunchEffort::High)),
+                    effort: Some(Some(LaunchEffort::High.into())),
                     ..TemplateFields::default()
                 },
                 false,
@@ -2013,7 +2119,7 @@ mod tests {
             (
                 codex.clone(),
                 TemplateFields {
-                    effort: Some(Some(LaunchEffort::Ultra)),
+                    effort: Some(Some(LaunchEffort::Ultra.into())),
                     ..TemplateFields::default()
                 },
                 false,
@@ -2108,7 +2214,7 @@ mod tests {
         let ctx = context(&catalog, &[], false);
         let codex_low = LauncherState {
             harness: Some(LaunchHarness::Codex),
-            effort: Some(LaunchEffort::Low),
+            effort: Some(LaunchEffort::Low.into()),
             ..LauncherState::default()
         };
         let astra = template(
@@ -2219,7 +2325,7 @@ mod tests {
             let effort = model.efforts.first().copied();
             let fields = TemplateFields {
                 model: Some(Some(model.id.clone())),
-                effort: effort.map(Some),
+                effort: effort.map(|value| Some(value.into())),
                 ..TemplateFields::default()
             };
             for name in ["saved", ""] {
@@ -2227,7 +2333,7 @@ mod tests {
                     apply_template(&state, &template(name, fields.clone()), &ctx).unwrap();
                 assert_eq!(applied.harness, Some(model.harness), "{}", model.id);
                 assert_eq!(applied.model.as_deref(), Some(model.id.as_str()));
-                assert_eq!(applied.effort, effort);
+                assert_eq!(applied.effort, effort.map(LaunchEffortValue::from));
             }
             let without_catalog = context(&[], &[], false);
             let refusal =

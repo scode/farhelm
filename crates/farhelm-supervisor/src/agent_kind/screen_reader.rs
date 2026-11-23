@@ -86,7 +86,8 @@ pub(crate) fn status_line_yolo(harness: farhelm_proto::LaunchHarness, text: &str
         | LaunchHarness::Antigravity
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 
@@ -116,7 +117,7 @@ pub(crate) fn workspace_trust_prompt(
             | LaunchHarness::OpenCode,
         )
         | None => reader.trust_prompt(text),
-        Some(LaunchHarness::Bash | LaunchHarness::Zsh) => false,
+        Some(LaunchHarness::Bash | LaunchHarness::Zsh | LaunchHarness::Custom) => false,
     }
 }
 
@@ -394,6 +395,7 @@ pub(crate) fn reader_for(kind: AgentKind) -> &'static dyn ScreenReader {
         | AgentKind::Pi
         | AgentKind::Omp
         | AgentKind::Grok
+        | AgentKind::Custom
         | AgentKind::Generic => &GenericReader,
     }
 }

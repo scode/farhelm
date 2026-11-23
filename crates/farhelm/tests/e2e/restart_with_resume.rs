@@ -60,6 +60,7 @@ async fn restart_with_fixture(fixture: FakeHarness) -> (Harness, FakeHarness, Se
 /// shape the helm's compiler composes, around the fixture's program.
 async fn structured_claude_session(h: &Harness, fixture: &FakeHarness) -> SessionInfo {
     let selection = farhelm_proto::LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
@@ -258,6 +259,7 @@ async fn named_restart_with_uses_the_requested_target_and_only_reports_capture_i
 async fn named_create_runs_once_and_reports_identity_without_changing_saved_launch() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let selection = farhelm_proto::LaunchSelection {
+        custom_agent: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
         effort: None,
@@ -445,6 +447,7 @@ async fn restart_with_refuses_a_launch_kind_change_without_changing_settings() {
     let (h, fixture, _accepting) = restart_with_harness().await;
     let work = farhelm_teststate::tempdir().expect("command workdir");
     let selection = farhelm_proto::LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: None,
@@ -633,6 +636,7 @@ async fn restart_with_refuses_a_bundle_loading_would_refuse_and_stops_nothing() 
         ),
     ] {
         let launch = farhelm_proto::SessionLaunch::Agent {
+            custom_reporting: None,
             selection: selection.clone(),
             start,
             resume: Some(resume),
@@ -986,10 +990,11 @@ async fn interrupted_session_resumes_its_conversation(structured: bool) {
     let resume_template =
         (!structured).then(|| fixture_resume_template(&bin.path().join(kind), kind, home.path()));
     let selection = structured.then(|| farhelm_proto::LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Claude,
         model: Some("claude-fable-5".to_string()),
-        effort: Some(farhelm_proto::LaunchEffort::High),
+        effort: Some(farhelm_proto::LaunchEffort::High.into()),
         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
         wrapper_prefix: None,
         container: None,
@@ -1625,8 +1630,10 @@ async fn a_restart_clears_a_previous_launch_error() {
         .create_session_with_extras(
             &work.path().to_string_lossy(),
             farhelm_proto::SessionLaunch::Agent {
+                custom_reporting: None,
                 // Goose, for the reasons `create_resumable_session` gives.
                 selection: farhelm_proto::LaunchSelection {
+                    custom_agent: None,
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: None,
                     effort: None,

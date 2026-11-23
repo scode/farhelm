@@ -30,7 +30,7 @@ fn fields_are_named_in_the_fixed_order() {
         wrapper_prefix: Some(Some(vec!["env".into(), "FOO='a b'".into()])),
         permission_flags: Some(vec!["--sandbox".into(), "read only".into()]),
         permissions: Some(Some(LaunchPermission::Custom)),
-        effort: Some(Some(LaunchEffort::High)),
+        effort: Some(Some(LaunchEffort::High.into())),
         model: Some(Some("gpt-6-luna".into())),
         agent: Some(LaunchHarness::Codex),
         kind: Some(LauncherKind::Agent),

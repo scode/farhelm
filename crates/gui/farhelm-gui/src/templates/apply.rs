@@ -115,9 +115,11 @@ pub fn snapshot(draft: &LaunchDraft, hosts: &[HostView]) -> LauncherState {
             Tab::Command => LauncherKind::Command,
         }),
         harness: agent.harness,
+        custom_agent: None,
+        command_custom_agent: None,
         model: agent.model.clone(),
         model_owner: agent.model_owner,
-        effort: agent.effort,
+        effort: agent.effort.map(Into::into),
         permissions: agent.permissions,
         permission_flags: (agent.permissions == Some(LaunchPermission::Custom))
             .then(|| split_permission_flags(&agent.permission_flags).ok())
@@ -532,8 +534,8 @@ fn replay(
         }
         None => {}
     }
-    if let Some(effort) = fields.effort {
-        draft.choose_effort(effort);
+    if let Some(effort) = &fields.effort {
+        draft.choose_effort(effort.as_ref().and_then(|value| value.known()));
     }
     if let Some(permissions) = fields.permissions {
         // A template's explicit reset asks for today's default. In Restart with, whose draft shows the permission the

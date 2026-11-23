@@ -82,6 +82,7 @@ pub(crate) fn reporter_asset(kind: farhelm_proto::AgentKind) -> Option<VendorAss
         | AgentKind::Grok
         | AgentKind::Antigravity
         | AgentKind::Muse
+        | AgentKind::Custom
         | AgentKind::Generic => None,
     }
 }

@@ -244,6 +244,7 @@ pub const POINTER_LINE: &str = farhelm_supervisor::agent_kind::INSTRUCTIONS_POIN
 pub fn write_response(out: &mut impl std::io::Write, vendor: ReportVendor, announce: bool) {
     let response = match vendor {
         ReportVendor::Antigravity => "{}",
+        ReportVendor::Custom => return,
         ReportVendor::Claude
         | ReportVendor::Codex
         | ReportVendor::Muse
@@ -302,13 +303,49 @@ pub fn run_with(
     hook_log: Option<PathBuf>,
     entry_vendor: ReportVendor,
 ) {
+    record_outcome(hook_log.as_deref(), || {
+        run_inner(credential, payload, budget, entry_vendor)
+    });
+}
+
+/// Write the public custom-agent report without reading stdin or requiring a running supervisor.
+///
+/// Keep the ID grammar and silent exit in sync with the contract changelog in
+/// `website/src/content/docs/docs/agents/custom-agent-contract.md`.
+pub fn run_custom_report(
+    credential: Option<HookCredential>,
+    id: Option<&str>,
+    hook_log: Option<&Path>,
+) {
+    record_outcome(hook_log, || {
+        let Some(credential) = credential else {
+            return Outcome::word("no-credential");
+        };
+        let Some(id) = id else {
+            return Outcome::detail("bad-payload", "expected --id and one value");
+        };
+        if let Err(reason) = farhelm_proto::conversation::validate_named_conversation(id) {
+            return Outcome::detail("bad-payload", reason);
+        }
+        let report = new_report(
+            ReportVendor::Custom,
+            id.to_owned(),
+            String::new(),
+            None,
+            None,
+            None,
+        );
+        finish_report(credential, report)
+    });
+}
+
+/// A failure writing a diagnostic may not escape into the agent's command or hide the report outcome.
+fn record_outcome(hook_log: Option<&Path>, work: impl FnOnce() -> Outcome) {
     // Two nested catches, for two different failures. The inner one turns
     // a panic in the work into the `panic` outcome, so the log still gets
     // its one line; the outer one guarantees that even a panic while
     // logging cannot escape into the caller, which must reach `exit(0)`.
-    let outcome = match std::panic::catch_unwind(AssertUnwindSafe(|| {
-        run_inner(credential, payload, budget, entry_vendor)
-    })) {
+    let outcome = match std::panic::catch_unwind(AssertUnwindSafe(work)) {
         Ok(outcome) => outcome,
         Err(_) => Outcome::word("panic"),
     };
@@ -316,7 +353,7 @@ pub fn run_with(
         // The supervisor's clock reading: a pre-epoch clock reads as 0, and a
         // nonsense timestamp is still better than losing the line.
         append_log(
-            hook_log.as_deref(),
+            hook_log,
             &outcome.render(farhelm_supervisor::store::now_unix().max(0) as u64),
         );
     }));
@@ -346,7 +383,7 @@ fn run_inner(
             return Outcome::detail("bad-payload", format!("no-reader: {err}"));
         }
     };
-    let mut report = match parse_payload(&bytes, entry_vendor) {
+    let report = match parse_payload(&bytes, entry_vendor) {
         Ok(report) => report,
         Err(reason) => return Outcome::detail("bad-payload", reason),
     };
@@ -359,6 +396,11 @@ fn run_inner(
     if let Some(reason) = subagent_refusal(report.agent_id.as_ref()) {
         return Outcome::detail("bad-payload", reason).about(&report.conversation, &report.source);
     }
+    finish_report(credential, report)
+}
+
+/// Capture evidence before the reporter exits and publish the report through the same durable drop as built-in hooks.
+fn finish_report(credential: HookCredential, mut report: HookReport) -> Outcome {
     // The ancestry is recorded HERE, while this process and its parents are
     // still running: it is the evidence the supervisor attributes the report
     // with, possibly long after they have all exited. A failure to read it
@@ -488,6 +530,7 @@ fn new_report(
 fn parse_payload(bytes: &[u8], entry_vendor: ReportVendor) -> Result<HookReport, &'static str> {
     let value: serde_json::Value = serde_json::from_slice(bytes).map_err(|_| "unparsable")?;
     match entry_vendor {
+        ReportVendor::Custom => Err("the custom agent reporter takes an ID argument"),
         ReportVendor::Antigravity => parse_antigravity_payload(&value),
         ReportVendor::Grok => parse_grok_payload(&value),
         ReportVendor::Muse => parse_muse_payload(&value),
@@ -534,6 +577,7 @@ fn parse_session_payload(
         ReportVendor::Omp => "omp",
         ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
         ReportVendor::Antigravity => unreachable!("Antigravity payloads use conversationId"),
+        ReportVendor::Custom => return Err("the custom agent reporter takes an ID argument"),
     };
     match value.get("vendor") {
         None | Some(serde_json::Value::Null) => {}
@@ -554,6 +598,7 @@ fn parse_session_payload(
         }
         ReportVendor::Grok => unreachable!("Grok payloads use their dual-spelling parser"),
         ReportVendor::Antigravity => unreachable!("Antigravity payloads use conversationId"),
+        ReportVendor::Custom => return Err("the custom agent reporter takes an ID argument"),
     } {
         let session_file = match value.get("session_file") {
             None | Some(serde_json::Value::Null) => None,

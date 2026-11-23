@@ -292,7 +292,7 @@ impl Rows<'_> {
                  launcher before launching.",
             ),
             Field::Agent => {
-                let options = LaunchHarness::ALL
+                let options = LaunchHarness::BUILT_INS
                     .iter()
                     .filter(|agent| fields.kind != Some(LauncherKind::Command) || !agent.is_shell())
                     .map(|&agent| (agent, harness_label(agent).to_owned()))
@@ -305,14 +305,14 @@ impl Rows<'_> {
             Field::Model => self.model(),
             Field::Effort => {
                 let options = effort_options(fields, self.catalog);
-                let chosen = fields.effort.flatten();
+                let chosen = fields.effort.as_ref().and_then(Option::as_ref).and_then(|value| value.known());
                 vec![self.choice(
                     field,
                     options,
                     chosen,
                     |editor, effort: Option<LaunchEffort>, window, cx| {
                         editor.edit(window, cx, |editor| {
-                            editor.draft.fields.effort = Some(effort)
+                            editor.draft.fields.effort = Some(effort.map(Into::into))
                         })
                     },
                 )]

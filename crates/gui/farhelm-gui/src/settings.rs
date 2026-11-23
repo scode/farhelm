@@ -626,7 +626,7 @@ impl Section {
         ]
         .into_iter()
         .chain(
-            LaunchHarness::ALL
+            LaunchHarness::BUILT_INS
                 .iter()
                 .copied()
                 .filter(|harness| !harness.is_shell())

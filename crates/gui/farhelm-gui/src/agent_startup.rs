@@ -927,7 +927,7 @@ mod tests {
         assert_eq!(
             (
                 codex.harness,
-                codex.effort,
+                codex.effort.as_ref().and_then(|value| value.known()),
                 codex.permissions,
                 codex.workspace_trust
             ),
@@ -1011,6 +1011,7 @@ mod tests {
                 canonical_cwd: Some("/tmp/run/work/0".into()),
                 cwd: "/tmp/run/work/0".into(),
                 selection: LaunchSelection {
+                    custom_agent: None,
                     harness: farhelm_proto::LaunchHarness::Claude,
                     model: None,
                     effort: None,

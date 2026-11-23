@@ -36,7 +36,7 @@ pub(super) fn templates() -> Vec<LaunchTemplate> {
                 kind: Some(LauncherKind::Agent),
                 agent: Some(LaunchHarness::Codex),
                 model: Some(Some("gpt-6.1-sol".into())),
-                effort: Some(Some(LaunchEffort::High)),
+                effort: Some(Some(LaunchEffort::High.into())),
                 ..TemplateFields::default()
             },
         ),

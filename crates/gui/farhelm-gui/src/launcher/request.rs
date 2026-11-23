@@ -462,9 +462,10 @@ impl LaunchDraft {
             .then(|| split_wrapper_prefix(&agent.wrapper).ok())
             .flatten();
         Some(LaunchSelection {
+            custom_agent: None,
             harness,
             model: agent.model.clone(),
-            effort: agent.effort,
+            effort: agent.effort.map(Into::into),
             permissions,
             permission_flags,
             workspace_trust: None,
@@ -478,6 +479,7 @@ impl LaunchDraft {
     pub fn command_launch(&self) -> Option<CommandLaunch> {
         let command = &self.command;
         Some(CommandLaunch {
+            custom_agent: None,
             command: command.command.clone(),
             yolo: command.yolo?,
             agent: command.agent,
@@ -820,9 +822,11 @@ fn selection_is_compatible(selection: &LaunchSelection, catalog: &[LaunchCatalog
             return false;
         }
     }
-    let effort_fits = selection.effort.is_none_or(|effort| match owned {
-        Some(model) => model.efforts.contains(&effort),
-        None => compatible_efforts(selection.harness, None, catalog).contains(&effort),
+    let effort_fits = selection.effort.as_ref().is_none_or(|value| {
+        value.known().is_some_and(|effort| match owned {
+            Some(model) => model.efforts.contains(&effort),
+            None => compatible_efforts(selection.harness, None, catalog).contains(&effort),
+        })
     });
     let permission_fits = selection
         .permissions

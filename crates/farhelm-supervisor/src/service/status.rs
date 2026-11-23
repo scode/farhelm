@@ -824,6 +824,7 @@ mod tests {
         }
         SessionEntry {
             snapshot: IntegrationSnapshot {
+                custom_reporting: None,
                 kind,
                 wrapper_prefix_words: 0,
                 resume_template: None,

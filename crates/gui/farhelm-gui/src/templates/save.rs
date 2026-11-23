@@ -24,7 +24,7 @@ use farhelm_proto::ui_channel::HostView;
 use super::fields::Field;
 use super::summary::permission_label;
 use crate::launcher::draft::{LaunchDraft, harness_label};
-use crate::permission::words::effort_label;
+use crate::permission::words::launch_effort_label;
 
 /// The values the panel offers and which of them start checked, fixed when the panel opens: the old panel's snapshot
 /// "stays fixed while this inline panel is open, even if the surrounding launcher changes".
@@ -154,8 +154,9 @@ pub fn choice_text(field: Field, fields: &TemplateFields) -> Option<String> {
         Field::Model => fields.model.clone().flatten(),
         Field::Effort => fields
             .effort
-            .flatten()
-            .map(|effort| effort_label(Some(effort)).to_owned()),
+            .as_ref()
+            .and_then(Option::as_ref)
+            .map(|effort| launch_effort_label(Some(effort)).to_owned()),
         Field::Permissions => Some(format!(
             "{}{}",
             permission_label(fields.agent, fields.permissions.flatten()),

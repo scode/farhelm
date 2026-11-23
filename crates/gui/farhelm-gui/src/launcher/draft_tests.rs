@@ -60,6 +60,7 @@ pub(super) fn session(launch: SessionLaunch) -> SessionInfo {
 /// An agent launch of `selection`, with a stored resume command when `resume`. Shared with the request tests.
 pub(super) fn agent_launch(selection: LaunchSelection, resume: bool) -> SessionLaunch {
     SessionLaunch::Agent {
+        custom_reporting: None,
         selection,
         start: vec!["agent".into(), "{farhelm_args}".into()],
         resume: resume.then(|| {
@@ -74,6 +75,7 @@ pub(super) fn agent_launch(selection: LaunchSelection, resume: bool) -> SessionL
 
 fn selection(harness: LaunchHarness) -> LaunchSelection {
     LaunchSelection {
+        custom_agent: None,
         harness,
         model: None,
         effort: None,
@@ -87,6 +89,7 @@ fn selection(harness: LaunchHarness) -> LaunchSelection {
 
 fn command(agent: Option<LaunchHarness>, resume: Option<&str>) -> CommandLaunch {
     CommandLaunch {
+        custom_agent: None,
         command: "my-agent {farhelm_args}".into(),
         yolo: false,
         agent,
@@ -619,7 +622,7 @@ fn a_host_change_reseeds_only_an_untouched_folder() {
 fn clone_seeds_an_agent_launch_verbatim() {
     let mut stored = selection(LaunchHarness::Codex);
     stored.model = Some("gpt-6-luna".into());
-    stored.effort = Some(LaunchEffort::High);
+    stored.effort = Some(LaunchEffort::High.into());
     stored.permissions = Some(LaunchPermission::Custom);
     stored.permission_flags = Some(vec!["--a".into(), "b c".into()]);
     stored.wrapper_prefix = Some(vec!["nice".into(), "-n".into(), "5".into()]);

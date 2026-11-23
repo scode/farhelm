@@ -155,7 +155,7 @@ fn incompatible_fields_refuse_saving_but_any_model_text_fits() {
     let switched = draft(TemplateFields {
         kind: Some(LauncherKind::Command),
         command: Some("make".into()),
-        effort: Some(Some(LaunchEffort::High)),
+        effort: Some(Some(LaunchEffort::High.into())),
         ..TemplateFields::default()
     });
     assert_eq!(
@@ -235,7 +235,7 @@ fn effort_choices_follow_a_read_catalog_only() {
     }];
     let fields = TemplateFields {
         model: Some(Some("gpt-6-luna".into())),
-        effort: Some(Some(LaunchEffort::High)),
+        effort: Some(Some(LaunchEffort::High.into())),
         ..agent_fields(Some(LaunchHarness::Codex))
     };
     let read = effort_options(&fields, Some(&catalog));

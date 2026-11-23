@@ -122,7 +122,8 @@ impl TrustAgent {
             | LaunchHarness::OpenCode
             | LaunchHarness::Grok
             | LaunchHarness::Bash
-            | LaunchHarness::Zsh => None,
+            | LaunchHarness::Zsh
+            | LaunchHarness::Custom => None,
         }
     }
 

@@ -1901,6 +1901,7 @@ mod tests {
         let mut entry = entry_with(Some(terminal), LastOutcome::Running);
         entry.info.id = id.to_string();
         entry.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template: None,
@@ -2397,7 +2398,9 @@ mod tests {
                 );
                 entry.info.id = id.clone();
                 entry.info.launch = farhelm_proto::SessionLaunch::Agent {
+                    custom_reporting: None,
                     selection: farhelm_proto::LaunchSelection {
+                        custom_agent: None,
                         harness: farhelm_proto::LaunchHarness::Codex,
                         model: None,
                         effort: None,
@@ -5222,6 +5225,7 @@ mod tests {
         let mut integrated = entry_with(base.terminal.clone(), LastOutcome::Running);
         integrated.info = base.info.clone();
         integrated.snapshot = IntegrationSnapshot {
+            custom_reporting: None,
             kind: AgentKind::Claude,
             wrapper_prefix_words: 0,
             resume_template: None,

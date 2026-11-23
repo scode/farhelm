@@ -10620,6 +10620,7 @@ mod tests {
         let other = farhelm_proto::parse_github_repo("acme/other").unwrap();
         let mut entry = session("repo-first", 100);
         entry.launch = crate::launches::test_agent_launch(LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
@@ -10856,10 +10857,11 @@ mod tests {
     /// the request provenance boundary rather than echoing peer authority.
     fn environment_history_selection() -> LaunchSelection {
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".into()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
+            effort: Some(farhelm_proto::LaunchEffort::High.into()),
             permissions: None,
             wrapper_prefix: None,
             container: None,
@@ -11779,10 +11781,11 @@ mod tests {
         let entry = SessionInfo {
             creation_seq: Some(7),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: Some("gpt-6-astra".to_string()),
-                effort: Some(farhelm_proto::LaunchEffort::High),
+                effort: Some(farhelm_proto::LaunchEffort::High.into()),
                 permissions: None,
                 wrapper_prefix: None,
                 container: None,
@@ -11848,6 +11851,7 @@ mod tests {
         let yolo = |id: &str, seq: u64| SessionInfo {
             creation_seq: Some(seq),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -12031,6 +12035,7 @@ mod tests {
             ..yolo("custom-origin", 3)
         };
         let custom_selection = LaunchSelection {
+            custom_agent: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -12082,6 +12087,7 @@ mod tests {
             ..yolo("divergent-reply", 100)
         };
         let submitted = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
@@ -12139,6 +12145,7 @@ mod tests {
             let entry = SessionInfo {
                 creation_seq: Some(index as u64 + 3),
                 launch: crate::launches::test_agent_launch(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: Some("z-ai/glm-5.3".into()),
@@ -12224,6 +12231,7 @@ mod tests {
             let entry = SessionInfo {
                 creation_seq: Some(seq),
                 launch: crate::launches::test_agent_launch(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness,
                     model: None,
@@ -12439,6 +12447,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "aliases.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
@@ -12781,6 +12790,7 @@ mod tests {
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -12859,6 +12869,7 @@ mod tests {
             canonical_cwd: Some("/real/project".to_string()),
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -13007,6 +13018,7 @@ mod tests {
         let entry = SessionInfo {
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -13087,6 +13099,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "eviction.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -13159,6 +13172,7 @@ mod tests {
         let structured = SessionInfo {
             creation_seq: Some(1),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -13219,6 +13233,7 @@ mod tests {
         let path = dir.path().join("helm.db");
         let host = host_with_identity(&store, "reopen.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Muse,
             model: None,
@@ -13424,6 +13439,7 @@ mod tests {
         let path = dir.path().join("helm.db");
         let host = host_with_identity(&store, "dual-frontier.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
@@ -13560,6 +13576,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "rollback.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: None,
@@ -13627,6 +13644,7 @@ mod tests {
         let (_dir, store) = fresh_store().await;
         let host = host_with_identity(&store, "adopt-history.example", "identity-a").await;
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -18548,6 +18566,7 @@ mod tests {
             selection,
             start,
             resume,
+            ..
         } = &cached[0].launch
         else {
             panic!(
@@ -18906,6 +18925,7 @@ mod tests {
         let admitted = SessionInfo {
             creation_seq: Some(2),
             launch: crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,

@@ -27,6 +27,7 @@ use std::collections::{BTreeMap, HashMap};
 
 use farhelm_proto::announcements::AnnouncementQueue;
 use farhelm_proto::approvals::PendingApproval;
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::LaunchTemplate;
 use farhelm_proto::notices::Notice;
 use farhelm_proto::provisioning::ProvisioningView;
@@ -51,6 +52,7 @@ pub enum PushedEntry {
     SshQuestion(SshQuestion),
     SshSignInCompletion(SshSignInCompletion),
     Template(LaunchTemplate),
+    CustomAgent(CustomAgent),
     Notice(Notice),
     Announcements(AnnouncementQueue),
     HostProgress(ProvisioningView),
@@ -134,6 +136,16 @@ impl Pushed for LaunchTemplate {
     fn from_entry(entry: &PushedEntry) -> Option<&Self> {
         match entry {
             PushedEntry::Template(value) => Some(value),
+            _ => None,
+        }
+    }
+}
+
+impl Pushed for CustomAgent {
+    const COLLECTION: Collection = Collection::CustomAgents;
+    fn from_entry(entry: &PushedEntry) -> Option<&Self> {
+        match entry {
+            PushedEntry::CustomAgent(value) => Some(value),
             _ => None,
         }
     }
@@ -256,6 +268,7 @@ fn decode_entries(
                 |value| typed(value, PushedEntry::SshSignInCompletion)
             }
             Collection::Templates => |value| typed(value, PushedEntry::Template),
+            Collection::CustomAgents => |value| typed(value, PushedEntry::CustomAgent),
             Collection::Notices => |value| typed(value, PushedEntry::Notice),
             Collection::Announcements => |value| typed(value, PushedEntry::Announcements),
             Collection::HostProgress => |value| typed(value, PushedEntry::HostProgress),

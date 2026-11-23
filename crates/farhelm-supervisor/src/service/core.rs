@@ -3598,7 +3598,9 @@ mod container_restart_validation_tests {
     #[test]
     fn incoming_container_is_refused_before_restart_can_mutate_a_host_session() {
         let launch = farhelm_proto::SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 harness: farhelm_proto::LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -3647,7 +3649,9 @@ fn restart_with_refusal(stored: &SessionLaunch, replacement: &SessionLaunch) -> 
             replacement.launch_kind().word()
         ));
     }
-    if stored.agent_type() != replacement.agent_type() {
+    if stored.agent_type() != replacement.agent_type()
+        || stored.custom_agent() != replacement.custom_agent()
+    {
         return Some(
             "Restart with keeps the agent type; use Replace with to change it".to_string(),
         );
@@ -3838,23 +3842,33 @@ pub(super) fn expand_tilde_cwd<'a>(
     cwd: &'a str,
     home: Option<&Path>,
 ) -> anyhow::Result<std::borrow::Cow<'a, str>> {
+    expand_tilde_path("working directory", cwd, home)
+}
+
+/// Resolve a literal home-relative path on the host that will use it. The subject keeps a host
+/// configuration failure tied to the launch field that needed it.
+fn expand_tilde_path<'a>(
+    subject: &str,
+    path: &'a str,
+    home: Option<&Path>,
+) -> anyhow::Result<std::borrow::Cow<'a, str>> {
     use std::borrow::Cow;
-    let rest = match cwd {
+    let rest = match path {
         "~" => "",
-        _ => match cwd.strip_prefix("~/") {
+        _ => match path.strip_prefix("~/") {
             Some(rest) => rest,
-            None if cwd.starts_with('~') => {
+            None if path.starts_with('~') => {
                 return Err(RequestError::new(
                     ErrorKind::InvalidRequest,
                     format!(
-                        "working directory {cwd} looks like a ~user path, which is not \
+                        "{subject} {path} looks like a ~user path, which is not \
                          supported; use ~ or ~/path (expanded against the supervisor's own \
                          home) or an absolute path"
                     ),
                 )
                 .into());
             }
-            None => return Ok(Cow::Borrowed(cwd)),
+            None => return Ok(Cow::Borrowed(path)),
         },
     };
     let home = home
@@ -3862,7 +3876,7 @@ pub(super) fn expand_tilde_cwd<'a>(
             RequestError::new(
                 ErrorKind::InvalidRequest,
                 format!(
-                    "working directory {cwd} needs ~ expansion, but this supervisor has no \
+                    "{subject} {path} needs ~ expansion, but this supervisor has no \
                      home directory (no HOME in its environment); use an absolute path"
                 ),
             )
@@ -3871,8 +3885,10 @@ pub(super) fn expand_tilde_cwd<'a>(
         .ok_or_else(|| {
             RequestError::new(
                 ErrorKind::Internal,
-                "the supervisor's home directory is not valid UTF-8, so ~ cannot be expanded \
-                 into a session working directory; use an absolute path",
+                format!(
+                    "the supervisor's home directory is not valid UTF-8, so ~ cannot be expanded \
+                 into the {subject}; use an absolute path"
+                ),
             )
         })?;
     // A relative home would expand `~/x` into another relative path, and
@@ -3884,7 +3900,7 @@ pub(super) fn expand_tilde_cwd<'a>(
             ErrorKind::Internal,
             format!(
                 "the supervisor's home directory ({home}) is not an absolute path, so ~ cannot \
-                 be expanded into a session working directory; use an absolute path"
+                 be expanded into the {subject}; use an absolute path"
             ),
         )
         .into());
@@ -7627,6 +7643,7 @@ impl Supervisor {
             | AgentKind::Grok
             | AgentKind::Antigravity
             | AgentKind::Muse
+            | AgentKind::Custom
             | AgentKind::Generic => {}
         }
     }
@@ -7662,6 +7679,7 @@ impl Supervisor {
             | AgentKind::Goose
             | AgentKind::Muse
             | AgentKind::Antigravity
+            | AgentKind::Custom
             | AgentKind::Generic => {}
         }
         let Some(vendor) = crate::agent_kind::locator_vendor(snapshot.kind) else {
@@ -12698,12 +12716,11 @@ impl Supervisor {
         // Keep the old capture only while a report can replace it; otherwise a
         // later plain Restart would reopen the old conversation indefinitely.
         let clear_capture = named_start.is_some()
-            && entry
-                .info
-                .launch
+            && executable_launch
                 .agent_selection()
                 .is_some_and(|selection| {
                     !selection.harness.captures_named_conversation()
+                        || executable_launch.custom_reporting() == Some(false)
                         || reporter_failed
                         || self
                             .seams
@@ -14564,7 +14581,7 @@ impl Supervisor {
         id: &str,
         session_token: &str,
         generation: i64,
-        argv: Vec<String>,
+        mut argv: Vec<String>,
         shell_source: Option<ShellSource<'_>>,
         snapshot: &IntegrationSnapshot,
         args_mode: FarhelmArgsMode,
@@ -14600,6 +14617,19 @@ impl Supervisor {
                 .context("the wrapper prefix is longer than the composed agent command")?;
             farhelm_proto::check_wrapper_prefix(Some(prefix))
                 .map_err(|message| anyhow::anyhow!(message))?;
+        }
+        if selection.is_some_and(|selection| selection.harness.uses_custom_catalog()) {
+            // The wrapper prefix is shell text. Expand the caller's home only in the first
+            // literal argument after that prefix, before it gets quoted for execution.
+            // See the contract changelog in `website/src/content/docs/docs/agents/custom-agent-contract.md`.
+            let program = argv
+                .get_mut(snapshot.wrapper_prefix_words)
+                .context("the custom agent launch needs an executable after its wrapper prefix")?;
+            if program.starts_with('~') {
+                *program =
+                    expand_tilde_path("custom agent command", program, self.user_home.as_deref())?
+                        .into_owned();
+            }
         }
         // Placeholder substitution is the FIRST transformation and hook
         // injection the second, so the injected tail — literals this crate
@@ -15701,6 +15731,16 @@ impl Supervisor {
                 )
                 .await
             }
+            AgentKind::Custom => {
+                self.report_positional_conversation(
+                    id,
+                    report,
+                    vendor::positional::CUSTOM,
+                    generation,
+                    entry,
+                )
+                .await
+            }
             AgentKind::Codex => {
                 self.report_codex_conversation(id, report, kind, generation, entry)
                     .await
@@ -16702,6 +16742,7 @@ pub(crate) mod tests {
             ),
         ] {
             let launch = SessionLaunch::Command(farhelm_proto::session_launch::CommandLaunch {
+                custom_agent: None,
                 command: "agent {farhelm_args}".into(),
                 yolo: false,
                 agent: Some(LaunchHarness::Claude),
@@ -17036,7 +17077,9 @@ pub(crate) mod tests {
     /// request/argv boundaries without executing an installed vendor agent.
     fn named_test_launch() -> SessionLaunch {
         SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 harness: LaunchHarness::Claude,
                 model: None,
                 effort: None,
@@ -17681,6 +17724,7 @@ pub(crate) mod tests {
         resume: Option<&str>,
     ) -> SessionLaunch {
         SessionLaunch::Command(farhelm_proto::CommandLaunch {
+            custom_agent: None,
             command: command.to_string(),
             yolo: false,
             agent: Some(agent),
@@ -17703,6 +17747,7 @@ pub(crate) mod tests {
             "agy" => (AgentKind::Antigravity, &["--conversation"]),
             _ => {
                 return IntegrationSnapshot {
+                    custom_reporting: None,
                     kind: AgentKind::Generic,
                     wrapper_prefix_words: 0,
                     resume_template: None,
@@ -17713,6 +17758,7 @@ pub(crate) mod tests {
         resume.extend(suffix.iter().map(|element| element.to_string()));
         resume.push(crate::agent_kind::CONVERSATION_PLACEHOLDER.to_string());
         IntegrationSnapshot {
+            custom_reporting: None,
             kind,
             wrapper_prefix_words: 0,
             resume_template: Some(resume),
@@ -17970,7 +18016,9 @@ pub(crate) mod tests {
             Some("claude --resume {conversation} {farhelm_args}"),
         );
         let agent = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
@@ -17995,6 +18043,19 @@ pub(crate) mod tests {
         };
         assert_eq!(restart_with_refusal(&resumable, &resumable), None);
         assert_eq!(restart_with_refusal(&agent, &agent), None);
+        let custom = |id: &str| {
+            let SessionLaunch::Command(mut command) = command(
+                LaunchHarness::Custom,
+                Some("custom --resume {conversation} {farhelm_args}"),
+            ) else {
+                unreachable!("the fixture builds a Command launch");
+            };
+            command.yolo = true;
+            command.custom_agent = Some(id.to_owned());
+            SessionLaunch::Command(command)
+        };
+        let first_custom = custom("first-agent");
+        assert_eq!(restart_with_refusal(&first_custom, &first_custom), None);
         for (stored, replacement, says) in [
             (&legacy, &resumable, "Replace with"),
             (&resumable, &agent, "keeps the launch kind"),
@@ -18004,6 +18065,12 @@ pub(crate) mod tests {
                     LaunchHarness::Codex,
                     Some("claude --resume {conversation} {farhelm_args}"),
                 ),
+                "keeps the agent type",
+            ),
+            // Two registrations can use unrelated conversation stores. Restart with must keep the original ID.
+            (
+                &first_custom,
+                &custom("other-agent"),
                 "keeps the agent type",
             ),
             (
@@ -19526,6 +19593,7 @@ pub(crate) mod tests {
                 host_tabs: host_tab_cell(Vec::new()),
             },
             snapshot: IntegrationSnapshot {
+                custom_reporting: None,
                 kind: AgentKind::Generic,
                 wrapper_prefix_words: 0,
                 resume_template: None,
@@ -20783,7 +20851,9 @@ pub(crate) mod tests {
         let cwd = state.path().join("work");
         std::fs::create_dir(&cwd).expect("private session directory");
         let launch = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 harness,
                 model: None,
                 effort: None,
@@ -23971,7 +24041,9 @@ await new Promise(() => {});
             ])
             .collect();
         let launch = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Omp,
                 model: None,
@@ -26646,6 +26718,7 @@ exit 1
     fn the_create_fingerprint_covers_every_session_shaping_field() {
         let command = |command: &str, yolo: bool, agent, resume: Option<&str>| {
             SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                custom_agent: None,
                 command: command.to_string(),
                 yolo,
                 agent,
@@ -26661,7 +26734,9 @@ exit 1
             None,
         );
         let agent = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
@@ -26877,6 +26952,7 @@ exit 1
                 Some("parent-1"),
                 "/work",
                 &SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                    custom_agent: None,
                     command: "claude {farhelm_args}".to_string(),
                     yolo: true,
                     agent: Some(LaunchHarness::Claude),
@@ -26891,11 +26967,13 @@ exit 1
                 None,
                 "/work",
                 &SessionLaunch::Agent {
+                    custom_reporting: None,
                     selection: farhelm_proto::LaunchSelection {
+                        custom_agent: None,
                         permission_flags: None,
                         harness: LaunchHarness::Codex,
                         model: Some("gpt-6-astra".to_string()),
-                        effort: Some(farhelm_proto::LaunchEffort::High),
+                        effort: Some(farhelm_proto::LaunchEffort::High.into()),
                         permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                         wrapper_prefix: None,
                         container: None,
@@ -26926,6 +27004,7 @@ exit 1
         use farhelm_proto::{LaunchPermission, LaunchSelection};
 
         let selection = LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -26943,12 +27022,14 @@ exit 1
             "{farhelm_args}".into(),
         ]);
         let saved = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: selection.clone(),
             start: start.clone(),
             resume: resume.clone(),
         };
         let recorded = launch_fingerprint(None, "/work", &saved, Some("title"));
         let migrated = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: LaunchSelection {
                 permissions: Some(LaunchPermission::Yolo),
                 ..selection.clone()
@@ -26976,6 +27057,7 @@ exit 1
             "the migration does not consume more of a saved command's field budget",
         );
         let different_argv = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: LaunchSelection {
                 permissions: Some(LaunchPermission::Yolo),
                 ..selection
@@ -27264,10 +27346,11 @@ exit 1
         assert_eq!(
             selection,
             &farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Omp,
                 model: Some("x-ai/grok-4.6".into()),
-                effort: Some(farhelm_proto::LaunchEffort::High),
+                effort: Some(farhelm_proto::LaunchEffort::High.into()),
                 permissions: Some(farhelm_proto::LaunchPermission::Approve),
                 wrapper_prefix: None,
                 container: None,
@@ -28182,6 +28265,7 @@ exit 1
             inherit_agent: false,
             cwd: "/".to_string(),
             launch: Some(SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                custom_agent: None,
                 command: "agent".to_string(),
                 yolo,
                 agent: None,
@@ -30681,6 +30765,7 @@ exit 1
                     cols: 80,
                     rows: 24,
                     snapshot: IntegrationSnapshot {
+                        custom_reporting: None,
                         kind: farhelm_proto::AgentKind::Generic,
                         wrapper_prefix_words: 0,
                         resume_template: None,
@@ -31228,6 +31313,7 @@ exit 1
             AgentKind::Grok => "grok",
             AgentKind::Antigravity => "antigravity",
             AgentKind::Muse => "muse",
+            AgentKind::Custom => "custom",
             AgentKind::Generic => "agent",
         };
         program_snapshot(argv0)
@@ -33483,7 +33569,9 @@ exit 1
         let root = tempfile::tempdir().unwrap();
         let checkout = checkout_fixture(root.path());
         let agent = |model: Option<&str>| SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: model.map(str::to_string),
@@ -33874,7 +33962,9 @@ exit 1
         let mut checkout = checkout_fixture(&root);
         checkout.agent_wrapper_supplied = true;
         let launch = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 harness: LaunchHarness::Codex,
                 model: None,
                 effort: None,

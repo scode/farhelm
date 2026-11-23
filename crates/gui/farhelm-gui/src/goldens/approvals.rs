@@ -64,6 +64,7 @@ fn approval_spawn() -> farhelm_proto::approvals::PendingApproval {
             repo: None,
             title: None,
             launch: farhelm_proto::SessionLaunch::Command(farhelm_proto::CommandLaunch {
+                custom_agent: None,
                 command: "claude {farhelm_args}".to_owned(),
                 yolo: false,
                 agent: Some(farhelm_proto::LaunchHarness::Claude),

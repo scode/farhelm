@@ -16,9 +16,8 @@
 //! The drawing is shared too ([`line`], and the ⚡ chord's text size, [`CHORD_TEXT`]), so that the lists show one
 //! summary the same way rather than each keeping a copy.
 
-use farhelm_proto::LaunchHarness;
-use farhelm_proto::LaunchPermission;
 use farhelm_proto::launcher::{LauncherKind, TemplateFields};
+use farhelm_proto::{LaunchEffortValue, LaunchHarness, LaunchPermission};
 
 use gpui::{Div, ElementId, ParentElement as _, Styled as _, div};
 
@@ -82,12 +81,16 @@ pub fn parts(fields: &TemplateFields) -> Vec<Part> {
         Some(None) => summary.words("Model default"),
         None => {}
     }
-    if let Some(effort) = fields.effort {
-        // `effort_label(None)` is "Default", which the old summary spelled lower case after its field name.
-        summary.words(&match effort {
-            Some(_) => format!("Effort {}", effort_label(effort)),
-            None => "Effort default".to_owned(),
-        });
+    match &fields.effort {
+        Some(Some(LaunchEffortValue::Known(effort))) => {
+            summary.words(&format!("Effort {}", effort_label(Some(*effort))));
+        }
+        Some(Some(LaunchEffortValue::Custom(effort))) => summary.field(vec![
+            Part::Words("Effort ".into()),
+            Part::Host(effort.clone()),
+        ]),
+        Some(None) => summary.words("Effort default"),
+        None => {}
     }
     if let Some(permissions) = fields.permissions {
         summary.words(&format!(

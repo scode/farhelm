@@ -9,7 +9,7 @@
 //! allow. The launcher's escalation banner keeps its own names (the launcher draft's `permission_name`), which differ
 //! in two words, as the old app's did; the launcher's chip order, docs link and agent notes stay in the launcher.
 
-use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission};
+use farhelm_proto::{LaunchEffort, LaunchEffortValue, LaunchHarness, LaunchPermission};
 
 /// An effort's name as the launcher shows it (old `effort_label`); `None` is the model's default. "xhigh" stays lower
 /// case, as the agents spell it.
@@ -24,6 +24,15 @@ pub(crate) const fn effort_label(effort: Option<LaunchEffort>) -> &'static str {
         Some(LaunchEffort::Max) => "Max",
         Some(LaunchEffort::Ultra) => "Ultra",
         None => "Default",
+    }
+}
+
+/// Built-in labels retain their established capitalization. A custom effort keeps the supplied spelling.
+pub(crate) fn launch_effort_label(effort: Option<&LaunchEffortValue>) -> &str {
+    match effort {
+        Some(LaunchEffortValue::Custom(value)) => value,
+        Some(LaunchEffortValue::Known(value)) => effort_label(Some(*value)),
+        None => effort_label(None),
     }
 }
 
@@ -143,7 +152,8 @@ const fn guarded_mode(harness: LaunchHarness) -> Option<&'static str> {
         | LaunchHarness::Pi
         | LaunchHarness::OpenCode
         | LaunchHarness::Bash
-        | LaunchHarness::Zsh => None,
+        | LaunchHarness::Zsh
+        | LaunchHarness::Custom => None,
     }
 }
 

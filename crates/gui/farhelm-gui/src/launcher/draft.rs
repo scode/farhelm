@@ -603,7 +603,7 @@ impl LaunchDraft {
             harness: Some(selection.harness),
             model: selection.model.clone(),
             model_owner: selection.model.as_ref().map(|_| selection.harness),
-            effort: selection.effort,
+            effort: selection.effort.as_ref().and_then(|value| value.known()),
             permissions: selection.harness.request_permission(selection.permissions),
             permissions_explicit: true,
             // Flags are literal words, so their editor text quotes them back; a wrapper's words keep the quotes and
@@ -876,9 +876,10 @@ impl LaunchDraft {
     fn choices_for(&self, harness: LaunchHarness) -> LaunchSelection {
         let agent = &self.agent;
         LaunchSelection {
+            custom_agent: None,
             harness: agent.harness.unwrap_or(harness),
             model: agent.model.clone(),
-            effort: agent.effort,
+            effort: agent.effort.map(Into::into),
             permissions: agent.permissions,
             permission_flags: farhelm_proto::split_permission_flags(&agent.permission_flags).ok(),
             workspace_trust: None,
@@ -896,7 +897,7 @@ impl LaunchDraft {
         harness: LaunchHarness,
         catalog: Catalog<'_>,
     ) -> Option<String> {
-        let effort = selection.effort;
+        let effort = selection.effort.clone();
         let (mut after, owner) = reconcile_harness_selection(
             selection.clone(),
             model_owner,
@@ -915,7 +916,7 @@ impl LaunchDraft {
         self.agent.harness = Some(after.harness);
         self.agent.model = after.model;
         self.agent.model_owner = owner;
-        self.agent.effort = after.effort;
+        self.agent.effort = after.effort.as_ref().and_then(|value| value.known());
         self.agent.permissions = after.permissions;
         notice
     }
@@ -1453,6 +1454,7 @@ pub const fn harness_label(harness: LaunchHarness) -> &'static str {
         LaunchHarness::OpenCode => "OpenCode",
         LaunchHarness::Bash => "Bash",
         LaunchHarness::Zsh => "Zsh",
+        LaunchHarness::Custom => "Custom",
     }
 }
 

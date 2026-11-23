@@ -105,6 +105,7 @@ mod tests {
     #[test]
     fn structured_selections_are_classified_by_permission_and_sole_mode() {
         let selection = |harness, permissions| LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness,
             model: None,

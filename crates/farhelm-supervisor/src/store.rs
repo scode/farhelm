@@ -1131,6 +1131,7 @@ pub(crate) fn agent_kind_column(kind: farhelm_proto::AgentKind) -> &'static str 
         K::Grok => "grok",
         K::Antigravity => "antigravity",
         K::Muse => "muse",
+        K::Custom => "custom",
         K::Generic => "generic",
     }
 }
@@ -1157,6 +1158,7 @@ fn agent_kind_from_column(text: &str) -> anyhow::Result<farhelm_proto::AgentKind
         "grok" => K::Grok,
         "antigravity" => K::Antigravity,
         "muse" => K::Muse,
+        "custom" => K::Custom,
         "generic" => K::Generic,
         other => anyhow::bail!("row has unrecognized agent kind {other:?}"),
     })
@@ -7231,6 +7233,7 @@ mod tests {
             .expect("read prior row")
             .expect("row exists");
         let selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -8368,7 +8371,9 @@ mod tests {
         let agent = |harness, permissions, start: &[&str], resume: Option<&[&str]>| {
             let words = |argv: &[&str]| argv.iter().map(ToString::to_string).collect();
             SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: LaunchSelection {
+                    custom_agent: None,
                     harness,
                     permissions,
                     model: None,
@@ -8724,6 +8729,7 @@ mod tests {
                 "a typed command from before launch kinds stays legacy"
             );
             let integration = IntegrationSnapshot {
+                custom_reporting: None,
                 kind: AgentKind::Claude,
                 wrapper_prefix_words: 0,
                 resume_template: row.resume_template(),
@@ -11469,10 +11475,11 @@ mod tests {
     async fn work_start_provenance_and_launch_survive_both_session_readers() {
         let (_dir, store) = fresh_store().await;
         let launch = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
+            effort: Some(farhelm_proto::LaunchEffort::High.into()),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -11615,10 +11622,11 @@ mod tests {
         ] {
             let (_dir, store) = fresh_store().await;
             let launch = farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness,
                 model: Some(model.to_string()),
-                effort,
+                effort: effort.map(Into::into),
                 permissions: Some(permissions),
                 wrapper_prefix: None,
                 container: None,
@@ -11629,6 +11637,7 @@ mod tests {
             let mut start = shell_words::split(invocation).expect("fixture invocation");
             start.push(crate::agent_kind::FARHELM_ARGS_PLACEHOLDER.to_string());
             let session_launch = farhelm_proto::SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: launch,
                 start,
                 resume: resume_template.map(|mut argv| {
@@ -11696,10 +11705,11 @@ mod tests {
             .await
             .expect("create fixture");
         let launch = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Omp,
             model: Some("provider/model".into()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
+            effort: Some(farhelm_proto::LaunchEffort::High.into()),
             permissions: Some(farhelm_proto::LaunchPermission::Approve),
             wrapper_prefix: None,
             container: None,
@@ -15224,6 +15234,7 @@ mod tests {
         let (dir, store) = fresh_store().await;
         insert_running(&store, "s1").await;
         let command = farhelm_proto::session_launch::CommandLaunch {
+            custom_agent: None,
             command: "agent '{cwd}'".into(),
             yolo: false,
             agent: None,
@@ -15459,6 +15470,7 @@ mod tests {
                     selection,
                     start,
                     resume,
+                    ..
                 } => (
                     shell_words::join(without_args(start)),
                     resume.as_deref().map(without_args),
@@ -15623,6 +15635,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let db_path = dir.path().join("supervisor.db");
         let selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-x".to_string()),
@@ -15661,6 +15674,7 @@ mod tests {
         assert_eq!(
             structured.launch,
             farhelm_proto::SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: farhelm_proto::LaunchSelection {
                     permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                     ..selection
@@ -15717,6 +15731,7 @@ mod tests {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("supervisor.db");
         let selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -15749,6 +15764,7 @@ mod tests {
         assert_eq!(
             row.launch,
             farhelm_proto::SessionLaunch::Agent {
+                custom_reporting: None,
                 selection,
                 start: words(&["claude", "--dangerously-skip-permissions", "{farhelm_args}"]),
                 resume: Some(words(&[

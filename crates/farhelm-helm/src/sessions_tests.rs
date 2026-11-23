@@ -32,6 +32,7 @@ mod captured_create_history {
             requested_cwd: "~".into(),
             accept_result: None,
             explicit_selection: Some(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Codex,
                 model: Some(recipe.into()),
@@ -805,10 +806,11 @@ async fn composer_catalog_and_history_routes_serve_helm_owned_choices() {
     let created = farhelm_proto::SessionInfo {
         creation_seq: Some(9),
         launch: crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Codex,
             model: Some("gpt-6-astra".to_string()),
-            effort: Some(farhelm_proto::LaunchEffort::High),
+            effort: Some(farhelm_proto::LaunchEffort::High.into()),
             permissions: Some(farhelm_proto::LaunchPermission::Yolo),
             wrapper_prefix: None,
             container: None,
@@ -1305,10 +1307,11 @@ async fn structured_tilde_create_replay_keeps_all_three_path_facts_distinct() {
                         invocation: "codex --model gpt-6-astra".into(),
                         launch: crate::launches::test_agent_launch(
                             farhelm_proto::LaunchSelection {
+                                custom_agent: None,
                                 permission_flags: None,
                                 harness: farhelm_proto::LaunchHarness::Codex,
                                 model: Some("gpt-6-astra".into()),
-                                effort: Some(farhelm_proto::LaunchEffort::High),
+                                effort: Some(farhelm_proto::LaunchEffort::High.into()),
                                 permissions: Some(farhelm_proto::LaunchPermission::Yolo),
                                 wrapper_prefix: None,
                                 container: None,
@@ -1418,6 +1421,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "yolo-launch",
                 Some(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Codex,
                     model: None,
@@ -1432,6 +1436,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "default-launch",
                 Some(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Codex,
                     model: None,
@@ -1445,6 +1450,7 @@ async fn a_successful_structured_launch_remembers_its_permissions_choice() {
             (
                 "goose-default-launch",
                 Some(LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: farhelm_proto::LaunchHarness::Goose,
                     model: None,
@@ -1616,6 +1622,7 @@ async fn remembered_defaults_follow_the_submitted_launch_not_the_reply() {
             let mut session = rest_harness::session(id, 1_700_000_000);
             session.creation_seq = Some(index as u64 + 1);
             session.launch = crate::launches::test_agent_launch(LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
@@ -1726,6 +1733,7 @@ async fn create_session_forwards_the_bodys_extras_to_the_supervisor() {
             launch,
             Some(farhelm_proto::SessionLaunch::Command(
                 farhelm_proto::CommandLaunch {
+                    custom_agent: None,
                     command: "some-agent {farhelm_args}".to_string(),
                     yolo: false,
                     agent: Some(farhelm_proto::LaunchHarness::Claude),
@@ -3852,6 +3860,7 @@ async fn a_plain_replace_records_no_launch_choices_from_the_listed_row() {
     use farhelm_proto::{ControlMsg, Frame, LaunchPermission, LaunchSelection};
 
     let yolo = LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: farhelm_proto::LaunchHarness::Codex,
         model: None,
@@ -4539,10 +4548,11 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchSelection};
 
     let selection = LaunchSelection {
+        custom_agent: None,
         permission_flags: None,
         harness: LaunchHarness::Claude,
         model: Some("claude-opus-4-6".to_string()),
-        effort: Some(LaunchEffort::High),
+        effort: Some(LaunchEffort::High.into()),
         permissions: None,
         wrapper_prefix: None,
         container: None,
@@ -4551,6 +4561,7 @@ async fn replace_of_an_agent_launch_copies_its_stored_launch() {
     // A launch an older catalog composed: the start command carries a flag
     // today's compiler would not write, which a recompile would lose.
     let stored = farhelm_proto::SessionLaunch::Agent {
+        custom_reporting: None,
         selection: selection.clone(),
         start: vec![
             "claude".to_string(),
@@ -4578,6 +4589,7 @@ async fn plain_replace_retains_stored_workspace_trust_and_historical_words() {
 
     for trust in [None, Some(false), Some(true)] {
         let mut stored = crate::launches::compile(LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -6566,6 +6578,7 @@ async fn assert_workspace_trust_dispatch(
 
     for enabled in [false, true] {
         let selection = LaunchSelection {
+            custom_agent: None,
             harness: harness_kind,
             model: None,
             effort: None,
@@ -6796,6 +6809,7 @@ async fn restart_with_a_command_launch_forwards_it_and_refuses_bad_shapes() {
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
 
     let edited = farhelm_proto::CommandLaunch {
+        custom_agent: None,
         command: "claude --model sonnet {farhelm_args}".to_string(),
         yolo: false,
         agent: Some(farhelm_proto::LaunchHarness::Claude),
@@ -11576,6 +11590,7 @@ async fn fresh_local_refusal_recovers_a_concurrent_winner_after_settings_change(
             assert_eq!(checkout.root, "/original-root");
             assert_eq!(checkout.client_identity, client_identity);
             let expected = crate::launches::compile(farhelm_proto::LaunchSelection {
+                custom_agent: None,
                 harness: farhelm_proto::LaunchHarness::Codex,
                 model: None,
                 effort: None,
@@ -13403,6 +13418,7 @@ fn retired_container_source() -> farhelm_proto::SessionInfo {
     let selection=serde_json::from_value(serde_json::json!({"harness":"codex","model":null,"effort":null,"permissions":null,"container":{"engine":"podman","image_file":"legacy.tar","api_proxy_port":43210}})).unwrap();
     farhelm_proto::SessionInfo {
         launch: farhelm_proto::SessionLaunch::Agent {
+            custom_reporting: None,
             selection,
             start: vec!["codex".into(), "{farhelm_args}".into()],
             resume: None,
@@ -13547,9 +13563,10 @@ mod client_bodies {
     /// helm stopped reading shows up as a lost value.
     fn selection() -> LaunchSelection {
         LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-6-luna".into()),
-            effort: Some(LaunchEffort::High),
+            effort: Some(LaunchEffort::High.into()),
             permissions: Some(LaunchPermission::Custom),
             permission_flags: Some(vec!["--sandbox".into(), "danger full".into()]),
             workspace_trust: None,
@@ -13560,6 +13577,7 @@ mod client_bodies {
 
     fn command() -> CommandLaunch {
         CommandLaunch {
+            custom_agent: None,
             command: "claude {farhelm_args}".into(),
             yolo: true,
             agent: Some(LaunchHarness::Claude),
@@ -13802,6 +13820,7 @@ mod client_bodies {
             FolderHistoryEntry, LaunchHistoryEntry, LaunchHistoryReply,
         };
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Codex,
             model: Some("gpt-5".into()),

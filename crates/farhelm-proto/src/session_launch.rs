@@ -100,6 +100,10 @@ pub enum SessionLaunch {
         /// agent type without conversation reporting. It has the same raw-prefix
         /// boundary as `start`, so Restart never re-splits stored wrapper text.
         resume: Option<Vec<String>>,
+        /// The registered custom agent's reporting capability at launch time.
+        /// A later catalog edit or deletion cannot change a running session's contract.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        custom_reporting: Option<bool>,
     },
     /// A command line the user wrote, with their own YOLO assertion.
     Command(CommandLaunch),
@@ -131,6 +135,10 @@ pub struct CommandLaunch {
     /// The agent type the command runs, when declared. Buys that type's
     /// status reading, conversation reporting and, with `resume`, Restart.
     pub agent: Option<LaunchHarness>,
+    /// Optional catalog identity for a command declaring the custom integration.
+    /// An anonymous custom command uses the same reporter and its own resume text.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub custom_agent: Option<String>,
     /// The user's own resume command; only with a declared agent type.
     pub resume: Option<String>,
 }
@@ -177,6 +185,16 @@ impl CommandLaunch {
     /// refusal names the field, so a client can show it beside the right
     /// control.
     pub fn validate_stored(&self) -> Result<(), String> {
+        let custom = self.agent.is_some_and(LaunchHarness::uses_custom_catalog);
+        if custom && !self.yolo {
+            return Err("command: a custom agent launch must be declared YOLO".into());
+        }
+        if let Some(id) = &self.custom_agent {
+            if !custom {
+                return Err("custom agent: an ID needs the custom agent type".into());
+            }
+            crate::custom_agents::validate_id(id).map_err(str::to_owned)?;
+        }
         let start = split("command", &self.command)?;
         check_argv("command", &start)?;
         refuse_present("command", &start, CONVERSATION_PLACEHOLDER)?;
@@ -229,6 +247,17 @@ impl LaunchKind {
 }
 
 impl SessionLaunch {
+    /// Return the reporting choice captured from the catalog by a structured custom launch.
+    /// A Command launch declares its own integration and does not consult the catalog for reporting.
+    pub fn custom_reporting(&self) -> Option<bool> {
+        match self {
+            Self::Agent {
+                custom_reporting, ..
+            } => *custom_reporting,
+            Self::Command(_) | Self::Legacy { .. } => None,
+        }
+    }
+
     /// Whether this was launched as a first-class shell. A command that
     /// happens to run Bash or Zsh keeps the command launch's own semantics.
     pub fn is_shell(&self) -> bool {
@@ -267,6 +296,7 @@ impl SessionLaunch {
     /// create that never asks about YOLO) builds.
     pub fn plain_command(command: impl Into<String>) -> SessionLaunch {
         SessionLaunch::Command(CommandLaunch {
+            custom_agent: None,
             command: command.into(),
             yolo: false,
             agent: None,
@@ -312,6 +342,7 @@ impl SessionLaunch {
         };
         start.push(FARHELM_ARGS_PLACEHOLDER.to_string());
         let candidate = SessionLaunch::Agent {
+            custom_reporting: None,
             selection,
             start,
             resume: resume_template.clone().map(|mut resume| {
@@ -366,6 +397,16 @@ impl SessionLaunch {
             SessionLaunch::Agent { selection, .. } => Some(selection.harness),
             SessionLaunch::Command(command) => command.agent,
             SessionLaunch::Legacy { .. } => None,
+        }
+    }
+
+    /// The stable catalog ID distinguishes custom agents that have separate conversation stores.
+    /// A Command launch may declare an unnamed custom integration.
+    pub fn custom_agent(&self) -> Option<&str> {
+        match self {
+            Self::Agent { selection, .. } => selection.custom_agent.as_deref(),
+            Self::Command(command) => command.custom_agent.as_deref(),
+            Self::Legacy { .. } => None,
         }
     }
 
@@ -467,7 +508,25 @@ impl SessionLaunch {
                 selection,
                 start,
                 resume,
+                custom_reporting,
             } => {
+                if selection.harness.uses_custom_catalog() {
+                    let id = selection
+                        .custom_agent
+                        .as_deref()
+                        .ok_or("custom agent: select a catalog entry")?;
+                    crate::custom_agents::validate_id(id).map_err(str::to_owned)?;
+                    if custom_reporting.is_none() {
+                        return Err(
+                            "custom agent: the compiled launch needs a reporting capability".into(),
+                        );
+                    }
+                    if selection.permissions != Some(crate::LaunchPermission::Yolo) {
+                        return Err("custom agent: the compiled launch must use YOLO".into());
+                    }
+                } else if selection.custom_agent.is_some() || custom_reporting.is_some() {
+                    return Err("custom agent: these fields need the custom agent type".into());
+                }
                 crate::check_permission_flags(
                     selection.permissions,
                     selection.permission_flags.as_deref(),
@@ -637,6 +696,7 @@ mod tests {
 
     fn command(command: &str, agent: Option<LaunchHarness>, resume: Option<&str>) -> SessionLaunch {
         SessionLaunch::Command(CommandLaunch {
+            custom_agent: None,
             command: command.to_string(),
             yolo: false,
             agent,
@@ -747,6 +807,7 @@ mod tests {
                 .contains("before launch kinds")
         );
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Claude,
             model: None,
@@ -757,6 +818,7 @@ mod tests {
             workspace_trust: None,
         };
         let agent = |start: &[&str], resume: Option<&[&str]>| SessionLaunch::Agent {
+            custom_reporting: None,
             selection: selection.clone(),
             start: start.iter().map(|s| s.to_string()).collect(),
             resume: resume.map(|r| r.iter().map(|s| s.to_string()).collect()),
@@ -799,7 +861,9 @@ mod tests {
     #[test]
     fn yolo_and_kind_come_from_the_launch() {
         let yolo_agent = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: LaunchSelection {
+                custom_agent: None,
                 permission_flags: None,
                 harness: LaunchHarness::Claude,
                 model: None,
@@ -852,12 +916,14 @@ mod tests {
             mut selection,
             start,
             resume,
+            custom_reporting,
         } = retired
         else {
             panic!("premise: an agent launch");
         };
         selection.container = None;
         let ordinary = SessionLaunch::Agent {
+            custom_reporting,
             selection,
             start,
             resume,
@@ -885,6 +951,7 @@ mod tests {
     #[test]
     fn pre_launch_kind_rows_convert_by_shape() {
         let selection = LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Claude,
             model: None,
@@ -907,6 +974,7 @@ mod tests {
                 Some(selection.clone()),
             ),
             SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: selection.clone(),
                 start: vec![
                     "claude".into(),
@@ -972,6 +1040,7 @@ mod tests {
         assert_eq!(
             converted,
             SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: muse,
                 start: vec![
                     "muse".into(),
@@ -990,6 +1059,7 @@ mod tests {
     #[test]
     fn muse_launches_derive_their_kind_without_backfilling_resume() {
         let launch = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: selection_for_muse(),
             start: vec!["muse".into(), FARHELM_ARGS_PLACEHOLDER.into()],
             resume: None,
@@ -997,6 +1067,7 @@ mod tests {
         assert_eq!(launch.agent_kind(), AgentKind::Muse);
         assert!(!launch.has_resume());
         let command = SessionLaunch::Command(CommandLaunch {
+            custom_agent: None,
             command: "wrapper muse {farhelm_args}".into(),
             yolo: false,
             agent: Some(LaunchHarness::Muse),
@@ -1018,6 +1089,7 @@ mod tests {
     fn resume_commands_display_like_start_commands() {
         let prefix = vec!["with-endpoint".to_string(), "\"${PROFILE}\"".to_string()];
         let agent = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: LaunchSelection {
                 wrapper_prefix: Some(prefix.clone()),
                 ..selection_for_muse()
@@ -1076,6 +1148,7 @@ mod tests {
         };
         assert_eq!(legacy.display_resume().as_deref(), Some("agent --resume"));
         let without = SessionLaunch::Agent {
+            custom_reporting: None,
             selection: selection_for_muse(),
             start: vec!["muse".into()],
             resume: None,
@@ -1086,6 +1159,7 @@ mod tests {
     /// A Muse selection with every choice at its default.
     fn selection_for_muse() -> LaunchSelection {
         LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: LaunchHarness::Muse,
             model: None,

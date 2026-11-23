@@ -2868,6 +2868,7 @@ mod workspace_trust_tests {
     #[farhelm_testtrace::test]
     fn agent_environment_requests_carry_the_approved_launch_and_agent_origin() {
         let selection = LaunchSelection {
+            custom_agent: None,
             harness: LaunchHarness::Codex,
             model: None,
             effort: None,
@@ -2973,9 +2974,10 @@ mod workspace_trust_tests {
     /// bypass Settings or make an unrelated harness's request invalid.
     #[test]
     fn incoming_workspace_trust_is_ignored_before_request_validation() {
-        for harness in LaunchHarness::ALL.iter().copied() {
+        for harness in LaunchHarness::BUILT_INS.iter().copied() {
             for trust in [None, Some(false), Some(true)] {
                 let selection = LaunchSelection {
+                    custom_agent: None,
                     harness,
                     model: None,
                     effort: None,
@@ -3012,8 +3014,9 @@ mod workspace_trust_tests {
                 post_clone: None,
                 config_revision: 0,
             };
-            for harness in LaunchHarness::ALL.iter().copied() {
+            for harness in LaunchHarness::BUILT_INS.iter().copied() {
                 let selection = LaunchSelection {
+                    custom_agent: None,
                     harness,
                     model: None,
                     effort: None,

@@ -258,10 +258,12 @@ impl Field {
             );
         }
         if self == Field::Effort
-            && let Some(Some(chosen)) = fields.effort
-            && !effort_options(fields, catalog)
-                .iter()
-                .any(|(value, _)| *value == Some(chosen))
+            && let Some(Some(chosen)) = &fields.effort
+            && !chosen.known().is_some_and(|chosen| {
+                effort_options(fields, catalog)
+                    .iter()
+                    .any(|(value, _)| *value == Some(chosen))
+            })
         {
             return Some(
                 "this agent type or model does not offer this effort; change or remove it"

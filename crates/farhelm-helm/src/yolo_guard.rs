@@ -207,6 +207,7 @@ mod tests {
             .unwrap();
         let make = |harness, permissions| {
             crate::launches::compile(LaunchSelection {
+                custom_agent: None,
                 harness,
                 permissions,
                 permission_flags: None,
@@ -240,6 +241,7 @@ mod tests {
         let harness = crate::rest_harness::idle_helm().await;
         let host = crate::rest_harness::local_id(&harness.store).await;
         let old = crate::launches::test_agent_launch(farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -277,6 +279,7 @@ mod tests {
         let harness = crate::rest_harness::idle_helm().await;
         let host = crate::rest_harness::local_id(&harness.store).await;
         let launch = crate::launches::compile(farhelm_proto::LaunchSelection {
+            custom_agent: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,
@@ -366,6 +369,7 @@ mod tests {
         let harness = crate::rest_harness::idle_helm().await;
         let local = crate::rest_harness::local_id(&harness.store).await;
         let selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             permission_flags: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
@@ -384,6 +388,7 @@ mod tests {
             panic!("an agent launch");
         };
         let forged = farhelm_proto::SessionLaunch::Agent {
+            custom_reporting: None,
             selection,
             start: vec![
                 "claude".to_string(),
@@ -418,6 +423,7 @@ mod tests {
             "premise: this host asks before YOLO"
         );
         let selection = farhelm_proto::LaunchSelection {
+            custom_agent: None,
             harness: farhelm_proto::LaunchHarness::Claude,
             model: None,
             effort: None,

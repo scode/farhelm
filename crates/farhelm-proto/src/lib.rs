@@ -114,6 +114,7 @@ pub mod announcements;
 /// serves them to the GUI (see the module's own docs).
 pub mod approvals;
 pub mod conversation;
+pub mod custom_agents;
 // The grid stream a terminal's attachment carries, and the input its viewer
 // sends back. Its docs are all its own: an outer doc comment here would make
 // rustdoc resolve the module's links from this file, where its items are not
@@ -170,9 +171,10 @@ pub mod time;
 /// Build classification shared by the GUI's wording and native release decisions.
 pub mod version;
 pub use launch::{
-    ContainerConfig, ContainerEngine, LaunchEffort, LaunchHarness, LaunchPermission,
-    LaunchSelection, NamedConversationStart, RETIRED_CONTAINER_REASON, check_permission_flags,
-    check_wrapper_prefix, join_permission_flags, split_permission_flags, split_wrapper_prefix,
+    ContainerConfig, ContainerEngine, LaunchEffort, LaunchEffortValue, LaunchHarness,
+    LaunchPermission, LaunchSelection, NamedConversationStart, RETIRED_CONTAINER_REASON,
+    check_permission_flags, check_wrapper_prefix, join_permission_flags, split_permission_flags,
+    split_wrapper_prefix,
 };
 pub use version::{UPGRADE_FLOOR, below_upgrade_floor, is_development_build};
 /// Bash placeholder admission and original-source rendering.
@@ -256,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_87` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_88` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -267,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 87;
+pub const PROTOCOL_VERSION: u32 = 88;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -1003,6 +1005,7 @@ impl PersistentHookOptIns {
             | AgentKind::Pi
             | AgentKind::Omp
             | AgentKind::Muse
+            | AgentKind::Custom
             | AgentKind::Generic => false,
         }
     }
@@ -1652,6 +1655,8 @@ crate::enum_with_all! {
         Antigravity,
         /// Muse Code, with per-launch hooks and positional conversation capture.
         Muse,
+        /// A user-provided program that reports a conversation through the public wrapper contract.
+        Custom,
         /// Explicitly non-integrated: no status heuristics beyond the
         /// generic ones and no conversation-identity capture, whatever the
         /// command's program is called.
@@ -1676,6 +1681,7 @@ impl AgentKind {
             | Self::Pi
             | Self::Omp
             | Self::Muse
+            | Self::Custom
             | Self::Generic => false,
         }
     }
@@ -1704,6 +1710,7 @@ impl AgentKind {
             AgentKind::Grok => Some("Grok"),
             AgentKind::Antigravity => Some("Antigravity"),
             AgentKind::Muse => Some("Muse"),
+            AgentKind::Custom => Some("Custom agent"),
             AgentKind::Generic => None,
         }
     }
@@ -1740,7 +1747,8 @@ impl AgentKind {
             AgentKind::Grok | AgentKind::Antigravity => self
                 .display_name()
                 .map(RestartReadiness::FirstPromptWithHooks),
-            AgentKind::Generic => None,
+            // The custom agent's caller decides when to report.
+            AgentKind::Custom | AgentKind::Generic => None,
         }
     }
 
@@ -1756,6 +1764,7 @@ impl AgentKind {
             AgentKind::Grok => "grok",
             AgentKind::Antigravity => "antigravity",
             AgentKind::Muse => "muse",
+            AgentKind::Custom => "custom",
             AgentKind::Generic => "generic",
         }
     }
@@ -2761,6 +2770,8 @@ pub enum ReportVendor {
     Antigravity,
     /// Muse Code, via the per-launch JSON hooks override.
     Muse,
+    /// User integrations call the public custom-agent reporter with a literal conversation ID.
+    Custom,
 }
 
 /// How much of a session a delete may find still alive and go ahead anyway:
@@ -5904,11 +5915,8 @@ mod tests {
         }
     }
 
-    /// Spec: every agent kind that reports conversations has a display name
-    /// and a restart-readiness moment, each moment words a clause for both
-    /// readers, only the user-facing wording says "you", and kinds without
-    /// reporting have no readiness; the `not_captured` refusal names the agent and its
-    /// moment for a reporting kind and makes no per-agent claim otherwise.
+    /// Built-in reporters have a known readiness moment with wording for both readers.
+    /// A user-provided reporter cannot predict when it writes a conversation.
     ///
     /// Why: these are the one source of the "when does Restart become
     /// available" facts for the app, the supervisor's refusal and the agent
@@ -5923,6 +5931,7 @@ mod tests {
             if readiness.is_none() {
                 let expected_name = match kind {
                     AgentKind::Generic => None,
+                    AgentKind::Custom => Some("Custom agent"),
                     AgentKind::Claude
                     | AgentKind::Codex
                     | AgentKind::Goose
@@ -6043,8 +6052,8 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_87() {
-        assert_eq!(PROTOCOL_VERSION, 87);
+    fn protocol_version_is_pinned_at_88() {
+        assert_eq!(PROTOCOL_VERSION, 88);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,
@@ -8122,6 +8131,7 @@ mod tests {
             AgentKind::Grok,
             AgentKind::Antigravity,
             AgentKind::Muse,
+            AgentKind::Custom,
             AgentKind::Generic,
         ] {
             let expected = match kind {
@@ -8133,6 +8143,7 @@ mod tests {
                 AgentKind::Grok => "grok",
                 AgentKind::Antigravity => "antigravity",
                 AgentKind::Muse => "muse",
+                AgentKind::Custom => "custom",
                 AgentKind::Generic => "generic",
             };
             assert_eq!(
@@ -8204,7 +8215,9 @@ mod tests {
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
             launch: Some(SessionLaunch::Agent {
+                custom_reporting: None,
                 selection: crate::LaunchSelection {
+                    custom_agent: None,
                     permission_flags: None,
                     harness: crate::LaunchHarness::Claude,
                     model: Some("opus".to_string()),
@@ -8284,6 +8297,7 @@ mod tests {
             inherit_agent: false,
             cwd: "/some/dir".to_string(),
             launch: Some(SessionLaunch::Command(CommandLaunch {
+                custom_agent: None,
                 command: "claude {farhelm_args}".to_string(),
                 yolo: true,
                 agent: Some(crate::LaunchHarness::Claude),
@@ -8692,6 +8706,7 @@ mod tests {
             session_id: "s1".into(),
             stop_if_running: false,
             with: Some(SessionLaunch::Command(CommandLaunch {
+                custom_agent: None,
                 command: "claude --dangerously-skip-permissions {farhelm_args}".into(),
                 yolo: true,
                 agent: Some(LaunchHarness::Claude),
