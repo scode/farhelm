@@ -602,7 +602,7 @@ impl Search {
         };
         let key_cap = div()
             .flex_none()
-            .rounded(px(3.))
+            .rounded(theme::metrics::RADIUS_CAP)
             .px(px(4.))
             .border_1()
             .border_color(theme::color(palette.border_dim))

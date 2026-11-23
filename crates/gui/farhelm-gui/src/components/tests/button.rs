@@ -254,11 +254,9 @@ fn a_busy_button_keeps_its_help_and_may_be_named_for_its_reason(cx: &mut TestApp
     );
 }
 
-/// A busy button must look unavailable in every filled tier, or a greyed Restart would read as one that works; the
-/// old sheet drew every `aria-disabled` filled button with `--bg-2`, `--border-dim` and `--fg-2`. The unfilled tiers
-/// have no fill to retire and keep their look. Specified, in both palettes: busy neutral, chip, primary and danger
-/// buttons take exactly the retired colors; a busy ghost button keeps the ghost's colors; a neutral one that is not busy
-/// keeps the neutral fill.
+/// A busy filled action needs the quieter tint and ink so it cannot be mistaken for an available action. Neutral,
+/// chip, primary and danger buttons use the same unoutlined retired look in both palettes. Ghosts keep their existing
+/// look and a ready neutral button keeps its ordinary tint.
 #[test]
 fn a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own() {
     let button = |tier: Tier, busy: bool| {
@@ -268,9 +266,9 @@ fn a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own
     };
     for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
         let retired = (
-            Some(palette.bg_2),
-            palette.bg_2,
-            Some(palette.border_dim),
+            Some(palette.button_retired),
+            palette.button_retired,
+            None,
             palette.fg_2,
         );
         for tier in [Tier::Neutral, Tier::Chip, Tier::Primary, Tier::Danger] {
@@ -292,9 +290,8 @@ fn a_busy_filled_button_takes_the_retired_look_and_an_unfilled_one_keeps_its_own
 /// A split button's caret whose menu has nothing that can run must read as unavailable, as the old
 /// `[data-actions-unavailable]` caret did, and yet still open, because its menu is where the reasons are (SPEC.md: "the
 /// menu remains available to inspect reasons"); once open it wears the open look like any toggle. Specified, in both
-/// palettes: a muted neutral caret has the retired fill, edge and ink, with the control hover fill still under the
-/// pointer; an unmuted caret keeps the neutral colors; a muted caret that is open has the same colors as an open caret
-/// that is not muted.
+/// palettes, a muted neutral caret has the retired tint and ink with no edge. Its fill stays quiet while hovered
+/// and held. The open caret shows the menu's accent fill even when none of the choices can run.
 #[test]
 fn a_muted_caret_reads_retired_until_it_opens() {
     let caret = |muted: bool, open: bool| {
@@ -312,19 +309,25 @@ fn a_muted_caret_reads_retired_until_it_opens() {
         assert_eq!(
             caret(true, false).colors(palette),
             (
-                Some(palette.bg_2),
-                palette.control_hover,
-                Some(palette.border_dim),
+                Some(palette.button_retired),
+                palette.button_retired,
+                None,
                 palette.fg_2,
             )
         );
+        assert_eq!(caret(true, false).held_fill(palette), None);
         let neutral = Button::new("n", "N", HoverHelp::tooltip("A button"), Role::Button)
             .tier(Tier::Neutral)
             .colors(palette);
         assert_eq!(caret(false, false).colors(palette), neutral);
         assert_eq!(
             caret(true, true).colors(palette),
-            caret(false, true).colors(palette)
+            (
+                Some(palette.accent_fill_hover),
+                palette.accent_fill_hover,
+                None,
+                palette.on_fill
+            )
         );
     }
 }
@@ -419,22 +422,101 @@ fn a_template_row_or_host_icon_keeps_its_resting_look_under_keyboard_focus() {
             );
             assert_eq!(chosen.fill(palette, true, false), hover, "{tier:?} hovered");
             let unchosen = choice(tier, false);
-            let edge = if tier == Tier::TemplateRow {
-                palette.accent
-            } else {
-                palette.accent_edge
-            };
-            assert_eq!(chosen.colors(palette).2, Some(edge));
             assert_eq!(
-                unchosen.colors(palette).2,
-                (tier == Tier::IconChoice).then_some(palette.border_dim)
+                chosen.colors(palette).2,
+                (tier == Tier::TemplateRow).then_some(palette.accent)
             );
+            assert_eq!(unchosen.colors(palette).2, None);
             assert_eq!(
                 unchosen.fill(palette, false, true),
                 unchosen.fill(palette, false, false),
                 "{tier:?} unchosen, focused"
             );
         }
+    }
+}
+
+/// A pointer press gives immediate feedback on the tinted and solid buttons. The held tint must stay distinct from
+/// the hover tint in both palettes, and it must never replace the chosen or expanded state or paint an unavailable
+/// action as held. Tests assert the exact tokens because a settled screenshot cannot keep a pointer press in flight.
+#[test]
+fn the_held_fill_belongs_to_available_buttons_at_rest() {
+    let button =
+        |tier| Button::new("b", "Action", HoverHelp::tooltip("Action"), Role::Button).tier(tier);
+    for palette in [&crate::theme::DARK, &crate::theme::LIGHT] {
+        assert_ne!(palette.button_hover, palette.button_held);
+        for (tier, rest, hover, held, ink) in [
+            (
+                Tier::Neutral,
+                palette.button_rest,
+                palette.button_hover,
+                palette.button_held,
+                palette.fg_0,
+            ),
+            (
+                Tier::Chip,
+                palette.button_rest,
+                palette.button_hover,
+                palette.button_held,
+                palette.fg_0,
+            ),
+            (
+                Tier::IconChoice,
+                palette.button_rest,
+                palette.button_hover,
+                palette.button_held,
+                palette.fg_0,
+            ),
+            (
+                Tier::Primary,
+                palette.accent_fill,
+                palette.primary_button_hover,
+                palette.accent_fill_hover,
+                palette.on_fill,
+            ),
+            (
+                Tier::Danger,
+                palette.danger_bg,
+                palette.danger_button_hover,
+                palette.danger_fill_hover,
+                palette.on_fill,
+            ),
+        ] {
+            assert_eq!(
+                button(tier).colors(palette),
+                (Some(rest), hover, None, ink),
+                "{tier:?}"
+            );
+            assert_eq!(button(tier).held_fill(palette), Some(held), "{tier:?}");
+            assert_eq!(button(tier).disabled(true).held_fill(palette), None);
+            assert_eq!(button(tier).busy(true).held_fill(palette), None);
+            assert_eq!(button(tier).expanded(true).held_fill(palette), None);
+            assert_eq!(button(tier).pressed(true).held_fill(palette), None);
+        }
+        for tier in [Tier::Primary, Tier::Danger] {
+            let refused = button(tier).refused(true);
+            assert_eq!(refused.held_fill(palette), None);
+            assert_eq!(
+                refused.colors(palette),
+                (
+                    Some(palette.button_retired),
+                    palette.button_retired,
+                    None,
+                    palette.fg_2
+                )
+            );
+        }
+        for tier in [
+            Tier::PrimaryOutline,
+            Tier::DangerOutline,
+            Tier::HostUpdate { required: false },
+            Tier::OnBanner,
+        ] {
+            assert!(button(tier).colors(palette).2.is_some());
+            assert!(button(tier).disabled(true).colors(palette).2.is_some());
+            assert_eq!(button(tier).held_fill(palette), None);
+        }
+        assert_eq!(button(Tier::Ghost).held_fill(palette), None);
     }
 }
 

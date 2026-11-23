@@ -1455,7 +1455,7 @@ fn launch_action(cx: &mut VisualTestContext) -> String {
 /// split buttons each a main part and a caret. The caret is a control of its own, so it needs a name that says whose
 /// options it opens, and every control has hover help (the old caret's and the old header Clone's tooltips, pinned).
 /// Specified: Stop, Restart, Restart's caret, Replace, Replace's caret, Clone and Delete are drawn left to right; each
-/// caret starts where its main part ends and has the same height; the carets are named "Restart options" and "Replace
+/// caret starts one pixel after its main part and has the same height. The carets are named "Restart options" and "Replace
 /// options" and Clone "Clone", which is painted; the carets' and Clone's hover help.
 #[gpui::test]
 fn clone_and_the_split_carets_sit_in_the_old_order_with_the_old_words(cx: &mut TestAppContext) {
@@ -1491,7 +1491,11 @@ fn clone_and_the_split_carets_sit_in_the_old_order_with_the_old_words(cx: &mut T
         (Action::Replace.id(), REPLACE_CARET),
     ] {
         let (main, caret) = (at(main).bounds, at(caret).bounds);
-        assert_eq!(caret.left(), main.right(), "{caret:?} joins {main:?}");
+        assert_eq!(
+            caret.left() - main.right(),
+            px(1.),
+            "one-pixel split gap between {main:?} and {caret:?}"
+        );
         assert_eq!(caret.size.height, main.size.height, "one height");
     }
     assert_eq!(at(RESTART_CARET).label.as_deref(), Some("Restart options"));
@@ -3354,7 +3358,7 @@ fn a_reset_forgets_an_unanswered_text_size_step(cx: &mut TestAppContext) {
 #[test]
 fn the_text_size_group_is_as_tall_as_the_header_buttons_in_both_looks() {
     use crate::components::{Button, Condensed};
-    use crate::terminal::text_size::GROUP_ID;
+    use crate::terminal::text_size::{GROUP_ID, LARGER_ID, READOUT_ID, SMALLER_ID};
     let check = |look: &str, nodes: &[gpui::DriverNode], condensed: Option<Condensed>| {
         let stop = only_node(nodes, Action::Stop.id()).bounds;
         assert_eq!(
@@ -3368,6 +3372,18 @@ fn the_text_size_group_is_as_tall_as_the_header_buttons_in_both_looks() {
             (stop.top(), stop.bottom()),
             "the {look} text size group spans Stop's height: group {group:?}, Stop {stop:?}"
         );
+        let smaller = only_node(nodes, SMALLER_ID).bounds;
+        let readout = only_node(nodes, READOUT_ID).bounds;
+        let larger = only_node(nodes, LARGER_ID).bounds;
+        assert_eq!(readout.left() - smaller.right(), px(1.));
+        assert_eq!(larger.left() - readout.right(), px(1.));
+        for cell in [smaller, readout, larger] {
+            assert_eq!(
+                (cell.top(), cell.bottom()),
+                (group.top(), group.bottom()),
+                "the {look} cells fill the group"
+            );
+        }
     };
 
     let mut wide = RealPane::open(1400., remote_session());

@@ -762,7 +762,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for RadioGroup<V> {
                 }))
                 .border_1()
                 .border_color(theme::color(palette.border_dim))
-                .rounded(metrics::RADIUS_MD)
+                .rounded(metrics::RADIUS_SEGMENTS)
                 .bg(theme::color(palette.well))
                 // The status filter's well fills its row from a 220-pixel start (`flex: 1 1 220px; min-width: 0`).
                 .when(self.look == Look::SmallSegments, |group| {
@@ -832,9 +832,8 @@ impl OptionState {
         }
     }
 
-    /// One segment of `.segmented-control`: transparent with the control hover fill, or the accent fill with the
-    /// inverse ink and semibold words when chosen, one step up the accent family under the pointer so hovering the
-    /// choice does not hide it. Its focus ring is inset (the old `outline-offset: -3px`), in the inverse ink on the
+    /// An unchosen segment uses a Medium label and the button hover tint. The chosen segment uses inverse ink and
+    /// a SemiBold label over an accent fill that stays distinct on hover. Its focus ring is inset, in the inverse ink on the
     /// chosen segment, so it stays visible inside the rounded well. The status filter and compact form variants keep
     /// this well and use a shorter segment. The form variant sizes the segment from its label with its own padding.
     fn segment<V>(
@@ -851,7 +850,7 @@ impl OptionState {
                 palette.on_fill,
             )
         } else {
-            (theme::TRANSPARENT, palette.control_hover, palette.accent)
+            (theme::TRANSPARENT, palette.button_hover, palette.accent)
         };
         let ink = self.filled_ink(option, palette.fg_0, palette);
         let (min_height, pad_x, pad_y, text_size, line_height) = if look == Look::Segments {
@@ -918,8 +917,10 @@ impl OptionState {
             .text_size(text_size)
             .line_height(px(line_height))
             .text_color(theme::color(ink))
-            .when(self.chosen, |segment| {
-                segment.font_weight(FontWeight::SEMIBOLD)
+            .font_weight(if self.chosen {
+                FontWeight::SEMIBOLD
+            } else {
+                FontWeight::MEDIUM
             })
             .when(self.enabled, |segment| {
                 segment
@@ -940,13 +941,9 @@ impl OptionState {
             })
     }
 
-    /// One compact chip of the launcher's harness row: the well color inside a hairline, or the accent fill with inverse ink when
-    /// chosen, the words regular weight either way. The old chips had no hover fill, no pointer cursor (no rule set
-    /// one, unlike the segments' `cursor: pointer`) and no disabled look of their own (the stylesheet's colors overrode
-    /// the browser's disabled ink); this one keeps the first two and dims an unavailable chip as every other look does,
-    /// so an unavailable choice never looks available. Its focus ring is the page's
-    /// (2 pixels, 1 pixel clear of the edge, in the accent) and, on the chosen chip, the inverse ink inset 3 pixels
-    /// (the old `.launch-composer-options > button.selected:focus-visible`).
+    /// One compact chip of the launcher's harness row. Its neutral tint follows the surface underneath in the same
+    /// states as a button. The chosen chip keeps its solid selection fill and uses the inverse ink for its ring.
+    /// The edge stays transparent so the chip and its existing keyboard ring keep their geometry.
     fn chip<V>(
         self,
         id: &SharedString,
@@ -956,7 +953,7 @@ impl OptionState {
         let fill = if self.chosen {
             palette.accent_fill
         } else {
-            palette.well
+            palette.button_rest
         };
         let ink = self.filled_ink(option, palette.fg_0, palette);
         // Absolute children are placed inside the edge, so the old ring's offsets, which are measured from the edge's
@@ -981,12 +978,18 @@ impl OptionState {
             .min_h(px(CHIP_MIN_HEIGHT))
             .px(px(CHIP_PAD_X))
             .border(px(CHIP_EDGE))
-            .border_color(theme::color(palette.border))
+            .border_color(theme::color(theme::TRANSPARENT))
             .rounded(metrics::RADIUS_SM)
             .bg(theme::color(fill))
             .text_size(metrics::TEXT_SM)
             .line_height(px(SEGMENT_LINE_HEIGHT))
+            .font_weight(FontWeight::MEDIUM)
             .text_color(theme::color(ink))
+            .when(self.enabled && !self.chosen, |chip| {
+                let (hover, held) = (palette.button_hover, palette.button_held);
+                chip.hover(move |style| style.bg(theme::color(hover)))
+                    .active(move |style| style.bg(theme::color(held)))
+            })
             .when(!self.enabled, |chip| chip.opacity(0.5))
             .children(contents(
                 option,
@@ -1131,7 +1134,7 @@ impl OptionState {
 /// What an option shows after any circle: its glyph, then its words, then its description line under them. A plain
 /// option's label is a direct text child, as it was before glyphs and descriptions existed, so those options draw
 /// exactly as they did. A harness mark uses its identity ink until chosen. The description takes its own ink and
-/// regular weight, so a chosen segment's semibold stays on the label.
+/// regular weight so the segment or chip's emphasis stays on the label.
 fn contents<V>(
     option: &RadioOption<V>,
     ink: Token,

@@ -70,7 +70,7 @@ pub(crate) mod video {
 /// The color roles the GUI paints with.
 ///
 /// Roles, not colors: a floating surface asks for [`Palette::bg_2`], never "the lighter grey". Each doc names the CSS
-/// custom property the value was copied from at the reference commit.
+/// custom property where the color comes from the old stylesheet.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Palette {
     /// Whether this is the dark appearance; selects Kit's mode.
@@ -89,6 +89,18 @@ pub struct Palette {
     pub card: Token,
     /// `--control-hover-bg`: the hover fill of a control; also a dialog header's band.
     pub control_hover: Token,
+    /// Translucent fill for neutral buttons and chips. It follows the surface underneath, including dialog bodies.
+    pub button_rest: Token,
+    /// Hover tint for neutral buttons, chips and unchosen segments.
+    pub button_hover: Token,
+    /// Tint while a neutral button or chip is held down with the pointer.
+    pub button_held: Token,
+    /// Quieter tint for filled actions that are unavailable.
+    pub button_retired: Token,
+    /// Hover fill for ordinary primary buttons. Open menus and other selections use `accent_fill_hover`.
+    pub primary_button_hover: Token,
+    /// Hover fill for ordinary destructive buttons. Banner actions use `danger_fill_hover`.
+    pub danger_button_hover: Token,
     /// `--fg-0`: primary text.
     pub fg_0: Token,
     /// `--fg-bright`: emphasis on an ordinary neutral surface, such as a link's host in its destination display.
@@ -111,7 +123,7 @@ pub struct Palette {
     pub accent: Token,
     /// `--accent-fill`: solid selection and ordinary primary actions.
     pub accent_fill: Token,
-    /// `--accent-fill-hover`: hover inside selection and on a primary action.
+    /// `--accent-fill-hover`: hover inside a selection, open menus, and primary buttons while held.
     pub accent_fill_hover: Token,
     /// `--accent-edge`: the edge of a filled primary action.
     pub accent_edge: Token,
@@ -159,7 +171,7 @@ pub struct Palette {
     pub danger_soft: Token,
     /// `--danger-bg`: the solid red fill of a destructive confirmation.
     pub danger_bg: Token,
-    /// `--danger-fill-hover`: hover on that fill.
+    /// `--danger-fill-hover`: banner button hover and destructive buttons while held.
     pub danger_fill_hover: Token,
     /// `--danger-bg-dim`: a subdued red fill, the hover of an outlined danger button (a permanent answer).
     pub danger_bg_dim: Token,
@@ -228,6 +240,13 @@ pub const DARK: Palette = Palette {
     settings_page: rgb_token(0x282e3a),
     card: rgb_token(0x20252f),
     control_hover: rgb_token(0x333b49),
+    // White at 6.5%, 11%, 8.5%, and 4%, rounded to the nearest alpha byte.
+    button_rest: rgba_token(0xffffff11),
+    button_hover: rgba_token(0xffffff1c),
+    button_held: rgba_token(0xffffff16),
+    button_retired: rgba_token(0xffffff0a),
+    primary_button_hover: rgb_token(0x5c72da),
+    danger_button_hover: rgb_token(0xb44757),
     fg_0: rgb_token(0xe2e6f0),
     fg_bright: rgb_token(0xf2f5ff),
     tunnel_fg: rgb_token(0xa0d8cf),
@@ -309,6 +328,13 @@ pub const LIGHT: Palette = Palette {
     settings_page: rgb_token(0xf4f6fa),
     card: rgb_token(0xffffff),
     control_hover: rgb_token(0xdde3ee),
+    // Ink at 6%, 10.5%, 14%, and 3.5%, rounded to the nearest alpha byte.
+    button_rest: rgba_token(0x1b21300f),
+    button_hover: rgba_token(0x1b21301b),
+    button_held: rgba_token(0x1b213024),
+    button_retired: rgba_token(0x1b213009),
+    primary_button_hover: rgb_token(0x4059c7),
+    danger_button_hover: rgb_token(0x983644),
     fg_0: rgb_token(0x1b2130),
     fg_bright: rgb_token(0x111827),
     tunnel_fg: rgb_token(0x1c6865),
@@ -495,9 +521,13 @@ fn terminal_index(index: u8) -> u32 {
 pub mod metrics {
     use super::{Pixels, px};
 
-    /// `--radius-sm`: controls and inputs.
-    pub const RADIUS_SM: Pixels = px(3.);
-    /// `--radius-md`: panels, cards, dialogs, tooltips.
+    /// Standard corners on buttons, fields and surfaces that share their shape.
+    pub const RADIUS_SM: Pixels = px(5.);
+    /// Tighter corners for the small checkbox and key cap affordances.
+    pub const RADIUS_CAP: Pixels = px(3.);
+    /// The well around a segmented control allows room for its 5-pixel segments.
+    pub const RADIUS_SEGMENTS: Pixels = px(7.);
+    /// Corners on panels, cards, dialogs and tooltips that keep the old panel shape.
     pub const RADIUS_MD: Pixels = px(4.);
     /// `--radius-lg`: pill-ish shapes (the Settings switch's track).
     pub const RADIUS_LG: Pixels = px(8.);

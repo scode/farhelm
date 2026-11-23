@@ -244,9 +244,7 @@ impl<V: Clone + PartialEq + 'static> RenderOnce for TabStrip<V> {
                 } else {
                     px(TAB_TEXT)
                 })
-                .when(selected || !self.underlined, |tab| {
-                    tab.font_weight(FontWeight::SEMIBOLD)
-                })
+                .font_weight(FontWeight::MEDIUM)
                 .cursor_pointer()
                 .text_color(theme::color(match (selected, filled) {
                     (_, true) => palette.on_fill,
