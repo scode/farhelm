@@ -6,7 +6,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 523946] `codex-recipe-credentials-at-launch.md` — Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
 - [in-flight 01ea2a] `stop-and-suspend-timeout-feedback.md` — Distinguish Stop and suspend's 20-second reply notice from supervisor timeouts in helm and desktop app
 - [complete] `tensorlake-lifecycle-sandbox-identity.md` — Refuse Tensorlake Suspend and Resume without a confirmed sandbox and persist recovered IDs under the provisioning lock
-- [pending] `tensorlake-leftovers-discovery-failure.md` — Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
+- [in-flight 72b066] `tensorlake-leftovers-discovery-failure.md` — Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
 - [pending] `explain-stale-launcher-choices.md` — Show inline stale-choice warning and keep query when a New Session launcher choice disappears
 - [pending] `approval-card-program-wording.md` — Name the shell or main program accurately in Stop and Delete approval cards
 - [pending] `wayland-clipboard-file-paste.md` — Read text/uri-list local files in Wayland clipboard paste with same-offer fallback
