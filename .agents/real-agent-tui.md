@@ -52,8 +52,10 @@ Run it after changing the script.
   once it is done drawing. A fixed sleep is either too short on a loaded machine or wastes time on an idle one.
 - To submit a prompt, `type` it, `wait` until the text is visible, then send `keys Enter` as a separate step. Text and
   Enter in one burst can read as a paste (Codex inserts the newline instead of submitting).
-- An agent that stops at a sign-in or update screen is not testable as it stands. Do not sign in or update on the
-  maintainer's behalf; report which agent and what it showed.
+- An agent that stops at a sign-in or update screen is not testable as it stands. Do not sign in on the maintainer's
+  behalf or answer an update screen; report which agent and what it showed. To bring an agent up to date, use
+  `python3 -B scripts/run-harness-drift.py --upgrade-only --harness <name>`, which runs the vendor's own updater
+  (`docs/harness-drift-tests.md`, "Upgrading the agents first").
 - Run several agents at once if you like: each `start` is its own terminal host. `stop` every run when done, including
   after a failure, and check that no `/tmp/fh-tui-*` directory of yours is left behind.
 

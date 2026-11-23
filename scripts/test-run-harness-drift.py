@@ -5,6 +5,7 @@ import contextlib
 import io
 import json
 from pathlib import Path
+import re
 import runpy
 import signal
 import subprocess
@@ -13,10 +14,17 @@ import unittest
 from unittest.mock import patch
 
 from agent_screen_host import OUTER_SESSION_MARKERS
+import harness_upgrades
 
 runner = runpy.run_path(str(Path(__file__).with_name("run-harness-drift.py")))
 # runpy returns a copy of the globals. Patch the actual function namespace so main uses the stand-ins.
 globals_of_runner = runner["main"].__globals__
+DRIFT_SOURCE = Path(__file__).resolve().parents[1] / "crates/farhelm/tests/e2e/real_agent_capture/drift.rs"
+
+
+def no_upgrades(names, env, upgrade):
+    """Stand in for the upgrade phase in runner tests that are about verdicts, so no vendor updater ever runs."""
+    return {name: harness_upgrades.Upgrade("current", "1.0", "1.0") for name in names}
 
 
 class DriftRunnerTests(unittest.TestCase):
@@ -109,6 +117,7 @@ class DriftRunnerTests(unittest.TestCase):
                     "build_binary": lambda env: Path("/synthetic/e2e"),
                     "discover": lambda binary, env: cases,
                     "recorded_case": recorded,
+                    "prepare": no_upgrades,
                 }),
                 contextlib.redirect_stdout(io.StringIO()) as output,
             ):
@@ -126,6 +135,7 @@ class DriftRunnerTests(unittest.TestCase):
             "build_binary": lambda env: Path("/synthetic/e2e"),
             "discover": lambda binary, env: {"claude": "case-claude"},
             "recorded_case": unexpected,
+            "prepare": unexpected,
         }), contextlib.redirect_stdout(io.StringIO()) as output:
             self.assertEqual(runner["main"](["--list"]), 0)
         self.assertEqual(output.getvalue().strip(), "claude")
@@ -194,6 +204,131 @@ class DriftRunnerTests(unittest.TestCase):
             with self.assertRaises(SystemExit) as stopped:
                 runner["recorded_case"](Path("/synthetic/e2e"), "exact-case", "grok", {"PATH": "bin"})
         self.assertEqual(stopped.exception.code, 128 + signal.SIGTERM)
+
+
+class UpgradePhaseTests(unittest.TestCase):
+    """The runner brings each harness to its latest release before testing it, and says so when it could not."""
+
+    def test_every_drift_case_has_a_recipe_for_the_binary_it_launches(self):
+        """A new drift case without a recipe would quietly test a stale CLI; a renamed binary would upgrade nothing."""
+        source = DRIFT_SOURCE.read_text()
+        block = source[source.index("drift_cases! {"):]
+        cases = re.findall(r"drift_([a-z][a-z0-9_]*) =>", block[:block.index("}")])
+        self.assertTrue(cases)
+        self.assertEqual(sorted(cases), sorted(harness_upgrades.RECIPES))
+        for name, recipe in harness_upgrades.RECIPES.items():
+            self.assertIn(f'"{recipe.binary}"', source, name)
+
+    def stand_in(self, directory, body):
+        """Write an executable `fake` CLI whose `--version` prints the file `version` beside it."""
+        path = Path(directory) / "fake"
+        path.write_text(
+            "#!/bin/sh\n"
+            f'here="{directory}"\n'
+            'if [ "$1" = --version ]; then echo "$QUIET" >> "$here/quiet"; cat "$here/version"; exit 0; fi\n'
+            f"{body}\n"
+        )
+        path.chmod(0o755)
+        (Path(directory) / "version").write_text("fake 1.0\n")
+        return {"PATH": f"{directory}:/usr/bin:/bin"}
+
+    def test_upgrade_reports_versions_and_names_the_updaters_reason_for_failing(self):
+        """Upgraded, already current and failed are told apart by the updater's exit and the versions around it."""
+        recipe = harness_upgrades.Recipe("fake", ("fake", "update"))
+        with tempfile.TemporaryDirectory() as directory:
+            env = self.stand_in(directory, f'echo "fake 2.0" > "{directory}/version"; echo done')
+            self.assertEqual(harness_upgrades.upgrade(recipe, env), harness_upgrades.Upgrade("upgraded", "fake 1.0", "fake 2.0"))
+            self.assertEqual(harness_upgrades.upgrade(recipe, env).status, "current")
+        with tempfile.TemporaryDirectory() as directory:
+            env = self.stand_in(directory, "echo checking; echo 'Error: [unauthenticated]'; exit 1")
+            result = harness_upgrades.upgrade(recipe, env)
+            self.assertEqual(result, harness_upgrades.Upgrade("failed", "fake 1.0", "fake 1.0", "Error: [unauthenticated]"))
+        self.assertEqual(harness_upgrades.upgrade(recipe, {"PATH": "/nonexistent"}).status, "not_installed")
+
+    def test_updaters_get_no_terminal_input_and_the_quiet_environment_reaches_every_probe(self):
+        """An updater that asks a question must fail, not hang, and a launcher must not update during a probe."""
+        recipe = harness_upgrades.Recipe(
+            "fake", ("fake", "update"), quiet_env={"QUIET": "yes"}, upgrade_env={"QUIET": "upgrading"},
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            env = self.stand_in(directory, 'echo "$QUIET" > "$here/updater"; read answer || { echo no input; exit 1; }')
+            result = harness_upgrades.upgrade(recipe, env)
+            self.assertEqual((result.status, result.detail), ("failed", "no input"))
+            self.assertEqual((Path(directory) / "updater").read_text(), "upgrading\n")
+            self.assertEqual((Path(directory) / "quiet").read_text(), "yes\nyes\n")
+
+    def test_the_installer_runs_only_after_the_updater_fails(self):
+        """Cursor's and goose's updaters broke while their installers worked; a working updater is never bypassed."""
+        recipe = harness_upgrades.Recipe(
+            "fake", ("fake", "update"), installer_url="https://example.invalid/install", installer_env={"CONFIGURE": "false"},
+        )
+        installs = []
+
+        def installer(url, env):
+            installs.append((url, env.get("CONFIGURE")))
+            return True, ""
+
+        with tempfile.TemporaryDirectory() as directory, patch.object(harness_upgrades, "run_installer", installer):
+            env = self.stand_in(directory, "exit 0")
+            self.assertEqual(harness_upgrades.upgrade(recipe, env).status, "current")
+            self.assertEqual(installs, [])
+            env = self.stand_in(directory, "echo updater broke; exit 1")
+            result = harness_upgrades.upgrade(recipe, env)
+            self.assertEqual(result.status, "current")
+            self.assertIn("updater broke", harness_upgrades.describe("fake", result))
+            self.assertEqual(installs, [("https://example.invalid/install", "false")])
+
+    def run_main(self, argv, upgrade_result=None):
+        """Run the runner's main against stand-ins, returning its exit code, output and what it upgraded or probed."""
+        calls = []
+        upgrade_result = upgrade_result or harness_upgrades.Upgrade("current", "1.0", "1.0")
+
+        def upgrade(recipe, env):
+            calls.append(("upgrade", recipe.binary))
+            return upgrade_result
+
+        def probe(recipe, env):
+            calls.append(("probe", recipe.binary))
+            return harness_upgrades.Upgrade("skipped", "1.0", "1.0")
+
+        with (
+            patch.object(harness_upgrades, "upgrade", upgrade),
+            patch.object(harness_upgrades, "probe", probe),
+            patch.dict(globals_of_runner, {
+                "build_binary": lambda env: calls.append(("build",)) or Path("/synthetic/e2e"),
+                "discover": lambda binary, env: {"claude": "case-claude", "newcomer": "case-newcomer"},
+                "recorded_case": lambda binary, test, name, env: calls.append(("case", name)) or runner["Result"]("passed", "ok"),
+            }),
+            contextlib.redirect_stdout(io.StringIO()) as output,
+        ):
+            code = runner["main"](argv)
+        return code, output.getvalue(), calls
+
+    def test_cases_run_after_their_upgrade_and_a_failed_upgrade_fails_the_run(self):
+        """A pass on a CLI that could not be upgraded is not the evidence the suite exists to give."""
+        code, output, calls = self.run_main(["--harness", "claude"])
+        self.assertEqual((code, calls), (0, [("build",), ("upgrade", "claude"), ("case", "claude")]))
+        self.assertRegex(output, r"PASSED +claude +1\.0")
+        failed = harness_upgrades.Upgrade("failed", "1.0", "1.0", "offline")
+        code, output, calls = self.run_main(["--harness", "claude"], failed)
+        self.assertEqual((code, calls[-1]), (1, ("case", "claude")))
+        self.assertIn("UPGRADE FAILED claude", output)
+        self.assertIn("UPGRADE FAILED for claude", output)
+
+    def test_a_case_without_a_recipe_is_reported_as_a_failed_upgrade(self):
+        """Adding a harness to the suite must come with a decision about how it gets upgraded."""
+        code, output, calls = self.run_main(["--harness", "newcomer"])
+        self.assertEqual((code, calls), (1, [("build",), ("case", "newcomer")]))
+        self.assertIn("no recipe in scripts/harness_upgrades.py", output)
+
+    def test_no_upgrade_probes_versions_and_upgrade_only_builds_nothing(self):
+        """Reproducing a failure needs the same version; upgrading alone needs neither the build nor a vendor turn."""
+        code, _, calls = self.run_main(["--harness", "claude", "--no-upgrade"])
+        self.assertEqual((code, calls), (0, [("build",), ("probe", "claude"), ("case", "claude")]))
+        code, _, calls = self.run_main(["--upgrade-only", "--harness", "codex"])
+        self.assertEqual((code, calls), (0, [("upgrade", "codex")]))
+        code, _, calls = self.run_main(["--upgrade-only"])
+        self.assertEqual(calls, [("upgrade", recipe.binary) for recipe in harness_upgrades.RECIPES.values()])
 
 
 if __name__ == "__main__":
