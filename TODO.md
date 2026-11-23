@@ -73,40 +73,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   provider or a documented provider fixture protocol that can ask a real question. Plan:
   `plans/queue/muse-session-tracking.md`.
 
-- **Custom agents, starting with conversation tracking.** Let users run an agent harness Farhelm has no built-in support
-  for (an internal or unreleased tool, say) and still get conversation tracking, so Restart resumes the conversation.
-  Farhelm cannot know such a tool's details, so the user brings the integration and Farhelm defines the contract. A
-  design sketched on 2026-10-30:
-  - The contract is a public, stable farhelm command the user's hook calls (for example
-    `farhelm report-conversation --id <ID>`, or reading one JSON document on stdin and picking the id out with a JSON
-    pointer), not the report files the built-in hooks write today. Those carry process ancestry, a format version and a
-    temp-file-then-rename protocol; making them public would freeze internals and make every user script reimplement the
-    ancestry walk. The existing user-installed hook integrations that call `farhelm internal hook` already show the
-    shape.
-  - Farhelm promises: a valid report becomes the session's resume target, the latest report wins, and repeating an id is
-    harmless; a report made while the supervisor is down is recorded as reports are today; the reporter always exits 0,
-    prints nothing and bounds its stdin read, sending problems to the session's hook log so a broken hook never shows in
-    the agent's interface; outside a Farhelm session it is a logged no-op, so the same hook can stay configured when the
-    tool runs by hand.
-  - The user promises: the reporter runs as a descendant of the session's agent process (so it inherits the session's
-    environment), whether through per-launch arguments or the tool's own configuration; it reports the conversation the
-    session's top-level agent is in now, not a subagent's; the id is an opaque string of bounded length with no control
-    characters, substituted into the resume command as one argument.
-  - The supervisor checks only what it can without knowing the tool: the report came from a process in the session's
-    pane, from the current launch, and the id is well formed. It cannot stop a nested agent from overwriting the report
-    or check that the id actually resumes; a bad id shows up as a failed resume command in the terminal, and the docs
-    should say so plainly.
-  - Wiring: command launches and templates already store a command and a resume command containing `{conversation}`. The
-    minimal addition is a "custom" agent type a command launch can declare, with generic screen-based status,
-    `{farhelm_args}` filled with nothing, conversation captured only through the reporter, Resume allowed with the
-    user's resume command, and no "agent never reported" warning, since Farhelm cannot know when a custom agent should
-    report. A named custom-agent catalog in the launcher can come later on the same contract.
-  - Maintainer decisions first: this contradicts SPEC.md's statements that integrations are not user-authored and that
-    Farhelm identifies an agent's conversation only from the harness's own explicit report. Also decide whether Restart
-    keeps the old id until a new report arrives or clears it, whether the reporter gets a mode to withdraw the target
-    ("no resumable conversation yet"), and whether to offer optional nesting protection (only admit a report when a
-    process with a named executable sits between the pane and the reporter). Plan: `plans/queue/custom-agents.md`.
-
 - **Run the desktop app's own supervisor as the same launchd job remote Macs get.** Asked for by the maintainer on
   2026-11-08 while planning remote macOS hosts: once that plan has landed and remote Macs are validated as stable, move
   the local Mac's supervisor from being started detached by the desktop app to the same per-user launchd job, so every

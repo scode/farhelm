@@ -8904,6 +8904,34 @@ Restart with, clone and replace, inheritance, the YOLO guard and mark, and the i
 (`IntegrationSnapshot::of`, the kind and resume argv, derived and never re-guessed). An agent's create carries a
 `LaunchRequest` instead (see the agent relay above), which never holds composed argv.
 
+#### Custom agents
+
+Helm schema 100 stores user registrations in `custom_agents`, a strict table keyed by immutable `id` with serialized
+definition and creation and update timestamps. Authenticated CRUD under `/api/custom-agents` updates the pushed
+`Collection::CustomAgents`. The desktop uses it for the editor and the registered agent's current name. The ID travels
+with the launch selection and a template may store it as part of its agent choice. The same JSON string representation
+covers built-in effort levels and custom text.
+
+`LaunchHarness::Custom` compiles a registered agent once at launch admission, composing literal argv with its optional
+model and effort. A named start takes the one-time `AgentVerb::Create.conversation` selector and the same resume flag as
+the stored resume argv. On spawn the supervisor expands a leading `~/` at the executable slot after the wrapper prefix.
+A resolved agent launch stores its `custom_reporting` flag and compiled resume argv independently. A declared custom
+command uses its own argv and always permits the custom reporter. Plain Restart and capture use the saved launch even
+when the helm edits or deletes its registration. Protocol 88 introduced the custom launch and report types. Protocol 89
+added the named selector to the agent create request, so an older peer cannot silently start the wrong conversation.
+
+`AgentKind::Custom` uses the generic screen reader and supplies no injected arguments or hook assets. The public
+reporter shares the hook drop-file path and credential and ancestry capture. Supervisor admission uses the version-0
+positional pin, skipping the custom reporter and its narrow five-argument shell trampoline. A recorded ancestor can
+correct a child pin. A structured launch that disabled reporting refuses capture even if it supplied a resume command.
+The integration has no missing-report timer.
+
+Keep `website/src/content/docs/docs/agents/custom-agent-contract.md` and its **Contract changelog** in step with every
+contract change. The `spec` subcommand embeds that file at build time, stripping frontmatter and Starlight wrappers
+while preserving the notice, examples and history.
+
+#### Built-in launch compilation
+
 The helm composes an agent launch's start command with `{farhelm_args}` last, and for an agent type with conversation
 reporting a resume command that adds the type's resume selector after the start command's choices and then
 `{farhelm_args}`; Cursor and OpenCode get none. Muse adds `resume {conversation}`, retaining the already-composed

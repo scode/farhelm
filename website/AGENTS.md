@@ -67,6 +67,9 @@ a heading anchor, `/docs/agents/grok/#launching`. The build checks every interna
 `https://farhelm.io` URL, so `bun run build` is the check to run after moving a page or renaming a heading. It only
 proves a link resolves; whether the linking sentence still matches what the target page says is yours to check.
 
+The CLI embeds `src/content/docs/docs/agents/custom-agent-contract.md` in `farhelm custom-agent spec`. Update the page's
+`## Contract changelog` in the same change as any change to the public custom-agent contract.
+
 ## The outline is the sidebar
 
 The sidebar in `astro.config.mjs` is the documentation's outline, in reading order: Overview, Get started (a guided

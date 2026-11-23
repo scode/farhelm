@@ -28,6 +28,10 @@
 //!    vocabularies stay vendor-specific. Reporter artifacts normally stay in Farhelm's state. Goose retains its
 //!    credential-free reporter declaration in conversation metadata. Grok and Antigravity discover dedicated hook
 //!    files in their configuration, which an opted-in launch can install.
+//!    Custom agents call the public reporter from their own process tree. Their
+//!    contract lives in `website/src/content/docs/docs/agents/custom-agent-contract.md`.
+//!    Changes to the public flags, reporter or admission rules update that page's
+//!    Contract changelog alongside the implementation.
 //! 3. **Activity interpretation** (PLAN_M6_75.md item 2). The generic
 //!    classifier can compare successive screens, but it cannot know which
 //!    redraws are vendor-owned decoration or which still screen proves a
