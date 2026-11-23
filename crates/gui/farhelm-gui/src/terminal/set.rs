@@ -152,7 +152,7 @@ pub(crate) fn close_refusal_id(id: &str) -> String {
 pub(crate) const ADD_ID: &str = "session-terminal-add";
 
 /// `.tab-add`: a 24-pixel square.
-const ADD_SIDE: f32 = 24.;
+pub(crate) const ADD_SIDE: f32 = 24.;
 
 /// `.tab-add-divider`: 16 pixels high.
 const ADD_DIVIDER_HEIGHT: f32 = 16.;

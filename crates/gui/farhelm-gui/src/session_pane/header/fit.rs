@@ -4,10 +4,9 @@
 //! SPEC.md, "Terminal experience": the row never wraps, and everything in it stays visible and keyboard reachable down
 //! to a 650-pixel main pane. A tunnel pill keeps its floor (the width at which both of its ports stay readable), so at
 //! that width it is the actions that give way. Ported from the old app's `assets/header-layout.js` and its
-//! `.actions-compact` rules (app.css) at the reference commit: the row condenses its actions only while a pill shows and
-//! the row cannot hold, side by side, the actions at their ordinary width, the pill at the width its content asks for
-//! and the tab strip at its floor, with the row's gaps between them. A wide row keeps the ordinary look even with a
-//! pill, and the row goes back to it as soon as the pressure leaves.
+//! `.actions-compact` rules (app.css) at the reference commit. The row condenses when it cannot hold the actions at
+//! their ordinary width, the tab strip at its preferred width, and any pill at the width its content asks for. The
+//! larger buttons can also make a row without a pill run out of width. When the room returns, so does the ordinary look.
 //!
 //! - **The strip's floor beside a pill.** The old app gave the strip `min-width: 112px` while a pill showed
 //!   ([`STRIP_FLOOR_BESIDE_PILL`]). Here that floor gives way when the row lacks room: once the actions' look is
@@ -17,12 +16,12 @@
 //!   name is cut) and its content's width when it has none (a count of tunnels, whose words any narrowing cuts)
 //!   ([`TunnelPill::shrink_floor`]); it gets that width as a floor of its own too, so a count pill cannot give up width
 //!   alongside the strip. SPEC.md keeps the pill and the actions whole down to a 650-pixel pane, and the strip scrolls,
-//!   so the strip is what gives. A fixed 112 pixels pushes the pill over the first action there: beside the condensed
-//!   actions a remote session's left region is about 251 pixels wide at 650, short of the 272 that the strip's 112,
-//!   the 6-pixel gap and the pill's 154 add up to, and an environment session's, whose actions carry its Suspend or
-//!   Resume control as well, about 176. Decided with the session view's owner on 2026-11-16; the other notes
-//!   of this rule point here. The decision whether to condense still counts the full 112, as the old script measured
-//!   it. Without a pill the strip has no floor.
+//!   so the strip is what gives. A fixed 112 pixels pushes the pill over the first action there, especially once the
+//!   row also shows Suspend or Resume. Decided with the session view's owner on 2026-11-16. The decision whether to
+//!   condense still counts the full 112, as the old script measured it. Without a pill the strip has no applied
+//!   minimum width, so it can always use the room left by the actions.
+//!   In the tightest pane with a pill, the strip can use some of the row's outer inset and its two gaps. That keeps
+//!   focused tab controls recognizable while every action and both tunnel ports still fit.
 //! - **Measured, not remembered.** Every input is measured while the frame is laid out, and none depends on the
 //!   choice: the actions at their ordinary size (as built for drawing, and drawn if they fit), the pill from a copy of
 //!   its own laid out at the width its content asks for, and the room from this element's own bounds, which the pane's
@@ -60,9 +59,15 @@ use gpui::{
     Size, Style, Styled as _, Window, div, point, px, relative, size,
 };
 
-use super::TABS_SLOT;
-use crate::terminal::set::STRIP_FLOOR_BESIDE_PILL;
+use super::{ROW_PAD_X, TABS_SLOT};
+use crate::terminal::set::{ADD_SIDE, STRIP_FLOOR_BESIDE_PILL};
 use crate::terminal::tunnels::TunnelPill;
+
+/// The strip tries to keep a New terminal button's worth of space. When the actions and tunnel mapping leave less,
+/// the row can lend some of its insets and gaps, keeping clearance at the edges and between its regions.
+const NARROW_STRIP_WIDTH: Pixels = px(ADD_SIDE);
+const NARROW_ROW_PAD_X: f32 = 4.;
+const NARROW_REGION_GAP: Pixels = px(2.);
 
 /// The top row's left region before it is built: the terminal area's tab strip and tunnel pill as the terminal area
 /// built them, and the row's gap. Whoever draws the region builds it ([`Left::build`]): the fit, once it
@@ -115,19 +120,16 @@ pub(super) struct Fit {
     /// The strip and the pill as the left region draws them, built into it once the floors are decided.
     pub(super) left: Left,
     /// A copy of the pill, laid out at the width its content asks for and never drawn, with the floor it is built to
-    /// shrink to; `None` without a pill, when the actions always take their ordinary look (the old rules applied only
-    /// `:has(> .session-tunnel-pill)`) and the strip has no floor.
+    /// shrink to. Without a pill, the tab strip occupies the entire region that the actions leave.
     pub(super) pill: Option<TunnelPill>,
     /// The actions in their ordinary look: always laid out, to measure them, and drawn when they fit.
     pub(super) ordinary: AnyElement,
-    /// The actions in their condensed look, built only while a pill shows: laid out and drawn only when the ordinary
-    /// ones do not fit.
-    pub(super) condensed: Option<AnyElement>,
+    /// The condensed actions, laid out and drawn only when the ordinary ones leave too little space.
+    pub(super) condensed: AnyElement,
 }
 
-/// Whether the actions must condense: a pill shows (`pill`, its content's width), and the row's `room` cannot hold the
-/// actions at their `ordinary` width beside it and the strip at its `floor` (`None` without a strip), with a `gap`
-/// between each, as the old script's `required > available`.
+/// Whether the ordinary actions, a pill at its content width, and a tab strip at its preferred width need more room.
+/// Count a gap only for a region present beside the actions.
 pub(super) fn condenses(
     room: Pixels,
     ordinary: Pixels,
@@ -135,11 +137,9 @@ pub(super) fn condenses(
     floor: Option<Pixels>,
     gap: Pixels,
 ) -> bool {
-    let Some(pill) = pill else {
-        return false;
-    };
     let strip = floor.map_or(px(0.), |floor| floor + gap);
-    strip + pill + gap + ordinary > room
+    let pill = pill.map_or(px(0.), |pill| pill + gap);
+    strip + pill + ordinary > room
 }
 
 /// The strip's floor beside a pill in a left region `left` pixels wide: [`STRIP_FLOOR_BESIDE_PILL`], or less when the
@@ -205,9 +205,10 @@ impl Element for Fit {
         window: &mut Window,
         cx: &mut App,
     ) -> (AnyElement, AnyElement) {
-        let room = bounds.size.width;
-        let left = std::mem::take(&mut self.left);
-        let gap = left.gap;
+        let mut room = bounds.size.width;
+        let mut left_x = bounds.origin.x;
+        let mut left = std::mem::take(&mut self.left);
+        let mut gap = left.gap;
         let mut actions = std::mem::replace(&mut self.ordinary, gpui::Empty.into_any_element());
         let ordinary = natural(&mut actions, window, cx).width;
         // The pill at its content's width, which the decision counts, and the width it needs to stay whole, which
@@ -217,16 +218,23 @@ impl Element for Fit {
             (content, copy.shrink_floor.unwrap_or(content))
         });
         // The strip at its full floor, as the old script measured it: what the decision counts is the old rule's.
-        let floor = pill
-            .and(left.strip.as_ref())
-            .map(|_| px(STRIP_FLOOR_BESIDE_PILL));
-        if condenses(room, ordinary, pill.map(|(content, _)| content), floor, gap)
-            && let Some(condensed) = self.condensed.take()
-        {
-            actions = condensed;
+        let floor = left.strip.as_ref().map(|_| px(STRIP_FLOOR_BESIDE_PILL));
+        if condenses(room, ordinary, pill.map(|(content, _)| content), floor, gap) {
+            actions = std::mem::replace(&mut self.condensed, gpui::Empty.into_any_element());
         }
         // A no-op for the ordinary actions, already laid out this way.
         let extent = natural(&mut actions, window, cx);
+        if let (Some(_), Some((_, pill_floor))) = (&left.strip, pill) {
+            // Save room for the tab text and the center of the strip's icon controls as they gain focus.
+            // Keep the tunnel's two ports and the button sizes even if the whole strip budget cannot fit.
+            let shortfall =
+                (NARROW_STRIP_WIDTH + extent.width + pill_floor + gap * 2. - room).max(px(0.)) / 2.;
+            let inset = shortfall.min(px(ROW_PAD_X - NARROW_ROW_PAD_X));
+            left_x -= inset;
+            room += inset * 2.;
+            gap = (gap - (shortfall - inset)).max(NARROW_REGION_GAP);
+            left.gap = gap;
+        }
         let left_width = (room - extent.width - gap).max(px(0.));
         // The pill's floor is capped at the left region's width, so its box stays inside the region; a pill wider than
         // that (only below the 650-pixel floor, where SPEC.md lets the row clip) still overflows its box.
@@ -254,9 +262,9 @@ impl Element for Fit {
             window,
             cx,
         );
-        left.prepaint_at(bounds.origin, window, cx);
+        left.prepaint_at(point(left_x, bounds.origin.y), window, cx);
         let at = point(
-            bounds.origin.x + left_width + gap,
+            left_x + (room - extent.width).max(px(0.)),
             bounds.origin.y + (bounds.size.height - extent.height) / 2.,
         );
         actions.prepaint_at(at, window, cx);
@@ -285,19 +293,20 @@ mod tests {
 
     use super::{condenses, floor_beside_pill};
 
-    /// The rule is the old script's `required > available`, which the layout tests reach only at a few widths: it counts
-    /// the pill at its content's width, the strip at its floor with a gap after it only when there is a strip, and the
-    /// actions at their ordinary width, and condenses nothing without a pill. Specified: with a 100-pixel pill, a 20-pixel
-    /// floor, 300-pixel actions and 6-pixel gaps, 432 pixels hold the row and 431 do not; with no strip, 406 pixels hold it
-    /// and 405 do not; and with no pill, a row of no width does not condense.
+    /// Protect the measured threshold on either side of the last pixel that fits. A tunnel, tab strip and ordinary
+    /// actions each contribute their widths, and only present regions contribute gaps. A crowded row can condense
+    /// even without a tunnel so its tab strip still has room.
     #[test]
-    fn the_actions_condense_only_when_a_pill_and_the_rest_do_not_fit() {
+    fn the_actions_condense_when_the_ordinary_row_does_not_fit() {
         let (pill, floor, actions, gap) = (Some(px(100.)), Some(px(20.)), px(300.), px(6.));
         assert!(!condenses(px(432.), actions, pill, floor, gap));
         assert!(condenses(px(431.), actions, pill, floor, gap));
         assert!(!condenses(px(406.), actions, pill, None, gap));
         assert!(condenses(px(405.), actions, pill, None, gap));
-        assert!(!condenses(px(0.), actions, None, floor, gap));
+        assert!(!condenses(px(326.), actions, None, floor, gap));
+        assert!(condenses(px(325.), actions, None, floor, gap));
+        assert!(!condenses(px(300.), actions, None, None, gap));
+        assert!(condenses(px(299.), actions, None, None, gap));
     }
 
     /// The strip's floor gives way only as far as the pill needs, which the layout tests reach at a few widths: a floor

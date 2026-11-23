@@ -232,16 +232,22 @@ const COLOR_CHOICE_PAD: f32 = 3.;
 /// so the order title's words start at the band's own edge.
 const HEADING_WORDS_PAD: (f32, f32) = (2., 0.);
 
-/// A marked bar button's padding, vertical then horizontal, and its height, edge included (`.marked-bar .marked-stop`:
-/// `height: 26px; padding: 3px 7px`). Its 12-pixel text is every button's.
-const TOOLBAR_PAD: (f32, f32) = (3., 7.);
-const TOOLBAR_HEIGHT: f32 = 26.;
+/// The open session's actions and the marked sessions bar share this geometry. The line, padding and transparent
+/// edge make the 26-pixel height together so the control stays centered in either surface.
+const TOOLBAR_PAD: (f32, f32) = (3., 10.);
+/// The ordinary toolbar's text size, also used by the number between its magnifiers.
+pub(crate) const TOOLBAR_TEXT: Pixels = px(12.5);
+const TOOLBAR_LINE: f32 = 18.;
+const TOOLBAR_ICON: Pixels = px(14.);
+const TOOLBAR_ICON_GAP: Pixels = px(6.);
+/// Gap between adjacent toolbar controls. The parts of a joined control use `BUTTON_JOIN_GAP` inside it.
+pub(crate) const TOOLBAR_ACTION_GAP: Pixels = px(8.);
 
 /// Every button's line height but where a tier or look sets its own: `.btn`'s `line-height: 1.4` at its 12-pixel text,
 /// 16.8 pixels rounded to 17.
 const LINE: f32 = 17.;
 /// The edge every tier but `Tier::Link` and `Tier::Readout` draws, transparent where the tier has no edge color (`.btn`'s
-/// `border: 1px solid`). The render draws it with `border_1`; this names it for [`Button::compact_height`].
+/// `border: 1px solid`). The render draws it with `border_1`; this names it for [`Button::toolbar_height`].
 const EDGE: f32 = 1.;
 
 /// A compact button's padding, vertical then horizontal: `.titlebar-actions .btn`'s `padding: 2px 8px`, the session
@@ -321,7 +327,11 @@ pub struct Button {
     role: Role,
     tier: Tier,
     icon: Option<Icon>,
+    /// Animation step for a spinner that occupies the leading icon's slot while work is pending.
+    spinner_step: Option<u8>,
     show_label: bool,
+    /// The longer label whose space this button needs before its action is pending.
+    reserved_label: Option<SharedString>,
     /// The accessible name, when it says more than the visible label ([`Button::accessible_name`]).
     accessible_name: Option<SharedString>,
     disabled: bool,
@@ -334,7 +344,7 @@ pub struct Button {
     compact: Option<Compact>,
     /// The list heading band's padding for a button with words ([`Button::heading`]).
     heading: bool,
-    /// The marked bar's geometry ([`Button::toolbar`]).
+    /// The session and marked bars' ordinary geometry ([`Button::toolbar`]).
     toolbar: bool,
     /// Whether what the button opens is open; `None` for a button that opens nothing.
     expanded: Option<bool>,
@@ -391,7 +401,9 @@ impl Button {
             role,
             tier: Tier::default(),
             icon: None,
+            spinner_step: None,
             show_label: true,
+            reserved_label: None,
             accessible_name: None,
             disabled: false,
             busy: false,
@@ -426,6 +438,13 @@ impl Button {
     /// A leading icon before the label.
     pub fn icon(mut self, icon: Icon) -> Self {
         self.icon = Some(icon);
+        self
+    }
+
+    /// Put a spinner in the leading icon's slot. Its matching size and spacing let it replace the icon without
+    /// moving the label or the neighboring controls.
+    pub(crate) fn spinner(mut self, step: u8) -> Self {
+        self.spinner_step = Some(step);
         self
     }
 
@@ -472,30 +491,24 @@ impl Button {
         self
     }
 
-    /// The session header's geometry (`.titlebar-actions .btn`): 2 by 8 pixels of padding, 4 between the icon and the
-    /// label, and a 13-pixel icon, so the header's actions keep their compact height and fit a 650-pixel pane.
+    /// The compact geometry for inline controls. It uses 2-by-8 padding, a 13-pixel icon and a 4-pixel icon gap.
     pub fn compact(mut self) -> Self {
         self.compact.get_or_insert(Compact::Ordinary);
         self
     }
 
-    /// The session header's geometry ([`Button::compact`]), condensed as `condensed` says, or ordinary for `None`: the
-    /// header's look while its row cannot hold its actions at their ordinary size (see [`Condensed`]).
+    /// Select the condensed geometry when the toolbar cannot fit its ordinary actions beside a tunnel. With `None`,
+    /// a toolbar button gets the ordinary toolbar size and a compact button gets the ordinary compact size.
     pub fn condensed(mut self, condensed: Option<Condensed>) -> Self {
         self.compact = Some(condensed.map_or(Compact::Ordinary, Compact::Condensed));
         self
     }
 
-    /// The outer height, edge included, of a session header button with words in the compact geometry, condensed as
-    /// `condensed` says or ordinary for `None`: 23 pixels ordinary and with [`Condensed::Padding`], 21 with
-    /// [`Condensed::Words`]. It is computed from the same line, padding and edge the render draws, for a control drawn
-    /// beside the header's buttons that must be exactly as tall as they are (the terminal text size group). It repeats
-    /// the render's choice of padding and edge rather than reading them from it, so the session header's tests check it
-    /// against a drawn Stop button in both looks. It does not hold for an icon-only button, whose box follows its 13-pixel icon instead (19
-    /// pixels) unless something stretches it, as a split button's caret is stretched to its main part.
-    pub fn compact_height(condensed: Option<Condensed>) -> Pixels {
+    /// The button height the terminal text size group matches. The ordinary toolbar uses 26 pixels. Its condensed
+    /// actions use 23 when only padding condenses, or 21 when the labels condense too.
+    pub(crate) fn toolbar_height(condensed: Option<Condensed>) -> Pixels {
         let (line, pad) = match condensed {
-            None => (LINE, COMPACT_PAD.0),
+            None => (TOOLBAR_LINE, TOOLBAR_PAD.0),
             Some(Condensed::Padding) => (LINE, CONDENSED_PAD),
             Some(Condensed::Words) => (CONDENSED_LINE, CONDENSED_PAD),
         };
@@ -511,9 +524,8 @@ impl Button {
         self.help_below()
     }
 
-    /// The session list's marked bar geometry for a button with words (its Stop and Delete): 3 by 7 pixels of padding in
-    /// a 26-pixel box, the old `.marked-bar .marked-stop` and `.marked-delete` rule, so the bar's words fit beside "N
-    /// marked" and its icon buttons in a narrow sidebar. Hover help prefers below. The tier still gives the colors.
+    /// The 26-pixel session toolbar size, shared with Stop and Delete in the marked sessions bar. A condensed look
+    /// selected by [`Button::condensed`] takes precedence. Hover help opens below when there is room.
     pub fn toolbar(mut self) -> Self {
         self.toolbar = true;
         self.help_below()
@@ -571,6 +583,13 @@ impl Button {
     /// twice needs no hiding; content holding host text draws it through the host-text element, as everywhere.
     pub fn content(mut self, content: impl IntoElement) -> Self {
         self.content = Some(content.into_any_element());
+        self
+    }
+
+    /// Reserve room for a longer label while still centering the current label and icon as one group.
+    /// An action can then show progress in place without moving the controls next to it.
+    pub(crate) fn reserve_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.reserved_label = Some(label.into());
         self
     }
 
@@ -935,10 +954,15 @@ impl RenderOnce for Button {
         let ring = focus::shows_ring(&focus, window, cx);
         // The lifecycle buttons' condensed look: smaller text and line, no side padding, a narrower gap.
         let words = self.compact == Some(Compact::Condensed(Condensed::Words));
+        let toolbar = self.toolbar && !matches!(self.compact, Some(Compact::Condensed(_)));
+        let caret = matches!(self.split, Some(SplitPart::Caret { .. }));
         // `.banner-reclaim` overrides `.btn`'s padding to fit inside the banner's 4-pixel band.
         let (pad_y, pad_x) = match self.tier {
             _ if self.heading => (px(HEADING_WORDS_PAD.0), px(HEADING_WORDS_PAD.1)),
-            _ if self.toolbar => (px(TOOLBAR_PAD.0), px(TOOLBAR_PAD.1)),
+            _ if toolbar => (
+                px(TOOLBAR_PAD.0),
+                px(if caret { CARET_PAD_X } else { TOOLBAR_PAD.1 }),
+            ),
             Tier::OnBanner => metrics::BANNER_BUTTON_PAD,
             Tier::RowMenu { .. } => (px(0.), px(ROW_MENU_PAD_X)),
             // Condensed before the compact geometry it replaces, the caret's included.
@@ -1021,7 +1045,7 @@ impl RenderOnce for Button {
         // old toggle's, set by its text line and its own side padding; a rail entry is a fixed square.
         let (pad_x, height) = match self.tier {
             _ if self.side.is_some() => (pad_x, self.side),
-            _ if self.toolbar => (pad_x, Some(px(TOOLBAR_HEIGHT))),
+            _ if toolbar => (pad_x, Some(Self::toolbar_height(None))),
             Tier::RowMenu { .. } => (pad_x, Some(px(ROW_MENU_HEIGHT))),
             Tier::Rail => (pad_x, Some(px(RAIL_SIZE))),
             // The bolt keeps its tall, narrow box (`padding: 10px 5px`), not the square an icon-only button gets.
@@ -1057,6 +1081,12 @@ impl RenderOnce for Button {
             handler.clone()
         };
 
+        let gap = match (toolbar, self.compact) {
+            (true, _) => TOOLBAR_ICON_GAP,
+            (_, Some(Compact::Condensed(Condensed::Words))) => CONDENSED_GAP,
+            (_, Some(_)) => px(COMPACT_GAP),
+            (_, None) => px(6.),
+        };
         let mut button = div()
             .id(ElementId::Name(self.id.clone()))
             .relative()
@@ -1071,11 +1101,7 @@ impl RenderOnce for Button {
             .flex()
             .items_center()
             .justify_center()
-            .gap(match self.compact {
-                Some(Compact::Condensed(Condensed::Words)) => CONDENSED_GAP,
-                Some(_) => px(COMPACT_GAP),
-                None => px(6.),
-            })
+            .gap(gap)
             .py(pad_y)
             .px(pad_x)
             .when_some(height, |button, height| button.h(height))
@@ -1135,6 +1161,9 @@ impl RenderOnce for Button {
                 button
                     .text_size(px(CONDENSED_TEXT))
                     .line_height(px(CONDENSED_LINE))
+            })
+            .when(toolbar, |button| {
+                button.text_size(TOOLBAR_TEXT).line_height(px(TOOLBAR_LINE))
             })
             .text_color(theme::color(text))
             // A transparent edge where a tier has none keeps every tier the same size.
@@ -1273,24 +1302,56 @@ impl RenderOnce for Button {
         {
             button = button.opacity(0.5);
         }
-        if let Some(icon) = self.icon {
-            button = button.child(
+        let icon_size = if self.compact.is_some() && !toolbar {
+            px(COMPACT_ICON)
+        } else {
+            TOOLBAR_ICON
+        };
+        let glyph = if let Some(step) = self.spinner_step {
+            Some(super::spinner_icon(step, icon_size, theme::color(text)).into_any_element())
+        } else {
+            self.icon.map(|icon| {
                 svg()
                     .path(icon.path())
-                    .size(px(if self.compact.is_some() {
-                        COMPACT_ICON
-                    } else {
-                        14.
-                    }))
-                    .text_color(theme::color(text)),
+                    .size(icon_size)
+                    .text_color(theme::color(text))
+                    .into_any_element()
+            })
+        };
+        if let Some(reserved) = self.reserved_label {
+            // Measure the progress label in the same font and line height as the visible group. The overlay
+            // centers the whole group within that space, including the icon when it has one.
+            let sizer = div()
+                .invisible()
+                .flex()
+                .gap(gap)
+                .children(glyph.as_ref().map(|_| div().size(icon_size)))
+                .child(reserved);
+            let group = div()
+                .absolute()
+                .inset_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .gap(gap)
+                .children(glyph)
+                .child(self.label);
+            button = button.child(
+                div()
+                    .relative()
+                    .whitespace_nowrap()
+                    .child(sizer)
+                    .child(group),
             );
-        }
-        if let Some(content) = self.content {
-            button = button.child(content);
-        } else if self.show_label && self.tier == Tier::Nav {
-            button = button.child(div().min_w_0().truncate().child(self.label));
-        } else if self.show_label {
-            button = button.child(self.label);
+        } else {
+            button = button.children(glyph);
+            if let Some(content) = self.content {
+                button = button.child(content);
+            } else if self.show_label && self.tier == Tier::Nav {
+                button = button.child(div().min_w_0().truncate().child(self.label));
+            } else if self.show_label {
+                button = button.child(self.label);
+            }
         }
         if let Some(badge) = self.badge {
             button = button.child(badge);
@@ -1422,6 +1483,11 @@ impl IconButton {
     /// See [`Button::condensed`]: the session header's carets while its row is short of width.
     pub fn condensed(self, condensed: Option<Condensed>) -> Self {
         IconButton(self.0.condensed(condensed))
+    }
+
+    /// Use the session toolbar's height and icon size, with the compact look still available for a narrow pane.
+    pub(crate) fn toolbar(self) -> Self {
+        IconButton(self.0.toolbar())
     }
 
     /// See [`Button::split`].

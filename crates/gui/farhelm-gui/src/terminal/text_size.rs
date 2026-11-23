@@ -38,7 +38,7 @@ use super::TextSize;
 use super::attached::AttachedTerminal;
 use crate::assets::Icon;
 use crate::components::{
-    BUTTON_JOIN_GAP, Button, Condensed, HoverHelp, IconButton, JoinSide, Tier,
+    BUTTON_JOIN_GAP, Button, Condensed, HoverHelp, IconButton, JoinSide, TOOLBAR_TEXT, Tier,
 };
 use crate::desktop::title_band;
 use crate::session;
@@ -183,13 +183,22 @@ pub(crate) fn step(delta: i8, cx: &mut App) {
 /// part of the title band, where the readout counts as text: a press on it neither drags nor zooms the window
 /// ([`title_band::claims_presses`]; SPEC.md, "Desktop window chrome").
 ///
-/// The three cells stretch to [`Button::compact_height`] so the group lines up with the lifecycle buttons in both
-/// the ordinary and condensed layouts. Each magnifier keeps its compact width and squares its inner edge.
+/// The three cells stretch to [`Button::toolbar_height`] so the group lines up with the lifecycle buttons in both
+/// layouts. The ordinary magnifiers are square and the condensed ones keep their narrow width.
 ///
 /// It keeps no state of its own, so the header can build it in both looks every frame and draw the one that fits.
 pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
     let palette = theme::palette(cx);
     let points = current(cx).points();
+    let height = Button::toolbar_height(compact.then_some(Condensed::Words));
+    let magnifier = |button: IconButton, side| {
+        let button = button.tier(Tier::Neutral).joined(side);
+        if compact {
+            button.compact()
+        } else {
+            button.toolbar().square(height)
+        }
+    };
     // Text in the macOS title band keeps its presses; the buttons claim theirs as controls already.
     let readout = title_band::claims_presses(div())
         .id(READOUT_ID)
@@ -202,9 +211,12 @@ pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
         .h_full()
         .bg(theme::color(palette.button_rest))
         .text_color(theme::color(palette.fg_1))
-        .text_size(theme::metrics::TEXT_SM)
+        .text_size(if compact {
+            theme::metrics::TEXT_SM
+        } else {
+            TOOLBAR_TEXT
+        })
         .child(SharedString::from(points.to_string()));
-    let condensed = compact.then_some(Condensed::Words);
     div()
         .id(GROUP_ID)
         .debug_selector(|| GROUP_ID.into())
@@ -214,33 +226,33 @@ pub(crate) fn controls(compact: bool, cx: &App) -> AnyElement {
         .flex_row()
         .flex_none()
         .gap(BUTTON_JOIN_GAP)
-        .h(Button::compact_height(condensed))
+        .h(height)
         .items_stretch()
         .child(
-            IconButton::new(
-                SMALLER_ID,
-                Icon::ZoomOut,
-                "Smaller terminal text",
-                HoverHelp::tooltip(format!("Smaller terminal text ({})", chord("−"))).below(),
-                Role::Button,
+            magnifier(
+                IconButton::new(
+                    SMALLER_ID,
+                    Icon::ZoomOut,
+                    "Smaller terminal text",
+                    HoverHelp::tooltip(format!("Smaller terminal text ({})", chord("−"))).below(),
+                    Role::Button,
+                ),
+                JoinSide::Right,
             )
-            .tier(Tier::Neutral)
-            .compact()
-            .joined(JoinSide::Right)
             .on_click(|_, _, cx| step(-1, cx)),
         )
         .child(readout)
         .child(
-            IconButton::new(
-                LARGER_ID,
-                Icon::ZoomIn,
-                "Larger terminal text",
-                HoverHelp::tooltip(format!("Larger terminal text ({})", chord("+"))).below(),
-                Role::Button,
+            magnifier(
+                IconButton::new(
+                    LARGER_ID,
+                    Icon::ZoomIn,
+                    "Larger terminal text",
+                    HoverHelp::tooltip(format!("Larger terminal text ({})", chord("+"))).below(),
+                    Role::Button,
+                ),
+                JoinSide::Left,
             )
-            .tier(Tier::Neutral)
-            .compact()
-            .joined(JoinSide::Left)
             .on_click(|_, _, cx| step(1, cx)),
         )
         .into_any_element()

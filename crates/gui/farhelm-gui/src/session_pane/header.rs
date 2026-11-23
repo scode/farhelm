@@ -10,21 +10,17 @@
 //!   to draw, [`AttachedTerminal::tunnel_pill`](crate::terminal::attached::AttachedTerminal::tunnel_pill)), then the
 //!   actions, which never shrink. The row never wraps; a pane too narrow for it clips it. SPEC.md's floor is a
 //!   650-pixel pane, where every action stays fully visible and keyboard reachable.
-//! - **Condensed actions under a pill.** While a tunnel pill shows, the row's gaps are 6 pixels rather than 10, and
-//!   when the row cannot hold the actions at their ordinary size beside the pill at its content's width and the strip
-//!   at its floor, the actions take the old `.actions-compact` look: 2 pixels between them, and the lifecycle buttons
-//!   and carets at 11 pixels on a 15-pixel line with no side padding (an environment session's control narrows to 2
-//!   pixels of padding). Menus and questions keep their size, and names, help and Tab's order do not change. Which look
-//!   is drawn is decided from
-//!   widths measured in the frame being drawn ([`fit`]); the pill keeps its floor (the terminal area agreed on
-//!   2026-11-16 that the pill keeps it and this row condenses its actions, as the old row did). "Compact" in the old
-//!   rule's name is "condensed" here, since [`Button::compact`] already names the header buttons' ordinary geometry.
+//! - **Ordinary and condensed actions.** The ordinary look uses the same 26-pixel buttons as the marked sessions
+//!   bar. When the actions, tab strip and any tunnel pill need more room than the pane has, the actions take the
+//!   condensed look. Lifecycle buttons use 11-pixel labels on a 15-pixel line with no side padding. An environment
+//!   session's Suspend or Resume keeps its former condensed padding and label size. The choice uses widths measured
+//!   in the current frame ([`fit`]). The tab strip scrolls as needed and the tunnel pill keeps its floor.
 //! - **The tab strip's floor beside a pill.** While a pill shows, the strip is at least 112 pixels wide, the old
 //!   `min-width: 112px` ([`crate::terminal::set::STRIP_FLOOR_BESIDE_PILL`]), but only as far as the row has room: when
 //!   the width the pill needs to stay whole and the chosen actions leave less, the strip gets what is left, down to
 //!   nothing, and scrolls. The fit decides the floor as the row is laid out, and its module docs give the rule and why
 //!   ([`fit`]); without a pill there is none.
-//! - **The actions, in the old order.** Stop, Restart, Replace, Clone, Delete, each a compact button with the old icon,
+//! - **The actions, in the old order.** Stop, Restart, Replace, Clone, Delete, each a toolbar button with the old icon,
 //!   label and hover help; Delete in the danger tier, the rest neutral. The terminal area adds the text size group at
 //!   the start of the actions.
 //! - **Restart and Replace are split buttons** ([`Split`]): the main part performs the plain action, question included,
@@ -104,8 +100,8 @@
 //! each (the maintainer's decision of 2026-11-16, where the old group was shorter).
 //!
 //! NOTE: The row's height is its minimum (30 pixels, or the title band's height), no longer the tallest thing in it:
-//! its content is laid out by [`fit`] inside a box that asks for no height of its own. Everything the row holds is
-//! shorter today (about 23 pixels); something taller would be clipped.
+//! its content is laid out by [`fit`] inside a box that asks for no height of its own. The ordinary 26-pixel buttons
+//! fit inside it.
 
 use std::collections::HashMap;
 use std::rc::Rc;
@@ -123,8 +119,8 @@ use crate::actions::DELETE_SESSION_SHORTCUT_NAME;
 use crate::actions::{FocusNext, FocusPrevious};
 use crate::assets::Icon;
 use crate::components::{
-    BUTTON_JOIN_GAP, Button, CONDENSED_GAP, Condensed, HoverHelp, IconButton, MenuHeader, MenuItem,
-    MenuStart, SplitPart, Tier, home_end_keys, spinner_icon, toggle_arrow_keys,
+    BUTTON_JOIN_GAP, Button, Condensed, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart,
+    SplitPart, TOOLBAR_ACTION_GAP, Tier, home_end_keys, spinner_icon, toggle_arrow_keys,
 };
 use crate::desktop::title_band::{self, Row};
 use crate::environment_ui::ProviderUi;
@@ -156,8 +152,6 @@ const ROW_PAD_X: f32 = 10.;
 const ROW_GAP: f32 = 10.;
 /// That gap while a tunnel pill shows (`.session-topbar:has(> .session-tunnel-pill) { gap: 6px }`).
 const PILL_ROW_GAP: f32 = 6.;
-/// `.titlebar-actions`'s gap between actions.
-const ACTIONS_GAP: f32 = 6.;
 /// That gap while the actions are condensed (`.actions-compact`'s `gap: 2px`).
 const CONDENSED_ACTIONS_GAP: f32 = 2.;
 
@@ -716,10 +710,10 @@ impl SessionPane {
             pane: cx.weak_entity(),
             retired,
         };
-        // The condensed look only while a pill shows: without one the actions never condense. The fit measures a second
-        // pill, never drawn (`fit`'s module docs).
+        // The ordinary toolbar can use all the room even without a pill. Keep a condensed layout available for the
+        // fit to give the tab strip room in either case.
         let ordinary = drawn.actions(false, cx);
-        let condensed = shows_pill.then(|| drawn.actions(true, cx));
+        let condensed = drawn.actions(true, cx);
         self.header.anchors = anchors;
         self.header.carets = carets;
         row.child(fit::Fit {
@@ -1031,7 +1025,6 @@ impl Drawn<'_> {
                     condensed,
                     &self.pane,
                     &self.shown.action,
-                    cx,
                 );
                 buttons.push(
                     div()
@@ -1043,7 +1036,7 @@ impl Drawn<'_> {
                 );
             }
             let asking = self.open == Some(Control::Action(action));
-            let button = action_button(action, self.shown, asking, condensed, &self.pane, cx);
+            let button = action_button(action, self.shown, asking, condensed, &self.pane);
             // Each action is its own anchor, exactly as wide as its button, as the old `.restart-offer` wrappers were,
             // so its question hangs under it.
             let main = div().relative().flex_none().child(button).children(
@@ -1092,11 +1085,11 @@ impl Drawn<'_> {
             .flex_row()
             .flex_none()
             .items_center()
-            .gap(px(if condensed {
-                CONDENSED_ACTIONS_GAP
+            .gap(if condensed {
+                px(CONDENSED_ACTIONS_GAP)
             } else {
-                ACTIONS_GAP
-            }))
+                TOOLBAR_ACTION_GAP
+            })
             // The terminal area's text size group starts the right-hand group (SPEC.md's top row), for a session that
             // has a terminal to size, drawn in the same look as the buttons so it stays exactly as tall as they are.
             .children((!self.retired).then(|| crate::terminal::text_size::controls(condensed, cx)))
@@ -1113,7 +1106,6 @@ fn action_button(
     asking: bool,
     condensed: bool,
     pane: &WeakEntity<SessionPane>,
-    cx: &App,
 ) -> Button {
     let pane = pane.clone();
     let captured = shown.action.clone();
@@ -1162,7 +1154,7 @@ fn action_button(
     )
     .icon(action.icon())
     .tier(action.tier())
-    .compact()
+    .toolbar()
     .condensed(condensed.then_some(Condensed::Words))
     .expanded(asking)
     .on_click(move |_, window, cx| {
@@ -1174,22 +1166,10 @@ fn action_button(
         }
     });
     if stopping {
-        // The old header's Stop while stopping: its icon, then the spinner and "Stopping…" in place of the label, which
-        // stays the button's accessible name. Its gap is the button's own, which condensing narrows.
-        let ink = theme::color(theme::palette(cx).fg_0);
-        button = button.content(
-            div()
-                .flex()
-                .flex_row()
-                .items_center()
-                .gap(if condensed {
-                    CONDENSED_GAP
-                } else {
-                    COMPACT_GLYPH_GAP
-                })
-                .child(spinner_icon(shown.step, px(12.), ink))
-                .child(stop::PROGRESS_LABEL),
-        );
+        button = button.spinner(shown.step);
+    } else if action == Action::Stop && !frozen {
+        // A frozen environment cannot start a Stop. Its disabled button can give that room to the tabs.
+        button = button.reserve_label(stop::PROGRESS_LABEL);
     }
     if Split::of(action).is_some() {
         button = button.split(SplitPart::Main);
@@ -1223,7 +1203,6 @@ fn environment_button(
     condensed: bool,
     pane: &WeakEntity<SessionPane>,
     captured: &ShownAction<menu::Actionable>,
-    cx: &App,
 ) -> Button {
     let resume = match environment.pending {
         Some(pending) => pending == environment::Pending::Resuming,
@@ -1250,7 +1229,7 @@ fn environment_button(
         Role::Button,
     )
     .tier(tier)
-    .compact()
+    .toolbar()
     .condensed(condensed.then_some(Condensed::Padding))
     .expanded(asking)
     .disabled(environment.unavailable)
@@ -1262,26 +1241,11 @@ fn environment_button(
             });
         }
     });
-    let Some(pending) = environment.pending else {
-        return button.icon(icon);
-    };
-    // The spinner in the glyph's slot, at the glyph's size and gap, before the unchanged label: the same width.
-    let ink = theme::color(theme::palette(cx).fg_0);
-    button.accessible_name(pending.label()).content(
-        div()
-            .flex()
-            .flex_row()
-            .items_center()
-            .gap(COMPACT_GLYPH_GAP)
-            .child(spinner_icon(step, COMPACT_GLYPH, ink))
-            .child(label),
-    )
+    match environment.pending {
+        Some(pending) => button.accessible_name(pending.label()).spinner(step),
+        None => button.icon(icon),
+    }
 }
-
-/// The compact button's glyph size and its gap before the label (`components::button`'s `.action-glyph` and the
-/// header's `gap: 4px`), which the environment control's spinner takes while pending so its width does not change.
-const COMPACT_GLYPH: gpui::Pixels = px(13.);
-const COMPACT_GLYPH_GAP: gpui::Pixels = px(4.);
 
 impl Drawn<'_> {
     /// `split`'s caret, offering `choices`, drawn open while its menu is (`open`), in the actions' ordinary look or
@@ -1316,7 +1280,7 @@ impl Drawn<'_> {
             Role::Button,
         )
         .tier(Tier::Neutral)
-        .compact()
+        .toolbar()
         .condensed(condensed.then_some(Condensed::Words))
         .split(SplitPart::Caret {
             muted: choices.none_available(),

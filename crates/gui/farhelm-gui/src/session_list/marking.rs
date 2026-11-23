@@ -70,8 +70,8 @@ use super::selection::Listed;
 use super::{HEADING_ICON_SIDE, SessionList, bulk, menu, mute, pins, retired, status};
 use crate::assets::Icon;
 use crate::components::{
-    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, Tier, home_end_keys, submenu,
-    toggle_arrow_keys,
+    Button, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart, TOOLBAR_ACTION_GAP, Tier,
+    home_end_keys, submenu, toggle_arrow_keys,
 };
 use crate::focus::{self, Mark};
 use crate::layers::{self, Anchor, LayerId, Popover};
@@ -763,7 +763,7 @@ impl SessionList {
                 .flex_row()
                 .flex_wrap()
                 .items_center()
-                .gap(px(6.))
+                .gap(TOOLBAR_ACTION_GAP)
                 .min_w_0()
                 .py(metrics::LIST_HEADING_PAD.0)
                 .px(metrics::LIST_HEADING_PAD.1)
