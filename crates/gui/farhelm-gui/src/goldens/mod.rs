@@ -1642,7 +1642,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "version-readout-update-ready",
-        size: (420., 170.),
+        size: (420., 219.),
         draw: version_readout_update_ready,
         setup: version_readout_update_ready_setup,
     },

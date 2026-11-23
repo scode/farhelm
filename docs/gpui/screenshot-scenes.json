@@ -3314,12 +3314,12 @@
     },
     {
       "golden": "version-readout-outcomes",
-      "title": "The version readout after a check: Up to date, Check failed, Check failed beside the red toggle, and the failure button with keyboard focus",
+      "title": "The version readout after a check: Up to date, Check failed, Check failed beside the red update pill, and the failure button with keyboard focus",
       "reference": null
     },
     {
       "golden": "version-readout-update-ready",
-      "title": "The version readout's red update-menu toggle: with the update arrow, with a withdrawal warning, and with keyboard focus (ring and fill)",
+      "title": "The version readout's red update pill: with the update arrow, with a withdrawal warning, with keyboard focus, and with the reminder arrow beside it",
       "reference": null
     },
     {
