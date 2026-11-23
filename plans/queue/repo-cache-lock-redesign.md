@@ -386,3 +386,30 @@ deliver its report through the queue script, write a closing entry in its log, a
 ## Release note
 
 No release note needed.
+
+## Blocked
+
+Blocked on 2026-11-23 (claim ae4dc9).
+
+### A replacement cache needs its own directory path
+
+A session can fail at checkout if an interrupted Git cleanup leaves the host's repository cache stuck. The planned
+recovery moves that cache aside and retries at its original path. A Git process that survives the interruption can still
+open files using the original absolute path, which then names the replacement. Cleanup from the interrupted job could
+interfere with that retry or a later checkout. On Git 2.43, both cleanup and its child reopened absolute paths even when
+started inside the cache directory. See recorded traces `49f2d98a-6dbd-413c-8449-51970bf8c5a6` and
+`f28a38b9-1b99-4351-bbf3-1da74d6003dc`.
+
+Should recovery give each cache version a unique directory path, or keep the current layout and defer checkout recovery?
+
+- Give each new cache its own path. Keep the existing per-repository lock and use a small Farhelm-owned record to select
+  the current cache. A failed retry leaves the old cache selected, and a successful retry switches to the new one. The
+  old path never points to a replacement. This needs migration and interrupted-rebuild cleanup rules. This is the
+  recommended option.
+- Keep the current layout and defer checkout recovery. Sessions using the affected cache can still fail at checkout
+  while a safer layout is designed.
+
+The independent startup cleanup fix is available in [draft #4697](https://github.com/scode/farhelm/pull/4697/changes).
+It lets the sweep remove an expired cache left as a plain file, so one leftover file cannot stop cleanup of other
+caches. All six cache tests selected by `cargo nextest run -p farhelm-supervisor --lib -E 'test(/^repo_cache::/)'`
+passed in recorded run `c8fcb672-21a0-4957-9ff2-18fecc981e22`. The checkout recovery TODO remains open.
