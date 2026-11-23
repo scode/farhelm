@@ -16,8 +16,8 @@ linux/attention-cue-flash--dark.png 2f4dc627b20f1f9378f6f55bc8ed3b216bb6c6d1
 linux/attention-cue-flash--light.png 535cf23653405c3303f423ef3d926779a52b75c0
 linux/attention-cue-flight--dark.png 60665294fa1a15be4aa4c921d4ab412f63d091dd
 linux/attention-cue-flight--light.png d81a2ddc22ca1399f3e43376e0746c79ee3dc928
-linux/buttons--dark.png 47b4cffe24961cfca5b5c818e66a48d7f03500e8
-linux/buttons--light.png 60426ec087860a7ca43b1eeba29dd44f3525d4d8
+linux/buttons--dark.png dc5a5439972248fc3a18a68b0735facf3764b955
+linux/buttons--light.png 13e68e0e97131dad392765b19d8c5c515e176625
 linux/checkbox--dark.png c0a93158209cfdd66cba8f0133401295276993ce
 linux/checkbox--light.png 7beca66f5b7a0027ed7b717249a123f13583487b
 linux/checkout-trash-confirm-all--dark.png 9576000cd82e10e853d50585bb5f8b2a4ef5c829
@@ -252,6 +252,8 @@ linux/session-status-segments--dark.png b811d5ce774763c750a6d97e03d0fad1d6f410eb
 linux/session-status-segments--light.png 48815bee63a2287f104085a78df06e22bf205731
 linux/session-summary-card--dark.png a0168bffd7533e69079e23be7341850351816160
 linux/session-summary-card--light.png 65342da9294cb2ca92168817a38758c545dc12f3
+linux/session-toolbar--dark.png 31c2adcc23a63b5d68c50401acf0818306d9fba4
+linux/session-toolbar--light.png c6d045a7f136f041012ffc5e010a40b156033cbf
 linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-antigravity--dark.png d3f1d5daf11e81861efa57f3c91ba7a37e83aac6

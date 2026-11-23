@@ -350,6 +350,24 @@ fn terminals(
 }
 
 impl SessionPane {
+    /// Draw the mounted session's real header without the terminal body, so a golden can compare the row at two widths.
+    #[cfg(test)]
+    pub(crate) fn golden_header(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> AnyElement {
+        let key = self
+            .mounted
+            .current(cx)
+            .as_ref()
+            .map(|mounted| mounted.key.clone());
+        match key {
+            Some(key) => self.header_row(&key, 0, window, cx),
+            None => div().into_any_element(),
+        }
+    }
+
     /// The pane in `window`, which follows the selection, the user's choices and the connection from here on, and
     /// mounts the selected session's terminal once the window's first frame exists. `new` is the session list's New
     /// button's focus handle, home when there are no sessions.

@@ -1,15 +1,155 @@
-//! Golden scenes for the open session's pane: its details bar and the interrupted and unavailable cards. The scene list
-//! itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
+//! Golden scenes for the open session's toolbar, details bar, and interrupted and unavailable cards. The scene list,
+//! `SCENES`, stays in `mod.rs`.
 
 use crate::session_list::host_rail::tests::{hosts, local, remote};
-use crate::session_list::tests::{TEST_NOW, listing, session};
+use crate::session_list::tests::{TEST_NOW, listing, preferences, session};
+use crate::session_pane::SessionPane;
 use crate::theme;
-use crate::{local_time, session, ticker};
+use crate::{local_state, local_time, session, ticker};
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::ui_channel::Collection;
-use gpui::{AnyElement, App, IntoElement, ParentElement, Styled, Window, div, px};
+use gpui::{
+    AnyElement, App, AppContext as _, Entity, InteractiveElement as _, IntoElement, ParentElement,
+    Styled, Window, div, px,
+};
+use std::cell::RefCell;
 
 use super::{SceneState, session_at_age};
+
+/// Each width gets its own pane and anchors. The panes share the same snapshot, as two views of the same session would.
+struct ToolbarScene {
+    panes: [Entity<SessionPane>; 2],
+    helm: RefCell<FakeHelm>,
+}
+
+/// Open a suspended environment session. Its Resume supplies the primary look, and a tunnel mapping makes the narrow
+/// row condense through the same layout decision as the desktop app.
+pub(super) fn session_toolbar_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    use crate::session_list::environment_tests::{
+        Provider, environment_host, idle, registry, suspended_at,
+    };
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let panes = [(); 2].map(|()| {
+        let new = cx.focus_handle();
+        cx.new(|cx| SessionPane::new(new, window, cx))
+    });
+    let row = idle("a").title("Review the build").host(2).tabs(1);
+    helm.connect(vec![
+        listing(&["a"], &[row]),
+        preferences(&["a"], Some("a")),
+        registry(&environment_host(
+            Provider::Container,
+            suspended_at(TEST_NOW * 1000),
+        )),
+    ]);
+    // The session list normally restores the selection. This scene mounts only the panes.
+    assert!(local_state::select("a", cx), "select the toolbar's session");
+    window.set_driver_enabled(true);
+    let mut keep = state.keep.borrow_mut();
+    keep.push(Box::new(connection));
+    keep.push(Box::new(ToolbarScene {
+        panes,
+        helm: RefCell::new(helm),
+    }));
+}
+
+/// Draw the same production toolbar first with room for the tunnel and tabs, then at the 650-pixel pane floor.
+pub(super) fn session_toolbar(state: &SceneState, window: &mut Window, cx: &mut App) -> AnyElement {
+    let keep = state.keep.borrow();
+    let Some(toolbar) = keep
+        .iter()
+        .find_map(|kept| kept.downcast_ref::<ToolbarScene>())
+    else {
+        return div().into_any_element();
+    };
+    let mut helm = toolbar.helm.borrow_mut();
+    for command in helm.commands() {
+        let body = (command.path == "/api/sessions/a/tunnels").then(|| {
+            serde_json::json!({
+                "available": true,
+                "host_name": "build-environment.example.invalid",
+                "consent": true,
+                "tunnels": [{ "id": "preview", "local_port": 54320, "remote_port": 5173 }],
+            })
+        });
+        helm.reply(command.id, 200, body);
+    }
+    div()
+        .flex()
+        .flex_col()
+        .items_start()
+        .gap(px(12.))
+        .children(
+            toolbar
+                .panes
+                .iter()
+                .zip([("ordinary-toolbar", 1400.), ("condensed-toolbar", 650.)])
+                .map(|(pane, (id, width))| {
+                    // Header construction obtains its keyed anchors before the wrapper enters layout.
+                    let header = window.with_element_namespace(id, |window| {
+                        pane.update(cx, |pane, cx| pane.golden_header(window, cx))
+                    });
+                    div().id(id).w(px(width)).child(header)
+                }),
+        )
+        .into_any_element()
+}
+
+/// A stable frame before the tunnel replies could show the ordinary look twice. Require both pills, all the controls
+/// being compared, and distinct button heights so the golden always covers the real condensed layout.
+pub(super) fn session_toolbar_unready(state: &SceneState, window: &Window) -> Option<String> {
+    if !state
+        .keep
+        .borrow()
+        .iter()
+        .any(|kept| kept.is::<ToolbarScene>())
+    {
+        return None;
+    }
+    let nodes = window.driver_nodes();
+    let whole = |node: &gpui::DriverNode, id: &str| {
+        node.element_id.as_deref() == Some(id)
+            && !node.bounds.is_empty()
+            && node.visible_bounds == node.bounds
+    };
+    let resume_controls: Vec<_> = nodes
+        .iter()
+        .filter(|node| whole(node, crate::session_pane::header::ENVIRONMENT_ID))
+        .map(|node| (node.label.as_deref(), node.disabled))
+        .collect();
+    if resume_controls != [(Some("Resume"), false); 2] {
+        return Some(format!(
+            "expected two whole enabled Resume buttons, got {resume_controls:?}"
+        ));
+    }
+    for id in [
+        "session-tunnel-pill",
+        "session-header-restart-options",
+        "session-header-replace-options",
+        "session-header-stop",
+        "session-header-restart",
+        "session-header-replace",
+        "session-header-clone",
+        crate::terminal::text_size::GROUP_ID,
+    ] {
+        let count = nodes.iter().filter(|node| whole(node, id)).count();
+        if count != 2 {
+            return Some(format!("{id} is whole in {count} of the two toolbar rows"));
+        }
+    }
+    let heights: Vec<_> = nodes
+        .iter()
+        .filter(|node| whole(node, "session-header-delete"))
+        .map(|node| node.bounds.size.height)
+        .collect();
+    match heights.as_slice() {
+        [ordinary, condensed] if ordinary > condensed => None,
+        _ => Some(format!(
+            "expected whole ordinary and condensed Delete buttons, got heights {heights:?}"
+        )),
+    }
+}
 
 /// The one-off hint appears above the terminal while the open Grok session has yet to report a conversation.
 pub(super) fn hook_setup_hint(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {

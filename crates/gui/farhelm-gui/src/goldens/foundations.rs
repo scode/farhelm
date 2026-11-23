@@ -7,8 +7,8 @@ use std::rc::Rc;
 use crate::assets::Icon;
 use crate::components::{
     Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, OptionRow, RadioGroup,
-    RadioOption, Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, TabOption,
-    TabStrip, TextInput, Tier,
+    RadioOption, Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, SplitPart,
+    TabOption, TabStrip, TextInput, Tier,
 };
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
@@ -124,7 +124,8 @@ pub(super) fn command_wells(_: &SceneState, _: &mut Window, cx: &mut App) -> Any
 /// second, the host rail's entries (All pressed, a host's mark not pressed, and a host's mark pressed in the quieter
 /// look the rail's choice wears while Hosts management is shown, on the rail's ground), the filter chip with
 /// a mark, a name and its ✕, and the link tier. The outlined danger tier is pinned at rest by `inline-prompt`; its
-/// unavailable and busy looks are not pinned yet.
+/// unavailable and busy looks are not pinned yet. A third row shows compact split buttons with normal, muted and open
+/// carets, followed by a disabled compact neutral button.
 pub(super) fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let help = || HoverHelp::tooltip("Golden scene control");
     let palette = theme::palette(cx);
@@ -214,12 +215,51 @@ pub(super) fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElemen
             help(),
             Role::Button,
         ));
+    let split = |id: &'static str, muted, open| {
+        div()
+            .flex()
+            .child(
+                Button::new(id, "Restart", help(), Role::Button)
+                    .tier(Tier::Neutral)
+                    .compact()
+                    .icon(Icon::Restart)
+                    .split(SplitPart::Main),
+            )
+            .child(
+                IconButton::new(
+                    format!("{id}-options"),
+                    Icon::ChevronDown,
+                    "Restart options",
+                    help(),
+                    Role::Button,
+                )
+                .tier(Tier::Neutral)
+                .compact()
+                .split(SplitPart::Caret { muted })
+                .expanded(open),
+            )
+    };
+    let compact = div()
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .child(split("split-normal", false, false))
+        .child(split("split-muted", true, false))
+        .child(split("split-open", true, true))
+        .child(
+            Button::new("compact-off", "Stop", help(), Role::Button)
+                .tier(Tier::Neutral)
+                .icon(Icon::Stop)
+                .compact()
+                .disabled(true),
+        );
     div()
         .flex()
         .flex_col()
         .gap(px(8.))
         .child(first)
         .child(second)
+        .child(compact)
         .into_any_element()
 }
 
