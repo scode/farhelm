@@ -491,7 +491,9 @@ fn the_footer_keeps_launch_primary_and_reset_quiet(cx: &mut TestAppContext) {
         });
         assert_eq!(palette.dark, appearance == Preference::Dark);
         {
-            let (id, fill, border) = ("launcher-launch", palette.accent_fill, palette.accent_edge);
+            // Buttons have no outline since the restyle, so Launch's place in the hierarchy comes from the accent
+            // fill alone.
+            let (id, fill) = ("launcher-launch", palette.accent_fill);
             let bounds = test_support::bounds(cx, id);
             assert!(!bounds.contains(&pointer), "the premise: {id} is unhovered");
             // The scene snaps the paint to device pixels. Match the button's own quad, since its parent may
@@ -511,16 +513,14 @@ fn the_footer_keeps_launch_primary_and_reset_quiet(cx: &mut TestAppContext) {
                 }),
                 "{appearance:?}: {id} paints its tier's resting fill"
             );
-            // GPUI paints the border separately and clips its quads to strips. Test the top edge away
-            // from the rounded corners, where the mask of the top strip includes the border.
-            let top_edge = painted_bounds.top_center();
+            // The button keeps a one-pixel edge so every tier has the same size, but draws it transparent. GPUI
+            // paints a border as separate quads clipped to strips, all at the button's bounds, so no quad there may
+            // carry a visible border color.
             assert!(
-                quads.iter().any(|quad| {
-                    quad.bounds == painted_bounds
-                        && quad.content_mask.bounds.contains(&top_edge)
-                        && quad.border_color == theme::color(border)
-                }),
-                "{appearance:?}: {id} paints its tier's resting border"
+                !quads
+                    .iter()
+                    .any(|quad| quad.bounds == painted_bounds && quad.border_color.a > 0.),
+                "{appearance:?}: {id} paints no outline"
             );
         }
         let reset = test_support::bounds(cx, "launcher-reset");

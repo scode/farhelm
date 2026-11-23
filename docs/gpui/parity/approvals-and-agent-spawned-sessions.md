@@ -231,7 +231,8 @@ docs media
 - Tunnel and open has hover help ("Tunnel and open: reach this port on the remote host through a tunnel, then open it in
   your browser"). The old button had none; every control in the GPUI app needs hover help.
 - The card's own fact words ("Generated", "None") and its notes are drawn upright where the old card set them in
-  italics: the app bundles Inter Regular and SemiBold only, and GPUI does not slant a face itself.
+  italics: the app bundles Inter Regular, Medium and SemiBold only, none of them italic, and GPUI does not slant a face
+  itself.
 - The From line's Copy ID uses the shared compact button, with 8 pixels of side padding where the old one had 6, so it
   is 4 pixels wider.
 - An agent's host add opened from its card while another dialog is open, or while a host is being probed, set up or

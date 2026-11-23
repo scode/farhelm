@@ -1101,9 +1101,9 @@ stay.
   Decided with the session view's owner on 2026-11-16; meant to stay. The rule and why are in the module docs of
   `crates/gui/farhelm-gui/src/session_pane/header/fit.rs`.
 - The text size control (zoom out, the size readout, zoom in) is exactly as tall as the session header's buttons beside
-  it, in the ordinary look and in the condensed one beside a tunnel pill, where the old control was shorter than them.
-  Its magnifier buttons take the header buttons' compact geometry. Decided by the maintainer on 2026-11-16, who counts
-  the old height as a bug; meant to stay. (`terminal/text_size.rs`.)
+  it, in the ordinary look and in the condensed one, where the old control was shorter than them. Its magnifier buttons
+  take the header buttons' compact geometry. Decided by the maintainer on 2026-11-16, who counts the old height as a
+  bug; meant to stay. (`terminal/text_size.rs`.)
 - A first attach whose socket opened and then sent no grid message within the catch-up's 5 s idle bound goes onto the
   reconnect ladder as a failed attempt, where the old app revealed an empty, live terminal. The helm client announces an
   attachment only with its first output, so there is nothing to reveal and no attachment for typing to reach; a

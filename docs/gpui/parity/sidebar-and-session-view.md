@@ -1056,7 +1056,7 @@ group and Suspend whole on one line, drawn once, reachable by Tab, the pill whol
 the actions, Stop condensed, the same look on the following frames, the ordinary look back once the same row is widened
 to 1400 pixels and the condensed one again at 650) and `a_wide_pane_keeps_the_ordinary_actions_beside_a_pill` (1400
 pixels: the ordinary look with the pill), the rule's arithmetic in crates/gui/farhelm-gui/src/session_pane/header/fit.rs
-`the_actions_condense_only_when_a_pill_and_the_rest_do_not_fit`, and the condensed box in
+`the_actions_condense_when_the_ordinary_row_does_not_fit`, and the condensed box in
 crates/gui/farhelm-gui/src/components/tests/button.rs
 `a_condensed_compact_button_gives_up_only_padding_text_size_and_line_height`;
 crates/gui/farhelm-gui/src/session_pane/details_tests.rs
