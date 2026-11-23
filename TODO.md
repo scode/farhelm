@@ -278,14 +278,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Keep all sandbox leftovers visible when Tensorlake discovery fails.** During unfinished cleanup, a failed refresh
-  can replace the previously listed sandboxes with the cleanup rows alone. Have the helm report the discovery failure
-  alongside the current cleanup snapshot, and keep the last discovered rows in Settings. Use the sandbox ID to show one
-  row when cleanup supersedes discovery. A known empty cleanup snapshot after the last cleanup finishes should remove
-  its old **Cleaning up…** or **Retry cleanup** row even during the outage. Keep the existing reply bound, and
-  distinguish a discovery failure from an individual cleanup error in Settings. Cover refresh, cleanup completion during
-  the outage, and recovery. Plan: `plans/queue/tensorlake-leftovers-discovery-failure.md`.
-
 - **Move Codex recipe endpoint credentials out of its settings.** Farhelm can overwrite a concurrent save to
   `~/.codex/config.toml` when it delivers a recipe endpoint. Keep the `farhelm` provider ID so existing sessions can
   restart and the launcher can open saved conversations by ID. In an isolated Codex 0.171.0 loopback probe, a launch

@@ -783,7 +783,11 @@ fn a_key_saved_in_credentials_makes_build_available_with_no_read(cx: &mut TestAp
         "{reads:?}"
     );
     for read in reads {
-        helm.reply(read.id, 200, Some(json!([])));
+        helm.reply(
+            read.id,
+            200,
+            Some(super::tensorlake_sandbox_tests::leftover_list(&[], &[])),
+        );
     }
     settle(cx);
 

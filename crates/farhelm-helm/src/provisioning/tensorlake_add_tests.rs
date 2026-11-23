@@ -8,7 +8,7 @@ use crate::rest_harness::{FleetBuilder, Harness};
 use crate::tensorlake::e2e::{E2eTensorlake, FakeModel};
 use crate::tensorlake::prepared::{PreparedInstallFacts, PreparedSnapshot};
 use farhelm_proto::tensorlake::{
-    SaveSettings,
+    OrphanDiscovery, SaveSettings,
     recipes::{RecipeBase, RecipeSave},
 };
 
@@ -1547,11 +1547,11 @@ async fn an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone(
         foreign,
         "setup leaves foreign resources unchanged"
     );
+    let OrphanDiscovery::Ok { sandboxes } = f.tensorlake.orphan_sandboxes().await.discovery else {
+        panic!("expected successful discovery while the local row reserves the name");
+    };
     assert!(
-        !f.tensorlake
-            .orphan_sandboxes()
-            .await
-            .unwrap()
+        !sandboxes
             .iter()
             .any(|leftover| leftover.id == created.sandbox_id)
     );
@@ -1574,11 +1574,11 @@ async fn an_unrequested_name_collision_refuses_setup_and_delete_leaves_it_alone(
         foreign,
         "deletion leaves the sandbox and snapshots intact"
     );
+    let OrphanDiscovery::Ok { sandboxes } = f.tensorlake.orphan_sandboxes().await.discovery else {
+        panic!("expected successful discovery after removing the local row");
+    };
     assert!(
-        f.tensorlake
-            .orphan_sandboxes()
-            .await
-            .unwrap()
+        sandboxes
             .iter()
             .any(|leftover| leftover.id == created.sandbox_id)
     );

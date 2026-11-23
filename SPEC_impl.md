@@ -294,8 +294,8 @@ keeps the latest failure, shown with Retry, since the attempt records it before 
 A credential replacement waits the same bound, counted from its handler's start, for delivery to its hosts; being
 already saved, it is not refused, and the hosts still being delivered to are reported as not delivered (see "Named
 credential catalog"). The Tensorlake settings routes, which wait on Tensorlake's API rather than on a host, answer
-within the same bound, counted from their handler's start: the API key's Test and the list of Sandboxes not on this helm
-stop listing and answer the 502 of an unanswered Tensorlake call, the list still showing any unfinished cleanup, and a
+within the same bound, counted from their handler's start. The API key's Test stops listing and answers 502 when
+Tensorlake does not answer. Sandboxes not on this helm returns the discovery error and the current cleanup snapshot. A
 leftover sandbox's Delete, once its cleanup is recorded as running, replies that the cleanup carries on, which that list
 then shows (see "Tensorlake account"). Settings' Create SSH key (`POST /api/tensorlake/ssh-key`) answers within the same
 bound, counted from its handler's start, because every host-waiting route the GUI sends is bounded: `ssh-keygen` may run
@@ -7043,10 +7043,11 @@ cleanup, and its reply comes within the UI channel's host reply bound: a cleanup
 carries on, and the list shows it as running until it ends (see "The UI channel"). The sandbox lookup before the cleanup
 is recorded is cut off after 10 seconds, so a Tensorlake that does not answer it gets that lookup's own 502, not a 504
 promising a cleanup nothing records. The service retains in-flight and failed explicit cleanup operations in memory,
-including canonical sandbox ID, display facts and the failure reason; the list overlays those operations on vendor
-discovery because terminated sandboxes disappear from that discovery. Settings shows running cleanup and offers Retry
-cleanup after failure, including after closing/reopening Settings or losing the vendor's terminated sandbox record. A
-retry still rechecks local ownership. Only a successful snapshot sweep removes the operation; nothing retries
+including canonical sandbox ID, display facts and the failure reason. The list route returns `OrphanSandboxList` with
+tagged discovery success or failure and the current cleanup snapshot, including an empty snapshot. Discovery's reads of
+the local key, the provider, and local ownership use the same reply deadline. Settings shows running cleanup and offers
+Retry cleanup after failure, including after closing/reopening Settings or losing the vendor's terminated sandbox
+record. A retry still rechecks local ownership. Only a successful snapshot sweep removes the operation; nothing retries
 automatically. A helm restart loses this in-memory operation state; a session-owned leftover still has its durable host
 resource record and remains visible in Hosts. Other unowned sandboxes gain no persistent ownership ledger, and neither
 path adds automatic startup reconciliation. The desktop list
@@ -7057,11 +7058,14 @@ reads it, so a rejected key is never resent on unrelated notices. A successful T
 healthy or failed (decided 2026-11-15); a key saved elsewhere, or a failure fixed elsewhere, shows after Refresh or
 reopening Settings.
 
-The list keeps its rows, its last failure and a "checked HH:MM" time in the viewer's local time beside each other. A
-saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out. Each read is a
-round and only the newest round's answer is shown; a Clear ends the round. A failed read shows the helm's reason and
-keeps earlier rows rather than claiming the account has none. These are presentation facts, not new backend operation
-state or a timer.
+The list keeps the last successful discovery, the current cleanup snapshot, and a "checked HH:MM" time in the viewer's
+local time. A saved key keeps it drawn when empty, with Refresh beside the heading, unavailable while a Delete is out.
+Each read is a round and only the newest round's answer is shown. Clear ends the round and empties both lists. Any ID in
+cleanup is removed from the remembered discovery so it cannot return when cleanup finishes during an outage. An older
+reply for the same key can supply that evidence while the newest round is still out. If discovery fails, the list shows
+the reason above the remembered rows and applies the new cleanup snapshot without advancing the checked time. A
+transport failure supplies neither snapshot and leaves the visible rows in place. A successful Delete removes its ID
+from both lists before refreshing.
 
 ## Feedback forwarding
 

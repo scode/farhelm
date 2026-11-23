@@ -243,7 +243,11 @@ fn a_save_in_either_key_form_shows_in_both_and_each_keeps_its_own_typed_key(
             .collect::<Vec<_>>(),
         ["/api/tensorlake/orphans"]
     );
-    helm.reply(reads[0].id, 200, Some(json!([])));
+    helm.reply(
+        reads[0].id,
+        200,
+        Some(super::tensorlake_sandbox_tests::leftover_list(&[], &[])),
+    );
     settle(cx);
 
     click(cx, section_button(Section::Tensorlake));

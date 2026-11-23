@@ -145,6 +145,22 @@ pub struct OrphanSandbox {
     pub cleanup: Option<OrphanCleanup>,
 }
 
+/// The provider's discovery result and the helm's current cleanup snapshot are independent.
+/// An empty snapshot retires old cleanup rows even when discovery could not refresh the sandbox list.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct OrphanSandboxList {
+    pub discovery: OrphanDiscovery,
+    pub cleanups: Vec<OrphanSandbox>,
+}
+
+/// Only a successful provider listing can replace previously discovered sandboxes.
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+#[serde(tag = "status", rename_all = "snake_case")]
+pub enum OrphanDiscovery {
+    Ok { sandboxes: Vec<OrphanSandbox> },
+    Failed { reason: String },
+}
+
 /// Helm-owned, in-memory progress for an explicitly requested deletion.
 /// It is retained until the snapshot sweep succeeds; nothing retries it
 /// automatically and a helm restart discards it.
@@ -153,4 +169,40 @@ pub struct OrphanSandbox {
 pub enum OrphanCleanup {
     Running,
     Failed { reason: String },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    /// An empty cleanup snapshot authorizes the app to retire old cleanup rows even during an outage.
+    /// A reply that omits the snapshot provides no such evidence.
+    #[test]
+    fn orphan_discovery_failure_requires_an_explicit_cleanup_snapshot() {
+        let failure = OrphanSandboxList {
+            discovery: OrphanDiscovery::Failed {
+                reason: "provider unavailable".into(),
+            },
+            cleanups: Vec::new(),
+        };
+        let json = serde_json::to_value(&failure).unwrap();
+        assert_eq!(
+            json,
+            json!({
+                "discovery": { "status": "failed", "reason": "provider unavailable" },
+                "cleanups": [],
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<OrphanSandboxList>(json).unwrap(),
+            failure
+        );
+        assert!(
+            serde_json::from_value::<OrphanSandboxList>(json!({
+                "discovery": { "status": "failed", "reason": "provider unavailable" },
+            }))
+            .is_err()
+        );
+    }
 }

@@ -562,7 +562,10 @@ fn leftover_sandboxes() -> serde_json::Value {
     let mut cleaning = row("sb-4", "farhelm-sess-fixture-run-k7q2");
     cleaning["cleanup"] = serde_json::json!({ "phase": "running" });
     cleaning["state"] = serde_json::json!("Cleanup in progress");
-    serde_json::json!([own, other, failed, cleaning])
+    serde_json::json!({
+        "discovery": { "status": "ok", "sandboxes": [own, other] },
+        "cleanups": [failed, cleaning],
+    })
 }
 
 /// Draws nothing; on each frame, it moves [`settings_tensorlake_sandboxes_setup`]'s scene one step on. Until the list's
