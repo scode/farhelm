@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight a6dc70] `host-auto-update-after-2fa.md` — Prompt for SSH sign-in and resume automatic remote-host updates (after `remove-host-signin-lock.md`)
 - [in-flight 826f22] `custom-agents.md` — Add user-registered custom agents, the custom-agent contract, CLI reporter, and docs
-- [pending] `positional-hook-attribution.md` — Attribute Grok and Codex hook reports to the process that ran the hook, as the default rule for every agent
+- [in-flight 21a0aa] `positional-hook-attribution.md` — Attribute Grok and Codex hook reports to the process that ran the hook, as the default rule for every agent
