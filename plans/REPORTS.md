@@ -16,3 +16,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`fix-muse-conversation-reporting`](reports/fix-muse-conversation-reporting.report.md) landed 2026-11-23 in #4696, #4708: Pass non-secret session identity args to Muse Code hooks across environment scrubbing
 - [`gui-goldens-in-releases`](reports/gui-goldens-in-releases.report.md) landed 2026-11-23 in #4692: Document keeping GPUI screenshot goldens development- and landing-only and remove the TODO entry
 - [`repo-cache-lock-redesign`](reports/repo-cache-lock-redesign.report.md) landed 2026-11-23 in #4697, #4709: Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
+- [`brick-test-remote-mac-uninstall`](reports/brick-test-remote-mac-uninstall.report.md) landed 2026-11-23 in #4700, #4702, #4703, #4710: Extend release brick test P1 with a Tart-managed remote Mac uninstall pass
