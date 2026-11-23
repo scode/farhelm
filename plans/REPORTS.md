@@ -2,7 +2,6 @@
 
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
-- [`stop-and-suspend-timeout-feedback`](reports/stop-and-suspend-timeout-feedback.report.md) landed 2026-11-23 in #4668, #4671, #4676: Distinguish Stop and suspend's 20-second reply notice from supervisor timeouts in helm and desktop app
 - [`remove-own-setting-permission`](reports/remove-own-setting-permission.report.md) landed 2026-11-23 in #4669, #4672, #4673, #4685: Remove "Agent's own setting" permission mode, treat unproven launches as YOLO, and offer guarded Replace
 - [`tensorlake-leftovers-discovery-failure`](reports/tensorlake-leftovers-discovery-failure.report.md) landed 2026-11-23 in #4675: Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
 - [`codex-recipe-credentials-at-launch`](reports/codex-recipe-credentials-at-launch.report.md) landed 2026-11-23 in #4679, #4680, #4693: Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
