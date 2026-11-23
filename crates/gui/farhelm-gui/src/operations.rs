@@ -822,12 +822,20 @@ pub struct Settled {
     pub user_moved_on: bool,
 }
 
-/// A refusal, or a partial result ([`Operations::note`]), recorded on the key it was for, for whatever shows that
-/// subject (a session's row, an editor) to show.
+/// What the views of a subject show after its operation settles. The next operation on that key replaces this record.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Failure {
     pub work: Work,
     pub message: HostText,
+    pub tone: Tone,
+}
+
+/// A refusal or incomplete result needs attention. A Stop and suspend notice records an unknown outcome and belongs
+/// to its host even if the session row leaves the current query.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tone {
+    Danger,
+    Notice { host: i64 },
 }
 
 /// Why [`Operations::start`] sent nothing.
@@ -920,7 +928,7 @@ impl Operations {
         self.in_flight.values().any(|running| matches(running.work))
     }
 
-    /// The last refusal or partial result of work on `key`, until the next operation on it starts or a feature forgets
+    /// The last refusal, partial result or notice for `key`, until the next operation on it starts or a feature forgets
     /// it ([`Operations::forget`]). A key whose subject is gone (a deleted session) keeps its entry until the UI
     /// session resets; nothing draws it, since nothing asks.
     pub fn failure(&self, key: &OpKey) -> Option<&Failure> {
@@ -1017,6 +1025,7 @@ impl Operations {
                 Failure {
                     work,
                     message: refusal.words.clone(),
+                    tone: Tone::Danger,
                 },
             );
         }
@@ -1041,11 +1050,59 @@ impl Operations {
         message: HostText,
         cx: &mut Context<Operations>,
     ) {
+        self.record_line(key, work, message, Tone::Danger, cx);
+    }
+
+    /// Replace the deadline reply's default failure line with a neutral Stop and suspend notice. Keep the host id
+    /// from the request so a pushed phase can clear the notice while the session is filtered out.
+    pub(crate) fn notice(
+        &mut self,
+        key: &OpKey,
+        host: i64,
+        message: HostText,
+        cx: &mut Context<Operations>,
+    ) {
+        self.record_line(
+            key,
+            Work::StopAndSuspend,
+            message,
+            Tone::Notice { host },
+            cx,
+        );
+    }
+
+    /// Both kinds of completion replace the same slot and are discarded with the UI session.
+    fn record_line(
+        &mut self,
+        key: &OpKey,
+        work: Work,
+        message: HostText,
+        tone: Tone,
+        cx: &mut Context<Operations>,
+    ) {
         if self.retired {
             return;
         }
-        self.failures.insert(key.clone(), Failure { work, message });
+        self.failures.insert(
+            key.clone(),
+            Failure {
+                work,
+                message,
+                tone,
+            },
+        );
         cx.notify();
+    }
+
+    /// The outstanding notices and the hosts whose pushed state can clear them. A newer failure on the same key
+    /// replaces its notice, so it is outside this view.
+    pub(crate) fn host_notices(&self) -> impl Iterator<Item = (&OpKey, i64)> {
+        self.failures
+            .iter()
+            .filter_map(|(key, line)| match line.tone {
+                Tone::Notice { host } => Some((key, host)),
+                Tone::Danger => None,
+            })
     }
 
     /// Drop the refusal or partial result recorded on `key`, for a feature that has already shown it somewhere else,

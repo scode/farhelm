@@ -334,6 +334,8 @@ linux/ssh-sign-in-needed--dark.png df7127509a2fa43a0245708f346916b2ec2fd17c
 linux/ssh-sign-in-needed--light.png 07b5de5816b17e40774356e299824d17246e5856
 linux/ssh-sign-in-notice--dark.png bf16a53434dec14c6188af819637f49dc762a393
 linux/ssh-sign-in-notice--light.png 62e63c98c55f04fe2d89e83a4453ce9f697e19aa
+linux/stop-and-suspend-outcomes--dark.png c49868ec6384193cd1ec0d34369f114e0d6b7a80
+linux/stop-and-suspend-outcomes--light.png 6999199109b37cd0ace9daea8a6300ac3e12c180
 linux/stop-while-launching-confirmation--dark.png d7a27d12f7a03f7ca8e51295e08c8b111dd8e1ca
 linux/stop-while-launching-confirmation--light.png f904b8849caf3c193427c54c404ed4ce3811b464
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54

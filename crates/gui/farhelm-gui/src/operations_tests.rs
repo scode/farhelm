@@ -23,7 +23,7 @@ use crate::host_text::HostText;
 use crate::main_view::MainView;
 use crate::operations::{
     self, Command, Failure, HelmMarker, NotStarted, OpKey, Operations, Outcome, Refusal, Settled,
-    Work,
+    Tone, Work,
 };
 use crate::session::{self, Connection};
 use crate::test_support::{self, keys, meta, session_entry, sessions, started};
@@ -477,6 +477,7 @@ fn a_partial_result_shows_where_a_refusal_does_until_the_next_start(cx: &mut Tes
         Some(Failure {
             work: Work::Save,
             message: HostText::from_host("the host kept one tab"),
+            tone: Tone::Danger,
         }),
         "the later note is what the row shows"
     );

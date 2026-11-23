@@ -542,6 +542,7 @@ impl SessionList {
     fn settle(&mut self, cx: &mut Context<Self>) {
         // A "stays" count in the Delete notice band goes once the hosts read shows its environment gone or going.
         delete_notice::follow_hosts(cx);
+        environment::forget_settled_notices(cx);
         // A bulk Delete's rows not sent yet are held in the store as Deletes (`bulk`'s module docs), so they count here
         // as the Deletes in flight do, and the selection never opens one of them before its request goes out. An
         // environment session's Delete is a Delete here too.

@@ -276,13 +276,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Show Stop and suspend's continuing work and actual timeout failures.** The desktop drops every 504 from this
-  command. A reply from the helm's 20-second bound means the operation is still running. Add a helm-only typed marker to
-  that reply and show its program-neutral explanation in the session row and header, including while Stop runs before
-  the host phase changes. A supervisor's own 504 has no continuation marker and must show as a failure. Cover both
-  responses, and keep the other host and environment operations' reply handling separate from this fix. Plan:
-  `plans/queue/stop-and-suspend-timeout-feedback.md`.
-
 - **Keep all sandbox leftovers visible when Tensorlake discovery fails.** During unfinished cleanup, a failed refresh
   can replace the previously listed sandboxes with the cleanup rows alone. Have the helm report the discovery failure
   alongside the current cleanup snapshot, and keep the last discovered rows in Settings. Use the sandbox ID to show one

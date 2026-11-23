@@ -1709,8 +1709,11 @@ sandbox. Plain Stop ends the chosen agent and tabs but keeps its sandbox running
 so and offers **Stop and suspend** as well. That action finishes ordinary Stop before requesting host Suspend; a failed
 or incomplete Stop prevents that action from suspending the sandbox. If the two have not finished within 20 seconds, the
 answer says that the action may or may not still be running and that suspension requires a clean Stop. The row and its
-host show the current state. The row menu always offers Stop and suspend, so it remains reachable when ordinary
-confirmations are skipped. Delete's confirmations are never skipped.
+host show the current state. The desktop shows the helm's deadline as a neutral notice in the session's row, menu and
+header, including if the host phase is still unchanged. The notice clears when the host is suspended or deleting, or
+when the user starts another action on the session. A supervisor timeout appears as a Stop failure. The row menu always
+offers Stop and suspend, so it remains reachable when ordinary confirmations are skipped. Delete's confirmations are
+never skipped.
 
 Agents in a sandbox session act only within their own sandbox, and agents elsewhere launch sandboxes only behind a card
 that always asks; [Agents and environments](#agents-and-environments) has the rules. The helm enforces them at the

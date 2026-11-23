@@ -15,7 +15,8 @@
 //!   ([`crate::operations::Operations::failure`]): a refusal, or a partial result a success carried (a Stop that could
 //!   not close a tab), which the operation's completion records there with [`crate::operations::Operations::note`]. The
 //!   store keeps either until the key's next start or a reset, whoever starts that work, so an editor or a later header
-//!   needs no call here. Both are drawn alike, in the refusal style, as the old app's one error slot drew them. A Stop,
+//!   needs no call here. A Stop and suspend deadline uses the same slot in neutral ink and clears once the host is
+//!   suspended or deleting. Refusals and partial failures keep the existing danger style. A Stop,
 //!   Replace, Restart, seen-toggle, pin or move line carries its operation's name in front of the words, as that slot
 //!   did, and a Rename or Delete refusal shows the words alone, as before. The open session's header shows the same
 //!   line below its top row ([`pane_line`]), as the old header's error lines did.
@@ -50,7 +51,7 @@ use gpui::{
 
 use crate::components::spinner_icon;
 use crate::host_text::{HostSentence, HostText};
-use crate::operations::{Failure, OpKey, Work};
+use crate::operations::{Failure, OpKey, Tone, Work};
 use crate::theme::{self, metrics};
 use crate::{session, ticker};
 
@@ -120,30 +121,27 @@ pub(crate) fn current_line(key: &str, cx: &App) -> Option<Failure> {
 
 // ---- The lines -------------------------------------------------------------------------------------------------------
 
-/// `key`'s line under its row: [`current_line`] in `.action-error`'s 12-pixel red, or in the fill's ink on the selected
-/// row (`.session-row.selected .action-error`). Named, as one label, by the operation and the escaped words.
+/// `key`'s operation outcome under its row. The selected row always uses the fill's ink for legibility.
 pub(super) fn row_line(key: &str, selected: bool, cx: &App) -> Option<Div> {
     let line = current_line(key, cx)?;
     Some(line_text(
         SharedString::from(format!("session-outcome-{key}")),
         &line,
-        refusal_ink(selected, theme::palette(cx)),
+        outcome_ink(line.tone, selected, theme::palette(cx)),
     ))
 }
 
-/// `key`'s line inside its open menu, which covers the row's own copy: the same words on the menu's own surface, so in
-/// the ordinary red whatever the row's fill.
+/// `key`'s line inside its open menu, where the menu's own surface determines the ink.
 pub(super) fn menu_line(key: &str, cx: &App) -> Option<Div> {
     let line = current_line(key, cx)?;
     Some(line_text(
         SharedString::from(format!("session-menu-outcome-{key}")),
         &line,
-        theme::palette(cx).danger,
+        outcome_ink(line.tone, false, theme::palette(cx)),
     ))
 }
 
-/// `key`'s line in the open session's header, below its top row: the same words in the old header's error lines'
-/// look (`.restart-error`, `.stop-error`, `.replace-error`: 12 pixels of `--danger`, padded 4 by 10 pixels).
+/// `key`'s outcome below the open session header or on its recovery card. Both use the same words and tone.
 pub(crate) fn pane_line(key: &str, cx: &App) -> Option<Div> {
     let line = current_line(key, cx)?;
     Some(
@@ -151,7 +149,11 @@ pub(crate) fn pane_line(key: &str, cx: &App) -> Option<Div> {
             .py(px(4.))
             .px(px(10.))
             .text_size(metrics::TEXT_SM)
-            .text_color(theme::color(theme::palette(cx).danger))
+            .text_color(theme::color(outcome_ink(
+                line.tone,
+                false,
+                theme::palette(cx),
+            )))
             .child(sentence(
                 SharedString::from(format!("session-header-outcome-{key}")),
                 &line,
@@ -159,13 +161,15 @@ pub(crate) fn pane_line(key: &str, cx: &App) -> Option<Div> {
     )
 }
 
-/// The ink of the row's line: `.action-error`'s red, or the fill's ink on the selected row, where red on the accent
-/// fill is hard to read.
-pub(super) fn refusal_ink(selected: bool, palette: &theme::Palette) -> theme::Token {
+/// A notice is explanatory. A failure needs attention. On the selected row the fill's ink gives both enough contrast.
+fn outcome_ink(tone: Tone, selected: bool, palette: &theme::Palette) -> theme::Token {
     if selected {
         palette.on_fill
     } else {
-        palette.danger
+        match tone {
+            Tone::Danger => palette.danger,
+            Tone::Notice { .. } => palette.fg_1,
+        }
     }
 }
 
@@ -185,7 +189,9 @@ fn line_text(id: SharedString, line: &Failure, ink: theme::Token) -> Div {
 /// host's words as their own element.
 fn sentence(id: SharedString, line: &Failure) -> HostSentence {
     let mut sentence = HostSentence::new(id);
-    if let Some(prefix) = prefix(line.work) {
+    if line.tone == Tone::Danger
+        && let Some(prefix) = prefix(line.work)
+    {
         sentence = sentence.text(prefix);
     }
     sentence.host(&line.message)
@@ -453,8 +459,19 @@ mod tests {
     #[test]
     fn a_refusal_on_the_selected_row_takes_the_fills_ink() {
         for palette in [&theme::DARK, &theme::LIGHT] {
-            assert_eq!(refusal_ink(true, palette), palette.on_fill);
-            assert_eq!(refusal_ink(false, palette), palette.danger);
+            assert_eq!(outcome_ink(Tone::Danger, true, palette), palette.on_fill);
+            assert_eq!(outcome_ink(Tone::Danger, false, palette), palette.danger);
+        }
+    }
+
+    /// The helm deadline leaves the result unknown, so its explanation uses neutral ink. Selected rows retain
+    /// their fill's contrast in either palette.
+    #[test]
+    fn a_notice_uses_neutral_ink_off_the_selection_fill() {
+        for palette in [&theme::DARK, &theme::LIGHT] {
+            let tone = Tone::Notice { host: 2 };
+            assert_eq!(outcome_ink(tone, true, palette), palette.on_fill);
+            assert_eq!(outcome_ink(tone, false, palette), palette.fg_1);
         }
     }
 

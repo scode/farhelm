@@ -16,8 +16,8 @@ use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::tensorlake::LifecycleDirection;
 use farhelm_proto::ui_channel::{
-    Collection, CollectionChanges, CollectionState, HostStateView, HostView, KeyedEntry,
-    RefreshView, SessionRow,
+    Collection, CollectionChanges, CollectionState, HelmMarker, HostStateView, HostView,
+    KeyedEntry, RefreshView, SessionRow,
 };
 use farhelm_proto::{EnvironmentHostView, LaunchTarget, Place, SessionStatus};
 use gpui::{Role, TestAppContext, VisualTestContext};
@@ -780,6 +780,170 @@ fn stop_and_suspend_asks_after_its_read_and_sends_the_clicked_guards(cx: &mut Te
         label_of(cx, "session-header-outcome-a").as_deref(),
         Some("Stop: this session has terminal tabs open"),
         "the open session's header shows the same refusal"
+    );
+}
+
+/// The helm's wording is deliberately provisional. Keep the fixture long enough to exercise line wrapping in the
+/// sidebar and the menu as well as the selected session.
+pub(crate) const STOP_AND_SUSPEND_NOTICE: &str = "Stop and suspend did not finish within 20 seconds and may or may not still be running. \
+     The environment suspends only if Stop finishes cleanly. Check the session list for the result.";
+
+/// Send through the Stop question's alternate answer path. The other tests exercise opening and answering the question.
+fn send_stop_and_suspend(fake: &mut FakeHelm, cx: &mut VisualTestContext) -> u64 {
+    cx.update(|_, cx| {
+        super::environment::stop_and_suspend("a", 2, Default::default(), cx);
+    });
+    test_support::settle(cx);
+    one(fake, Method::Post, "/api/sessions/a/stop-and-suspend").0
+}
+
+/// Pin the stored outcome separately from what's drawn. A hidden notice could otherwise reappear on Resume.
+fn stop_and_suspend_line(cx: &mut VisualTestContext) -> Option<crate::operations::Failure> {
+    cx.update(|_, cx| super::outcome::current_line("a", cx))
+}
+
+/// A deadline arriving while the host is still connected must explain the unknown outcome on each surface. The
+/// host's pushed suspension retires the record, including when the user subsequently resumes from Hosts.
+#[gpui::test]
+fn a_marked_stop_and_suspend_timeout_shows_until_the_host_suspends(cx: &mut TestAppContext) {
+    let mut host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 0)], true, &host);
+    pending(&mut fake);
+    let id = send_stop_and_suspend(&mut fake, cx);
+    cx.update(|_, cx| {
+        let environment = super::environment::of_key("a", cx).expect("the session has its host");
+        assert!(matches!(
+            environment.host.state,
+            HostStateView::Connected { .. }
+        ));
+    });
+    fake.reply_marked(
+        id,
+        504,
+        vec![HelmMarker::StopAndSuspendReplyBound],
+        Some(json!(STOP_AND_SUSPEND_NOTICE)),
+    );
+    test_support::settle(cx);
+    assert_eq!(
+        stop_and_suspend_line(cx).unwrap().tone,
+        crate::operations::Tone::Notice { host: 2 }
+    );
+    for id in ["session-outcome-a", "session-header-outcome-a"] {
+        assert_eq!(label_of(cx, id).as_deref(), Some(STOP_AND_SUSPEND_NOTICE));
+    }
+    test_support::click(cx, "session-menu-a");
+    assert_eq!(
+        label_of(cx, "session-menu-outcome-a").as_deref(),
+        Some(STOP_AND_SUSPEND_NOTICE)
+    );
+    test_support::keys(cx, "escape");
+    host.state = suspended_at(0);
+    push_host(&mut fake, &host, cx);
+    assert!(
+        stop_and_suspend_line(cx).is_none(),
+        "suspension clears the record"
+    );
+
+    test_support::click(cx, "hosts-panel-toggle");
+    test_support::click(cx, "host-resume-2");
+    let (id, _) = one(&mut fake, Method::Post, "/api/hosts/2/resume");
+    fake.reply(id, 200, None);
+    host.state = connected();
+    push_host(&mut fake, &host, cx);
+    assert!(
+        stop_and_suspend_line(cx).is_none(),
+        "a host action cannot reveal an old notice"
+    );
+}
+
+/// The host push can beat the deadline reply. A notice is already obsolete in either settling phase.
+#[gpui::test]
+fn a_marked_reply_does_not_create_a_notice_on_a_settled_host(cx: &mut TestAppContext) {
+    let mut host = environment_host(Provider::Container, connected());
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 0)], true, &host);
+    pending(&mut fake);
+    for phase in [suspended_at(0), deleting(None)] {
+        host.state = connected();
+        push_host(&mut fake, &host, cx);
+        let id = send_stop_and_suspend(&mut fake, cx);
+        host.state = phase;
+        push_host(&mut fake, &host, cx);
+        fake.reply_marked(
+            id,
+            504,
+            vec![HelmMarker::StopAndSuspendReplyBound],
+            Some(json!(STOP_AND_SUSPEND_NOTICE)),
+        );
+        test_support::settle(cx);
+        assert!(stop_and_suspend_line(cx).is_none(), "{:?}", host.state);
+    }
+}
+
+/// The deletion push clears the stored line even while the host is still listed. Starting a new session action
+/// clears it earlier, at admission, so an unanswered request cannot leave the old outcome on screen.
+#[gpui::test]
+fn deletion_and_the_next_session_action_clear_stop_and_suspend_notices(cx: &mut TestAppContext) {
+    let mut host = environment_host(Provider::Container, connected());
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 0)], true, &host);
+    pending(&mut fake);
+    let id = send_stop_and_suspend(&mut fake, cx);
+    fake.reply_marked(
+        id,
+        504,
+        vec![HelmMarker::StopAndSuspendReplyBound],
+        Some(json!(STOP_AND_SUSPEND_NOTICE)),
+    );
+    test_support::settle(cx);
+    assert!(
+        stop_and_suspend_line(cx).is_some(),
+        "premise: the first notice is stored"
+    );
+
+    let id = send_stop_and_suspend(&mut fake, cx);
+    assert!(
+        stop_and_suspend_line(cx).is_none(),
+        "a new action has its own outcome"
+    );
+    fake.reply_marked(
+        id,
+        504,
+        vec![HelmMarker::StopAndSuspendReplyBound],
+        Some(json!(STOP_AND_SUSPEND_NOTICE)),
+    );
+    test_support::settle(cx);
+    assert!(
+        stop_and_suspend_line(cx).is_some(),
+        "premise: the new notice is stored"
+    );
+    host.state = deleting(None);
+    push_host(&mut fake, &host, cx);
+    assert!(
+        stop_and_suspend_line(cx).is_none(),
+        "deleting clears the record"
+    );
+}
+
+/// A supervisor timeout also answers 504. Its words cannot make it a notice, even if they resemble the helm's copy.
+#[gpui::test]
+fn an_unmarked_stop_and_suspend_timeout_is_a_stop_failure(cx: &mut TestAppContext) {
+    let host = environment_host(Provider::Sandbox, connected());
+    let (mut fake, cx) = open(cx, &[(bash_session("a"), 0)], true, &host);
+    pending(&mut fake);
+    let id = send_stop_and_suspend(&mut fake, cx);
+    fake.reply(id, 504, Some(json!(STOP_AND_SUSPEND_NOTICE)));
+    test_support::settle(cx);
+    assert_eq!(
+        stop_and_suspend_line(cx).unwrap().tone,
+        crate::operations::Tone::Danger
+    );
+    let expected = format!("Stop: {STOP_AND_SUSPEND_NOTICE}");
+    for id in ["session-outcome-a", "session-header-outcome-a"] {
+        assert_eq!(label_of(cx, id).as_deref(), Some(expected.as_str()));
+    }
+    test_support::click(cx, "session-menu-a");
+    assert_eq!(
+        label_of(cx, "session-menu-outcome-a").as_deref(),
+        Some(expected.as_str())
     );
 }
 

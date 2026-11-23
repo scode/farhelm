@@ -50,9 +50,10 @@
 //!   own per-host hold did, and share only the activity read ([`read_activity`]) and the commands
 //!   ([`suspend_command`], [`resume_command`]) with these: neither surface waits for the other's request, which the
 //!   pushed phase and the helm's lifecycle lock coordinate, as they did in the old app.
-//! - **The 20-second bound is routine, and the change still holds the session.** The helm answers these routes within
-//!   its host reply bound, and work still running then answers a 504 that says it carries on; a Tensorlake Resume
-//!   routinely takes longer. That answer is not shown as a failure ([`settle`]): the row and header go on showing
+//! - **The 20-second bound and the pushed phase.** Suspend and Resume keep their existing 504 handling. For Stop and
+//!   suspend, only the helm's marked 504 means the outcome is unknown. Its notice can show during Stop, before the
+//!   host phase moves, and clears on Suspended, Deleting or another session action. A supervisor timeout remains a
+//!   failure ([`settle`]). The row and header show
 //!   **Suspending…** or **Resuming…** from the pushed phase until it settles ([`pending`]), and the commands of every
 //!   session on that host, Delete and Clone included, stay refused while that phase shows the provider's change running
 //!   ([`held`]), as the old claim lasted for the whole change. Any other refusal stays on the session's key and shows on
@@ -79,7 +80,9 @@ use std::collections::HashSet;
 
 use farhelm_helm_client::{ApiPath, Collections, Method, PathError};
 use farhelm_proto::EnvironmentHostView;
-use farhelm_proto::ui_channel::{HostStateView, HostView, RefreshView, SessionList, SessionRow};
+use farhelm_proto::ui_channel::{
+    HelmMarker, HostStateView, HostView, RefreshView, SessionList, SessionRow,
+};
 use farhelm_proto::{SessionStatus, SessionStopRequest};
 use gpui::{AnyWindowHandle, App, BorrowAppContext as _, Global, Window};
 use serde_json::json;
@@ -101,12 +104,8 @@ pub(super) const SUSPENDED_HELP: &str =
 /// The badge's word.
 pub(super) const SUSPENDED: &str = "Suspended";
 
-/// The status the helm answers with when the host reply bound passed while the work goes on
-/// (`within_host_reply_bound_saying` in the helm's sessions module): not a failure here (the module docs). It is not the
-/// only 504: a supervisor's own timeout inside the bound (Stop and suspend's Stop half, say) answers it too, and the
-/// helm marks neither, so such a refusal is dropped as well and only the session's pushed state shows what happened.
-/// The environment Delete drops it the same way (`super::environment_delete`), and the Hosts panel's Suspend and Resume
-/// read it the same way (`crate::hosts::lifecycle`).
+/// The HTTP gateway timeout status. Suspend, Resume and environment Delete keep treating 504 as continuing work.
+/// Stop and suspend requires the helm's reply-bound marker because a supervisor Stop can also answer 504.
 pub(crate) const CARRIES_ON: u16 = 504;
 
 // ---- What a session's environment is --------------------------------------------------------------------------------
@@ -666,10 +665,14 @@ fn send(asked: Asked, cx: &mut App) {
         return;
     }
     let command = command(&asked);
-    let key = asked.key;
-    match super::start_request(&OpKey::session(&key), command, cx, move |settled, cx| {
-        settle(&key, settled, cx);
-    }) {
+    match super::start_request(
+        &OpKey::session(&asked.key),
+        command,
+        cx,
+        move |settled, cx| {
+            settle(&asked, settled, cx);
+        },
+    ) {
         Ok(()) | Err(NotStarted::Retired) => {}
         Err(NotStarted::Path(_)) => {
             tracing::warn!("an environment request whose ids cannot be path segments was not sent");
@@ -678,19 +681,66 @@ fn send(asked: Asked, cx: &mut App) {
     }
 }
 
-/// `key`'s environment request settled. A 504 at the helm's bound says the work carries on, so its record is dropped
-/// rather than shown as the session's refusal: the pushed phase shows how it goes on ([`pending`]). Every other refusal
-/// stays the operation store's, on the session's key, which the row, the header and the card show.
-fn settle(key: &str, settled: &Settled, cx: &mut App) {
+/// The operation store already has the default failure. Preserve an unmarked Stop timeout, and replace a marked
+/// Stop and suspend deadline with a notice if the pushed host state has yet to settle it.
+fn settle(asked: &Asked, settled: &Settled, cx: &mut App) {
     let Outcome::Refused(refusal) = &settled.outcome else {
         return;
     };
     if refusal.status != CARRIES_ON {
         return;
     }
+    let key = OpKey::session(&asked.key);
+    let stop_and_suspend = asked.verb == Verb::StopAndSuspend;
+    if stop_and_suspend && !refusal.has(HelmMarker::StopAndSuspendReplyBound) {
+        return;
+    }
+    let show_notice = stop_and_suspend
+        && !session::current_store(cx)
+            .is_some_and(|store| notice_settled(store.read(cx).collections(), asked.host));
     if let Some(operations) = session::current_operations(cx) {
         operations.update(cx, |operations, cx| {
-            operations.forget(&OpKey::session(key), cx)
+            if show_notice {
+                operations.notice(&key, asked.host, refusal.words.clone(), cx);
+            } else {
+                operations.forget(&key, cx);
+            }
+        });
+    }
+}
+
+/// A suspended or deleting host supersedes the deadline notice. A missing host entry is inconclusive.
+fn notice_settled(collections: &Collections, host: i64) -> bool {
+    collections
+        .get::<HostView>(&HostView::key(host))
+        .is_some_and(|host| {
+            matches!(
+                host.state,
+                HostStateView::Suspended { .. } | HostStateView::Deleting { .. }
+            )
+        })
+}
+
+/// Clear the record on pushed host updates so Resume from Hosts cannot reveal an old notice again. The host id
+/// kept in the record lets this work even when the list's current query omits the affected session.
+pub(super) fn forget_settled_notices(cx: &mut App) {
+    let (Some(store), Some(operations)) =
+        (session::current_store(cx), session::current_operations(cx))
+    else {
+        return;
+    };
+    let collections = store.read(cx).collections();
+    let settled: Vec<_> = operations
+        .read(cx)
+        .host_notices()
+        .filter(|(_, host)| notice_settled(collections, *host))
+        .map(|(key, _)| key.clone())
+        .collect();
+    if !settled.is_empty() {
+        operations.update(cx, |operations, cx| {
+            for key in settled {
+                operations.forget(&key, cx);
+            }
         });
     }
 }
