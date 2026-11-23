@@ -10,5 +10,5 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `repo-cache-lock-redesign.md` — Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
 - [complete] `brick-test-remote-mac-uninstall.md` — Extend release brick test P1 with a Tart-managed remote Mac uninstall pass
 - [in-flight aeef77] `remove-host-signin-lock.md` — Stop removing an SSH host from blocking on open sign-in prompts and probes
-- [pending] `eye-catching-pending-upgrade.md` — Highlight pending desktop updates with a tinted red pill and periodic reminder animation
+- [in-flight 0e5a96] `eye-catching-pending-upgrade.md` — Highlight pending desktop updates with a tinted red pill and periodic reminder animation
 - [pending] `host-auto-update-after-2fa.md` — Prompt for SSH sign-in and resume automatic remote-host updates (after `remove-host-signin-lock.md`)
