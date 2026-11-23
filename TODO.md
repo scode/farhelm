@@ -38,14 +38,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   Codex's launch configuration that keeps saved conversations, regular settings and tokenless endpoints working. Plan:
   `plans/queue/codex-recipe-credentials-at-launch.md`.
 
-- **Revisit skipping Claude trust in the home directory and root.** On 2026-11-22 the landing monitor, landing
-  `agent-trust-every-folder` (fix #4583), narrowed the maintainer's "every folder" decision for Claude only: with
-  Claude's trust switch on, a launch in the home directory or the filesystem root no longer marks it trusted in Claude's
-  settings file, prints a note, and leaves Claude to ask. Claude treats a trusted directory as covering every directory
-  inside it, so trusting home would trust everything under it, outside Farhelm and after the switch is off, with no
-  removal record. The alternative was to apply the edit in every folder as decided, with a caveat in Settings and the
-  release note. Plan: `plans/queue/claude-trust-home-dir-policy.md`.
-
 ## Near term
 
 - **A slow host still delays ordered desktop actions.** The desktop app keeps live updates flowing during host waits.

@@ -202,7 +202,9 @@ impl TrustAgent {
             TrustAgent::Claude => {
                 "Before Claude starts, Farhelm marks the folder trusted in Claude's settings file on the session's \
                  host. This applies in folders you choose and in managed checkouts, including launches an agent requests. \
-                 It also applies to a checkout Farhelm clones for another agent. New, Clone, Restart with and \
+                 It also applies to a checkout Farhelm clones for another agent. Farhelm skips your home directory and \
+                 its parents, including /. Claude's trust covers everything inside those directories, so Claude may \
+                 still ask there. New, Clone, Restart with and \
                  Replace with use this setting. Restart and Replace keep the session's saved launch."
             }
             TrustAgent::Codex => {

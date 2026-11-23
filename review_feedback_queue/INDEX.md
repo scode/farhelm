@@ -100,11 +100,6 @@ consequences.
   — Toggling Claude workspace trust while an agent checkout approval card waits or an environment starts can grant trust
   to a Not trusted approval or leave permanent trust with no archive cleanup record.
 
-- [`trailing-claude-trust-guard-allows-home-ancestors-and-fails-open.md`](trailing-claude-trust-guard-allows-home-ancestors-and-fails-open.md)
-  — Starting a Claude session in a parent of the home directory such as /home or /Users permanently marks it trusted in
-  Claude settings (covering the whole home directory), and an unresolvable HOME fails open when CLAUDE_CONFIG_DIR is
-  set.
-
 - [`trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md`](trailing-unstamped-host-skips-legacy-claude-settings-cleanup.md)
   — If a pre-upgrade Farhelm wrote Claude endpoint settings remotely before crashing or losing the reply, upgrading
   skips cleaning ~/.claude/settings.json so a stale URL there can receive the new launch token.
@@ -1194,10 +1189,6 @@ consequences.
 - [`worker-staging-failure-leaves-in-progress-evidence.md`](worker-staging-failure-leaves-in-progress-evidence.md) — A
   failed worker upload can leave its local evidence directory marked as staging after the command has returned an error.
 
-- [`claude-trust-settings-omit-folder-exemptions.md`](claude-trust-settings-omit-folder-exemptions.md) — The Claude
-  trust setting says it applies to folders the user chooses. Its help omits that Farhelm skips the home directory and
-  filesystem root.
-
 - [`launcher-first-podman-check-hides-known-host-refusal.md`](launcher-first-podman-check-hides-known-host-refusal.md) —
   While Farhelm runs the first Podman check, the launcher can show a generic check-needed message even when the helm
   already knows why the host is refused.
@@ -1321,10 +1312,6 @@ consequences.
 - [`trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md`](trailing-wake-checkout-tests-omit-unverified-and-stopped-hosts.md)
   — Every wake-checkout test uses a verified suspended sandbox, leaving unverified resumable hosts and stopped Podman
   containers uncovered.
-
-- [`trailing-claude-trust-empty-or-relative-home-edits-cwd.md`](trailing-claude-trust-empty-or-relative-home-edits-cwd.md)
-  — When a session runs with empty or relative HOME and no CLAUDE_CONFIG_DIR, Claude workspace-trust resolution bypasses
-  the home guard and edits .claude.json relative to the session working directory.
 
 - [`trailing-claude-trust-and-antigravity-missing-regression-tests.md`](trailing-claude-trust-and-antigravity-missing-regression-tests.md)
   — No child-process test verifies the launch shim skips .claude.json in HOME, pins_approval_cwd has no direct unit
