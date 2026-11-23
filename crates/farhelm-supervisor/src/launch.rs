@@ -2019,7 +2019,9 @@ fn apply_claude_workspace_trust(
         Ok(())
     })();
     if let Err(error) = result {
-        eprintln!("Farhelm could not mark this folder trusted. Claude may ask. ({error:#})");
+        // "Did not" rather than "could not": the error is as often a deliberate refusal (home or a folder above it,
+        // an unusable HOME) as a failure such as a busy lock, and the parenthetical says which.
+        eprintln!("Farhelm did not mark this folder trusted. Claude may ask. ({error:#})");
     }
 }
 

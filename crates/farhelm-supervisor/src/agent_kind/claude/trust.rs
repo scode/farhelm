@@ -102,7 +102,7 @@ pub(crate) fn resolve(
     ensure!(home.is_dir(), "HOME does not name a directory");
     ensure!(
         folder.parent().is_some() && !home.starts_with(&folder),
-        "the session folder is your home directory or one of its parents, including /. Claude's trust covers everything inside"
+        "the session folder is your home directory or a folder above it, and Claude's trust would cover everything inside it"
     );
     let selected = environment.config_path();
     let config_path = match fs::canonicalize(&selected) {
