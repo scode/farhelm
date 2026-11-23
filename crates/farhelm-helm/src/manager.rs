@@ -754,7 +754,8 @@ pub struct HostSnapshot {
     /// connection to a host from the next without interpreting the state
     /// beside it; the UI's provisioning panel binds a displayed plan to it.
     ///
-    /// Zero means "never connected".
+    /// A protocol refusal can carry a token even without a usable client.
+    /// Zero is the initial value before the actor publishes an incarnation.
     pub incarnation: u64,
 }
 
@@ -1039,6 +1040,10 @@ struct ActorStatus {
     /// case the check exists to catch. A token that is never reused makes
     /// "the same connection" mean the same thing across the manager's whole
     /// life rather than within one actor's.
+    ///
+    /// Protocol skew refuses a usable client but still establishes a connection for automatic updates.
+    /// Entering skew or explicitly retrying it opens a new update opportunity. An unchanged background
+    /// probe must keep the token so it cannot reopen an automatic update that already failed.
     incarnation: u64,
     /// The manager-wide number of the dial whose answer the current state
     /// is, when the state is a refusal (`VersionSkew`, `IdentityMismatch`,
@@ -1161,11 +1166,17 @@ impl Nudge {
 struct NudgeReceiver {
     channel: watch::Receiver<Nudge>,
     seen: u64,
+    /// Last consumed interrupt, kept across provisioning nudges and across a dial interrupted by Retry.
+    interrupt_seen: u64,
 }
 
 impl NudgeReceiver {
     fn new(channel: watch::Receiver<Nudge>) -> Self {
-        Self { channel, seen: 0 }
+        Self {
+            channel,
+            seen: 0,
+            interrupt_seen: 0,
+        }
     }
 
     /// Merge everything published since the last read into one request. An unread interrupt (a user retry, a
@@ -1180,6 +1191,7 @@ impl NudgeReceiver {
             .filter(|(revision, _)| *revision > self.seen)
             .map(|(_, receipt)| Arc::clone(receipt));
         if request.last_interrupt > self.seen {
+            self.interrupt_seen = request.last_interrupt;
             request.preserved_attempt = None;
             request.fresh_window |= request.interrupt_fresh_window;
         } else if let Some(receipt) = &unread_attach {
@@ -2179,7 +2191,7 @@ impl ConnectionManager {
             running_seen_at: None,
             takeover: None,
             live_sessions: None,
-            // Zero is "never connected": no claim can ever carry it,
+            // Zero means no incarnation has been published. No claim can ever carry it,
             // because a claim is only made against a published client.
             incarnation: 0,
             refusal_attempt: 0,
@@ -3817,6 +3829,14 @@ enum PublishGuard {
     WhileIncarnation(u64),
 }
 
+/// Bind the refusal to the dial that produced it. Only an interrupt can renew the incarnation
+/// of a host that stayed in version skew throughout the dial. Any dial that enters skew
+/// from a different state can establish a new incarnation.
+struct RefusalPublication {
+    attempt: u64,
+    after_interrupt: bool,
+}
+
 /// Hold the calling actor at `slot`'s gate, if one is installed for
 /// `destination`: report arrival, then wait for the test to release it.
 #[cfg(test)]
@@ -4117,7 +4137,10 @@ impl HostActor {
             LiveSessions::Clear,
             None,
             PublishGuard::Always,
-            attempt,
+            Some(RefusalPublication {
+                attempt,
+                after_interrupt: false,
+            }),
         );
     }
 
@@ -4179,6 +4202,7 @@ impl HostActor {
     ) {
         let mut active = true;
         let mut stopped = StoppedEpisode::default();
+        let mut last_settled_interrupt = 0;
         loop {
             // Read BEFORE the reload: see `PublishGuard::WhileIncarnation`.
             let incarnation = self.status.borrow().incarnation;
@@ -4246,6 +4270,12 @@ impl HostActor {
                 // it before doing anything with the old dial's answer.
                 continue;
             };
+            // Retry can interrupt the re-probe's sleep, its dial, or a result about to be published.
+            // Spend it on the first settled dial that follows. An interrupted dial has no answer yet.
+            let after_interrupt = nudge.interrupt_seen != last_settled_interrupt;
+            if !matches!(outcome, AttemptOutcome::Interrupted { .. }) {
+                last_settled_interrupt = nudge.interrupt_seen;
+            }
             if let Some(refusal) = known_owner_refusal
                 && matches!(
                     &outcome,
@@ -4325,7 +4355,7 @@ impl HostActor {
                     // Debug-quoted value would just be an ugly one. The
                     // escaping belongs where the hazard is — a terminal —
                     // and that is the log site below.
-                    self.set_refusal(
+                    self.publish_refresh(
                         HostState::VersionSkew {
                             peer_protocol: skew.peer_protocol,
                             peer_build: skew.peer_build,
@@ -4337,7 +4367,14 @@ impl HostActor {
                                 skew.our_protocol,
                             ),
                         },
-                        attempt,
+                        None,
+                        LiveSessions::Clear,
+                        None,
+                        PublishGuard::WhileIncarnation(incarnation),
+                        Some(RefusalPublication {
+                            attempt,
+                            after_interrupt,
+                        }),
                     );
                     active = self.hold(&mut nudge, self.cadence.reprobe).await;
                 }
@@ -4568,7 +4605,7 @@ impl HostActor {
                     LiveSessions::Clear,
                     None,
                     PublishGuard::WhileIncarnation(incarnation),
-                    0,
+                    None,
                 );
             }
             if attempt > 0 {
@@ -4781,7 +4818,7 @@ impl HostActor {
             LiveSessions::Retain,
             None,
             PublishGuard::WhileIncarnation(incarnation),
-            0,
+            None,
         );
     }
 
@@ -4820,7 +4857,7 @@ impl HostActor {
             LiveSessions::Retain,
             None,
             PublishGuard::WhileIncarnation(progress.incarnation),
-            0,
+            None,
         );
     }
 
@@ -4927,7 +4964,7 @@ impl HostActor {
                 LiveSessions::Clear,
                 None,
                 PublishGuard::WhileIncarnation(progress.incarnation),
-                0,
+                None,
             );
         }
         match gate {
@@ -5465,7 +5502,7 @@ impl HostActor {
             live,
             None,
             PublishGuard::WhileIncarnation(incarnation),
-            0,
+            None,
         );
         let mut ended = "the peer closed the connection";
         // Change hints (`ControlMsg::SessionsChanged`): the supervisor saying
@@ -5573,7 +5610,7 @@ impl HostActor {
                 step.live,
                 step.truncated,
                 PublishGuard::WhileCurrent,
-                0,
+                None,
             );
             // The publication gate may have yielded to a retarget. Hold the
             // same status read lock while consuming evidence and try-enqueueing:
@@ -6000,7 +6037,7 @@ impl HostActor {
         client: Option<Arc<SupervisorClient>>,
         live: LiveSessions,
     ) {
-        self.publish_refresh(state, client, live, None, PublishGuard::Always, 0);
+        self.publish_refresh(state, client, live, None, PublishGuard::Always, None);
     }
 
     /// Publish one coherent refresh and its truncation evidence. A failed
@@ -6017,7 +6054,8 @@ impl HostActor {
     /// the feed replaces. What counts as a change is exactly what a client
     /// can see through the hosts read and the merged list: the state itself
     /// (including a refresh's health and its session count) and the
-    /// in-memory list an identity-less host serves from. The CACHED
+    /// in-memory list an identity-less host serves from. A new skew incarnation also
+    /// wakes automatic updates when the refusal itself looks identical. The CACHED
     /// sessions of every other host are published separately, by the write
     /// that committed them (see [`RefreshStep::cache_changed`]), because
     /// nothing about the state says whether a replacement changed a row.
@@ -6043,7 +6081,7 @@ impl HostActor {
         live: LiveSessions,
         truncated: Option<bool>,
         guard: PublishGuard,
-        refusal_attempt: u64,
+        refusal: Option<RefusalPublication>,
     ) {
         let previous = self.status.borrow().state.phase();
         let next = state.phase();
@@ -6112,14 +6150,20 @@ impl HostActor {
             // live connection carry the same client and therefore the same
             // token, which is what keeps a claim valid for as long as the
             // connection it was made on lasts, and not one moment longer.
-            if !same_connection(status.client.as_ref(), client.as_ref()) {
+            let client_changed = !same_connection(status.client.as_ref(), client.as_ref());
+            // A protocol refusal has no live client for the pointer comparison above to see.
+            // A new connection opportunity still matters to an automatic updater that has given up.
+            let new_skew = matches!(state, HostState::VersionSkew { .. })
+                && (!matches!(status.state, HostState::VersionSkew { .. })
+                    || refusal
+                        .as_ref()
+                        .is_some_and(|refusal| refusal.after_interrupt));
+            if client_changed || new_skew {
                 status.incarnation = self
                     .incarnations
                     .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-                // The same condition that mints a new incarnation is the
-                // one that ends the old connection, and deliberately so:
-                // "this row is served by something else now" and "that
-                // something is finished" are the same fact.
+            }
+            if client_changed {
                 withdrawn = status.client.take();
             }
             // Compare by value: equal rows in a fresh allocation do not change
@@ -6129,7 +6173,8 @@ impl HostActor {
             if let Some(truncated) = truncated {
                 status.list_truncated = truncated;
             }
-            observable_change = status.state != state
+            observable_change = new_skew
+                || status.state != state
                 || published_live.as_deref() != live_sessions.as_deref()
                 || published_truncated != status.list_truncated;
             status.state = state;
@@ -6137,7 +6182,7 @@ impl HostActor {
             status.live_sessions = live_sessions;
             // Not part of `observable_change`: nothing outside the manager
             // shows it. See `ActorStatus::refusal_attempt`.
-            status.refusal_attempt = refusal_attempt;
+            status.refusal_attempt = refusal.map_or(0, |refusal| refusal.attempt);
         });
         retire_withdrawn(withdrawn);
         // Logged only for a publish that happened, so a dropped one cannot
@@ -7374,7 +7419,7 @@ mod tests {
     /// can outlive a helm restart, and a restarted helm that counted from 1
     /// again could hand a stale claim a matching number on a different
     /// machine's connection. Spec: the first token of a process is never
-    /// zero (zero means "never connected"), never above 2^52 (exact in JSON
+    /// zero (reserved for an unpublished incarnation), never above 2^52 (exact in JSON
     /// with ample headroom below 2^53), and is not a fixed value: eight
     /// draws do not all agree.
     #[farhelm_testtrace::test]
@@ -7946,6 +7991,8 @@ mod tests {
         /// `false` makes the DIAL itself fail — the host is down, and no
         /// peer is spawned at all.
         reachable: bool,
+        /// The sessions sign-in stopped before a supervisor dial. A test can clear this and issue the ordinary Retry.
+        sign_in_needed: bool,
         protocol: u32,
         build: String,
         /// The identity the peer's hello reports. `None` models a
@@ -8018,6 +8065,7 @@ mod tests {
         fn default() -> Self {
             Script {
                 reachable: true,
+                sign_in_needed: false,
                 protocol: PROTOCOL_VERSION,
                 build: "peer-build".to_string(),
                 identity: Some("identity-a".to_string()),
@@ -8213,6 +8261,26 @@ mod tests {
     }
 
     impl HostTransport for ScriptedTransport {
+        fn sign_in<'a>(
+            &'a self,
+            host: &'a HostRow,
+            _deadline: Duration,
+            _startup: bool,
+            _on_question: &'a mut (dyn FnMut(bool) + Send),
+        ) -> Pin<Box<dyn Future<Output = anyhow::Result<()>> + Send + 'a>> {
+            let needs_sign_in = self
+                .scripts
+                .lock()
+                .expect("script mutex")
+                .get(&host.id)
+                .is_some_and(|script| script.sign_in_needed);
+            Box::pin(std::future::ready(if needs_sign_in {
+                Err(crate::ssh_sign_in::SignInNeeded.into())
+            } else {
+                Ok(())
+            }))
+        }
+
         fn connect<'a>(
             &'a self,
             host: &'a HostRow,
@@ -9295,6 +9363,48 @@ mod tests {
 
     // ---- Version skew ------------------------------------------------
 
+    /// A successful sign-in can reach a supervisor that refuses our protocol.
+    /// The host becomes eligible for a fresh automatic update even though
+    /// signing in did not provide a usable supervisor client.
+    #[farhelm_testtrace::test(start_paused = true)]
+    async fn signing_in_to_an_older_host_establishes_a_new_incarnation() {
+        let fixture = fixture(Cadence::default(), |store, transport| async move {
+            let host = store.add_ssh_host("old.example", None, None).await.unwrap();
+            transport.set_script(
+                host,
+                Script {
+                    sign_in_needed: true,
+                    protocol: PROTOCOL_VERSION - 1,
+                    ..Script::default()
+                },
+            );
+        })
+        .await;
+        let host = fixture.store.list_hosts().await.unwrap()[1].id;
+        let mut publications = status_receiver(&fixture.manager, host);
+        let stopped = publications
+            .wait_for(|status| matches!(status.state, HostState::SignInNeeded))
+            .await
+            .expect("the attempted sign-in must stop before dialing")
+            .clone();
+        assert!(fixture.transport.attempts(host).is_empty());
+        let revision = fixture.manager.events().revision();
+
+        fixture
+            .transport
+            .edit(host, |script| script.sign_in_needed = false);
+        assert!(fixture.manager.retry_now(host).await.unwrap());
+        let skewed = publications
+            .wait_for(|status| matches!(status.state, HostState::VersionSkew { .. }))
+            .await
+            .expect("the successful sign-in reaches a supervisor that needs an update")
+            .clone();
+        assert_eq!(fixture.transport.attempts(host).len(), 1);
+        assert!(skewed.client.is_none());
+        assert!(skewed.incarnation > stopped.incarnation);
+        assert!(fixture.manager.events().revision() > revision);
+    }
+
     /// A supervisor speaking another protocol version must land in its own
     /// state carrying BOTH versions and a remediation — never in
     /// `Unreachable`, where the user would be told to check the network
@@ -9347,8 +9457,24 @@ mod tests {
         // six identical re-refusals before reporting itself.
         assert_eq!(seconds(&fixture.transport.attempts(host)), vec![0]);
 
+        // Automatic updates need a real connection token even though the refusal never yielded a client.
+        let mut publications = status_receiver(&fixture.manager, host);
+        let first = publications.borrow().clone();
+        assert_ne!(first.incarnation, 0);
+
         // Nothing was ever recorded for a host we refused to talk to.
         assert_eq!(recorded_identity(&fixture.store, host).await, None);
+
+        let rechecked = publications
+            .wait_for(|status| status.refusal_attempt > first.refusal_attempt)
+            .await
+            .expect("the background probe must publish its refusal")
+            .clone();
+        assert_eq!(rechecked.state, first.state);
+        assert_eq!(
+            rechecked.incarnation, first.incarnation,
+            "the periodic probe must not reopen an automatic update for the same refusal"
+        );
 
         fixture
             .transport
@@ -9360,7 +9486,7 @@ mod tests {
             .expect("actor is running");
         assert_eq!(
             seconds(&fixture.transport.attempts(host)),
-            vec![0, 45],
+            vec![0, 45, 90],
             "a skewed host must be re-probed on the same 45s cadence an unreachable one is"
         );
     }
@@ -10943,11 +11069,14 @@ mod tests {
             .await
             .expect("actor is running");
 
-        // Hold the NEXT refusal after it settles, before it publishes.
+        // Hold the next periodic refusal after it settles, before it publishes. A later Retry
+        // opens a new update opportunity only when the dial it requested actually answers.
+        let original = fixture.manager.status(host).expect("actor is running");
         let held = install_refusal_gate(&fixture.manager, "skew.example");
-        assert!(fixture.manager.retry_now(host).await.unwrap());
         held.reached.notified().await;
         let stale_dials = fixture.transport.attempts(host).len();
+        assert_eq!(seconds(&fixture.transport.attempts(host)), vec![0, 45]);
+        let revision = fixture.manager.events().revision();
 
         // The retry under test lands in that window.
         let ticket = fixture
@@ -10979,6 +11108,8 @@ mod tests {
              (stamp {}, ticket {ticket})",
             stale.refusal_attempt
         );
+        assert_eq!(stale.incarnation, original.incarnation);
+        assert_eq!(fixture.manager.events().revision(), revision);
 
         *fixture
             .manager
@@ -10993,10 +11124,25 @@ mod tests {
             .expect("actor is running")
             .clone();
         assert!(matches!(fresh.state, HostState::VersionSkew { .. }));
+        assert_eq!(fresh.state, stale.state, "both dials saw the same protocol");
+        assert!(fresh.incarnation > stale.incarnation);
+        assert!(
+            fixture.manager.events().revision() > revision,
+            "the explicit Retry must wake automatic updates even when the refusal is identical"
+        );
         assert!(
             fresh.refusal_attempt > ticket,
             "the retry's own dial must pass the ticket (stamp {}, ticket {ticket})",
             fresh.refusal_attempt
+        );
+        let rechecked = status
+            .wait_for(|status| status.refusal_attempt > fresh.refusal_attempt)
+            .await
+            .expect("the next periodic probe must publish")
+            .clone();
+        assert_eq!(
+            rechecked.incarnation, fresh.incarnation,
+            "the background probe must not spend the same Retry again"
         );
     }
 

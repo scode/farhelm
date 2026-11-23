@@ -964,8 +964,9 @@ pub struct HostView {
     pub color: crate::host_appearance::HostColor,
     pub state: HostStateView,
     /// Which CONNECTION this host is on — an opaque, monotonic token that
-    /// changes whenever the host's client does, including when it goes away
-    /// (see `manager::ActorStatus::incarnation`).
+    /// changes whenever the host's client does, including when it goes away.
+    /// An older supervisor can establish a new incarnation by refusing our
+    /// protocol, before a usable client exists.
     ///
     /// Served so a client can tell one connection to a host from the next
     /// without interpreting the state payload — the UI's provisioning panel
@@ -975,7 +976,7 @@ pub struct HostView {
     /// over this helm's own connections and means nothing across a restart,
     /// which is exactly why a client must not persist one.
     ///
-    /// `0` is "never connected".
+    /// `0` means the actor has yet to publish an incarnation.
     pub incarnation: u64,
     /// This helm's last observed Trash change, independent of session status.
     pub trash_epoch: u64,
