@@ -61,3 +61,75 @@ Independent Sol code review passed on both changes. The first review corrected t
 helm log. The desktop test gives both timeout replies identical text so the marker alone must distinguish them. Opus
 approved the two screenshots after the fixture ages and command were corrected. Only the pictured test data changed
 before the second screenshot review.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs (#4668, #4671) landed alone in this round, followed by one landing fix (#4676) that changes only code
+comments. Nothing reached main between the plan's base and the round's start; while it landed, only two changes to
+TODO.md went in, which touch nothing here. The plan was built on top of the previous round's change to Tensorlake
+Suspend (#4670), which made Suspend and Resume refuse a host whose sandbox Farhelm cannot identify; nothing here undoes
+or contradicts it.
+
+The landing's independent reviewer confirmed that only the helm's own 20-second reply carries the new marker, so a
+supervisor's own Stop timeout always shows as a failure, and that no other action whose reply the helm also limits to 20
+seconds changes behavior. The notice clears once the host shows as suspended or deleting (and is never shown at all if
+the host got there before the reply arrived), on the next action on the session, or when the desktop reconnects to the
+helm. A later Resume cannot bring it back, and it clears even while the session is filtered out of the list. Every other
+outcome line in the session list (refusals, partial results, their "Stop: " style prefixes, the selected row's colors)
+looks as before. The marker needs no protocol version change: only the desktop app reads it, and the app only ever talks
+to the helm built with it.
+
+#### Fixes made while landing
+
+- Rewriting the code comments around the 20-second reply of Stop and suspend and of a host's Suspend and Resume, the
+  plan dropped the recorded reason those actions reply within it instead of answering "accepted" at once (their result
+  reaches the desktop through the host state the helm pushes anyway). It also left some desktop comments describing the
+  change instead of the code, one of them wrongly saying the new notice carries a "Stop: " prefix. #4676 restores the
+  reason and corrects those comments. No behavior changes.
+
+#### Checks
+
+The plan changes the helm's Stop and suspend reply, the message format between the helm and the desktop app, and how the
+desktop draws every session outcome line, with a new reference scene and an entry in the screenshot scene list. The
+supervisor and the desktop app's outer program (the part that starts the window and the embedded helm) are untouched, so
+the landing ran the helm's, the message format's and the desktop window's own test suites, the lints, the end-to-end
+smoke test and every reference picture on the plan as delivered, then the lints again after the comment-only landing
+fix. The worker runs were on a separate arm64 Linux test worker with a systemd user manager, rootless Podman and SSH to
+itself; the rest ran locally on x86_64 Linux. None of them reached a real sandbox or container host: the tests use
+stand-ins, as the report says.
+
+On the plan as delivered, rebased onto main:
+
+- `cargo nextest run -p farhelm-helm -p farhelm-proto -p farhelm-gui`, on the test worker (recorder run
+  `2b1df1c5-64d3-48b1-ae86-6c1d36df2798`): all 5463 passed, none printed a runtime `SKIPPED`.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `61849e6a-7899-4ef4-8dbc-3a8d781656e6`): all
+  50 steps passed, one skipped as always on Linux (paste, which headless Mutter cannot give the app).
+- `python3 scripts/check-gui-goldens.py`, locally (recorder run `7a51c5f5-25ac-4aef-a8a7-62e4d2f1a4e6`): every picture
+  matched its reference, the new scene's light and dark pictures included; I also looked at the light one myself.
+- `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot scene list's own checks), locally and not through
+  the recorder, so it has no run id: all 47 cases passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix (#4676), which changes only comments:
+
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed (the first attempt could not reach the worker and ran nothing; the second ran).
+- `cargo fmt --all -- --check` and `python -B scripts/check-test-sleeps.py`, locally: passed.
+
+Reused: every runtime suite above for the fix, since comments cannot change behavior. Skipped: the supervisor's tests
+and the desktop app's outer program's tests, which nothing in the plan reaches; macOS, where nothing compiles
+differently; a real sandbox or container host; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The notice is the helm's own text, so inside the session list it ends "Check the session list for the result", and at
+  the sidebar's width it takes four lines under the row. The plan asked for that wording; a possible follow-up is a
+  shorter text for the desktop.
+- The plan adds one new reference scene, pictured in light and dark. It shows the notice on the selected row (in the
+  row's selection colors) and in the open session's header, but not on an unselected row, so no picture shows the
+  notice's neutral color in the list. Adding that row to the scene would be a small follow-up.
