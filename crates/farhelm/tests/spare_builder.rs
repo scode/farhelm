@@ -89,6 +89,31 @@ impl Fixture {
         }
     }
 
+    /// The cache directories beside the stable cache key (`bar.git:gen-<id>`). Every rebuild works in a fresh one, and
+    /// a rebuild that fails removes its own, so the set shows whether one was started and whether one was left behind.
+    fn cache_generations(&self) -> Vec<PathBuf> {
+        let prefix = format!("{}:gen-", self.cache.file_name().unwrap().to_str().unwrap());
+        fs::read_dir(self.cache.parent().unwrap())
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_str()
+                    .unwrap()
+                    .starts_with(&prefix)
+            })
+            .collect()
+    }
+
+    /// The cache directory the selector (`bar.git:current`) names, once a rebuild has published one.
+    fn selected_cache(&self) -> Option<PathBuf> {
+        let name = self.cache.file_name().unwrap().to_str().unwrap();
+        let selector = self.cache.with_file_name(format!("{name}:current"));
+        let id = fs::read_to_string(selector).ok()?;
+        Some(self.cache.with_file_name(format!("{name}:gen-{id}")))
+    }
+
     /// Child-only environment injection is the supported way to prove startup
     /// and helper scrubs. The test runner's environment remains untouched.
     fn command(&self, verb: &str) -> Command {
@@ -358,7 +383,10 @@ async fn spare_builder_cli_real_clone_scrubs_after_login_and_dissociates() {
     );
     assert_eq!(git(&fixture.target, &["rev-parse", "HEAD"]), expected);
     assert!(!fixture.target.join(".git/objects/info/alternates").exists());
-    assert!(fixture.cache.is_dir());
+    assert!(
+        fixture.selected_cache().is_some_and(|cache| cache.is_dir()),
+        "the completed clone published its cache"
+    );
     let env = fs::read_to_string(fixture.root.join("git-env")).unwrap();
     assert_eq!(env.lines().count(), 3);
     assert!(
@@ -427,10 +455,10 @@ async fn spare_builder_password_required_fails_without_prompting_or_completion()
     );
     assert!(!fixture.spec.with_extension("receipt").exists());
     assert!(!fixture.spec.with_extension("result").exists());
-    assert!(
-        fixture.cache.is_dir(),
-        "cache init ran before the refused fetch"
-    );
+    // Init ran before the refused fetch (the two Git commands below); the failed rebuild then removed its own cache
+    // directory and published nothing, so a later attempt starts clean.
+    assert!(fixture.selected_cache().is_none());
+    assert!(fixture.cache_generations().is_empty());
     assert!(!fixture.target.join(".git").exists());
     let argv = fs::read_to_string(fixture.root.join("git-argv")).unwrap();
     assert_eq!(
@@ -808,7 +836,7 @@ async fn spare_builder_owner_sigkill_after_rc_retires_cache_fetch() {
     let mut fetch = Indirect(Some(pids[0]));
     let mut helper = Indirect(Some(pids[1]));
     assert!(
-        fixture.cache.is_dir(),
+        !fixture.cache_generations().is_empty(),
         "premise: init completed before held fetch"
     );
     assert!(!terminated(guard) && !terminated(pids[0]) && !terminated(pids[1]));
