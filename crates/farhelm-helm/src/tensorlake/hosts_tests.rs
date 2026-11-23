@@ -1850,6 +1850,288 @@ async fn lifecycle_host_with_headers(
     (status, headers, String::from_utf8(bytes.to_vec()).unwrap())
 }
 
+const UNCONFIRMED_SANDBOX: &str = "farhelm-host-fixture";
+
+/// Register the row that setup leaves before admitting a sandbox. Without install coordinates the actor never
+/// probes Tensorlake, so the API's call log can attribute every request to the explicit lifecycle action.
+async fn unconfirmed_sandbox_helm(
+    api: &FakeApi,
+    pending_create_at: Option<i64>,
+) -> (crate::rest_harness::Harness, HostId) {
+    let harness = crate::rest_harness::FleetBuilder::new()
+        .await
+        .tensorlake_api(Arc::new(api.clone()))
+        .start()
+        .await;
+    harness
+        .store
+        .save_tensorlake_config(SaveSettings {
+            api_key: Some(KEY.into()),
+            clear_api_key: false,
+            create_without_asking: None,
+        })
+        .await
+        .map_err(|_| "save failed")
+        .unwrap();
+    let host = plant(&harness.store, "fixture", UNCONFIRMED_SANDBOX, "rust", None).await;
+    assert!(
+        harness
+            .store
+            .set_tensorlake_pending_create(host, pending_create_at)
+            .await
+            .unwrap()
+    );
+    harness.manager.sync_registry().await.unwrap();
+    let binding = row(&harness.store, host).await.tensorlake.unwrap();
+    assert!(binding.sandbox_id.is_none());
+    assert_eq!(binding.pending_create_at, pending_create_at);
+    assert!(api.calls().is_empty());
+    (harness, host)
+}
+
+/// Reserving a name before Create confers no ownership. Neither verb may even look up the unrelated same-name
+/// sandbox, and the ownership refusal must take precedence when the API key is missing.
+#[farhelm_testtrace::test]
+async fn lifecycle_refuses_a_reserved_name_without_sandbox_ownership() {
+    let api =
+        FakeApi::default().with_sandbox("unrelated", UNCONFIRMED_SANDBOX, SandboxStatus::Running);
+    let (harness, host) = unconfirmed_sandbox_helm(&api, None).await;
+    for with_key in [true, false] {
+        if !with_key {
+            harness
+                .store
+                .save_tensorlake_config(SaveSettings {
+                    api_key: None,
+                    clear_api_key: true,
+                    create_without_asking: None,
+                })
+                .await
+                .map_err(|_| "clear failed")
+                .unwrap();
+        }
+        let before = harness
+            .manager
+            .status(host)
+            .expect("the host has a connection actor");
+        for verb in ["suspend", "resume"] {
+            let (status, headers, body) = lifecycle_host_with_headers(&harness, host, verb).await;
+            assert_eq!(status, axum::http::StatusCode::CONFLICT, "{verb}: {body}");
+            assert_eq!(
+                body,
+                "This host has no confirmed Tensorlake sandbox yet; finish setup or delete the host entry",
+            );
+            assert!(!headers.contains_key(farhelm_proto::http::HOST_BUSY_HEADER));
+            let after = harness
+                .manager
+                .status(host)
+                .expect("the host remained registered");
+            assert_eq!(
+                after.incarnation, before.incarnation,
+                "{verb} must leave routing alone"
+            );
+            assert!(api.calls().is_empty());
+        }
+    }
+}
+
+/// An unanswered create permits one lookup. A mutation refusal must leave the recovered ID saved so a retry reaches
+/// the original sandbox even after its name is reused. The mutation and confirming status poll both use the ID.
+#[farhelm_testtrace::test]
+async fn lifecycle_uses_the_recovered_sandbox_id_before_mutating_and_on_retry() {
+    for (verb, initial) in [
+        ("suspend", SandboxStatus::Running),
+        ("resume", SandboxStatus::Suspended),
+    ] {
+        let api = FakeApi::default()
+            .with_sandbox("sbx-owned", UNCONFIRMED_SANDBOX, initial)
+            .failing(
+                verb,
+                TensorlakeError::Transport("injected lifecycle refusal".into()),
+            );
+        let (harness, host) =
+            unconfirmed_sandbox_helm(&api, Some(super::super::recipes::now_secs())).await;
+        let gate = Arc::new(Gate::default());
+        if verb == "suspend" {
+            api.0.lock().unwrap().suspend_gate = Some(gate.clone());
+        } else {
+            api.0.lock().unwrap().resume_gate = Some(gate.clone());
+        }
+        let harness = Arc::new(harness);
+        let request = tokio::spawn({
+            let harness = harness.clone();
+            async move { lifecycle_host(&harness, host, verb).await }
+        });
+        tokio::time::timeout(Duration::from_secs(10), gate.entered.notified())
+            .await
+            .expect("the lifecycle call reached the mutation boundary");
+        let recovered = row(&harness.store, host).await.tensorlake.unwrap();
+        assert_eq!(recovered.sandbox_id.as_deref(), Some("sbx-owned"));
+        assert_eq!(recovered.pending_create_at, None);
+        assert_eq!(api.calls(), [format!("get {UNCONFIRMED_SANDBOX}")]);
+        {
+            let mut fake = api.0.lock().unwrap();
+            fake.suspend_gate = None;
+            fake.resume_gate = None;
+            fake.sandboxes[0].1 = "renamed-sandbox".into();
+            fake.sandboxes
+                .push(("sbx-unrelated".into(), UNCONFIRMED_SANDBOX.into(), initial));
+        }
+        gate.release.notify_one();
+        let (status, body) = request.await.unwrap();
+        assert_eq!(
+            status,
+            axum::http::StatusCode::SERVICE_UNAVAILABLE,
+            "{body}"
+        );
+        assert!(body.contains("injected lifecycle refusal"), "{body}");
+
+        let (status, body) = lifecycle_host(&harness, host, verb).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        assert_eq!(
+            api.calls(),
+            [
+                format!("get {UNCONFIRMED_SANDBOX}"),
+                format!("{verb} sbx-owned"),
+                "get sbx-owned".into(),
+                format!("{verb} sbx-owned"),
+                "get sbx-owned".into()
+            ],
+        );
+        assert_eq!(api.0.lock().unwrap().sandboxes[1].2, initial);
+    }
+}
+
+/// A no-op lifecycle action still settles the outstanding Create. The next action needs its ID even though the first
+/// never sends a mutation.
+#[farhelm_testtrace::test]
+async fn lifecycle_records_recovered_id_even_if_the_sandbox_is_already_at_target() {
+    for (verb, target) in [
+        ("suspend", SandboxStatus::Suspended),
+        ("resume", SandboxStatus::Running),
+    ] {
+        let api = FakeApi::default().with_sandbox("sbx-owned", UNCONFIRMED_SANDBOX, target);
+        let (harness, host) =
+            unconfirmed_sandbox_helm(&api, Some(super::super::recipes::now_secs())).await;
+        let (status, body) = lifecycle_host(&harness, host, verb).await;
+        assert_eq!(status, axum::http::StatusCode::OK, "{body}");
+        let binding = row(&harness.store, host).await.tensorlake.unwrap();
+        assert_eq!(binding.sandbox_id.as_deref(), Some("sbx-owned"));
+        assert_eq!(binding.pending_create_at, None);
+        assert_eq!(api.calls(), [format!("get {UNCONFIRMED_SANDBOX}")]);
+    }
+}
+
+/// A slow ID write must finish under the owning operation's lock. When it finishes past the provider deadline,
+/// the recovered ID survives for retry, but the operation may no longer send Suspend.
+#[farhelm_testtrace::test(start_paused = true)]
+async fn lifecycle_keeps_the_lock_through_identity_write_past_provider_deadline() {
+    use rusqlite::hooks::{AuthAction, AuthContext, Authorization};
+    let api =
+        FakeApi::default().with_sandbox("sbx-owned", UNCONFIRMED_SANDBOX, SandboxStatus::Running);
+    let (harness, host) =
+        unconfirmed_sandbox_helm(&api, Some(super::super::recipes::now_secs())).await;
+    let (entered, write_started) = tokio::sync::oneshot::channel();
+    let (release, wait_for_release) = std::sync::mpsc::channel();
+    let mut entered = Some(entered);
+    harness
+        .store
+        .connection_for_test()
+        .lock()
+        .authorizer(Some(move |context: AuthContext<'_>| {
+            if matches!(
+                context.action,
+                AuthAction::Update {
+                    table_name: "hosts",
+                    column_name: "tensorlake_sandbox_id"
+                }
+            ) && let Some(entered) = entered.take()
+            {
+                let _ = entered.send(());
+                // Keep the connection's write blocked independently of the fixture's virtual clock.
+                if wait_for_release
+                    .recv_timeout(Duration::from_secs(10))
+                    .is_err()
+                {
+                    return Authorization::Deny;
+                }
+            }
+            Authorization::Allow
+        }))
+        .unwrap();
+    let mut change = std::pin::pin!(crate::tensorlake::lifecycle::change(
+        &harness.state,
+        host,
+        false
+    ));
+    tokio::select! {
+        result = change.as_mut() => panic!("expected the lifecycle operation to reach the gated write: {result:?}"),
+        result = write_started => result.expect("the ID update reached the SQLite gate"),
+    }
+    assert_eq!(api.calls(), [format!("get {UNCONFIRMED_SANDBOX}")]);
+    tokio::time::advance(Duration::from_secs(61)).await;
+    // sleep-ok: wait for the timer driver to observe the advanced clock before polling the gated change
+    tokio::time::sleep_until(tokio::time::Instant::now()).await;
+    let polled = std::future::poll_fn(|cx| std::task::Poll::Ready(change.as_mut().poll(cx))).await;
+    assert!(
+        polled.is_pending(),
+        "deadline must leave the store write awaited"
+    );
+    assert!(harness.manager.try_host_provision_lock(host).is_none());
+    release.send(()).unwrap();
+
+    let error = change.await.unwrap_err();
+    assert!(error.to_string().contains("within 60 seconds"), "{error:#}");
+    let recovered = row(&harness.store, host).await.tensorlake.unwrap();
+    assert_eq!(recovered.sandbox_id.as_deref(), Some("sbx-owned"));
+    assert_eq!(recovered.pending_create_at, None);
+    assert_eq!(api.calls(), [format!("get {UNCONFIRMED_SANDBOX}")]);
+    assert!(harness.manager.try_host_provision_lock(host).is_some());
+}
+
+/// A failed identity write leaves the original Create unsettled. A provider mutation must wait until Farhelm
+/// durably knows which sandbox it owns.
+#[farhelm_testtrace::test]
+async fn lifecycle_sends_no_mutation_if_recovered_id_cannot_be_saved() {
+    use axum::http::StatusCode;
+    for (raise, expected_status) in [
+        (
+            "RAISE(ABORT, 'injected sandbox ID write failure')",
+            StatusCode::INTERNAL_SERVER_ERROR,
+        ),
+        ("RAISE(IGNORE)", StatusCode::CONFLICT),
+    ] {
+        let api = FakeApi::default().with_sandbox(
+            "sbx-owned",
+            UNCONFIRMED_SANDBOX,
+            SandboxStatus::Running,
+        );
+        let pending = super::super::recipes::now_secs();
+        let (harness, host) = unconfirmed_sandbox_helm(&api, Some(pending)).await;
+        // IGNORE exercises an update that finds no row without deleting the fixture's host under a live operation.
+        harness
+            .store
+            .connection_for_test()
+            .lock()
+            .execute_batch(&format!(
+            "CREATE TEMP TRIGGER refuse_recovered_id BEFORE UPDATE OF tensorlake_sandbox_id ON hosts
+             BEGIN SELECT {raise}; END;",
+        ))
+            .unwrap();
+        let (status, body) = lifecycle_host(&harness, host, "suspend").await;
+        assert_eq!(status, expected_status, "{body}");
+        if status == StatusCode::CONFLICT {
+            assert!(
+                body.contains("This Tensorlake host is no longer registered"),
+                "{body}"
+            );
+        }
+        let binding = row(&harness.store, host).await.tensorlake.unwrap();
+        assert!(binding.sandbox_id.is_none());
+        assert_eq!(binding.pending_create_at, Some(pending));
+        assert_eq!(api.calls(), [format!("get {UNCONFIRMED_SANDBOX}")]);
+    }
+}
+
 /// Suspend must withdraw routing without losing the registered machine. Resume
 /// must preserve the host/session identity while earning a fresh connection.
 /// Repeating either verb is safe and does not issue a second vendor mutation.

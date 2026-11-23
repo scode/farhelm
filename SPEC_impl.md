@@ -6931,7 +6931,14 @@ is refused before any card.
 
 Explicit Tensorlake Suspend and Resume use `POST /api/hosts/{id}/suspend` and `/resume`, on helm-owned tasks so a closed
 tab cannot strand a hold. Both take the host's provisioning lock before reading its binding, excluding setup, update and
-removal. `HostState::TensorlakeChanging` and its UI projection carry `LifecycleDirection` (suspending or resuming) and
+removal. If the binding has neither a saved sandbox ID nor an outstanding create, the helm refuses with 409 before
+checking the API key or taking a connection hold. Only an outstanding create allows a lookup by name. A successful
+lookup saves the returned ID and clears the create marker in one write, even when the sandbox is already in the
+requested state. Mutation and confirmation use the saved ID. A failed write leaves the sandbox untouched. The write
+finishes under the provisioning lock with no provider timeout around it, since cancelling the await can leave SQLite
+writing after the lock is released. The same provider deadline covers the initial lookup, the mutation and the
+confirmation polls. If that deadline passes during the write, the recovered ID stays saved and the helm sends no
+mutation. `HostState::TensorlakeChanging` and its UI projection carry `LifecycleDirection` (suspending or resuming) and
 the request's unix-ms time under wire phase `tensorlake-changing`. Suspend holds the actor in that transient state,
 releases both shared SSH masters, asks Tensorlake to suspend and waits at most 60 seconds. Only confirmed suspension
 records the completion time and publishes `Suspended` under the hold, so the displayed timestamp cannot momentarily

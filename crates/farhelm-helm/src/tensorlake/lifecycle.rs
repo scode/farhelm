@@ -8,7 +8,11 @@
 //! the change itself runs to its end on a task of its own.
 
 use super::api::{ApiKey, SandboxStatus, TensorlakeError};
-use crate::{AppState, manager::HostState, store::HostId};
+use crate::{
+    AppState,
+    manager::HostState,
+    store::{HelmStore, HostId, TensorlakeBinding},
+};
 use axum::{
     extract::{Path, State},
     response::{IntoResponse, Response},
@@ -102,9 +106,9 @@ pub(crate) async fn change(state: &AppState, host: HostId, resume: bool) -> anyh
     crate::environment::lifecycle::change(state, host, resume).await
 }
 
-/// Keep account validation ahead of connection withdrawal. The provider seam
-/// delegates here after selection, and this function re-reads the binding under
-/// the existing provisioning lock before any provider operation.
+/// Validate sandbox ownership and account access before withdrawing the connection.
+/// The provider re-reads the binding under the provisioning lock, which keeps setup, removal and other
+/// lifecycle operations from changing the same host through identifier recovery and provider calls.
 pub(super) async fn change_tensorlake(
     service: &super::Tensorlake,
     manager: &crate::manager::ConnectionManager,
@@ -125,11 +129,16 @@ pub(super) async fn change_tensorlake(
             "Suspend and Resume are available only for Tensorlake hosts",
         )
     })?;
+    if binding.sandbox_id.is_none() && binding.pending_create_at.is_none() {
+        return Err(refusal(
+            ErrorKind::Conflict,
+            "This host has no confirmed Tensorlake sandbox yet; finish setup or delete the host entry",
+        ));
+    }
     let key = service
         .api_key()
         .await
         .map_err(|reason| refusal(ErrorKind::Conflict, &reason))?;
-    let sandbox = binding.sandbox_id.as_deref().unwrap_or(&binding.sandbox);
     let changing = HostState::TensorlakeChanging {
         starting: false,
         direction: if resume {
@@ -144,7 +153,7 @@ pub(super) async fn change_tensorlake(
         &row,
         resume,
         changing,
-        transition(service, &key, sandbox, resume),
+        transition(service, &key, manager.store(), host, binding, resume),
         |transitioned| async move {
             let suspended_at = if resume {
                 None
@@ -181,29 +190,71 @@ pub(super) async fn change_tensorlake(
     .await
 }
 
-/// Reconcile conflicts with the actual status rather than guessing what a
-/// vendor 409 means. The deadline includes each request, so a slow final GET
-/// cannot extend the advertised wait indefinitely.
+/// A name lookup may settle an outstanding create. Save its ID under the caller's provisioning lock
+/// before mutating or returning an already-at-target result, so all later calls and retries use that ID.
+/// One deadline bounds provider requests. The local write must finish even if that deadline passes,
+/// because timing out its waiter would allow SQLite to keep writing after the provisioning lock is released.
 /// Returns whether a mutation was needed. A new pause earns its own stamp.
 async fn transition(
     service: &super::Tensorlake,
     key: &ApiKey,
-    sandbox: &str,
+    store: &HelmStore,
+    host: HostId,
+    binding: &TensorlakeBinding,
     resume: bool,
 ) -> anyhow::Result<bool> {
     let wait = Duration::from_secs(if resume { 120 } else { 60 });
     let deadline = tokio::time::Instant::now() + wait;
+    let provider_failure = |error: TensorlakeError| {
+        refusal(
+            ErrorKind::Unavailable,
+            &format!(
+                "Tensorlake could not {} this host: {error}",
+                if resume { "resume" } else { "suspend" }
+            ),
+        )
+    };
+    let expired = || {
+        refusal(
+            ErrorKind::Unavailable,
+            &format!(
+                "Tensorlake did not finish {} this host within {} seconds; try again",
+                if resume { "resuming" } else { "suspending" },
+                wait.as_secs()
+            ),
+        )
+    };
     let api = service.api();
-    let result = tokio::time::timeout_at(deadline, async {
-        let initial = api.get_sandbox(key, sandbox).await?;
-        let target = if resume {
-            SandboxStatus::Running
-        } else {
-            SandboxStatus::Suspended
-        };
-        if initial.status == target {
-            return Ok(false);
+    let saved_id = binding.sandbox_id.as_deref();
+    let lookup = saved_id.unwrap_or(&binding.sandbox);
+    let initial = tokio::time::timeout_at(deadline, api.get_sandbox(key, lookup))
+        .await
+        .map_err(|_| expired())?
+        .map_err(provider_failure)?;
+    let sandbox = if let Some(id) = saved_id {
+        id
+    } else {
+        if !store.set_tensorlake_sandbox_id(host, &initial.id).await? {
+            return Err(refusal(
+                ErrorKind::Conflict,
+                "This Tensorlake host is no longer registered",
+            ));
         }
+        &initial.id
+    };
+    let target = if resume {
+        SandboxStatus::Running
+    } else {
+        SandboxStatus::Suspended
+    };
+    if initial.status == target {
+        return Ok(false);
+    }
+    // Tokio may poll a new timeout's inner future once at an expired deadline.
+    if tokio::time::Instant::now() >= deadline {
+        return Err(expired());
+    }
+    tokio::time::timeout_at(deadline, async {
         let request = if resume {
             api.resume_sandbox(key, sandbox).await
         } else {
@@ -230,25 +281,9 @@ async fn transition(
             tokio::time::sleep(Duration::from_secs(1)).await;
         }
     })
-    .await;
-    match result {
-        Ok(Ok(changed)) => Ok(changed),
-        Ok(Err(error)) => Err(refusal(
-            ErrorKind::Unavailable,
-            &format!(
-                "Tensorlake could not {} this host: {error}",
-                if resume { "resume" } else { "suspend" }
-            ),
-        )),
-        Err(_) => Err(refusal(
-            ErrorKind::Unavailable,
-            &format!(
-                "Tensorlake did not finish {} this host within {} seconds; try again",
-                if resume { "resuming" } else { "suspending" },
-                wait.as_secs()
-            ),
-        )),
-    }
+    .await
+    .map_err(|_| expired())?
+    .map_err(provider_failure)
 }
 
 /// Keep actionable lifecycle refusals distinct from internal storage errors.

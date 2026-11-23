@@ -366,6 +366,9 @@ checks again once per re-probe interval and connects by itself when the sandbox 
 on its own. A sandbox Tensorlake no longer has makes the host unreachable with the advice to delete it. When Tensorlake
 cannot answer at all (no key, an outage), Farhelm dials anyway rather than cutting off a sandbox that may be running.
 
+Suspend and Resume require a saved sandbox ID or an outstanding create request. If an outstanding create resolves by
+name, Farhelm saves its ID before sending either action.
+
 The hosts panel offers **Suspend** for Tensorlake hosts unless they are suspended, suspending or resuming, including
 when the supervisor is unreachable. **Resume** appears in both the menu and the suspended row. Suspend asks first when a
 session on that host is working, its status is unknown or stale, or activity cannot be checked completely. Immediate
