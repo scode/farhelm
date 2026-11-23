@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run the opt-in real-agent drift cases, one recorded case at a time."""
+"""Upgrade the installed agent CLIs, then run the opt-in real-agent drift cases, one recorded case at a time."""
 
 from __future__ import annotations
 
@@ -15,6 +15,7 @@ import tempfile
 from typing import NamedTuple
 
 from agent_screen_host import OUTER_SESSION_MARKERS
+import harness_upgrades
 
 ROOT = Path(__file__).resolve().parents[1]
 CASE_PATTERN = re.compile(r"real_agent_capture::drift::drift_([a-z][a-z0-9_-]*): test")
@@ -170,28 +171,68 @@ def recorded_case(binary: Path, test: str, name: str, env: dict[str, str]) -> Re
                 raise SystemExit(128 + interrupted)
 
 
-def summarize(results: dict[str, Result], explicit: bool) -> int:
-    """Group verdicts while keeping unknown coverage separate from success."""
-    print(f"{'Verdict':<14}  {'Harness':<13}  Detail")
+def prepare(names: list[str], env: dict[str, str], upgrade: bool) -> dict[str, harness_upgrades.Upgrade]:
+    """Upgrade (or only probe) each selected harness before any case runs, so every case tests the latest release.
+
+    A drift case with no recipe is reported as a failed upgrade rather than silently tested on whatever is installed:
+    adding a harness to the suite means deciding how it gets upgraded too.
+    """
+    upgrades = {}
+    for name in names:
+        recipe = harness_upgrades.RECIPES.get(name)
+        if recipe is None:
+            result = harness_upgrades.Upgrade("failed", "unknown", "unknown", "no recipe in scripts/harness_upgrades.py")
+        elif upgrade:
+            result = harness_upgrades.upgrade(recipe, env)
+        else:
+            result = harness_upgrades.probe(recipe, env)
+        upgrades[name] = result
+        print(harness_upgrades.describe(name, result), flush=True)
+    return upgrades
+
+
+def summarize(results: dict[str, Result], explicit: bool, upgrades: dict[str, harness_upgrades.Upgrade]) -> int:
+    """Group verdicts while keeping unknown coverage separate from success.
+
+    Each line names the version the case ran against, since a verdict is only meaningful for that version. A failed
+    upgrade fails the run even when its case passed: the pass is real, but for a release users no longer get.
+    """
+    print(f"{'Verdict':<14}  {'Harness':<13}  {'Version':<34}  Detail")
     for verdict, title in LABELS.items():
         for name, result in results.items():
             if result.verdict == verdict:
                 detail = result.detail.splitlines()[0]
                 evidence = f"  ({result.evidence})" if result.evidence is not None else ""
-                print(f"{title:<14}  {name:<13}  {detail}{evidence}")
-    return int(any(
+                tested = upgrades[name].after if name in upgrades else "unknown"
+                print(f"{title:<14}  {name:<13}  {tested:<34}  {detail}{evidence}")
+    stale = [name for name, result in upgrades.items() if result.status == "failed"]
+    if stale:
+        print(f"UPGRADE FAILED for {', '.join(stale)}: those cases ran against the version that was already installed")
+    return int(bool(stale) or any(
         result.verdict == "failed" or (explicit and result.verdict == "could_not_run")
         for result in results.values()
     ))
 
 
 def main(argv: list[str] | None = None) -> int:
-    """Build and list once, then keep going after each individual verdict."""
+    """Build and list once, upgrade the selected harnesses, then keep going after each individual verdict."""
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--harness", action="append", default=[], metavar="NAME")
     parser.add_argument("--list", action="store_true", help="build and list the ignored cases without launching agents")
+    modes = parser.add_mutually_exclusive_group()
+    modes.add_argument(
+        "--no-upgrade", action="store_true", help="test the installed versions, e.g. to reproduce a failure on them",
+    )
+    modes.add_argument("--upgrade-only", action="store_true", help="upgrade the selected harnesses and run no case")
     options = parser.parse_args(argv)
     env = child_environment(dict(os.environ))
+    if options.upgrade_only:
+        # Upgrading needs no test binary, so skip the build and select from the recipes instead of discovered cases.
+        unknown = sorted(set(options.harness) - harness_upgrades.RECIPES.keys())
+        if unknown:
+            parser.error(f"unknown harness: {', '.join(unknown)} (choose from {', '.join(harness_upgrades.RECIPES)})")
+        upgrades = prepare(list(dict.fromkeys(options.harness or harness_upgrades.RECIPES)), env, upgrade=True)
+        return int(any(result.status == "failed" for result in upgrades.values()))
     try:
         binary = build_binary(env)
         cases = discover(binary, env)
@@ -204,13 +245,15 @@ def main(argv: list[str] | None = None) -> int:
     if options.list:
         print("\n".join(cases))
         return 0
+    selected = list(dict.fromkeys(options.harness or cases))
+    upgrades = prepare(selected, env, upgrade=not options.no_upgrade)
     results = {}
-    for name in dict.fromkeys(options.harness or cases):
+    for name in selected:
         try:
             results[name] = recorded_case(binary, cases[name], name, env)
         except OSError as error:
             results[name] = Result("failed", str(error))
-    return summarize(results, bool(options.harness))
+    return summarize(results, bool(options.harness), upgrades)
 
 
 if __name__ == "__main__":

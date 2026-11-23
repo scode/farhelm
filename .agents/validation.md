@@ -1163,14 +1163,16 @@ systemd or SSH substrate ran.
   directory until stop is confirmed. Run it when the scrubber or its host backend changes. Seconds, no network or vendor
   turns. The recorded agent screen fixtures selection independently checks the Rust guard.
 - `python3 -B scripts/test-run-harness-drift.py` — the drift runner's build discovery, child environment, per-case
-  timeout, verdicts and evidence retention against stand-ins. Run it when the runner changes. Seconds and zero vendor
-  turns. The non-ignored e2e tests in `real_agent_capture::drift::tests` check whole-line recall, fresh accepted hook
-  evidence and matching resume arguments without starting a vendor CLI.
+  timeout, verdicts and evidence retention against stand-ins, and its upgrade step (`scripts/harness_upgrades.py`): a
+  recipe for every drift case's binary, versions around each updater, stdin closed, the fallback installer only after a
+  failed updater, and a failed upgrade failing the run. Run it when the runner or the upgrade recipes change. Seconds
+  and zero vendor turns. The non-ignored e2e tests in `real_agent_capture::drift::tests` check whole-line recall, fresh
+  accepted hook evidence and matching resume arguments without starting a vendor CLI.
 - `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks of installed agent launch flags, conversation
-  reports and Restart. Tracked agents spend two real vendor turns to check recall across Restart and verify a fresh
-  accepted hook report. The runner records each case and reports PASSED, COULD NOT RUN or FAILED. See
-  `docs/harness-drift-tests.md` for credentials and hook prerequisites. The ignored cases stay out of default nextest,
-  deflake, CI and release gates.
+  reports and Restart. It first upgrades each selected agent CLI to its vendor's latest release (`--no-upgrade` skips
+  that). Tracked agents spend two real vendor turns to check recall across Restart and verify a fresh accepted hook
+  report. The runner records each case and reports PASSED, COULD NOT RUN or FAILED. See `docs/harness-drift-tests.md`
+  for credentials and hook prerequisites. The ignored cases stay out of default nextest, deflake, CI and release gates.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.
