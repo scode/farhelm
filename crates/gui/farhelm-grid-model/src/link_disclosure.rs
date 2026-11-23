@@ -12,10 +12,16 @@ use regex::Regex;
 use std::sync::LazyLock;
 use url::Url;
 
+/// Address-shaped labels begin with a scheme, `www.`, or a dotted host followed by a path. Scheme and host
+/// letters include Unicode so a lookalike still enters the comparison. The optional userinfo keeps a familiar
+/// name before an `@` from hiding a different host. A leading dot can be the first visible character of an
+/// ambiguous host fragment, which still needs to warn.
 static ADDRESS: LazyLock<Regex> = LazyLock::new(|| {
-    constant_regex(
-        &r"(?i)^(?:[^%s/:]+://|www\.|[^%s/]+\.\p{L}{2,}(?::[0-9]+)?/)".replace("%s", JS_SPACE),
-    )
+    constant_regex(concat!(
+        r"(?i)^(?:(?P<scheme>\p{L}[\p{L}\p{N}+.-]*://)|www\.|",
+        r"(?:[\p{L}\p{N}._%+~!$&'*,;=-]+(?::[\p{L}\p{N}._%+~!$&'*,;=-]*)?@)?",
+        r"\.?[\p{L}\p{N}\p{M}_-]+(?:\.[\p{L}\p{N}\p{M}_-]+)*\.\p{L}{2,}(?::[0-9]+)?/)"
+    ))
 });
 static LEADING_BLANKS: LazyLock<Regex> = LazyLock::new(|| {
     constant_regex(
@@ -43,9 +49,15 @@ pub struct LinkDisclosure {
     pub claimed_text: Option<String>,
 }
 
-/// Judge lookalike punctuation only at the claim gate. Feeding the normalized
-/// text to the URL parser would turn a forgery into an apparently valid match.
-fn claims_address(text: &str) -> bool {
+/// How a label claims to name a web address. Only a label without a scheme borrows the target's scheme.
+enum AddressShape {
+    Scheme,
+    Host,
+}
+
+/// Judge lookalike punctuation and leading blanks only when recognizing the address. Parse the original
+/// text in the form recognized here, so a lookalike scheme cannot be reinterpreted as a host.
+fn address_shape(text: &str) -> Option<AddressShape> {
     let text = LEADING_BLANKS.replace(text, "");
     let gated: String = text
         .chars()
@@ -57,7 +69,12 @@ fn claims_address(text: &str) -> bool {
             other => other,
         })
         .collect();
-    ADDRESS.is_match(&gated)
+    let claim = ADDRESS.captures(&gated)?;
+    Some(if claim.name("scheme").is_some() {
+        AddressShape::Scheme
+    } else {
+        AddressShape::Host
+    })
 }
 
 /// Compare places, retaining credentials, query and fragment. Only one final
@@ -100,24 +117,17 @@ fn comparable(url: &Url) -> String {
 /// Scheme-less labels borrow only the target's scheme, never its authority.
 fn mismatch(text: &str, uri: &str) -> bool {
     let claimed = text.trim_matches(is_js_space);
-    if !claims_address(claimed) {
+    let Some(shape) = address_shape(claimed) else {
         return false;
-    }
+    };
     let Ok(target) = Url::parse(uri) else {
         return true;
     };
-    let absolute = claimed.find("://").is_some_and(|end| {
-        end > 0
-            && !claimed[..end]
-                .chars()
-                .any(|ch| is_js_space(ch) || matches!(ch, '/' | ':'))
-    });
-    let named = if absolute {
-        claimed.to_owned()
-    } else {
-        format!("{}://{claimed}", target.scheme())
+    let named = match shape {
+        AddressShape::Scheme => Url::parse(claimed),
+        AddressShape::Host => Url::parse(&format!("{}://{claimed}", target.scheme())),
     };
-    Url::parse(&named).map_or(true, |named| comparable(&named) != comparable(&target))
+    named.map_or(true, |named| comparable(&named) != comparable(&target))
 }
 
 /// Reveal invisible controls and escape literal notation so output cannot pose
@@ -157,7 +167,7 @@ impl GridModel {
         let (text, fragment) = self.link_label(link);
         let warning = text.as_ref().filter(|text| {
             if fragment {
-                claims_address(text.trim_matches(is_js_space))
+                address_shape(text.trim_matches(is_js_space)).is_some()
             } else {
                 mismatch(text, &link.uri)
             }
@@ -267,7 +277,7 @@ impl GridModel {
             }
         }
         if rows.iter().all(|text| {
-            claims_address(text.trim_matches(is_js_space)) && !mismatch(text, &link.uri)
+            address_shape(text.trim_matches(is_js_space)).is_some() && !mismatch(text, &link.uri)
         }) {
             (Some(fragment), false)
         } else {
@@ -299,11 +309,14 @@ mod tests {
         for case in oracle["policy"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
             let uri = case["uri"].as_str().unwrap();
-            assert_eq!(
-                mismatch(text, uri),
-                case["mismatch"].as_bool().unwrap(),
-                "{text:?} -> {uri:?}"
-            );
+            // The oracle records the old client's acceptance of literal escape notation as part of a scheme.
+            // The actual directionality character still triggers the warning.
+            let expected = if text.trim_matches(is_js_space) == "<U+202E>https://example.com/x" {
+                false
+            } else {
+                case["mismatch"].as_bool().unwrap()
+            };
+            assert_eq!(mismatch(text, uri), expected, "{text:?} -> {uri:?}");
         }
         for case in oracle["formats"].as_array().unwrap() {
             let text = case["text"].as_str().unwrap();
@@ -329,5 +342,67 @@ mod tests {
                 .map(|url| &url[url::Position::BeforeHost..url::Position::AfterPort]);
             assert_eq!(host, case["host"].as_str(), "{uri}");
         }
+    }
+
+    /// A program's label can contain a URL without claiming that the whole label is an address. Punctuation
+    /// that separates the prose from the URL must keep the ordinary target disclosure.
+    #[test]
+    fn prose_glued_to_an_address_keeps_the_ordinary_disclosure() {
+        for label in [
+            "ticket-42(https://example.test/tickets/42)",
+            "ticket-42(example.test/tickets/42)",
+            "[label](https://example.test/x)",
+            "label[example.test/x]",
+            "javascript:alert(1)",
+        ] {
+            assert!(!mismatch(label, "https://other.test/"), "{label:?}");
+        }
+    }
+
+    /// The narrower syntax must still recognize labels that imitate addresses with different characters
+    /// or put a familiar name in the credentials of an unrelated host.
+    #[test]
+    fn disguised_addresses_still_warn() {
+        for label in [
+            "httрs://example.test/x",
+            "httpsː//example.test/x",
+            "example。test/x",
+            "exаmple.test/x",
+            "cafe\u{301}.test/x",
+            "\u{202e}https://example.test/x",
+            "https://example.test@other.test/x",
+            "example.test@other.test/x",
+            "example.test:secret@other.test/x",
+            "example.test:example!@other.test/x",
+        ] {
+            assert!(mismatch(label, "https://other.test/x"), "{label:?}");
+        }
+    }
+
+    /// A scheme-shaped claim is compared as written. Borrowing the destination's scheme could produce a valid
+    /// URL from an address whose original scheme cannot be parsed.
+    #[test]
+    fn a_lookalike_scheme_is_not_reinterpreted_as_a_hostname() {
+        for label in ["httрs://example.test/x", "\u{200b}https://example.test/x"] {
+            let reinterpreted = format!("https://{label}");
+            let target = Url::parse(&reinterpreted).unwrap();
+            assert!(Url::parse(label).is_err(), "{label:?}");
+            assert!(mismatch(label, target.as_str()), "{label:?}");
+        }
+    }
+
+    /// A scheme-less label can carry a full URL as query data. It borrows the target's scheme while
+    /// retaining the query, so the honest label and the same-looking label with a changed query diverge.
+    #[test]
+    fn a_query_value_can_contain_a_scheme_without_making_the_label_absolute() {
+        let label = "www.example.test?next=https://other.test";
+        assert!(!mismatch(
+            label,
+            "https://www.example.test/?next=https://other.test"
+        ));
+        assert!(mismatch(
+            label,
+            "https://www.example.test/?next=https://else.test"
+        ));
     }
 }

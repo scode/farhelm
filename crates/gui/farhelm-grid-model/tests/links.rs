@@ -39,6 +39,40 @@ fn ascii(text: &str, wraps: bool, link: Option<usize>) -> Value {
     json!({"w":wraps,"r":[run]})
 }
 
+/// Disclosure reads both pieces of a wrapped program hyperlink. A wrapped label can put an address immediately
+/// after its own text, and still receives an ordinary target disclosure. A wrapped address alone still warns.
+#[test]
+fn a_wrapped_program_label_can_contain_an_address_without_claiming_it() {
+    let target = "https://other.test/";
+    let columns = 20;
+    for (label, warns) in [
+        ("ticket-42(https://example.test/x)", false),
+        ("ticket-42(example.test/tickets/42)", false),
+        ("https://example.test/tickets/42", true),
+    ] {
+        let (first, last) = label.split_at(usize::from(columns));
+        let model = model(
+            columns,
+            vec![ascii(first, true, Some(0)), ascii(last, false, Some(0))],
+            vec![json!(["example", target])],
+        );
+        let start = model.link_at(Position { line: 0, col: 0 }).unwrap();
+        let end = model.link_at(Position { line: 1, col: 0 }).unwrap();
+        assert_eq!(start.label, first);
+        assert_eq!(end.label, last);
+        assert_eq!(start.kind, end.kind, "both rows share the explicit tag");
+        for link in [start, end] {
+            let disclosure = model.link_disclosure(&link).unwrap();
+            assert_eq!(disclosure.host, "other.test");
+            assert_eq!(
+                disclosure.claimed_text.as_deref(),
+                warns.then_some(label),
+                "{label}"
+            );
+        }
+    }
+}
+
 /// A URL can continue over soft wraps; underlining follows cell ranges, while
 /// evidence includes the neighboring boundary whose edit could extend it.
 #[test]
