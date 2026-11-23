@@ -916,6 +916,7 @@ pub struct App {
     missing_glyph_callback: Rc<MissingGlyphCallbackSlot>,
     pub(crate) thermal_state_observers: SingleSubscriberSet<Handler>,
     pub(crate) display_observers: SingleSubscriberSet<DisplayHandler>,
+    reduce_motion_observers: SingleSubscriberSet<Handler>,
     /// The connected displays, as of the platform's last display change
     /// notification.
     displays: HashMap<DisplayId, DisplayState>,
@@ -1067,6 +1068,7 @@ impl App {
                 missing_glyph_callback: Rc::default(),
                 thermal_state_observers: SingleSubscriberSet::new(),
                 display_observers: SingleSubscriberSet::new(),
+                reduce_motion_observers: SingleSubscriberSet::new(),
                 displays: read_displays(platform.as_ref()),
                 system_sleep_observers: SingleSubscriberSet::new(),
                 system_wake_observers: SingleSubscriberSet::new(),
@@ -1409,11 +1411,25 @@ impl App {
         self.reduce_motion
     }
 
+    /// Observe changes to the app's motion preference while the subscription is held.
+    /// The callback can read the new value and stop or resume animation work before the next redraw.
+    /// Use [`App::defer`] if a callback needs to change the preference again, so every observer can read this change
+    /// before the next one is published.
+    pub fn observe_reduce_motion(&self, mut callback: impl FnMut(&mut App) + 'static) -> Subscription {
+        self.reduce_motion_observers.insert(Box::new(move |cx| {
+            callback(cx);
+            true
+        }))
+    }
+
     /// Sets whether non-essential animations (e.g. loading spinners) should be
     /// rendered in a static state instead of animating.
     pub fn set_reduce_motion(&mut self, reduce_motion: bool) {
         if self.reduce_motion != reduce_motion {
             self.reduce_motion = reduce_motion;
+            self.reduce_motion_observers
+                .clone()
+                .retain(|callback| callback(self));
             self.refresh_windows();
         }
     }

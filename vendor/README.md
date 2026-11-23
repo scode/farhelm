@@ -1310,23 +1310,24 @@ crates; every one of them declares Apache-2.0, which was checked on 2026-11-13.
 
 Here's what each layer changes and why, in application order. Sizes are `git apply --numstat` added / removed lines.
 
-| Layer                   | Trees (added / removed)                                                             | Why                                                        |
-| ----------------------- | ----------------------------------------------------------------------------------- | ---------------------------------------------------------- |
-| `bridge`                | gpui-pre 480 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101, gpui-agent 22 / 1 | Hooks the automation bridge reads; window screenshots      |
-| `capture-alpha`         | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces          |
-| `gpui-agent`            | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees       |
-| `native-key`            | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events |
-| `attachment-clipboard`  | gpui-pre-linux 406 / 2, gpui-pre-macos 92 / 0                                       | Files, images, then text for async paste                   |
-| `activation-token`      | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token      |
-| `frame-source`          | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
-| `no-kde-blur`           | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
-| `wayland-drop-position` | gpui-pre-linux 57 / 21                                                              | Keep motion while Wayland reads the drag's file list       |
-| `modified-notices`      | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                       |
-| `hitbox-occlusion`      | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel        |
-| `mixed-font-ellipsis`   | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line     |
-| `zoomed-open`           | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear           |
+| Layer                    | Trees (added / removed)                                                             | Why                                                         |
+| ------------------------ | ----------------------------------------------------------------------------------- | ----------------------------------------------------------- |
+| `bridge`                 | gpui-pre 480 / 4, gpui-pre-linux 30 / 1, gpui-pre-wgpu 147 / 101, gpui-agent 22 / 1 | Hooks the automation bridge reads; window screenshots       |
+| `capture-alpha`          | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces           |
+| `gpui-agent`             | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees        |
+| `native-key`             | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events  |
+| `attachment-clipboard`   | gpui-pre-linux 406 / 2, gpui-pre-macos 92 / 0                                       | Files, images, then text for async paste                    |
+| `activation-token`       | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token       |
+| `frame-source`           | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later   |
+| `no-kde-blur`            | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate      |
+| `wayland-drop-position`  | gpui-pre-linux 57 / 21                                                              | Keep motion while Wayland reads the drag's file list        |
+| `modified-notices`       | gpui-pre 12, gpui-pre-linux 8, gpui-pre-wgpu 1, gpui-pre-macos 4, gpui-agent 7      | The license's change notices (above)                        |
+| `hitbox-occlusion`       | gpui-pre 125 / 0                                                                    | Check whether mouse-blocking hitboxes cover a panel         |
+| `mixed-font-ellipsis`    | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line      |
+| `zoomed-open`            | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear            |
+| `reduce-motion-observer` | gpui-pre 54 / 0                                                                     | Notify animation drivers when the motion preference changes |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,925 added and 233 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,979 added and 233 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1408,6 +1409,9 @@ included.
 - **zoomed-open.** A Mac window restored maximized used to appear at its ordinary size before AppKit zoomed it. GPUI now
   gives AppKit the ordinary frame and zooms the window before showing it. AppKit saves that frame as the destination for
   the next Zoom, which puts the window back where it was before it was maximized.
+- **reduce-motion-observer.** GPUI redraws when its motion preference changes. Farhelm also needs to pause or resume its
+  animation driver when the setting changes in an open window. `App::observe_reduce_motion` reports the new value before
+  the next redraw. The `reduce_motion` test covers changes in both directions, repeated values and unsubscribe.
 
 Two Linux hunks are carried but not compiled: the bridge's capture hook in `src/linux/x11/window.rs` and native-key's
 event conversion in `src/linux/x11/client.rs`. The workspace builds `gpui-pre-platform` without its `x11` feature, so
@@ -1460,6 +1464,7 @@ git apply --directory=vendor/gpui-pre patches/gpui/hitbox-occlusion/gpui-pre-0.3
 git apply --directory=vendor/gpui-pre patches/gpui/mixed-font-ellipsis/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre patches/gpui/zoomed-open/gpui-pre-0.3.12.patch
 git apply --directory=vendor/gpui-pre-macos patches/gpui/zoomed-open/gpui-pre-macos-0.3.12.patch
+git apply --directory=vendor/gpui-pre patches/gpui/reduce-motion-observer/gpui-pre-0.3.12.patch
 ```
 
 - Remove `vendor/gpui-agent/docs/`, `vendor/gpui-agent/scripts/`, `vendor/gpui-agent/patches/` and
@@ -1499,11 +1504,11 @@ require newer versions: the `icu_*` crates from 2.3 to 2.4, with `tinystr`, `yok
 
 ### Running their tests
 
-The native-key, bridge and hitbox-occlusion tests of the core, outside the workspace like the terminal crates' tests
-(minutes, since it builds GPUI on its own; `.agents/validation.md` has the recorded form):
+The native-key, bridge, hitbox-occlusion and motion preference tests of the core, outside the workspace like the
+terminal crates' tests (minutes, since it builds GPUI on its own; `.agents/validation.md` has the recorded form):
 
 ```sh
-cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record --test hitbox_occlusion
+cargo test --locked --manifest-path vendor/gpui-pre/Cargo.toml --features test-support --test native_key_metadata --test driver_record --test hitbox_occlusion --test reduce_motion
 ```
 
 ### Staying out of the workspace's checks

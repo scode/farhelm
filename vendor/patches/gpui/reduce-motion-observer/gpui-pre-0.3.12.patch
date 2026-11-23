@@ -1,0 +1,101 @@
+diff --git a/Cargo.toml b/Cargo.toml
+index 62ce0b478..aa2711c4f 100644
+--- a/Cargo.toml
++++ b/Cargo.toml
+@@ -291,6 +291,11 @@ name = "hitbox_occlusion"
+ path = "tests/hitbox_occlusion.rs"
+ required-features = ["test-support"]
+ 
++[[test]]
++name = "reduce_motion"
++path = "tests/reduce_motion.rs"
++required-features = ["test-support"]
++
+ [dependencies.accesskit]
+ version = "0.24.0"
+ features = ["enumn"]
+diff --git a/src/app.rs b/src/app.rs
+index ff922d087..3a6582651 100644
+--- a/src/app.rs
++++ b/src/app.rs
+@@ -916,6 +916,7 @@ pub struct App {
+     missing_glyph_callback: Rc<MissingGlyphCallbackSlot>,
+     pub(crate) thermal_state_observers: SingleSubscriberSet<Handler>,
+     pub(crate) display_observers: SingleSubscriberSet<DisplayHandler>,
++    reduce_motion_observers: SingleSubscriberSet<Handler>,
+     /// The connected displays, as of the platform's last display change
+     /// notification.
+     displays: HashMap<DisplayId, DisplayState>,
+@@ -1067,6 +1068,7 @@ impl App {
+                 missing_glyph_callback: Rc::default(),
+                 thermal_state_observers: SingleSubscriberSet::new(),
+                 display_observers: SingleSubscriberSet::new(),
++                reduce_motion_observers: SingleSubscriberSet::new(),
+                 displays: read_displays(platform.as_ref()),
+                 system_sleep_observers: SingleSubscriberSet::new(),
+                 system_wake_observers: SingleSubscriberSet::new(),
+@@ -1409,11 +1411,25 @@ impl App {
+         self.reduce_motion
+     }
+ 
++    /// Observe changes to the app's motion preference while the subscription is held.
++    /// The callback can read the new value and stop or resume animation work before the next redraw.
++    /// Use [`App::defer`] if a callback needs to change the preference again, so every observer can read this change
++    /// before the next one is published.
++    pub fn observe_reduce_motion(&self, mut callback: impl FnMut(&mut App) + 'static) -> Subscription {
++        self.reduce_motion_observers.insert(Box::new(move |cx| {
++            callback(cx);
++            true
++        }))
++    }
++
+     /// Sets whether non-essential animations (e.g. loading spinners) should be
+     /// rendered in a static state instead of animating.
+     pub fn set_reduce_motion(&mut self, reduce_motion: bool) {
+         if self.reduce_motion != reduce_motion {
+             self.reduce_motion = reduce_motion;
++            self.reduce_motion_observers
++                .clone()
++                .retain(|callback| callback(self));
+             self.refresh_windows();
+         }
+     }
+diff --git a/tests/reduce_motion.rs b/tests/reduce_motion.rs
+new file mode 100644
+index 000000000..dec20028e
+--- /dev/null
++++ b/tests/reduce_motion.rs
+@@ -0,0 +1,33 @@
++// Modified for Farhelm: changed or added by the patch layers in vendor/patches/gpui/ (vendor/README.md, "GPUI").
++
++use std::{cell::RefCell, rc::Rc};
++
++use gpui::TestAppContext;
++
++/// An animation driver must see the new preference before the setter returns, including when motion resumes.
++/// Reapplying the same platform value should not start or interrupt work, and the guard owns the callback's lifetime.
++#[gpui::test]
++fn reduce_motion_observer_reports_changes_until_dropped(cx: &mut TestAppContext) {
++    let observed = Rc::new(RefCell::new(Vec::new()));
++    let subscription = cx.update(|cx| {
++        cx.set_reduce_motion(false);
++        assert!(!cx.reduce_motion());
++        let observed = observed.clone();
++        cx.observe_reduce_motion(move |cx| observed.borrow_mut().push(cx.reduce_motion()))
++    });
++    assert!(observed.borrow().is_empty());
++
++    cx.update(|cx| {
++        cx.set_reduce_motion(false);
++        assert!(observed.borrow().is_empty());
++        cx.set_reduce_motion(true);
++        assert_eq!(observed.borrow().as_slice(), &[true]);
++        cx.set_reduce_motion(true);
++        cx.set_reduce_motion(false);
++        assert_eq!(observed.borrow().as_slice(), &[true, false]);
++    });
++
++    drop(subscription);
++    cx.update(|cx| cx.set_reduce_motion(true));
++    assert_eq!(observed.borrow().as_slice(), &[true, false]);
++}
