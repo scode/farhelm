@@ -113,8 +113,8 @@ on those hosts does not start a snapshot build. Old package recipes keep their b
 Under **Agents**, choose **API endpoint** for Claude Code, Codex, or both, then set a base URL and choose a named
 endpoint token. Create the token in Settings → **Credentials** first; **None** in the token picker uses the endpoint
 without a token. A base URL can point at a [tunnel](#tunnels-to-your-side), such as `http://127.0.0.1:8080`. Farhelm
-delivers these when it sets up each host, for every base, and before it connects. Recipe changes reach existing hosts at
-their next connection or setup. Updating Farhelm on a host does not independently reapply them.
+sends the credentials to each host when it is added or connects, for every base. Recipe changes reach existing hosts at
+their next connection or setup.
 
 Replacing a token in Credentials keeps its name, so you do not need to edit the recipes that use it. Changing a base URL
 keeps the selected token name. A credential cannot be deleted while a recipe uses it; choose **None** or another name in
@@ -140,14 +140,19 @@ take precedence over the recipe, and Claude would then send the recipe's token t
 image. Choose **None** to use credentials already set up on the host. Claude may show its own first-run setup when you
 open it on a new host.
 
+For Codex **API endpoint**, Farhelm supplies the endpoint whenever it starts or resumes a Codex session. Use **Restart**
+to pick up a replacement in a running session. Typing `codex` in a terminal tab uses that shell's usual Codex settings.
+On upgrade, Farhelm removes the old provider selection and bearer it had written to Codex's settings on hosts where it
+recorded that delivery. If your base image already sets a token on the `farhelm` provider, Codex can send it to the
+recipe's URL even when the recipe's token picker says **None**. To use the image's own configuration, choose **None** as
+the Codex mode.
+
 For a ChatGPT login, choose Codex **Subscription** and select the login you saved in Credentials. Farhelm writes it to
 the host's usual `~/.codex/auth.json` and leaves Codex's refreshed file alone until you replace that saved login. Recipe
 selection changes take effect at the next connection or setup; replacing the saved login sends it to hosts already using
 it, with the same delivery warnings as endpoint tokens.
 
-Codex **None** and **Subscription** clear Farhelm's API-provider selection and bearer token, keeping your other
-settings. Switching away from Subscription leaves `auth.json` on the host. Sign out in Codex on that host to remove it;
-choosing None in the recipe does not sign you out.
+Switching away from **Subscription** leaves `auth.json` on the host. Sign out in Codex on that host to remove it.
 
 ### Tunnels to your side
 

@@ -6008,38 +6008,46 @@ across independent SQLite connections. Saving a recipe checks metadata alone. De
 `token_credential`.
 
 Schema 77 adds nullable `hosts.tensorlake_credential_delivery`. The provisioning delivery component alone reads and
-writes this nonsecret JSON. It records the known absolute home and separate stamps for the Claude launch environment,
-legacy Claude cleanup, Codex config, Codex auth and GitHub token. Endpoint stamps include the URL and the token name,
-revision and creation UUID if selected. A Claude subscription uses its name, revision and creation UUID. Each successful
-file's stamp commits before the next file is attempted. Unknown slots retry. The revision and value come from the same
-credential read, and the record and connection's active recipe selection carry metadata only.
+writes this nonsecret JSON. It records the known absolute home, separate legacy cleanup and launch-environment stamps
+for Claude and Codex, plus stamps for Codex auth and the GitHub token. Endpoint stamps include the URL and the token
+name, revision and creation UUID if selected. A Claude subscription uses its name, revision and creation UUID. Each
+successful file's stamp commits before the next file is attempted. Unknown slots retry. The revision and value come from
+the same credential read, and the record and connection's active recipe selection carry metadata only.
 
 Recipes persist optional `claude_login_credential` and `codex_login_credential` names, each mutually exclusive with that
 agent's optional endpoint. Neither present means None. The endpoint and login drafts stay separate in the editor; only
-the selected mode is saved. Delivery resolves concrete slots in order: Claude legacy settings cleanup and launch
-environment, Codex config, Codex auth, then GitHub. Each name is resolved at its own slot so a later missing retained
-selection cannot withhold an earlier successful replacement. Codex auth goes through the private stdin uploader into the
-ordinary `.codex/auth.json`, only when the selected name/revision/creation UUID differs from the last successful auth
-write. Its stamp commits before GitHub and is retained across Endpoint/None. Neither a reconnect nor a later-slot
-failure can cause an unchanged seed to overwrite Codex's refreshed file. Delivery never reads auth.json, tests no remote
-ownership marker and creates no separate agent home or retry task. Remote-success with a lost response or a process
-crash before the local stamp remains ambiguous; this is not exactly-once installation.
+the selected mode is saved. Delivery reconciles the combined launch environment, then Codex auth, then GitHub. Each name
+is resolved at its own slot so a later missing retained selection cannot withhold an earlier successful replacement.
+Codex auth goes through the private stdin uploader into the ordinary `.codex/auth.json`, only when the selected
+name/revision/creation UUID differs from the last successful auth write. Its stamp commits before GitHub and is retained
+across Endpoint/None. Neither a reconnect nor a later-slot failure can cause an unchanged seed to overwrite Codex's
+refreshed file. Delivery never reads auth.json, tests no remote ownership marker and creates no separate agent home or
+retry task. Remote-success with a lost response or a process crash before the local stamp remains ambiguous; this is not
+exactly-once installation.
 
-The Claude slot uses the private stdin uploader to replace a 0600 `agent-credentials` file in the supervisor's state
-directory. It contains a JSON `env` map bounded to 1 MiB. Endpoint mode supplies `ANTHROPIC_BASE_URL` and
-`ANTHROPIC_AUTH_TOKEN` (empty for a tokenless endpoint), while Subscription supplies `CLAUDE_CODE_OAUTH_TOKEN`. None
-removes the owned file. The supervisor reads one snapshot into `ChildSpec.env` per host-terminal agent or tab spawn,
-with Restart using the agent path. An absent file leaves the composed environment alone. A malformed file refuses the
-spawn with fixed diagnostics. The delivery sends values only to the child via the host's stdin and keeps them out of
-`LaunchSpec`, launch records, logs and host argv and environment.
+The private stdin uploader atomically replaces one mode-0600 `agent-credentials` file in the supervisor's state
+directory. The JSON is bounded to 1 MiB. Claude API endpoint supplies `ANTHROPIC_BASE_URL` and `ANTHROPIC_AUTH_TOKEN`
+(empty for a tokenless endpoint), while Claude Subscription supplies `CLAUDE_CODE_OAUTH_TOKEN`. Codex API endpoint
+supplies `codex_endpoint` (the base URL and whether the bearer is present) and, if selected, the bearer in the `env` map
+as `FARHELM_CODEX_ENDPOINT_TOKEN`. The helm sends the extended file only after a compatible supervisor connects
+(protocol 87). Setup can still write the old Claude-only format until that connection and leaves a previously delivered
+combined file for the connected delivery path. An empty snapshot unlinks the owned file.
 
-Before publishing the launch environment, the helm clears the three Claude keys from `~/.claude/settings.json` if the
-legacy stamp was Endpoint, Subscription or Absent. Otherwise an old settings URL can take precedence over the delivered
-URL and receive the new token. A host with no legacy stamp records Cleared directly, preserving its image settings. A
-failed settings merge keeps the legacy stamp for retry, withholds the new environment, and leaves Codex and GitHub
-delivery eligible to finish. It appears in the host's warning and in the result of a replacement for a credential the
-host's Claude selection uses. A successful cleanup commits Cleared before the upload, so an upload retry keeps
-subsequent settings edits.
+The supervisor reads one snapshot per host-terminal agent or tab spawn, with Restart using the agent path. Only the
+Codex endpoint descriptor reaches launch composition. Codex Start and Resume select the `farhelm` provider in `-c`
+overrides even when session hooks are disabled. The provider uses `env_key` only when the bearer is present. A missing
+snapshot leaves the composed environment as it was. A malformed file refuses the spawn with fixed diagnostics. The host
+receives credential values through stdin for `ChildSpec.env`. `LaunchSpec` contains only the nonsecret provider
+arguments, and launch records, logs, host argv and host environment carry no bearer.
+
+Before publishing the snapshot, a legacy stamp authorizes clearing the old Farhelm keys for that agent. For Codex, only
+an Endpoint stamp records a settings write. An old Absent stamp leaves settings alone. An old Claude settings URL can
+otherwise take precedence and receive the new token. An old Codex settings bearer can survive a provider override that
+omits a bearer. A host with no legacy stamp records Cleared directly, preserving its image settings. A failed cleanup
+keeps that stamp for retry and withholds that agent's entry. The other agent and GitHub can still finish. The host
+warning names the affected agent, and credential replacement reports the warning when that agent's selection uses the
+replaced name. A successful cleanup commits Cleared before the snapshot upload, so an upload retry preserves subsequent
+settings edits.
 
 Recipes persist optional `github_token_credential` names. The GitHub slot atomically installs 0600 bytes through stdin
 at `github_token::host_file(remote_state_dir)`, the shared `github-token` basename, or unlinks only that file for None.
@@ -6546,10 +6554,11 @@ refusal clears them with the pending marker. An interrupted create recovers its 
 prepared record. Later Rerun and Update retain ordinary installation, and the supervisor's hello remains the authority
 for observed host version and identity. The API's Running state can precede gateway readiness. Setup waits for SSH with
 the ordinary bounded transport retry, without starting logind or modifying the clone, before admitting paths or
-delivering credentials. This wait belongs to the admission portion of the debug spawn timings. Credentials are delivered
-with the saved home before the actor's hold is released, and the ordinary fresh-window attachment wait establishes the
-connection. A pending ordinary create that appears between lookups retains ordinary inspection/install recovery rather
-than assuming it used the newly selected prepared snapshot.
+delivering credentials. This wait belongs to the admission portion of the debug spawn timings. Setup uses the saved home
+for credential delivery before releasing the actor's hold. The fresh-window attachment wait establishes the connection,
+and the connected delivery step reconciles the combined launch file after the supervisor's compatible hello. A pending
+ordinary create that appears between lookups retains ordinary inspection/install recovery rather than assuming it used
+the newly selected prepared snapshot.
 
 The free probe omits **Prepare snapshot** when the local prepared record is fresh. Execution rechecks and inserts that
 step if preparation became necessary, retaining completed common steps. Its first-time/24-hour/update explanation is
@@ -6573,30 +6582,24 @@ transaction, before writing coordinates or identity, so a probe or plan started 
 adopt copied state later. The Tensorlake executor instead uses an explicit admission write after its copied-state check;
 that write records both coordinates together and imports no discovered identity.
 
-Codex settings delivery and the one-time Claude legacy cleanup read settings up to 1 MiB. The helm merges them and
-streams the result through backend stdin into a mode-0600 atomic install. The legacy Claude cleanup requires JSON and
-any existing `env` to be objects. Missing or already clean files settle the cleanup as well. Farhelm leaves onboarding
-and first-run metadata to Claude, so its own setup can appear once on a fresh host. `toml_edit` preserves Codex's root
-settings and other providers while replacing its entire `model_providers.farhelm`. Codex None and Subscription remove
-only a `farhelm` model_provider selection and that table's experimental_bearer_token, retaining its table, unrelated
-keys and comments. Setup always includes credential configuration because cleanup can do work even without selected
-credentials; the copied-state check and install-coordinate admission still precede it. Parse/read failures omit contents
-and parser details so tokens cannot enter progress. The shared delivery component writes at Add, connection and
-credential replacement; Update does not independently reapply settings. Failures become warnings and do not abort
-supervisor installation or connection. The shared SSH uploader sets `umask 077` before creating its temporary, so even
-an existing mode-0755 agent directory cannot expose tokens during upload or after interruption. Its finishing command
-applies the requested final mode. Before replacing agent settings it compares the destination with the bytes read (or
-expected absence); a mismatch re-reads and merges once, then warns without recording delivery if it conflicts again,
-leaving the latest file for the next connection's retry. A save that lands between that final comparison and the
-replacement can still be overwritten, because the two are separate steps on the host; closing that gap would need a lock
-the agents themselves honor, so it is accepted.
+The one-time legacy cleanup reads settings up to 1 MiB and streams the merged result through backend stdin into a
+mode-0600 atomic install. Claude's cleanup requires JSON and any existing `env` to be objects. Farhelm leaves onboarding
+and first-run metadata to Claude. For Codex, `toml_edit` removes only a `farhelm` selection in `model_provider` and the
+provider's `experimental_bearer_token`, preserving the table, unrelated keys and comments. Missing or already clean
+files settle the cleanup as well. The copied-state check and install-coordinate admission precede credential delivery.
+Codex cleanup happens after a compatible connection, including in None and Subscription modes. Parse and read failures
+omit contents and parser details so tokens stay out of progress. Delivery converges at Add, connection and credential
+replacement. Update relies on reconnection to apply recipe changes. Failures are nonfatal warnings. The shared SSH
+uploader sets `umask 077` before creating its temporary, so even an existing mode-0755 agent directory cannot expose
+tokens during upload or after interruption. Its finishing command applies the requested final mode. Before replacing
+agent settings it compares the destination with the bytes read (or expected absence); a mismatch re-reads and merges
+once, then warns without recording delivery if it conflicts again, leaving the latest file for the next connection's
+retry. A save that lands between that final comparison and the replacement can still be overwritten, because the two are
+separate steps on the host; closing that gap would need a lock the agents themselves honor, so it is accepted.
 
-This credential cleanup is best effort beyond SPEC.md's undefined result for credentials already present when Farhelm
-supplies an agent's credentials. It does not establish support for mixing credential owners. In Codex API endpoint mode,
-the entire Farhelm provider table is emptied before its keys are written, dropping `env_key`, header settings and other
-leftovers. Comments outside that table remain intact. Claude's one-time cleanup preserves settings beyond the three
-legacy keys, including custom headers and helpers. A gateway needing extra headers belongs under None, with the image
-providing its complete credentials.
+The credential ownership rule in SPEC.md applies to image and user settings. A bearer in an unstamped Codex config stays
+under the image or user's ownership. Custom headers and helpers also remain in place. A gateway needing extra headers
+belongs under None, with the image providing its complete credentials.
 
 The add dialog embeds the full recipe editor with deletion disabled and a `DialogCloseGuard` for Escape and Close. It
 selects the editor outside its own body wrapper: the editor supplies a body and `DialogFooter` as direct siblings of the
