@@ -19,8 +19,13 @@ prints. No Ghostty implementation is copied.
 
 The Inter regular and semibold TrueType files in `crates/gui/farhelm-gui/assets/fonts/`, which the GPUI desktop app
 bundles, are decompressed byte for byte (`woff2_decompress`) from the website's vendored Inter WOFF2 files in
-`website/public/fonts/`. Copyright 2016 The Inter Project Authors ([`rsms/inter`](https://github.com/rsms/inter)). They
-are licensed under the SIL Open Font License, Version 1.1; the complete notice is `OFL-Inter.txt` beside them.
+`website/public/fonts/`. `Inter-Medium.ttf` is copied from `extras/ttf/Inter-Medium.ttf` in the upstream Inter 4.1
+[`Inter-4.1.zip`](https://github.com/rsms/inter/releases/download/v4.1/Inter-4.1.zip) archive (SHA-256
+`9883fdd4a49d4fb66bd8177ba6625ef9a64aa45899767dde3d36aa425756b11e`). The Medium file's SHA-256 is
+`97ad806f526e41546d46365bb3a393145f75b7b1568913db74549ad8b8dba872`.
+
+Copyright 2016 The Inter Project Authors ([`rsms/inter`](https://github.com/rsms/inter)). The SIL Open Font License,
+Version 1.1, covers all three faces. The complete notice is `OFL-Inter.txt` beside them.
 
 ## JetBrains Mono terminal font
 
