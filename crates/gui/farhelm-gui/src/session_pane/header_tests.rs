@@ -581,13 +581,14 @@ fn only_the_headers_copy_of_a_wait_line_is_announced(cx: &mut TestAppContext) {
 /// work. While it runs, the header says so on the button, and the session's other actions wait. Specified: on a running
 /// session with one tab, the header's Stop asks "Stop the agent and close 1 terminal tab?" with the title quoted and
 /// focus on Confirm stop; Confirm sends the Stop with tabs shown and a live agent; while it is unanswered, the Stop
-/// button reads "Stopping…" and Replace opens nothing; once answered, Stop reads "Stop" again.
+/// button reads "Stopping…" at the same width and Replace opens nothing. Once answered, Stop reads "Stop" again.
 #[gpui::test]
 fn the_headers_stop_asks_the_rows_question_and_says_stopping_while_it_runs(
     cx: &mut TestAppContext,
 ) {
     let (mut fake, cx) = open_main(cx, snapshot_of(vec![entry(&session("a"), 1)], false));
     pending(&mut fake);
+    let rest_width = drawn_node(&frame(cx), Action::Stop).bounds.size.width;
     test_support::click(cx, "session-header-stop");
     assert!(
         texts(cx)
@@ -608,6 +609,11 @@ fn the_headers_stop_asks_the_rows_question_and_says_stopping_while_it_runs(
     assert_eq!(
         label_of(cx, "session-header-stop").as_deref(),
         Some("Stopping…")
+    );
+    assert_eq!(
+        drawn_node(&frame(cx), Action::Stop).bounds.size.width,
+        rest_width,
+        "a pending Stop can replace its icon and label without moving the toolbar"
     );
     test_support::click(cx, "session-header-replace");
     assert!(!any_layer(cx), "Replace waits while the Stop runs");
@@ -2580,11 +2586,13 @@ fn long_host() -> String {
 /// session, once the terminal lists one tunnel to a very long host name, every action, both carets, the text size group
 /// and the environment's control are drawn once each, whole, inside the pane, on one line, each but the readout
 /// tracking a focus handle so Tab reaches it; the pill is drawn whole, no narrower than its floor and ending left of
-/// the actions; the tab strip is narrower than 112 pixels and ends the row's 6-pixel gap left of the pill, which is
-/// exactly its 154-pixel floor wide, so the strip has all the room the pill's floor leaves; Stop is narrower than it
-/// was before the pill showed, by more than its side padding (the condensed look); three more frames draw Stop and the
-/// pill in the same place, so the look does not flip between frames; and the same row widened to 1400 pixels draws
-/// Stop as wide as before the pill showed, and narrowed to 650 again draws it condensed as before, so a condensed look
+/// the actions. At 650 pixels without a pill the actions and a scrollable strip also fit. With the pill, the tab strip
+/// is narrower than 112 pixels and ends left of the pill by the same gap as the pill and actions. That clearance can
+/// shrink from 6 to 2 pixels so the strip has room to reveal more than a sliver of a tab. The pill stays exactly its
+/// 154-pixel floor wide, so the strip has all the room the pill's floor leaves; Stop is narrower than it
+/// was at 1400 pixels by more than its side padding (the condensed look). Three more frames draw Stop and the
+/// pill in the same place, so the look does not flip between frames. The same row widened to 1400 pixels draws
+/// Stop at its ordinary width, and narrowed to 650 again draws it condensed as before, so a condensed look
 /// neither sticks nor fails to come back.
 #[test]
 fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
@@ -2595,7 +2603,7 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
         ("remote", remote_session(), false),
         ("environment", environment_session(), true),
     ] {
-        let mut pane = RealPane::open(650., snapshot);
+        let mut pane = RealPane::open(1400., snapshot);
         let before = pane.draw();
         assert!(
             !before
@@ -2604,6 +2612,18 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
             "the premise: no pill before the tunnel read is answered ({name})"
         );
         let ordinary_stop = only_node(&before, Action::Stop.id()).bounds;
+        assert_eq!(
+            ordinary_stop.size.height,
+            px(26.),
+            "the ordinary toolbar is drawn"
+        );
+        pane.resize(650.);
+        let without_pill = pane.draw();
+        assert_whole_on_one_line(&without_pill);
+        assert!(
+            only_node(&without_pill, STRIP_ID).bounds.size.width > px(0.),
+            "the scrollable strip has room without a pill ({name})"
+        );
         pane.open_tunnel(&long_host());
         let nodes = pane.draw();
         assert_whole_on_one_line(&nodes);
@@ -2639,16 +2659,19 @@ fn a_pill_at_650_pixels_condenses_the_actions_beside_it() {
         );
         // The strip's floor beside the pill: neither row has room for all 112 pixels of it beside the pill at its
         // floor and the condensed actions, so it gives way, but only that far: the strip has every pixel the pill's
-        // floor leaves, the pill no more than its floor, with the row's 6-pixel gap between them (the module docs of
+        // floor leaves, the pill no more than its floor, with the row's measured gap between them (the module docs of
         // `header/fit.rs`).
         let strip = only_node(&nodes, STRIP_ID).bounds;
         assert!(
             strip.size.width < px(STRIP_FLOOR_BESIDE_PILL),
             "the premise: the strip gives up part of its floor ({name}): {strip:?}"
         );
+        let before_pill = pill.left() - strip.right();
+        let after_pill = first.left() - pill.right();
         assert!(
             pill.size.width == px(154.)
-                && strip.origin.x + strip.size.width + px(6.) == pill.origin.x,
+                && (px(2.)..=px(6.)).contains(&before_pill)
+                && (before_pill - after_pill).abs() <= px(1.),
             "the strip takes all the room the pill's floor leaves ({name}): strip {strip:?}, pill {pill:?}"
         );
         let stop = only_node(&nodes, Action::Stop.id()).bounds;
@@ -2778,9 +2801,9 @@ fn a_count_pill_at_650_pixels_keeps_its_whole_width() {
 /// 650-pixel pane, for a container environment's session with one shell tab, once the terminal lists one tunnel to a
 /// very long host name, the strip is narrower than its Agent tab alone; the Agent tab, the shell tab, its × and New
 /// terminal are each drawn once and track a focus handle; pressing Tab from where focus starts reaches each of them
-/// within 40 presses; and each of them, once focused, is scrolled into the strip far enough that part of it is visible.
-/// The × is the case that needs its own rule: it sits at the end of an item wider than the strip, whose start is what
-/// scrolling to the item would show (`TerminalSet::reveal_focused`).
+/// within 40 presses. Each focused control reveals a recognizable portion, including the centered marks on × and New
+/// terminal. The × sits at the end of an item wider than the strip, whose start is what scrolling to the item would
+/// show (`TerminalSet::reveal_focused`).
 #[test]
 fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
     use crate::terminal::set::{ADD_ID, AGENT_TAB_ID, STRIP_ID, close_element_id, tab_element_id};
@@ -2795,10 +2818,11 @@ fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
         strip.size.width < agent.size.width,
         "the premise: the strip is narrower than its Agent tab alone: strip {strip:?}, Agent {agent:?}"
     );
+    let close = close_element_id("t1");
     let controls = [
         AGENT_TAB_ID.to_owned(),
         tab_element_id("t1"),
-        close_element_id("t1"),
+        close.clone(),
         ADD_ID.to_owned(),
     ];
     for id in &controls {
@@ -2821,10 +2845,18 @@ fn a_narrowed_strip_keeps_its_tabs_reachable_at_650_pixels() {
         if controls.contains(&id) {
             let visible = focused.visible_bounds;
             assert!(
-                visible.size.width > px(0.) && visible.size.height > px(0.),
+                visible.size.width >= px(12.) && visible.size.height > px(0.),
                 "{id}, focused, is scrolled into view: visible {visible:?}, bounds {:?}, strip {strip:?}",
                 focused.bounds
             );
+            if id == close || id == ADD_ID {
+                let center = focused.bounds.center().x;
+                assert!(
+                    visible.left() < center && visible.right() > center,
+                    "{id} reveals the center of its mark: visible {visible:?}, bounds {:?}",
+                    focused.bounds
+                );
+            }
         }
         if controls.contains(&id) && !reached.contains(&id) {
             reached.push(id);
@@ -2920,8 +2952,9 @@ fn a_running_delete_in_a_narrow_pane_keeps_the_pill_whole_beside_many_tabs() {
 /// Resume, left of Stop, and whose pending states once widened that control until Delete was cut off (the review of
 /// 2026-11-16 measured Delete 52 of 72 pixels visible while suspending). Specified: in a 650-pixel pane with an idle
 /// session on a container host, the environment control, each of the five actions and both carets are drawn whole
-/// inside the pane on one line, and the control's width is the same, while the host is connected (Suspend), suspending,
-/// suspended (Resume) and resuming.
+/// inside the pane on one line while the host is connected (Suspend), suspending, suspended (Resume) and resuming.
+/// The condensed environment button keeps its 23-pixel height, vertically centered with the 21-pixel actions.
+/// Starting a request keeps the width of the control that started it.
 #[test]
 fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
     use super::header::ENVIRONMENT_ID;
@@ -3006,8 +3039,18 @@ fn an_environment_sessions_actions_stay_whole_in_a_650_pixel_pane() {
             control.visible_bounds
         );
         assert_eq!(
-            bounds.origin.y, stop.origin.y,
-            "on the actions' line ({name})"
+            bounds.center().y,
+            stop.center().y,
+            "centered on the actions' line ({name})"
+        );
+        let expected_height = if stop.size.height == px(21.) {
+            px(23.)
+        } else {
+            px(26.)
+        };
+        assert_eq!(
+            bounds.size.height, expected_height,
+            "the environment control keeps its layout's height ({name})"
         );
         widths.push((name, bounds.size.width));
     }
@@ -3349,21 +3392,24 @@ fn a_reset_forgets_an_unanswered_text_size_step(cx: &mut TestAppContext) {
 /// The text size group sits in the header's row of buttons, and a group taller than its neighbors reads as a different
 /// control: the port's first group was 30 pixels against the buttons' 23, and the old app's was shorter than its
 /// buttons, which the maintainer counted as a bug too (decided on 2026-11-16 that it matches them). The group's height
-/// comes from `Button::compact_height`, so this also checks that figure against the buttons it describes.
+/// comes from `Button::toolbar_height`, so this also checks that figure against the drawn buttons.
 ///
-/// Spec: in a 1400-pixel pane for a remote session with no tunnel pill (the header's ordinary look), and in a 650-pixel
-/// pane once that session's terminal lists one tunnel to a very long host name (the condensed look), Stop is drawn at
-/// `Button::compact_height` for its look (ordinary, or `Condensed::Words` when condensed, 2 pixels shorter), and the
-/// text size group's outer box has Stop's top and bottom, so it is exactly as tall as Stop and level with it.
+/// Spec: in a 1400-pixel pane for a remote session with no tunnel pill, the toolbar uses 26-pixel buttons. A long
+/// tunnel mapping in a 650-pixel pane brings Stop down to 21 pixels. The text size group's cells line up with Stop
+/// in both rows, with a one-pixel gap on each side of the readout.
 #[test]
 fn the_text_size_group_is_as_tall_as_the_header_buttons_in_both_looks() {
-    use crate::components::{Button, Condensed};
+    use crate::components::Condensed;
     use crate::terminal::text_size::{GROUP_ID, LARGER_ID, READOUT_ID, SMALLER_ID};
     let check = |look: &str, nodes: &[gpui::DriverNode], condensed: Option<Condensed>| {
         let stop = only_node(nodes, Action::Stop.id()).bounds;
         assert_eq!(
             stop.size.height,
-            Button::compact_height(condensed),
+            if condensed.is_some() {
+                px(21.)
+            } else {
+                px(26.)
+            },
             "the premise: Stop is drawn in the {look} look"
         );
         let group = only_node(nodes, GROUP_ID).bounds;

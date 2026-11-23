@@ -3415,36 +3415,36 @@ whatever the agent renders is what you see. There is no composer, no message abs
   (zoom out, size in points, zoom in), Stop, Restart ▾, Replace ▾, Clone and Delete on the right, followed by the
   terminal and a slim details bar below it. Restart and Replace are split buttons: the main part performs the ordinary
   action, including its existing confirmation; the caret opens a menu offering that action and Restart with… or Replace
-  with…. The icon-and-label controls keep their compact height. Text size, Stop, both parts of each split button, Clone,
-  Delete and the tunnel pill remain fully visible and keyboard reachable from a 650px main pane; only the tab strip
-  takes the remaining width and scrolls horizontally when needed. Narrower panes may clip the row, which never wraps.
-  The bottom bar is about one tab-strip row high and shows, in order, status, session name, host, age, the
-  managed-checkout branch mark when present, directory, and command line. The host's icon follows the session list's
-  rules; its name is the full display name, prominent beside the session name. A missing host name omits the host rather
-  than inventing one. Directory display still abbreviates the home directory to `~`. Keyboard order follows the top row,
-  terminal, then bottom bar. The terminal loses no height in the steady state. Conditional notices stay between the top
-  row and terminal; a stale session's status appears only in its stale notice, not again in the bottom bar. Restart and
-  its menu's matching entries are greyed out when the session cannot resume its conversation (see Lifecycle operations);
-  their tooltips and accessible descriptions explain the specific reason, such as an agent type without conversation
-  reporting, a command launch that declared no agent type or did not opt into Resume, or a conversation not captured
-  yet. For an agent that reports conversations, a running session's explanation says, naming the agent, when Restart
-  normally becomes available for it (Codex, for instance, once the first prompt is submitted), and an ended session's
-  says its conversation was never captured; both invite the user to send feedback if that is not what happened, since
-  Farhelm cannot tell a report still to come from one that never will. The supervisor's refusal of such a restart and
-  the agent instructions state the same timing, without the invitation. Directory and command line are muted
-  click-to-copy buttons that take the width their values need and ellipsize before the session name or host when the bar
-  runs out of room; a click confirms locally for about 1.5 seconds. A hidden-characters copy warning opens upward from
-  the bar and stays within the window. Clipboard writes use the system clipboard and fail silently. Replace has its own
-  anchored danger confirmation and neutral cancellation. Delete is styled as the danger action and asks first in the
-  same anchored way, even for a session that has ended, with the same consequence text the row's delete prompt shows.
-  Restart's confirmation is likewise anchored under its top-row button; Escape cancels these questions and returns focus
-  to the terminal. The session-confirmation setting skips the top row's Stop, Delete, Replace and Restart questions, the
-  interrupted-card Replace question, and tab Close, using the screen's consent and existing guards. Split menus follow
-  the app's shared keyboard rules: mouse or pen movement focuses the hovered choice without scrolling, arrows and
-  Home/End move between choices, and only the focused enabled choice has the highlight fill. Leaving the menu keeps that
-  focus; Escape or Tab closes the menu and returns focus to its caret. Cancelling Restart with returns to that
-  persistent caret. An unavailable plain Restart does not hide an independently available Restart with; the menu remains
-  available to inspect reasons.
+  with…. The ordinary buttons are 26 pixels high. The row uses condensed controls when it runs short of width. Text
+  size, Stop, both parts of each split button, Clone, Delete and the tunnel pill remain fully visible and keyboard
+  reachable from a 650px main pane; only the tab strip takes the remaining width and scrolls horizontally when needed.
+  Narrower panes may clip the row, which never wraps. The bottom bar is about one tab-strip row high and shows, in
+  order, status, session name, host, age, the managed-checkout branch mark when present, directory, and command line.
+  The host's icon follows the session list's rules; its name is the full display name, prominent beside the session
+  name. A missing host name omits the host rather than inventing one. Directory display still abbreviates the home
+  directory to `~`. Keyboard order follows the top row, terminal, then bottom bar. The terminal loses no height in the
+  steady state. Conditional notices stay between the top row and terminal; a stale session's status appears only in its
+  stale notice, not again in the bottom bar. Restart and its menu's matching entries are greyed out when the session
+  cannot resume its conversation (see Lifecycle operations); their tooltips and accessible descriptions explain the
+  specific reason, such as an agent type without conversation reporting, a command launch that declared no agent type or
+  did not opt into Resume, or a conversation not captured yet. For an agent that reports conversations, a running
+  session's explanation says, naming the agent, when Restart normally becomes available for it (Codex, for instance,
+  once the first prompt is submitted), and an ended session's says its conversation was never captured; both invite the
+  user to send feedback if that is not what happened, since Farhelm cannot tell a report still to come from one that
+  never will. The supervisor's refusal of such a restart and the agent instructions state the same timing, without the
+  invitation. Directory and command line are muted click-to-copy buttons that take the width their values need and
+  ellipsize before the session name or host when the bar runs out of room; a click confirms locally for about 1.5
+  seconds. A hidden-characters copy warning opens upward from the bar and stays within the window. Clipboard writes use
+  the system clipboard and fail silently. Replace has its own anchored danger confirmation and neutral cancellation.
+  Delete is styled as the danger action and asks first in the same anchored way, even for a session that has ended, with
+  the same consequence text the row's delete prompt shows. Restart's confirmation is likewise anchored under its top-row
+  button; Escape cancels these questions and returns focus to the terminal. The session-confirmation setting skips the
+  top row's Stop, Delete, Replace and Restart questions, the interrupted-card Replace question, and tab Close, using the
+  screen's consent and existing guards. Split menus follow the app's shared keyboard rules: mouse or pen movement
+  focuses the hovered choice without scrolling, arrows and Home/End move between choices, and only the focused enabled
+  choice has the highlight fill. Leaving the menu keeps that focus; Escape or Tab closes the menu and returns focus to
+  its caret. Cancelling Restart with returns to that persistent caret. An unavailable plain Restart does not hide an
+  independently available Restart with; the menu remains available to inspect reasons.
 - Old terminals: releases from before terminal hosts ran each terminal (the agent's and each tab's) in the host's
   private tmux server instead, and later ones kept those old terminals running beside terminal hosts, with a loud band
   on such a session and the old-terminal warning (see Status) asking the user to move them. A supervisor that finds that

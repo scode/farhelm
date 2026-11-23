@@ -234,8 +234,8 @@ linux/session-list-groups--dark.png c5d7fde5c01e65c99761fee8a4db5b6920bf146a
 linux/session-list-groups--light.png e1d6c1fd03232e02f1c48c5f2d9fde1d6b94e0af
 linux/session-list-guarded-replace--dark.png 0e9cc2b1633ac96c68c8befffc167193e13ef83e
 linux/session-list-guarded-replace--light.png 61dd83e9d76dbb257ed0d15a0011e84bbab92684
-linux/session-list-marked--dark.png 93e02ca58aba57db5da1567a1fd105522c4eb32c
-linux/session-list-marked--light.png a152094e5561d579187569b572b08eb142b776ed
+linux/session-list-marked--dark.png 1b6026ba95a4f49b5e3925af0959d4d8aeaf5021
+linux/session-list-marked--light.png 7d414a116c11e0cc941f15d7d96b109bf56451b2
 linux/session-list-pinned--dark.png b73188f398550d11d715cee387aeef1c6ea47326
 linux/session-list-pinned--light.png f3c9f7a1976041eb4bf7373008195e003e9351bc
 linux/session-list-selected-stale--dark.png a8d42dae028bff07d67d12493dbb16556bc5b39d
@@ -252,8 +252,8 @@ linux/session-status-segments--dark.png 0aeb8c7ab680f49604fde27b933d90227cc17594
 linux/session-status-segments--light.png 89c7374a57a5010ff3c886455dbad9ea114d73a8
 linux/session-summary-card--dark.png 1bcf3315eb88476c4e437da8206608cccdee16ea
 linux/session-summary-card--light.png 0af125cd4857c81edca0d1b682c17f774be7ae65
-linux/session-toolbar--dark.png 5e3ed25f76147eeac4e871470c57342b7eb83fa2
-linux/session-toolbar--light.png 50efc1d50cde5ca9424b613a55760b14017457cc
+linux/session-toolbar--dark.png 6c237995638e03323621c06d71e8f6f31d7b7910
+linux/session-toolbar--light.png 78f390e57487a89c653e628de187b6feb1bc70fe
 linux/session-unavailable--dark.png ba64050bbb898c59c774674689fc7580ccaff939
 linux/session-unavailable--light.png 3ebce7b976276b40383b0f646202cc14e70b18d2
 linux/settings-antigravity--dark.png 90d2f2cc7921966572e005191b8e0b3b1f02034d
@@ -340,8 +340,8 @@ linux/ssh-sign-in-needed--dark.png fd425ef8bd9ab3fbd400aaea33d944832fce5f43
 linux/ssh-sign-in-needed--light.png 653958ea0915a5b9f3ea1d39c8a1beed0035daea
 linux/ssh-sign-in-notice--dark.png d557d94efedec9a22a493e79c6b160ad436d9daf
 linux/ssh-sign-in-notice--light.png 449e06d65b857ee6db536630a33057cf87a480bd
-linux/stop-and-suspend-outcomes--dark.png b715b4d9b218d9f18821c02aaa19c083b4aeba47
-linux/stop-and-suspend-outcomes--light.png 0f79499a81e72fe0b6d517eff38485ef7c03d68c
+linux/stop-and-suspend-outcomes--dark.png 4aa9f2df43be02e451a52bd80414751b8c107d0e
+linux/stop-and-suspend-outcomes--light.png a608bd107c01795e94676b1b7665eba7e57089ac
 linux/stop-while-launching-confirmation--dark.png 1567c5cb31dd09c568c666d49f579bb3acab3318
 linux/stop-while-launching-confirmation--light.png 46fbf0459709457fa7b795b320e016be5b7761c7
 linux/switch--dark.png 7b2651bfe584447fd4daea73e59508a1dac0cd54

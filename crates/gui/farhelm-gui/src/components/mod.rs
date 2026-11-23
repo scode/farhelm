@@ -67,7 +67,9 @@ mod transition;
 mod tests;
 
 pub use banner::Banner;
-pub(crate) use button::{BUTTON_JOIN_GAP, JoinSide, TEMPLATE_ROW_VERTICAL_INSET};
+pub(crate) use button::{
+    BUTTON_JOIN_GAP, JoinSide, TEMPLATE_ROW_VERTICAL_INSET, TOOLBAR_ACTION_GAP, TOOLBAR_TEXT,
+};
 pub use button::{Button, CONDENSED_GAP, Condensed, IconButton, SplitPart, Tier};
 pub use checkbox::Checkbox;
 pub use command_well::{COMMAND_TEXT, CommandWell};
