@@ -4090,28 +4090,29 @@ its parent's capture. Plain Restart needs both a recorded conversation and a sav
 keeps the old capture until a report from the new launch replaces it, and clears it in the relaunch when the new launch
 has reporting disabled.
 
-Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
-terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.
-Resident launchers and other processes above it are accepted. If a recorded Codex ancestor later reports a verified
-conversation, Farhelm corrects the pin and resume target to that ancestor and posts a notification once per launch,
-explaining what a Restart before correction would have resumed. An ancestor's source-less `Stop` can make this
-correction too; an unverified record changes nothing, and a not-yet-resumable ancestor `Stop` is acknowledged without
-effect. A dead pin is released for a new Codex whose ancestry does not include the pinned process, after considering
-ancestor correction; a descendant whose report still contains the pinned process stays refused even after that process
-exits. The pin survives a supervisor restart but clears on every relaunch and is not restored by an aborted relaunch.
-Farhelm also verifies the exact reported transcript's root-session metadata; process ancestry alone cannot distinguish
-threads sharing a process. The durable locator keeps runtime session identity separate from persistent thread identity,
-and resume uses the latter. Custom Codex homes work through the exact reported path; Farhelm does not search another
-home or choose a newer file. A legitimate reported `/clear` switches the current identity even when its transcript is
-not yet persisted: the old conversation stops being offered, and only the new conversation's exact file may make it
-resumable. A later attributed `Stop` for that same runtime confirms a pending clear once the file exists; unless it is
-correcting a pin from a recorded ancestor, it cannot select another conversation or recheck an already resumable
-binding. Selection and confirmation both survive a supervisor outage and are applied in that order. Codex sessions
-launched before this subscription was added must be relaunched before conversations begun with `/clear` can become
-resumable. An unrelated rejected report leaves the foreground identity untouched. Compaction preserves the conversation,
-and a verified new conversation replaces it. Unverifiable historical bare IDs remain stored but are not offered as exact
-resume targets. Missing or changed transcript evidence refuses Resume rather than silently launching fresh or selecting
-a different historical conversation.
+Codex's first admitted selecting report pins the process that ran the hook under the session's agent terminal, skipping
+narrow shell trampolines. Renamed Codex executables and resident launchers above the emitter work with this rule. Later
+selection from a descendant leaves the pinned process's conversation in place. A shell or a nested Codex can report
+first if the session has no pin. If a recorded ancestor later reports a verified conversation, Farhelm corrects the pin
+and resume target to that ancestor and posts a notification once per launch, explaining what a Restart before correction
+would have resumed. An ancestor's source-less `Stop` can make this correction too; an unverified record changes nothing,
+and a not-yet-resumable ancestor `Stop` is acknowledged without effect. A dead pin is released for a new Codex whose
+ancestry does not include the pinned process, after considering ancestor correction; a descendant whose report still
+contains the pinned process stays refused even after that process exits. The pin survives a supervisor restart but
+clears on every relaunch and is not restored by an aborted relaunch. Farhelm also verifies the exact reported
+transcript's root-session metadata; process ancestry alone cannot distinguish threads sharing a process. The durable
+locator keeps runtime session identity separate from persistent thread identity, and resume uses the latter. Custom
+Codex homes work through the exact reported path; Farhelm does not search another home or choose a newer file. A
+legitimate reported `/clear` switches the current identity even when its transcript is not yet persisted: the old
+conversation stops being offered, and only the new conversation's exact file may make it resumable. A later attributed
+`Stop` for that same runtime confirms a pending clear once the file exists; unless it is correcting a pin from a
+recorded ancestor, it cannot select another conversation or recheck an already resumable binding. Selection and
+confirmation both survive a supervisor outage and are applied in that order. Codex sessions launched before this
+subscription was added must be relaunched before conversations begun with `/clear` can become resumable. An unrelated
+rejected report leaves the foreground identity untouched. Compaction preserves the conversation, and a verified new
+conversation replaces it. Unverifiable historical bare IDs remain stored but are not offered as exact resume targets.
+Missing or changed transcript evidence refuses Resume rather than silently launching fresh or selecting a different
+historical conversation.
 
 Agent files on an execution host are trusted host state. Farhelm reads them only when a decision needs information the
 report does not provide: report admission, confirmation of a pending conversation, or Restart's exact-target check. For

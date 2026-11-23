@@ -15572,9 +15572,8 @@ impl Supervisor {
     /// restart's whole-process-tree sweep before the replacement runs.
     /// Every report arrives with the hook's recorded process chain already
     /// anchored at the session's current pane process, which ties it to the
-    /// current launch (`report_files`). Codex attributes the innermost native
-    /// emitter and applies its durable launch pin. Grok uses the first non-trampoline
-    /// process, verifies its `--no-leader` option and applies the same pin rules.
+    /// current launch (`report_files`). Codex and Grok attribute the first non-trampoline
+    /// process and apply its durable launch pin. Grok also verifies its `--no-leader` option.
     /// OMP verifies its launched runtime. Claude attributes the first non-trampoline
     /// process and applies its pin without recognizing an executable or reading a transcript.
     ///

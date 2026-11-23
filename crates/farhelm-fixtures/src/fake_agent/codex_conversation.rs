@@ -234,21 +234,12 @@ fn nested_from_root(
     Ok(())
 }
 
-/// Perform one nested hook report from a SHELL descendant: the reporter's
-/// parent is a live shell, not a Codex runtime, so the corridor must
-/// refuse it as an unclassified intermediary — even when every other
-/// part of the report is valid. The shell inherits the launch credential
-/// by normal process inheritance, exactly like a vendor shell-escape
-/// would.
+/// Run a valid hook from a live shell below the foreground Codex fixture.
 ///
-/// Why a shell descendant matters separately from a native one: the
-/// native child is refused by the admitted process pin; the shell child
-/// carries no second runtime, pinning that the corridor classifies the
-/// intermediaries themselves rather than either proof carrying the whole
-/// boundary. Both cases below are valid in every respect EXCEPT
-/// ancestry — matching envelope, plausible runtime, SessionStart, and
-/// (for persisted) a real record whose metadata is asserted before the
-/// report — so a refusal can only come from the corridor.
+/// The shell inherits the launch credential and runs the hook directly.
+/// This supplies a different emitter while the foreground stays alive. A
+/// valid record or a pending clear can then exercise the pin's authority
+/// independently of transcript verification.
 fn nested_shell_from_root(
     root: &Path,
     hook_binary: &Path,
@@ -257,17 +248,15 @@ fn nested_shell_from_root(
 ) -> anyhow::Result<()> {
     let cwd = std::env::current_dir().context("reading nested shell fixture cwd")?;
     let (conversation, source, transcript) = if persisted {
-        // A real record for the shell's own runtime: verification would
-        // succeed, so only the corridor stands between this report and a
-        // rival binding. Its metadata is asserted before anything acts.
+        // Verify the shell's own record before it reports so a pinned launch
+        // can exercise process authority with otherwise valid evidence.
         let conversation = create(root, &cwd)?;
         assert_root_record(&conversation)?;
         let path = conversation.path.clone();
         (conversation, "startup", Some(path))
     } else {
-        // No transcript at all, reported as a clear: the strongest weapon
-        // a descendant holds, since a foreground clear may establish a
-        // pending binding. Refusal here is the corridor doing its job.
+        // A clear can establish a pending binding without a transcript.
+        // The shell exercises the existing pin even on that admission path.
         let conversation = ephemeral(root, &cwd)?;
         (conversation, "clear", None)
     };
@@ -386,11 +375,11 @@ fn run_shell_reporter(
         .find(|line| *line == "SHELL-REPORT-DONE:0")
         .context("the hook finished silently under its shell parent")?;
     for name in ["hook.out", "hook.err"] {
-        let bytes = std::fs::read(root.join(name))
-            .with_context(|| format!("reading refused hook {name}"))?;
+        let bytes =
+            std::fs::read(root.join(name)).with_context(|| format!("reading hook {name}"))?;
         ensure!(
             bytes.is_empty(),
-            "a refused hook stays silent on its own descriptors; {name} held {:?}",
+            "the hook wrote to {name}: {:?}",
             String::from_utf8_lossy(&bytes)
         );
     }
@@ -405,9 +394,9 @@ fn run_shell_reporter(
 /// shell is the process that parented the hook, not something observed
 /// later. The executable path is quoted with the installer's own quoting
 /// so paths with spaces or metacharacters stay one literal word; every
-/// other metacharacter in the string is live shell syntax, which is the
-/// point: the corridor must refuse it while the hook still runs (and so
-/// must exit silently, exactly like the script shape). The bare `echo`
+/// other metacharacter in the string is live shell syntax. The shell is
+/// therefore the emitter. The hook must exit silently, exactly like the
+/// script shape. The bare `echo`
 /// after the witness is load-bearing: `tr -d '[:space:]'` consumes the
 /// newline too, and without it the witness and the completion marker
 /// merge onto one line the parser cannot match. `hook_status=$?` runs

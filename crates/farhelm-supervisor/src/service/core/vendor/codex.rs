@@ -56,8 +56,8 @@ impl Supervisor {
             "the exact Codex transcript is missing or inconsistent; nothing was relaunched — refresh the session").into())
     }
 
-    /// Admit a verified record only for this launch's pinned Codex process.
-    /// First admission pins; a recorded Codex ancestor can correct a child-first
+    /// Admit a verified record from the process that ran the Codex hook.
+    /// First admission pins; a recorded ancestor can correct a child-first
     /// pin, while a dead pin releases for a fresh process outside its chain.
     /// The capture claim and durable CAS keep process authority and the exact
     /// conversation binding together across reports, reloads and relaunches.
@@ -127,8 +127,9 @@ impl Supervisor {
         // Attribution must precede Stop's confirmation-only returns: a recorded
         // ancestor's Stop is a selection of its own record, not an enrichment
         // of the child conversation we previously followed by mistake.
-        let attribution = crate::procs::codex_corridor(&chain)
-            .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
+        let attribution =
+            crate::procs::positional_corridor(&chain, crate::procs::PositionalReporter::BuiltIn)
+                .map_err(|reason| RequestError::new(ErrorKind::Conflict, reason))?;
         let stored_pin = self.store.report_pin(id).await.map_err(|_| {
             RequestError::new(
                 ErrorKind::Internal,
@@ -153,7 +154,7 @@ impl Supervisor {
             }
             return Err(RequestError::new(
                 ErrorKind::Conflict,
-                "a Codex process below or different from the pinned process cannot report for this launch",
+                "a process other than the pinned process cannot report a Codex conversation for this launch",
             ));
         }
         let correction = decision == PinDecision::Correct;
