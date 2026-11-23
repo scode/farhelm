@@ -5,7 +5,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `remove-own-setting-permission.md` — Remove "Agent's own setting" permission mode, treat unproven launches as YOLO, and offer guarded Replace
 - [in-flight 523946] `codex-recipe-credentials-at-launch.md` — Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
 - [complete] `stop-and-suspend-timeout-feedback.md` — Distinguish Stop and suspend's 20-second reply notice from supervisor timeouts in helm and desktop app
-- [in-flight 72b066] `tensorlake-leftovers-discovery-failure.md` — Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
+- [complete] `tensorlake-leftovers-discovery-failure.md` — Keep previously discovered Tensorlake leftovers visible alongside cleanup rows when discovery fails
 - [in-flight c56e98] `explain-stale-launcher-choices.md` — Show inline stale-choice warning and keep query when a New Session launcher choice disappears
 - [in-flight 235c83] `approval-card-program-wording.md` — Name the shell or main program accurately in Stop and Delete approval cards
 - [pending] `wayland-clipboard-file-paste.md` — Read text/uri-list local files in Wayland clipboard paste with same-offer fallback
