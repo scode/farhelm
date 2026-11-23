@@ -1254,8 +1254,8 @@ test-automation bridge that lets an agent drive the running app.
 These trees came from a private GPUI prototype of Farhelm, which built and measured them; the changes were ported, not
 re-derived. They are the prototype's trees minus its two measurement-only layers (per-draw CPU attribution and a
 frame-wake counter for one test), plus the change notices below, Farhelm's `frame-source`, `no-kde-blur`,
-`wayland-drop-position`, `hitbox-occlusion`, `mixed-font-ellipsis` and `zoomed-open` layers, and one addition to the
-bridge layer (an element's selected state).
+`wayland-drop-position`, `hitbox-occlusion`, `mixed-font-ellipsis`, `zoomed-open` and `reduce-motion-observer` layers,
+and one addition to the bridge layer (an element's selected state).
 
 ### What is here
 
@@ -1295,11 +1295,11 @@ The GPUI crates and gpui-agent are Apache-2.0 only; each tree keeps its license 
 `gpui-agent/LICENSE`). Apache-2.0 requires modified files to say so. The `modified-notices` layer puts a one-line
 `Modified for Farhelm` comment at the top of every file an earlier layer changed or added (32 files; the bridge's
 `gpui/Cargo.lock` is left without one, because cargo rewrites lockfiles), the same marker the terminal crates use, so
-one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test, and
-`mixed-font-ellipsis` the two files it changes. Unlike the terminal crates' patches, these layers do not mark each
-patched spot with a `Farhelm patch` comment: they were carried over from the prototype as they were, and the patch files
-themselves are the record of what changed. `THIRD_PARTY_NOTICES.md` has the entries, including one for the Lucide icons
-GPUI Kit bundles.
+one search finds every modified vendored file. The later `hitbox-occlusion` layer marks its own new test,
+`mixed-font-ellipsis` the two files it changes, and `reduce-motion-observer` its new test. Unlike the terminal crates'
+patches, these layers do not mark each patched spot with a `Farhelm patch` comment: they were carried over from the
+prototype as they were, and the patch files themselves are the record of what changed. `THIRD_PARTY_NOTICES.md` has the
+entries, including one for the Lucide icons GPUI Kit bundles.
 
 Zed's crates other than `gpui`, `gpui_macros`, `gpui_platform`, `gpui_util`, `gpui_tokio` and `scheduler` are treated as
 GPL unless checked; none of their code is here, and none may be copied in. The `gpui-pre-*` utility crates in this graph
@@ -1327,7 +1327,7 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `zoomed-open`            | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear            |
 | `reduce-motion-observer` | gpui-pre 54 / 0                                                                     | Notify animation drivers when the motion preference changes |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,979 added and 233 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 2,048 added and 233 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
