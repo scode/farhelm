@@ -2856,10 +2856,10 @@ it, and a hook older than its supervisor during an upgrade is the accepted gap t
 Protocol version 31 gives every terminal detach a code beside its reason. `ControlMsg::Detached` carries a `DetachCode`
 (`taken_over`, `stalled`, `tab_closed`, `replaced`, `other`), a non-displacing attach refused because another client
 holds the terminal is `ErrorKind::TakenOver` rather than a `Conflict` recognized by its message, and the helm forwards
-the code in the terminal stream's `detached` notice. Clients decide behavior from the code only (the desktop app's
-terminal attaches again after `replaced` or `taken_over` and stops on a stall or a closed tab) and show the reason as
-text, so reason wording is free to change. Before 31 the helm and the old browser app's `terminal.js` compared English
-sentences they each kept a copy of, and only that app's disabled browser suite would have noticed a rewording.
+the code in the terminal stream's `detached` notice. The desktop app attaches again after `replaced` or `taken_over` and
+stops on a stall or a closed tab. The reason is display text and its wording is free to change. Before 31 the helm and
+the old browser app's `terminal.js` compared English sentences they each kept a copy of, and only that app's disabled
+browser suite would have noticed a rewording.
 
 The helm also uses `tab_closed` for a tab attach refused as `NotFound`. That refusal describes current state, not a
 passing condition: the supervisor looks the tab up among its live tabs, and a session or host that cannot be found has
@@ -2870,6 +2870,18 @@ every listed tab, rebuilding a terminal each time. The desktop app's helm client
 list, as SPEC.md has a tab whose shell exits disappear silently; a tab the helm never attached shows the reason, or its
 pane would stay blank. The agent terminal's `NotFound` stays `other`: its reason is the supervisor's account of the
 session, such as a reboot and what restart would do.
+
+On the helm-to-desktop socket, a `detached` notice can also carry `tab_unavailable: true` with code `other`. Only an
+initial shell-tab attach refused as `Unavailable` in a supervisor reply earns the field. Unreachable hosts and lost
+connections omit it, so the desktop keeps retrying. An older helm can omit it and an older desktop ignores it. The field
+does not change the supervisor protocol. A marked detach waits for the user's Reconnect and shows the supervisor's
+reason.
+
+When restoring a remembered shell tab, the desktop falls back to the main terminal on that marked refusal or
+`tab_closed` before a successful attachment. The shell remains listed until the roster changes and the remembered choice
+survives the fallback. An explicit choice ends restoration. While a remembered tab is still attaching or automatically
+reconnecting, carried upload notices wait. They go to the terminal the desktop ends up showing. Leaving the session
+before restoration settles promotes pending interrupted uploads to the window's notices.
 
 ### TCP relay channels
 

@@ -392,6 +392,14 @@ pub struct StatusLine {
     pub offers_reconnect: bool,
 }
 
+/// What a remembered shell tab's first attach proved. Restore waits through a transient reconnect and falls back
+/// only on a definitive tab refusal before an attachment starts.
+pub(super) enum InitialTabAttach {
+    Pending,
+    Refused,
+    Settled,
+}
+
 /// How much of a terminal's own notices its owner holds back now ([`AttachedTerminal::hold_notices`]).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub enum Hold {
@@ -807,6 +815,29 @@ impl AttachedTerminal {
     /// this holds.
     pub fn is_live(&self) -> bool {
         self.live && self.fault.is_none() && !self.retired
+    }
+
+    /// A previous attachment settles restoration even if the set observes the stream after another state change.
+    /// A stopped stream with an unrelated error keeps its own visible explanation and can receive carried notices.
+    pub(super) fn initial_tab_attach(&self) -> InitialTabAttach {
+        if self.attachment.is_some() {
+            return InitialTabAttach::Settled;
+        }
+        match self.stream {
+            StreamState::Attaching | StreamState::Reconnecting(_) => InitialTabAttach::Pending,
+            StreamState::Detached {
+                code: Some(DetachCode::TabClosed),
+                ..
+            }
+            | StreamState::Detached {
+                tab_unavailable: true,
+                ..
+            } => InitialTabAttach::Refused,
+            StreamState::Attached(_)
+            | StreamState::Detached { .. }
+            | StreamState::Refused { .. }
+            | StreamState::Closed => InitialTabAttach::Settled,
+        }
     }
 
     /// The pane's focus handle, for the focus coordinator: the session view passes it to [`focus::choose_terminal`]

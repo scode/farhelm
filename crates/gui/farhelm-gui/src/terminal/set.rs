@@ -44,7 +44,8 @@
 //!
 //! - **The choice survives a new view.** Reopening a session or reconnecting to the helm shows the last shell tab the
 //!   user chose if that tab still has a terminal in the set. Choosing Agent clears the choice. Falling back to Agent
-//!   while a tab is unavailable leaves the choice intact, so a short tab list does not erase it.
+//!   while a tab is absent or its first attach is refused leaves the choice intact. A temporary reconnect keeps
+//!   trying the remembered tab.
 //!   Opening a session the sidebar filters hid can precede its first row. If the user is still waiting when that row
 //!   comes in, it supplies the initial tab list. The terminal shown after restoration receives upload notices left by
 //!   the old view.
@@ -70,7 +71,7 @@ use gpui::{
 mod tests;
 
 use super::CellMetrics;
-use super::attached::{AttachedTerminal, Hold, NoticeHold, TerminalTarget};
+use super::attached::{AttachedTerminal, Hold, InitialTabAttach, NoticeHold, TerminalTarget};
 use super::attachments::Carried;
 use super::tunnels::Tunnels;
 use crate::assets::Icon;
@@ -253,6 +254,8 @@ struct Tab {
     id: String,
     /// Its terminal, while it is among the first [`MAX_ATTACHED_TABS`].
     terminal: Option<Entity<AttachedTerminal>>,
+    /// Follows the terminal's attach outcome while this set can still be restoring the tab.
+    _attach: Option<Subscription>,
     /// Its button's focus handle in the strip, kept with the tab so focus stays on its button as tabs come and go.
     focus: FocusHandle,
     /// Its ×'s focus handle, kept with the tab for the same reason, and so the strip can tell when the × holds focus
@@ -283,6 +286,13 @@ struct ShownTerminals(HashMap<String, String>);
 
 impl Global for ShownTerminals {}
 
+/// Which boundary an automatic restore is waiting for. Carried upload notices wait too so they go to the final
+/// visible terminal, or to the notice center if the user leaves while the restore is pending.
+enum Restore {
+    WaitingForRow(Mark),
+    Attaching(String),
+}
+
 /// The open session's terminals. See the module docs.
 pub struct TerminalSet {
     /// The UI session the terminals were made under, whose opener each new one takes.
@@ -297,9 +307,8 @@ pub struct TerminalSet {
     tabs: Vec<Tab>,
     /// The chosen tab's id, `None` for the agent terminal. Only ever a listed tab's.
     chosen: Option<String>,
-    /// An opening with a remembered tab can wait for the first row. Once the user moves on it must leave the
-    /// terminal they have started using in place.
-    restore: Option<Mark>,
+    /// The pending restore for this opening. An explicit choice takes precedence even if it chooses this same tab.
+    restore: Option<Restore>,
     /// The hold every terminal's notices answer to.
     hold: SharedHold,
     /// The Agent tab's focus handle in the strip.
@@ -341,7 +350,7 @@ impl TerminalSet {
         let restore = cx
             .try_global::<ShownTerminals>()
             .is_some_and(|shown| shown.0.contains_key(&key))
-            .then(|| Mark::take(cx));
+            .then(|| Restore::WaitingForRow(Mark::take(cx)));
         let mut set = TerminalSet {
             session: session.downgrade(),
             key,
@@ -536,13 +545,15 @@ impl TerminalSet {
         let Some(listed) = listed else {
             return;
         };
-        let restore = self.restore.take();
+        let waiting_for_row = self
+            .restore
+            .take_if(|restore| matches!(restore, Restore::WaitingForRow(_)));
         // Most pushes change something else about the row (its activity, its status): nothing to do then. A tab whose
         // terminal could not be made (the font did not measure) is tried again at the next change of the list.
         let unchanged = listed.len() == self.tabs.len()
             && listed.iter().zip(&self.tabs).all(|(id, tab)| *id == tab.id);
         if unchanged {
-            if restore.is_some() {
+            if waiting_for_row.is_some() {
                 self.take_carried(cx);
             }
             return;
@@ -560,6 +571,7 @@ impl TerminalSet {
             let mut tab = old.remove(&id).unwrap_or_else(|| Tab {
                 id,
                 terminal: None,
+                _attach: None,
                 focus: cx.focus_handle().tab_stop(true),
                 close_focus: cx.focus_handle().tab_stop(true),
             });
@@ -578,6 +590,10 @@ impl TerminalSet {
                     Some(self.agent.read(cx).tunnels().clone()),
                     cx,
                 );
+                let tab_id = tab.id.clone();
+                tab._attach = Some(cx.observe(&terminal, move |set, terminal, cx| {
+                    set.follow_tab_attach(&tab_id, &terminal, cx);
+                }));
                 // Not fitted here: the notify below redraws the shown terminal, whose measured pane fits it (`measured`).
                 tab.terminal = Some(terminal);
             }
@@ -589,8 +605,9 @@ impl TerminalSet {
             && !self.tabs.iter().any(|tab| &tab.id == chosen)
         {
             self.chosen = None;
+            self.restore = None;
         }
-        if let Some(mark) = restore
+        if let Some(Restore::WaitingForRow(mark)) = waiting_for_row
             && !focus::has_moved_on(&mark, cx)
         {
             self.chosen = cx
@@ -603,20 +620,48 @@ impl TerminalSet {
                         .any(|tab| &tab.id == *wanted && tab.terminal.is_some())
                 })
                 .cloned();
+            self.restore = self.chosen.clone().map(Restore::Attaching);
         }
-        self.take_carried(cx);
-        // The requested tab can be chosen after this update releases the set.
+        // One push can remove the restoring tab and list the tab New requested. Let the deferred choice
+        // settle before delivering notices, so they reach the terminal the user will see after this push.
         if let Some((id, _, _)) = &self.opened
             && self.tabs.iter().any(|tab| &tab.id == id)
             && let Some((id, mark, window)) = self.opened.take()
         {
             let set = cx.entity();
-            cx.defer(move |cx| choose_in(&set, id, mark, window, cx));
+            cx.defer(move |cx| {
+                choose_in(&set, id, mark, window, cx);
+                // The user may have moved on. In that case `choose` did not run to deliver the notices.
+                set.update(cx, |set, cx| set.take_carried(cx));
+            });
+        } else {
+            self.take_carried(cx);
         }
         cx.notify();
     }
 
-    /// Deliver old upload results once the first row settles the restored tab. A tab past the attach limit has no
+    /// Settle restoration only for the tab this opening chose automatically. If its first attach is refused, the main
+    /// terminal becomes home and receives the notices. Keep the remembered choice for the next opening.
+    fn follow_tab_attach(
+        &mut self,
+        tab: &str,
+        terminal: &Entity<AttachedTerminal>,
+        cx: &mut Context<Self>,
+    ) {
+        if !matches!(&self.restore, Some(Restore::Attaching(wanted)) if wanted == tab) {
+            return;
+        }
+        match terminal.read(cx).initial_tab_attach() {
+            InitialTabAttach::Pending => return,
+            InitialTabAttach::Refused => self.chosen = None,
+            InitialTabAttach::Settled => {}
+        }
+        self.restore = None;
+        self.take_carried(cx);
+        cx.notify();
+    }
+
+    /// Deliver old upload results once the remembered tab's attach settles. A tab past the attach limit has no
     /// visible strip. The hidden Agent can still keep failures already shown, while interruptions wait for a
     /// visible terminal or a departure.
     fn take_carried(&mut self, cx: &mut Context<Self>) {
@@ -919,8 +964,9 @@ impl TerminalSet {
     }
 
     /// Close shell tab `id` (its × and, unless skipped, its question), under the tab's own key, so siblings close side by
-    /// side. Its terminal goes when the pushed row stops listing it; a chosen tab that closed shows the agent terminal
-    /// at once. A refusal shows under the strip until the tab's next close.
+    /// side. Its terminal goes when the pushed row stops listing it. A successful close settles restoration before
+    /// that push, so the main terminal can show pending upload notices as soon as it becomes visible.
+    /// A refusal shows under the strip until the tab's next close.
     fn close_tab(&mut self, id: &str, cx: &mut Context<Self>) {
         let (Some(operations), Ok(path)) = (
             session::current_operations(cx),
@@ -947,6 +993,8 @@ impl TerminalSet {
                         let _ = set.update(cx, |set, cx| {
                             if set.chosen.as_deref() == Some(closed.as_str()) {
                                 set.chosen = None;
+                                set.restore = None;
+                                set.take_carried(cx);
                                 cx.notify();
                             }
                         });
