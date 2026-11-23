@@ -364,8 +364,8 @@ linux/template-wrapper-help--dark.png b9868c394e91ceba6aed64b1717a33c5a35e260d
 linux/template-wrapper-help--light.png e83c1de9988b0e729cab003d92e4d6f6c595350e
 linux/templates-dialog--dark.png 6a015f53a2387ec4cb6f297840923946a66cfad6
 linux/templates-dialog--light.png 3139bed192ca4890f6c65bf88e225244dc6365d9
-linux/terminal-covered-link--dark.png f4f8d6746094ec5b19ed65f0b1b796b42e5bbf7a
-linux/terminal-covered-link--light.png e9f23c56971c4956d563b8821f699a30d1673496
+linux/terminal-covered-link--dark.png bc0975f4f31006ef55ffc6c7e786080e2e886d92
+linux/terminal-covered-link--light.png 1eb4cab83067a8602a98de64a08e2e708d853486
 linux/terminal-cursors--dark.png 3459e566da4c53c46bf870d97660f696ab9a150d
 linux/terminal-cursors--light.png 132a4374cd6c6d9f0caf116436286f67a99df8e9
 linux/terminal-cut-session-row--dark.png ed0454f06fa1eca998d2e8db2cee1e5a68340e4c
