@@ -5876,8 +5876,9 @@ Add host shows the setup connection's question inside the dialog, below the dest
 stops the check and keeps the destination and alias. The sessions connection may ask again after the dialog closes.
 Setup, Update and Uninstall can ask for the setup connection through the attention row. If the setup connection expired
 while a confirmation was open, confirming can require another sign-in before work starts. A question gets focus only
-while the user is still waiting on the action that caused it. An automatic Update never opens the Setup question by
-itself. A manual action that needs the same connection can open the question already waiting for that host.
+while the user is still waiting on the action that caused it. An automatic Update's Setup question waits in the
+attention row, and its popover opens only when the user presses **Answer**. A manual action that needs the same
+connection can open the question already waiting for that host.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to
