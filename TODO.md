@@ -265,14 +265,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Use the desktop's reduced-motion setting for the attention cue and other motion.** On Linux the attention cue can
-  disappear when the desktop portal and Farhelm's startup setting disagree. `layers/cue.rs` starts a flight from the
-  startup value in `ticker.rs`, while GPUI can jump the flight to its transparent last frame. Follow the toolkit's
-  preference everywhere and remove the separate desktop startup read. Use the stationary flash from SPEC.md's “Status”
-  while reduced motion is on, including during a live change. Make ongoing cursor and status animations pause and resume
-  with the preference while clocks and one-shot deadlines keep running. Test a preference change in an open window.
-  Plan: `plans/queue/toolkit-reduced-motion.md`.
-
 - **Show the main terminal when a remembered shell tab cannot attach.** Reopening a session can leave it stuck
   reconnecting to a remembered shell tab whose terminal the supervisor cannot read. Fall back to the main terminal after
   an explicit initial refusal, even if the shell tab remains listed. The terminal stream currently uses the same detach

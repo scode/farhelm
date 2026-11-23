@@ -276,7 +276,6 @@ impl Launcher {
         Some(slide_down(
             SharedString::from(format!("launcher-escalation-slide-{generation}")),
             band,
-            cx,
         ))
     }
 

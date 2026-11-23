@@ -13,8 +13,8 @@
 //! until the host's arrives), the notice center and the local state that survives resets, and, in test builds, the
 //! render counter. Last come the desktop integration's menus, after every key binding exists, because a Mac menu reads
 //! the shortcuts it shows once, when it is set. Then the coordinator starts following the host's answer for which
-//! controls Tab reaches, the ticker takes the host's reduced-motion setting (and, in an agent build, counts every
-//! window as active, so a run under headless Mutter, which reports every window inactive, still animates), the app's
+//! controls Tab reaches, and in an agent build the ticker counts every window as active so a run under headless Mutter
+//! still animates. Kit owns the motion preference, which the ticker follows live. The app's
 //! clock times follow the host's time zone if it hands one in (so the window's first frame already writes local times),
 //! the desktop integration keeps the host's source of the license notices and the host's updater (so the window's first
 //! frame already knows whether an updater runs), the host's status-sound player is installed if it has one (before any
@@ -261,9 +261,6 @@ pub struct Host {
     /// The helm this window talks to: the embedded helm's address and the device credential it minted for this
     /// process. `None` opens no channel, so the window stays at "Connecting to the helm…" (useful only in tests).
     pub helm: Option<farhelm_helm_client::HelmEndpoint>,
-    /// The operating system's reduced-motion setting, read by the host at startup: the GUI does not query the platform
-    /// itself (see the ticker).
-    pub reduced_motion: bool,
     /// Builds the license notices that must travel with the binary, as the "Open-Source Notices" window shows them. A
     /// function, not the text, because the text is close to a megabyte and is needed only while that window is open.
     /// Handed to the desktop integration before the window opens.
@@ -294,7 +291,6 @@ pub struct Host {
 struct Startup {
     tab_reach: focus::TabReachSource,
     helm: Option<farhelm_helm_client::HelmEndpoint>,
-    reduced_motion: bool,
     licenses: fn() -> String,
     window_frame: Option<desktop::FrameHost>,
     updater: Option<desktop::UpdaterHost>,
@@ -310,7 +306,6 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
     let Startup {
         tab_reach,
         helm,
-        reduced_motion,
         licenses,
         window_frame,
         updater,
@@ -320,7 +315,6 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
     } = startup;
     install(cx)?;
     focus::follow_tab_reach(tab_reach, cx);
-    ticker::set_reduced_motion(reduced_motion, cx);
     if let Some(time_zone) = time_zone {
         local_time::follow_platform(time_zone, cx);
     }
@@ -364,7 +358,6 @@ pub fn run(host: Host) {
         on_startup_failure,
         tab_reach,
         helm,
-        reduced_motion,
         licenses,
         window_frame,
         updater,
@@ -375,7 +368,6 @@ pub fn run(host: Host) {
     let startup = Startup {
         tab_reach: Rc::from(tab_reach),
         helm,
-        reduced_motion,
         licenses,
         window_frame,
         updater,
@@ -482,7 +474,6 @@ mod tests {
         Startup {
             tab_reach: Rc::new(|| focus::TabReach::EveryControl),
             helm: None,
-            reduced_motion: true,
             licenses: String::new,
             window_frame: None,
             updater: None,

@@ -88,7 +88,7 @@ pub struct MainView {
     /// This window's layer stack (which redraws this view, and so the overlay it draws, when an overlay changes), its
     /// focus state and the coordinator's focus recovery.
     root: root::Attachment,
-    /// Redraws on a change of the connection's state and of the notice center.
+    /// Follows the connection and notice center, and refreshes the motion preference on macOS activation.
     _observed: Vec<Subscription>,
     /// The previous connected frame's banners. A fresh notice should scroll into view. Dismissing the last banner
     /// or receiving a notice for the approval region should leave the banner scroll position alone.
@@ -130,6 +130,14 @@ impl MainView {
         let status_sounds = cx.new(|cx| sounds::StatusSounds::new(&session_list, window, cx));
         // The pane makes New home when there are no sessions, so it holds New's handle.
         let new = session_list.read(cx).new_focus().clone();
+        // Kit only samples the macOS setting at startup. Read it again on activation, before the layer stack's
+        // activation observer starts the cues that were waiting for this window.
+        #[cfg(target_os = "macos")]
+        observed.push(cx.observe_window_activation(window, |_, window, cx| {
+            if window.is_window_active() {
+                gpui_base::apply_system_reduce_motion(cx);
+            }
+        }));
         let root = root::attach(window, cx);
         // The agent approval cards' slot, once per window, as the layer stack it belongs to is attached.
         crate::approvals::region::install(window, cx);

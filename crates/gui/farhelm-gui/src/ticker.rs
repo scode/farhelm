@@ -1,6 +1,6 @@
 //! The ticker: the one source of time for the GUI, for animation and for deadlines.
 //!
-//! SPEC_impl.md, "Animation time: the ticker". It serves three kinds of time:
+//! SPEC_impl.md, "Animation time: the ticker". It serves these kinds of time:
 //!
 //! - Periodic animation ticks, at most [`TICKS_PER_SECOND`] a second, only while some view holds an [`Animating`],
 //!   [`Blinking`] or [`Pulsing`] handle, only for views whose window is active, and never under reduced motion. A view
@@ -34,9 +34,9 @@
 //! Whether a window counts as active comes from GPUI, unless [`set_active_override`] says otherwise: headless Mutter
 //! reports every window inactive forever (SPEC_impl.md, "GPUI cookbook: traps"), so the test-automation bridge's runs
 //! pin it. In-process tests do not need the override: GPUI's test platform reports activity, and a test deactivates a
-//! window with `VisualTestContext::deactivate_window`. Reduced motion is the operating system's setting, read by the
-//! host process once at startup and handed in ([`set_reduced_motion`]); this crate does not query the platform itself.
-//! Under reduced motion no tick loop runs at all, so nothing moves and nothing wakes ten times a second.
+//! window with `VisualTestContext::deactivate_window`. GPUI Kit feeds the operating system's reduced-motion setting
+//! into GPUI. When that setting changes, the ticker stops or restarts its animation loop. Clocks and deadlines keep
+//! their own timers because they track elapsed time.
 //!
 //! One-shot transitions are not the ticker's: an element that fades in as it appears goes through the component layer's
 //! `components::entrance` (its module docs say why ticks cannot draw one). The setting still comes from here: the
@@ -105,15 +105,15 @@ pub const SECONDS_PERIOD: Duration = Duration::from_secs(1);
 #[derive(Default)]
 struct Ticker {
     animating: Vec<Subscriber>,
-    /// The tick loop. It stops by itself once nobody animates; [`animate`] starts a new one, replacing (and so
-    /// dropping) the finished task.
+    /// The tick loop. It is cancelled when motion is reduced, or finishes at its next wake once nobody animates.
     tick_loop: Option<Task<()>>,
     running: bool,
+    /// Keep the motion observer registered for the life of this global, including when the loop is paused.
+    _motion_observer: Option<Subscription>,
     /// The 30-second clock that [`clock`] hands out, for ages.
     ages: ClockLoop,
     /// The one-second clock that [`every_second`] hands out, for counts of seconds.
     seconds: ClockLoop,
-    reduced_motion: bool,
     active_override: Option<bool>,
     /// How many ticks have been delivered since the app started. Only differences between two readings mean anything;
     /// the count stands still while nothing animates.
@@ -289,7 +289,7 @@ impl Blinking {
     /// active; in an inactive window the answer may change unannounced, so a view there should not draw from it.
     pub fn is_on(&self, cx: &App) -> bool {
         match installed::<Ticker>(cx) {
-            Some(ticker) if !ticker.reduced_motion => {
+            Some(ticker) if !reduced_motion(cx) => {
                 // Saturating, because `since` lies ahead of the count until the first multiple of the half comes: the
                 // ticks before it are part of the first shown half.
                 (ticker.ticks.saturating_sub(self.since) / BLINK_HALF_TICKS).is_multiple_of(2)
@@ -317,7 +317,7 @@ impl Pulsing {
     /// notified each time the answer changes. It says nothing about an inactive window, where no view holds a handle.
     pub fn step(&self, cx: &App) -> u64 {
         match installed::<Ticker>(cx) {
-            Some(ticker) if !ticker.reduced_motion => pulse_step(ticker.ticks),
+            Some(ticker) if !reduced_motion(cx) => pulse_step(ticker.ticks),
             _ => 0,
         }
     }
@@ -347,29 +347,25 @@ pub struct Deadline {
     _task: Task<()>,
 }
 
-/// Install the ticker. Part of the bootstrap.
+/// Install the ticker and follow changes to the preference Kit applies during bootstrap.
 pub fn install(cx: &mut App) {
-    cx.set_global(Ticker::default());
+    let motion_observer = cx.observe_reduce_motion(motion_changed);
+    cx.set_global(Ticker {
+        _motion_observer: Some(motion_observer),
+        ..Ticker::default()
+    });
 }
 
-/// Record the operating system's reduced-motion setting. Under reduced motion views still draw their state, but no
-/// animation ticks are delivered, so nothing moves on its own.
-pub fn set_reduced_motion(reduced: bool, cx: &mut App) {
-    if let Some(ticker) = installed_mut::<Ticker>(cx) {
-        ticker.reduced_motion = reduced;
-    }
+/// Tests set the preference directly because Kit skips platform queries under the simulated scheduler.
+#[cfg(test)]
+pub(crate) fn set_reduced_motion(reduced: bool, cx: &mut App) {
+    cx.set_reduce_motion(reduced);
 }
 
-/// Whether the operating system asks for reduced motion, as the host handed it in ([`set_reduced_motion`]): for motion
-/// the ticks do not drive, which must stand still under the same setting. The component layer's one-shot entrance
-/// (`components::entrance`) draws its final state at once when this is set.
-///
-/// Code that needs the setting asks this rather than GPUI's own flag (`App::reduce_motion`), so that all of the motion
-/// the app's own code draws follows one reading, the host's, which tests can drive. GPUI's flag holds GPUI Kit's own
-/// reading of the platform, which can differ from the host's (Kit's own motion follows it), and under the test
-/// scheduler nothing writes it.
+/// The same live preference GPUI and Kit use, for motion the ticks do not drive. A one-shot entrance, for example,
+/// draws its final state at once under reduced motion.
 pub fn reduced_motion(cx: &App) -> bool {
-    installed::<Ticker>(cx).is_some_and(|ticker| ticker.reduced_motion)
+    cx.reduce_motion()
 }
 
 /// Pin whether windows count as active (`Some`), or follow GPUI again (`None`). For runs where the platform cannot
@@ -435,14 +431,44 @@ fn subscribe<V: 'static>(window: &Window, cx: &mut Context<V>, cadence: Cadence)
         cadence,
         since,
     });
-    if !ticker.running && !ticker.reduced_motion {
-        ticker.running = true;
-        let task = periodic(TICK, tick, cx);
-        if let Some(ticker) = installed_mut::<Ticker>(cx) {
-            ticker.tick_loop = Some(task);
-        }
-    }
+    start_tick_loop(cx);
     (alive, since)
+}
+
+/// Stop the animation timer at the preference change. Keep the holders so a cursor or pulse can resume on the
+/// same handle. While paused, nothing prunes dead holders until motion returns.
+fn motion_changed(cx: &mut App) {
+    let reduced = reduced_motion(cx);
+    let Some(ticker) = installed_mut::<Ticker>(cx) else {
+        return;
+    };
+    if reduced {
+        ticker.tick_loop = None;
+        ticker.running = false;
+        return;
+    }
+    ticker
+        .animating
+        .retain(|subscriber| subscriber.alive.strong_count() > 0);
+    start_tick_loop(cx);
+}
+
+/// Start one loop for the registered animations when motion is allowed and a holder needs it.
+fn start_tick_loop(cx: &mut App) {
+    if reduced_motion(cx) {
+        return;
+    }
+    let Some(ticker) = installed_mut::<Ticker>(cx) else {
+        return;
+    };
+    if ticker.running || ticker.animating.is_empty() {
+        return;
+    }
+    ticker.running = true;
+    let task = periodic(TICK, tick, cx);
+    if let Some(ticker) = installed_mut::<Ticker>(cx) {
+        ticker.tick_loop = Some(task);
+    }
 }
 
 /// Start notifying the view `cx` belongs to every [`CLOCK_PERIOD`] until the handle drops, whatever its window's
@@ -534,6 +560,7 @@ pub fn after(delay: Duration, cx: &mut App, callback: impl FnOnce(&mut App) + 's
 /// One tick: count it, and notify every live subscriber that is due and whose window is active. Returns whether the loop
 /// should keep running: not once nobody animates, and not under reduced motion.
 fn tick(cx: &mut App) -> bool {
+    let reduced = reduced_motion(cx);
     let (subscribers, override_active) = {
         let Some(ticker) = installed_mut::<Ticker>(cx) else {
             return false;
@@ -541,7 +568,7 @@ fn tick(cx: &mut App) -> bool {
         ticker
             .animating
             .retain(|subscriber| subscriber.alive.strong_count() > 0);
-        if ticker.animating.is_empty() || ticker.reduced_motion {
+        if ticker.animating.is_empty() || reduced {
             ticker.running = false;
             return false;
         }
@@ -601,6 +628,12 @@ fn clock_tick(period: Period, cx: &mut App) -> bool {
 #[cfg(test)]
 pub(crate) fn ticks(cx: &App) -> u64 {
     installed::<Ticker>(cx).map_or(0, |ticker| ticker.ticks)
+}
+
+/// Test whether the animation task was released at the preference change, before its next scheduled tick.
+#[cfg(test)]
+pub(crate) fn holds_animation_task(cx: &App) -> bool {
+    installed::<Ticker>(cx).is_some_and(|ticker| ticker.tick_loop.is_some())
 }
 
 /// The crate's one timer: everything time-based goes through [`after`], the tick loop that [`animate`], [`blink`] and

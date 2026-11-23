@@ -541,6 +541,94 @@ impl Render for Counter {
     }
 }
 
+/// Capture the cursor half and status pulse the open window actually drew.
+struct MotionProbe {
+    blink: ticker::Blinking,
+    pulse: ticker::Pulsing,
+    drawn: Rc<Cell<(bool, u64)>>,
+}
+
+impl Render for MotionProbe {
+    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.drawn.set((self.blink.is_on(cx), self.pulse.step(cx)));
+        div()
+    }
+}
+
+/// The live preference stops the shared animation counter, then restarts it for the same holders. A hidden
+/// cursor and dim pulse draw their steady states while a one-shot and both independent clocks still fire.
+#[gpui::test]
+fn a_live_motion_change_pauses_drawing_without_pausing_time(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let _ager = cx.add_window(|_, cx| Ager {
+        _clock: ticker::clock(cx),
+    });
+    let _counter = cx.add_window(|_, cx| Counter {
+        name: "counter",
+        second: Some(ticker::every_second(cx)),
+    });
+    let drawn = Rc::new(Cell::new((true, 0)));
+    let (_probe, cx) = cx.add_window_view(|window, cx| MotionProbe {
+        blink: ticker::blink(window, cx),
+        pulse: ticker::pulse(window, cx),
+        drawn: drawn.clone(),
+    });
+    let deadline = Rc::new(Cell::new(false));
+    let fired = deadline.clone();
+    let _deadline = cx.update(|window, cx| {
+        window.activate_window();
+        ticker::after(Duration::from_millis(750), cx, move |_| fired.set(true))
+    });
+    cx.run_until_parked();
+    assert!(cx.update(|window, _| window.is_window_active()));
+    let advance = |cx: &mut VisualTestContext, elapsed| {
+        cx.executor().advance_clock(elapsed);
+        cx.run_until_parked();
+    };
+    advance(cx, Duration::from_millis(500));
+    assert_eq!(
+        drawn.get(),
+        (false, 2),
+        "premise: the cursor and pulse are animating"
+    );
+    assert!(!deadline.get(), "premise: the deadline is pending");
+    let paused = cx.update(|_, cx| {
+        assert!(
+            ticker::holds_animation_task(cx),
+            "premise: the animation task is held"
+        );
+        cx.set_reduce_motion(true);
+        assert!(
+            !ticker::holds_animation_task(cx),
+            "the observer drops the task immediately"
+        );
+        ticker::ticks(cx)
+    });
+    cx.run_until_parked();
+    assert_eq!(drawn.get(), (true, 0), "draw the steady states immediately");
+    cx.update(|_, cx| render_count::reset(cx));
+
+    advance(cx, Duration::from_millis(250));
+    assert!(deadline.get(), "the original deadline fired while paused");
+    advance(cx, Duration::from_millis(250));
+    assert_eq!(cx.update(|_, cx| render_count::count("counter", cx)), 1);
+    assert_eq!(cx.update(|_, cx| render_count::count("ager", cx)), 0);
+    advance(cx, ticker::CLOCK_PERIOD - Duration::from_secs(1));
+    assert_eq!(cx.update(|_, cx| render_count::count("ager", cx)), 1);
+    assert_eq!(cx.update(|_, cx| ticker::ticks(cx)), paused);
+    assert_eq!(drawn.get(), (true, 0));
+
+    cx.update(|_, cx| cx.set_reduce_motion(false));
+    cx.run_until_parked();
+    advance(cx, Duration::from_millis(500));
+    assert_eq!(cx.update(|_, cx| ticker::ticks(cx)), paused + 5);
+    assert_eq!(
+        drawn.get(),
+        (true, 4),
+        "both animations resume on the original handles"
+    );
+}
+
 /// A wait's "5s" and a host setup's elapsed time must count on in a window the user is not typing into and under
 /// reduced motion, like an age (a count is information, not motion), and SPEC.md asks for the wait to move on about
 /// once a second. Specified: with the window inactive and reduced motion on, a view holding the one-second `Clock` is
