@@ -181,6 +181,40 @@ class OwnershipTests(unittest.TestCase):
         self.assertIn('| result |', journal)
         self.assertIn('Live VM state is running', journal)
 
+    def test_remote_mac_starts_headless_and_needs_only_background_readiness(self):
+        """A remote peer must boot without a GUI login and have its own SSH and user domain."""
+        remote = f'fh-{self.run_id}-remote-mac'
+        directory = self.home / 'vms' / remote
+        directory.mkdir()
+        identity = '02:00:00:00:00:02'
+        atomic_json(directory / 'config.json', {'macAddress': identity})
+        self.control.data['vms']['remote-mac'] = {'name': remote, 'mac_address': identity, 'phase': 'ready'}
+        self.control.save()
+
+        class Process:
+            """Represent the live Tart process the controller must keep for this clone."""
+
+            pid = 12345
+
+            def poll(self):
+                """The independent state probe below supplies the running result."""
+                return None
+
+        def spawn(argv, **kwargs):
+            """Record the explicit headless launch independently of the readiness command."""
+            self.assertEqual(argv, ['tart', 'run', '--no-audio', '--no-clipboard', '--no-graphics', remote])
+            self.state = 'running'
+            return Process()
+
+        self.control.start('remote-mac', spawner=spawn)
+        self.control.ready('remote-mac', timeout=5)
+        command = self.calls[-1]
+        self.assertEqual(command[:5], ['tart', 'exec', remote, '/bin/sh', '-c'])
+        self.assertIn('kern.hv_vmm_present', command[5])
+        self.assertIn('/bin/launchctl print "user/$(id -u)"', command[5])
+        self.assertIn('127.0.0.1 22 && test -s /etc/ssh/ssh_host_ed25519_key.pub', command[5])
+        self.assertNotIn('/dev/console', command[5])
+
     def test_shutdown_transport_failure_requires_stopped_poststate(self):
         """Losing the guest agent during real shutdown must retain both observations.
 

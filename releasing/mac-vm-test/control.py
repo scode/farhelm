@@ -24,6 +24,9 @@ import uuid
 from datetime import datetime, timezone
 
 
+GUEST_ROLES = ('mac', 'linux', 'remote-mac')
+
+
 class Refused(RuntimeError):
     """The fixture lacks evidence that a requested mutation is owned and safe."""
 
@@ -116,7 +119,7 @@ belongs in the run directory, whose location is recorded as an evidence label.
 
     def owned(self, role):
         """Require both the minted name and unchanged hardware before mutation."""
-        if role not in ('mac', 'linux'):
+        if role not in GUEST_ROLES:
             raise Refused('unknown guest role')
         entry = self.data['vms'].get(role)
         expected = f'fh-{self.data["run_id"]}-{role}'
@@ -146,7 +149,7 @@ A pending record is retained across interruption. It deliberately grants no
 cleanup authority until successful cloning and identity capture are complete;
 an agent must reconcile an interrupted clone rather than guess what happened.
 """
-        if role not in ('mac', 'linux'):
+        if role not in GUEST_ROLES:
             raise Refused('unknown guest role')
         if role in self.data['vms']:
             raise Refused('role already recorded; use a new run for a fresh pass')
@@ -180,7 +183,9 @@ raises, so callers can keep supervising a failed start. No timeout force-stops i
         if self.state(role)['State'] != 'stopped':
             raise Refused('guest is not stopped')
         argv = [self.tart, 'run', '--no-audio', '--no-clipboard']
-        if headless:
+        # Only the Mac driving the native UI needs a window. The remote Mac
+        # stays a background SSH peer even when started from the control CLI.
+        if headless or role == 'remote-mac':
             argv.append('--no-graphics')
         argv.append(name)
         event = str(uuid.uuid4())
@@ -215,11 +220,19 @@ error retains the last diagnostic without copying potentially private stdout
 into the historical journal. GUI screenshots remain a separate required check.
 """
         name = self.owned(role)
-        probe = ('test "$(/usr/sbin/sysctl -n kern.hv_vmm_present)" = 1 && '
-                 'test "$(/usr/bin/stat -f %Su /dev/console)" = "$(id -un)"') if role == 'mac' else (
-                 'test -S "/run/user/$(id -u)/bus" && '
-                 'XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment >/dev/null && '
-                 'systemctl is-active --quiet ssh')
+        mac_guest = 'test "$(/usr/sbin/sysctl -n kern.hv_vmm_present)" = 1'
+        # Remote Login starts sshd on demand, so connect once before requiring
+        # the host key it generates. The pinned SSH check later proves login.
+        probes = {
+            'mac': mac_guest + ' && test "$(/usr/bin/stat -f %Su /dev/console)" = "$(id -un)"',
+            'remote-mac': mac_guest + ' && /usr/bin/nc -z -w 2 127.0.0.1 22 && '
+                          'test -s /etc/ssh/ssh_host_ed25519_key.pub && '
+                          '/bin/launchctl print "user/$(id -u)" >/dev/null',
+            'linux': 'test -S "/run/user/$(id -u)/bus" && '
+                     'XDG_RUNTIME_DIR="/run/user/$(id -u)" systemctl --user show-environment >/dev/null && '
+                     'systemctl is-active --quiet ssh',
+        }
+        probe = probes[role]
         deadline = time.monotonic() + timeout
         last = 'no successful guest command'
         while time.monotonic() < deadline:
@@ -354,7 +367,7 @@ def main():
     sub.add_parser('init')
     for action in ('clone', 'run', 'ready', 'ip', 'exec', 'collect', 'shutdown', 'delete', 'status'):
         child = sub.add_parser(action)
-        child.add_argument('role', choices=('mac', 'linux'))
+        child.add_argument('role', choices=GUEST_ROLES)
         if action == 'clone':
             child.add_argument('source')
         if action == 'run':

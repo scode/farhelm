@@ -2,11 +2,13 @@
 
 from pathlib import Path
 import json
+import shlex
 import subprocess
+import sys
 import tempfile
 import unittest
 
-from fixture_probe import ProbeError, paths, present, probe, require_clean_pair, merge_peer
+from fixture_probe import ProbeError, paths, present, probe, require_clean_pair, merge_peer, peer_probe
 
 
 class Commands:
@@ -75,6 +77,40 @@ class FixtureProbeTests(unittest.TestCase):
     def test_mac_launch_agent_is_dirty(self):
         """A legacy launch agent invalidates cleanliness even with no current process or binary."""
         self.assertFalse(self.inspect(Commands(launch='- 0 org.example.farhelm\n'), role='mac')['clean'])
+
+    def test_remote_mac_plist_is_residue_even_without_a_loaded_job(self):
+        """A plist on a headless peer can start a supervisor later and invalidates a clean base."""
+        commands = Commands()
+        peer = self.inspect(commands, role='remote-mac',
+                            found='/fixture/home/Library/LaunchAgents/io.farhelm.supervisor.plist')
+        self.assertEqual(peer['services'], [])
+        self.assertEqual(commands.calls, [['/bin/ps', '-axo', 'comm='], ['/bin/launchctl', 'list']])
+        self.assertFalse(peer['clean'])
+
+    def test_remote_mac_peer_uses_owned_alias_and_the_prepared_python(self):
+        """The shipped probe runs through the pinned Mac alias and labels the background peer separately."""
+        alias = 'fh-mac-30a194a9-75fc-408a-94ee-fb6cd394cad9'
+        role, argv = peer_probe(alias)
+        self.assertEqual(role, 'remote-mac')
+        self.assertEqual(argv[:-1], ['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o',
+                                    'StrictHostKeyChecking=yes', alias])
+        self.assertEqual(shlex.split(argv[-1]), [sys.executable, '-', '--role', 'remote-mac'])
+        with self.assertRaises(ProbeError):
+            peer_probe(alias + ' -o StrictHostKeyChecking=no')
+
+    def test_a_clean_remote_mac_receipt_requires_an_explicit_expected_peer(self):
+        """A Linux receipt cannot satisfy the Mac path or vice versa when both claim cleanliness."""
+        primary = self.inspect(Commands(), role='mac')
+        peer = self.inspect(Commands(), role='remote-mac')
+        reply = {'format': 1, 'clean': True, 'observations': [peer]}
+        result = subprocess.CompletedProcess([], 0, json.dumps(reply).encode(), b'')
+        self.assertEqual(merge_peer(result, 'remote-mac'), [peer])
+        with self.assertRaises(ProbeError):
+            merge_peer(result)
+        pair = {'format': 1, 'clean': True, 'observations': [primary, peer]}
+        self.assertEqual(require_clean_pair(pair, 'remote-mac'), pair)
+        with self.assertRaises(ProbeError):
+            require_clean_pair(pair)
 
     def test_removed_app_preferences_and_staging_are_residue(self):
         """Removing the bundle alone must not make a previously used or interrupted installation fresh."""

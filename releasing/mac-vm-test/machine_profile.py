@@ -140,6 +140,8 @@ into the public checkout or interpreted as additional script capabilities.
                   'route_via_gateway', 'agents'}
         if isinstance(data, dict) and data.get('format') == 2:
             fields.add('guest_tester')
+        if isinstance(data, dict) and 'remote_mac_base' in data:
+            fields.add('remote_mac_base')
         if not isinstance(data, dict) or set(data) != fields or type(data['format']) is not int or data['format'] not in (1, 2):
             raise Refused('unsupported or incomplete brick-test profile format')
         values = dict(data)
@@ -149,6 +151,12 @@ into the public checkout or interpreted as additional script capabilities.
             values[role + '_base'] = base_binding(data[role + '_base'])
         if values['mac_base']['name'] == values['linux_base']['name']:
             raise Refused('macOS and Linux bases must be different VMs')
+        # The profile snapshot is compared on resume. Resolve the fallback at
+        # preparation time so an older snapshot without this key still matches.
+        if 'remote_mac_base' in data:
+            values['remote_mac_base'] = base_binding(data['remote_mac_base'])
+            if values['remote_mac_base']['name'] == values['linux_base']['name']:
+                raise Refused('remote Mac and Linux bases must be different VMs')
         if not isinstance(data['linux_user'], str) or not re.fullmatch(r'[a-z_][a-z0-9_-]*[$]?', data['linux_user']):
             raise Refused('Linux username must be a plain account name')
         if data['agents'] != ['codex'] or not isinstance(data['route_via_gateway'], bool):
