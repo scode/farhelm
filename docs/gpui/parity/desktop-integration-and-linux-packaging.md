@@ -48,9 +48,9 @@ light and dark (`version-readout-check`, `version-readout-progress`, `version-re
 (see Deviations). Per their scene titles in `docs/gpui/screenshot-scenes.json`, `-check` shows the check button at rest,
 lit as under the pointer, with a reinstall warning, that warning lit, and with keyboard focus; `-progress` a check and
 an install, alone and beside the update toggle; `-outcomes` Up to date, Check failed, Check failed beside the toggle,
-and the failure button focused; `-update-ready` the update toggle plain, with a withdrawal warning, and focused; `-menu`
-the update menu open; `-tooltip` the wider paragraph help for a reinstall readout. The goldens are Linux only: no Mac
-golden shows the readout in the band
+and the failure button focused; `-update-ready` the update pill plain, with a withdrawal warning, focused, and with its
+reminder arrow; `-menu` the update menu open; `-tooltip` the wider paragraph help for a reinstall readout. The goldens
+are Linux only: no Mac golden shows the readout in the band
 
 ## The old native app's own tests
 
