@@ -90,3 +90,131 @@ The independent review gate passed after addressing the findings for all three d
 an upgrade and the create size limit. Desktop review covered eligibility, button order, guard preservation and the
 displayed source at answer time. Documentation review corrected the shield, workspace trust, template permission and
 launch-confirmation descriptions.
+
+### Landing
+
+#### What landed with it
+
+The plan's three PRs (#4669, #4672, #4673) and one landing fix (#4685) landed in this round ahead of
+tensorlake-leftovers-discovery-failure, which touches the helm's Tensorlake leftover list and Settings and does not
+interact with it. Since the plan's base, main had gained the Claude folder trust guard for the home directory and the
+folders above it, Tensorlake Suspend and Resume requiring a known sandbox, the session list's notice for a sandbox's
+Stop and suspend action that runs past 20 seconds, and changes to the opt-in tests that run real agent programs. The
+rebase met only TODO.md, where this plan's removal of its own entry sat beside two entries main had added; both were
+kept. While the plan landed, one more change to those opt-in tests reached main (#4674, which keeps their agent hook
+setup out of the user's real agent configuration). It touches no launch or permission code, and with both on main every
+test target still compiled and linted, and those tests' guard checks passed.
+
+The landing's independent reviewer checked that a saved launch with no recorded permission is never treated as less than
+YOLO anywhere the plan reaches: the host's YOLO question, the session's shield, approval cards, agent copies, templates,
+launch history and remembered defaults. **Replace as guarded instead** is offered only for saved YOLO sessions whose
+agent offers Guarded, keeps the original session's Delete guard, and creates the new session before deleting the old
+one. The upgrade runs in one transaction and leaves every saved start and resume command unchanged. No protocol version
+change is needed even between different releases: the permission values sent between the helm and a supervisor are the
+same as before. A supervisor that has not been updated still sends no value for an old session, which a new helm counts
+as YOLO, and an updated supervisor sends YOLO, a value older helms already understand.
+
+#### Fixes made while landing
+
+- The landing's full test run failed one test of the desktop launcher (part of the desktop interface's suite, which that
+  run includes); the executor's runs had not included its file. The test checks that in **Restart with** the recent
+  setups are shown but cannot be applied. Its sample session had no recorded permission, so under this plan Restart with
+  starts it from YOLO and shows only YOLO recent setups, hiding the Guarded setup the test looked for: the same
+  consequence as the first item under "Things you should know". #4685 gives the sample session Guarded, since the test
+  is about the recent setups, not about old sessions.
+- The plan rewrote the rule in the instructions Farhelm gives agents about hosts that ask before YOLO launches, and left
+  "there is no override." starting a sentence in lower case. #4685 restores "Nothing you pass changes that: there is no
+  override."
+- The plan's new reference picture of Replace's YOLO question with its **Replace as guarded instead** answer was missing
+  from the screenshot scene list, which that list's own check refuses; #4685 adds it, and corrects a renamed test's name
+  in the notes comparing the desktop app with the old web app (`docs/gpui/parity/`).
+- #4685 adds a caveat to the release-notes draft, explained in the first item below.
+
+#### Checks
+
+This round landed remove-own-setting-permission (how saved agent launches are classified, a supervisor database upgrade,
+the helm's launch history and YOLO question, the desktop launcher, Replace and permission marks, reference pictures and
+docs) and tensorlake-leftovers-discovery-failure (the helm's Tensorlake leftover list, a new reply type and Settings)
+together. Between them they reach every crate except the desktop app's outer program, so the landing ran the whole
+workspace suite, the lints (the desktop app's too), the end-to-end smoke test, every reference picture and the docs site
+build on both plans as delivered, stacked on main, then narrower runs after the landing fix and after a mid-round change
+to main. The worker runs were on a separate arm64 Linux test worker with a systemd user manager, rootless Podman and SSH
+to itself; the rest ran locally on x86_64 Linux. None of them used a real agent program or a real Tensorlake account:
+the tests use stand-ins, as the reports say.
+
+On both plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `13298a6c-7f5f-46ce-a761-2caa08b85278`): 8413 of 8414 passed and none printed a runtime `SKIPPED`. The failure is a
+  test of the desktop launcher's recent setups that remove-own-setting-permission broke, which that plan's landing fix
+  (#4685) corrects; the failed run is kept.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's two
+  `cargo clippy -p farhelm-desktop --all-targets` runs (with and without `--features agent`), on the test worker:
+  passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `4e8cb1fd-10e7-4211-8f0a-d30516dcbb4d`): of
+  its 50 steps, 49 passed and one was skipped as always on Linux (paste, which headless Mutter cannot give the app).
+- `python3 scripts/check-gui-goldens.py`, locally (recorder run `768fb235-2adc-486f-a06c-ed76fcf489bf`): every picture
+  matched its reference, including the pictures remove-own-setting-permission added or replaced.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check`,
+  `python3 releasing/check-changelog.py format` and the docs site build (`bun run build` in `website/`), locally:
+  passed.
+
+After remove-own-setting-permission's landing fix (#4685):
+
+- `cargo nextest run -p farhelm-gui -p farhelm` with the desktop launcher's and the agent instructions' tests selected,
+  on the test worker (recorder run `85f1444a-54cb-4501-9740-6b6cafaf5ea6`): all 548 passed, the corrected test among
+  them.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot scene list's own checks, locally and not through the
+  recorder, so it has no run id): all 47 cases passed. `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py`, `dprint check` and `python3 releasing/check-changelog.py format`, locally:
+  passed.
+
+After remove-own-setting-permission merged, main also held a change to the opt-in real-agent tests that landed mid-round
+(#4674), which none of the runs above had seen. On main plus tensorlake-leftovers-discovery-failure:
+
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed, so every test target still compiles.
+- `cargo nextest run -p farhelm -p farhelm-supervisor` with the real-agent test module's guard tests and the
+  supervisor's agent and persistent hook tests selected, on the test worker (recorder run
+  `eb6f15f3-0088-46ec-b052-ce1b3533b79d`): all 113 passed, none printed a runtime `SKIPPED`.
+
+Reused: the workspace run above for everything outside those selections, since the fix changes one test's fixture, the
+wording of one paragraph of the instructions Farhelm gives agents, the screenshot scene list (which feeds only the
+screenshot comparison page, whose own checks ran), a GPUI parity notes page outside the docs site and a release-notes
+draft, so the reference pictures and the docs site build were reused too; and #4674 changes only the opt-in real-agent
+tests and documentation. Skipped: the desktop app's outer program's tests, which nothing in either plan reaches; macOS,
+where nothing compiles differently; real agent programs and a real Tensorlake account; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- I accepted a consequence of the upgrade on your behalf, and am recording it in TODO.md's "Plan decisions to revisit"
+  with this round's TODO update. Because old agent sessions that never chose a permission are now saved as YOLO,
+  **Clone**, **Replace with** and **Restart with** of such a session open with YOLO selected, and starting it passes the
+  agent's bypass flag (Claude's `--dangerously-skip-permissions`, Codex's `--yolo`), where before they opened with
+  Guarded for agents that offer it. The user can still pick Guarded before starting, a host that asks before YOLO
+  launches still asks and offers to start guarded instead, and a host set to start YOLO sessions without asking starts
+  it as YOLO. A Clone started that way also makes YOLO the remembered permission for later new launches. For agents that
+  offer no Guarded mode nothing new follows from this: Pi, OpenCode and Goose already counted an empty permission as
+  YOLO, and Cursor now starts as YOLO (`--force`) by your decision about Cursor.
+  - Why I accepted it: your decision was to record YOLO on those sessions, and once recorded it cannot be told apart
+    from a YOLO the user chose, so Clone and its siblings cannot treat the two differently. The plan's criterion that
+    agents offering Guarded "continue to resolve to Guarded when composing new launches" is about saved templates,
+    launch history and remembered defaults with no permission, which still compose Guarded.
+  - The alternative: leave those sessions' permission empty instead of recording YOLO. The YOLO question, the shield and
+    every other check already count an empty permission as YOLO, so nothing would get less safe, and Clone and its
+    siblings would keep opening with Guarded. That departs from the decision to record YOLO.
+  - Your release note calls the change "conservative/safe" and "safe to ignore"; with this consequence that wording
+    deserves a second look at curation. The release-notes draft now carries the caveat.
+- Possible follow-ups:
+  - Some descriptions of the old setting remain: the notes in `docs/gpui/parity/` still describe Cursor's own setting in
+    a few places, two TODO.md entries about the opt-in real-agent tests still ask to check Cursor's "Agent's own
+    setting", which no longer exists, and a queued review finding about template summaries still quotes the old wording.
+  - Two YOLO texts got vaguer for an explicit YOLO choice: the approval card now says "Farhelm applies the host's YOLO
+    rules to this launch", and the launcher's YOLO question now says a guarded mode "is available for a new launch".
+  - About 70 lines of supervisor code exist only for one case: a create or Replace whose reply was lost before the
+    upgrade and is retried after it, when only the newly recorded YOLO differs. The reviewer found it correct but heavy
+    for so narrow a case.
+  - When **Replace as guarded instead** refuses because the session's launch or host changed while the question was open
+    ("This session changed while the question was open"), no test covers that refusal.
