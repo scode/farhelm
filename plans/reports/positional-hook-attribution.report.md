@@ -85,3 +85,115 @@ All four PRs passed separate source and wording reviews. The Grok review strengt
 ordering could not hide a missing parent pin. The Codex review corrected the notice for a shell reporter, preserved the
 description of existing pins across upgrade, and tested a renamed executable below a resident wrapper. The final review
 checked the documented default and OMP exception against the implementation.
+
+### Landing
+
+#### What landed with it
+
+The plan's four PRs (#4724, #4725, #4728, #4729) and one landing fix (#4734) landed second in a round with the
+custom-agents plan, which landed just before it (with its own landing fix). Since the stack's base, main had also gained
+the automatic host update fix (host-auto-update-after-2fa), which touches nothing this plan changed.
+
+The two plans were built at the same time and both reshape how the supervisor decides which process sent a conversation
+report, so every one of this plan's commits conflicted with custom agents when stacked on it: the attribution code, a
+code comment that maps where each agent's behavior lives, and SPEC.md's Codex paragraph, which custom agents put a new
+paragraph in front of. The landing kept both sides everywhere (this plan's wording for the attribution module's opening
+line, since custom agents' "for agents with no executable identity rule" stopped being true once Grok and Codex use it).
+Two interactions produced no textual conflict but would not have compiled, and the landing fixed them inside this plan's
+commits. Custom agents gave the shared attribution function a second argument saying which reporter command to expect,
+so this plan's new Grok and Codex callers and 18 of its Codex tests now pass the built-in hook command. And both plans
+added a correction notification kind to a fixed-length list whose declared length the merge left at 12 for 13 entries.
+
+The landing's reviewer for this plan compared its diff before and after the rebase: the only differences are those
+resolutions and fixes. It found that custom agents' admission is unchanged by this plan, that Grok and Codex need none
+of custom agents' checks (launch validation refuses the custom reporting setting on any other agent type), that the
+shared code deciding whether a recorded reporting process still holds the session behaves exactly as the old per-agent
+code did, and that every process chain the old Codex name rule accepted gives the same reporting process under the new
+rule.
+
+#### Fixes made while landing
+
+- #4734 updates descriptions of the rule that had not kept up. SPEC.md still said Grok gives up capturing a conversation
+  when a resident Bash sits above its wrapper with another wrapper below; it now says Claude, Muse, Codex, Grok,
+  Antigravity and custom agents tolerate it and only OMP refuses. SPEC_impl.md's default attribution rule and its list
+  of agents that keep the recorded reporting process, and two code comments listing which agents share that code now
+  name custom agents and the shared check.
+- **The report and the Grok docs said Farhelm always passes `--no-leader`.** It adds the flag only when it composes a
+  Grok launch from the launcher's Grok agent type. A custom command that declares Grok must include it, because Farhelm
+  refuses every report from a Grok started without it (a requirement that predates this plan). #4734 says so in the Grok
+  setup page and the hook injection page; its commit message wrongly says the refusal is new.
+- #4734 also rewords Codex test comments that still described the removed executable-name check as the production rule.
+
+#### Checks
+
+The two plans touch the protocol, the supervisor's report attribution, the helm's launches, registry and CLI, the
+desktop window's Settings and launcher, the installer's launcher script and the docs site, and each executor ran
+filtered selections. So the landing ran the whole workspace suite, every lint, the desktop app's own tests (the app
+embeds the changed window), the installer test and the end-to-end smoke on the two plans stacked on main, with every
+reference picture, the website build and the source checks locally. The worker runs were on a separate arm64 Linux test
+worker; the rest ran locally on x86_64 Linux.
+
+On both plans stacked on main, with the conflict resolutions and compile fixes:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `adc951be-a12e-44f5-9490-806b28f11ad4`): 8508 of 8511 passed and none printed a runtime `SKIPPED`. Two of the failures
+  were the helm's schema 26 migration tests that custom agents broke (fixed in #4733, see its notes). The third was the
+  helm's Tensorlake test of carrying a Codex sign-in choice into environment setup, which found a Codex credential
+  marked cleared where it expected none. Neither plan touches that flow, and the same test failed once during the
+  host-auto-update-after-2fa plan's execution on a tree without either plan. It passed 20 of 20 repeated runs alone on
+  this tree, locally on x86_64 rather than on the arm64 worker where it failed (recorder repetition batch
+  `2ebb6eaf-0b96-4280-9ac5-17a22c8ac47a`), and again on the worker in the run after the fixes below. It looks like a
+  latent flake that shows only under load. The landing did not record it in FLAKES.md, which takes its own change;
+  recording it is a follow-up.
+- `cargo nextest run -p farhelm-desktop`, on the test worker (recorder run `8dce2b68-35aa-4ad4-a8ee-e51508e3ac5f`): all
+  184 passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's
+  `cargo clippy -p farhelm-desktop --all-targets -- -D warnings` with and without `--features agent`, on the test
+  worker: passed.
+- `bash scripts/test-install-sh.sh --farhelm target/debug/farhelm`, on the test worker, run directly as the validation
+  guide lists it rather than through the recorder: 547 checks, none failed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `bd07df46-6f7f-449c-89cf-6fe615c8bf44`): of
+  its 50 steps, 49 passed and one was skipped as always on Linux (paste, which the headless Linux desktop session the
+  smoke runs in cannot provide).
+- `python3 scripts/check-gui-goldens.py`, locally (recorder run `9f6e7283-22b0-4a28-8465-fa845314e194`): every reference
+  picture matched, including custom agents' new launcher, Settings and approval scenes.
+- `python3 -B scripts/test-gui-agent.py`, locally (a self-test the validation guide lists without the recorder): failed
+  on the new custom launch type (fixed in #4733; see the custom-agents landing notes).
+- `cargo check -p farhelm-supervisor --tests`, locally, at each of the positional plan's first three commits and at the
+  top of the stack: compiled, so each of that plan's commits builds on its own after the landing's fixes.
+- `python3 -B scripts/test-gui-screenshot-batch.py`, `sh -n scripts/install.sh` with `shellcheck`,
+  `python3 scripts/check-agents-md.py`, the website build (`bun install --frozen-lockfile` and `bun run build`),
+  `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fixes (#4733 and #4734):
+
+- `cargo nextest run -p farhelm-helm -p farhelm --lib --test e2e` selecting the helm's library and the agent listing
+  end-to-end module, whose test checks the new refusal, on the test worker (recorder run
+  `89e4e6ca-903f-4197-9fa9-479aada524d8`): all 1891 passed, including both migration tests and the Tensorlake test, and
+  none printed a runtime `SKIPPED`.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 -B scripts/test-gui-agent.py`, `sh -n scripts/install.sh` with `shellcheck`, the website build,
+  `cargo fmt --all -- --check`, the sleep check, `dprint check` and the changelog format check, locally: passed.
+
+Reused for the fixes: the rest of the workspace suite, the desktop tests, the installer test, the smoke and the
+reference pictures above, since the fixes change one helm refusal, a test fixture, two scripts' launch type lists, a
+supervisor message and documentation. Skipped: macOS, where no Mac was used, so custom agents' new Settings and launcher
+screens are unchecked there; the real-agent drift tests for Grok and Codex, which the positional plan's executor ran and
+nothing at landing changed their behavior; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- **After Codex exits under a wrapper that leaves a shell, that shell can now report a Codex conversation.** With a
+  command such as `codex; exec bash`, the recorded Codex process has exited and the shell does not descend from it, so a
+  report from the shell is accepted if it carries a valid transcript or is a `/clear`. Before, it was refused because no
+  Codex process was in its ancestry. This follows from the decision to let a shell report first, and it is not a
+  security issue (same user, same inherited credential), but SPEC_impl.md does not describe this after-exit case.
+- **The Codex and Grok changelog fragments do not mention the new correction notice.** A script or nested agent that
+  reports first can briefly supply the conversation until the agent's own report switches it back with a notification;
+  before, that first report was refused silently. Release-time curation can add the caveat.
+- When Farhelm cannot read whether the recorded Grok process is alive (an OS read error), a nested Grok's end-of-turn
+  and prompt reports log a refusal where Claude, Muse and Antigravity stay quiet. Cosmetic.
+- The Codex attribution unit tests now call the shared function directly, so they would not notice if Codex admission
+  moved to a different rule.
