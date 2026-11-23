@@ -34,7 +34,7 @@ from verify_release import require_comment
 from guest_tester import execution_calls, native_events, native_image_digests, request as tester_request, RESULT_STATES
 from guest_workflow import (copy_credentials, execute as execute_guest, cancel as cancel_guest, require_setup,
                             source_url, task_for, Unavailable, CheckStopped, CleanupPending)
-from checkpoint_contract import prerequisite_checks, turn_timeout
+from checkpoint_contract import REMOTE_MAC_PASS, prerequisite_checks, turn_timeout
 
 
 REPO = Path(__file__).resolve().parents[2]
@@ -182,13 +182,15 @@ def update_path(candidate, latest, supports_override):
 
 
 def plan(candidate, latest, source, floor=UPGRADE_FLOOR):
-    """Plan the P0 fixtures, then bonus upgrades from the newest eligible stables.
+    """Plan the P0 pairs, remote Mac P1, then bonus coverage.
 
 A standard gate cannot silently test a downgrade or choose the candidate as its
 own previous release. Independent P0 fixtures exercise fresh install, in-app
 updater discovery (stable candidates only: the updater never offers an RC or
 dev build, so a prerelease plans no such pair) and installer upgrade, whose
-pair also carries the supervisor upgrades, P1 and P2. Bonus upgrade pairs cover
+pair also carries the supervisor upgrades, Linux P1 and P2. The remote Mac
+needs an independent fresh pair because the GUI Mac runs the desktop app.
+Bonus upgrade pairs cover
 at most HISTORICAL_UPGRADE_LIMIT previous stables, newest first; older sources
 inside the floor are deliberately omitted, not a coverage gap.
 The caller must establish that the supplied floor matches the candidate's
@@ -224,7 +226,10 @@ fictional releases.
     if target[3] == 1:
         p0.append(dict(old, id='p0-updater-upgrade', update_path=update_path(candidate, latest, supported)))
     p0.append(dict(old, id='p0-installer-upgrade', update_path='manual'))
-    passes = p0 + [{'id': 'fresh', 'previous': previous, 'update_path': None, 'priority': 'bonus'}]
+    # The local candidate on the installer pair still sends feedback before
+    # that pair is cleaned up. The next pair uses two Macs and covers P1 only.
+    passes = p0 + [dict(old, id=REMOTE_MAC_PASS, update_path=None, priority='P1'),
+                   {'id': 'fresh', 'previous': previous, 'update_path': None, 'priority': 'bonus'}]
     for previous in eligible[:HISTORICAL_UPGRADE_LIMIT]:
         supported = source.override(previous)
         path = update_path(candidate, latest, supported)
@@ -258,6 +263,12 @@ Signed archive availability/provisioning is proved by the genuine guest flow.
 
 # Evidence gates establish what an observation must retain. They can validate
 # linkage, identity and formats; interpreting actual GUI behavior stays with the agent.
+def pass_roles(pass_id):
+    """Keep the GUI Mac in every pair and choose its one disposable SSH peer."""
+    peer = 'remote-mac' if pass_id == REMOTE_MAC_PASS else 'linux'
+    return 'mac', peer
+
+
 def checks(pass_id, smoke=False):
     """Declare acceptance boundaries before evidence is recorded.
 
@@ -266,6 +277,13 @@ Continuity checkpoints require independent before/after receipts as well.
 """
     if smoke:
         return {'commands': {'gui': False, 'continuity': False}}
+    if pass_id == REMOTE_MAC_PASS:
+        # The first three checks use fixed operations. The app and remote menu
+        # checks also require native observations on the GUI Mac.
+        return {key: {'gui': gui, 'command': gui, 'continuity': False, 'priority': 'P1'}
+                for key, gui in (('artifact-verification', False), ('fixture-clean', False),
+                                 ('install', False), ('app-start', True), ('remote-provision', True),
+                                 ('remote-host-uninstall', True))}
     if pass_id.startswith('p0-'):
         # Separate upgrade fixtures keep installer success from standing in for
         # discovery by the old updater, and keep a failed discovery from hiding
@@ -621,8 +639,14 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             raise Refused('finish or reconcile the existing working pair first')
         self.budget()
         inspector = self.control()
-        for role in ('mac', 'linux'):
-            base = self.profile.values[role + '_base']
+        roles = pass_roles(pass_id)
+        bases = {
+            'mac': self.profile.values['mac_base'],
+            'linux': self.profile.values['linux_base'],
+            'remote-mac': self.profile.values.get('remote_mac_base', self.profile.values['mac_base']),
+        }
+        for role in roles:
+            base = bases[role]
             if inspector.identity(base['name']).lower() != base['mac_address']:
                 raise Refused('prepared base hardware identity changed')
             value = json.loads(inspector.command('get', base['name'], '--format', 'json', capture_output=True).stdout)
@@ -636,22 +660,27 @@ P0 scheduling and scope are checked before budget probes or clone mutations.
             c.data = {'format': 1, 'run_id': str(uuid.uuid4()), 'vms': {}}
             c.save()
             with c.locked():
-                for role in ('mac', 'linux'):
-                    c.clone(role, self.profile.values[role + '_base']['name'])
-                for role in ('mac', 'linux'):
-                    c.start(role, headless=headless or role == 'linux')
+                for role in roles:
+                    c.clone(role, bases[role]['name'])
+                for role in roles:
+                    c.start(role, headless=headless or role != 'mac')
                     c.ready(role, 120)
-                account = c.command('exec', c.owned('linux'), '/usr/bin/id', '-un', capture_output=True).stdout.decode().strip()
-                if account != self.profile.values['linux_user']:
-                    raise Refused('Linux guest-execution account differs from configured SSH account')
-                self.connector(c, c.owned('mac'), c.owned('linux'), self.profile.values['linux_user'],
-                               self.profile.values['route_via_gateway'])
-                stage = ('from pathlib import Path; import sys; '
-                         'd=Path.home()/"farhelm-brick-test"; d.mkdir(mode=0o700,exist_ok=True); '
-                         'p=d/"continuity.py"; p.write_bytes(sys.stdin.buffer.read()); p.chmod(0o600)')
-                c.mutate(['exec', '-i', c.owned('linux'), '/usr/bin/python3', '-c', stage],
-                         'Stage the portable continuity workload only inside the owned Linux guest.',
-                         input=(HERE / 'continuity.py').read_bytes())
+                peer_role = roles[1]
+                peer = c.owned(peer_role)
+                account = c.command('exec', peer, '/usr/bin/id', '-un', capture_output=True).stdout.decode().strip()
+                if peer_role == 'remote-mac':
+                    self.connector(c, c.owned('mac'), peer, account, self.profile.values['route_via_gateway'],
+                                   peer_role=peer_role)
+                else:
+                    if account != self.profile.values['linux_user']:
+                        raise Refused('Linux guest-execution account differs from configured SSH account')
+                    self.connector(c, c.owned('mac'), peer, account, self.profile.values['route_via_gateway'])
+                    stage = ('from pathlib import Path; import sys; '
+                             'd=Path.home()/"farhelm-brick-test"; d.mkdir(mode=0o700,exist_ok=True); '
+                             'p=d/"continuity.py"; p.write_bytes(sys.stdin.buffer.read()); p.chmod(0o600)')
+                    c.mutate(['exec', '-i', peer, '/usr/bin/python3', '-c', stage],
+                             'Stage the portable continuity workload only inside the owned Linux guest.',
+                             input=(HERE / 'continuity.py').read_bytes())
             entry['phase'] = 'ready'
             self.save()
             self.note('decision', f'Pass `{pass_id}` has command readiness and verified guest SSH; GUI checks remain required.')
@@ -764,7 +793,7 @@ retained outcome.
                 if len(receipts) != 1:
                     raise Refused('fixture-clean needs the deterministic pair receipt')
                 try:
-                    require_clean_pair(receipts[0])
+                    require_clean_pair(receipts[0], pass_roles(pass_id)[1])
                 except (ValueError, RuntimeError, KeyError, TypeError) as error:
                     raise Refused('fixture-clean receipt is not complete and clean') from error
             if check_id in ('update-relaunch', 'update-discovery') and 'latest_at_selection' not in entry:
@@ -864,10 +893,11 @@ actions or failed cleanup.
             self.save()
         try:
             with c.locked():
-                if any(c.state(role)['State'] != 'running' for role in ('mac', 'linux')):
+                if any(c.state(role)['State'] != 'running' for role in pass_roles(pass_id)):
                     raise Refused('both owned guests must be running before testing')
                 if not entry.get('credentials_injected'):
-                    copy_credentials(c, config)
+                    roles = ('mac',) if pass_id == REMOTE_MAC_PASS else ('mac', 'linux')
+                    copy_credentials(c, config, roles)
                     entry['credentials_injected'] = True
                 guest_home = c.command('exec', c.owned('mac'), config['settings']['python'], '-c',
                                        'from pathlib import Path; print(Path.home())', capture_output=True).stdout.decode().strip()
@@ -888,7 +918,7 @@ actions or failed cleanup.
             with self.locked():
                 entry = self.selected(pass_id)
                 context['check_contracts'] = entry['required']
-                if entry.get('priority') != 'P0':
+                if entry.get('priority', 'bonus') == 'bonus':
                     addendum = self.directory / 'addendum.md'
                     if addendum.is_symlink() or not addendum.is_file() or not 0 < addendum.stat().st_size <= 32768:
                         raise Unavailable('bonus checks require a bounded filled addendum.md in the private run')
@@ -1006,7 +1036,7 @@ actions or failed cleanup.
                 identity = {key: task[key] for key in ('attempt', 'run_id', 'pass_id', 'check_id')}
                 if observation is not None and observation.get('identity') != identity:
                     raise Refused('guest observation identity differs from the claimed attempt')
-                if priority == 'P1' and execution.get('status') == 'automation-failure':
+                if priority == 'P1' and check_id != 'native-preflight' and execution.get('status') == 'automation-failure':
                     # A harness failure at an optional P1 check makes that check
                     # unavailable and stops the P1 chain like any P1 nonpass; it
                     # must not keep the pair's P0 checks (after `old-sessions`)
@@ -1341,10 +1371,12 @@ discovery observation takes precedence over the selected path.
         return latest
 
     def add_check(self, pass_id, check_id, gui=False):
-        """Keep release-specific obligations in bonus coverage without expanding P0."""
+        """Keep release-specific obligations out of the tiered fixtures."""
         entry = self.selected(pass_id)
         if entry.get('priority') == 'P0':
             raise Refused('add broader functionality checks to bonus passes, not P0')
+        if entry.get('priority') == 'P1':
+            raise Refused('add broader functionality checks to bonus passes, not P1')
         if entry['phase'] not in ('pending', 'ready'):
             raise Refused('add obligations before completing or failing a pass')
         if not re.fullmatch(r'extra-[a-z0-9-]+', check_id) or check_id in entry['required']:
@@ -1399,9 +1431,10 @@ check stops bonus coverage, the only work left by then. Product failures in P0,
 P1 and P2 fence their own chains instead (`chain_block`).
 """
         for entry in self.data['passes'].values():
-            released = entry.get('priority') == 'P0' and entry['phase'] == 'deleted'
+            priority = entry.get('priority', 'bonus')
+            released = priority in ('P0', 'P1') and entry['phase'] == 'deleted'
             if (not released and (entry.get('preparation_error') or entry.get('automation_failure'))) or (
-                    entry.get('priority') != 'P0'
+                    priority == 'bonus'
                     and any(result['status'] != 'pass' for result in entry['results'].values())):
                 raise Refused('stop after the first failed or unavailable check; preserve this run')
 
@@ -1562,14 +1595,16 @@ P0 verdict still counts discovery as unavailable.
                 f'The public update channel pointed to {self.data["plan"]["latest_at_plan"]} when it was planned.')
 
     def require_priority(self, pass_id):
-        """Fence bonus work and later P0 fixtures before any guest is cloned.
+        """Check tier and pair ordering before any guest is cloned.
 
 P0 fixtures run in their planned order but do not depend on each other: a
 failed fresh install or discovery says nothing about whether the supervisors
 upgrade, so the next P0 pair may still run once the failed one is released
-(which needs the maintainer's retention decision). Bonus work needs every P0
-check passed with retained evidence, revalidated rather than trusted from a
-label. Historical runs without an explicit P0 plan keep their original
+(which needs the maintainer's retention decision). The remote Mac fixture
+needs P1 in scope and the P0 pairs released, including the installer pair.
+Its result is independent of their results. When the remote Mac pass is planned, it finishes
+and releases its guests before any bonus pair. Historical runs without an
+explicit P0 plan keep their original
 obligations; their observations are never retroactively relabeled as P0.
 """
         entry = self.selected(pass_id)
@@ -1579,10 +1614,18 @@ obligations; their observations are never retroactively relabeled as P0.
             if any(self.selected(key)['phase'] == 'pending' for key in sequence[:sequence.index(pass_id)]):
                 raise Refused('run the P0 fixtures in their planned order')
             return
+        if pass_id == REMOTE_MAC_PASS:
+            if 'P1' not in self.scope_tiers():
+                raise Refused(f'{self.scope_label()}: the remote Mac fixture is outside this run scope')
+            if any(self.selected(key)['phase'] != 'deleted' for key in sequence):
+                raise Refused('finish the P0 sequence and clean up the installer pair before the remote Mac fixture')
+            return
         if self.data.get('scope', 'full') != 'full':
             raise Refused(f'{self.scope_label()}: bonus fixtures are outside this run scope')
         if not self.p0_executable_complete():
             raise Refused('complete P0 fixtures with valid evidence before bonus work')
+        if REMOTE_MAC_PASS in self.data['passes'] and self.selected(REMOTE_MAC_PASS)['phase'] != 'deleted':
+            raise Refused('finish and clean up the remote Mac fixture before bonus work')
 
     def result_evidence_retained(self, result):
         """Recheck accepted bytes independently of the observation's status.
@@ -1663,8 +1706,9 @@ preflight), so a projection is not invalidated by another tier's lost retry.
 Each entry is (label, pass, checkpoints), where None means all of that pass's
 checkpoints in the tier. The installer pair answers the installer upgrade,
 both supervisor upgrades and both new agents for P0, its old sessions and
-remote menu for P1 (each old-session result folds in `old-sessions`, which
-started that session), and feedback for P2. A planned pass that is absent
+remote Linux menu for P1 (each old-session result folds in `old-sessions`,
+which started that session), and feedback for P2. New layouts additionally
+summarize the dedicated Mac pass as one P1 result. A planned pass that is absent
 reports as skipped: a prerelease plans no updater pair. A historical run
 without P0 fixtures names only the P1 checks it declared.
 """
@@ -1672,7 +1716,7 @@ without P0 fixtures names only the P1 checks it declared.
             return {'P0': [], 'P1': [(check, pass_id, [check]) for pass_id, entry in self.data['passes'].items()
                                      for check in priority_entry(entry, 'P1')['required']], 'P2': []}
         installer = 'p0-installer-upgrade'
-        return {
+        results = {
             'P0': [('fresh-install-start', 'p0-fresh', None),
                    ('click-to-upgrade', 'p0-updater-upgrade', None),
                    ('installer-upgrade', installer, ['artifact-verification', 'old-fixture', 'update-relaunch']),
@@ -1685,6 +1729,9 @@ without P0 fixtures names only the P1 checks it declared.
                    ('remote-host-remove', installer, ['remote-host-remove']),
                    ('remote-host-uninstall', installer, ['remote-host-uninstall'])],
             'P2': [('feedback-send', installer, ['p2-feedback-send'])]}
+        if REMOTE_MAC_PASS in self.data['passes']:
+            results['P1'].append(('remote-mac-uninstall', REMOTE_MAC_PASS, None))
+        return results
 
     def report(self):
         """Report P0, P1, P2, requested scope and full coverage independently.
@@ -1802,8 +1849,8 @@ projections.
 
 Evidence is rechecked first. Clean guest shutdown remains mandatory, and each
 role's low-level manifest must prove unchanged ownership and observed absence.
-A P0 pair needs its P0 checks passed, no automation failure, and a result for
-every in-scope P1 and P2 checkpoint (a recorded skip counts). Every P1 and P2
+A tiered pair needs any P0 checks passed, no automation failure, and a result
+for every in-scope P1 and P2 checkpoint (a recorded skip counts). Every P1 and P2
 result keeps its exported evidence, and a failed or unavailable one has some:
 its exported observation is what the maintainer reviews, so it needs no live
 disposable pair, and holding the pair would stall the bonus work the failure
@@ -1814,11 +1861,12 @@ approval as before; none of these paths delete retained evidence.
         if entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
             raise Refused('cannot clean up while the independent guest tester is active')
         self.settle()
-        if entry.get('priority') == 'P0' and self.data['plan'].get('p0_sequence'):
+        if entry.get('priority') in ('P0', 'P1') and self.data['plan'].get('p0_sequence'):
             empty = hashlib.sha256(b'').hexdigest()
             later = [(key, tier(entry, key)) for key in entry['required'] if tier(entry, key) in ('P1', 'P2')]
             results = [entry['results'][key] for key, _ in later if key in entry['results']]
-            complete = (self.verdict(priority_entry(entry, 'P0')) == 'pass' and not entry.get('automation_failure')
+            p0 = priority_entry(entry, 'P0')
+            complete = ((not p0['required'] or self.verdict(p0) == 'pass') and not entry.get('automation_failure')
                         and all(key in entry['results'] for key, priority in later if priority in self.scope_tiers())
                         and all(self.result_evidence_retained(result) for result in results)
                         and all(result['status'] in ('pass', 'skipped')
@@ -1829,7 +1877,7 @@ approval as before; none of these paths delete retained evidence.
             raise Refused('pass is incomplete or failed; ask about retention before --discard-failed')
         c = self.pair(pass_id)
         with c.locked():
-            for role in ('mac', 'linux'):
+            for role in pass_roles(pass_id):
                 if c.data['vms'].get(role, {}).get('phase') == 'deleted':
                     continue
                 if c.state(role)['State'] != 'stopped':

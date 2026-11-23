@@ -18,6 +18,14 @@ a refusal into a pass.
 import json
 
 
+REMOTE_MAC_PASS = 'p1-remote-mac'
+
+
+def is_bonus_pass(pass_id):
+    """Only the broader fresh and historical fixtures need bonus gesture readiness."""
+    return not pass_id.startswith('p0-') and pass_id != REMOTE_MAC_PASS
+
+
 # Each side of the pair has its own fixed observation of terminal hosts and of
 # session rows; the old-session checkpoint for that side compares against the
 # `old-sessions` receipts of the same operations.
@@ -165,7 +173,7 @@ def required_operations(check, pass_id, update_path):
         'remote-update': {'remote_version', 'continuity_remote_after'},
         'reopen': {'launch', 'versions', 'remote_version', 'continuity_reopen_before', 'continuity_reopen_after'}}
     result = set(requirements.get(check, {'prior_receipts'}))
-    if check == 'native-preflight' and not pass_id.startswith('p0-'):
+    if check == 'native-preflight' and is_bonus_pass(pass_id):
         result.add('finder_frame')
     # The updater pair checks discovery and relaunch only; every other old
     # fixture provisions the remote host its later checks upgrade.
@@ -203,39 +211,59 @@ Earlier snapshots have no proxy classification and compare every PID.
     return resources
 
 
-def require_remote_host_effect(check, before, after):
-    """Distinguish forgetting a host from uninstalling its managed resources.
+def require_remote_host_start(before, pass_id=None):
+    """Prove that the observed starting installation can test the menu effect.
 
-Both menu checks must start with a real provisioned host and readable retained
-data, with the process scan seeing its running supervisor; otherwise the
-premise failed (RuntimeError). Remove must preserve the managed host while
-closing its own connection.
-Uninstall must remove the service and files completely, with no supervisor
-or terminal host left running, while keeping the data: the same session ids in
-its database. A contradiction after a valid start is an `EffectFailure`.
-Native images separately prove the registry and session behavior, which these
-independent SSH observations cannot establish.
+The peer must have a running supervisor in the process scan and a readable
+database. The Mac fixture starts its own session, so its baseline must
+contain at least one session ID before Uninstall is attempted.
 """
-    if check not in ('remote-host-remove', 'remote-host-uninstall'):
-        raise ValueError('not a remote host menu checkpoint')
     service = before['service']
-    if (service['ActiveState'] != 'active' or service['SubState'] != 'running'
-            or not service['MainPID'].isdigit() or int(service['MainPID']) <= 0
-            or int(service['MainPID']) not in before['farhelm_pids'] or before['session_ids'] is None
+    if pass_id == REMOTE_MAC_PASS:
+        if service['kind'] != 'launchd':
+            raise RuntimeError('the remote Mac check requires launchd observations')
+        pid = service['pid']
+        running = service['loaded'] is True and service['state'] == 'running' and type(pid) is int and pid > 0
+        retained_sample = bool(before['session_ids'])
+    else:
+        pid = int(service['MainPID']) if service['MainPID'].isdigit() else 0
+        running = service['ActiveState'] == 'active' and service['SubState'] == 'running' and pid > 0
+        retained_sample = before['session_ids'] is not None
+    if (not running or pid not in before['farhelm_pids'] or not retained_sample
             or not all(before[key] for key in ('lib_present', 'unit_present', 'binary_sha256',
                                               'unit_sha256', 'data_present', 'database_present'))):
         raise RuntimeError('remote menu check did not start from a provisioned running host with readable data')
+
+
+def require_remote_host_effect(check, before, after, pass_id=None):
+    """Distinguish forgetting a host from uninstalling its managed resources.
+
+Remove must preserve the host while closing its own SSH connection. Uninstall
+must leave the same saved sessions and remove the service, installed files
+and processes. Contradictions after a valid start are product failures.
+Native images independently prove the menu and registry behavior.
+"""
+    if check not in ('remote-host-remove', 'remote-host-uninstall'):
+        raise ValueError('not a remote host menu checkpoint')
+    require_remote_host_start(before, pass_id)
     # Kept data means the same data: an emptied, replaced or unreadable
     # database keeps the file but loses the sessions it held.
     if not after['data_present'] or not after['database_present'] or after['session_ids'] != before['session_ids']:
         raise EffectFailure('remote menu action lost the retained data directory or database')
-    if (check == 'remote-host-remove'
-            and _resources_preserved_by_remove(before) != _resources_preserved_by_remove(after)):
-        raise EffectFailure('Remove changed remote resources or the running supervisor')
-    if check == 'remote-host-uninstall' and (
-            after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']
-            or after['service']['MainPID'] != '0' or after['service']['ActiveState'] != 'inactive'
-            or after['service']['LoadState'] != 'not-found' or after['farhelm_pids']):
+    if check == 'remote-host-remove':
+        if _resources_preserved_by_remove(before) != _resources_preserved_by_remove(after):
+            raise EffectFailure('Remove changed remote resources or the running supervisor')
+        return
+    service = after['service']
+    if pass_id == REMOTE_MAC_PASS:
+        if service['kind'] != 'launchd':
+            raise RuntimeError('the remote Mac check requires launchd observations')
+        stopped = service['loaded'] is False and service['pid'] is None
+    else:
+        stopped = (service['MainPID'] == '0' and service['ActiveState'] == 'inactive'
+                   and service['LoadState'] == 'not-found')
+    if (after['lib_present'] or after['unit_present'] or after['binary_sha256'] or after['unit_sha256']
+            or not stopped or after['farhelm_pids']):
         raise EffectFailure('Uninstall left remote binaries, unit, supervisor or terminal hosts running')
 
 
@@ -248,6 +276,10 @@ launches and continuity milestones belong only to their declared checkpoint.
     result = required_operations(check, pass_id, update_path) | {
         'prior_receipts', 'versions', 'remote_version', 'update_logs', 'inspect_state',
         'remote_inspect_state', 'terminal_hosts', 'remote_terminal_hosts'}
+    if pass_id == REMOTE_MAC_PASS:
+        # The Linux terminal-host probe reads procfs. The remote Mac uses the
+        # fixed launchd and process snapshots in the uninstall checkpoint.
+        result.discard('remote_terminal_hosts')
     if check == 'continuity-before':
         result.add('continuity_command')
     if check == 'window-drag':
@@ -341,7 +373,7 @@ override-removal observation as a gap.'''
     return result
 
 
-def remote_host_instructions(check):
+def remote_host_instructions(check, pass_id=None):
     """Exercise the remote menu before feedback, using the agent sessions P0 and the old-session checks left running.
 
 Remove runs first while both genuine remote sessions are still alive. Uninstall
@@ -367,6 +399,24 @@ creating replacement sessions. Call remote_version and retain native images
 showing the reconnected candidate host and recovered sessions. Local host and
 local session remain available. This proves Remove forgets the registration
 without uninstalling or ending the remote session.'''
+    if check == 'remote-host-uninstall' and pass_id == REMOTE_MAC_PASS:
+        return '''Call prior_receipts for the connected candidate on context.ssh.alias.
+Through Farhelm's native New session launcher, choose that Mac host and start one plain-command
+session (agent type none, /bin/sh). Verify it starts on the remote host, then
+Stop it through Farhelm and confirm it has exited. Keep its session data, and
+leave the local host untouched. Use remote_inspect_state to note the remote
+session ID. Call remote_host_before while the remote supervisor still runs.
+Require the fixed snapshot to contain that session ID and a running launchd job.
+Open that remote host's menu and choose Uninstall. Inspect the actual plan
+before confirming. Require it to remove the launchd job, its plist and the
+private lib directory, and to keep the Farhelm data directory. Retain a native
+image of the plan, then choose its ordinary Uninstall confirmation once.
+Require the remote host and cached sessions to disappear, and the kept-data
+removal notice to appear. Call remote_host_after. Require the job unloaded,
+its plist and lib directory gone, and no Farhelm process left. Require the
+original data directory, database and session ID. Retain a native image of
+completion. The local host and candidate app must still work. Do not re-add,
+reinstall or substitute direct service or file mutations for the menu action.'''
     if check == 'remote-host-uninstall':
         return '''Call prior_receipts for the re-added candidate Linux host/session. Through
 Farhelm's native UI Stop BOTH remote sessions, the old migrated/resumed one

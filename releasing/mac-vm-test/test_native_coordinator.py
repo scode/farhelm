@@ -16,7 +16,8 @@ import unittest
 import zlib
 from unittest import mock
 
-from brick_test import Run, rate_limited_without_actions, smoke
+from brick_test import Run, pass_roles, rate_limited_without_actions, smoke
+from checkpoint_contract import REMOTE_MAC_PASS
 from control import Refused
 from guest_workflow import CleanupPending
 import test_brick_test as fixtures
@@ -123,7 +124,7 @@ class NativeCoordinatorTests(unittest.TestCase):
         if envelope['check_id'] == 'fixture-clean':
             clean = {'format': 1, 'clean': True, 'observations': [
                 probe(role, '/fictional/home', {}, runner=Commands(), present=lambda path: False, which=lambda name: None)
-                for role in ('mac', 'linux')]}
+                for role in pass_roles(envelope['pass_id'])]}
             if fixture_defect == 'missing-peer':
                 clean['observations'].pop()
             elif fixture_defect == 'service':
@@ -444,6 +445,37 @@ follow every P0 turn. The long-turn floors apply to the agent conversations.
         with self.run.locked():
             self.assertEqual(self.run.report()['p0']['verdict'], 'pass')
             self.assertEqual(self.run.report()['p1']['verdict'], 'pass')
+
+    def test_remote_mac_pass_imports_native_evidence_and_only_authenticates_the_gui_mac(self):
+        """The P1 peer needs a plain command, with no copied Codex login or bonus readiness."""
+        f = self.fixture
+        f.enable_p0(scope='p1-only', remote_mac=True)
+        self.run = f.run
+        self.finish_preceding_pairs()
+        self.drive_pair('p0-installer-upgrade')
+        with self.run.locked():
+            self.run.cleanup('p0-installer-upgrade')
+        first_call = len(f.model.calls)
+        self.seen.clear()
+        self.drive_pair(REMOTE_MAC_PASS)
+        self.assertEqual([value['check_id'] for value in self.seen],
+                         ['native-preflight', 'artifact-verification', 'fixture-clean', 'install',
+                          'app-start', 'remote-provision', 'remote-host-uninstall'])
+        self.assertIn('This preflight does not require drag or double-click probes', self.seen[0]['instructions'])
+        self.assertTrue(all('addendum' not in value['context'] for value in self.seen))
+        self.assertIn('agent type none, /bin/sh', self.seen[-1]['instructions'])
+        authorized = [argv[3] for argv in f.model.calls[first_call:]
+                      if argv[1:3] == ['exec', '-i'] and '"fixture contains authentication"' in argv[-1]]
+        self.assertEqual(len(authorized), 1)
+        self.assertTrue(authorized[0].endswith('-mac'))
+        self.assertFalse(authorized[0].endswith('-remote-mac'))
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual(report['p1']['checks']['remote-mac-uninstall'], 'pass')
+            self.assertEqual(report['p1']['verdict'], 'pass')
+            self.assertEqual(report['requested_verdict'], 'pass')
+            self.assertEqual(report['p2']['verdict'], 'could not run')
+            self.run.cleanup(REMOTE_MAC_PASS)
 
     def test_a_failed_p1_turn_skips_the_later_p1_turns_and_still_sends_feedback(self):
         """A lost session stops the checks that share it, but not the independent feedback send.

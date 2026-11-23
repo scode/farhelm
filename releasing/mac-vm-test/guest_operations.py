@@ -19,13 +19,15 @@ import os
 from pathlib import Path
 import plistlib
 import re
+import shlex
 import subprocess
 import sys
 import time
 from urllib.request import urlopen
 
-from checkpoint_contract import (SIDES, available_operations, fixed_operations, host_identity, prerequisite_checks,
-                                 require_applicable_operation)
+from checkpoint_contract import (REMOTE_MAC_PASS, SIDES, available_operations, fixed_operations, host_identity,
+                                 is_bonus_pass, prerequisite_checks, require_applicable_operation,
+                                 require_remote_host_start)
 from guest_ui import NativeUI, tool_definition, wait_running
 from window_geometry import calibrate, select_frame
 
@@ -246,6 +248,76 @@ given here and the ones it makes itself; tests execute this exact text.
     return 'from pathlib import Path\nimport subprocess,hashlib,json\n' + inspect.getsource(remote_host_snapshot)
 
 
+def remote_mac_service(runner=subprocess.run, uid=None):
+    """Distinguish a missing launchd job from an unavailable user domain.
+
+An existing registration still counts as loaded without a PID. After
+uninstall, only the known missing-service response from a working domain
+proves that launchd cannot restart the supervisor.
+"""
+    uid = os.getuid() if uid is None else uid
+    domain = f'user/{uid}'
+    label = 'io.farhelm.supervisor'
+    options = {'capture_output': True, 'text': True, 'timeout': 20, 'env': dict(os.environ, LC_ALL='C')}
+    manager = runner(['/bin/launchctl', 'print', domain], **options)
+    if manager.returncode:
+        raise RuntimeError('remote launchd user domain is unavailable')
+    job = runner(['/bin/launchctl', 'print', f'{domain}/{label}'], **options)
+    if job.returncode:
+        missing = f'Bad request.\nCould not find service "{label}" in domain for uid: {uid}'
+        if job.returncode != 113 or job.stdout.strip() or job.stderr.strip() != missing:
+            raise RuntimeError('remote launchd job state is unavailable')
+        return {'kind': 'launchd', 'loaded': False, 'state': None, 'pid': None}
+    state = re.search(r'^\tstate = (.+)$', job.stdout, re.MULTILINE)
+    pid = re.search(r'^\tpid = ([0-9]+)$', job.stdout, re.MULTILINE)
+    return {'kind': 'launchd', 'loaded': True, 'state': state[1] if state else None, 'pid': int(pid[1]) if pid else None}
+
+
+def remote_mac_host_snapshot(home=None, runner=subprocess.run, uid=None):
+    """Read the peer's independent uninstall evidence without trusting a cached host row.
+
+The snapshot reads the user's launchd domain, exact lib and plist paths,
+processes executing from that lib directory, and only session IDs from the
+database. It can still inspect the peer when the app has forgotten the host.
+"""
+    import contextlib
+    import sqlite3
+    home = Path.home() if home is None else Path(home)
+    service = remote_mac_service(runner, uid)
+    lib = home / '.local/lib/farhelm'
+    unit = home / 'Library/LaunchAgents/io.farhelm.supervisor.plist'
+    binary = lib / 'farhelm'
+    data = home / '.local/state/farhelm'
+    prefixes = (str(lib) + '/', os.path.realpath(lib) + '/')
+    processes = runner(['/bin/ps', '-ww', '-axo', 'pid=,comm='], capture_output=True, text=True, timeout=20, check=True)
+    pids = []
+    for line in processes.stdout.splitlines():
+        fields = line.split(maxsplit=1)
+        if len(fields) == 2 and fields[0].isdigit() and fields[1].startswith(prefixes):
+            pids.append(int(fields[0]))
+    database = data / 'supervisor.db'
+    session_ids = None
+    if database.is_file():
+        try:
+            with contextlib.closing(sqlite3.connect(database.as_uri() + '?mode=ro', uri=True,
+                                                    timeout=10)) as connection:
+                session_ids = sorted(row[0] for row in connection.execute('SELECT id FROM sessions'))
+        except sqlite3.Error:
+            pass
+    return {'service': service, 'lib_present': lib.exists() or lib.is_symlink(),
+            'unit_present': unit.exists() or unit.is_symlink(),
+            'binary_sha256': hashlib.sha256(binary.read_bytes()).hexdigest() if binary.is_file() else None,
+            'unit_sha256': hashlib.sha256(unit.read_bytes()).hexdigest() if unit.is_file() else None,
+            'data_present': data.is_dir(), 'database_present': database.is_file(),
+            'farhelm_pids': sorted(pids), 'session_ids': session_ids}
+
+
+def remote_mac_host_payload():
+    """Ship only the Mac-specific observations to the pinned SSH peer."""
+    return ('from pathlib import Path\nimport hashlib,json,os,re,subprocess\n'
+            + inspect.getsource(remote_mac_service) + '\n' + inspect.getsource(remote_mac_host_snapshot))
+
+
 def installer_environment(environment, version, sums, *, update):
     """Select the published installer's fresh or updater entrypoint explicitly.
 
@@ -412,8 +484,9 @@ repeating the mistake past the bound stops an unproductive attempt.
 
     def ssh(self, script, private_output=False):
         """Use the manifest-pinned peer and fixed Python, never a model command string."""
+        python = (self.task['settings']['python'] if self.task['pass_id'] == REMOTE_MAC_PASS else '/usr/bin/python3')
         return self.command(['/usr/bin/ssh', '-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=yes',
-            self.context['ssh']['alias'], '/usr/bin/python3', '-'], data=script.encode(), timeout=30,
+            self.context['ssh']['alias'], shlex.quote(python), '-'], data=script.encode(), timeout=30,
             private_output=private_output)
 
     def version(self):
@@ -505,6 +578,11 @@ exists is an ordinary answer (False), not a failed command.
             if mac['stdout'].strip() != '1':
                 raise RuntimeError('managed operations require a virtualized Mac')
             local = self.command([self.task['settings']['codex'], '--version'])
+            result = {'virtualized_mac': mac, 'mac_cli': local}
+            if self.task['pass_id'] == REMOTE_MAC_PASS:
+                # This peer runs only a plain-command session. Its authenticated
+                # SSH and launchd readiness were already proved at preparation.
+                return result
             remote = self.ssh('''from pathlib import Path
 import subprocess,json,stat,os
 p=Path.home()/'.codex/auth.json'
@@ -514,8 +592,8 @@ r=subprocess.run(['codex','--version'],capture_output=True,text=True,timeout=20)
 assert r.returncode==0
 print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regular file owned by guest')))
 ''')
-            result = {'virtualized_mac': mac, 'mac_cli': local, 'linux': remote}
-            if not self.task['pass_id'].startswith('p0-'):
+            result['linux'] = remote
+            if is_bonus_pass(self.task['pass_id']):
                 result['native_geometry_toolchain'] = self.command(['/usr/bin/swift', '--version'])
             return result
         if operation == 'prior_receipts':
@@ -614,6 +692,19 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
         if operation == 'versions':
             return self.version()
         if operation == 'remote_version':
+            if self.task['pass_id'] == REMOTE_MAC_PASS:
+                value = self.ssh(remote_mac_host_payload() + '''
+p = Path.home() / '.local/lib/farhelm/farhelm'
+version = subprocess.run([str(p), '--version'], capture_output=True, text=True, timeout=20, check=True)
+print(json.dumps({'version': version.stdout.strip(), 'service': remote_mac_service()}))
+''')
+                observed = json.loads(value['stdout'])
+                service = observed['service']
+                if observed['version'] != 'farhelm ' + candidate.removeprefix('v'):
+                    raise RuntimeError('remote Mac binary is not the expected release')
+                if not service['loaded'] or service['state'] != 'running' or not service['pid']:
+                    raise RuntimeError('remote Mac supervisor is not running in launchd')
+                return value
             value = self.ssh('''from pathlib import Path
 import subprocess,json
 p=Path.home()/'.local/lib/farhelm/farhelm'
@@ -640,8 +731,16 @@ raise SystemExit(0 if all(r['returncode']==0 for r in rows) else 1)
                 raise RuntimeError('remote host starting snapshot is already retained')
             if operation == 'remote_host_after' and 'remote_host_before' not in self.completed:
                 raise RuntimeError('remote host starting snapshot is required first')
-            script = remote_host_payload() + '\nprint(json.dumps(remote_host_snapshot()))\n'
-            return json.loads(self.ssh(script)['stdout'])
+            if self.task['pass_id'] == REMOTE_MAC_PASS:
+                script = remote_mac_host_payload() + '\nprint(json.dumps(remote_mac_host_snapshot()))\n'
+            else:
+                script = remote_host_payload() + '\nprint(json.dumps(remote_host_snapshot()))\n'
+            sample = json.loads(self.ssh(script)['stdout'])
+            if self.task['pass_id'] == REMOTE_MAC_PASS and operation == 'remote_host_before':
+                # Refuse the starting premise while the action gate can still
+                # prevent the model from clicking Uninstall on this fixture.
+                require_remote_host_start(sample, REMOTE_MAC_PASS)
+            return sample
         if operation == 'public_latest':
             with urlopen('https://get.farhelm.io/latest', timeout=30) as response:
                 value = response.read(256).decode().strip()

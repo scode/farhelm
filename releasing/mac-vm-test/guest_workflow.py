@@ -17,7 +17,7 @@ from urllib.parse import urlparse
 
 from control import Refused
 from guest_tester import request
-from checkpoint_contract import update_instructions, window_instructions, remote_host_instructions
+from checkpoint_contract import update_instructions, window_instructions, remote_host_instructions, is_bonus_pass
 
 
 HERE = Path(__file__).resolve().parent
@@ -80,13 +80,16 @@ Historical profiles remain usable for status and cleanup.
     return config
 
 
-def copy_credentials(control, config):
+def copy_credentials(control, config, roles=('mac', 'linux')):
     """Inject only the explicitly authorized file through stdin into owned working clones.
 
 Prepared images must have no refreshed login. Therefore initial injection is a
 prerequisite, not a reactive permission workaround. Neither argv nor journal
-contains the bytes; a single immutable read feeds both intended destinations.
+contains the bytes; a single immutable read feeds the requested approved roles.
+The remote Mac executes a plain command and is outside this authorization.
 """
+    if roles not in (('mac',), ('mac', 'linux')):
+        raise Refused('credential copy is limited to the authorized Mac and Linux roles')
     source = Path(config['auth_source'])
     descriptor = os.open(source, os.O_RDONLY | os.O_NOFOLLOW)
     try:
@@ -107,7 +110,7 @@ contains the bytes; a single immutable read feeds both intended destinations.
               'fd=os.open(p,os.O_WRONLY|os.O_CREAT|os.O_EXCL,0o600); '
               's=os.fdopen(fd,"wb"); s.write(sys.stdin.buffer.read()); s.flush(); os.fsync(s.fileno()); s.close(); '
               'assert p.stat().st_mode & 0o777 == 0o600')
-    for role in ('mac', 'linux'):
+    for role in roles:
         python = config['settings']['python'] if role == 'mac' else '/usr/bin/python3'
         control.mutate(['exec', '-i', control.owned(role), python, '-c', script],
                        'Inject authorized Codex authentication into this disposable guest only; stdin excluded.',
@@ -225,7 +228,7 @@ window-drag carries its own contract because its gestures, observation and
 could-not-run boundary are too specific to leave to that mapping.
 """
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
-        return remote_host_instructions(check_id)
+        return remote_host_instructions(check_id, pass_id)
     contracts = {
         'p2-feedback-send': '''This is the separately authorized P2 check after all runnable P0 checks passed.
 Expected RC or dev updater discovery skips and P1 results do not block this check.
@@ -420,8 +423,8 @@ native input and ordinary window captures work.
     if check_id in ('update-discovery', 'update-relaunch'):
         return update_instructions(check_id, pass_id, update_path)
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
-        return remote_host_instructions(check_id)
-    if check_id == 'native-preflight' and not pass_id.startswith('p0-'):
+        return remote_host_instructions(check_id, pass_id)
+    if check_id == 'native-preflight' and is_bonus_pass(pass_id):
         return '''Call prerequisites. This bonus fixture needs native window gestures as well
 as screenshots, clicks and exact text. Bind Finder and establish exactly one
 normal file window using its native File > New Finder Window if needed;
@@ -446,7 +449,7 @@ requesting an image; Escape alone is not proof that the menu closed. Capture
 the normal window, click its Search control and paste nonsecret text. Verify
 the complete reactive field and capture the final native image. Do not open
 Help or Go to Folder as input probes. No Farhelm product state, OS permissions
-or authentication changes. P0 does not require drag or double-click probes.''',
+or authentication changes. This preflight does not require drag or double-click probes.''',
         'artifact-verification': 'Call brick_action verify_candidate. Require its verified release receipt.',
         'fixture-clean': 'Call brick_action fixture_clean. Require both roles clean; never repair residue.',
         'install': 'Call brick_action install_candidate. Require successful installer and exact candidate CLI version.',
