@@ -214,8 +214,8 @@ fn record_launch_history(
     // launch can describe its effective mode. Do not let that normalization
     // turn a harness's own YOLO default into a remembered choice: the next
     // dialog already starts there, and remembering it would spill into a
-    // harness with a real non-YOLO default. Explicit YOLO remains remembered
-    // for those real-choice harnesses because their omitted value is `None`.
+    // harness with a non-YOLO default. An explicit YOLO choice on a harness
+    // that defaults to Guarded can still be remembered.
     let permissions_word = selection
         .permissions
         .filter(|permission| Some(*permission) != selection.harness.omitted_permission())
@@ -11949,6 +11949,53 @@ mod tests {
                 .iter()
                 .any(|entry| { entry.selection.harness == farhelm_proto::LaunchHarness::Bash }),
             "shells still show up in recent setups"
+        );
+
+        let cursor = SessionInfo {
+            cwd: "/cursor".into(),
+            creation_seq: Some(5),
+            launch: crate::launches::compile(LaunchSelection {
+                harness: farhelm_proto::LaunchHarness::Cursor,
+                permissions: None,
+                wrapper_prefix: None,
+                ..user_origin.launch.agent_selection().unwrap().clone()
+            })
+            .expect("compile Cursor using its default"),
+            ..session("cursor-origin", 103)
+        };
+        store
+            .record_create_history_with_destination(
+                host,
+                "identity-a",
+                &admitted_row(host, &cursor),
+                HistoryPaths {
+                    canonical_cwd: &cursor.cwd,
+                    display_cwd: &cursor.cwd,
+                },
+                None,
+                cursor.launch.agent_selection(),
+            )
+            .await
+            .expect("record a Cursor launch using its default");
+        let recent = store.launch_history(host, "identity-a").await.unwrap();
+        assert_eq!(
+            recent
+                .iter()
+                .find(|entry| entry.cwd == "/cursor")
+                .unwrap()
+                .selection
+                .permissions,
+            Some(farhelm_proto::LaunchPermission::Yolo),
+            "the recent setup shows the effective permission",
+        );
+        assert!(
+            store
+                .preferences()
+                .await
+                .unwrap()
+                .remembered_permissions
+                .is_none(),
+            "Cursor's default must not preselect YOLO for another agent",
         );
 
         let custom = SessionInfo {

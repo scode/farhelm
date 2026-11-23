@@ -1365,8 +1365,8 @@ fn each_agent_type_offers_its_own_permission_vocabulary(cx: &mut TestAppContext)
         ),
         (
             "launcher-harness-Cursor",
-            &["Agent's own setting", "YOLO", "Custom"],
-            "Agent's own setting",
+            &["YOLO", "Custom"],
+            "YOLO",
             false,
         ),
         (

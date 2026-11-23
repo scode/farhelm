@@ -657,12 +657,11 @@ fn one_restart_and_no_host_write(helm: &mut FakeHelm, cx: &mut VisualTestContext
     restart.body.clone().expect("a restart carries a body")
 }
 
-/// An older launch stored no permission, which for Codex is the agent's own setting, so choosing Guarded is an edit:
-/// marked with what it was, and sent (restart-with.spec's "restart with upgrades an older own-setting launch to
-/// guarded"). Specified: a stores Codex, gpt-6-astra, high, no permission; Guarded marks "● Changed · was agent's own
-/// setting", and the restart sends that model and effort with Guarded.
+/// Restart with treats an older Codex session with no recorded mode as YOLO.
+/// Guarded is an edit that resends the existing model and effort with the
+/// new permission.
 #[gpui::test]
-fn guarded_over_an_older_own_setting_launch_is_an_edit(cx: &mut TestAppContext) {
+fn guarded_over_an_older_launch_with_no_permission_is_an_edit(cx: &mut TestAppContext) {
     let (mut helm, cx) = window_with(cx, Some("a"));
     a_stores(
         &mut helm,
@@ -672,13 +671,13 @@ fn guarded_over_an_older_own_setting_launch_is_an_edit(cx: &mut TestAppContext) 
     assert!(restart_with(cx, "a"));
     assert_eq!(
         draft(cx).agent.permissions,
-        None,
-        "the premise: own setting"
+        Some(LaunchPermission::Yolo),
+        "premise: the missing permission is shown as YOLO"
     );
     test_support::click(cx, "launcher-permissions-Guarded");
     assert_eq!(
         name_of(cx, "launcher-changed-permissions").as_deref(),
-        Some("● Changed · was agent's own setting")
+        Some("● Changed · was YOLO")
     );
     let body = pressed(&mut helm, cx).body.expect("a body");
     assert_eq!(

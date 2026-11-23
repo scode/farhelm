@@ -416,8 +416,8 @@ fn launch_chips_follow_the_session_lists_shield_for_every_mode() {
     }
 }
 
-/// An omitted permission is the agent's own setting, never today's default, and warns: otherwise an old launch could
-/// look safer than the hosts' YOLO rule treats it. Guarded names the agent's mode in one line.
+/// A saved launch with no recorded mode warns as YOLO. Guarded names the
+/// agent's mode in one line.
 #[test]
 fn an_agent_launch_names_its_permission_in_one_line() {
     let row = |permissions| {
@@ -449,12 +449,16 @@ fn an_agent_launch_names_its_permission_in_one_line() {
         )
     );
     assert_eq!(guarded.description(), "Guarded · Claude auto mode");
-    let own = row(None);
+    let unclassified = row(None);
     assert_eq!(
-        (own.kind, own.guarded, own.warning()),
-        (ChipKind::OwnSetting, None, true)
+        (
+            unclassified.kind,
+            unclassified.guarded,
+            unclassified.warning()
+        ),
+        (ChipKind::Yolo, None, true)
     );
-    assert_eq!(own.description(), ChipKind::OwnSetting.description());
+    assert_eq!(unclassified.description(), ChipKind::Yolo.description());
 }
 
 /// Launch and Restart cards explain stored workspace trust on its own chip, and only when the launch records one, so

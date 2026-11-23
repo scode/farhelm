@@ -1034,7 +1034,7 @@ impl ChipKind {
     /// What the meaning is, beside the chip.
     pub const fn description(self) -> &'static str {
         match self {
-            ChipKind::Yolo => "YOLO permission bypass",
+            ChipKind::Yolo => "Farhelm applies the host's YOLO rules to this launch",
             ChipKind::Guarded => "Guarded permission mode",
             ChipKind::OwnSetting => {
                 "Agent's own setting — not classified; treated as YOLO on hosts that ask before YOLO launches"

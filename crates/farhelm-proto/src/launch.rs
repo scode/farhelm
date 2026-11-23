@@ -1,14 +1,11 @@
 //! Structured launch intent shared by the helm and supervisor.
 //!
-//! This module intentionally records choices, not inferred runtime facts. A
-//! missing model, effort, permission, or workspace-trust choice means that the
-//! selected harness receives no corresponding argument. An agent then uses
-//! its default, while a shell has no agent options. Even OpenCode may use its configured default; an explicit
-//! OpenCode model still has to use its supported Zen provider. The supervisor
-//! later stores the same value beside the resolved argv so clone and history
-//! can preserve the launch without parsing a command line back into intent.
-//! The helm supplies workspace trust from Settings on new compositions.
-//! Saved launches keep their choice for plain Restart and Replace.
+//! The helm fills the permission and workspace-trust choices for a new
+//! launch. An omitted model or effort lets the harness choose its default.
+//! Plain shells have neither agent options nor an agent permission mode.
+//! The supervisor stores the resolved choices beside argv so plain Restart
+//! and Replace can reuse the command. A saved agent launch with no recorded
+//! permission is treated as YOLO because its safety mode is unknown.
 
 use std::borrow::Cow;
 
@@ -318,18 +315,16 @@ impl LaunchHarness {
 
     /// The permission selected for a new request that omits its permission.
     ///
-    /// Every harness that offers Guarded starts there unless another mode was
-    /// chosen. Pi, OpenCode and Goose retain their YOLO defaults;
-    /// Cursor remains under its own configuration. Shells have no mode.
-    /// This is an admission rule,
-    /// not a way to reinterpret an older stored command: use
-    /// [`Self::stored_permission`] for that.
+    /// Harnesses that offer Guarded start there. Cursor, Pi, OpenCode and
+    /// Goose default to YOLO, and shells have no permission mode. Use
+    /// [`Self::stored_permission`] to classify argv already saved in a session.
     pub const fn omitted_permission(self) -> Option<LaunchPermission> {
         match self {
-            LaunchHarness::Pi | LaunchHarness::OpenCode | LaunchHarness::Goose => {
-                Some(LaunchPermission::Yolo)
-            }
-            LaunchHarness::Cursor | LaunchHarness::Bash | LaunchHarness::Zsh => None,
+            LaunchHarness::Cursor
+            | LaunchHarness::Pi
+            | LaunchHarness::OpenCode
+            | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
+            LaunchHarness::Bash | LaunchHarness::Zsh => None,
             LaunchHarness::Codex
             | LaunchHarness::Claude
             | LaunchHarness::Muse
@@ -359,6 +354,18 @@ impl LaunchHarness {
         self.offers_permission(LaunchPermission::Yolo)
     }
 
+    /// Whether a different choice can keep a permission check or limit what
+    /// the agent does. Custom remains available on some YOLO-only harnesses,
+    /// but its flags cannot establish any safety guarantee for Farhelm.
+    pub fn offers_non_yolo_mode(self) -> bool {
+        LaunchPermission::ALL.into_iter().any(|permission| {
+            !matches!(
+                permission,
+                LaunchPermission::Yolo | LaunchPermission::Custom
+            ) && self.offers_permission(permission)
+        })
+    }
+
     /// Resolve a draft request against the harness's current offered modes.
     ///
     /// Unsupported older values fall back to the omitted mode. The helm uses
@@ -374,34 +381,20 @@ impl LaunchHarness {
         }
     }
 
-    /// Classify the permission a stored command was actually built with.
+    /// Classify a stored launch using the permission it recorded.
     ///
-    /// An absent value predates guarded flags on Claude, Codex, Grok and Muse,
-    /// and remains the agent's own setting on Cursor. It cannot inherit the
-    /// current request default: restart, replace and agent copies reuse that
-    /// stored command. The older YOLO defaults on the other harnesses retain
-    /// their meaning. Unsupported values use the same historical fallback.
-    /// A shell always has no permission mode.
+    /// A stored command with no supported permission is treated as YOLO.
+    /// Restart, Replace and agent copies can reuse the original argv, so the
+    /// current default for a newly composed launch cannot establish its safety
+    /// mode. Shells always have no permission mode.
     pub const fn stored_permission(
         self,
         permission: Option<LaunchPermission>,
     ) -> Option<LaunchPermission> {
         match permission {
             Some(value) if self.offers_permission(value) => Some(value),
-            _ => match self {
-                LaunchHarness::Pi
-                | LaunchHarness::OpenCode
-                | LaunchHarness::Omp
-                | LaunchHarness::Goose => Some(LaunchPermission::Yolo),
-                LaunchHarness::Cursor
-                | LaunchHarness::Codex
-                | LaunchHarness::Claude
-                | LaunchHarness::Muse
-                | LaunchHarness::Grok
-                | LaunchHarness::Antigravity
-                | LaunchHarness::Bash
-                | LaunchHarness::Zsh => None,
-            },
+            _ if self.is_shell() => None,
+            _ => Some(LaunchPermission::Yolo),
         }
     }
 
@@ -598,8 +591,8 @@ impl LaunchEffort {
 /// A permission choice that adds a deliberate harness flag.
 ///
 /// `Guarded` records explicit flags, rather than inferring safety from an
-/// omitted field. Older omissions stay under the agent's own setting where
-/// Farhelm previously passed no permission flags. No value promises that vendor
+/// omitted field. A stored launch with omitted permissions counts as YOLO
+/// because Farhelm has no explicit mode to rely on. No value promises that vendor
 /// rules or a later in-session mode switch cannot loosen the launch.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -905,7 +898,7 @@ fn raw_wrapper_words(text: &str) -> Vec<String> {
 /// Split editable permission text without evaluating expansions or commands.
 /// Shell-style quotes and escapes only determine word boundaries; a `#` at
 /// the start of a word begins a comment. Empty/comment-only input is refused
-/// rather than silently selecting the agent's own permission setting.
+/// so every custom permission choice supplies literal flags.
 pub fn split_permission_flags(text: &str) -> Result<Vec<String>, String> {
     let words =
         shell_words::split(text).map_err(|error| format!("invalid permission flags: {error}"))?;
@@ -1001,7 +994,7 @@ mod tests {
     use super::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection};
 
     /// Quoting chooses argv boundaries, never execution. Comments and malformed
-    /// quotes cannot turn an empty custom draft into the agent's own setting.
+    /// quotes cannot turn an empty custom draft into an accepted launch.
     #[test]
     fn custom_flags_preserve_literal_words_and_require_a_complete_choice() {
         let words =
@@ -1044,14 +1037,23 @@ mod tests {
                 harness.request_permission(None),
                 Some(LaunchPermission::Guarded)
             );
-            assert_eq!(harness.stored_permission(None), None);
+            assert_eq!(
+                harness.stored_permission(None),
+                Some(LaunchPermission::Yolo)
+            );
             assert_eq!(
                 harness.stored_permission(Some(LaunchPermission::Guarded)),
                 Some(LaunchPermission::Guarded)
             );
         }
-        assert_eq!(LaunchHarness::Cursor.request_permission(None), None);
-        assert_eq!(LaunchHarness::Cursor.stored_permission(None), None);
+        assert_eq!(
+            LaunchHarness::Cursor.request_permission(None),
+            Some(LaunchPermission::Yolo)
+        );
+        assert_eq!(
+            LaunchHarness::Cursor.stored_permission(None),
+            Some(LaunchPermission::Yolo)
+        );
         assert_eq!(
             LaunchHarness::Omp.request_permission(None),
             Some(LaunchPermission::Guarded)
@@ -1148,7 +1150,7 @@ mod tests {
         use LaunchHarness::*;
         // (harness, offers model, offers effort, omitted permission, only YOLO)
         let expected = [
-            (Cursor, true, false, None, false),
+            (Cursor, true, false, Some(LaunchPermission::Yolo), false),
             (Codex, true, true, Some(LaunchPermission::Guarded), false),
             (Claude, true, true, Some(LaunchPermission::Guarded), false),
             (Muse, true, true, Some(LaunchPermission::Guarded), false),

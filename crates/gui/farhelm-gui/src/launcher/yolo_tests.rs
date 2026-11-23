@@ -32,11 +32,8 @@ fn selection(harness: LaunchHarness, permissions: Option<LaunchPermission>) -> L
     }
 }
 
-/// SPEC.md, "Creation": the question says "why this launch is one (YOLO was chosen where the agent type offers other
-/// modes, the agent type has no guarded mode, the launch uses the agent's own setting which Farhelm cannot override,
-/// custom flags whose effect Farhelm does not check, or the command was asserted to be YOLO)". Specified: a command
-/// launch is Asserted; Custom flags are CustomFlags; YOLO chosen on Codex is ChosenPermission; Pi, which offers only
-/// YOLO, is OnlyMode; Codex with no permission stored is OwnSetting.
+/// The refusal explains the relevant permission choice. Cursor's Custom
+/// mode remains selectable, but it is not a safety alternative to YOLO.
 #[test]
 fn each_yolo_launch_gets_its_own_reason() {
     assert_eq!(YoloReason::of_launch(None), YoloReason::Asserted);
@@ -55,8 +52,18 @@ fn each_yolo_launch_gets_its_own_reason() {
         YoloReason::of_launch(Some(&pi)),
         YoloReason::OnlyMode(LaunchHarness::Pi)
     );
-    let own = selection(LaunchHarness::Codex, None);
-    assert_eq!(YoloReason::of_launch(Some(&own)), YoloReason::OwnSetting);
+    let unclassified = selection(LaunchHarness::Codex, None);
+    assert_eq!(
+        YoloReason::of_launch(Some(&unclassified)),
+        YoloReason::ChosenPermission
+    );
+    let cursor = selection(LaunchHarness::Cursor, Some(LaunchPermission::Yolo));
+    let reason = YoloReason::of_launch(Some(&cursor));
+    assert_eq!(reason, YoloReason::OnlyMode(LaunchHarness::Cursor));
+    assert_eq!(
+        reason.sentence(),
+        "Farhelm treats every Cursor permission choice as YOLO."
+    );
 }
 
 /// SPEC.md: "an explicit YOLO choice on an agent that offers guarded mode also offers starting the same launch guarded

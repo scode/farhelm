@@ -382,9 +382,9 @@ impl SessionLaunch {
     }
 
     /// Whether admission must treat this launch as YOLO: an agent launch by
-    /// its stored permission (including own-setting, which cannot prove a
-    /// safety gate), a command launch by the user's assertion, and `None` for a legacy session,
-    /// which carries no assertion and is shown as unclassified.
+    /// its stored permission, a command launch by the user's assertion, and
+    /// `None` for a legacy session, which carries no assertion and is shown
+    /// as unclassified.
     pub fn yolo(&self) -> Option<bool> {
         match self {
             SessionLaunch::Agent { selection, .. } => {

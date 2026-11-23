@@ -70,7 +70,7 @@ fn template_values_are_host_text() {
 
 /// Explicit resets read as defaults, and the permission names what the launch would request: with no agent type a
 /// reset depends on the agent; with Claude it is Claude's guarded mode by its own name; with Cursor, which has no
-/// guarded mode, the agent's own setting.
+/// guarded mode, it is YOLO.
 #[test]
 fn resets_and_permissions_read_as_the_launch_would_request() {
     let reset = |agent| TemplateFields {
@@ -92,8 +92,8 @@ fn resets_and_permissions_read_as_the_launch_would_request() {
          Resume default"
     );
     assert!(
-        plain(&reset(Some(LaunchHarness::Cursor))).contains("Approvals Agent's own setting"),
-        "Cursor has no guarded mode"
+        plain(&reset(Some(LaunchHarness::Cursor))).contains("Approvals YOLO"),
+        "Cursor defaults to YOLO"
     );
     let yolo = TemplateFields {
         permissions: Some(Some(LaunchPermission::Yolo)),

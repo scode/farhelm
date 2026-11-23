@@ -566,7 +566,7 @@ fn session_owned_hosts_are_not_offered() {
 /// is the shared one in `farhelm-proto` (old `permission_search_actions_follow_harness_capabilities`).
 #[test]
 fn permission_rows_follow_the_agents_capabilities() {
-    use SearchPermission::{Approve, Chat, Custom, Guarded, OwnSetting, SmartApprove, Yolo};
+    use SearchPermission::{Approve, Chat, Custom, Guarded, SmartApprove, Yolo};
     let perms = |harness: LaunchHarness, query: &str| Draft::agent(Some(harness)).rows(query);
     assert_eq!(
         perms(LaunchHarness::Codex, "perms:"),
@@ -586,7 +586,10 @@ fn permission_rows_follow_the_agents_capabilities() {
         perms(LaunchHarness::Omp, "perms:"),
         permissions(&[Yolo, Guarded, Custom, Approve])
     );
-    assert!(perms(LaunchHarness::Cursor, "perms:").contains(&Row::Permission(OwnSetting)));
+    assert_eq!(
+        perms(LaunchHarness::Cursor, "perms:"),
+        permissions(&[Yolo, Custom])
+    );
     assert!(perms(LaunchHarness::Pi, "perms:default").is_empty());
     assert_eq!(
         perms(LaunchHarness::Goose, "perms:smart"),

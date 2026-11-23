@@ -90,7 +90,7 @@ use subtle::ConstantTimeEq;
 /// database has ever had, and the template every later one follows.
 /// Public because the supervisor's hello reports it and the helm's Update
 /// refuses a host whose reported schema is above this build's.
-pub const SCHEMA_VERSION: i64 = 38;
+pub const SCHEMA_VERSION: i64 = 39;
 
 /// The supervisor remembers its owner even with no live helm connection.
 pub(crate) struct StoredHelmOwner {
@@ -1859,7 +1859,7 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
                  generation INTEGER NOT NULL,
                  PRIMARY KEY (session_id, generation)
              ) STRICT;
-             PRAGMA user_version = 38;
+             PRAGMA user_version = 39;
              COMMIT;",
         )
         .context("creating schema")?;
@@ -2668,6 +2668,11 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         .context("migrating schema from version 37 to 38")?;
         version = 38;
     }
+    if version == 38 {
+        migrate_unclassified_agent_permissions(conn)
+            .context("migrating schema from version 38 to 39")?;
+        version = 39;
+    }
     if version == SCHEMA_VERSION {
         return Ok(());
     }
@@ -2675,6 +2680,38 @@ fn apply_schema(conn: &Connection, may_migrate: bool) -> anyhow::Result<()> {
         "supervisor.db has schema version {version}, but this build only understands \
          version {SCHEMA_VERSION}; refusing to open it rather than risk misreading it"
     )
+}
+
+/// Schema 39 gives saved agent launches an explicit permission classification.
+/// Replace and Restart may reuse these commands, so the migration preserves
+/// every argument and changes only the missing permission and schema stamp.
+fn migrate_unclassified_agent_permissions(conn: &Connection) -> anyhow::Result<()> {
+    use farhelm_proto::SessionLaunch;
+
+    let tx = conn.unchecked_transaction()?;
+    let launches: Vec<(String, String)> = tx
+        .prepare("SELECT id, session_launch FROM sessions WHERE session_launch IS NOT NULL")?
+        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))?
+        .collect::<Result<_, _>>()?;
+    for (id, json) in launches {
+        let mut launch: SessionLaunch = serde_json::from_str(&json)
+            .with_context(|| format!("session {id} has an unreadable launch"))?;
+        let SessionLaunch::Agent { selection, .. } = &mut launch else {
+            continue;
+        };
+        if selection.permissions.is_none()
+            && let Some(permission) = selection.harness.stored_permission(None)
+        {
+            selection.permissions = Some(permission);
+            tx.execute(
+                "UPDATE sessions SET session_launch = ?1 WHERE id = ?2",
+                rusqlite::params![serde_json::to_string(&launch)?, id],
+            )?;
+        }
+    }
+    tx.pragma_update(None, "user_version", 39)?;
+    tx.commit()
+        .context("committing agent permission classification")
 }
 
 /// Schema 26: every session's launch becomes one `session_launch` value
@@ -8315,6 +8352,116 @@ mod tests {
                 .expect("list obligations")
                 .is_empty()
         );
+    }
+
+    /// A v38 session can be replaced or resumed using its saved argv. The
+    /// upgrade records the conservative classification without recomposing
+    /// those commands or assigning a permission mode to shells or legacy rows.
+    #[farhelm_testtrace::test]
+    async fn schema_38_classifies_old_agent_permissions_without_changing_argv() {
+        use crate::agent_kind::{CONVERSATION_PLACEHOLDER, FARHELM_ARGS_PLACEHOLDER};
+        use farhelm_proto::{LaunchHarness, LaunchPermission, LaunchSelection, SessionLaunch};
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let path = dir.path().join("supervisor.db");
+        let fresh = SessionStore::open(&path, true).await.expect("fresh store");
+        let agent = |harness, permissions, start: &[&str], resume: Option<&[&str]>| {
+            let words = |argv: &[&str]| argv.iter().map(ToString::to_string).collect();
+            SessionLaunch::Agent {
+                selection: LaunchSelection {
+                    harness,
+                    permissions,
+                    model: None,
+                    effort: None,
+                    permission_flags: None,
+                    wrapper_prefix: None,
+                    container: None,
+                    workspace_trust: None,
+                },
+                start: words(start),
+                resume: resume.map(words),
+            }
+        };
+        let old_codex = agent(
+            LaunchHarness::Codex,
+            None,
+            &[
+                "codex",
+                "--model",
+                "a saved model",
+                FARHELM_ARGS_PLACEHOLDER,
+            ],
+            Some(&[
+                "codex",
+                "resume",
+                CONVERSATION_PLACEHOLDER,
+                FARHELM_ARGS_PLACEHOLDER,
+            ]),
+        );
+        let old_cursor = agent(
+            LaunchHarness::Cursor,
+            None,
+            &["cursor-agent", FARHELM_ARGS_PLACEHOLDER],
+            None,
+        );
+        let fixtures = [
+            ("old-codex", old_codex, true),
+            ("old-cursor", old_cursor, true),
+            (
+                "guarded-codex",
+                agent(
+                    LaunchHarness::Codex,
+                    Some(LaunchPermission::Guarded),
+                    &["codex", "-s", "workspace-write", FARHELM_ARGS_PLACEHOLDER],
+                    None,
+                ),
+                false,
+            ),
+            (
+                "shell",
+                agent(
+                    LaunchHarness::Bash,
+                    None,
+                    &["bash", FARHELM_ARGS_PLACEHOLDER],
+                    None,
+                ),
+                false,
+            ),
+            ("legacy", launching_row("legacy").launch, false),
+        ];
+        for (id, launch, _) in &fixtures {
+            let mut row = launching_row(id);
+            row.launch = launch.clone();
+            fresh.insert_session(row, None).await.expect("seed session");
+            let stored = fresh.session(id).await.unwrap().expect("fixture row");
+            assert_eq!(&stored.launch, launch, "premise: {id}");
+        }
+        drop(fresh);
+
+        Connection::open(&path)
+            .expect("open migration fixture")
+            .pragma_update(None, "user_version", 38)
+            .expect("restore the v38 stamp without changing its layout");
+
+        let migrated = SessionStore::open(&path, true)
+            .await
+            .expect("migrate from 38");
+        let conn = Connection::open(&path).expect("read migrated stamp");
+        let version: i64 = conn
+            .pragma_query_value(None, "user_version", |row| row.get(0))
+            .unwrap();
+        assert_eq!(version, SCHEMA_VERSION);
+        for (id, mut expected, changes) in fixtures {
+            if changes {
+                let SessionLaunch::Agent { selection, .. } = &mut expected else {
+                    panic!("expected an agent fixture for {id}");
+                };
+                assert_eq!(selection.permissions, None);
+                selection.permissions = Some(LaunchPermission::Yolo);
+            }
+            let stored = migrated.session(id).await.unwrap().expect("migrated row");
+            assert_eq!(stored.launch, expected, "{id}");
+        }
     }
 
     /// A deleted session needs no live row for cleanup. Two generations remain distinct even when one write is
@@ -15461,7 +15608,8 @@ mod tests {
     /// Spec: schema 26 turns a row created from structured choices into an
     /// agent launch, with `{farhelm_args}` appended to its stored start and
     /// resume commands, and keeps every other row's command, kind and
-    /// resume template as a legacy launch.
+    /// resume template as a legacy launch. The later permission migration
+    /// classifies the omitted structured permission as YOLO.
     ///
     /// Why: this is the upgrade promise for sessions that are running when
     /// the release lands (SPEC.md's launch-kinds upgrade paragraph). A
@@ -15513,7 +15661,10 @@ mod tests {
         assert_eq!(
             structured.launch,
             farhelm_proto::SessionLaunch::Agent {
-                selection,
+                selection: farhelm_proto::LaunchSelection {
+                    permissions: Some(farhelm_proto::LaunchPermission::Yolo),
+                    ..selection
+                },
                 start: strings(&["codex", "-m", "gpt-x", "{farhelm_args}"]),
                 resume: Some(strings(&[
                     "codex",

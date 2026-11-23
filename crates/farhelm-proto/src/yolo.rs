@@ -2,11 +2,9 @@
 //!
 //! The launch says so itself ([`crate::SessionLaunch::yolo`]): an agent
 //! launch by its effective permission ([`selection_is_yolo`](crate::yolo::selection_is_yolo)), resolved
-//! through [`crate::LaunchHarness::stored_permission`]. Explicit bypass and
-//! own-setting launches both require the conservative gate; the sidebar
-//! distinguishes them instead of claiming own-setting is known bypass.
-//! Omitted Pi, OpenCode, OMP and Goose permissions retain their historical
-//! YOLO meaning. Plain shell sessions have no permission mode and do not
+//! through [`crate::LaunchHarness::stored_permission`]. Explicit bypass,
+//! unspecified agent permissions and custom flags require the same gate.
+//! Plain shell sessions have no permission mode and do not
 //! trigger this gate. A command launch uses the user's assertion. Farhelm never
 //! reads a command line to decide or second-guess it (SPEC.md, Creation).
 //!
@@ -57,21 +55,14 @@ pub fn is_env_program(program: &str) -> bool {
 
 /// Whether admission must treat a stored selection as YOLO.
 ///
-/// An agent's own setting cannot prove a safety gate and therefore returns
-/// true. Shells do not run an agent, so the absence of a mode is intentional.
-/// New requests must be compiled first; this function never upgrades an older
-/// missing permission to today's guarded default.
+/// A saved agent launch without a recorded mode needs the same confirmation
+/// as an explicit YOLO launch. Shells have no permission mode. New requests
+/// must be compiled first so the flags they actually use determine admission.
 pub fn selection_is_yolo(selection: &LaunchSelection) -> bool {
-    !selection.harness.is_shell()
-        && selection
-            .harness
-            .stored_permission(selection.permissions)
-            .is_none_or(|permission| {
-                matches!(
-                    permission,
-                    LaunchPermission::Yolo | LaunchPermission::Custom
-                )
-            })
+    matches!(
+        selection.harness.stored_permission(selection.permissions),
+        Some(LaunchPermission::Yolo | LaunchPermission::Custom)
+    )
 }
 
 #[cfg(test)]
@@ -127,13 +118,12 @@ mod tests {
             LaunchHarness::Codex,
             Some(LaunchPermission::Yolo)
         )));
-        for harness in [
-            LaunchHarness::Pi,
-            LaunchHarness::OpenCode,
-            LaunchHarness::Omp,
-            LaunchHarness::Goose,
-        ] {
-            assert!(selection_is_yolo(&selection(harness, None)), "{harness:?}");
+        for &harness in LaunchHarness::ALL {
+            assert_eq!(
+                selection_is_yolo(&selection(harness, None)),
+                !harness.is_shell(),
+                "{harness:?}"
+            );
         }
         for permission in [
             LaunchPermission::Approve,
@@ -146,15 +136,6 @@ mod tests {
             )));
         }
 
-        assert!(selection_is_yolo(&selection(LaunchHarness::Codex, None)));
-        // Like a terminal tab, a shell has no permission choice and needs
-        // no YOLO confirmation. Cursor's missing value still means own-setting.
-        for shell in [LaunchHarness::Bash, LaunchHarness::Zsh] {
-            assert!(shell.is_shell());
-            assert_eq!(shell.omitted_permission(), None);
-            assert!(!selection_is_yolo(&selection(shell, None)));
-        }
-        assert!(selection_is_yolo(&selection(LaunchHarness::Cursor, None)));
         assert!(!selection_is_yolo(&selection(
             LaunchHarness::Codex,
             Some(LaunchPermission::Guarded)

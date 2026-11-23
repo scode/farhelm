@@ -379,7 +379,7 @@ fn the_shield_follows_the_launch_and_draws_its_mark() {
             agent("codex", json!("guarded"), &["codex"]),
             Shield::Shielded,
         ),
-        (agent("codex", Value::Null, &["codex"]), Shield::OwnSetting),
+        (agent("codex", Value::Null, &["codex"]), Shield::Yolo),
         (agent("omp", json!("approve"), &["omp"]), Shield::Shielded),
         // An older OMP launch stored no permission, which for OMP meant YOLO, though a new OMP launch defaults to
         // guarded: the row keeps the meaning it was stored with (old `omp-composer.spec.ts`, "an OMP session row shows
@@ -491,12 +491,9 @@ fn a_command_or_legacy_description_names_the_assertion_and_the_command() {
     }
 }
 
-/// SPEC.md: "Every guarded hover names the agent's mode and meaning, shows the actual stored command under Launched
-/// with, and explains that allow rules, hooks, plugins … can loosen it", and the own-setting hover "says Not
-/// classified". Specified, exactly, as a screen reader hears it (the old text): a guarded Codex launch, an older Codex
-/// launch with no permission (the agent's own setting) and an OMP launch in approve each read `<agent> — <the
-/// launcher's help for that permission>` then `Launched with: <stored command>`, the help ending with the launcher's
-/// caveat; the guarded help names Codex's mode and its flags.
+/// The session row names the effective mode and the actual stored command.
+/// A missing agent permission reads as YOLO, with any historical flags still
+/// visible. Guarded help names Codex's mode and flags.
 #[test]
 fn an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command() {
     let guarded = described(
@@ -521,8 +518,7 @@ fn an_agent_launch_description_gives_the_mode_its_help_and_the_stored_command() 
             false
         ),
         format!(
-            "Codex — Not classified · Agent's own setting\nFarhelm did not force a guarded permission mode for this \
-             launch. The agent's configuration decides; hosts that ask before YOLO launches treat it as YOLO.\n\n\
+            "Codex — YOLO: Farhelm treats this launch as bypassing approval and sandbox checks\n\n\
              {CAVEAT}\n\nLaunched with: codex --older-flag"
         )
     );
@@ -624,8 +620,8 @@ fn the_description_escapes_the_command_it_quotes() {
 /// SPEC.md: for Claude, Grok, Muse and Cursor a definite no-checks reading "changes any shield other than YOLO or
 /// asserted-YOLO to the YOLO shield", its text names the observed mode while "retaining the launch mode and command",
 /// it "never makes the shield safer than its launch choice", legacy sessions and the other agents "are not read", and
-/// a later run without evidence shows the launch again. Specified: a guarded Claude launch, an own-setting Cursor
-/// launch, a Muse command asserted not YOLO and a Grok one escalate to the YOLO shield, their descriptions leading
+/// a later run without evidence shows the launch again. A guarded Claude launch,
+/// a Muse command asserted not YOLO and a Grok one escalate to the YOLO shield, their descriptions leading
 /// with the observation in the agent's own words and then `Launched as:` and the launch's own description, unchanged;
 /// an asserted-YOLO command keeps the YOLO shield; a Codex launch (no status-line reading) and a legacy session ignore
 /// the evidence; and without the evidence every description is the launch's alone.
@@ -639,10 +635,6 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
                 &["claude", "--permission-mode", "auto"],
             ),
             "bypass permissions on",
-        ),
-        (
-            agent("cursor", Value::Null, &["cursor-agent"]),
-            "Run Everything",
         ),
         (command("muse", false, json!("muse")), "YOLO"),
         (command("grok", false, json!("grok")), "always-approve"),
@@ -672,6 +664,19 @@ fn status_line_evidence_escalates_the_shield_and_keeps_the_launch_described() {
         );
         assert_eq!(row.permission.map(|(shield, _)| shield), Some(Shield::Yolo));
     }
+    let cursor = agent("cursor", Value::Null, &["cursor-agent"]);
+    assert_eq!(
+        permission(&decoded(cursor.clone()), false),
+        Some(Shield::Yolo)
+    );
+    assert_eq!(
+        permission(&decoded(cursor.clone()), true),
+        Some(Shield::Yolo)
+    );
+    assert!(
+        described(cursor, true)
+            .starts_with("YOLO observed on the agent's status line: Run Everything.")
+    );
     let asserted = command("claude --yolo", true, json!("claude"));
     assert_eq!(permission(&decoded(asserted), true), Some(Shield::Yolo));
     for unread in [
