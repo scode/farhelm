@@ -14,8 +14,9 @@ use crate::hook_identity::{ServeTask, wait_for_after_from};
 
 /// A copied executable is only the filesystem fallback for filesystems that
 /// cannot make a hard link. Both shapes give the kernel executable a real
-/// `codex` basename; a symlink would resolve back to `farhelm` and fail to
-/// establish the premise the production ancestry guard validates.
+/// `codex` basename, mirroring a stock install; a symlink would resolve back
+/// to `farhelm`. Attribution is positional, so the name is the native layout
+/// these tests reproduce, not a rule the supervisor checks.
 fn native_codex_image(dir: &std::path::Path) -> std::path::PathBuf {
     let image = dir.join("codex");
     match std::fs::hard_link(fixtures_bin(), &image) {

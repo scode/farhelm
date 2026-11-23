@@ -4236,23 +4236,23 @@ no path values are stored in the notice.
   The first admitted selecting report pins its emitter and records every ancestor through the terminal root, each by PID
   and kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
   separately from the conversation locator. The historical SQL name and JSON shape are retained for the shared
-  `ReportPin` used by Claude, Codex, Muse, Grok and Antigravity. A session has only one agent kind, so no migration or
-  vendor tag is needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the
-  capture claim and writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing
-  the complete prior binding and exact previous pin. The writer takes the replacement ownership version explicitly.
-  Codex and Grok pass 1. Plain-ID positional integrations pass 0. The previous version remains an independent CAS
-  precondition. No in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later reports must
-  come from the pinned emitter, preserving the original stored ancestry rather than replacing it with a later snapshot.
-  A recorded ancestor takes precedence: its verified record independently selects and corrects both pin and
-  conversation, never inheriting the child's file or persistent thread. A correction records the once-per-launch Codex
-  correction notification in the same transaction as adoption; notification-write failure rolls back the correction, and
-  reload restores it even if publication was interrupted. It does not resolve on capture because it records the prior
-  mistaken target. An unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin
-  whose process is gone, reused or non-running releases for a fresh emitter only if the pin is absent from the new
-  report's chain; descendants cannot inherit authority after its exit. Unavailable process evidence does not release it.
-  A live Codex launch carries its stored pin across an upgrade. That pin keeps the ancestors recorded by the old
-  corridor until it is replaced or the session relaunches. If the launch has no pin, a nested child's selecting report
-  may pin it first, and the root's next verified report can correct it and notify.
+  `ReportPin` used by Claude, Codex, Muse, Grok, Antigravity and custom agents. A session has only one agent kind, so no
+  migration or vendor tag is needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin
+  under the capture claim and writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation,
+  fencing the complete prior binding and exact previous pin. The writer takes the replacement ownership version
+  explicitly. Codex and Grok pass 1. Plain-ID positional integrations pass 0. The previous version remains an
+  independent CAS precondition. No in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it.
+  Later reports must come from the pinned emitter, preserving the original stored ancestry rather than replacing it with
+  a later snapshot. A recorded ancestor takes precedence: its verified record independently selects and corrects both
+  pin and conversation, never inheriting the child's file or persistent thread. A correction records the once-per-launch
+  Codex correction notification in the same transaction as adoption; notification-write failure rolls back the
+  correction, and reload restores it even if publication was interrupted. It does not resolve on capture because it
+  records the prior mistaken target. An unverified ancestor changes nothing, and its unready Stop is acknowledged
+  without effect. A pin whose process is gone, reused or non-running releases for a fresh emitter only if the pin is
+  absent from the new report's chain; descendants cannot inherit authority after its exit. Unavailable process evidence
+  does not release it. A live Codex launch carries its stored pin across an upgrade. That pin keeps the ancestors
+  recorded by the old corridor until it is replaced or the session relaunches. If the launch has no pin, a nested
+  child's selecting report may pin it first, and the root's next verified report can correct it and notify.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -4333,7 +4333,9 @@ no path values are stored in the notice.
   left in the chain. The terminal root ends the search even if it resembles a trampoline. The first admitted report pins
   the emitter and records its ancestors through the root. Later reports can keep that binding from the same emitter or
   correct it from a recorded ancestor according to the vendor's record and event policy. Claude, Codex, Muse, Grok and
-  Antigravity use this rule. Grok also requires `--no-leader` on the emitter to establish an owned backend.
+  Antigravity use this rule. Grok also requires `--no-leader` on the emitter to establish an owned backend. Custom
+  agents use it with their own reporter command and its five-argument shell trampoline in place of the hook invocation
+  and hook trampoline (see **Custom agents**).
 
   Add an executable-name or launch-shape rule only when recorded evidence shows what position plus pin cannot
   distinguish. OMP is the launch-shape exception. Its extension's TUI context check excludes delegated callbacks inside

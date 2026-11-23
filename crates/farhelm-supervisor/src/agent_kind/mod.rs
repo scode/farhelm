@@ -134,8 +134,10 @@
 //! - **Stateful per-kind behavior in the supervisor** (report admission,
 //!   resume verification, launch provenance):
 //!   `service/core/vendor/<kind>.rs`, dispatched from `service/core.rs` by
-//!   exhaustive matches. Claude, Muse and Antigravity share `vendor/positional.rs` with
-//!   explicit per-kind event, record-verification and correction-notice policies.
+//!   exhaustive matches. Claude, Muse, Antigravity and custom agents share `vendor/positional.rs`
+//!   with explicit per-kind event, record-verification and correction-notice policies; every
+//!   pinned kind (those plus Codex and Grok) judges its process pin through `judge_report_pin`
+//!   in `vendor/mod.rs`.
 //! - **Process-tree attribution:** `procs/positional.rs` and the durable `ReportPin`
 //!   are the default for a new agent. Grok adds an emitter option check. OMP keeps
 //!   its launch-shape proof in `procs/omp.rs`. See **Default process attribution**

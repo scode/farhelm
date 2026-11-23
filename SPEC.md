@@ -4216,10 +4216,10 @@ conversation or unavailable. Choosing a conversation by ID still opens it direct
 Farhelm-launched Codex sessions run without Codex's shared background server, so their commands keep the session's own
 environment and process tree. This applies even with conversation hooks off; legacy sessions keep their old injection.
 
-A compound command or wrapper prefix can keep Bash resident above its agent or wrapper. Claude, Muse and Codex tolerate
-that additional process. Grok and OMP refuse an unclassified intermediary when another resident wrapper sits below it,
-so such a command can run without capturing a conversation and leave Restart unavailable. Farhelm does not infer or
-repair the command's process layout.
+A compound command or wrapper prefix can keep Bash resident above its agent or wrapper. Claude, Muse, Codex, Grok,
+Antigravity and custom agents tolerate that additional process. OMP refuses an unclassified intermediary when another
+resident wrapper sits below it, so such a command can run without capturing a conversation and leave Restart
+unavailable. Farhelm does not infer or repair the command's process layout.
 
 OMP (the `omp` program, the `@oh-my-pi/pi-coding-agent` CLI) is another report-only integration beside Pi. An OMP agent
 launch gets Farhelm's private extension, and so does a command launch that declares OMP, where its `{farhelm_args}`

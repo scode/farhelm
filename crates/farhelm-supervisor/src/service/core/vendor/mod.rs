@@ -1,5 +1,6 @@
 //! The supervisor's per-agent behavior that needs the supervisor itself:
-//! one file per agent kind, with positional admission shared by Claude and Muse.
+//! one file per agent kind, with positional admission shared by Claude, Muse, Antigravity
+//! and custom agents, and one process-pin judge shared by every pinned kind.
 //!
 //! This is the stateful half of a kind's integration. The pure half (launch
 //! argv, hook injection decisions, record and locator parsing, screen

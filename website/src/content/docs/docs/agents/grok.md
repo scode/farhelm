@@ -40,6 +40,7 @@ delete the file from the machines where it was installed, and start a new Grok p
   [Permission modes](/docs/agents/#permission-modes). Farhelm also tries to notice **always-approve** on Grok's status
   line and show a YOLO shield; this is best effort, not a check of your allow rules.
 - **Restart** works with a versioned Grok binary or a [wrapper prefix](/docs/agents/agent-wrappers/) that passes through
-  Grok's arguments and environment. Grok needs to run with `--no-leader`, which Farhelm passes when starting it.
+  Grok's arguments and environment. Grok needs to run with `--no-leader`, which Farhelm passes when it composes the
+  command; a custom command must include it.
 - Grok's conversation hooks do not introduce `$farhelm` requests.
 - Tested on Linux with Grok Build 1.0.40 and 1.0.50; not yet on a Mac.
