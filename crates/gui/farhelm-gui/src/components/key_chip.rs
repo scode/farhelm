@@ -13,7 +13,7 @@ pub(crate) fn key_chip(keys: impl Into<SharedString>, ink: Token, palette: &Pale
         .px(px(5.))
         .border_1()
         .border_color(theme::color(palette.border_dialog))
-        .rounded(metrics::RADIUS_SM)
+        .rounded(metrics::RADIUS_CAP)
         .text_size(px(11.))
         .text_color(theme::color(ink))
         .child(keys.into())

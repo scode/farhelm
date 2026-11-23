@@ -68,7 +68,7 @@ pub enum Tier {
     /// `.btn`: no fill, quiet text, a hover fill. Most toolbar and row controls.
     #[default]
     Ghost,
-    /// `.btn-neutral`: a raised fill and outline, for secondary answers such as Cancel.
+    /// A translucent tint for secondary actions such as Cancel. It reads against both panel and dialog backgrounds.
     Neutral,
     /// `.btn-primary`: the solid accent fill of an ordinary main action.
     Primary,
@@ -79,14 +79,13 @@ pub enum Tier {
     /// `.btn-danger.btn-outline`: red text and a red outline on no fill, with a subdued red hover. The permanent answer
     /// beside a one-off danger answer (the YOLO confirmation's "Start, and don't ask again on this host" beside "Start
     /// YOLO session anyway"): a filled button draws the reflex click, and the answer that turns a question off for good
-    /// should not be the reflex target, so it keeps the danger tier's color but not its fill. Unavailable, it takes the
-    /// retired fill as [`Tier::Danger`] does; busy, it keeps its outline and loses only its hover, as the old
-    /// `aria-disabled` rule left it.
+    /// keeps its red outline. A disabled button has the quieter outline and an opaque fill. A busy button keeps its
+    /// idle outline and loses its hover.
     DangerOutline,
     /// `.btn-primary.btn-outline`: accent text and an accent outline on no fill, with the control hover fill. The
     /// permanent answer beside a one-off primary answer, for the same reason as [`Tier::DangerOutline`]: the host setup
-    /// confirmation's "Set up, don't ask again" beside Set up. Unavailable, it takes the retired fill as
-    /// [`Tier::Primary`] does; busy, it keeps its outline and loses only its hover.
+    /// confirmation's "Set up, don't ask again" beside Set up. It keeps the same outlined disabled and busy states
+    /// as [`Tier::DangerOutline`].
     PrimaryOutline,
     /// `.btn.banner-reclaim`: a compact ghost button for the red banner (the old terminal's "Take control"). It has a
     /// pale red outline and white text so it reads against the banner's fill, a darker red hover, and a white focus
@@ -150,12 +149,9 @@ pub enum Tier {
     /// of the field's control beside it, so the ✕ is centered on the control), in the quiet `--fg-1` ink that turns
     /// `--danger` with the control hover fill under the pointer.
     FieldRemove,
-    /// `.host-icon-choice`: one of the host settings' icon choices, a 36-pixel square on the well with a dim edge, its
-    /// content (the host's mark) centered, and the control hover fill under the pointer. Chosen
-    /// ([`Button::pressed`]), it takes the accent fill with the accent edge, as a [`Tier::Nav`] entry does, keeps the
-    /// fill's hover, and keeps its resting fill under the keyboard ring ([`Button::fill`]). The content is the caller's,
-    /// so a chosen choice draws its mark in the inverse ink itself (the old sheet's one `!important` over the mark's own
-    /// tint).
+    /// One of the host settings' icon choices. The 36-pixel square uses the ordinary button tint until chosen, when
+    /// the accent fill and inverse ink distinguish the current icon. The keyboard ring leaves the resting fill in
+    /// place. The caller draws the centered mark in the appropriate ink.
     IconChoice,
     /// `.session-tunnel-toggle`: the open-tunnels pill in the session's top row, the row's one distinctively colored
     /// control: the tunnel ink on the tunnel fill inside the tunnel edge, rounded to 8 pixels, padded 2 by 4 pixels at
@@ -293,8 +289,7 @@ pub enum Condensed {
 
 /// Which part of a split button a button is ([`Button::split`]): the session header's Restart and Replace, whose main
 /// part performs the ordinary action and whose caret opens a menu of that action and its "with…" variant (SPEC.md,
-/// "Terminal experience"). The two parts are drawn side by side with no gap, the way the old `.header-action-split`
-/// joined them, so each squares the corners where it meets the other.
+/// "Terminal experience"). The two parts square their inner corners and sit one pixel apart.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum SplitPart {
     /// The main part: its right corners are square.
@@ -306,6 +301,16 @@ pub enum SplitPart {
     /// `[data-actions-unavailable="true"]` rule, a visual state rather than a disabled one).
     Caret { muted: bool },
 }
+
+/// The side facing a neighboring control in a joined row. The outward corners keep the button's ordinary radius.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JoinSide {
+    Left,
+    Right,
+}
+
+/// The space between the square edges of a split button or the terminal text size controls.
+pub(crate) const BUTTON_JOIN_GAP: Pixels = px(1.);
 
 /// A button with a visible text label (and optionally a leading icon).
 #[derive(IntoElement)]
@@ -347,6 +352,8 @@ pub struct Button {
     side: Option<Pixels>,
     /// The part of a split button this is, if it is one ([`Button::split`]).
     split: Option<SplitPart>,
+    /// The side whose corners flatten to face the next cell.
+    joined: Option<JoinSide>,
     /// Whether an open button ([`Button::expanded`]) wears the open look; false for a disclosure
     /// ([`Button::discloses`]).
     open_look: bool,
@@ -400,6 +407,7 @@ impl Button {
             badge: None,
             side: None,
             split: None,
+            joined: None,
             open_look: true,
             rail_row: false,
             on_click: None,
@@ -435,11 +443,9 @@ impl Button {
     /// button shows `cursor: not-allowed`, as the old sheet gave the `aria-disabled` header Restart; no other tier
     /// does, since the old busy Save kept the button's cursor.
     ///
-    /// Its look by tier: the filled tiers (neutral, chip, primary, danger) take the retired look, the old sheet's
-    /// `--bg-2` fill, `--border-dim` edge and `--fg-2` text; the unfilled ones (ghost, the danger outline, the row's ⋯,
-    /// the banner's, the rail's, the Settings section list's and the link) keep their look and lose only their hover
-    /// fill. GPUI cannot report the state to assistive technology, so a button whose action cannot run should say so in
-    /// its name ([`Button::accessible_name`]).
+    /// Neutral, chip, primary and danger buttons take the retired tint and quiet ink. Ghost and outlined actions
+    /// keep their existing rest looks. GPUI cannot report this distinction to assistive technology, so a button whose
+    /// action cannot run should say so in its name ([`Button::accessible_name`]).
     ///
     /// The look is applied on the next redraw, so a handler must still keep its own guard for a press that arrives
     /// before it (Rename's Save checks its draft).
@@ -595,10 +601,18 @@ impl Button {
         self
     }
 
-    /// Draw the button as one part of a split button (see [`SplitPart`]). The owner lays the two parts out side by side
-    /// with no gap, and each is a control of its own: its own label, hover help, focus and activation.
+    /// Draw the button as one part of a split button. The owner lays out the gap between the two independent controls.
     pub fn split(mut self, part: SplitPart) -> Self {
         self.split = Some(part);
+        self.joined(match part {
+            SplitPart::Main => JoinSide::Right,
+            SplitPart::Caret { .. } => JoinSide::Left,
+        })
+    }
+
+    /// Square the edge facing the next cell while keeping this button's padding and behavior.
+    fn joined(mut self, side: JoinSide) -> Self {
+        self.joined = Some(side);
         self
     }
 
@@ -693,18 +707,13 @@ impl Button {
                 palette.on_fill,
             );
         }
-        if self.pressed == Some(true) && matches!(self.tier, Tier::IconChoice | Tier::TemplateRow) {
+        if self.pressed == Some(true) && self.tier == Tier::TemplateRow {
             // In Dark appearance the usual edge is the same color as the fill. The stronger edge keeps the
             // selected template distinct from the dialog even when its editor has keyboard focus.
-            let edge = if self.tier == Tier::TemplateRow {
-                palette.accent
-            } else {
-                palette.accent_edge
-            };
             return (
                 Some(palette.accent_fill),
                 palette.accent_fill_hover,
-                Some(edge),
+                Some(palette.accent),
                 palette.on_fill,
             );
         }
@@ -724,18 +733,6 @@ impl Button {
                 palette.on_fill,
             );
         }
-        // A muted caret reads as retired until its menu opens, and keeps a hover fill, since a press still opens it.
-        if self.expanded != Some(true)
-            && self.tier == Tier::Neutral
-            && self.split == Some(SplitPart::Caret { muted: true })
-        {
-            return (
-                Some(palette.bg_2),
-                palette.control_hover,
-                Some(palette.border_dim),
-                palette.fg_2,
-            );
-        }
         // After the pressed looks: a button that is both a choice in force and open (the host rail's Hosts while host
         // management shows) keeps its pressed look, as the old sheet drew it. The readout's update toggle had no open
         // look at all: it keeps the look of its text while its menu is open.
@@ -751,6 +748,15 @@ impl Button {
             );
         }
         let retired = (
+            Some(palette.button_retired),
+            palette.button_retired,
+            None,
+            palette.fg_2,
+        );
+        if self.muted_caret() {
+            return retired;
+        }
+        let outlined_retired = (
             Some(palette.bg_2),
             palette.bg_2,
             Some(palette.border_dim),
@@ -783,10 +789,10 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::Neutral | Tier::Chip if self.busy => retired,
-            Tier::Neutral | Tier::Chip => (
-                Some(palette.bg_2),
-                palette.control_hover,
-                Some(palette.border),
+            Tier::Neutral | Tier::Chip | Tier::IconChoice => (
+                Some(palette.button_rest),
+                palette.button_hover,
+                None,
                 palette.fg_0,
             ),
             Tier::Rail => (None, palette.bg_2, None, palette.fg_1),
@@ -797,12 +803,6 @@ impl Button {
                 palette.fg_0,
             ),
             Tier::Nav | Tier::TemplateRow => (None, palette.control_hover, None, palette.fg_0),
-            Tier::IconChoice => (
-                Some(palette.well),
-                palette.control_hover,
-                Some(palette.border_dim),
-                palette.fg_0,
-            ),
             Tier::ColorChoice => (None, theme::TRANSPARENT, None, palette.fg_0),
             Tier::Tunnel => (
                 Some(palette.tunnel_bg),
@@ -820,38 +820,64 @@ impl Button {
                 };
                 (None, palette.control_hover, Some(ink), ink)
             }
-            Tier::Primary if self.disabled || self.busy || self.refused => retired,
-            Tier::Danger if self.disabled || self.busy || self.refused => retired,
+            Tier::Primary | Tier::Danger if self.disabled || self.busy || self.refused => retired,
             Tier::Primary => (
                 Some(palette.accent_fill),
-                palette.accent_fill_hover,
-                Some(palette.accent_edge),
+                palette.primary_button_hover,
+                None,
                 palette.on_fill,
             ),
             Tier::Danger => (
                 Some(palette.danger_bg),
-                palette.danger_fill_hover,
-                Some(palette.danger_soft),
+                palette.danger_button_hover,
+                None,
                 palette.on_fill,
             ),
             Tier::DangerGhost if self.disabled || self.busy => {
                 (None, palette.bg_2, None, palette.fg_2)
             }
             Tier::DangerGhost => (None, palette.danger_bg_dim, None, palette.danger),
-            Tier::DangerOutline if self.disabled => retired,
+            Tier::DangerOutline if self.disabled => outlined_retired,
             Tier::DangerOutline => (
                 None,
                 palette.danger_bg_dim,
                 Some(palette.danger),
                 palette.danger,
             ),
-            Tier::PrimaryOutline if self.disabled => retired,
+            Tier::PrimaryOutline if self.disabled => outlined_retired,
             Tier::PrimaryOutline => (
                 None,
                 palette.control_hover,
                 Some(palette.accent),
                 palette.accent,
             ),
+        }
+    }
+
+    /// A muted caret still opens its menu so the user can read why its choices are unavailable. Its quiet tint
+    /// remains through hover and pointer down until the menu actually opens.
+    fn muted_caret(&self) -> bool {
+        self.expanded != Some(true)
+            && self.tier == Tier::Neutral
+            && self.split == Some(SplitPart::Caret { muted: true })
+    }
+
+    /// Pointer-down fill for the tinted and solid actions. Chosen options, open menus and muted carets keep their
+    /// state colors. Busy and disabled buttons keep their resting fill even when their hover help is reachable.
+    pub(super) fn held_fill(&self, palette: &Palette) -> Option<Token> {
+        if self.disabled
+            || self.busy
+            || self.muted_caret()
+            || self.pressed == Some(true)
+            || (self.expanded == Some(true) && self.open_look)
+        {
+            return None;
+        }
+        match self.tier {
+            Tier::Neutral | Tier::Chip | Tier::IconChoice => Some(palette.button_held),
+            Tier::Primary if !self.refused => Some(palette.accent_fill_hover),
+            Tier::Danger if !self.refused => Some(palette.danger_fill_hover),
+            _ => None,
         }
     }
 
@@ -895,6 +921,7 @@ impl RenderOnce for Button {
         let radius = match self.tier {
             Tier::ColorChoice => px(COLOR_CHOICE_SIZE / 2.),
             Tier::Waiting => metrics::RADIUS_MD,
+            Tier::NumberKey { .. } => metrics::RADIUS_CAP,
             _ => metrics::RADIUS_SM,
         };
         let bordered = !matches!(self.tier, Tier::Link | Tier::Readout { .. });
@@ -1075,20 +1102,35 @@ impl RenderOnce for Button {
                 })
             })
             .rounded(radius)
-            // Where a split button's two parts meet, their corners are square.
-            .when(self.split == Some(SplitPart::Main), |button| {
+            .when(self.joined == Some(JoinSide::Right), |button| {
                 button.rounded_tr(px(0.)).rounded_br(px(0.))
             })
-            .when(
-                matches!(self.split, Some(SplitPart::Caret { .. })),
-                |button| button.rounded_tl(px(0.)).rounded_bl(px(0.)),
-            )
+            .when(self.joined == Some(JoinSide::Left), |button| {
+                button.rounded_tl(px(0.)).rounded_bl(px(0.))
+            })
             // `.inline-link` and the readout have no edge at all (`border: 0`), so they sit on the text line like the
             // words around them; every other tier keeps the 1-pixel edge.
             .when(bordered, |button| button.border_1())
             .when(self.tier == Tier::Link, |button| button.underline())
             .text_size(metrics::TEXT_SM)
             .line_height(px(LINE))
+            .when(
+                // Menu rows keep their normal weight even when a popover builds them from buttons.
+                !matches!(
+                    self.tier,
+                    Tier::Link
+                        | Tier::Readout { .. }
+                        | Tier::Nav
+                        | Tier::TemplateRow
+                        | Tier::BrowseRow
+                        | Tier::Rail
+                        | Tier::Waiting
+                ) && !matches!(
+                    self.role,
+                    Role::MenuItem | Role::MenuItemCheckBox | Role::MenuItemRadio
+                ),
+                |button| button.font_weight(FontWeight::MEDIUM),
+            )
             .when(words, |button| {
                 button
                     .text_size(px(CONDENSED_TEXT))
@@ -1176,9 +1218,12 @@ impl RenderOnce for Button {
         } else if ring {
             // The old `outline: 2px solid var(--accent); outline-offset: 1px`, drawn as a ring element because GPUI has
             // no outline: two pixels wide, one pixel clear of the button's edge.
-            button = button.child(
-                super::focus_ring(px(-3.).into(), ring_color).rounded(metrics::RADIUS_SM + px(3.)),
-            );
+            button = button.child(super::focus_ring(px(-3.).into(), ring_color).rounded(
+                match self.tier {
+                    Tier::NumberKey { .. } | Tier::Waiting => metrics::RADIUS_CAP + px(3.),
+                    _ => metrics::RADIUS_SM + px(3.),
+                },
+            ));
         }
         if active {
             // The field's ✕ also turns red under the pointer (`.templates-remove:hover { color: var(--danger) }`).
@@ -1196,6 +1241,9 @@ impl RenderOnce for Button {
                     None => style,
                 }
             });
+            if let Some(fill) = self.held_fill(palette) {
+                button = button.active(move |style| style.bg(theme::color(fill)));
+            }
         } else if enabled && self.busy && self.tier == Tier::Neutral {
             // The old sheet's `cursor: not-allowed` on the `aria-disabled` header Restart, which still answers the
             // hover. Only the neutral tier: the old busy Save (a primary) kept the button's cursor.
@@ -1379,6 +1427,11 @@ impl IconButton {
     /// See [`Button::split`].
     pub fn split(self, part: SplitPart) -> Self {
         IconButton(self.0.split(part))
+    }
+
+    /// Join a neighboring cell at this edge while keeping the ordinary icon-button geometry.
+    pub(crate) fn joined(self, side: JoinSide) -> Self {
+        IconButton(self.0.joined(side))
     }
 
     /// See [`Button::on_key_down`]: a caret that opens its menu with Down and Up.

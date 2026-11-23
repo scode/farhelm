@@ -6,9 +6,9 @@ use std::rc::Rc;
 
 use crate::assets::Icon;
 use crate::components::{
-    Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, OptionRow, RadioGroup,
-    RadioOption, Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill, SplitPart,
-    TabOption, TabStrip, TextInput, Tier,
+    BUTTON_JOIN_GAP, Button, Checkbox, CommandWell, DialogFrame, HoverHelp, IconButton, OptionRow,
+    RadioGroup, RadioOption, Role, ScrollBox, Select, SelectOption, SequenceChip, SequencePill,
+    SplitPart, TabOption, TabStrip, TextInput, Tier,
 };
 use crate::focus::Mark;
 use crate::host_text::{self, HostSentence, HostText};
@@ -125,7 +125,7 @@ pub(super) fn command_wells(_: &SceneState, _: &mut Window, cx: &mut App) -> Any
 /// look the rail's choice wears while Hosts management is shown, on the rail's ground), the filter chip with
 /// a mark, a name and its ✕, and the link tier. The outlined danger tier is pinned at rest by `inline-prompt`; its
 /// unavailable and busy looks are not pinned yet. A third row shows compact split buttons with normal, muted and open
-/// carets, followed by a disabled compact neutral button.
+/// carets, followed by a disabled compact neutral button. Button unit tests cover the pointer-down fill.
 pub(super) fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElement {
     let help = || HoverHelp::tooltip("Golden scene control");
     let palette = theme::palette(cx);
@@ -218,6 +218,7 @@ pub(super) fn buttons(_: &SceneState, _: &mut Window, cx: &mut App) -> AnyElemen
     let split = |id: &'static str, muted, open| {
         div()
             .flex()
+            .gap(BUTTON_JOIN_GAP)
             .child(
                 Button::new(id, "Restart", help(), Role::Button)
                     .tier(Tier::Neutral)

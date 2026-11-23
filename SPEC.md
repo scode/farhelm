@@ -3311,9 +3311,9 @@ whatever the agent renders is what you see. There is no composer, no message abs
 - Terminal text size is adjustable: Cmd+Shift with + or − on macOS, Ctrl+Shift elsewhere, or the magnifier − / + buttons
   at the start of the action group on the right of the session's top row, step every open terminal's text size together,
   hidden tabs included, within a fixed range, and each terminal is resized so the program inside sees its new rows and
-  columns. The buttons share one border with a fixed-width, display-only readout of the current size in points between
-  them. The readout follows button and shortcut changes, resets and rebuilt session controls without adding a tab stop.
-  While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program. Cmd/Ctrl
+  columns. A fixed-width, display-only readout shows the current size in points, with a one-pixel gap between it and
+  each button. The readout follows button and shortcut changes, resets and rebuilt session controls without adding a tab
+  stop. While a terminal is open the shortcut works wherever focus is and never reaches the terminal's program. Cmd/Ctrl
   with = or − and no Shift are not app shortcuts and reach a focused terminal like any other key: there is no interface
   zoom (decided 2026-11-13). On Linux this takes over Ctrl+Shift+− (Ctrl+_, undo in readline and emacs) inside the
   terminal, accepted 2026-10-02. The keys are the ones at the US-layout positions of = and −. The size is a helm

@@ -164,7 +164,7 @@ impl Checkbox {
             .flex()
             .items_center()
             .justify_center()
-            .rounded(metrics::RADIUS_SM)
+            .rounded(metrics::RADIUS_CAP)
             .border_1()
             .border_color(theme::color(edge))
             .bg(theme::color(fill))
@@ -241,7 +241,7 @@ impl RenderOnce for Checkbox {
         } else if self.switch {
             (px(-3.), palette.accent, metrics::RADIUS_LG + px(3.))
         } else {
-            (px(-3.), palette.accent, metrics::RADIUS_SM + px(3.))
+            (px(-3.), palette.accent, metrics::RADIUS_CAP + px(3.))
         };
         let mark = div()
             .relative()

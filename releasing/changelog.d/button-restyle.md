@@ -2,4 +2,4 @@
 kind: changed
 ---
 
-Section headings in Settings and the session launcher's More options now use Inter Medium.
+Desktop buttons and choice chips have softer corners, Medium-weight labels, and a tinted fill without outlines. Primary and destructive buttons keep their blue and red fills. The session toolbar's split buttons and text size controls use one-pixel gaps between their parts.

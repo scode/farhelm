@@ -123,8 +123,8 @@ use crate::actions::DELETE_SESSION_SHORTCUT_NAME;
 use crate::actions::{FocusNext, FocusPrevious};
 use crate::assets::Icon;
 use crate::components::{
-    Button, CONDENSED_GAP, Condensed, HoverHelp, IconButton, MenuHeader, MenuItem, MenuStart,
-    SplitPart, Tier, home_end_keys, spinner_icon, toggle_arrow_keys,
+    BUTTON_JOIN_GAP, Button, CONDENSED_GAP, Condensed, HoverHelp, IconButton, MenuHeader, MenuItem,
+    MenuStart, SplitPart, Tier, home_end_keys, spinner_icon, toggle_arrow_keys,
 };
 use crate::desktop::title_band::{self, Row};
 use crate::environment_ui::ProviderUi;
@@ -1072,12 +1072,13 @@ impl Drawn<'_> {
                 condensed,
                 focus,
             );
-            // The two parts side by side with no gap, as the old `.header-action-split`; the row's default stretch
-            // gives the icon-only caret the main part's height. The caret is its menu's anchor.
+            // The gap separates the two click targets. Stretch gives the caret the main part's height so the pair
+            // still reads as one control. The caret is its menu's anchor.
             buttons.push(
                 div()
                     .flex()
                     .flex_row()
+                    .gap(BUTTON_JOIN_GAP)
                     .flex_none()
                     .child(main)
                     .child(div().relative().flex().child(caret).child(anchor.track()))
