@@ -325,6 +325,9 @@ fn resolve_with(
         LaunchRequest::Command(command) => command.custom_agent.as_deref(),
     };
     let registered = id.and_then(|id| placement.custom_agents.iter().find(|agent| agent.id == id));
+    if let (Some(id), None) = (id, registered) {
+        return Err(crate::custom_agents::unknown_agent(id));
+    }
     let launch = crate::sessions::resolve_launch_request(request, registered)?;
     // A template switch can leave an earlier prompt dormant. Only the final
     // program can receive it. The fold already refused an explicit unsupported edit.

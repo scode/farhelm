@@ -115,6 +115,31 @@ pub(crate) fn missing_agent() -> anyhow::Error {
     .into()
 }
 
+/// Refuse an agent's `--agent` value that names neither a built-in type nor a custom agent registered here.
+///
+/// SPEC.md, "Agent-spawned sessions", requires such a refusal to list the agent types, because the calling agent's
+/// only way to recover is the message. The CLI accepts any well-formed custom ID, since it cannot read the catalog,
+/// so a typo of a built-in name (`cluade`) reaches the helm and is refused here rather than as a stale registration,
+/// which would claim the ID was once registered.
+pub(crate) fn unknown_agent(id: &str) -> anyhow::Error {
+    let built_ins: Vec<String> = farhelm_proto::LaunchHarness::BUILT_INS
+        .iter()
+        .filter_map(|harness| match serde_json::to_value(harness) {
+            Ok(serde_json::Value::String(word)) => Some(word),
+            _ => None,
+        })
+        .collect();
+    SupervisorError::helm(
+        ErrorKind::NotFound,
+        format!(
+            "{id:?} is not a built-in agent type or a custom agent registered on this helm; \
+             built-in types are {}",
+            built_ins.join(", ")
+        ),
+    )
+    .into()
+}
+
 /// Used for the Settings view and the channel's keyed catalog projection.
 pub(crate) async fn list(State(state): State<Arc<AppState>>) -> Response {
     match state.store.custom_agents().await {
