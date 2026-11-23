@@ -487,6 +487,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   whichever was done, and whether the license check should catch GPL-family files bundled inside a crate whose declared
   license is permissive.
 
+- **Command and control drop-down on Command-backtick.** command and control bound to `` command-` `` (drops down)
+
 ### Tensorlake
 
 - **Live resize of Tensorlake hosts.** A host is created at its recipe's size, and a recipe's size change affects only
