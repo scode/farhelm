@@ -8650,18 +8650,19 @@ own migration and adoption rules instead. A terminal host is the exception that 
 client tag and the snapshots it keeps are permanent surfaces with rules of their own, in "Terminal host" and "Version
 and skew".) So the following are a compatibility surface, held to the same care as a wire format:
 
-- The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, as
-  injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's `-c hooks=…`, and as the user installs
-  it for Grok and Antigravity (see "The per-launch identity hook" under Supervisor internals), and the outer timeouts
-  those declarations carry, which bound how long a newer hook, and anything in front of it, may take. Sessions launched
-  before an earlier upgrade still hold Claude's or Codex's old five-second limit, which a hook that only writes a file
-  fits easily; only a vendor holding stdin open could push one past it. The supervisor's recognition of those shapes
-  counts too: hook attribution for Claude, Codex, Muse, Grok, OMP and Antigravity matches the reporter's
-  `<farhelm> internal hook …` argv and its `sh -c` trampoline syntactically, never by path, so that an upgraded
-  supervisor still accepts an older hook. Those command lines run whatever binary is installed when they fire, so an
-  already-running session's hooks start writing report files after an update with nothing re-issued; the report file
-  format is versioned, and a supervisor refuses a version it does not read (the brief update gap described under "Report
-  files").
+- The hook command lines and their flags: `farhelm internal hook --vendor <adapter>`, with or without `--announce`, and
+  for Muse also `--session-id` and `--supervisor-socket` (which name the session and its supervisor even when Muse
+  scrubs the hook's environment), as injected into Claude's `--settings`, Codex's `-c hooks.…` overrides and Muse's
+  `-c hooks=…`, and as the user installs it for Grok and Antigravity (see "The per-launch identity hook" under
+  Supervisor internals), and the outer timeouts those declarations carry, which bound how long a newer hook, and
+  anything in front of it, may take. Sessions launched before an earlier upgrade still hold Claude's or Codex's old
+  five-second limit, which a hook that only writes a file fits easily; only a vendor holding stdin open could push one
+  past it. The supervisor's recognition of those shapes counts too: hook attribution for Claude, Codex, Muse, Grok, OMP
+  and Antigravity matches the reporter's `<farhelm> internal hook …` argv and its `sh -c` trampoline syntactically,
+  never by path, so that an upgraded supervisor still accepts an older hook. Those command lines run whatever binary is
+  installed when they fire, so an already-running session's hooks start writing report files after an update with
+  nothing re-issued; the report file format is versioned, and a supervisor refuses a version it does not read (the brief
+  update gap described under "Report files").
 - Goose's stored reporter declaration, in full: the extension name `farhelm-reporter`, its
   `sh -c 'exec "${FARHELM_GOOSE_REPORTER_EXE:-farhelm}" internal goose-hook'` command, and the fallback to `farhelm` on
   `PATH`. Goose replays it on every resume, including a manual one long after the Farhelm session is gone: Farhelm adds
