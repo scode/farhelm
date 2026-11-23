@@ -45,6 +45,8 @@ enum Step {
     ReplayComplete,
     /// A detach notice with this code, then the socket closes.
     Detach(Option<DetachCode>),
+    /// A supervisor unavailable reply arrives before the shell tab goes live.
+    RefuseTabAttach,
     /// The open socket drops.
     DropLink,
     /// A binary message on the open socket that is not a grid message.
@@ -83,6 +85,11 @@ fn script() -> Vec<Step> {
         // A resize while the first attach connects reaches only the retry after that attach fails.
         Resize(100, 30),
         Fail,
+        Accept,
+        // A real attach refusal stops even with code "other", while a dropped socket later keeps retrying.
+        RefuseTabAttach,
+        ReconnectNow,
+        TakeControl,
         Accept,
         // A socket that opened but never went live counts as a failed attempt, so the ladder climbs on, and drops
         // input; the first output makes it live.
@@ -174,11 +181,19 @@ fn newest(events: &[TerminalEvent], stamp: &mut u64) {
     }
 }
 
+/// Both sides attach a shell tab so an initial tab refusal is meaningful before the first replay.
+fn attach_tab() -> TerminalAttach {
+    TerminalAttach {
+        tab: Some("remembered".into()),
+        ..attach("s1")
+    }
+}
+
 /// Play the script against the fake. Index 0 is what the GUI saw on open; index `i` is step `i - 1`. Beside each
 /// step's observations goes the fake's phase after it, which tells `run_real` whether a socket is open and live.
 fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
     let (mut fake, handle, mut events) =
-        FakeTerminal::open_with_ladder(&attach("s1"), parity_ladder());
+        FakeTerminal::open_with_ladder(&attach_tab(), parity_ladder());
     let (mut observed, mut phases) = (Vec::new(), Vec::new());
     let mut stamp = 0;
     for step in std::iter::once(None).chain(steps.iter().copied().map(Some)) {
@@ -191,6 +206,7 @@ fn run_fake(steps: &[Step]) -> (Vec<Observed>, Vec<FakePhase>) {
             Some(Step::Output) => fake.output(GridOutput::HistoryReset),
             Some(Step::ReplayComplete) => fake.replay_complete(),
             Some(Step::Detach(code)) => fake.detach(code, "why"),
+            Some(Step::RefuseTabAttach) => fake.refuse_tab_attach("why"),
             Some(Step::Undecodable) => fake.protocol_fault(),
             Some(step @ (Step::Input(data) | Step::StaleInput(data))) => {
                 let stamp = if matches!(step, Step::StaleInput(_)) {
@@ -265,7 +281,7 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
         ..ChannelConfig::default()
     };
     let (handle, mut events) =
-        open_terminal(HelmEndpoint::new(addr, "test-secret"), attach("s1"), config);
+        open_terminal(HelmEndpoint::new(addr, "test-secret"), attach_tab(), config);
     let mut socket: Option<WebSocketStream<TcpStream>> = None;
     // The latest size the GUI asked for, which the resize after early input repeats.
     let mut size = (80, 24);
@@ -305,10 +321,17 @@ async fn run_real(steps: &[Step], expected: &[Observed], phases: &[FakePhase]) -
                 let frame = Message::text(TerminalServerMessage::ReplayComplete.to_text());
                 socket.as_mut().unwrap().send(frame).await.unwrap();
             }
-            Some(Step::Detach(code)) => {
+            Some(step @ (Step::Detach(_) | Step::RefuseTabAttach)) => {
+                let tab_unavailable = matches!(step, Step::RefuseTabAttach);
+                let code = if let Step::Detach(code) = step {
+                    code
+                } else {
+                    Some(DetachCode::Other)
+                };
                 let notice = TerminalServerMessage::Detached {
                     reason: "why".into(),
                     code,
+                    tab_unavailable,
                 };
                 let mut detached = socket.take().unwrap();
                 detached
@@ -436,6 +459,10 @@ async fn next_input(socket: &mut WebSocketStream<TcpStream>) -> GridInput {
 fn attach_of(uri: &str) -> FakeAttach {
     let (path, query) = uri.split_once('?').unwrap();
     assert_eq!(path, "/api/sessions/s1/term", "the attach's route");
+    assert!(
+        query.split('&').any(|param| param == "tab=remembered"),
+        "{uri}"
+    );
     let param = |name: &str| -> u16 {
         query
             .split('&')
@@ -454,7 +481,7 @@ fn attach_of(uri: &str) -> FakeAttach {
 /// tests built on it pass against rules the app does not follow. One script covers most of the rules the fake restates:
 /// the state sequence (`Attached` on the first output rather than on open, `Reconnecting` at each wait and each attempt
 /// with the ladder starting over after an attachment and a take-control and running on into probing, a 5xx refusal
-/// retried, `Closed` last), which detach codes stop the stream, an undecodable message as a lost link, that
+/// retried, `Closed` last), which detaches stop the stream including an explicit initial tab refusal, an undecodable message as a lost link, that
 /// only a stopped or refused stream acts on take-control, the size each attach asks for (including a resize made
 /// while live), the resize that follows an attach whose query a resize overtook while it connected, input dropped
 /// while no attachment is live (with a socket open or not), and input stamped for an earlier attachment dropped while

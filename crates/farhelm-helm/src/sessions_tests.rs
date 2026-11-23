@@ -8891,6 +8891,7 @@ async fn folder_checks_do_not_list_or_refine_history() {
 /// silent close is exactly a pretense the client would blame on the
 /// network. Riding the existing notice shape is also what lets the UI
 /// render this without a new message type.
+/// A shell tab gets the same unmarked retryable detach. The unreachable host had no opportunity to refuse the tab.
 #[farhelm_testtrace::test]
 async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
     let (builder, host) = rest_harness::FleetBuilder::new()
@@ -8912,21 +8913,33 @@ async fn a_terminal_socket_on_a_down_host_is_refused_with_the_hosts_state() {
         .await;
 
     let addr = harness.serve().await;
-    let mut ws =
-        WsTestClient::connect(addr, &harness.session_uri(host, "/api/sessions/owned/term")).await;
-    let (opcode, payload) = ws.recv().await.expect("a notice, not a bare close");
-    assert_eq!(opcode, 1, "the refusal arrives as a text notice");
-    let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
-    assert_eq!(notice["type"], "detached");
-    let reason = notice["reason"].as_str().unwrap();
-    assert!(
-        reason.contains("unreachable-reprobing"),
-        "the notice must name the host's state: {reason}"
-    );
-    assert!(
-        ws.recv().await.is_none(),
-        "the socket closes once its refusal is delivered"
-    );
+    for path in [
+        "/api/sessions/owned/term",
+        "/api/sessions/owned/term?tab=some-tab",
+    ] {
+        let mut ws = WsTestClient::connect(addr, &harness.session_uri(host, path)).await;
+        let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
+            .await
+            .expect("the down host never sent its refusal")
+            .expect("a notice, not a bare close");
+        assert_eq!(opcode, 1, "the refusal arrives as a text notice");
+        let notice: serde_json::Value = serde_json::from_slice(&payload).unwrap();
+        assert_eq!(notice["type"], "detached");
+        assert_eq!(notice["code"], "other", "{path}: {notice}");
+        assert!(notice.get("tab_unavailable").is_none(), "{path}: {notice}");
+        let reason = notice["reason"].as_str().unwrap();
+        assert!(
+            reason.contains("unreachable-reprobing"),
+            "the notice must name the host's state: {reason}"
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_secs(5), ws.recv())
+                .await
+                .expect("the down host socket never closed")
+                .is_none(),
+            "the socket closes once its refusal is delivered"
+        );
+    }
 }
 
 /// A session created HERE must be operable at once — the create's own

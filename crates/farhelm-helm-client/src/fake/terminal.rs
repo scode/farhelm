@@ -111,6 +111,8 @@ pub struct FakeTerminal {
     requests: mpsc::UnboundedReceiver<Request>,
     events: mpsc::Sender<TerminalEvent>,
     phase: FakePhase,
+    /// A marked refusal only makes sense for a stream whose attach actually targets a shell tab.
+    shell_tab: bool,
     /// The outage's position on the ladder, reset as the real stream resets it: when an attachment that went live
     /// ends, and at take-control.
     ladder: Ladder,
@@ -156,6 +158,7 @@ impl FakeTerminal {
             requests,
             events,
             phase: FakePhase::Attaching,
+            shell_tab: attach.tab.is_some(),
             ladder: Ladder::new(ladder),
             waiting: None,
             attempt_size: size,
@@ -226,15 +229,37 @@ impl FakeTerminal {
     /// unless a socket is open.
     pub fn detach(&mut self, code: Option<DetachCode>, reason: &str) {
         self.require_socket();
-        if detach_stops(code) {
-            self.phase = FakePhase::Detached;
-            self.emit(TerminalEvent::State(StreamState::Detached {
-                code,
-                reason: reason.to_owned(),
-            }));
+        if detach_stops(code, false) {
+            self.finish_detach(code, reason, false);
         } else {
             self.lose_link();
         }
+    }
+
+    /// The supervisor refused the selected shell tab before the attach went live. The GUI gets the reason and
+    /// a stopped stream, just as it would from a marked detach notice on the real socket.
+    pub fn refuse_tab_attach(&mut self, reason: &str) {
+        self.require_socket();
+        assert!(
+            self.shell_tab,
+            "the main terminal cannot get a marked tab refusal"
+        );
+        assert_eq!(
+            self.phase,
+            FakePhase::Open,
+            "only an initial attach can be refused"
+        );
+        self.finish_detach(Some(DetachCode::Other), reason, true);
+    }
+
+    /// Enter the state that waits for Take control and retain the initial-tab marker for the GUI.
+    fn finish_detach(&mut self, code: Option<DetachCode>, reason: &str, tab_unavailable: bool) {
+        self.phase = FakePhase::Detached;
+        self.emit(TerminalEvent::State(StreamState::Detached {
+            code,
+            reason: reason.to_owned(),
+            tab_unavailable,
+        }));
     }
 
     /// The attach failed, or the socket dropped or its watchdog fired: the GUI sees the next reconnect wait, a
@@ -539,7 +564,8 @@ mod tests {
             state(events.try_recv()),
             StreamState::Detached {
                 code: Some(DetachCode::Stalled),
-                reason: "stalled".into()
+                reason: "stalled".into(),
+                tab_unavailable: false,
             }
         );
         handle.take_control();
@@ -727,6 +753,7 @@ mod tests {
                 StreamState::Detached {
                     code,
                     reason: "why".into(),
+                    tab_unavailable: false,
                 }
             } else {
                 reconnecting(1, Retrying, Some(500))

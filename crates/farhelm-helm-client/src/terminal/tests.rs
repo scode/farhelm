@@ -276,6 +276,7 @@ async fn every_attach_takes_the_one_route_and_a_takeover_reattaches() {
             TerminalEvent::State(StreamState::Detached {
                 code: Some(DetachCode::Stalled),
                 reason: "too slow".into(),
+                tab_unavailable: false,
             })
         );
         handle.take_control();
@@ -356,6 +357,7 @@ async fn a_stream_closed_while_waiting_for_the_user_still_reports_closed() {
             TerminalEvent::State(StreamState::Detached {
                 code: Some(DetachCode::Stalled),
                 reason: "too slow".into(),
+                tab_unavailable: false,
             }),
         )
         .await;
@@ -439,6 +441,7 @@ async fn each_detach_code_stops_or_reattaches_as_the_policy_says() {
                 TerminalEvent::State(StreamState::Detached {
                     code: Some(code),
                     reason: "why".into(),
+                    tab_unavailable: false,
                 })
             } else {
                 reconnecting(1, 1, ReconnectPhase::Retrying, Some(10))

@@ -862,7 +862,7 @@ impl AttachedTerminal {
                 code: Some(DetachCode::TabClosed),
                 ..
             } if self.attachment.is_some() => None,
-            StreamState::Detached { code, reason } => line(
+            StreamState::Detached { code, reason, .. } => line(
                 "Detached: ".into(),
                 Some(HostText::from_host(reason.as_str())),
                 *code != Some(DetachCode::TabClosed),
