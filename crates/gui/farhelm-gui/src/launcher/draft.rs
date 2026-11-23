@@ -934,7 +934,7 @@ impl LaunchDraft {
     }
 
     /// Whether switching agents since `before` made the shown permission more dangerous (SPEC.md: "Chat and approve
-    /// are safest, then smart approve and Guarded, then YOLO, custom flags and the agent's own setting; only a move to
+    /// are safest, then smart approve and Guarded, then YOLO and custom flags. Only a move to
     /// a later group triggers the banner"). Before the first agent, only a permission chosen deliberately counts. A
     /// switch made from the Command tab, onto it, or between a shell and an
     /// agent compares no permissions for the shell.
@@ -957,8 +957,8 @@ impl LaunchDraft {
             None => None,
         };
         let to = harness.request_permission(self.agent.permissions);
-        // With no previous agent and no deliberate choice, `from` is the agent's own setting, the most dangerous
-        // group, so nothing can rise above it: a displayed default never raises the banner.
+        // Before the user makes a choice, an unset baseline suppresses the
+        // banner. A displayed default alone is no escalation.
         (danger(to) > danger(from)).then(|| Escalation {
             before: from,
             after: to,
@@ -1456,7 +1456,7 @@ pub const fn harness_label(harness: LaunchHarness) -> &'static str {
     }
 }
 
-/// A permission's name in the escalation banner; `None` is the agent's own setting.
+/// A permission's name in the escalation banner.
 pub const fn permission_name(permission: Option<LaunchPermission>) -> &'static str {
     match permission {
         Some(LaunchPermission::Guarded) => "Guarded",
@@ -1465,12 +1465,12 @@ pub const fn permission_name(permission: Option<LaunchPermission>) -> &'static s
         Some(LaunchPermission::Approve) => "Approve",
         Some(LaunchPermission::SmartApprove) => "Smart approve",
         Some(LaunchPermission::Chat) => "Chat",
-        None => "Agent's own setting",
+        None => "Default",
     }
 }
 
-/// SPEC.md's safety groups: 0 asks about actions, 1 lets a safety mechanism approve them, 2 has no check (or one
-/// Farhelm cannot see: the agent's own setting, custom flags).
+/// Higher groups trigger the escalation banner when switching agents.
+/// Before the first choice, an unset baseline suppresses the warning.
 const fn danger(permission: Option<LaunchPermission>) -> u8 {
     match permission {
         Some(LaunchPermission::Chat | LaunchPermission::Approve) => 0,

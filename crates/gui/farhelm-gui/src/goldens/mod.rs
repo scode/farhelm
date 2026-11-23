@@ -344,9 +344,9 @@ fn session_list_scene_with_listing(
 /// fixture's managed checkout, and the waiting row one terminal tab, which its Delete question names. The rows run on
 /// the local host (the red laptop, inverted on the selected row) and on remotes (the cloud), with one launch of each
 /// kind and shield: a guarded Claude launch (an identity color and the green shield), the fixture's Codex YOLO launch
-/// (a grey mark and the amber slashed shield), a command with no agent asserted not YOLO (the Terminal mark), Cursor
-/// under its own setting (the dashed shield), a guarded Muse launch, and a session from before launch kinds (the amber
-/// question mark).
+/// (a grey mark and the amber slashed shield), a command with no agent asserted not YOLO (the Terminal mark), an older
+/// Cursor launch with no recorded mode (the YOLO shield), a guarded Muse launch, and a session from before launch kinds
+/// (the amber question mark).
 fn fleet() -> [Fixture; 6] {
     let status = |state: &str| serde_json::json!({ "state": state });
     let agent = |harness: &str, permissions: serde_json::Value, program: &str| {
@@ -801,6 +801,12 @@ static SCENES: &[Scene] = &[
         size: (420., 418.),
         draw: session_lists,
         setup: session_list_setup,
+    },
+    Scene {
+        name: "session-list-guarded-replace",
+        size: (420., 620.),
+        draw: session_list_guarded_replace,
+        setup: session_list_guarded_replace_setup,
     },
     Scene {
         name: "session-row-hover-beside",

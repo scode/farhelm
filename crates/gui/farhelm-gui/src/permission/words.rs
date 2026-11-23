@@ -43,8 +43,7 @@ pub(crate) fn effort_word(effort: Option<LaunchEffort>) -> String {
 pub(crate) const DEFAULT_EFFORT_HELP: &str = "Use the agent's default reasoning effort";
 
 /// A permission's name in the footer and on its segment (old `permission_display_value`), with no choice as
-/// "Default". It differs from the launcher's escalation banner names (its draft's `permission_name`) in two words, as
-/// the old app's did: no choice there is the agent's own setting, and Custom there is "Custom flags".
+/// "Default". The escalation banner spells out "Custom flags".
 pub(crate) const fn permission_display(permission: Option<LaunchPermission>) -> &'static str {
     match permission {
         None => "Default",
@@ -96,10 +95,7 @@ pub(crate) fn permission_help(
             "YOLO: Farhelm treats this launch as bypassing approval and sandbox checks"
         }
         Some(value) => permission_tooltip(value),
-        None => {
-            "Not classified · Agent's own setting\nFarhelm did not force a guarded permission mode for this launch. The \
-             agent's configuration decides; hosts that ask before YOLO launches treat it as YOLO."
-        }
+        None => "Default permission mode",
     };
     let mut help = explanation.to_owned();
     if permission == Some(LaunchPermission::Guarded) {

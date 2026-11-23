@@ -64,9 +64,8 @@
 //! geometry in [`crate::marks`], the one source for those shapes and their provenance, and a test in the GUI's harness
 //! module (`every_harness_icon_is_its_mark_rendered` in `harness.rs`) fails when a file and its mark disagree, so a mark
 //! is changed in `marks.rs` and its file regenerated, never edited by hand
-//! (`docs/harness-marks.md`, "Drawing the marks"). The four permission marks (`Permission*`) are the old app's
-//! `PermissionIcon` drawings at the reference commit, in its 12-unit box with the 1.25 stroke and round caps and joins;
-//! the own-setting shield is the plain one dashed.
+//! (`docs/harness-marks.md`, "Drawing the marks"). The permission marks (`Permission*`) use the old app's
+//! `PermissionIcon` drawings, with the same 12-unit box, 1.25 stroke, and round caps and joins.
 //!
 //! The Trash button's two cans are the old app's `TrashIcon`, in its 12-unit box with the 1.2 stroke and round caps and
 //! joins; the open-lid can's body is filled, as the old one's was. The Trash dialog draws the Branch glyph above.
@@ -292,8 +291,6 @@ pub enum Icon {
     PermissionYolo,
     /// A plain shield: an agent launch in guarded or an approval mode, or a command asserted not to be YOLO.
     PermissionShielded,
-    /// A dashed shield: the agent's own setting, which Farhelm never classified.
-    PermissionOwnSetting,
     /// A question mark: a command from before launch kinds, which carries no YOLO assertion.
     PermissionUnknown,
     /// A bell, unfilled: the Settings dialog's Notifications section, and a session row's bell with nothing unread (the
@@ -450,7 +447,6 @@ impl Icon {
         Icon::HarnessZsh,
         Icon::PermissionYolo,
         Icon::PermissionShielded,
-        Icon::PermissionOwnSetting,
         Icon::PermissionUnknown,
         Icon::Bell,
         Icon::Branch,
@@ -557,7 +553,6 @@ impl Icon {
             Icon::HarnessZsh => "icons/harness-zsh.svg",
             Icon::PermissionYolo => "icons/permission-yolo.svg",
             Icon::PermissionShielded => "icons/permission-shielded.svg",
-            Icon::PermissionOwnSetting => "icons/permission-own-setting.svg",
             Icon::PermissionUnknown => "icons/permission-unknown.svg",
             Icon::Bell => "icons/bell.svg",
             Icon::Branch => "icons/branch.svg",
@@ -681,9 +676,6 @@ impl Assets {
             }
             "icons/permission-shielded.svg" => {
                 Some(include_bytes!("../assets/icons/permission-shielded.svg"))
-            }
-            "icons/permission-own-setting.svg" => {
-                Some(include_bytes!("../assets/icons/permission-own-setting.svg"))
             }
             "icons/permission-unknown.svg" => {
                 Some(include_bytes!("../assets/icons/permission-unknown.svg"))

@@ -338,7 +338,7 @@ fn the_from_line_keeps_its_parts_apart_and_the_full_reference_raw() {
 // ---- Permission chips -----------------------------------------------------------------------------------------------
 
 /// The chip's description says what Farhelm does not know: a command launch's YOLO claim is the launcher's unchecked
-/// assertion, the agent's own setting is treated as YOLO, and an unclassified launch predates launch kinds. Losing
+/// assertion, a saved agent mode can be treated as YOLO, and an unclassified launch predates launch kinds. Losing
 /// these words would make a claim or an unknown read like Farhelm's verdict. The asserted chips' own words say
 /// "Asserted" for the same reason.
 #[test]
@@ -346,11 +346,6 @@ fn permission_chips_say_what_farhelm_did_not_check() {
     for asserted in [ChipKind::AssertedYolo, ChipKind::AssertedNotYolo] {
         assert!(asserted.description().contains("not checked by Farhelm"));
     }
-    assert!(
-        ChipKind::OwnSetting
-            .description()
-            .contains("treated as YOLO")
-    );
     assert!(
         ChipKind::Unknown
             .description()
@@ -362,7 +357,7 @@ fn permission_chips_say_what_farhelm_did_not_check() {
 
 /// A launch's chip comes from the session list's own shield, for every agent type and mode it offers: custom flags
 /// stay YOLO, guarded carries the agent's own name for the mode, the flags stay an inspectable fact, and the chip warns
-/// exactly when the session list's shield is the YOLO one or the agent's own setting. Start and Resume cards agree.
+/// exactly when the session list draws a YOLO shield. Start and Resume cards agree.
 #[test]
 fn launch_chips_follow_the_session_lists_shield_for_every_mode() {
     for &harness in LaunchHarness::ALL {

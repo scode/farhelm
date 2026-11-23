@@ -101,11 +101,11 @@ impl Launcher {
 }
 
 /// The old marker's permission word: YOLO in capitals, the other modes in their lowercase phrase
-/// (`permission_value`), and "agent's own setting" for none.
+/// (`permission_value`), and "default" for an unset choice.
 fn permission_word(permissions: Option<LaunchPermission>) -> String {
     match permissions {
         Some(LaunchPermission::Yolo) => "YOLO".to_owned(),
         Some(_) => permission_display(permissions).to_lowercase(),
-        None => "agent's own setting".to_owned(),
+        None => "default".to_owned(),
     }
 }

@@ -730,7 +730,10 @@ fn cancelling_the_headers_question_gives_the_terminal_its_height_back(cx: &mut T
 fn a_cancel_during_the_host_write_keeps_the_question_for_its_refusal(cx: &mut TestAppContext) {
     let (mut fake, cx, id) = replacing_from_the_header(cx);
     refuse_for_yolo(&mut fake, cx, id);
-    test_support::click(cx, "prompt-alternative-0");
+    test_support::click(
+        cx,
+        crate::session_list::lifecycle_tests::PERMANENT_REPLACE_ANSWER,
+    );
     let sent = fake.commands();
     let [write] = &sent[..] else {
         panic!("only the host write is out, not {} commands", sent.len());

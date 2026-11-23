@@ -516,7 +516,7 @@ impl RenderOnce for FactLine {
     }
 }
 
-/// A chip (`.approval-permission-chip`), warning-toned for YOLO and the agent's own setting.
+/// A permission chip draws the warning color for launches treated as YOLO.
 fn chip(content: impl IntoElement, warning: bool, palette: &Palette) -> AnyElement {
     div()
         .flex()

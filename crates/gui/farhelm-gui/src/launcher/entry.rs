@@ -51,7 +51,7 @@ use gpui::{App, Entity, Window};
 
 use super::draft::{FolderDefault, Install, LaunchDraft, harness_label, remembered_permission};
 use super::launch;
-use super::view::yolo_question::{self, replace_owner};
+use super::view::yolo_question::{self, GuardedAction, replace_owner};
 use super::view::{Launcher, Note, Shown, open, open_noted};
 use crate::focus::Mark;
 use crate::host_text::HostText;
@@ -460,6 +460,12 @@ fn environment_of(collections: &Collections, row: &SessionRow) -> Option<LaunchT
 /// ([`ask_yolo_for_replace`]).
 pub use super::view::yolo_question::YoloAsk;
 
+/// The user can keep the saved launch or choose a newly composed Guarded replacement.
+pub(crate) enum ReplaceAnswer {
+    Yolo,
+    Guarded,
+}
+
 /// Ask the YOLO question for a plain Replace the helm refused because the source's host asks before YOLO launches (the
 /// refusal's `HelmMarker::YoloConfirmation`), for the sidebar to draw inline where the user answered Replace: at the
 /// row, in the session header, or on the interrupted card (SPEC.md, "Creation": the confirmation is "shown with the
@@ -469,10 +475,9 @@ pub use super::view::yolo_question::YoloAsk;
 /// (`hosts::identity::display_name`), `launch` its stored launch (which says why it is YOLO), and `mark` the mark taken
 /// when the user answered Replace: the question takes focus, on Cancel, only if the user has not moved on since
 /// (SPEC.md: "a plain Replace's question, which arrives after its reply, takes focus only if the user has not moved on
-/// since answering Replace"). There is no guarded answer: plain Replace keeps the stored launch.
+/// since answering Replace"). A saved YOLO launch can offer a guarded replacement when its agent supports Guarded.
 ///
-/// `retry` sends the Replace again with `confirm_yolo` set, the caller's own command under its own key, as the
-/// sidebar's Replace flow owns its launch and its retry. It runs at most once: for the one-off answer, or for the
+/// `retry` dispatches the chosen replacement under the caller's own key. It runs at most once: for Guarded, the one-off answer, or for the
 /// permanent answer only after that answer's host write (the host settings' own "Start YOLO sessions without asking")
 /// has succeeded; a failed write runs nothing and keeps the question up with the reason. It is handed the mark of the
 /// answer's press, which the caller combines with its own operation's moved-on flag for what the Replace's reply may
@@ -485,17 +490,27 @@ pub use super::view::yolo_question::YoloAsk;
 /// scrolled away, the selection changed), the write still runs on and its success still calls `retry`, which must cope
 /// with the source having moved on. A reset drops the write's reply, leaving the question in flight for good, so drop
 /// it with the UI session.
-pub fn ask_yolo_for_replace(
+pub(crate) fn ask_yolo_for_replace(
     host: i64,
     host_name: HostText,
     launch: &SessionLaunch,
     mark: &Mark,
-    retry: impl Fn(Mark, &mut Window, &mut App) + 'static,
+    retry: impl Fn(ReplaceAnswer, Mark, &mut Window, &mut App) + 'static,
     window: &mut Window,
     cx: &mut App,
 ) -> prompt::Inline<YoloAsk> {
     let ask = YoloAsk::for_stored_launch(host, host_name, launch);
-    yolo_question::ask_question(&ask, None, replace_owner(Rc::new(retry)), mark, window, cx)
+    let retry = Rc::new(retry);
+    let guarded = ask.guarded.then(|| {
+        let retry = Rc::clone(&retry);
+        GuardedAction::replace(move |mark, window, cx| {
+            retry(ReplaceAnswer::Guarded, mark, window, cx)
+        })
+    });
+    let owner = replace_owner(Rc::new(move |mark, window, cx| {
+        retry(ReplaceAnswer::Yolo, mark, window, cx)
+    }));
+    yolo_question::ask_question(&ask, guarded, owner, mark, window, cx)
 }
 
 /// New's draft from what the store holds and the selected session `selected`: the open session's host and folder when

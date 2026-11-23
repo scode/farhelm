@@ -38,6 +38,44 @@ pub(super) fn session_list_setup(state: &SceneState, _: &mut Window, cx: &mut Ap
     session_list_scene(state, &fleet(), cx);
 }
 
+/// Show the real inline question on the Codex row. The sidebar width pins
+/// the wrapping and order of the new guarded answer beside the YOLO answers.
+pub(super) fn session_list_guarded_replace_setup(state: &SceneState, _: &mut Window, cx: &mut App) {
+    use crate::session_list::replace_yolo::{Surface, ask};
+
+    session_list_then(
+        state,
+        |_, _, window, cx| {
+            let mark = Mark::take(cx);
+            let window = window.window_handle();
+            // The refusal callback reopens the window once this draw's update
+            // has returned it to the app.
+            cx.defer(move |cx| {
+                assert!(ask(
+                    "b",
+                    DeleteGuard::Unconditional,
+                    Surface::Row,
+                    mark,
+                    window,
+                    cx
+                ));
+            });
+        },
+        cx,
+    );
+}
+
+/// Keep the usual sidebar width so the answers wrap. The taller list leaves room for the full question even when
+/// the fleet's host notice takes up the top of the sidebar.
+pub(super) fn session_list_guarded_replace(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    defer_after(state, window, cx);
+    session_lists_at(state, px(596.), cx)
+}
+
 /// Rows on a host the helm cannot reach, the open one among them, so the selected row's inverse inks are pinned for a
 /// stale row too: its title in `--on-accent-dim` rather than `--on-fill`, and its cause in the selected row's secondary
 /// ink. Beside it, a stale exited row shows its ended words and its cause on one line, and an ordinary row on a
