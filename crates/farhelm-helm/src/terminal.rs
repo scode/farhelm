@@ -30,11 +30,9 @@
 //! Every one of those refusals therefore leaves the same way: a
 //! `{"type":"detached","reason":...}` text frame, then a close. That
 //! uniformity is the point. The notice carries a detach code the client acts
-//! on (stop retrying a closed tab, reconnect after transport trouble) and a
-//! reason. The desktop client shows the reason when the code stops the
-//! stream (a takeover, a closed tab, a stall); an `other` refusal sends it
-//! into its reconnect backoff, and the reason reaches only its log for
-//! now. The rule dates from the browser client, which could not
+//! on and a reason. An explicit supervisor refusal to attach an unavailable shell tab carries a marker so the
+//! desktop can wait for a manual reconnect. An unmarked `other` refusal goes through reconnect backoff.
+//! The rule dates from the browser client, which could not
 //! read a status code off a failed upgrade at all: the alternative was a
 //! socket that opened and closed with nothing said, which the user
 //! experienced as a terminal that flickered and vanished, blamed on the
@@ -316,17 +314,35 @@ fn refused_as_missing_tab(error: &anyhow::Error, q: &TermQuery) -> bool {
             .is_some_and(|supervised| supervised.kind() == ErrorKind::NotFound)
 }
 
-/// The `{"type":"detached","reason":...,"code":...}` notice the GUI's terminal client receives.
-///
-/// `code` is the [`farhelm_proto::DetachCode`] a client decides from (wait
-/// for Take control after a takeover or a stall, stop retrying a closed tab,
-/// retry anything else); `reason` is only ever shown or logged, never
-/// decided from.
-/// One builder so every exit from this socket carries both.
+/// A detach after attach uses the supervisor stream's existing code and reason. Only the initial attach path can
+/// report a supervisor marking the requested shell tab unavailable.
 fn detached_notice(detach: &crate::client::Detach) -> TerminalServerMessage {
     TerminalServerMessage::Detached {
         reason: detach.reason.clone(),
         code: Some(detach.code),
+        tab_unavailable: false,
+    }
+}
+
+/// Preserve the source of an initial shell-tab refusal. An unavailable reply from the supervisor means the tab
+/// can stay listed while the client waits for a manual retry. An unavailable host or a dropped link still retries.
+fn refused_attach_notice(error: &anyhow::Error, q: &TermQuery) -> TerminalServerMessage {
+    let code = if refused_as_missing_tab(error, q) {
+        farhelm_proto::DetachCode::TabClosed
+    } else {
+        farhelm_proto::DetachCode::Other
+    };
+    let tab_unavailable = q.tab.is_some()
+        && error
+            .downcast_ref::<SupervisorError>()
+            .is_some_and(|error| {
+                error.origin() == crate::client::ErrorOrigin::SupervisorReply
+                    && error.kind() == ErrorKind::Unavailable
+            });
+    TerminalServerMessage::Detached {
+        reason: format!("{error:#}"),
+        code: Some(code),
+        tab_unavailable,
     }
 }
 
@@ -503,15 +519,7 @@ async fn serve_term(
         match attach_from_query(&state, &session_id, &q).await {
             Ok(parts) => parts,
             Err(e) => {
-                let code = if refused_as_missing_tab(&e, &q) {
-                    farhelm_proto::DetachCode::TabClosed
-                } else {
-                    farhelm_proto::DetachCode::Other
-                };
-                let notice = detached_notice(&crate::client::Detach {
-                    reason: format!("{e:#}"),
-                    code,
-                });
+                let notice = refused_attach_notice(&e, &q);
                 // Bound this notice because a peer that cannot accept a
                 // hundred-byte notice within the grace period is one the
                 // reason would never have reached anyway.
@@ -809,13 +817,15 @@ mod tests {
         format!("{prefix}{entry}:{suffix}")
     }
 
+    use super::{TermQuery, default_cols, default_rows, refused_attach_notice};
     use crate::BUILD_STAMP_HEADER;
-    use crate::client::SupervisorClient;
+    use crate::client::{SupervisorClient, SupervisorError};
     use crate::rest_harness::{self, WsTestClient};
     use axum::body::to_bytes;
     use axum::http::{Request, StatusCode};
     use farhelm_proto::io::{FrameReader, FrameWriter, handshake};
-    use farhelm_proto::{ControlMsg, Frame};
+    use farhelm_proto::terminal_socket::TerminalServerMessage;
+    use farhelm_proto::{ControlMsg, ErrorKind, Frame, TerminalSelector};
     use std::time::Duration;
     use tower::ServiceExt;
 
@@ -2299,11 +2309,12 @@ mod tests {
         );
     }
 
-    /// Attach `path` against a scripted supervisor that refuses with `kind`,
-    /// and return the client's detach notice.
-    async fn detach_notice_for_refused_attach(
+    /// Wait until the supervisor sees the real attach request. A scripted error supplies the reply origin.
+    /// For transport loss the test closes the manager-side connection, since the splice outlives the scripted peer.
+    async fn detach_notice_for_initial_attach_failure(
         path: &str,
-        kind: farhelm_proto::ErrorKind,
+        expected_terminal: TerminalSelector,
+        reply: Option<ErrorKind>,
     ) -> serde_json::Value {
         use farhelm_proto::ControlMsg;
         use farhelm_proto::io::{FrameReader, FrameWriter, handshake, parse_control};
@@ -2316,25 +2327,43 @@ mod tests {
             handshake(&mut reader, &mut writer, "supervisor")
                 .await
                 .unwrap();
-            let request = parse_control(&reader.read_frame().await.unwrap().unwrap()).unwrap();
-            let ControlMsg::Attach { req_id, .. } = request else {
+            let frame = tokio::time::timeout(Duration::from_secs(5), reader.read_frame())
+                .await
+                .expect("the helm never sent Attach")
+                .unwrap()
+                .expect("the helm closed the connection before Attach");
+            let request = parse_control(&frame).unwrap();
+            let ControlMsg::Attach {
+                req_id, terminal, ..
+            } = request
+            else {
                 panic!("expected Attach, got {request:?}");
             };
-            writer
-                .write_control(&ControlMsg::Error {
-                    create_unaccepted: false,
-                    req_id,
-                    message: "scripted refusal".to_string(),
-                    kind,
-                })
-                .await
-                .unwrap();
+            assert_eq!(
+                terminal, expected_terminal,
+                "the supervisor receives the requested terminal"
+            );
+            if let Some(kind) = reply {
+                writer
+                    .write_control(&ControlMsg::Error {
+                        create_unaccepted: false,
+                        req_id,
+                        message: "scripted refusal".to_string(),
+                        kind,
+                    })
+                    .await
+                    .unwrap();
+            }
         });
 
         let mut harness = rest_harness::spliced_helm(client_side).await;
         let addr = harness.serve().await;
         let (mut ws, peer) = tokio::join!(connect_session(&harness, addr, path), peer);
         peer.unwrap();
+        if reply.is_none() {
+            let local = rest_harness::local_id(&harness.store).await;
+            harness.fleet.kill_connection(local);
+        }
         let (opcode, payload) = tokio::time::timeout(Duration::from_secs(5), ws.recv())
             .await
             .expect("no detach notice arrived")
@@ -2343,43 +2372,58 @@ mod tests {
         serde_json::from_slice(&payload).unwrap()
     }
 
-    /// `tab_closed` is reserved for the one refusal that proves a TAB is
-    /// gone. The same `NotFound` on the agent terminal carries the
-    /// supervisor's account of what happened to the session, and the client
-    /// must keep retrying the agent terminal rather than stopping it as it
-    /// does for a closed tab; and a tab
-    /// refused for any other reason, such as a host the helm cannot reach,
-    /// is transport trouble that the client's reconnect ladder exists to
-    /// ride out. Both stay `other`.
-    ///
-    /// This pins the edges of the mapping that stopped phantom tabs from
-    /// retrying (see `refused_as_missing_tab`): widened to the agent, it
-    /// would stop the agent terminal's recovery after a reboot; widened past
-    /// `NotFound`, it would end recovery for tabs on a host that is only
-    /// briefly away.
+    /// A supervisor's explicit unavailable reply and a dropped link while attaching can have similar user-facing
+    /// reasons. The tab marker distinguishes their sources so a temporary outage keeps retrying. Main terminal
+    /// errors retain the ordinary retry policy, since there is no other terminal to restore in their place.
     #[farhelm_testtrace::test]
-    async fn only_a_missing_tab_is_reported_as_tab_closed() {
-        use farhelm_proto::ErrorKind;
-
-        let agent =
-            detach_notice_for_refused_attach("/api/sessions/sess-1/term", ErrorKind::NotFound)
-                .await;
-        assert_eq!(agent["type"], "detached");
-        assert_eq!(
-            agent["code"], "other",
-            "the agent terminal's NotFound keeps the agent terminal retrying: {agent}"
-        );
-
-        let unreachable = detach_notice_for_refused_attach(
-            "/api/sessions/sess-1/term?tab=some-tab",
-            ErrorKind::Unavailable,
-        )
-        .await;
-        assert_eq!(unreachable["type"], "detached");
-        assert_eq!(
-            unreachable["code"], "other",
-            "a tab refused for transport reasons must stay recoverable: {unreachable}"
-        );
+    async fn only_an_explicit_unavailable_tab_reply_is_marked() {
+        let main = "/api/sessions/sess-1/term";
+        let tab = "/api/sessions/sess-1/term?tab=some-tab";
+        for (path, reply, marked) in [
+            (main, Some(ErrorKind::NotFound), false),
+            (main, Some(ErrorKind::Unavailable), false),
+            (tab, Some(ErrorKind::Unavailable), true),
+            (tab, None, false),
+        ] {
+            let expected = if path == tab {
+                TerminalSelector::Tab {
+                    id: "some-tab".into(),
+                }
+            } else {
+                TerminalSelector::Agent
+            };
+            let notice = detach_notice_for_initial_attach_failure(path, expected, reply).await;
+            assert_eq!(notice["type"], "detached");
+            assert_eq!(notice["code"], "other", "{path} {reply:?}: {notice}");
+            assert_eq!(
+                notice["tab_unavailable"].as_bool(),
+                marked.then_some(true),
+                "{path} {reply:?}: {notice}"
+            );
+            let reason = notice["reason"].as_str().unwrap();
+            let expected = if reply.is_some() {
+                "scripted refusal"
+            } else {
+                "connection closed after the request was sent"
+            };
+            assert!(reason.contains(expected), "{path} {reply:?}: {notice}");
+        }
+        let query = TermQuery {
+            cols: default_cols(),
+            rows: default_rows(),
+            tab: Some("some-tab".into()),
+            lease: None,
+        };
+        let error =
+            SupervisorError::helm(ErrorKind::Unavailable, "host is disconnected".to_owned());
+        assert!(matches!(
+            refused_attach_notice(&error.into(), &query),
+            TerminalServerMessage::Detached {
+                code: Some(farhelm_proto::DetachCode::Other),
+                tab_unavailable: false,
+                ..
+            }
+        ));
     }
 
     /// An explicit, empty `?lease=` (as opposed to no `?lease=` at all)

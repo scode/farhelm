@@ -37,13 +37,18 @@ pub enum TerminalServerMessage {
     /// the same queue as the grid messages, so its position is exact. Presentation only; nothing decides session or
     /// lifecycle behavior from it.
     ReplayComplete,
-    /// The attachment ended. `code` is what a client decides from; `reason` is only ever shown. Followed by a close.
+    /// The attachment ended or was refused. Clients decide from the code and the initial tab refusal marker.
+    /// The reason is for display. Followed by a close.
     Detached {
         reason: String,
         /// Always present from this helm. Optional on the reading side so a notice from a helm that predates detach
         /// codes still parses (and counts as [`DetachCode::Other`] to whoever decides from it).
         #[serde(default)]
         code: Option<DetachCode>,
+        /// The supervisor explicitly refused this shell tab's initial attach as unavailable. The tab may still
+        /// be listed. Older helms omit this marker, so their detach notices keep their existing retry behavior.
+        #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+        tab_unavailable: bool,
     },
     /// A message type this build does not know, from a newer helm. Ignored. Never sent: it does not serialize, so
     /// [`TerminalServerMessage::to_text`] refuses it rather than emitting a bogus `{"type":"unknown"}`.
@@ -103,8 +108,17 @@ mod tests {
                 TerminalServerMessage::Detached {
                     reason: "another client attached".into(),
                     code: Some(DetachCode::TakenOver),
+                    tab_unavailable: false,
                 },
                 r#"{"type":"detached","reason":"another client attached","code":"taken_over"}"#,
+            ),
+            (
+                TerminalServerMessage::Detached {
+                    reason: "shell cannot be read".into(),
+                    code: Some(DetachCode::Other),
+                    tab_unavailable: true,
+                },
+                r#"{"type":"detached","reason":"shell cannot be read","code":"other","tab_unavailable":true}"#,
             ),
         ];
         for (message, wire) in server {
@@ -129,7 +143,8 @@ mod tests {
                 .unwrap(),
             TerminalServerMessage::Detached {
                 reason: "gone".into(),
-                code: None
+                code: None,
+                tab_unavailable: false,
             }
         );
     }

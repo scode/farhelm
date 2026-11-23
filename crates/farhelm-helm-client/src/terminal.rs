@@ -31,8 +31,8 @@
 //!   rung later, until its Displaced notice arrives and the window tears its terminals down. Two live streams for
 //!   one terminal under different leases would do the same forever, so a caller keeps at most one live stream per
 //!   terminal, under any lease (see [`AttachmentLease`]).
-//! - `tab_closed` and `stalled` stop the stream in [`StreamState::Detached`]: the tab is gone, or this client fell
-//!   behind and attaching again would walk back into the same wedge. [`TerminalHandle::take_control`] attaches again.
+//! - A closed tab, a stall, or an explicit refusal to attach an unavailable tab stops the stream in
+//!   [`StreamState::Detached`]. [`TerminalHandle::take_control`] attaches again.
 //! - [`TerminalHandle::reconnect_now`] skips a running wait (the "Reconnect now" button), retrying or probing.
 //!
 //! Every attachment starts with a full replay of the screen and history, ended by [`TerminalEvent::ReplayComplete`]
@@ -152,11 +152,12 @@ pub enum StreamState {
     /// The stream dropped and is coming back by itself: shown when each wait begins and again when its attempt starts,
     /// so the status is always the current one. The outage ends at the next `Attached`, or when the stream stops.
     Reconnecting(ReconnectStatus),
-    /// Stopped by a `tab_closed` or `stalled` detach notice. Waits for
-    /// [`TerminalHandle::take_control`].
+    /// Stopped by a detach that needs user action. Waits for [`TerminalHandle::take_control`].
     Detached {
         code: Option<DetachCode>,
         reason: String,
+        /// The supervisor reported the requested shell tab unavailable before the attach could go live.
+        tab_unavailable: bool,
     },
     /// The helm refused the upgrade with a status that is not 5xx (401 credential, 404 session gone, ...). Waits for
     /// `take_control`. A 5xx is retried instead, as `Reconnecting`.
@@ -364,10 +365,11 @@ enum Ended {
         attached: bool,
         skip_wait: bool,
     },
-    /// A detach that waits for the user: `tab_closed` or `stalled`.
+    /// A detach that waits for the user, including an explicit shell-tab attach refusal.
     Detached {
         code: Option<DetachCode>,
         reason: String,
+        tab_unavailable: bool,
     },
     Closed,
 }
@@ -380,11 +382,12 @@ enum Ended {
 /// window that was just displaced reconnecting a terminal before its Displaced notice arrives, and the window that
 /// holds the seat answers that by attaching again (the migration's orchestrator decided on 2026-11-15). The module
 /// docs say why this cannot keep going back and forth.
-pub(crate) fn detach_stops(code: Option<DetachCode>) -> bool {
-    match code {
-        Some(DetachCode::TabClosed | DetachCode::Stalled) => true,
-        Some(DetachCode::Replaced | DetachCode::TakenOver | DetachCode::Other) | None => false,
-    }
+pub(crate) fn detach_stops(code: Option<DetachCode>, tab_unavailable: bool) -> bool {
+    tab_unavailable
+        || match code {
+            Some(DetachCode::TabClosed | DetachCode::Stalled) => true,
+            Some(DetachCode::Replaced | DetachCode::TakenOver | DetachCode::Other) | None => false,
+        }
 }
 
 /// One control message as the text frame that carries it ([`TerminalClientMessage::to_text`] is the one spelling).
@@ -480,9 +483,17 @@ impl Stream {
                         return;
                     }
                 }
-                Ended::Detached { code, reason } => {
+                Ended::Detached {
+                    code,
+                    reason,
+                    tab_unavailable,
+                } => {
                     if !self
-                        .emit(TerminalEvent::State(StreamState::Detached { code, reason }))
+                        .emit(TerminalEvent::State(StreamState::Detached {
+                            code,
+                            reason,
+                            tab_unavailable,
+                        }))
                         .await
                         || !self.wait_for_take_control().await
                         || !self
@@ -638,10 +649,12 @@ impl Stream {
                             Self::mark_attached(&mut attached, &mut pending, &mut self.attachments);
                             pending.push_back(TerminalEvent::ReplayComplete);
                         },
-                        Ok(TerminalServerMessage::Detached { reason, code }) if detach_stops(code) => {
-                            break Ended::Detached { code, reason };
+                        Ok(TerminalServerMessage::Detached { reason, code, tab_unavailable })
+                            if detach_stops(code, tab_unavailable) =>
+                        {
+                            break Ended::Detached { code, reason, tab_unavailable };
                         }
-                        Ok(TerminalServerMessage::Detached { reason, code }) => {
+                        Ok(TerminalServerMessage::Detached { reason, code, .. }) => {
                             tracing::debug!(?code, %reason, "terminal detached; backing off and reattaching");
                             break Ended::Dropped { attached, skip_wait: false };
                         }
