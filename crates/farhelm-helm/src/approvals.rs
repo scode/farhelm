@@ -59,11 +59,11 @@ use std::time::Duration;
 
 use axum::extract::{Path as AxPath, State};
 use axum::response::IntoResponse;
-use farhelm_proto::ErrorKind;
 use farhelm_proto::approvals::{
-    ApprovalAction, ApprovalAnswer, ApprovalAnswerRequest, ApprovalSession, PendingApproval,
-    PendingApprovals,
+    ApprovalAction, ApprovalAnswer, ApprovalAnswerRequest, ApprovalLaunchKind, ApprovalSession,
+    PendingApproval, PendingApprovals,
 };
+use farhelm_proto::{ErrorKind, SessionInfo};
 use tokio::sync::oneshot;
 
 use crate::agent_requests::AgentOrigin;
@@ -516,6 +516,7 @@ pub(crate) async fn ask_with_answer(
                         id: asking_full_id,
                         title,
                         host_name: Some(host_name),
+                        launch_kind: None,
                     },
                     action,
                     own_host_session_action,
@@ -645,16 +646,31 @@ pub(crate) async fn describe_session(
     key: &SessionKey,
     entry_uuid: &str,
 ) -> ApprovalSession {
+    let info = state
+        .store
+        .cached_session(key.host, &key.session_id)
+        .await
+        .ok()
+        .flatten();
+    describe_session_with_info(state, key, entry_uuid, info.as_ref()).await
+}
+
+/// Describe the exact target snapshot supplied by a lifecycle caller. Delete
+/// uses the same snapshot for this description and for its deletion guard.
+pub(crate) async fn describe_session_with_info(
+    state: &AppState,
+    key: &SessionKey,
+    entry_uuid: &str,
+    info: Option<&SessionInfo>,
+) -> ApprovalSession {
     let mut described = ApprovalSession {
         id: SessionRef::new(entry_uuid, &key.session_id)
             .expect("a routed target has an admitted ID and validated entry UUID")
             .to_string(),
-        title: None,
+        title: info.map(|info| info.title.clone()),
         host_name: None,
+        launch_kind: info.map(|info| ApprovalLaunchKind::of(&info.launch)),
     };
-    if let Ok(Some(info)) = state.store.cached_session(key.host, &key.session_id).await {
-        described.title = Some(info.title);
-    }
     if let Ok(rows) = state.store.list_hosts().await
         && let Some(row) = rows.iter().find(|row| row.id == key.host)
     {
@@ -1128,6 +1144,7 @@ pub(crate) mod tests {
                 id: "00000001-0000-4000-8000-000000000000:target".to_string(),
                 title: None,
                 host_name: None,
+                launch_kind: None,
             },
         }
     }

@@ -58,6 +58,7 @@ fn request() -> PendingApproval {
             id: "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:asker".to_owned(),
             title: Some("asker title".to_owned()),
             host_name: Some("build".to_owned()),
+            launch_kind: None,
         },
         action: ApprovalAction::HostAdd {
             destination: "ops@new.example".to_owned(),

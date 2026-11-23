@@ -77,14 +77,44 @@ pub struct PendingApproval {
 }
 
 /// A session named on a card: the asking session, or the target of a
-/// lifecycle action. `title` and `host_name` are what the helm's session
-/// cache knows, `None` when it does not know the session (a session created
-/// moments ago, or one on a host it has not listed yet).
+/// lifecycle action. The reference is the identity the helm resolved. The
+/// other fields describe that session when the helm has the information.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ApprovalSession {
     pub id: String,
     pub title: Option<String>,
     pub host_name: Option<String>,
+    /// What the target runs, when known. Older helms omit it, so a card
+    /// must be able to describe the main program without naming its kind.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch_kind: Option<ApprovalLaunchKind>,
+}
+
+/// The target's program category, derived by the helm from its saved launch.
+/// Cards need this fact without the launch's command or settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalLaunchKind {
+    Agent,
+    Shell,
+    Command,
+    Legacy,
+    #[serde(other)]
+    Unknown,
+}
+
+impl ApprovalLaunchKind {
+    /// Classify what Farhelm knows about the program. A command with a
+    /// declared agent is an agent session for lifecycle purposes.
+    pub fn of(launch: &SessionLaunch) -> Self {
+        match launch {
+            SessionLaunch::Agent { .. } if launch.is_shell() => Self::Shell,
+            SessionLaunch::Agent { .. } => Self::Agent,
+            SessionLaunch::Command(_) if launch.agent_type().is_some() => Self::Agent,
+            SessionLaunch::Command(_) => Self::Command,
+            SessionLaunch::Legacy { .. } => Self::Legacy,
+        }
+    }
 }
 
 /// Shortcut effects shown by the card for a template write.
@@ -424,6 +454,79 @@ pub enum ApprovalAnswer {
 
 #[cfg(test)]
 mod tests {
+    /// A Stop card remains readable in both upgrade directions. A newer kind
+    /// still allows the current GUI to describe the target as a main program.
+    #[test]
+    fn target_program_kind_is_optional_and_forward_compatible() {
+        use super::{ApprovalLaunchKind, ApprovalSession};
+        use serde_json::json;
+
+        #[derive(serde::Deserialize)]
+        struct OlderSession {
+            id: String,
+        }
+
+        let mut wire = json!({"id": "target", "title": null, "host_name": null});
+        let older: ApprovalSession = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(older.launch_kind, None);
+        assert_eq!(serde_json::to_value(older).unwrap(), wire);
+
+        wire["launch_kind"] = json!("shell");
+        let shell: ApprovalSession = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(shell.launch_kind, Some(ApprovalLaunchKind::Shell));
+        assert_eq!(serde_json::to_value(shell).unwrap(), wire);
+        let older_reader: OlderSession = serde_json::from_value(wire.clone()).unwrap();
+        assert_eq!(older_reader.id, "target");
+
+        let future = serde_json::from_value::<super::ApprovalAction>(json!({
+            "kind": "stop",
+            "target": { "id": "target", "title": null, "host_name": null, "launch_kind": "future_kind" },
+        }))
+        .unwrap();
+        assert!(matches!(future, super::ApprovalAction::Stop { target }
+            if target.launch_kind == Some(ApprovalLaunchKind::Unknown)));
+    }
+
+    /// Categorize the stored launch without guessing from a command line.
+    /// A declared agent keeps its program name even on the Command tab.
+    #[test]
+    fn lifecycle_program_kind_comes_from_the_saved_launch() {
+        use super::ApprovalLaunchKind::{self, Agent, Command, Legacy, Shell};
+        use crate::SessionLaunch;
+        use serde_json::json;
+
+        for (saved, kind) in [
+            (
+                json!({"kind": "agent", "selection": {"harness": "bash"}, "start": ["bash"]}),
+                Shell,
+            ),
+            (
+                json!({"kind": "agent", "selection": {"harness": "zsh"}, "start": ["zsh"]}),
+                Shell,
+            ),
+            (
+                json!({"kind": "agent", "selection": {"harness": "codex"}, "start": ["codex"]}),
+                Agent,
+            ),
+            (
+                json!({"kind": "command", "command": "wrapped", "agent": "codex", "yolo": false}),
+                Agent,
+            ),
+            (
+                json!({"kind": "command", "command": "codex", "yolo": false}),
+                Command,
+            ),
+            (
+                json!({"kind": "legacy", "invocation": "bash", "agent_kind": "generic"}),
+                Legacy,
+            ),
+        ] {
+            let launch: SessionLaunch = serde_json::from_value(saved.clone())
+                .unwrap_or_else(|err| panic!("{saved}: {err}"));
+            assert_eq!(ApprovalLaunchKind::of(&launch), kind, "{launch:?}");
+        }
+    }
+
     /// A card from an older helm offers no host-local grant. New metadata must
     /// also remain ignorable by an older UI that already understands its action.
     #[test]
@@ -650,6 +753,7 @@ mod tests {
                 id: "target".into(),
                 title: Some("title".into()),
                 host_name: Some("host".into()),
+                launch_kind: None,
             },
             launch: crate::SessionLaunch::Command(crate::CommandLaunch {
                 command: "codex".into(),

@@ -9278,6 +9278,13 @@ first resolves exactly what it would do (the launch, the target session, the who
 (`approvals::ask`), then rechecks that the request's connection is still the one serving its host before acting, so an
 approval never carries over to whatever replaced that connection during the wait.
 
+Stop and Delete approval cards get the target's optional program category from `ApprovalSession.launch_kind` on the
+helm-to-GUI interface. The field carries no command text. An omitted or unknown category falls back to "main program".
+Delete describes the same live target snapshot that sets its liveness guard. Stop uses the cached description when
+available and gives the routed supervisor two seconds to answer a listing on a cache miss. Failure or expiry leaves
+neutral words on the Stop heading. Expiry removes the pending correlation so a late answer is ignored without retiring
+the link.
+
 NOTE: running-agent prompts are turned off (SPEC.md, Agent-spawned sessions). The helm's agent request handler refuses
 every `AgentVerb::Prompt` first, ahead of its liveness and validation checks, while
 `agent_requests::AGENT_PROMPTS_ENABLED` is false; flipping that constant is the helm side of a re-enable. This and the

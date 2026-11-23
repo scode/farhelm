@@ -153,8 +153,8 @@ use std::sync::{Arc, Weak};
 use anyhow::Context as _;
 use async_trait::async_trait;
 use farhelm_proto::approvals::{
-    ApprovalAction, HostFieldChange, LaunchVerb, QuickLaunchCard, TemplateKeyCard,
-    TemplateShortcutCard,
+    ApprovalAction, ApprovalLaunchKind, ApprovalSession, HostFieldChange, LaunchVerb,
+    QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
 };
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::{
@@ -616,16 +616,17 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Ok(target) => target,
                     Err(error) => return outcome_of(Err(error), mutating),
                 };
-                let (target_claim, _) =
+                let (target_claim, client) =
                     match crate::sessions::route_active_session(&state, &target).await {
                         Ok(route) => route,
                         Err(unroutable) => return outcome_of(Err(unroutable), mutating),
                     };
                 let action = ApprovalAction::Stop {
-                    target: crate::approvals::describe_session(
+                    target: describe_stop_target(
                         &state,
                         &target,
                         &target_claim.entry_uuid,
+                        &client,
                     )
                     .await,
                 };
@@ -2757,6 +2758,7 @@ async fn agent_prompt(
                 snapshot.destination.as_deref(),
                 snapshot.alias.as_deref(),
             )),
+            launch_kind: None,
         },
         launch: shown.launch,
         screen_yolo: shown.screen_yolo,
@@ -2778,6 +2780,37 @@ async fn agent_prompt(
     }
     client.prompt_session(&target.session_id, prompt).await?;
     Ok(AgentReply::Prompted {})
+}
+
+/// A fresh Stop target can be routable before its row reaches the helm's
+/// cache. Read its exact ID on the pinned connection for the card's wording.
+/// A failed or slow read leaves the description unknown. Wording alone
+/// cannot hold the agent's mutation fence for the life of the connection.
+async fn describe_stop_target(
+    state: &AppState,
+    target: &SessionKey,
+    entry_uuid: &str,
+    client: &crate::SupervisorClient,
+) -> ApprovalSession {
+    let cached = state
+        .store
+        .cached_session(target.host, &target.session_id)
+        .await
+        .ok()
+        .flatten();
+    let info = match cached {
+        Some(info) => Some(info),
+        None => client
+            .list_sessions_for_description(std::time::Duration::from_secs(2))
+            .await
+            .and_then(|listing| {
+                listing
+                    .sessions
+                    .into_iter()
+                    .find(|info| info.id == target.session_id)
+            }),
+    };
+    crate::approvals::describe_session_with_info(state, target, entry_uuid, info.as_ref()).await
 }
 
 /// Bind an approved deletion to one target snapshot. The supervisor checks
@@ -2812,7 +2845,13 @@ async fn agent_delete(
         anyhow::Error::new(crate::SupervisorError::helm(ErrorKind::Conflict, message))
     })?;
     let action = ApprovalAction::Delete {
-        target: crate::approvals::describe_session(state, target, &claim.entry_uuid).await,
+        target: crate::approvals::describe_session_with_info(
+            state,
+            target,
+            &claim.entry_uuid,
+            Some(shown),
+        )
+        .await,
         guard,
     };
     approved(state, origin, asking, target.host == origin.host, action).await?;
@@ -2829,8 +2868,8 @@ async fn agent_delete(
     .map(|outcome| AgentReply::Deleted { outcome })
 }
 
-/// The delete card and dispatch share this guard. Unknown status may still
-/// hide a live agent, so it requires the same consent as a known live one.
+/// The delete card and dispatch share this guard. Unknown status carries
+/// the same consent requirement as a program known to be running.
 fn agent_delete_guard(
     info: &farhelm_proto::SessionInfo,
     stop_if_running: bool,
@@ -2839,7 +2878,16 @@ fn agent_delete_guard(
     if info.status.has_ended() && info.tabs.is_empty() {
         Ok(DeleteGuard::NothingAlive)
     } else if !stop_if_running {
-        Err("the target session's agent or terminal tabs may still be running; pass --stop-if-running to permit stopping them before deletion".to_string())
+        let program = match ApprovalLaunchKind::of(&info.launch) {
+            ApprovalLaunchKind::Agent => "agent",
+            ApprovalLaunchKind::Shell => "shell",
+            ApprovalLaunchKind::Command
+            | ApprovalLaunchKind::Legacy
+            | ApprovalLaunchKind::Unknown => "main program",
+        };
+        Err(format!(
+            "the target session's {program} or terminal tabs may still be running; pass --stop-if-running to permit stopping them before deletion"
+        ))
     } else if info.status.has_ended() {
         Ok(DeleteGuard::AgentEnded)
     } else {
@@ -5985,6 +6033,23 @@ mod tests {
         }
     }
 
+    /// Give the peer a structured shell launch. Command text alone must never
+    /// make an approval card identify a program as a shell.
+    fn scripted_shell(id: &str, shell: &str, status: SessionStatus) -> SessionInfo {
+        let launch = serde_json::from_value(serde_json::json!({
+            "kind": "agent",
+            "selection": { "harness": shell },
+            "start": [shell, "{farhelm_args}"],
+        }))
+        .unwrap();
+        SessionInfo {
+            launch,
+            status,
+            invocation: shell.into(),
+            ..session(id, 2)
+        }
+    }
+
     /// A local host with three sessions (including one with another agent)
     /// and an ssh host that connects, caches two sessions, and then goes
     /// away — leaving stale rows behind.
@@ -7731,9 +7796,9 @@ mod tests {
         }
     }
 
-    /// Delete retains the approval's liveness guard and returns checkout
-    /// recovery advice through the shared UI teardown path. The splice proves
-    /// the exchange and cleanup, not process death; the supervisor tests own it.
+    /// Delete describes the live program it bound to the liveness guard even
+    /// while the cache holds a different description. The splice verifies the
+    /// exact target and guard dispatched, and that checkout advice survives it.
     #[farhelm_testtrace::test]
     async fn agent_delete_preserves_the_card_guard_and_checkout_notice() {
         use farhelm_proto::ControlMsg;
@@ -7770,8 +7835,29 @@ mod tests {
                 .await
                 .unwrap();
         });
+        let mut cached_target = session("target", 2);
+        cached_target.status = SessionStatus::Exited { exit_code: Some(0) };
         let (h, local) =
-            spliced_local_fleet(client_side, vec![session("asker", 1), session("target", 2)]).await;
+            spliced_local_fleet(client_side, vec![session("asker", 1), cached_target]).await;
+        let key = SessionKey::new(local, "target");
+        let cached = h
+            .store
+            .cached_session(local, &key.session_id)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(cached.title, "target");
+        assert_eq!(
+            agent_delete_guard(&cached, true).unwrap(),
+            farhelm_proto::DeleteGuard::NothingAlive
+        );
+        assert_eq!(
+            ApprovalLaunchKind::of(&cached.launch),
+            ApprovalLaunchKind::Command
+        );
+        let mut shell = scripted_shell("target", "bash", SessionStatus::Running);
+        shell.title = "Live shell title".into();
+        h.fleet.edit(local, |script| script.sessions[1] = shell);
         h.store
             .set_commands_without_asking(local, false)
             .await
@@ -7801,9 +7887,20 @@ mod tests {
             card.action,
             ApprovalAction::Delete {
                 guard: farhelm_proto::DeleteGuard::Unconditional,
-                ..
-            }
+                target
+            } if target.id == full_id(&h, local, "target")
+                && target.title.as_deref() == Some("Live shell title")
+                && target.launch_kind == Some(ApprovalLaunchKind::Shell)
         ));
+        assert_eq!(
+            h.store
+                .cached_session(local, &key.session_id)
+                .await
+                .unwrap()
+                .unwrap()
+                .title,
+            cached.title
+        );
         assert_eq!(
             answer_card(&h, "allow").await,
             axum::http::StatusCode::NO_CONTENT
@@ -8058,6 +8155,22 @@ mod tests {
                 agent_delete_guard(&info, false).is_ok(),
                 expected == DeleteGuard::NothingAlive
             );
+        }
+    }
+
+    /// Without stop consent, the refusal names the program that would be
+    /// stopped. A literal command defaults to the neutral name.
+    #[farhelm_testtrace::test]
+    fn an_agent_delete_refusal_names_the_running_program() {
+        let shell = scripted_shell("target", "zsh", SessionStatus::Running);
+        let command = session("target", 2);
+        for (info, name) in [(shell, "shell"), (command, "main program")] {
+            let refusal = agent_delete_guard(&info, false).unwrap_err();
+            assert!(
+                refusal.contains(&format!("{name} or terminal tabs")),
+                "{refusal}"
+            );
+            assert!(refusal.contains("--stop-if-running"), "{refusal}");
         }
     }
 
@@ -12333,6 +12446,135 @@ mod tests {
                 ..
             }
         ));
+    }
+
+    /// A routable session can be absent from the helm cache. Stop reads the
+    /// target's current description in that case, and a lost description
+    /// read leaves neutral display metadata. Delete's stopped-shell card
+    /// describes the exact no-process consent from the live row.
+    #[farhelm_testtrace::test]
+    async fn approval_cards_name_uncached_running_and_ended_shells() {
+        use farhelm_proto::DeleteGuard;
+
+        let h = FleetBuilder::new()
+            .await
+            .local(HostScript {
+                sessions: vec![
+                    session("asker", 1),
+                    scripted_shell("bash-target", "bash", SessionStatus::Running),
+                    scripted_shell(
+                        "zsh-target",
+                        "zsh",
+                        SessionStatus::Exited { exit_code: Some(0) },
+                    ),
+                ],
+                ..HostScript::default()
+            })
+            .await
+            .start()
+            .await;
+        let local = local_id(&h.store).await;
+        h.await_refreshed(local).await;
+        let _gui = h.state.manager.ui_seat().hold();
+        let origin = origin_of(&h, local);
+        let handler = HelmAgentRequests::for_state(&h.state);
+
+        for (id, title) in [
+            ("bash-target", "Running shell"),
+            ("zsh-target", "Ended shell"),
+        ] {
+            let key = SessionKey::new(local, id);
+            assert!(
+                !h.store.has_cached_session(&key).await.unwrap(),
+                "the display cache must miss {id}"
+            );
+            // Change the live title after refresh. Only the request's own
+            // lookup sees it, so the card distinguishes live from cached data.
+            h.fleet.edit(local, |script| {
+                script
+                    .sessions
+                    .iter_mut()
+                    .find(|info| info.id == id)
+                    .unwrap()
+                    .title = title.into();
+            });
+            let full = full_id(&h, local, id);
+            let caller = Arc::clone(&handler);
+            let request_id = full.clone();
+            let mut task = tokio::spawn(async move {
+                caller
+                    .handle(
+                        origin,
+                        "asker",
+                        AgentVerb::Stop {
+                            session_id: Some(request_id),
+                        },
+                    )
+                    .await
+            });
+            let card = await_card_or_outcome(&h, &mut task).await;
+            assert!(matches!(card.action, ApprovalAction::Stop { target }
+                if target.id == full && target.title.as_deref() == Some(title)
+                    && target.launch_kind == Some(ApprovalLaunchKind::Shell)));
+            assert_eq!(
+                answer_card(&h, "deny").await,
+                axum::http::StatusCode::NO_CONTENT
+            );
+            assert!(matches!(
+                task.await.unwrap(),
+                AgentOutcome::Err {
+                    kind: ErrorKind::Unauthorized,
+                    ..
+                }
+            ));
+        }
+
+        let ended = full_id(&h, local, "zsh-target");
+        let request_id = ended.clone();
+        let caller = Arc::clone(&handler);
+        let mut task = tokio::spawn(async move {
+            caller
+                .handle(
+                    origin,
+                    "asker",
+                    AgentVerb::Delete {
+                        session_id: Some(request_id),
+                        stop_if_running: false,
+                    },
+                )
+                .await
+        });
+        let card = await_card_or_outcome(&h, &mut task).await;
+        assert!(
+            matches!(card.action, ApprovalAction::Delete { target, guard: DeleteGuard::NothingAlive }
+            if target.id == ended && target.title.as_deref() == Some("Ended shell")
+                && target.launch_kind == Some(ApprovalLaunchKind::Shell))
+        );
+        assert_eq!(
+            answer_card(&h, "deny").await,
+            axum::http::StatusCode::NO_CONTENT
+        );
+        assert!(matches!(
+            task.await.unwrap(),
+            AgentOutcome::Err {
+                kind: ErrorKind::Unauthorized,
+                ..
+            }
+        ));
+
+        // Lose the peer after routing to exercise a failed best-effort read.
+        let key = SessionKey::new(local, "zsh-target");
+        let (claim, client) = crate::sessions::route_active_session(&h.state, &key)
+            .await
+            .unwrap();
+        h.fleet.take_down(local);
+        tokio::time::timeout(RESPONDER_JOIN_BUDGET, client.closed())
+            .await
+            .expect("the routed client closed");
+        let target = describe_stop_target(&h.state, &key, &claim.entry_uuid, &client).await;
+        assert_eq!(target.id, ended);
+        assert_eq!(target.title, None);
+        assert_eq!(target.launch_kind, None);
     }
 
     /// Inherited spawn composes with current Settings even in a plain folder.

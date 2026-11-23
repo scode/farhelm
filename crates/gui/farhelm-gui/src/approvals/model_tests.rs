@@ -6,8 +6,8 @@
 //! allow offered where SPEC.md forbids it would let an approval cover something the user never saw.
 
 use farhelm_proto::approvals::{
-    ApprovalAction, ApprovalAnswer, ApprovalSession, HostFieldChange, LaunchVerb, PendingApproval,
-    QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
+    ApprovalAction, ApprovalAnswer, ApprovalLaunchKind, ApprovalSession, HostFieldChange,
+    LaunchVerb, PendingApproval, QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
 };
 use farhelm_proto::host_appearance::{HostColor, HostIcon};
 use farhelm_proto::launcher::{TemplateDestination, TemplateFields, TemplateNameKind};
@@ -44,6 +44,7 @@ fn unknown(id: &str) -> ApprovalSession {
         id: id.to_owned(),
         title: None,
         host_name: None,
+        launch_kind: None,
     }
 }
 
@@ -57,6 +58,7 @@ fn request(id: &str, host: &str, action: ApprovalAction) -> PendingApproval {
             id: reference("asker"),
             title: Some("asker".to_owned()),
             host_name: Some(host.to_owned()),
+            launch_kind: None,
         },
         action,
         own_host_session_action: false,
@@ -273,6 +275,7 @@ fn session_references_stay_raw_copyable_identities() {
             id: id.clone(),
             title: Some("a session title".into()),
             host_name: Some("a host".into()),
+            launch_kind: None,
         };
         for action in [
             ApprovalAction::Stop {
@@ -324,6 +327,7 @@ fn the_from_line_keeps_its_parts_apart_and_the_full_reference_raw() {
         id: reference("1234567\u{200b}middle\u{202e}"),
         title: Some("“quoted” title".into()),
         host_name: None,
+        launch_kind: None,
     };
     let from = Card::of(&approval, TunnelOffer::NotOffered).from;
     assert_eq!(from.host, HostText::from_host("build\u{202e}host"));
@@ -659,6 +663,7 @@ fn an_environment_launch_card_names_the_new_machine_and_its_cost() {
             id: "entry:source".into(),
             title: Some("original".into()),
             host_name: Some("dev container".into()),
+            launch_kind: None,
         }),
         prompt: None,
     };
@@ -722,30 +727,65 @@ fn a_restart_card_shows_the_resume_command_only() {
     assert!(chips(&rows).is_empty());
 }
 
-/// A delete card spells out exactly what its guard lets it stop; a tabs-only warning must not silently cover stopping
-/// a restarted agent.
+/// Stop names the program in the heading alone. Delete names the scope of
+/// the guard, so a tabs-only warning never covers a restarted main program.
 #[test]
-fn a_delete_card_describes_the_authorized_liveness_scope() {
-    for (guard, words) in [
-        (
-            DeleteGuard::NothingAlive,
-            "nothing; refuse if the agent or any terminal tab is alive",
-        ),
-        (
-            DeleteGuard::AgentEnded,
-            "terminal tabs; refuse if the agent is running again",
-        ),
-        (
-            DeleteGuard::Unconditional,
-            "the agent and all terminal tabs",
-        ),
+fn stop_and_delete_cards_describe_the_target_program() {
+    use ApprovalLaunchKind::{Agent, Command, Legacy, Shell, Unknown};
+
+    for (launch_kind, program) in [
+        (Some(Agent), "agent"),
+        (Some(Shell), "shell"),
+        (Some(Command), "main program"),
+        (Some(Legacy), "main program"),
+        (Some(Unknown), "main program"),
+        (None, "main program"),
     ] {
-        let action = ApprovalAction::Delete {
-            target: unknown("t"),
-            guard,
+        let target = ApprovalSession {
+            launch_kind,
+            ..unknown("t")
         };
-        assert_eq!(kind(&action), "delete");
-        assert!(facts(&action).contains(&Fact::Words("what deletion stops", words)));
+        let stop = ApprovalAction::Stop {
+            target: target.clone(),
+        };
+        assert_eq!(
+            summary(&stop),
+            format!("Stop a session's {program} and close its terminal tabs")
+        );
+        assert_eq!(
+            facts(&stop),
+            [
+                Fact::Words("session", "title unknown"),
+                Fact::CopyIdentity("session id", "t".into()),
+                Fact::Words("session's host", "unknown to this helm"),
+            ]
+        );
+
+        for (guard, expected) in [
+            (
+                DeleteGuard::NothingAlive,
+                format!("nothing. Refuse if the {program} or any terminal tab is alive"),
+            ),
+            (
+                DeleteGuard::AgentEnded,
+                format!("terminal tabs. Refuse if the {program} is running again"),
+            ),
+            (
+                DeleteGuard::Unconditional,
+                format!("the {program} and all terminal tabs"),
+            ),
+        ] {
+            let delete = ApprovalAction::Delete {
+                target: target.clone(),
+                guard,
+            };
+            assert_eq!(kind(&delete), "delete");
+            let shown = facts(&delete).into_iter().find_map(|fact| match fact {
+                Fact::Words("what deletion stops", words) => Some(words),
+                _ => None,
+            });
+            assert_eq!(shown, Some(expected.as_str()));
+        }
     }
 }
 
@@ -760,6 +800,7 @@ fn a_prompt_card_shows_the_message_the_targets_shield_and_its_caveats() {
             id: "target".into(),
             title: Some("title".into()),
             host_name: Some("host".into()),
+            launch_kind: None,
         },
         launch: SessionLaunch::Command(CommandLaunch {
             command: "secret command".into(),
@@ -1436,7 +1477,7 @@ fn a_card_answers_under_its_approval_id_with_the_old_help() {
     assert_ne!(card.id, card.from.id);
     assert_eq!(
         card.heading,
-        "Stop a session's agent and close its terminal tabs"
+        "Stop a session's main program and close its terminal tabs"
     );
     assert_eq!(
         card.answers[0],
@@ -1489,6 +1530,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
         id: reference("target"),
         title: Some("target title".into()),
         host_name: Some("box".into()),
+        launch_kind: None,
     };
     let anonymous = unknown(&reference("anon"));
     let codex = agent(
@@ -1623,7 +1665,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
             ApprovalAction::Stop {
                 target: target.clone(),
             },
-            "Stop a session's agent and close its terminal tabs",
+            "Stop a session's main program and close its terminal tabs",
             target_facts(vec![]),
             vec![],
             &ORDINARY,
@@ -1636,7 +1678,7 @@ fn every_kind_shows_exactly_the_old_cards_content() {
             "Delete a session and its stored state",
             target_facts(vec![Fact::Words(
                 "what deletion stops",
-                "the agent and all terminal tabs",
+                "the main program and all terminal tabs",
             )]),
             vec![],
             &ORDINARY,

@@ -49,6 +49,7 @@ fn launch(host: &str) -> PendingApproval {
             id: reference("1234567890abcdefghijkl"),
             title: Some("asker title".to_owned()),
             host_name: Some(host.to_owned()),
+            launch_kind: None,
         },
         action: ApprovalAction::Launch {
             verb: LaunchVerb::Create,

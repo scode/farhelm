@@ -53,6 +53,7 @@ fn link() -> PendingApproval {
             id: SESSION.to_owned(),
             title: Some("asker".to_owned()),
             host_name: Some("build".to_owned()),
+            launch_kind: None,
         },
         action: ApprovalAction::OpenUrl {
             url: "http://127.0.0.1:8080/".to_owned(),

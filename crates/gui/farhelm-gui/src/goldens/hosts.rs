@@ -131,6 +131,7 @@ pub(super) fn host_add_dialog_agent_setup(state: &SceneState, window: &mut Windo
                 .to_owned(),
             title: Some("Provision the test fleet".to_owned()),
             host_name: Some("build-box".to_owned()),
+            launch_kind: None,
         },
         action: ApprovalAction::HostAdd {
             destination: "ops@new-box.example".to_owned(),

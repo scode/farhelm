@@ -15,8 +15,8 @@
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
 use farhelm_proto::approvals::{
-    ApprovalAction, ApprovalSession, HostFieldChange, LaunchVerb, PendingApproval, QuickLaunchCard,
-    TemplateKeyCard, TemplateShortcutCard,
+    ApprovalAction, ApprovalLaunchKind, ApprovalSession, HostFieldChange, LaunchVerb,
+    PendingApproval, QuickLaunchCard, TemplateKeyCard, TemplateShortcutCard,
 };
 use farhelm_proto::launcher::TemplateFields;
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
@@ -108,12 +108,14 @@ pub(crate) fn stop(id: &str, host: &str) -> PendingApproval {
             id: "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:asker".to_owned(),
             title: None,
             host_name: None,
+            launch_kind: None,
         },
         action: ApprovalAction::Stop {
             target: ApprovalSession {
                 id: "7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:target".to_owned(),
                 title: None,
                 host_name: None,
+                launch_kind: Some(ApprovalLaunchKind::Shell),
             },
         },
         own_host_session_action: false,
@@ -252,7 +254,7 @@ fn the_oldest_opens_and_a_chosen_header_stays_until_its_request_ends(cx: &mut Te
     assert_eq!(expanded(cx).as_deref(), Some("a"));
     assert_eq!(
         label(cx, "approval-b-waiting").as_deref(),
-        Some("Stop a session's agent and close its terminal tabs, from host other")
+        Some("Stop a session's shell and close its terminal tabs, from host other")
     );
     click(cx, "approval-b-waiting");
     assert_eq!(
@@ -393,6 +395,7 @@ fn session(name: &str) -> ApprovalSession {
         id: format!("7f8c2b1e-6d0e-4c51-9a8e-1e2f3a4b5c6d:{name}"),
         title: Some(format!("{name} title")),
         host_name: Some("build-box".to_owned()),
+        launch_kind: None,
     }
 }
 

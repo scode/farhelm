@@ -55,6 +55,7 @@ fn approval_spawn() -> farhelm_proto::approvals::PendingApproval {
                 .to_owned(),
             title: Some("Review agent request".to_owned()),
             host_name: Some("this machine".to_owned()),
+            launch_kind: None,
         },
         action: ApprovalAction::Launch {
             verb: LaunchVerb::SpawnInherited,
