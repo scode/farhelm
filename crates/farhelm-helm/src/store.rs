@@ -7450,9 +7450,8 @@ impl HelmStore {
             .await
     }
 
-    /// Record Tensorlake's id for `host`'s sandbox: once a create answers,
-    /// and when a removal finds a sandbox by name that the row has no id for
-    /// (before terminating it, so a retry can still find its snapshots).
+    /// Record Tensorlake's id when a create answers or an operation recovers an outstanding create.
+    /// Later mutations use the saved id so retries can find the same sandbox and its snapshots.
     /// Saving the id also settles any outstanding create in the same write.
     /// Returns whether a Tensorlake row was there to update.
     pub(crate) async fn set_tensorlake_sandbox_id(
