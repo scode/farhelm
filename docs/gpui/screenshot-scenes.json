@@ -3453,6 +3453,11 @@
       "reference": null
     },
     {
+      "golden": "stop-and-suspend-outcomes",
+      "title": "A Stop and suspend deadline notice alongside a Stop failure",
+      "reference": null
+    },
+    {
       "golden": "launcher-resuming-host",
       "title": "Launch preparation while a suspended host resumes",
       "reference": null

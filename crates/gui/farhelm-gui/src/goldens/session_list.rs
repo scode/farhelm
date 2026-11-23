@@ -2,6 +2,8 @@
 //! menus and the Delete question) and the Rename dialog. The scene list itself, `SCENES` with each scene's name and
 //! size, stays in `mod.rs`.
 
+use std::rc::Rc;
+
 use crate::focus::Mark;
 use crate::layers;
 use crate::operations::OpKey;
@@ -561,6 +563,122 @@ pub(super) fn disconnect_pending_launch(state: &SceneState) {
         .find_map(|item| item.downcast_mut::<FakeHelm>())
         .expect("the scene keeps its fake helm")
         .break_channel();
+}
+
+/// Show the deadline notice in the open session and a separate Stop failure in the list. The sandbox still
+/// appears connected, which is the part of Stop and suspend in which there would otherwise be no feedback.
+pub(super) fn stop_and_suspend_outcomes_setup(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    use crate::host_text::HostText;
+    use crate::operations::Work;
+    use crate::session_list::environment_tests::{
+        Provider, STOP_AND_SUSPEND_NOTICE, bash_session, connected, environment_host, registry,
+    };
+    use crate::session_pane::SessionPane;
+
+    window.set_driver_enabled(true);
+    let rows = [
+        bash_session("a")
+            .host(2)
+            .title("Build console")
+            .activity(TEST_NOW - 30)
+            .invocation("bash"),
+        bash_session("b")
+            .host(2)
+            .title("Package release")
+            .activity(TEST_NOW - 60)
+            .invocation("bash"),
+    ];
+    let (mut helm, handle, events) = FakeHelm::new();
+    let connection = session::start(handle, events, None, cx);
+    let keep = Rc::downgrade(&state.keep);
+    connection.update(cx, |connection, _| {
+        connection.serve_terminals(move |attach| {
+            super::terminal::replayed_stream(None, keep.upgrade().unwrap(), |_| {})(attach)
+        });
+    });
+    helm.connect(vec![
+        listing(&["a", "b"], &rows),
+        preferences(&["a"], None),
+        registry(&environment_host(Provider::Sandbox, connected())),
+    ]);
+    let list = cx.new(SessionList::new);
+    let new = list.read(cx).new_focus().clone();
+    let pane = cx.new(|cx| SessionPane::new(new, window, cx));
+    state.lists.borrow_mut().push(list);
+    state.keep.borrow_mut().push(Box::new(pane));
+    state.after.set(Some(await_stop_and_suspend_outcomes));
+    super::once_ui_session(state, helm, connection, cx, |cx| {
+        session::current_operations(cx)
+            .expect("the operation store is live")
+            .update(cx, |operations, cx| {
+                operations.notice(
+                    &OpKey::session("a"),
+                    2,
+                    HostText::from_host(STOP_AND_SUSPEND_NOTICE),
+                    cx,
+                );
+                operations.note(
+                    &OpKey::session("b"),
+                    Work::StopAndSuspend,
+                    HostText::from_host("The supervisor did not finish stopping the session."),
+                    cx,
+                );
+            });
+    });
+}
+
+/// A settled background alone could pass the pixel check before the fake helm's snapshot. Wait for the actual
+/// notice and failure labels in the sidebar and open pane.
+fn await_stop_and_suspend_outcomes(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    _: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    if ![
+        "session-outcome-a",
+        "session-outcome-b",
+        "session-header-outcome-a",
+    ]
+    .into_iter()
+    .all(|id| {
+        nodes
+            .iter()
+            .any(|node| node.element_id.as_deref() == Some(id) && !node.visible_bounds.is_empty())
+    }) {
+        state.after.set(Some(await_stop_and_suspend_outcomes));
+    }
+}
+
+/// Keep a sidebar-width column beside the open pane to exercise the same wrap as the desktop.
+pub(super) fn stop_and_suspend_outcomes(
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    use crate::session_pane::SessionPane;
+
+    let Some(pane) = state
+        .keep
+        .borrow()
+        .iter()
+        .find_map(|item| item.downcast_ref::<Entity<SessionPane>>().cloned())
+    else {
+        // The first frame precedes the scene setup.
+        return div().into_any_element();
+    };
+    defer_after(state, window, cx);
+    div()
+        .flex()
+        .h(px(370.))
+        .child(super::session_lists_at(state, px(370.), cx))
+        .child(div().w(px(660.)).min_w_0().h_full().child(pane))
+        .into_any_element()
 }
 
 /// The stopped session and the pending create share the same host.

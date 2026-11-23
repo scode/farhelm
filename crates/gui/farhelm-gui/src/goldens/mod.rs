@@ -950,6 +950,12 @@ static SCENES: &[Scene] = &[
         setup: session_list_deleting_setup,
     },
     Scene {
+        name: "stop-and-suspend-outcomes",
+        size: (1040., 394.),
+        draw: stop_and_suspend_outcomes,
+        setup: stop_and_suspend_outcomes_setup,
+    },
+    Scene {
         name: "announcements-dialog",
         size: (640., 520.),
         draw: empty,

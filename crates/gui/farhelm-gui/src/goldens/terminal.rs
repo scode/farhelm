@@ -336,7 +336,11 @@ fn stalled_stream(exit: Option<i32>, keep: Kept) -> OpenStream {
 
 /// An opener whose fake stream replays a short session at the bottom of the fitted screen, with the program exited
 /// with status `exit` if given, and then does `then` to it. The fake is kept in `keep`.
-fn replayed_stream(exit: Option<i32>, keep: Kept, then: fn(&mut FakeTerminal)) -> OpenStream {
+pub(super) fn replayed_stream(
+    exit: Option<i32>,
+    keep: Kept,
+    then: fn(&mut FakeTerminal),
+) -> OpenStream {
     Box::new(move |attach| {
         let (mut fake, handle, events) = FakeTerminal::open(&attach);
         let asked = fake.attach();
