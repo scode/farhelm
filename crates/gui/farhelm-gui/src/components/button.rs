@@ -5,12 +5,12 @@
 //! two swatches of the host settings' appearance picker, and a Hosts row's outlined inline Update.
 //!
 //! Either part of a split button is a button too ([`Button::split`]): the session header's Restart and Replace, a main
-//! part and a caret joined with no gap, each its own control with its own focus and help.
+//! part and a caret joined by a one-pixel gap ([`BUTTON_JOIN_GAP`]), each its own control with its own focus and help.
 //!
-//! The session header's buttons ([`Button::compact`]) also have a condensed look ([`Button::condensed`]), the old
-//! `.actions-compact` rule, which the header takes only while its row cannot hold its actions at their ordinary size
-//! beside a tunnel pill. It changes only the box, the text size and the line height: names, help, focus and activation
-//! stay as they are.
+//! The session header's toolbar buttons also have a condensed look ([`Button::condensed`]), the old `.actions-compact`
+//! rule, which the header takes only while its row cannot hold its actions at their ordinary size, with or without a
+//! tunnel pill beside them. It changes only the box, the text size and the line height: names, help, focus and
+//! activation stay as they are.
 //!
 //! A button shows its label's text, or other content in its place ([`Button::content`]: a host's mark, a mark beside a
 //! host's name); the label is its accessible name either way. A button that is one of a set of choices says whether
