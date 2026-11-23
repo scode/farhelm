@@ -58,13 +58,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   settings, including Delete sandbox or container from the Hosts panel. Review the two-lane channel and the operation
   boundaries before converting more of them. Plan: `plans/queue/slow-host-async-actions.md`.
 
-- **Restyle buttons and button-like controls.** Buttons lose their outlines and take a translucent tint of the text
-  color (the solid blue and red stay, without edges), with 5-pixel corners and Medium-weight labels (bundling Inter
-  Medium); split-button halves and the terminal text size control are joined by 1-pixel gaps, and the session toolbar
-  grows to 26-pixel buttons. Choice chips follow the buttons; segmented controls keep their outlined container. Designed
-  with the maintainer on 2026-11-22 against browser mockups, and validated through the GPUI goldens, with a new
-  reference picture of the session toolbar. Plan: `plans/queue/button-restyle.md`.
-
 - **Idle CPU of the GPUI desktop app.** Accepted for now on 2026-11-16: an idle window with one running session uses
   about 3.05-3.09% CPU on the test Mac (Apple silicon), against 1.61-1.62% for the last browser-UI build in the same
   session. Frames are back to the old app's rate (3.0 changed frames a second, after the cursor blink was aligned with

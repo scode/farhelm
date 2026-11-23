@@ -19,8 +19,9 @@ use std::time::Duration;
 use farhelm_input_mapping::Platform;
 use farhelm_proto::AgentKind;
 use gpui::{
-    App, Bounds, Context, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels,
-    Point, Render, SharedString, Size, StatefulInteractiveElement, Styled, Window, div, point, px,
+    App, Bounds, Context, FontWeight, InteractiveElement, IntoElement, MouseButton, ParentElement,
+    Pixels, Point, Render, SharedString, Size, StatefulInteractiveElement, Styled, Window, div,
+    point, px,
 };
 
 use super::SelectionModifier;
@@ -181,10 +182,9 @@ pub(super) type Dismiss = Rc<dyn Fn(&mut Window, &mut App)>;
 /// tab stop and its press is not the terminal's, so dismissing it leaves focus where it was and sends the program
 /// nothing (the old button's `tabindex: -1` and prevented `mousedown`).
 ///
-/// That is why the × is built from a plain element rather than taken from the component layer, which every other
-/// control comes from: the layer's `Button` is a tab stop tracked for focus, which a click on Linux focuses. The ×
-/// still carries the label, hover help and role the component layer requires of a control, through
-/// [`with_hover_help`], as the session list's pin grip (`session_list/pin_drag.rs`) does.
+/// The × shares the ghost button's padding, corner, label weight and hover fill. Its plain element stays outside
+/// the component's focus handling so the terminal keeps receiving keystrokes. The element carries the button role,
+/// name and hover help, through [`with_hover_help`] as the session list's pin grip (`session_list/pin_drag.rs`) does.
 pub(crate) struct NoticeView {
     text: SharedString,
     dismiss: Dismiss,
@@ -210,8 +210,10 @@ impl Render for NoticeView {
             // The one part of the notice that takes the pointer: a press on it is not also a press on the terminal.
             .occlude()
             .flex_none()
-            .px(px(4.))
-            .rounded(metrics::RADIUS_MD)
+            .py(metrics::BUTTON_PAD.0)
+            .px(metrics::BUTTON_PAD.1)
+            .rounded(metrics::RADIUS_SM)
+            .font_weight(FontWeight::MEDIUM)
             .cursor_pointer()
             .hover(move |style| style.bg(theme::color(palette.control_hover)))
             // Nothing in the notice takes focus; GPUI's own focus-on-press has nothing to do here either.
