@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `wayland-clipboard-file-paste.md` — Read text/uri-list local files in Wayland clipboard paste with same-offer fallback
 - [complete] `toolkit-reduced-motion.md` — Follow GPUI's live reduced-motion setting everywhere and remove the desktop startup check
 - [complete] `fallback-unattachable-remembered-tab.md` — Fall back to the main terminal when a remembered shell tab receives an explicit initial attach refusal
-- [in-flight 224a28] `fix-muse-conversation-reporting.md` — Pass non-secret session identity args to Muse Code hooks across environment scrubbing
+- [complete] `fix-muse-conversation-reporting.md` — Pass non-secret session identity args to Muse Code hooks across environment scrubbing
 - [in-flight 61b9d9] `button-restyle.md` — Restyle buttons and button-like controls without outlines, with the larger session toolbar
 - [complete] `gui-goldens-in-releases.md` — Document keeping GPUI screenshot goldens development- and landing-only and remove the TODO entry
 - [in-flight ae4dc9] `repo-cache-lock-redesign.md` — Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
