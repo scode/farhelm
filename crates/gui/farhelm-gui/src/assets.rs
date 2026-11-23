@@ -112,10 +112,11 @@ use gpui::{AssetSource, SharedString};
 /// The interface font family name, as the bundled faces declare it.
 pub const UI_FONT: &str = "Inter";
 
-/// The interface faces the GUI uses: regular text and the semibold used for dialog titles and row titles.
+/// Bundle Inter Regular, Medium and SemiBold so headings and labels that request Medium get their own face.
 pub fn ui_fonts() -> Vec<Cow<'static, [u8]>> {
     vec![
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-Regular.ttf")),
+        Cow::Borrowed(include_bytes!("../assets/fonts/Inter-Medium.ttf")),
         Cow::Borrowed(include_bytes!("../assets/fonts/Inter-SemiBold.ttf")),
     ]
 }
