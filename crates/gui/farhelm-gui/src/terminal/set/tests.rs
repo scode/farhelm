@@ -19,7 +19,7 @@ use farhelm_helm_client::transfers::Transfers;
 use farhelm_proto::DetachCode;
 use farhelm_proto::grid::{GridInput, GridOutput};
 use farhelm_proto::ui_channel::{Collection, CollectionChanges, CollectionState, KeyedEntry};
-use gpui::{Entity, TestAppContext, VisualTestContext};
+use gpui::{Entity, SharedString, TestAppContext, VisualTestContext};
 use serde_json::json;
 
 use super::{
@@ -153,6 +153,36 @@ impl Window<'_> {
             .iter()
             .position(|(_, attach)| attach.tab.as_deref() == tab)
             .unwrap_or_else(|| panic!("no stream for {tab:?}"))
+    }
+
+    /// Find session a's replacement stream after a remount or connection reset, avoiding the retired stream.
+    fn reopened_stream(&self, first: usize, tab: Option<&str>) -> usize {
+        self.opened
+            .borrow()
+            .iter()
+            .enumerate()
+            .skip(first)
+            .find(|(_, (_, attach))| attach.session == "a" && attach.tab.as_deref() == tab)
+            .unwrap_or_else(|| panic!("session a did not reopen {tab:?}"))
+            .0
+    }
+
+    /// The upload notice strip of the named terminal, including when that terminal is hidden.
+    fn upload_lines(&mut self, id: Option<&str>) -> Vec<SharedString> {
+        let set = self.set();
+        self.cx.update(|_, cx| {
+            let set = set.read(cx);
+            let terminal = if let Some(id) = id {
+                set.tabs
+                    .iter()
+                    .find(|tab| tab.id == id)
+                    .and_then(|tab| tab.terminal.as_ref())
+                    .expect("the shell has an attached-terminal view")
+            } else {
+                set.agent()
+            };
+            terminal.read(cx).attachments().read(cx).lines_shown()
+        })
     }
 
     /// Stream `index`'s attach opens and replays a screen showing `text`, so its terminal goes live.
@@ -968,6 +998,69 @@ fn a_missing_tab_falls_back_to_agent_without_erasing_the_choice(cx: &mut TestApp
     assert_eq!(window.chosen().as_deref(), Some("t1"));
 }
 
+/// A temporary disconnect while restoring a remembered tab must leave that tab selected and trying. If the next
+/// attach gets a definitive refusal, the main terminal takes focus. A deliberate selection still explains the
+/// tab's refusal and gives the user a Reconnect button.
+#[gpui::test]
+fn a_remembered_shell_tab_falls_back_after_a_retry_is_refused(cx: &mut TestAppContext) {
+    let mut window = open(cx, snapshot(&["t1"]));
+    click(window.cx, T1_TAB);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    click(window.cx, "session-row-b");
+    let first = window.opened.borrow().len();
+    click(window.cx, "session-row-a");
+    let main = window.reopened_stream(first, None);
+    let shell = window.reopened_stream(first, Some("t1"));
+    window.go_live(main, "main terminal");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+
+    window.opened.borrow_mut()[shell].0.drop_link();
+    settle(window.cx);
+    assert_eq!(window.phase(shell), FakePhase::Reconnecting);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+
+    let reason = "The shell tab's terminal cannot be read";
+    {
+        let mut opened = window.opened.borrow_mut();
+        let terminal = &mut opened[shell].0;
+        terminal.attach();
+        terminal.refuse_tab_attach(reason);
+    }
+    settle(window.cx);
+    assert_eq!(window.chosen(), None, "the main terminal is shown");
+    assert_eq!(window.phase(shell), FakePhase::Detached);
+    assert!(
+        window.cx.debug_bounds(T1_TAB).is_some(),
+        "the shell remains listed"
+    );
+    keys(window.cx, "x");
+    assert!(window.typed_into(main), "focus follows the fallback");
+    assert!(!window.typed_into(shell));
+    assert_eq!(
+        window
+            .cx
+            .update(|_, cx| cx.global::<super::ShownTerminals>().0.get("a").cloned())
+            .as_deref(),
+        Some("t1"),
+        "automatic fallback preserves the user's remembered tab"
+    );
+
+    click(window.cx, T1_TAB);
+    assert_eq!(
+        window.chosen().as_deref(),
+        Some("t1"),
+        "deliberate choice remains shown"
+    );
+    assert_eq!(window.phase(shell), FakePhase::Detached);
+    let text = painted(&test_support::frame(window.cx)).join(" ");
+    assert!(
+        text.contains("Detached:") && text.contains(reason),
+        "{text}"
+    );
+    click(window.cx, STATUS_RECONNECT_ID);
+    assert_eq!(window.phase(shell), FakePhase::Attaching);
+}
+
 /// Leave a sent upload waiting for an answer in the first shell tab. Its cancellation can then be distinguished
 /// from a queued upload that never reached the fake.
 fn pending_upload_in_first_tab(
@@ -997,6 +1090,179 @@ fn pending_upload_in_first_tab(
     };
     assert!(!answer.abandoned(), "the upload is still in flight");
     answer
+}
+
+/// A connection reset keeps the selected session. Return its new two streams while the remembered tab is still
+/// attaching, with the retired tab's upload waiting to be reported.
+fn reset_with_interrupted_tab_upload(
+    window: &mut Window<'_>,
+    transfers: &mut FakeTransfers,
+) -> (usize, usize) {
+    let answer = pending_upload_in_first_tab(window, transfers);
+    window.helm.break_channel();
+    settle(window.cx);
+    assert!(answer.abandoned(), "the old tab's upload was interrupted");
+    let first = window.opened.borrow().len();
+    window.helm.connect(snapshot(&["t1"]));
+    settle(window.cx);
+    let main = window.reopened_stream(first, None);
+    let shell = window.reopened_stream(first, Some("t1"));
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert_eq!(window.phase(shell), FakePhase::Attaching);
+    assert!(window.upload_lines(None).is_empty());
+    assert!(window.upload_lines(Some("t1")).is_empty());
+    (main, shell)
+}
+
+/// Even if the roster still lists a tab that has closed, its initial detach settles the restore. The main
+/// terminal receives the pending notice once, and a deliberate visit to the stale tab cannot consume it.
+#[gpui::test]
+fn a_closed_remembered_tab_routes_the_upload_notice_to_main(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let (main, shell) = reset_with_interrupted_tab_upload(&mut window, &mut transfers);
+    window.go_live(main, "main terminal");
+    {
+        let mut opened = window.opened.borrow_mut();
+        let terminal = &mut opened[shell].0;
+        terminal.attach();
+        terminal.detach(Some(DetachCode::TabClosed), "the shell has closed");
+    }
+    settle(window.cx);
+    assert_eq!(window.chosen(), None);
+    let lines = window.upload_lines(None);
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Attaching Cargo.toml was interrupted"),
+        "{lines:?}"
+    );
+    assert!(window.upload_lines(Some("t1")).is_empty());
+    assert_eq!(
+        window.cx.update(|_, cx| notices::posted(cx)),
+        [Notice::ConnectionLost]
+    );
+}
+
+/// Close can settle before the roster drops the tab or the in-flight attach answers. Its success must release
+/// the carried notice to the main terminal immediately, because the tab may never report another attach state.
+#[gpui::test]
+fn closing_a_restoring_tab_releases_the_notice_before_the_roster_changes(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let (_, shell) = reset_with_interrupted_tab_upload(&mut window, &mut transfers);
+    click(window.cx, "session-terminal-close-t1");
+    click(window.cx, "prompt-confirm");
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "one tab close: {sent:?}");
+    assert_eq!(
+        (sent[0].1, sent[0].2.as_str()),
+        (
+            farhelm_helm_client::Method::Delete,
+            "/api/sessions/a/tabs/t1"
+        )
+    );
+    window.helm.reply(sent[0].0, 200, None);
+    settle(window.cx);
+
+    assert_eq!(window.chosen(), None);
+    assert!(
+        window.cx.debug_bounds(T1_TAB).is_some(),
+        "the roster has not changed"
+    );
+    assert_eq!(
+        window.phase(shell),
+        FakePhase::Attaching,
+        "no initial attach result"
+    );
+    let lines = window.upload_lines(None);
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Attaching Cargo.toml was interrupted"),
+        "{lines:?}"
+    );
+    window.push_tabs(&[]);
+    assert_eq!(window.upload_lines(None), lines);
+}
+
+/// A single roster push can remove the remembered shell and list the shell the user just opened. Route the
+/// carried notice after honoring that choice, so it reaches the new shell instead of a hidden main terminal.
+#[gpui::test]
+fn replacing_the_restoring_tab_in_one_push_routes_the_notice_to_the_new_shell(
+    cx: &mut TestAppContext,
+) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    reset_with_interrupted_tab_upload(&mut window, &mut transfers);
+    click(window.cx, super::ADD_ID);
+    let sent = tab_requests(&mut window.helm);
+    assert_eq!(sent.len(), 1, "one tab open: {sent:?}");
+    assert_eq!(
+        (sent[0].1, sent[0].2.as_str()),
+        (farhelm_helm_client::Method::Post, "/api/sessions/a/tabs")
+    );
+    window
+        .helm
+        .reply(sent[0].0, 200, Some(json!({ "tab": { "id": "t2" } })));
+    settle(window.cx);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    assert!(window.upload_lines(None).is_empty());
+
+    window.push_tabs(&["t2"]);
+    assert_eq!(window.chosen().as_deref(), Some("t2"));
+    let lines = window.upload_lines(Some("t2"));
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Attaching Cargo.toml was interrupted"),
+        "{lines:?}"
+    );
+    assert!(window.upload_lines(None).is_empty());
+}
+
+/// If the remembered tab's attachment succeeds, the upload notice goes to that tab even if the main terminal
+/// connected first.
+#[gpui::test]
+fn a_restored_shell_tab_receives_its_interrupted_upload_notice(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let (main, shell) = reset_with_interrupted_tab_upload(&mut window, &mut transfers);
+    window.go_live(main, "main terminal");
+    assert!(window.upload_lines(None).is_empty());
+    assert!(window.upload_lines(Some("t1")).is_empty());
+    window.go_live(shell, "shell terminal");
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    let lines = window.upload_lines(Some("t1"));
+    assert_eq!(lines.len(), 1);
+    assert!(
+        lines[0].contains("Attaching Cargo.toml was interrupted"),
+        "{lines:?}"
+    );
+    assert!(window.upload_lines(None).is_empty());
+}
+
+/// Leaving while the restored tab is still trying moves the pending upload notice to the main window, where it
+/// remains visible without a terminal of the source session mounted.
+#[gpui::test]
+fn leaving_during_tab_restore_posts_the_pending_upload_notice(cx: &mut TestAppContext) {
+    let (mut transfers, handle) = FakeTransfers::new();
+    let mut window = open_with_transfers(cx, snapshot(&["t1"]), Some(handle));
+    let (_, shell) = reset_with_interrupted_tab_upload(&mut window, &mut transfers);
+    window.opened.borrow_mut()[shell].0.drop_link();
+    settle(window.cx);
+    assert_eq!(window.phase(shell), FakePhase::Reconnecting);
+    assert_eq!(window.chosen().as_deref(), Some("t1"));
+    click(window.cx, "session-row-b");
+    let posted = window.cx.update(|_, cx| notices::posted(cx));
+    assert!(
+        matches!(
+            posted.as_slice(),
+            [Notice::ConnectionLost, Notice::InterruptedUpload(_)]
+        ),
+        "{posted:?}"
+    );
+    assert_eq!(
+        posted[1].text().as_ref(),
+        "Attaching Cargo.toml to a was interrupted — whether it was attached cannot be told."
+    );
 }
 
 /// Leaving a session reports its shell's interrupted upload in a banner right away. Restoring the shell

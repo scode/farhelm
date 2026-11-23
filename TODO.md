@@ -265,13 +265,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
   without showing the accepted removal.
 
-- **Show the main terminal when a remembered shell tab cannot attach.** Reopening a session can leave it stuck
-  reconnecting to a remembered shell tab whose terminal the supervisor cannot read. Fall back to the main terminal after
-  an explicit initial refusal, even if the shell tab remains listed. The terminal stream currently uses the same detach
-  code for that refusal and for some dropped supervisor connections. Give the desktop app a way to tell them apart so a
-  temporary outage keeps retrying. Route pending upload notices to the terminal the app ends up showing, and keep the
-  shell tab available for a deliberate selection. Plan: `plans/queue/fallback-unattachable-remembered-tab.md`.
-
 - **Evidence shows Muse Code conversation reporting is broken (1.4.24).** During the `harness-drift-tests` live run on
   Muse Code 1.4.24-R9131.1, Farhelm injected its hook flags and Muse replied to the prompt, but no conversation report
   arrived and Farhelm's hook helper never even wrote a diagnostic log line before teardown—indicating conversation
