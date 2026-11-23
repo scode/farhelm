@@ -16,7 +16,7 @@ shift 2
 cd "$base/src" || exit 1
 use_pinned_toolchain
 substrate >"$out/summary.txt"
-keep_disk_free >>"$out/summary.txt"
+keep_disk_free >>"$out/summary.txt" || { cat "$out/summary.txt"; exit "$DISK_FULL_STATUS"; }
 nextest_dir=$(python3 scripts/install-pinned-nextest.py 2>>"$out/console.log") || {
   echo "setup failed: could not install the pinned nextest" >>"$out/summary.txt"
   cat "$out/summary.txt"

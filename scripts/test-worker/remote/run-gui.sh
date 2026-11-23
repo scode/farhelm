@@ -17,12 +17,14 @@ shift 2
 cd "$base/src" || exit 1
 use_pinned_toolchain
 [ $# -gt 0 ] || set -- smoke lifecycle
+disk_full=
 {
   substrate
-  keep_disk_free
+  keep_disk_free || disk_full=1
   echo "mutter: $(mutter --version 2>&1 | head -1)"
   echo "mesa: $(dpkg-query -W -f='${Version}' mesa-vulkan-drivers 2>&1)"
 } >"$out/summary.txt"
+[ -z "$disk_full" ] || { cat "$out/summary.txt"; exit "$DISK_FULL_STATUS"; }
 code=0 built='' runs=()
 for suite in "$@"; do
   [ -z "$cancelled" ] || break

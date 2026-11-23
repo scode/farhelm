@@ -1203,8 +1203,12 @@ systemd or SSH substrate ran.
   `python3 -B scripts/test-worker/test-test-worker.py` through the recorder on Linux to drive the real driver against
   the local SSH stand-in. It checks that a busy tree keeps the admitted run's bytes, the run survives a client
   disconnect, incremental mtimes survive, bootstrap and execution exclude each other, evidence belongs to one invocation
-  even through Stop, and pruning spares staging under an active lease. The fixture allows the full Stop grace period, so
-  it takes about a minute. Using the harness is described in `.agents/test-worker.md`.
+  even through Stop, and pruning spares staging under an active lease. Its disk guard tests run the runners'
+  `keep_disk_free` against stand-in `df`, `du` and `cargo`: a checkout within its budget and with room is left alone;
+  one over budget or short of room loses its incremental caches before anything else and all of its build output (the
+  vendored crates' included) only when that is not enough, never sources and without cargo; a disk others fill stops the
+  run only after this checkout's own output is gone; and a failed `df` removes nothing. The fixture allows the full Stop
+  grace period, so it takes about a minute. Using the harness is described in `.agents/test-worker.md`.
 - `python3 scripts/record-test-run.py --kind development --selection 'portable brick-test harness' --concurrency 'one unittest process' -- python3 -B -m unittest discover -s releasing/mac-vm-test -p 'test_*.py' -v`
   — validates owned Tart lifecycle, signed-input planning, Rust/Python upgrade-floor agreement and fixed-floor baseline
   selection, guest execution, model selection shared with Farhelm-launched Codex sessions, native-runtime attestation,

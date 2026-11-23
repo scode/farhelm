@@ -15,6 +15,12 @@ shift 2
 . "$(dirname "$0")/env.sh"
 cd "$base/src" || exit 1
 use_pinned_toolchain
+# Most commands run here build (clippy, a narrow test selection), so they hold the checkout to its disk share too.
+if ! disk=$(keep_disk_free); then
+  { echo "command: $*"; echo "$disk"; echo "exit: $DISK_FULL_STATUS"; } >"$out/summary.txt"
+  cat "$out/summary.txt"
+  exit "$DISK_FULL_STATUS"
+fi
 nextest_dir=$(python3 scripts/install-pinned-nextest.py 2>/dev/null) && export PATH="$nextest_dir:$PATH"
 [ -z "$cancelled" ] || exit 143
 "$@" >"$out/console.log" 2>&1
@@ -23,6 +29,7 @@ code=$?
 {
   echo "command: $*"
   echo "arch: $(uname -m)"
+  echo "$disk"
   echo "exit: $code"
   grep -oE 'test-run evidence: [^ ]+' "$out/console.log" | tail -1
   tail -n 30 "$out/console.log"
