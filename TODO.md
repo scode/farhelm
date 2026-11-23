@@ -313,10 +313,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Make a pending upgrade more eye-catching.** when there is an upgrade pending, make it a little more "eyey catching".
-  in addition to being read, let's have some kind of "animation" like a bouncing arrow or something point at it every 15
-  minutes while its being used or something liek that (details tbd during planning of todo item) Plan:
-  `plans/queue/eye-catching-pending-upgrade.md`.
 - **Host auto-update may stall on 2FA prompts.** i THINK auto-updating of hosts may stop working when 2fa prompts are
   involved. at least i had to click in an environment where i also have a 2fa prompt. tbd during planning. Plan:
   `plans/queue/host-auto-update-after-2fa.md`.

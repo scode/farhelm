@@ -830,16 +830,14 @@ impl Button {
             ),
             Tier::Link => (None, theme::TRANSPARENT, None, palette.link),
             Tier::Readout => (None, theme::TRANSPARENT, None, palette.fg_1),
-            Tier::UpdateReady { pulsing } => (
-                Some(if pulsing {
-                    palette.danger_wash_hover
+            Tier::UpdateReady { pulsing } => {
+                let (rest, hover) = if pulsing {
+                    (palette.danger_wash_pulse, palette.danger_wash_pulse)
                 } else {
-                    palette.danger_wash
-                }),
-                palette.danger_wash_hover,
-                None,
-                palette.danger_strong,
-            ),
+                    (palette.danger_wash, palette.danger_wash_hover)
+                };
+                (Some(rest), hover, None, palette.danger_strong)
+            }
             Tier::HostUpdate { required } => {
                 let ink = if required {
                     palette.danger_strong

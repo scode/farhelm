@@ -20,7 +20,7 @@
 
 use farhelm_proto::{BUILD_VERSION, is_development_build};
 use gpui::{
-    App, Entity, InteractiveElement as _, IntoElement, ParentElement,
+    App, Div, Entity, InteractiveElement as _, IntoElement, ParentElement, Pixels,
     StatefulInteractiveElement as _, Styled, Window, div, img, prelude::FluentBuilder as _, px,
 };
 
@@ -47,13 +47,26 @@ pub(super) fn header(
     window: &Window,
     cx: &App,
 ) -> impl IntoElement {
+    title_band::row(
+        header_row(readout, title_band::traffic_light_room(window), cx),
+        Row::AppBar,
+    )
+}
+
+/// Lay out the actual header row with the specified space for native window controls. Taking that inset explicitly
+/// lets the layout test exercise the macOS budget on the headless platform.
+pub(crate) fn header_row(
+    readout: Option<Entity<VersionReadout>>,
+    traffic_light_room: Option<Pixels>,
+    cx: &App,
+) -> Div {
     let palette = theme::palette(cx);
     let height = if title_band::ON {
         title_band::HEIGHT
     } else {
         px(HEIGHT)
     };
-    let row = div()
+    div()
         .debug_selector(|| "app-bar".into())
         .flex()
         .flex_row()
@@ -62,15 +75,14 @@ pub(super) fn header(
         .min_h(height)
         .py(px(PAD.0))
         .px(px(PAD.1))
-        .when_some(title_band::traffic_light_room(window), |row, room| {
-            row.pl(room)
-        })
+        .when_some(traffic_light_room, |row, room| row.pl(room))
         .bg(theme::color(palette.bg_1))
         .border_b_1()
         .border_color(theme::color(palette.border_row))
         .child(
             div()
                 .id("app-wordmark")
+                .debug_selector(|| "app-wordmark".into())
                 .role(Role::Image)
                 .aria_label("farhelm")
                 .flex_none()
@@ -87,6 +99,8 @@ pub(super) fn header(
                 .flex()
                 .flex_row()
                 .justify_end()
+                // Give the reminder the real space left after the brand and controls take their width.
+                .children(readout.as_ref().cloned().map(VersionReadout::reminder_gap))
                 .child(match readout {
                     // Its controls keep their own presses; its status text claims them itself.
                     Some(readout) => div().min_w_0().child(readout).into_any_element(),
@@ -105,8 +119,7 @@ pub(super) fn header(
                     )
                     .into_any_element(),
                 }),
-        );
-    title_band::row(row, Row::AppBar)
+        )
 }
 
 /// The wordmark file for `palette`'s ground: light letters on a dark ground, dark letters on a light one.

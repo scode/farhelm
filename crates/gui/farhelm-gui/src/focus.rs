@@ -340,6 +340,9 @@ fn note_click(cx: &mut App) {
 
 // ---- Per-window state ------------------------------------------------------------------------------------------------
 
+/// A one-shot wake for the update readout, deferred until the current input dispatch can finish.
+type ActivityWaiter = Box<dyn FnOnce(&mut Window, &mut App)>;
+
 /// One window's focus state. Kept per window: multi-window support is a watch-list item, and the one thing it asks of
 /// the foundations now is that focus and overlays are not shared between windows.
 pub struct WindowFocus {
@@ -375,6 +378,10 @@ pub struct WindowFocus {
     /// Whether the user's latest press in this window was a key rather than a mouse button, which is what
     /// [`last_input_was_keyboard`] answers. Starts false, as GPUI's own flag does.
     keyboard: bool,
+    /// The last press in this window, independent of whether it moved focus or counted toward [`Mark`].
+    last_activity: Option<Instant>,
+    /// One pending update reminder can wait for a press without polling or keeping a ticker handle.
+    activity_waiter: Option<ActivityWaiter>,
     /// The menu item the pointer last moved focus onto, until any other move through [`apply`].
     pointer_landing: Option<PointerLanding>,
     /// The move [`focus_in_layer`] is waiting to make once a frame draws its target ([`Pending`]). One per window: a
@@ -465,6 +472,8 @@ pub fn attach<V: 'static>(window: &mut Window, cx: &mut Context<V>) -> Attachmen
         regions_open: Vec::new(),
         recorded: 0,
         keyboard: false,
+        last_activity: None,
+        activity_waiter: None,
         pointer_landing: None,
         pending: None,
     });
@@ -1814,6 +1823,22 @@ pub fn last_input_was_keyboard(window: &Window, cx: &App) -> bool {
     state(window, cx).is_some_and(|state| state.read(cx).keyboard)
 }
 
+/// When this window last received a mouse or keyboard press, on the same clock that drives the GUI's deadlines.
+pub(crate) fn last_activity(window: &Window, cx: &App) -> Option<Instant> {
+    state(window, cx).and_then(|state| state.read(cx).last_activity)
+}
+
+/// Wake the update readout on the next press in this window. The newest waiter owns the single slot.
+pub(crate) fn on_next_activity(
+    window: &Window,
+    cx: &mut App,
+    wake: impl FnOnce(&mut Window, &mut App) + 'static,
+) {
+    if let Some(state) = state(window, cx) {
+        state.update(cx, |state, _| state.activity_waiter = Some(Box::new(wake)));
+    }
+}
+
 /// Whether focus in `window` counts as the keyboard's for hover help ([`layers::focus_drawn`]): the user's latest press
 /// was a key, and the pointer did not put focus where it is. A menu item the pointer highlights after keyboard use
 /// still shows its ring, as the old scripted focus matched `:focus-visible` then, but its help stays the pointer's, as
@@ -1832,14 +1857,23 @@ pub fn focus_came_by_keyboard(window: &Window, cx: &App) -> bool {
 
 /// Record whether the user's latest press in `window` was a key, for [`last_input_was_keyboard`]. A change redraws the
 /// window: rings and focus help read the flag as the frame is drawn, and GPUI redraws only when its own flag changes,
-/// which a mouse press after a pointer move does not do.
+/// which a mouse press after a pointer move does not do. Any press updates the window's activity time, regardless of
+/// whether it changes its last-input kind. Run the activity wake outside the coordinator and the dispatch stack.
 fn note_input(keyboard: bool, window: &mut Window, cx: &mut App) {
     let Some(state) = state(window, cx) else {
         return;
     };
-    let was = state.update(cx, |state, _| {
-        std::mem::replace(&mut state.keyboard, keyboard)
+    let now = cx.background_executor().now();
+    let (was, waiter) = state.update(cx, |state, _| {
+        state.last_activity = Some(now);
+        (
+            std::mem::replace(&mut state.keyboard, keyboard),
+            state.activity_waiter.take(),
+        )
     });
+    if let Some(wake) = waiter {
+        window.defer(cx, wake);
+    }
     if was != keyboard {
         window.refresh();
     }

@@ -61,6 +61,8 @@
 mod header;
 
 #[cfg(test)]
+pub(crate) use header::header_row;
+#[cfg(test)]
 mod tests;
 
 use farhelm_helm_client::{ApiPath, Method};
@@ -161,6 +163,19 @@ struct Drag {
 }
 
 impl Sidebar {
+    /// The main view keeps the sidebar entity across a disconnect, even though it stops drawing the header.
+    pub(crate) fn suspend_update_reminder(&self, cx: &mut App) {
+        if let Some(readout) = &self.readout {
+            readout.update(cx, |readout, _| readout.suspend_reminder());
+        }
+    }
+
+    /// The retained readout, including during frames where the channel is disconnected.
+    #[cfg(test)]
+    pub(crate) fn update_readout(&self) -> Option<Entity<VersionReadout>> {
+        self.readout.clone()
+    }
+
     /// The sidebar around `session_list`.
     pub fn new(session_list: Entity<SessionList>, cx: &mut Context<Self>) -> Self {
         Sidebar {

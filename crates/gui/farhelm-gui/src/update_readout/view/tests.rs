@@ -5,20 +5,26 @@
 //! reach the fake, beside one other control for the focus cases; one test draws it in the real header. Without an
 //! updater the header draws its plain build text, which the sidebar's own header test covers.
 
+use std::cell::Cell;
 use std::rc::Rc;
 use std::time::Duration;
 
 use gpui::{
     AppContext as _, Entity, FocusHandle, IntoElement as _, Modifiers, ParentElement as _,
-    TestAppContext, VisualTestContext, div, point, px,
+    Styled as _, TestAppContext, VisualTestContext, div, point, px,
 };
 
+use super::reminder::{ARROW_ROOM, BURST_TICKS};
 use super::{Look, RELEASE_NOTES_URL, UP_TO_DATE_FOR, VersionReadout, check_look};
 use crate::desktop::updates::fake::{Feed, Seen, fake_host, readout_saying};
 use crate::desktop::updates::{self, Updater};
 use crate::test_support;
-use crate::theme;
 use crate::update_readout::{Activity, Readout, inline_presentation};
+use crate::{theme, ticker};
+
+/// The user-facing timing contract, independent of the scheduler's constants.
+const FIFTEEN_MINUTES: Duration = Duration::from_secs(15 * 60);
+const FIVE_MINUTES: Duration = Duration::from_secs(5 * 60);
 
 /// A readout in `activity`, with an update waiting when `ready`, under request `notice_id`.
 fn readout_in(activity: Activity, ready: bool, notice_id: u64) -> Readout {
@@ -111,6 +117,259 @@ fn look(cx: &mut VisualTestContext, readout: &Entity<VersionReadout>) -> Option<
 /// Whether the readout holds its spinner (it does only while something spins and the window is active).
 fn holds_spinner(cx: &mut VisualTestContext, readout: &Entity<VersionReadout>) -> bool {
     cx.update(|_, cx| readout.read(cx).spinner.is_some())
+}
+
+/// Observe actual reminder handles so a visually quiet row cannot hide a repeating timer or retained ticker.
+fn reminder_state(
+    cx: &mut VisualTestContext,
+    readout: &Entity<VersionReadout>,
+) -> (Option<u64>, bool, bool) {
+    cx.update(|_, cx| {
+        let reminder = &readout.read(cx).reminder;
+        (
+            reminder.burst.as_ref().map(|burst| burst.count(cx)),
+            reminder.deadline.is_some(),
+            reminder.is_due(),
+        )
+    })
+}
+
+/// Drive the shared test executor and let the readout act on the deadline or draw its next frame.
+fn advance_reminder(cx: &mut VisualTestContext, duration: Duration) {
+    cx.executor().advance_clock(duration);
+    test_support::settle(cx);
+}
+
+/// Advance the remaining burst ticks through their own frames, like an active window receiving the ticker.
+fn complete_reminder(cx: &mut VisualTestContext, readout: &Entity<VersionReadout>) -> Duration {
+    let remaining = BURST_TICKS - reminder_state(cx, readout).0.expect("the burst is playing");
+    for _ in 0..remaining {
+        advance_reminder(cx, ticker::TICK);
+    }
+    ticker::TICK * u32::try_from(remaining).unwrap()
+}
+
+/// A new ready update plays once. Re-publishing it does not reset the burst or its deadline. A recent key press
+/// qualifies the next reminder exactly at the interval, with no animation handle in the quiet period.
+#[gpui::test]
+fn reminder_starts_on_arrival_and_repeats_with_recent_input(cx: &mut TestAppContext) {
+    let (cx, readout, feed, _, _) = open(cx, readout_in(Activity::Idle, false, 1));
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+    advance_reminder(cx, ticker::TICK);
+    let raised = reminder_state(cx, &readout);
+    assert_eq!(raised, (Some(1), true, false));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 3));
+    assert_eq!(reminder_state(cx, &readout), raised);
+    let spent = ticker::TICK + complete_reminder(cx, &readout);
+    assert_eq!(reminder_state(cx, &readout), (None, true, false));
+
+    advance_reminder(cx, FIFTEEN_MINUTES - spent - Duration::from_millis(1));
+    assert_eq!(reminder_state(cx, &readout), (None, true, false));
+    test_support::keys(cx, "tab");
+    assert!(cx.update(|window, cx| crate::focus::last_activity(window, cx).is_some()));
+    advance_reminder(cx, Duration::from_millis(1));
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+}
+
+/// Time passing alone never shows another burst in an idle window. A mouse press consumes the due reminder and
+/// starts the next interval without reviving a second scheduler.
+#[gpui::test]
+fn idle_reminder_waits_for_a_press_without_retrying(cx: &mut TestAppContext) {
+    let (cx, readout, feed, _, _) = open(cx, readout_in(Activity::Idle, false, 1));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    test_support::keys(cx, "tab");
+    assert!(cx.update(|window, cx| crate::focus::last_activity(window, cx).is_some()));
+    let spent = complete_reminder(cx, &readout);
+    assert!(cx.update(|window, cx| ticker::is_active(window, cx)));
+    assert_eq!(reminder_state(cx, &readout), (None, true, false));
+    advance_reminder(cx, FIFTEEN_MINUTES - spent);
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    advance_reminder(cx, FIFTEEN_MINUTES);
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    test_support::click(cx, "other");
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+}
+
+/// Activation counts as returning even without a recent input. It wakes both an update delivered to a hidden window
+/// and a periodic reminder that expires while the window is inactive.
+#[gpui::test]
+fn activation_plays_a_reminder_due_while_inactive(cx: &mut TestAppContext) {
+    let (cx, readout, feed, _, _) = open(cx, readout_in(Activity::Idle, false, 1));
+    cx.deactivate_window();
+    assert!(!cx.update(|window, cx| ticker::is_active(window, cx)));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    cx.update(|window, _| window.activate_window());
+    test_support::settle(cx);
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+    let spent = complete_reminder(cx, &readout);
+    cx.deactivate_window();
+    assert!(!cx.update(|window, cx| ticker::is_active(window, cx)));
+    advance_reminder(cx, FIFTEEN_MINUTES - spent);
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    assert!(cx.update(|window, cx| crate::focus::last_activity(window, cx).is_none()));
+    cx.update(|window, _| window.activate_window());
+    test_support::settle(cx);
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+}
+
+/// Reduced motion skips arrival and cancels any ongoing burst and future reminder without hiding the update action.
+#[gpui::test]
+fn reduced_motion_leaves_the_pill_steady(cx: &mut TestAppContext) {
+    let (cx, readout, feed, _, _) = open(cx, readout_in(Activity::Idle, false, 1));
+    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    assert!(drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+    advance_reminder(cx, FIFTEEN_MINUTES);
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+
+    cx.update(|_, cx| ticker::set_reduced_motion(false, cx));
+    // Let the live preference notification drive the frame without requesting one from the test.
+    test_support::settle(cx);
+    assert_eq!(reminder_state(cx, &readout), (None, true, false));
+    advance_reminder(cx, FIFTEEN_MINUTES - FIVE_MINUTES + Duration::from_secs(1));
+    test_support::keys(cx, "tab");
+    advance_reminder(cx, FIVE_MINUTES - Duration::from_secs(1));
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+    cx.update(|_, cx| ticker::set_reduced_motion(true, cx));
+    test_support::settle(cx);
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+    assert!(drawn(cx, "app-version-toggle"));
+}
+
+/// Exercise the production gap beside a wordmark at the narrow Mac header budget and at a wider width. The pill
+/// still pulses when the arrow would overlap the wordmark or when an inline status competes for the space.
+#[gpui::test]
+fn narrow_and_busy_headers_keep_the_pulse_without_an_arrow(cx: &mut TestAppContext) {
+    test_support::install(cx);
+    let (feed, _) = keep_fake(cx, readout_in(Activity::Idle, false, 1));
+    let readout = cx.update(|cx| {
+        let updater = updates::entity(cx).expect("the fixture set up an updater");
+        cx.new(|cx| VersionReadout::new(updater, cx))
+    });
+    let width = Rc::new(Cell::new(px(296.)));
+    let traffic_lights = Rc::new(Cell::new(px(88.)));
+    let (drawn_readout, drawn_width, drawn_inset) =
+        (readout.clone(), width.clone(), traffic_lights.clone());
+    let cx = test_support::open(cx, move |_, cx| {
+        div()
+            .w(drawn_width.get())
+            .child(crate::sidebar::header_row(
+                Some(drawn_readout.clone()),
+                Some(drawn_inset.get()),
+                cx,
+            ))
+            .into_any_element()
+    });
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    assert!(drawn(cx, "app-version-toggle"));
+    let gap = |cx: &mut VisualTestContext| {
+        test_support::bounds(cx, "app-version-toggle").left()
+            - test_support::bounds(cx, "app-wordmark").right()
+    };
+    let initial_gap = gap(cx);
+    if initial_gap >= ARROW_ROOM {
+        // A release's build string can be shorter. Keep the 296-pixel width and consume enough of the extra room
+        // in the inset to exercise the same narrow-gap boundary with the production layout.
+        traffic_lights.set(traffic_lights.get() + initial_gap - ARROW_ROOM + px(1.));
+        test_support::redraw(cx);
+    }
+    assert!(gap(cx) < ARROW_ROOM);
+    for _ in 0..3 {
+        advance_reminder(cx, ticker::TICK);
+    }
+    let pulses = |cx: &mut VisualTestContext| {
+        cx.update(|_, cx| {
+            readout
+                .read(cx)
+                .reminder
+                .frame(cx)
+                .is_some_and(|frame| frame.pulsing)
+        })
+    };
+    assert!(pulses(cx));
+    assert!(!drawn(cx, "upgrade-reminder-arrow"));
+
+    width.set(px(380.));
+    test_support::redraw(cx);
+    assert!(drawn(cx, "upgrade-reminder-arrow"));
+    let before = test_support::bounds(cx, "app-version-toggle");
+    let wordmark = test_support::bounds(cx, "app-wordmark");
+    let arrow = test_support::bounds(cx, "upgrade-reminder-arrow");
+    assert!(before.left() - wordmark.right() >= ARROW_ROOM);
+    assert!(arrow.left() >= wordmark.right() && arrow.right() <= before.left());
+    advance_reminder(cx, ticker::TICK * 2);
+    assert_ne!(
+        test_support::bounds(cx, "upgrade-reminder-arrow").left(),
+        arrow.left()
+    );
+    assert_eq!(test_support::bounds(cx, "app-version-toggle"), before);
+    publish(cx, &feed, readout_in(Activity::Checking, true, 3));
+    assert!(drawn(cx, "app-update-status"));
+    assert!(pulses(cx));
+    assert!(!drawn(cx, "upgrade-reminder-arrow"));
+}
+
+/// The main window keeps its sidebar across a channel break. Hiding the header must release the held animation
+/// and deadline even though the readout will not render again until reconnect.
+#[gpui::test]
+fn disconnected_header_releases_the_reminder(cx: &mut TestAppContext) {
+    let (mut helm, _) = test_support::started(cx);
+    let (feed, _) = keep_fake(cx, readout_in(Activity::Idle, false, 1));
+    helm.connect(Vec::new());
+    cx.run_until_parked();
+    let (main, cx) = test_support::open_view(cx, crate::main_view::MainView::new);
+    let readout = cx
+        .update(|_, cx| main.read(cx).update_readout(cx))
+        .expect("the sidebar has an updater");
+    publish(cx, &feed, readout_in(Activity::Idle, true, 2));
+    assert!(drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+
+    helm.break_channel();
+    test_support::settle(cx);
+    assert!(!drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+    advance_reminder(cx, FIFTEEN_MINUTES * 2);
+    assert_eq!(reminder_state(cx, &readout), (None, false, false));
+
+    helm.connect(Vec::new());
+    test_support::settle(cx);
+    assert!(drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (None, true, false));
+
+    // An arrival already due survives the disconnected screen, even if the window activates before reconnecting.
+    publish(cx, &feed, readout_in(Activity::Idle, false, 3));
+    cx.deactivate_window();
+    assert!(!cx.update(|window, cx| ticker::is_active(window, cx)));
+    publish(cx, &feed, readout_in(Activity::Idle, true, 4));
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    helm.break_channel();
+    test_support::settle(cx);
+    cx.update(|window, _| window.activate_window());
+    test_support::settle(cx);
+    assert!(!drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    helm.connect(Vec::new());
+    test_support::settle(cx);
+    assert!(drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
+
+    // An idle periodic reminder remains due across a connection change. The connection alone is not new input.
+    let spent = complete_reminder(cx, &readout);
+    advance_reminder(cx, FIFTEEN_MINUTES - spent);
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    helm.break_channel();
+    test_support::settle(cx);
+    helm.connect(Vec::new());
+    test_support::settle(cx);
+    assert!(drawn(cx, "app-version-toggle"));
+    assert_eq!(reminder_state(cx, &readout), (None, false, true));
+    test_support::keys(cx, "tab");
+    assert_eq!(reminder_state(cx, &readout), (Some(0), true, false));
 }
 
 /// Move keyboard focus to the check button with Tab, asserting it got there. The second Tab is for Linux, where an

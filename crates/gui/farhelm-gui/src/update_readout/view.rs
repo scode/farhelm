@@ -9,7 +9,8 @@
 //!   instead (eight steps a turn, from the ticker) and the words beside it say which. A reinstall, interrupted-install
 //!   or withdrawal warning turns the version amber with a `⚠` before it, and the press still retries.
 //! - **The update-menu toggle** once an update is installed: a red pill with the version and `↑` (and an amber `⚠`
-//!   when a warning stands). A press opens the menu beside it, with Restart to update and What's new.
+//!   when a warning stands). The reminder briefly brightens the pill and places an arrow in the header's spare space.
+//!   A press opens the menu beside it, with Restart to update and What's new.
 //! - **The inline status** after either: Checking… or Installing…, Up to date for about five seconds, or Check failed,
 //!   a button that dismisses it. While an update waits, progress gets a ring of its own, since the toggle has no glyph
 //!   to spin.
@@ -50,6 +51,8 @@ use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
 use crate::theme::{self, metrics};
 use crate::{render_count, ticker};
+
+mod reminder;
 
 /// How long Up to date stays beside the readout (SPEC.md: "about five seconds").
 pub(crate) const UP_TO_DATE_FOR: Duration = Duration::from_secs(5);
@@ -114,6 +117,8 @@ pub struct VersionReadout {
     expiry: Option<ticker::Deadline>,
     /// The turn of whatever spins, held only while something spins and the window is active.
     spinner: Option<Spinner>,
+    /// The pending update's independent deadline and short burst. Inline activity can spin without advancing it.
+    reminder: reminder::Reminder,
     /// The one focus handle the check button and the toggle share (see the module docs).
     focus: FocusHandle,
     /// Where the menu opens: beside the toggle, drawn while the toggle is.
@@ -153,6 +158,7 @@ impl VersionReadout {
             feedback: InlineFeedback::default(),
             expiry: None,
             spinner: None,
+            reminder: reminder::Reminder::default(),
             focus: cx.focus_handle().tab_stop(true),
             anchor: None,
             menu: None,
@@ -314,7 +320,9 @@ impl VersionReadout {
             readout_help(readout.tooltip.clone()),
             Role::Button,
         )
-        .tier(Tier::UpdateReady { pulsing: false })
+        .tier(Tier::UpdateReady {
+            pulsing: self.reminder.frame(cx).is_some_and(|frame| frame.pulsing),
+        })
         .accessible_name(format!(
             "Farhelm {}, update ready: {}",
             farhelm_proto::BUILD_VERSION,
@@ -416,6 +424,7 @@ impl Render for VersionReadout {
         self.drawn_look.set(None);
         let readout = self.readout(cx);
         let control = readout_control(Some(&readout));
+        self.update_reminder(readout.update_ready, window, cx);
         let presentation = inline_presentation(&readout, self.feedback.suppressed.as_ref());
         // Something spins: the check glyph during visible work, or the ring while an update waits.
         let spins = matches!(control, ReadoutControl::Check { spinning: true })
@@ -633,3 +642,12 @@ fn readout_help(text: String) -> HoverHelp {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+impl VersionReadout {
+    /// Hold the pulse and arrow near the pill for a visual comparison without running the animation clock.
+    pub(crate) fn holding_reminder(mut self) -> Self {
+        self.reminder.held_frame = Some(3);
+        self
+    }
+}
