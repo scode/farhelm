@@ -21,7 +21,7 @@ import subprocess
 import time
 
 from checkpoint_contract import (EffectFailure, old_session_side, require_old_session, relaunch_checks_app_only,
-                                 fixed_operations, required_operations, require_remote_host_effect)
+                                 fixed_operations, required_operations, require_remote_host_effect, is_bonus_pass)
 from window_geometry import require_drag_delivery, require_window_trace
 
 
@@ -304,7 +304,7 @@ failure that would stop the pair's remaining P0 checks.
         if task['check_id'] in ('remote-host-remove', 'remote-host-uninstall'):
             try:
                 require_remote_host_effect(task['check_id'], record['observations']['remote_host_before'],
-                                           record['observations']['remote_host_after'])
+                                           record['observations']['remote_host_after'], task['pass_id'])
             except EffectFailure as error:
                 # From a valid start the snapshots show what the menu action
                 # did to the host, so a contradiction is the product's failure,
@@ -368,7 +368,7 @@ failure that would stop the pair's remaining P0 checks.
                 require_old_session(record['observations'], side)
             except (ValueError, KeyError, TypeError) as error:
                 raise TesterError('managed old-session premise failed: ' + str(error)) from error
-        bonus_preflight = task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-')
+        bonus_preflight = task['check_id'] == 'native-preflight' and is_bonus_pass(task['pass_id'])
         if task['check_id'] == 'window-drag' or bonus_preflight:
             try:
                 trace = json.loads((root / 'work/managed-window-frames.json').read_text())
@@ -601,7 +601,7 @@ not discard an otherwise safe screenshot or failure receipt.
             and task['check_id'] == 'update-relaunch' and not any(
                 call.get('arguments', {}).get('method') == 'restart' for call in calls)):
         raise TesterError('managed update did not use the owned native restart transition')
-    bonus_preflight = task['check_id'] == 'native-preflight' and not task['pass_id'].startswith('p0-')
+    bonus_preflight = task['check_id'] == 'native-preflight' and is_bonus_pass(task['pass_id'])
     if (value['status'] == 'pass' and task['context'].get('managed_operations')
             and (task['check_id'] == 'window-drag' or bonus_preflight)):
         count = sum(block.get('type') == 'image' for call in calls for block in call.get('result', {}).get('content', []))

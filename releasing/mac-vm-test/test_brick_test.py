@@ -23,6 +23,7 @@ from unittest import mock
 
 from brick_test import (REPO, UPGRADE_FLOOR, Run, Source, artifact, checks, metadata, plan, priority_entry, smoke,
                         tier, version)
+from checkpoint_contract import REMOTE_MAC_PASS
 from control import Control, Refused, atomic_json
 from machine_profile import Profile
 from test_machine_profile import fixture
@@ -74,7 +75,7 @@ raise, and a floor beyond every previous stable must fail before guest setup.
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.24.0')
         self.assertEqual([v['id'] for v in result['passes']],
                          ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
-                          'fresh', 'upgrade-v0.24.0'])
+                          REMOTE_MAC_PASS, 'fresh', 'upgrade-v0.24.0'])
         self.assertTrue(all(v['previous'] == 'v0.24.0' for v in result['passes']))
         with self.assertRaisesRegex(Refused, 'from v0.25.0 onward'):
             plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.25.0')
@@ -89,9 +90,9 @@ layout marker that lets this coordinator continue it.
         result = plan('v0.25.0', 'v0.24.0', FakeSource(), floor='v0.23.0')
         self.assertEqual([v['id'] for v in result['passes']],
                          ['p0-fresh', 'p0-updater-upgrade', 'p0-installer-upgrade',
-                          'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
+                          REMOTE_MAC_PASS, 'fresh', 'upgrade-v0.24.0', 'upgrade-v0.23.0'])
         self.assertEqual(result['p0_sequence'], [v['id'] for v in result['passes'][:3]])
-        self.assertEqual(result['passes'][4]['update_path'], 'manual')
+        self.assertEqual(result['passes'][5]['update_path'], 'manual')
         self.assertEqual(result['priority_layout'], 2)
 
     def test_bonus_upgrades_cover_at_most_the_three_newest_previous_stables(self):
@@ -166,8 +167,9 @@ fresh fixture keeps its four checkpoints.
         stable = plan('v0.25.0', 'v0.24.0', source, floor='v0.23.0')
         self.assertEqual(stable['passes'][1]['update_path'], 'override')
         self.assertEqual(stable['passes'][2]['update_path'], 'manual')
-        self.assertEqual(stable['passes'][4]['update_path'], 'override')
-        self.assertEqual(stable['passes'][5]['update_path'], 'manual')
+        by_id = {entry['id']: entry for entry in stable['passes']}
+        self.assertEqual(by_id['upgrade-v0.24.0']['update_path'], 'override')
+        self.assertEqual(by_id['upgrade-v0.23.0']['update_path'], 'manual')
         rc = plan('v0.25.0-rc.1', 'v0.24.0', source, floor='v0.23.0')
         self.assertTrue(all(v['update_path'] == 'manual' for v in rc['passes'] if v['update_path'] is not None))
 
@@ -392,10 +394,12 @@ class FakeTart:
                     archive.addfile(info, io.BytesIO(content))
         return FixtureControl(*args, runner=self.runner)
 
-    def connect(self, control, mac, linux, user, route):
+    def connect(self, control, mac, peer, user, route, *, peer_role='linux'):
         """Assert named owned peers, then record a fictional already-proved SSH handle."""
-        if self.states[mac] != 'running' or self.states[linux] != 'running':
+        if self.states[mac] != 'running' or self.states[peer] != 'running':
             raise AssertionError('both owned guest processes must be live before connection')
+        if control.owned(peer_role) != peer:
+            raise AssertionError('the connection must use the exact owned peer role')
         if user != self.account:
             raise AssertionError('account premise must already be checked')
         control.data['ssh'] = {'alias': 'fixture-peer', 'user': user}
@@ -427,7 +431,7 @@ class WorkflowTests(unittest.TestCase):
         # Keep that premise explicit so the new P0 scheduling fence cannot
         # mask the ownership or evidence failure each test exists to observe.
         self.plan.pop('p0_sequence')
-        self.plan['passes'] = [v for v in self.plan['passes'] if v['priority'] != 'P0']
+        self.plan['passes'] = [v for v in self.plan['passes'] if v['priority'] == 'bonus']
         self.plan['sha256sums_sha256'] = 'fixture-checksum'
         self.run.create(self.plan)
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
@@ -792,19 +796,23 @@ artifact corruption as competing causes of the new refusal.
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.assertTrue(all(child.poll() == 0 for child in self.model.children))
 
-    def enable_p0(self, scope='full', supported=True, candidate='v0.25.0'):
+    def enable_p0(self, scope='full', supported=True, candidate='v0.25.0', *, remote_mac=False):
         """Create a new priority-aware run without rewriting the legacy fixture's history.
 
 The modeled bases are independently stopped. No real release bytes, guest
 authentication, GUI outcome or product verdict is borrowed by these tests.
 `supported` says whether the fictional previous stable's app honors the update
 override, which decides whether its updater pair can discover the candidate.
+The existing installer-pair tests exercise layout-2 manifests saved before
+the additional Mac pair was scheduled. Tests of the new pair request it.
 """
         self.assertTrue(all(state == 'stopped' for state in self.model.states.values()))
         self.run = Run(self.evidence / ('brick-' + str(uuid.uuid4())), self.profile,
                        factory=self.model.factory, connector=self.model.connect,
                        disk_usage=lambda path: namedtuple('Usage', 'free')(self.free))
         release = plan(candidate, 'v0.24.0', FakeSource(['v0.24.0'] if supported else []), floor='v0.23.0')
+        if not remote_mac:
+            release['passes'] = [entry for entry in release['passes'] if entry['id'] != REMOTE_MAC_PASS]
         release['sha256sums_sha256'] = 'fixture-checksum'
         self.run.create(release, scope=scope)
 
@@ -845,6 +853,60 @@ are left unrecorded, as the scheduler leaves them.
         """Pass and release the fresh and updater pairs, leaving the installer pair for the test itself."""
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-updater-upgrade')
+
+    def test_remote_mac_pair_follows_installer_cleanup_and_counts_as_p1(self):
+        """A failed Mac uninstall preserves P0 and feedback, while leaving bonus coverage runnable."""
+        self.enable_p0(remote_mac=True)
+        self.complete_stable_p0()
+        self.complete_p0('p0-installer-upgrade', through='remote-host-uninstall')
+        image = self.evidence_file('remote-mac.png', PNG)
+        command = self.evidence_file('remote-mac.txt', b'synthetic Mac checkpoint evidence')
+        receipt = self.evidence_file('remote-mac-verification.json', json.dumps({
+            'version': self.run.data['plan']['candidate'], 'previous_trust_ring': 'v0.24.0',
+            'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
+            'trusted_comment': 'verified', 'installer_checksum': 'verified'}).encode())
+        with self.run.locked():
+            self.assertIn('remote-mac-uninstall', self.run.report()['p1']['checks'])
+            with self.assertRaisesRegex(Refused, 'clean up the installer pair'):
+                self.run.prepare(REMOTE_MAC_PASS, [])
+            self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Synthetic feedback result.')
+            self.run.cleanup('p0-installer-upgrade')
+            with self.assertRaisesRegex(Refused, 'remote Mac fixture before bonus'):
+                self.run.prepare('fresh', [])
+        first = len(self.model.calls)
+        children = self.prepare(REMOTE_MAC_PASS)
+        calls = self.model.calls[first:]
+        clones = [argv for argv in calls if argv[1] == 'clone']
+        self.assertEqual([argv[2] for argv in clones], ['mac-base', 'mac-base'])
+        self.assertTrue(clones[1][3].endswith('-remote-mac'))
+        self.assertFalse(any('continuity.py' in part for argv in calls for part in argv))
+        self.assertEqual(len(children), 2)
+        with self.run.locked():
+            entry = self.run.selected(REMOTE_MAC_PASS)
+            self.assertEqual(list(entry['required']),
+                             ['artifact-verification', 'fixture-clean', 'install', 'app-start',
+                              'remote-provision', 'remote-host-uninstall'])
+            self.assertEqual({tier(entry, check) for check in entry['required']}, {'P1'})
+            with self.assertRaisesRegex(Refused, 'bonus passes, not P1'):
+                self.run.add_check(REMOTE_MAC_PASS, 'extra-ui')
+            for check in entry['required']:
+                refs = [receipt] if check == 'artifact-verification' else [image, command]
+                failed = check == 'remote-host-uninstall'
+                self.run.record(REMOTE_MAC_PASS, check, 'fail' if failed else 'pass', refs, 'Synthetic Mac result.')
+            self.run.cleanup(REMOTE_MAC_PASS)
+            report = self.run.report()
+            self.assertEqual(report['p0']['verdict'], 'pass')
+            self.assertEqual(report['p1']['checks']['remote-mac-uninstall'], 'fail')
+            self.assertEqual(report['p2']['verdict'], 'pass')
+        self.assertTrue(all(child.poll() == 0 for child in children))
+        self.prepare('fresh')
+
+    def test_remote_mac_pair_is_outside_p0_only_scope(self):
+        """The scope fence should refuse P1 before any probe or clone mutation."""
+        self.enable_p0(scope='p0-only', remote_mac=True)
+        with self.run.locked(), self.assertRaisesRegex(Refused, 'remote Mac fixture is outside'):
+            self.run.prepare(REMOTE_MAC_PASS, [])
+        self.assertEqual(self.model.calls, [])
 
     def test_prerelease_reports_its_skipped_discovery_and_still_runs_p1_and_p2(self):
         """An RC or dev run explains the discovery it never planned, and the rest of its coverage still runs.
@@ -1067,9 +1129,9 @@ menu check is then unavailable rather than failed.
 
 After the failed updater pair is released, the installer pair runs P0 and
 P1. P2 can never be dispatched, since P0 failed elsewhere, so that pair still
-cleans up normally; bonus work stays fenced.
+cleans up normally. The independent Mac check can run then. Bonus stays fenced.
 """
-        self.enable_p0(supported=False)
+        self.enable_p0(supported=False, remote_mac=True)
         self.complete_p0('p0-fresh')
         self.prepare('p0-updater-upgrade')
         with self.run.locked():
@@ -1085,13 +1147,15 @@ cleans up normally; bonus work stays fenced.
             self.assertEqual(report['p0']['verdict'], 'fail')
             self.assertEqual(report['p0']['checks']['local-supervisor-upgrade'], 'pass')
             self.assertEqual(report['p0']['checks']['remote-agent'], 'pass')
-            self.assertEqual(report['p1']['verdict'], 'pass')
+            self.assertEqual(report['p1']['checks']['remote-host-uninstall'], 'pass')
+            self.assertEqual(report['p1']['checks']['remote-mac-uninstall'], 'could not run')
             send = self.run.selected('p0-installer-upgrade')['results']['p2-feedback-send']
             self.assertEqual(send['status'], 'skipped')
             self.assertIn('p0-updater-upgrade did not pass', send['detail'])
             with self.assertRaisesRegex(Refused, 'already exists'):
                 self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Never dispatched.')
             self.run.cleanup('p0-installer-upgrade')
+            self.run.require_priority(REMOTE_MAC_PASS)
             with self.assertRaisesRegex(Refused, 'complete P0 fixtures'):
                 self.run.prepare('fresh', [])
         self.assertTrue(all(child.poll() == 0 for child in children))

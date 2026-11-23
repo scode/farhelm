@@ -22,10 +22,10 @@ import types
 import unittest
 from unittest import mock
 
-from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_payload, remote_host_snapshot,
-                              run_fixed, select_hosts, serve, write_json)
+from guest_operations import (ObservationNotReady, Operations, installer_environment, parse_mac_processes, remote_host_payload,
+                              remote_host_snapshot, remote_mac_host_payload, run_fixed, select_hosts, serve, write_json)
 from guest_tester import managed_result, native_args, prompt, TesterError, validate_observation
-from checkpoint_contract import (EffectFailure, available_operations, require_old_session,
+from checkpoint_contract import (REMOTE_MAC_PASS, EffectFailure, available_operations, require_old_session,
                                  required_operations, require_remote_host_effect, turn_timeout)
 from guest_workflow import managed_instructions
 from test_guest_tester import task
@@ -206,6 +206,84 @@ database reads as no session ids rather than failing.
             with self.assertRaisesRegex(RuntimeError, 'already retained'):
                 operations.dispatch('remote_host_before')
         self.assertNotIn('remote_host_before', available_operations('remote-supervisor-agent', 'p0-installer-upgrade', 'manual'))
+
+    def test_remote_mac_uninstall_uses_launchd_paths_processes_and_retained_session_ids(self):
+        """Exercise the source shipped over SSH with real files and independent launchd and ps responses."""
+        home = self.root / 'guest-home'
+        binary = home / '.local/lib/farhelm/farhelm'
+        plist = home / 'Library/LaunchAgents/io.farhelm.supervisor.plist'
+        database = home / '.local/state/farhelm/supervisor.db'
+        for path in (binary, plist, database):
+            path.parent.mkdir(parents=True)
+        binary.write_bytes(b'fixture binary')
+        plist.write_bytes(b'fixture launchd job')
+        with contextlib.closing(sqlite3.connect(database)) as connection, connection:
+            connection.execute('CREATE TABLE sessions (id TEXT PRIMARY KEY)')
+            connection.execute('INSERT INTO sessions VALUES (?)', ('fixture-session',))
+        namespace = {}
+        exec(compile(remote_mac_host_payload(), 'remote-mac-host-payload', 'exec'), namespace)
+        snapshot = namespace['remote_mac_host_snapshot']
+        missing = 'Bad request.\nCould not find service "io.farhelm.supervisor" in domain for uid: 501\n'
+        domain = ['/bin/launchctl', 'print', 'user/501']
+        job = ['/bin/launchctl', 'print', 'user/501/io.farhelm.supervisor']
+        processes = ['/bin/ps', '-ww', '-axo', 'pid=,comm=']
+
+        def reply(status, stdout='', stderr=''):
+            """Keep unavailable, absent and running substrate states independently observable."""
+            return subprocess.CompletedProcess([], status, stdout, stderr)
+
+        observed = mock.Mock(side_effect=[reply(0, 'domain'),
+            reply(0, 'user/501/io.farhelm.supervisor = {\n\tstate = running\n\tpid = 71\n}\n'),
+            reply(0, f' 71  {binary}\n\t80\t{binary}\n 90  /bin/sh\n')])
+        before = snapshot(home, observed, uid=501)
+        self.assertEqual([call.args[0] for call in observed.call_args_list], [domain, job, processes])
+        self.assertEqual(before['farhelm_pids'], [71, 80])
+        self.assertEqual(before['session_ids'], ['fixture-session'])
+
+        binary.unlink()
+        binary.parent.rmdir()
+        plist.unlink()
+        absent = mock.Mock(side_effect=[reply(0, 'domain'), reply(113, stderr=missing), reply(0, '90 /bin/sh\n')])
+        after = snapshot(home, absent, uid=501)
+        require_remote_host_effect('remote-host-uninstall', before, after, REMOTE_MAC_PASS)
+        for changes in ({'unit_present': True}, {'farhelm_pids': [80]}, {'session_ids': []},
+                        {'service': dict(after['service'], loaded=True)}):
+            with self.subTest(changes=changes), self.assertRaises(EffectFailure):
+                require_remote_host_effect('remote-host-uninstall', before, dict(after, **changes), REMOTE_MAC_PASS)
+        with self.assertRaisesRegex(RuntimeError, 'provisioned running') as failure:
+            require_remote_host_effect('remote-host-uninstall', dict(before, session_ids=[]), after, REMOTE_MAC_PASS)
+        self.assertNotIsInstance(failure.exception, EffectFailure)
+        with self.assertRaisesRegex(RuntimeError, 'job state is unavailable'):
+            snapshot(home, mock.Mock(side_effect=[reply(0, 'domain'), reply(113, stderr='Permission denied\n')]), uid=501)
+
+    def test_remote_mac_uses_prepared_ssh_python_without_linux_preflight(self):
+        """A headless Mac peer needs neither Codex credentials nor Linux-only process or Finder probes."""
+        self.value['pass_id'] = REMOTE_MAC_PASS
+        self.value['check_id'] = 'native-preflight'
+        operations = self.operations()
+        with mock.patch.object(operations, 'command', side_effect=[{'stdout': '1\n'}, {'stdout': 'fixture codex'}]) as calls:
+            self.assertEqual(set(operations.perform('prerequisites')), {'virtualized_mac', 'mac_cli'})
+            self.assertEqual([call.args[0][0] for call in calls.call_args_list],
+                             ['/usr/sbin/sysctl', self.value['settings']['codex']])
+        with mock.patch.object(operations, 'command') as invoke:
+            operations.ssh('print("fixture")')
+            self.assertEqual(invoke.call_args.args[0][-2:], [self.value['settings']['python'], '-'])
+        self.assertNotIn('remote_terminal_hosts', available_operations('remote-host-uninstall', REMOTE_MAC_PASS, None))
+        self.assertEqual(required_operations('native-preflight', REMOTE_MAC_PASS, None), {'prerequisites'})
+
+    def test_remote_mac_rejects_an_empty_database_before_uninstall(self):
+        """An unseeded baseline must close the command gate before the native action."""
+        self.value['pass_id'] = REMOTE_MAC_PASS
+        self.value['check_id'] = 'remote-host-uninstall'
+        operations = self.operations()
+        before = {'service': {'kind': 'launchd', 'loaded': True, 'state': 'running', 'pid': 71},
+                  'lib_present': True, 'unit_present': True, 'binary_sha256': 'binary', 'unit_sha256': 'unit',
+                  'data_present': True, 'database_present': True, 'farhelm_pids': [71], 'session_ids': []}
+        with mock.patch.object(operations, 'ssh', return_value={'stdout': json.dumps(before)}):
+            with self.assertRaisesRegex(RuntimeError, 'provisioned running host'):
+                operations.dispatch('remote_host_before')
+        self.assertNotIn('remote_host_before', operations.completed)
+        self.assertTrue((self.output / 'managed-failure.json').is_file())
 
     def test_remote_menu_pass_requires_independent_effect_receipts(self):
         """Native success text alone cannot waive the SSH before/after acceptance contract."""
@@ -770,7 +848,7 @@ window/search probe without adding bonus gesture prerequisites.
                 self.assertIn('Escape alone is not proof', text)
                 self.assertIn('click its Search control', text)
                 self.assertIn('Do not open\nHelp or Go to Folder', text)
-                self.assertIn('P0 does not require drag or double-click probes', text)
+                self.assertIn('This preflight does not require drag or double-click probes', text)
 
     def test_override_removal_accepts_exact_native_accessibility_version(self):
         """Native version text proves the channel even when a tooltip image is unavailable.
