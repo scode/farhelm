@@ -44,21 +44,39 @@ produced it, or when the agents were upgraded moments ago. `--upgrade-only` upgr
 case, without building the test binary. An agent session that is already running keeps its old version until it is
 restarted.
 
+## Hook setup in a private copy of the vendor's configuration
+
+Grok and Antigravity find Farhelm's conversation hooks in files in their own configuration (`~/.grok/hooks/farhelm.json`
+and `~/.gemini/config/plugins/farhelm/`), which Farhelm writes when a launch has the user's consent to set them up. A
+drift case runs that same setup, because it is part of what users get, but never against your real files: they name the
+`farhelm` that wrote them, which in a drift run is the build under test, and every session of that agent on the machine
+runs them, inside your installed Farhelm or not.
+
+So each such case builds a private copy of the vendor's directory (`GROK_HOME` for Grok, the whole `HOME` for
+Antigravity). Every entry in it is a symlink to your real one, except the files Farhelm's setup writes and the
+directories above them. The agent keeps its login, settings and sessions. Farhelm's real setup writes its files into the
+copy, and the agent is started with the copy's variable set, also on Restart. The case fails if any of your real hook
+files changed. A vendor that saves a file by renaming a new copy over it (a refreshed login, say) replaces the copy's
+symlink rather than writing your file; the case copies such a file back afterwards when your real one is unchanged, and
+prints a `drift:` note naming any it could not.
+
+Which files to keep private comes from Farhelm's setup itself, so an agent that gains persistent hooks is covered
+without listing its paths again, as long as they lie under the home directory or Grok's. A guard test
+(`real_agent_capture::drift::private_config::tests`, part of the ordinary e2e run) fails for one whose paths do not, or
+that has no drift profile.
+
 ## Prerequisites
 
-The test uses the vendor's existing credentials. Antigravity and Grok also need the conversation hooks described in the
-[Antigravity setup guide](../website/src/content/docs/docs/agents/antigravity.md) and
-[Grok setup guide](../website/src/content/docs/docs/agents/grok.md). Sign in and start a session with setup enabled
-before retrying a case that needs those hooks. Tests use private Farhelm state and leave hook files alone. The
-maintainer handles vendor sign-in and hook setup; the runner handles updates. An agent running this suite reports unmet
-prerequisites as COULD NOT RUN and reports an UPGRADE FAILED line with the agent and the updater's reason. The rules in
+The test uses the vendor's existing credentials. You do not need to set up any agent's hooks first; the runner handles
+updates and each case handles hook setup as described above. An agent running this suite reports a missing login as
+COULD NOT RUN and reports an UPGRADE FAILED line with the agent and the updater's reason. The rules in
 `.agents/real-agent-tui.md` apply.
 
 ## Reading the result
 
 - **PASSED** means all of that case's live checks ran and succeeded.
-- **COULD NOT RUN** means a prerequisite was missing. The table gives the reason, such as a missing binary, a login
-  screen or an absent hook file.
+- **COULD NOT RUN** means a prerequisite was missing. The table gives the reason, such as a missing binary or a login
+  screen.
 - **UPGRADE FAILED** means the agent's updater (and its fallback installer, if it has one) failed. The case still ran,
   against the version shown.
 - **FAILED** means the CLI or test failed after starting. The retained run contains its output, source identity and

@@ -8445,6 +8445,13 @@ constraint (see the GUI section's motivation), not an afterthought:
   with `FARHELM_REAL_AGENT=1`.
 - Rust integration tests exercise the supervisor with real terminal hosts and the framing protocol with golden cases;
   farhelm-proto keeps wire compatibility testable.
+- The opt-in real-agent drift tests (`docs/harness-drift-tests.md`) run each installed vendor CLI through the shipped
+  launch, a conversation report and Restart. They never write Farhelm's hook files into the user's real vendor
+  configuration: those files name the `farhelm` that wrote them and run in every session of that agent on the machine.
+  For an agent whose hooks are such files (`AgentKind::offers_persistent_hooks`), each case runs Farhelm's own setup
+  into a private mirror of the vendor's directory, with the paths to keep private planned by the supervisor's setup
+  code, so a vendor's paths are stated once. A guard test fails when such an agent has no drift profile or plans a path
+  outside the home and Grok's home, the two directories the mirror can stand in for.
 - **Terminal hosts are tested against real hosts on real ptys.** The host crate has a test bar of its own
   (`crates/terminal-host/TESTING.md`: real-pty tests of the built binary, golden fixtures of every frame of every
   protocol version, property tests, at least 95% line coverage and mutation testing; the suite also runs in the focused

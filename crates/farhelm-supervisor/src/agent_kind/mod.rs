@@ -139,7 +139,10 @@
 //!   (`assets/pi-conversation-v1.ts`, `assets/omp-conversation-v1.ts`) own
 //!   those agents' event subscriptions, report payloads, and ordering. `persistent_hooks.rs` writes the files Grok
 //!   and Antigravity discover, with the paths and contents answered in their respective modules. The helm and GUI
-//!   use `AgentKind::offers_persistent_hooks` for the shared capability. In
+//!   use `AgentKind::offers_persistent_hooks` for the shared capability. Those files live in the user's own vendor
+//!   configuration, so the real-agent drift tests give such an agent a private copy of it
+//!   (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`); their paths must lie under the
+//!   supervisor's `user_home` or `grok_home`, the two directories that copy can stand in for. In
 //!   the `farhelm` crate, `hook.rs` (parsing
 //!   each vendor's hook callback payload) and `goose_hook.rs` (Goose's MCP
 //!   reporter endpoint, which builds Goose's report itself).
@@ -270,6 +273,9 @@ pub(crate) mod grok;
 mod muse;
 pub(crate) mod omp;
 pub(crate) mod persistent_hooks;
+/// The drift tests' view of persistent hook setup; see the function's own docs.
+#[cfg(feature = "test-seams")]
+pub use persistent_hooks::planned_paths_for_test as persistent_hook_paths_for_test;
 pub(crate) mod pi;
 mod records;
 pub(crate) mod report_pin;

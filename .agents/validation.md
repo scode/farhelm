@@ -1166,13 +1166,19 @@ systemd or SSH substrate ran.
   timeout, verdicts and evidence retention against stand-ins, and its upgrade step (`scripts/harness_upgrades.py`): a
   recipe for every drift case's binary, versions around each updater, stdin closed, the fallback installer only after a
   failed updater, and a failed upgrade failing the run. Run it when the runner or the upgrade recipes change. Seconds
-  and zero vendor turns. The non-ignored e2e tests in `real_agent_capture::drift::tests` check whole-line recall, fresh
-  accepted hook evidence and matching resume arguments without starting a vendor CLI.
+  and zero vendor turns. The non-ignored e2e tests in `real_agent_capture::drift::tests` check the reply and recall
+  lines, fresh accepted hook evidence and matching resume arguments without starting a vendor CLI; those in
+  `real_agent_capture::drift::private_config::tests` check the private copy of a vendor's configuration (hook files and
+  the directories above them private, everything else linked, rewritten files copied back only over an unchanged
+  original) and guard that every agent with global hook files has a drift profile and hook paths that copy can hold. Run
+  both with `cargo nextest run -p farhelm --test e2e -E 'test(/^real_agent_capture::drift::/)'` when the drift test or
+  persistent hook setup changes.
 - `python3 -B scripts/run-harness-drift.py` — manual, opt-in Linux checks of installed agent launch flags, conversation
   reports and Restart. It first upgrades each selected agent CLI to its vendor's latest release (`--no-upgrade` skips
   that). Tracked agents spend two real vendor turns to check recall across Restart and verify a fresh accepted hook
   report. The runner records each case and reports PASSED, COULD NOT RUN or FAILED. See `docs/harness-drift-tests.md`
-  for credentials and hook prerequisites. The ignored cases stay out of default nextest, deflake, CI and release gates.
+  for credentials, and for the private copy of the vendor configuration that Grok's and Antigravity's cases set their
+  hooks up in. The ignored cases stay out of default nextest, deflake, CI and release gates.
 - `deno test -A scripts/serve-page.ts` — the legacy standalone static server (agent pages use the `interactive-artifact`
   skill): that it answers with `Cache-Control: no-store` and moves past a taken port. Run it, with `deno check` on the
   same file, when the script changes; seconds. Needs Deno, and fetches `jsr:@std/http` the first time.

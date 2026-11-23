@@ -1,5 +1,9 @@
 //! Grok and Antigravity discover conversation hooks from their own configuration directories.
 //! A launch with consent refreshes only Farhelm's files there before it starts the agent.
+//!
+//! These files are global: they name the `farhelm` that wrote them, and every session of the agent on the machine
+//! runs them, inside Farhelm or not. Nothing but a consented launch may write them, which is why tests that run real
+//! agents plan the paths with [`planned_paths_for_test`] and keep a private copy of the vendor's directory instead.
 
 use std::path::{Path, PathBuf};
 
@@ -65,7 +69,25 @@ pub(crate) async fn install(
     grok_home: Option<&Path>,
     exe: &str,
 ) -> Result<()> {
-    let files: Vec<_> = match kind {
+    for file in planned_files(kind, home, grok_home, exe).await? {
+        file.install().await?;
+    }
+    Ok(())
+}
+
+/// The files [`install`] would write for `kind`, under the given directories, without touching the filesystem
+/// beyond the vendor modules' own safety checks.
+///
+/// The real-agent drift tests call this through [`planned_paths_for_test`] to learn which paths to keep private
+/// before they let the real setup run, so a vendor's hook paths are stated only in its own module.
+#[warn(clippy::wildcard_enum_match_arm)]
+async fn planned_files(
+    kind: AgentKind,
+    home: Option<&Path>,
+    grok_home: Option<&Path>,
+    exe: &str,
+) -> Result<Vec<HookFile>> {
+    Ok(match kind {
         AgentKind::Grok => vec![grok::persistent_hook_file(home, grok_home, exe)?],
         AgentKind::Antigravity => {
             antigravity::persistent_hook_files(home.context("the supervisor has no HOME")?, exe)
@@ -79,11 +101,29 @@ pub(crate) async fn install(
         | AgentKind::Omp
         | AgentKind::Muse
         | AgentKind::Generic => anyhow::bail!("this agent has no persistent conversation hooks"),
-    };
-    for file in files {
-        file.install().await?;
-    }
-    Ok(())
+    })
+}
+
+/// Every path Farhelm's persistent hook setup writes for `kind`, resolved under `home` and `grok_home`.
+///
+/// Only for the real-agent drift tests (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`). They
+/// must never write the hook files in the maintainer's own vendor configuration: those files name the `farhelm` that
+/// wrote them, and every session of that agent on the machine, inside the installed Farhelm or not, runs them. So a
+/// drift case plans the paths here under scratch directories, builds a private copy of the vendor's directory with
+/// exactly these paths left out, and lets the real setup write them there. A kind gaining persistent hooks is covered
+/// without a second list of its paths, as long as each path lies under one of these two directories; the drift
+/// test refuses one that does not.
+#[cfg(feature = "test-seams")]
+pub async fn planned_paths_for_test(
+    kind: AgentKind,
+    home: &Path,
+    grok_home: &Path,
+) -> Result<Vec<PathBuf>> {
+    Ok(planned_files(kind, Some(home), Some(grok_home), "farhelm")
+        .await?
+        .into_iter()
+        .map(|file| file.path)
+        .collect())
 }
 
 #[cfg(test)]

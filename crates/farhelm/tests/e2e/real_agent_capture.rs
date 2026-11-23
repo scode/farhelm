@@ -220,17 +220,21 @@ async fn wait_for_agent_tui_ready(
 /// aborts on drop and its [`ServeTask::stop`] reports a `serve()` that
 /// ended any other way.
 ///
-/// Default seams, and that is the point: hooks are on by default, and the
-/// agent runs in a terminal host started from the built `farhelm`, so this
-/// exercises the configuration a user gets.
+/// Callers pass default seams unless they must redirect a directory, and
+/// that is the point: hooks are on by default, and the agent runs in a
+/// terminal host started from the built `farhelm`, so this exercises the
+/// configuration a user gets. The drift cases redirect only the vendor
+/// configuration directories of agents with global hook files
+/// (`drift/private_config.rs`).
 async fn serving_supervisor(
     state: &std::path::Path,
+    seams: SupervisorSeams,
 ) -> (Arc<Supervisor>, Arc<SupervisorClient>, ServeTask) {
     let sup = Supervisor::new_with_seams(
         state,
         farhelm_bin().into(),
         SupervisorTimeouts::default(),
-        SupervisorSeams::default(),
+        seams,
     )
     .await
     .expect("supervisor");
@@ -453,7 +457,8 @@ async fn real_claude_session_reports_its_identity_across_clear() {
     // vendor agent with them) runs before the agent's folder is removed.
     let work = farhelm_teststate::tempdir().expect("workdir");
     let state = farhelm_teststate::tempdir().expect("state dir");
-    let (sup, client, accepting) = serving_supervisor(state.path()).await;
+    let (sup, client, accepting) =
+        serving_supervisor(state.path(), SupervisorSeams::default()).await;
 
     let session = client
         .create_session_with_extras(
@@ -638,7 +643,8 @@ async fn real_claude_shelled_out_child_cannot_replace_the_session_conversation()
     // vendor agent with them) runs before the agent's folder is removed.
     let work = farhelm_teststate::tempdir().expect("workdir");
     let state = farhelm_teststate::tempdir().expect("state dir");
-    let (sup, client, accepting) = serving_supervisor(state.path()).await;
+    let (sup, client, accepting) =
+        serving_supervisor(state.path(), SupervisorSeams::default()).await;
 
     let hook = format!(
         "{} internal hook --vendor claude",
@@ -783,7 +789,8 @@ async fn real_codex_session_reports_its_identity_across_new() {
     let work = farhelm_teststate::tempdir().expect("workdir");
     let state = farhelm_teststate::tempdir().expect("state dir");
     let agent = trusted_codex(work.path());
-    let (sup, client, accepting) = serving_supervisor(state.path()).await;
+    let (sup, client, accepting) =
+        serving_supervisor(state.path(), SupervisorSeams::default()).await;
 
     let session = client
         .create_session_with_extras(
