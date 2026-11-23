@@ -3,7 +3,6 @@
 One line per landed plan whose report the maintainer has not reviewed yet, oldest first. `plans/AGENTS.md` describes the review; only `scripts/plans-queue.py` changes this file. It is excluded from dprint so a line is never rewrapped.
 
 - [`codex-recipe-credentials-at-launch`](reports/codex-recipe-credentials-at-launch.report.md) landed 2026-11-23 in #4679, #4680, #4693: Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
-- [`gui-goldens-in-releases`](reports/gui-goldens-in-releases.report.md) landed 2026-11-23 in #4692: Document keeping GPUI screenshot goldens development- and landing-only and remove the TODO entry
 - [`repo-cache-lock-redesign`](reports/repo-cache-lock-redesign.report.md) landed 2026-11-23 in #4697, #4709: Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
 - [`brick-test-remote-mac-uninstall`](reports/brick-test-remote-mac-uninstall.report.md) landed 2026-11-23 in #4700, #4702, #4703, #4710: Extend release brick test P1 with a Tart-managed remote Mac uninstall pass
 - [`remove-host-signin-lock`](reports/remove-host-signin-lock.report.md) landed 2026-11-23 in #4714, #4718: Stop removing an SSH host from blocking on open sign-in prompts and probes
