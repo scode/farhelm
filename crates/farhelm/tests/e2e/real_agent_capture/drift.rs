@@ -1,8 +1,11 @@
 //! Opt-in checks that the installed CLIs still accept Farhelm's launch and resume commands.
 //!
-//! Each test owns a new workspace, supervisor state and terminal host. Vendors retain their ordinary login and
-//! manual hook configuration. The tracked tests plant a code word, Restart, and ask the new process to recall it.
-//! A fresh accepted hook report must also leave the original resume command intact.
+//! Each test owns a new workspace, supervisor state and terminal host. Vendors keep their ordinary login and
+//! settings. An agent whose Farhelm hooks are global files gets Farhelm's real setup run into a private copy of its
+//! configuration instead of the maintainer's (`private_config`). The tracked tests plant a code word, Restart, and
+//! ask the new process to recall it. A fresh accepted hook report must also leave the original resume command intact.
+
+mod private_config;
 
 use super::{
     SCREEN_BYTES, StreamText, reported_runtime_identity, serving_supervisor, which_binary,
@@ -10,7 +13,7 @@ use super::{
 use crate::harness::*;
 use farhelm_proto::{LaunchEffort, LaunchHarness, LaunchPermission, LaunchSelection, RestartOffer};
 use farhelm_supervisor::hosts::{HostTerminal, Liveness};
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 /// The runner supplies a private result file. A crash, timeout or missing result is a runner-visible failure.
 const VERDICT_FILE: &str = "FARHELM_DRIFT_VERDICT_FILE";
@@ -60,7 +63,6 @@ struct Harness {
     model: Option<&'static str>,
     effort: Option<LaunchEffort>,
     composer: &'static [&'static str],
-    manual_hook: Option<&'static str>,
     hook_witness: Option<HookWitness>,
     trust_at_launch: bool,
     update_override: Option<UpdateOverride>,
@@ -74,195 +76,120 @@ fn profile(kind: LaunchHarness) -> Option<Harness> {
     let flash = std::env::var_os("OPENROUTER_API_KEY")
         .filter(|key| !key.is_empty())
         .map(|_| "z-ai/glm-5.3-flash");
-    let (binary, model, effort, composer, manual_hook, witness, trust_at_launch, update_override) =
-        match kind {
-            Claude => (
-                "claude",
-                Some("haiku"),
-                Some(LaunchEffort::Low),
-                &["claude code v", "❯"][..],
-                None,
-                Some(HookWitness::MatchingIdentity),
-                false,
-                None,
-            ),
-            Codex => (
-                "codex",
-                Some("gpt-6-luna"),
-                Some(LaunchEffort::Low),
-                &["openai codex", "›"][..],
-                None,
-                Some(HookWitness::MatchingIdentity),
-                true,
-                None,
-            ),
-            Antigravity => (
-                "agy",
-                Some("gemini-3.8-flash"),
-                Some(LaunchEffort::Low),
-                // Not the bare name: 1.5.14's "Welcome to the Antigravity CLI ... Signing in..." splash, shown before
-                // its trust prompt, contains it, and a prompt typed into the splash is lost. 1.5.14's composer has
-                // "? for shortcuts" under the input box.
-                &["? for shortcuts", "type a message"][..],
-                Some("antigravity"),
-                Some(HookWitness::MatchingIdentity),
-                false,
-                None,
-            ),
-            Goose => (
-                "goose",
-                flash,
-                None,
-                &["goose session", "enter your message", "( o)>"][..],
-                None,
-                Some(HookWitness::Fresh),
-                false,
-                None,
-            ),
-            Grok => (
-                "grok",
-                None,
-                None,
-                &["grok", "❯"][..],
-                Some("grok"),
-                Some(HookWitness::Fresh),
-                false,
-                None,
-            ),
-            Muse => (
-                "muse",
-                Some("muse-spark-1.3-contributor"),
-                None,
-                // Startup warnings can truncate the model name in the composer footer.
-                &["muse-spark-1.3-"][..],
-                None,
-                Some(HookWitness::MatchingIdentity),
-                true,
-                Some(UpdateOverride::Muse),
-            ),
-            Pi => (
-                "pi",
-                flash,
-                Some(LaunchEffort::Low),
-                &["pi v", "/hotkeys", "ctrl+c"][..],
-                None,
-                Some(HookWitness::Fresh),
-                false,
-                None,
-            ),
-            Omp => (
-                "omp",
-                flash,
-                Some(LaunchEffort::Low),
-                &[
-                    "omp v",
-                    "oh-my-pi",
-                    "/hotkeys",
-                    "start your prompt",
-                    "to change thinking effort",
-                    // A resumed conversation can fill the screen and leave only the editor border.
-                    "\n╰─",
-                ][..],
-                None,
-                Some(HookWitness::Fresh),
-                false,
-                Some(UpdateOverride::Omp),
-            ),
-            Cursor => (
-                "cursor-agent",
-                None,
-                None,
-                &["cursor agent", "→"][..],
-                None,
-                None,
-                false,
-                None,
-            ),
-            OpenCode => (
-                "opencode",
-                None,
-                None,
-                &["opencode", "ask anything", "ctrl+p"][..],
-                None,
-                None,
-                false,
-                None,
-            ),
-            Bash | Zsh => return None,
-        };
+    let (binary, model, effort, composer, witness, trust_at_launch, update_override) = match kind {
+        Claude => (
+            "claude",
+            Some("haiku"),
+            Some(LaunchEffort::Low),
+            &["claude code v", "❯"][..],
+            Some(HookWitness::MatchingIdentity),
+            false,
+            None,
+        ),
+        Codex => (
+            "codex",
+            Some("gpt-6-luna"),
+            Some(LaunchEffort::Low),
+            &["openai codex", "›"][..],
+            Some(HookWitness::MatchingIdentity),
+            true,
+            None,
+        ),
+        Antigravity => (
+            "agy",
+            Some("gemini-3.8-flash"),
+            Some(LaunchEffort::Low),
+            // Not the bare name: 1.5.14's "Welcome to the Antigravity CLI ... Signing in..." splash, shown before
+            // its trust prompt, contains it, and a prompt typed into the splash is lost. 1.5.14's composer has
+            // "? for shortcuts" under the input box.
+            &["? for shortcuts", "type a message"][..],
+            Some(HookWitness::MatchingIdentity),
+            false,
+            None,
+        ),
+        Goose => (
+            "goose",
+            flash,
+            None,
+            &["goose session", "enter your message", "( o)>"][..],
+            Some(HookWitness::Fresh),
+            false,
+            None,
+        ),
+        Grok => (
+            "grok",
+            None,
+            None,
+            &["grok", "❯"][..],
+            Some(HookWitness::Fresh),
+            false,
+            None,
+        ),
+        Muse => (
+            "muse",
+            Some("muse-spark-1.3-contributor"),
+            None,
+            // Startup warnings can truncate the model name in the composer footer.
+            &["muse-spark-1.3-"][..],
+            Some(HookWitness::MatchingIdentity),
+            true,
+            Some(UpdateOverride::Muse),
+        ),
+        Pi => (
+            "pi",
+            flash,
+            Some(LaunchEffort::Low),
+            &["pi v", "/hotkeys", "ctrl+c"][..],
+            Some(HookWitness::Fresh),
+            false,
+            None,
+        ),
+        Omp => (
+            "omp",
+            flash,
+            Some(LaunchEffort::Low),
+            &[
+                "omp v",
+                "oh-my-pi",
+                "/hotkeys",
+                "start your prompt",
+                "to change thinking effort",
+                // A resumed conversation can fill the screen and leave only the editor border.
+                "\n╰─",
+            ][..],
+            Some(HookWitness::Fresh),
+            false,
+            Some(UpdateOverride::Omp),
+        ),
+        Cursor => (
+            "cursor-agent",
+            None,
+            None,
+            &["cursor agent", "→"][..],
+            None,
+            false,
+            None,
+        ),
+        OpenCode => (
+            "opencode",
+            None,
+            None,
+            &["opencode", "ask anything", "ctrl+p"][..],
+            None,
+            false,
+            None,
+        ),
+        Bash | Zsh => return None,
+    };
     Some(Harness {
         binary,
         model,
         effort,
         composer,
-        manual_hook,
         hook_witness: witness,
         trust_at_launch,
         update_override,
     })
-}
-
-/// An installed manual hook may use a quoted absolute path. Look at the parsed command, without running it or
-/// writing the vendor's configuration. A malformed or unreadable file is a prerequisite problem.
-fn has_manual_hook(path: &Path, vendor: &str) -> bool {
-    fn contains_command(value: &serde_json::Value, vendor: &str) -> bool {
-        if let Some(entries) = value.as_object() {
-            return entries.iter().any(|(key, entry)| {
-                if key != "command" {
-                    return contains_command(entry, vendor);
-                }
-                let Some(words) = entry
-                    .as_str()
-                    .and_then(|line| shell_words::split(line).ok())
-                else {
-                    return false;
-                };
-                words.split_first().is_some_and(|(command, args)| {
-                    Path::new(command)
-                        .file_name()
-                        .is_some_and(|name| name == "farhelm")
-                        && args.starts_with(&[
-                            "internal".into(),
-                            "hook".into(),
-                            "--vendor".into(),
-                            vendor.into(),
-                        ])
-                })
-            });
-        }
-        value
-            .as_array()
-            .is_some_and(|entries| entries.iter().any(|entry| contains_command(entry, vendor)))
-    }
-    std::fs::read(path)
-        .ok()
-        .and_then(|bytes| serde_json::from_slice(&bytes).ok())
-        .is_some_and(|value| contains_command(&value, vendor))
-}
-
-/// Check the files the installed agent discovers. The drift test reads existing hook configuration.
-fn manual_hook_configured(vendor: &str) -> bool {
-    let home = std::env::var_os("HOME").map(PathBuf::from);
-    match vendor {
-        "antigravity" => home.is_some_and(|home| {
-            let config = home.join(".gemini/config");
-            has_manual_hook(&config.join("hooks.json"), vendor)
-                || has_manual_hook(&config.join("plugins/farhelm/hooks.json"), vendor)
-        }),
-        "grok" => std::env::var_os("GROK_HOME")
-            .map(PathBuf::from)
-            .or_else(|| home.map(|home| home.join(".grok")))
-            .and_then(|home| std::fs::read_dir(home.join("hooks")).ok())
-            .is_some_and(|files| {
-                files.filter_map(Result::ok).any(|file| {
-                    let path = file.path();
-                    path.extension()
-                        .is_some_and(|extension| extension == "json")
-                        && has_manual_hook(&path, vendor)
-                })
-            }),
-        _ => unreachable!("only the installed manual-hook vendors reach preflight"),
-    }
 }
 
 /// A visible login or credential error, as opposed to a CLI rejecting Farhelm's argv.
@@ -334,6 +261,16 @@ fn trust_prompt(text: &str) -> bool {
 
 /// Compare the selected option before answering a known workspace question in the test's empty directory.
 fn trust_answer(text: &str) -> Option<&'static [u8]> {
+    // Grok Build 1.0.92 marks the selection by colour alone, which the screen text does not carry, and gives each
+    // answer its own key ("Yes, proceed   y"). The key answers regardless of the selection. Grok asks only once a
+    // hook is installed, so its case first reached this question when it began setting up its hooks.
+    if text
+        .lines()
+        .map(str::trim)
+        .any(|line| line.starts_with("yes, proceed") && line.split_whitespace().last() == Some("y"))
+    {
+        return Some(b"y");
+    }
     for line in text.lines().map(str::trim) {
         let Some(option) = line.strip_prefix(['❯', '⟩', '›', '>']) else {
             continue;
@@ -689,14 +626,14 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
             profile.binary
         )));
     }
-    if let Some(vendor) = profile.manual_hook
-        && !manual_hook_configured(vendor)
-    {
-        return Err(DriftError::CouldNotRun(format!(
-            "the {vendor} Farhelm hook is absent or unreadable (see the agent setup guide)"
-        )));
-    }
     let _slot = SLOTS.acquire().await.expect("semaphore is never closed");
+    // Declared first so it drops last: the private vendor configuration must outlive the agent reading it.
+    let config = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
+    let private = private_config::PrivateConfig::prepare(kind.agent_kind(), config.path()).await?;
+    let mut seams = SupervisorSeams::default();
+    if let Some(private) = &private {
+        private.apply(&mut seams);
+    }
     // State drops before the work directory and reaps the terminal host on every return path.
     let work = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
     let state = farhelm_teststate::tempdir().map_err(anyhow::Error::from)?;
@@ -721,7 +658,7 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
         workspace_trust: profile.trust_at_launch.then_some(true),
     })
     .map_err(anyhow::Error::msg)?;
-    let (sup, client, accepting) = serving_supervisor(state.path()).await;
+    let (sup, client, accepting) = serving_supervisor(state.path(), seams).await;
     let session = client
         .create_session_with_extras(
             &work.path().to_string_lossy(),
@@ -729,12 +666,19 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
             None,
             COLS,
             ROWS,
-            farhelm_helm::CreateExtras::default(),
+            // The same consent "Set up and launch" gives; the seams aim its writes at the private copy.
+            farhelm_helm::CreateExtras {
+                setup_persistent_hooks: private.is_some(),
+                ..farhelm_helm::CreateExtras::default()
+            },
         )
         .await?;
     let id = &session.id;
     let mut first = Terminal::attach(&sup, &client, id, false).await?;
     let result = async {
+        if let Some(private) = &private {
+            private.check_installed()?;
+        }
         first.ready(&profile, false).await?;
         let Some(hook_witness) = profile.hook_witness else {
             return Ok(());
@@ -813,7 +757,15 @@ async fn execute(kind: LaunchHarness) -> DriftResult {
     drop(first);
     let cleanup = client.delete_session(id).await;
     accepting.stop().await;
+    // After the agent is gone, so nothing writes the copy any more; before `config` drops, so rewrites survive.
+    let finished = private
+        .as_ref()
+        .map(private_config::PrivateConfig::finish)
+        .transpose();
     cleanup?;
+    for note in finished?.unwrap_or_default() {
+        eprintln!("drift: {note}");
+    }
     result
 }
 
@@ -906,6 +858,24 @@ mod tests {
         assert!(!expected.saw_reply("The code is RECALL-FH78C1E9AF."));
         // A longer token that merely starts with the label is a different answer.
         assert!(!expected.saw_reply("RECALL-FH78C1E9AF0"));
+    }
+
+    /// Grok's trust menu shows no selection glyph in text, only a key per answer; a bare mention of the words is not
+    /// an option line, and menus with a selection glyph keep their own handling.
+    #[farhelm_testtrace::test]
+    fn a_trust_menu_with_answer_keys_is_answered_with_the_affirmative_key() {
+        let grok = "do you trust the contents of this directory?\n  /tmp/x\n\n   yes, proceed                 y\n   \
+                    no, quit                     n\n";
+        assert!(trust_prompt(grok));
+        assert_eq!(trust_answer(grok), Some(&b"y"[..]));
+        assert_eq!(
+            trust_answer("do you trust this?\nsay yes, proceed if you like"),
+            None
+        );
+        assert_eq!(
+            trust_answer("do you trust the contents?\n> yes, i trust this folder\n  no, exit"),
+            Some(&b"\r"[..])
+        );
     }
 
     /// Weak models decorate the answer they were told to give alone; the word still has to open the line.

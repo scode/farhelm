@@ -251,12 +251,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Plan follow-up
 
-- **Run the live harness drift tests across all tracked agents and resolve any failures.** PR #4628 updated the harness
-  drift tests so Restart must prove conversation recall (Turn-1 test label, Turn-2 recall, and a fresh post-Restart
-  conversation acknowledgment), but only Codex and OMP passed live before landing. Claude Code stopped at its workspace
-  trust screen (needs a trusted test workspace), and Antigravity, Muse, Goose, Grok, and Pi were not run live at all,
-  including Antigravity and Muse, which use the stricter conversation-ID match check. Run the real harness drift tests
-  across all eight agents and fix whatever fails.
+- **Fix the two live harness drift failures left after the 2026-11-22 run.** Every drift case has now run live on the
+  latest agent releases; Claude, Codex, Antigravity, Goose, Pi, OMP, Cursor and OpenCode pass. Muse 1.4.25 replies but
+  no conversation report reaches Farhelm (an in-flight plan fixes the environment scrubbing behind it). Grok 1.0.92's
+  hooks fire, but Farhelm refuses every report with "the session pane looks like a Grok runtime that is not the
+  recognised emitter": Grok's installer links `~/.grok/bin/grok` to a versioned
+  `~/.grok/downloads/grok-<version>-linux-x86_64`, and `is_grok_image` in `crates/farhelm-supervisor/src/procs/grok.rs`
+  accepts only `grok` and `grok-linux-x86_64`, so Restart cannot resume Grok sessions on such installs. Fix both and
+  re-run `python3 -B scripts/run-harness-drift.py --harness muse --harness grok`.
 
 - **Stop Remove host from blocking on an open SSH sign-in prompt.** PR #4638 (`tailscale-ssh-hosts`) added a per-host
   read-write lock (`ssh_route_lock`) so toggling Tailscale mode or removing a host does not race with an active SSH

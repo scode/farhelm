@@ -1662,6 +1662,10 @@ crate::enum_with_all! {
 impl AgentKind {
     /// Whether the agent discovers Farhelm's conversation hooks from a dedicated file in its own configuration.
     /// The setting and launch prompt use this same answer for agent and declared command launches.
+    ///
+    /// Answering true also commits the real-agent drift tests to running that setup in a private copy of the
+    /// vendor's configuration, never in the user's real one; their guard test fails until a new kind's hook paths
+    /// fit that copy (`crates/farhelm/tests/e2e/real_agent_capture/drift/private_config.rs`).
     #[warn(clippy::wildcard_enum_match_arm)]
     pub const fn offers_persistent_hooks(self) -> bool {
         match self {
