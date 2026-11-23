@@ -127,8 +127,8 @@ Codex process whose conversation it accepts; wrappers above that process do not 
 Codex process started inside the session reports first, Farhelm may briefly follow its conversation. When the Codex
 process that started it reports, Farhelm switches to that conversation and tells you in the session's notifications what
 a **Restart** before the switch would have resumed. If the followed Codex exits and you start a fresh one in the same
-terminal, Farhelm can follow the new one. The native Codex executable must still be named `codex`; a renamed one cannot
-supply the conversation **Restart** needs.
+terminal, Farhelm can follow the new one. A renamed Codex executable can still report the conversation **Restart**
+needs.
 
 Grok also works through wrappers that stay running, including a chain of wrappers. Pass through Grok's arguments and
 environment so [its hooks](/docs/agents/grok/#setup) can report from inside Farhelm.

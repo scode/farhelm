@@ -510,12 +510,11 @@ async fn child_first_codex_capture_corrects_and_resumes_the_parent() {
     }
 }
 
-/// A descendant must not win the first report merely because no foreground
-/// binding exists yet. The root is live in its owned pane and the child's
-/// transcript is valid, so the observed intermediary refusal distinguishes
-/// ancestry enforcement from missing-pane or missing-record rejection.
+/// A shell that runs a valid Codex hook can be the first reporter before the
+/// foreground has reported. Verify the child's Resume target before the
+/// recorded parent takes it over and leaves a correction notice.
 #[farhelm_testtrace::test]
-async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
+async fn a_shell_child_can_report_first_until_its_codex_parent_reports() {
     let h = harness().await;
     let serving = ServeTask::spawn(&h.sup, h.state.path()).await;
     let work = farhelm_teststate::tempdir().expect("working directory");
@@ -583,29 +582,29 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
         .path()
         .join("hook-log")
         .join(format!("{}.log", session.id));
-    assert_hook_reply_since(&h.sup, &log, 0, &child, "startup", " refused ").await;
-    assert_hook_reply_since(
-        &h.sup,
-        &log,
-        0,
-        &child,
-        "startup",
-        "unclassified intermediary",
-    )
-    .await;
-    assert_eq!(
-        durable_binding(h.state.path(), &session.id).await,
-        pristine,
-        "a processed child-first report must leave the row pristine",
+    assert_hook_reply_since(&h.sup, &log, 0, &child, "startup", " acked ").await;
+    let (binding, provenance, source) = durable_binding(h.state.path(), &session.id).await;
+    assert!(
+        binding.as_ref().is_some_and(|value| value.contains(&child)),
+        "the shell reported while the root had no binding: {binding:?}"
     );
+    assert_eq!(provenance, 1);
+    assert_eq!(source.as_deref(), Some("hook"));
     assert_eq!(
         listed(&h.client, &session.id).await.restart_offer,
-        farhelm_proto::RestartOffer::NotCaptured,
+        farhelm_proto::RestartOffer::Resume,
+    );
+    assert!(
+        listed(&h.client, &session.id)
+            .await
+            .notifications
+            .is_empty()
     );
 
-    // The same live foreground must then succeed: a permanently broken
-    // report path or a dead pane cannot satisfy the negative assertion alone.
-    let offset = std::fs::read(&log).expect("read child refusal").len();
+    // The foreground's verified selection corrects the child's pin.
+    let offset = std::fs::read(&log)
+        .expect("read the child's hook verdict")
+        .len();
     send_and_wait(
         &h.client,
         channel,
@@ -619,11 +618,16 @@ async fn a_shell_child_cannot_claim_a_pristine_codex_session() {
     wait_for_offer(&h.client, &session.id, farhelm_proto::RestartOffer::Resume).await;
     let (binding, provenance, source) = durable_binding(h.state.path(), &session.id).await;
     assert!(
-        binding.is_some(),
-        "the foreground establishes the first binding"
+        binding.as_ref().is_some_and(|value| value.contains(&root)),
+        "{binding:?}"
     );
     assert_eq!(provenance, 1);
     assert_eq!(source.as_deref(), Some("hook"));
+    let notices = listed(&h.client, &session.id).await.notifications;
+    assert_eq!(notices.len(), 1, "{notices:?}");
+    assert!(notices[0].text.contains("reported by another process"));
+    assert!(notices[0].text.contains("A Restart before now"));
+    assert!(!notices[0].resolved);
     serving.stop().await;
 }
 
@@ -892,16 +896,11 @@ async fn nested_native_codex_reports_cannot_replace_the_foreground_conversation(
     );
     assert_nested_hook_reached_supervisor(&h, &session.id, &ephemeral_child).await;
 
-    // Shell descendants are refused by the corridor — the live shell
-    // between reporter and runtime matches no narrow trampoline — no
-    // matter how valid the rest of the report is. The persisted case
-    // carries a real record for its own runtime (verified against the
-    // file before reporting), so only ancestry can refuse it; the
-    // fileless case reports `clear`, the descendant's strongest weapon,
-    // and doubles as the live descendant-clear regression. The native
-    // case wraps a second Codex image in a live shell, pinning that the
-    // nested rule is not bypassed by shell wrapping. Every case leaves
-    // the complete saved binding and the public offer byte-identical.
+    // The foreground pin refuses a shell descendant that ran the hook.
+    // The persisted case carries a verified record for its own runtime.
+    // The fileless case covers the clear path that can create a pending
+    // binding. The native case launches another Codex through a live shell.
+    // Each leaves the foreground binding and Restart offer intact.
     let shell_log = h
         .state
         .path()

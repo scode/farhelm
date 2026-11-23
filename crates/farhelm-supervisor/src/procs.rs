@@ -60,11 +60,9 @@ use std::collections::HashMap;
 // sit between a hook and the agent's foreground process, and which one is
 // the emitter) lives in its own file; the walk, the shared trampoline and
 // runtime rules, and the platform reads stay here.
-mod codex;
 mod grok;
 mod omp;
 mod positional;
-pub(crate) use codex::codex_corridor;
 pub(crate) use grok::grok_corridor;
 pub(crate) use omp::omp_corridor;
 pub(crate) use positional::{PositionalReporter, positional_corridor};
@@ -655,17 +653,15 @@ fn has_unquoted_shell_syntax(command: &str) -> bool {
 /// (`sh -c '<farhelm> internal hook ...'`). The command must be exactly
 /// one simple command: any unquoted control operator, redirection,
 /// substitution, or other executable shell syntax refuses, even when the
-/// hook comes first. An interactive shell, a script, a chained command,
-/// or any other image is an unclassified intermediary and refuses, as
-/// does any other session-hosting runtime.
+/// hook comes first. A positional corridor treats the first unskipped
+/// process as the emitter. OMP still verifies its own launch shape.
 ///
 /// Argv is self-reported by the intermediary, so this classifies honest
 /// trampolines; it cannot unmask a descendant that forges the exact hook
 /// shape. That forgery is outside the attribution model (inherited
 /// credentials are not a same-user security boundary — see the module
-/// docs): the value is refusing every delegated path that does NOT
-/// bother to mimic, while the resumable-or-clear gate still bounds what
-/// a mimicking reporter can establish without a valid record.
+/// docs). Positional callers protect the selection with the report pin
+/// and any vendor record checks.
 fn is_hook_trampoline(exe: &[u8], argv: &[Vec<u8>]) -> bool {
     let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
     if !matches!(name, b"sh" | b"bash" | b"dash") {
@@ -1105,19 +1101,6 @@ mod imp {
         std::fs::read_link(format!("/proc/{pid}/cwd"))
             .ok()
             .map(|path| path.as_os_str().as_bytes().to_vec())
-    }
-
-    /// Whether raw `exe` bytes name a native Codex image: the basename
-    /// check the emitter has always applied, over bytes the caller
-    /// already captured, so the walk and the corridor cannot observe two
-    /// different images for one edge.
-    pub(super) fn is_codex_image(exe: &[u8]) -> bool {
-        // Byte-level basename, exactly as the emitter has always applied
-        // it: no UTF-8 decoding, so a non-UTF-8 image path decides on its
-        // raw bytes rather than on a lossy rendering of them.
-        let name = exe.rsplit(|byte| *byte == b'/').next().unwrap_or_default();
-        // procfs marks the image this way after an atomic executable update.
-        name.strip_suffix(b" (deleted)").unwrap_or(name) == b"codex"
     }
 
     /// The bounded `/proc/<pid>/cmdline` split: NUL-separated argv with
@@ -1702,13 +1685,6 @@ mod imp {
         }
         let bytes = &path[..len as usize];
         Ok(bytes.strip_suffix(&[0]).unwrap_or(bytes).to_vec())
-    }
-
-    /// Whether raw `proc_pidpath` bytes name a native Codex image: the
-    /// basename check the emitter has always applied, over bytes the
-    /// caller already captured.
-    pub(super) fn is_codex_image(exe: &[u8]) -> bool {
-        exe.rsplit(|byte| *byte == b'/').next() == Some(b"codex".as_slice())
     }
 
     /// No working-directory read on macOS: OMP's relative entry resolution
@@ -2743,15 +2719,16 @@ mod tests {
     /// The direct-child shape every production hook takes: no
     /// intermediary between the reporter and the runtime.
     ///
-    /// This is the shape the corridor must keep admitting — the fix for
-    /// unclassified intermediaries below must not narrow it.
+    /// The first process above a direct hook stays the emitter under the
+    /// shared positional rule.
     #[farhelm_testtrace::test]
     fn a_direct_hook_child_of_the_runtime_is_admitted() {
         let chain = vec![
             corridor_link(11, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let emitter = codex_corridor(&chain).expect("a direct hook child must be admitted");
+        let emitter = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("a direct hook child must be admitted");
         assert_eq!(
             emitter.emitter.pid, 10,
             "the emitter is the one Codex image"
@@ -2778,7 +2755,8 @@ mod tests {
             ),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let emitter = codex_corridor(&chain).expect("a hook trampoline must be admitted");
+        let emitter = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("a hook trampoline must be admitted");
         assert_eq!(emitter.emitter.pid, 10);
     }
 
@@ -2792,7 +2770,10 @@ mod tests {
             corridor_link(11, "/opt/test/bin/codex", &["codex"]),
             corridor_link(10, "/bin/bash", &["-bash"]),
         ];
-        codex_corridor(&chain).expect("the pane anchor must not need trampoline shape");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the pane anchor can be a wrapper");
+        assert_eq!(attribution.emitter.pid, 11);
+        assert_eq!(attribution.ancestors[0].pid, 10);
     }
 
     /// Launch ancestry above the emitter may contain arbitrary intermediaries.
@@ -2806,10 +2787,17 @@ mod tests {
             corridor_link(11, "/usr/bin/node", &["node", "codex.js"]),
             corridor_link(10, "/bin/bash", &["bash", "launch.sh"]),
         ];
-        let attribution =
-            codex_corridor(&chain).expect("launch wrappers above the emitter are accepted");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("launch wrappers above the emitter are accepted");
         assert_eq!(attribution.emitter.pid, 12);
-        assert!(attribution.ancestors.is_empty());
+        assert_eq!(
+            attribution
+                .ancestors
+                .iter()
+                .map(|link| link.pid)
+                .collect::<Vec<_>>(),
+            [11, 10]
+        );
     }
 
     /// A reporter that is not the hook invocation cannot report, even with
@@ -2827,7 +2815,8 @@ mod tests {
                 corridor_link(11, "/opt/test/bin/farhelm", &argv),
                 corridor_link(10, "/opt/test/bin/codex", &["codex"]),
             ];
-            let refusal = codex_corridor(&chain).expect_err("a non-hook reporter must be refused");
+            let refusal = positional_corridor(&chain, PositionalReporter::BuiltIn)
+                .expect_err("a non-hook reporter must be refused");
             assert!(
                 refusal.contains("supported hook invocation"),
                 "the diagnostic must name the missing hook shape: {refusal}"
@@ -2843,15 +2832,15 @@ mod tests {
             corridor_link_no_argv(11, "/opt/test/bin/farhelm"),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal = codex_corridor(&chain).expect_err("missing reporter argv must be refused");
+        let refusal = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect_err("missing reporter argv must be refused");
         assert!(refusal.contains("supported hook invocation"), "{refusal}");
     }
 
-    /// An interactive shell between reporter and runtime is unclassified:
-    /// it may run anything, so the corridor cannot treat it as a
-    /// transparent trampoline.
+    /// An interactive shell runs the hook itself. Attributing its report
+    /// to the Codex ancestor would let it bypass that ancestor's process pin.
     #[farhelm_testtrace::test]
-    fn an_interactive_shell_intermediary_is_refused() {
+    fn an_interactive_shell_is_the_emitter() {
         let chain = vec![
             corridor_link(13, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(12, "/bin/bash", &["bash"]),
@@ -2862,30 +2851,29 @@ mod tests {
             ),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        // The inner trampoline is well-formed; the interactive shell above
-        // it is not, and one unclassified link refuses the whole chain.
-        let refusal = codex_corridor(&chain).expect_err("an interactive shell must be refused");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the shell ran the hook");
+        assert_eq!(attribution.emitter.pid, 12);
     }
 
-    /// A shell running a script is not a trampoline even when the script
-    /// eventually runs the hook: the corridor sees the intermediary's own
-    /// shape (`sh script`), not what the script does later.
+    /// A shell script that invokes the hook reports for its own process.
+    /// Only the simple hook invocation can pass through to the ancestor.
     #[farhelm_testtrace::test]
-    fn a_script_running_shell_intermediary_is_refused() {
+    fn a_shell_running_a_script_is_the_emitter() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(11, "/bin/sh", &["sh", "/tmp/reporter.sh"]),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal = codex_corridor(&chain).expect_err("a script intermediary must be refused");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the script's shell ran the hook");
+        assert_eq!(attribution.emitter.pid, 11);
     }
 
-    /// A chained `-c` command mentions the hook without being only the
-    /// hook: substring presence must not pass.
+    /// A chained `-c` command owns its report. Mentioning the hook cannot
+    /// transfer the report to the process above the shell.
     #[farhelm_testtrace::test]
-    fn a_chained_shell_command_mentioning_the_hook_is_refused() {
+    fn a_chained_shell_command_is_the_emitter() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(
@@ -2899,9 +2887,9 @@ mod tests {
             ),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal =
-            codex_corridor(&chain).expect_err("a chained command must not pass as a trampoline");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the chained shell ran the hook");
+        assert_eq!(attribution.emitter.pid, 11);
     }
 
     /// A hook-first `-c` command with a redirection and a second command
@@ -2910,7 +2898,7 @@ mod tests {
     /// shell executes the redirection and the chained command too. The
     /// trampoline must be exactly one simple command.
     #[farhelm_testtrace::test]
-    fn a_hook_first_chained_shell_command_is_refused() {
+    fn a_hook_first_chained_shell_command_is_the_emitter() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(
@@ -2924,16 +2912,16 @@ mod tests {
             ),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal = codex_corridor(&chain)
-            .expect_err("a hook-first chained command must not pass as a trampoline");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the chained shell ran the hook");
+        assert_eq!(attribution.emitter.pid, 11);
     }
 
     /// A redirection alone is executable shell syntax beyond the hook:
     /// the same single command with its stdin replaced is not the
     /// supported simple command.
     #[farhelm_testtrace::test]
-    fn a_hook_command_with_a_redirection_is_refused() {
+    fn a_hook_command_with_a_redirection_is_the_emitter() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(
@@ -2947,16 +2935,16 @@ mod tests {
             ),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal = codex_corridor(&chain)
-            .expect_err("a redirected hook command must not pass as a trampoline");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the redirecting shell ran the hook");
+        assert_eq!(attribution.emitter.pid, 11);
     }
 
     /// A substitution inside `-c` runs a second command to build the
     /// hook's surroundings. Word splitting hides it inside one word; the
     /// syntax scan must still see the `$`.
     #[farhelm_testtrace::test]
-    fn a_hook_command_with_a_substitution_is_refused() {
+    fn a_hook_command_with_a_substitution_is_the_emitter() {
         for command in [
             "/opt/test/bin/farhelm internal hook --vendor $(printf codex)",
             "/opt/test/bin/farhelm internal hook --vendor `printf codex`",
@@ -2968,9 +2956,9 @@ mod tests {
                 corridor_link(11, "/bin/sh", &["sh", "-c", command]),
                 corridor_link(10, "/opt/test/bin/codex", &["codex"]),
             ];
-            let refusal = codex_corridor(&chain)
-                .expect_err("a hook command with extra shell syntax must be refused: {command}");
-            assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+            let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+                .expect("the shell ran the hook");
+            assert_eq!(attribution.emitter.pid, 11, "{command}");
         }
     }
 
@@ -2990,28 +2978,25 @@ mod tests {
                 corridor_link(11, "/bin/sh", &["sh", "-c", command]),
                 corridor_link(10, "/opt/test/bin/codex", &["codex"]),
             ];
-            let emitter = codex_corridor(&chain)
+            let emitter = positional_corridor(&chain, PositionalReporter::BuiltIn)
                 .expect("a quoted-path trampoline must be admitted: {command}");
             assert_eq!(emitter.emitter.pid, 10);
         }
     }
 
-    /// Another harness between reporter and runtime refuses with its own
-    /// message, so the diagnostic names the mechanism.
+    /// A non-shell intermediary owns its report even if its image is another
+    /// known runtime. A Codex ancestor's pin still protects its conversation.
     #[farhelm_testtrace::test]
-    fn another_runtime_between_reporter_and_foreground_is_refused() {
-        for (exe, message) in [
-            ("/opt/test/bin/claude", "another session-hosting runtime"),
-            ("/usr/local/bin/node", "unclassified intermediary"),
-        ] {
+    fn another_runtime_between_reporter_and_foreground_is_the_emitter() {
+        for exe in ["/opt/test/bin/claude", "/usr/local/bin/node"] {
             let chain = vec![
                 corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
                 corridor_link(11, exe, &[exe, "--run", "harness"]),
                 corridor_link(10, "/opt/test/bin/codex", &["codex"]),
             ];
-            let refusal =
-                codex_corridor(&chain).expect_err("a foreign intermediary must be refused");
-            assert!(refusal.contains(message), "{refusal}");
+            let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+                .expect("the intermediary ran the hook");
+            assert_eq!(attribution.emitter.pid, 11, "{exe}");
         }
     }
 
@@ -3038,7 +3023,8 @@ mod tests {
             ),
         );
         for chain in [direct, trampoline] {
-            let attribution = codex_corridor(&chain).expect("the inner Codex emitted this hook");
+            let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+                .expect("the inner Codex emitted this hook");
             assert_eq!(
                 attribution.emitter,
                 ProcessIdentity {
@@ -3056,10 +3042,10 @@ mod tests {
         }
     }
 
-    /// No Codex image at all still refuses: the corridor never admits on
-    /// ancestry shape alone.
+    /// A renamed Codex remains the reporting process after the hook
+    /// trampoline is skipped, even when a different process is the terminal root.
     #[farhelm_testtrace::test]
-    fn a_chain_without_any_codex_image_is_refused() {
+    fn a_renamed_codex_image_can_emit_the_hook() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link(
@@ -3067,27 +3053,27 @@ mod tests {
                 "/bin/sh",
                 &["sh", "-c", "farhelm internal hook --vendor codex"],
             ),
-            corridor_link(10, "/bin/bash", &["-bash"]),
+            corridor_link(10, "/opt/test/bin/codex-versioned", &["codex-versioned"]),
+            corridor_link(9, "/bin/bash", &["bash", "resident-launcher.sh"]),
         ];
-        let refusal = codex_corridor(&chain).expect_err("a chain without Codex must be refused");
-        assert!(
-            refusal.contains("no attributable Codex executable"),
-            "{refusal}"
-        );
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the first non-trampoline is Codex");
+        assert_eq!(attribution.emitter.pid, 10);
+        assert_eq!(attribution.ancestors[0].pid, 9);
     }
 
-    /// Missing intermediary argv cannot match the trampoline shape, so it
-    /// refuses rather than passing on image alone.
+    /// Without argv, the first shell cannot prove that it is a trampoline.
+    /// Attribute it independently so the ancestor's pin remains meaningful.
     #[farhelm_testtrace::test]
-    fn an_intermediary_without_readable_argv_is_refused() {
+    fn a_shell_without_readable_argv_is_the_emitter() {
         let chain = vec![
             corridor_link(12, "/opt/test/bin/farhelm", &hook_argv()),
             corridor_link_no_argv(11, "/bin/sh"),
             corridor_link(10, "/opt/test/bin/codex", &["codex"]),
         ];
-        let refusal =
-            codex_corridor(&chain).expect_err("an unreadable intermediary must be refused");
-        assert!(refusal.contains("unclassified intermediary"), "{refusal}");
+        let attribution = positional_corridor(&chain, PositionalReporter::BuiltIn)
+            .expect("the shell is an emitter");
+        assert_eq!(attribution.emitter.pid, 11);
     }
 
     /// Versioned images can report when the process that ran the hook uses

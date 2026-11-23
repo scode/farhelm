@@ -4225,39 +4225,34 @@ no path values are stored in the notice.
 
   **Codex attribution and exact-record validation.** The hook records its own process ancestry when it makes a report,
   and the supervisor anchors that chain at the session's agent terminal's root process (see the shared framework below).
-  For a Codex report, the innermost native executable whose basename is `codex` is the emitter. Any processes above it
-  are launch ancestry, including resident Codex-named launchers, scripts, shells and package managers. The supported
-  process chains are documented in [the Codex integration](website/src/content/docs/docs/agents/codex.md). The reporter
-  must spell the installed hook invocation (`<farhelm> internal hook …`, matched syntactically so an upgraded supervisor
-  still accepts older hooks), and every link between that reporter and the emitter must be a narrow shell trampoline
-  directly invoking it (`sh -c '<farhelm> internal hook …'` — the shape vendor hook runners produce) as exactly one
-  simple command: any unquoted control operator, redirection, substitution, or other executable shell syntax refuses
-  even when the hook comes first, while metacharacters inside quoted paths stay literal; another session-hosting runtime
-  or any unclassified intermediary (interactive shell, script, chained command, unreadable argv) refuses. Argv
-  classifies honest trampolines only: a descendant forging the exact hook shape is outside the attribution model.
-  Unavailable process evidence refuses the report without changing the current identity. This is attribution under
-  inherited credentials, not a security boundary against the same Unix user. Renamed native executables are not
-  recognized.
+  Codex uses the shared positional corridor. The reporter must spell the installed invocation
+  (`<farhelm> internal hook …`). The first process above the reporter after skipping narrow shell trampolines is the
+  emitter. An interactive shell or a script that invokes the hook reports for its own process. Renamed executables work.
+  Resident launchers, scripts, shells and package managers above the emitter are launch ancestry. A child that runs a
+  valid hook before Codex reports can become the first pinned process. Once the parent has a pin, a descendant cannot
+  take over its conversation. Unavailable pin liveness evidence refuses the report and preserves the current binding.
+  See [the Codex integration](website/src/content/docs/docs/agents/codex.md) for launch shapes.
 
-  The first admitted selecting report pins its emitter and records the Codex-image ancestors above it, each by PID and
-  kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
+  The first admitted selecting report pins its emitter and records every ancestor through the terminal root, each by PID
+  and kernel start token. A nullable JSON `codex_report_pin` column on the session row holds this launch authority
   separately from the conversation locator. The historical SQL name and JSON shape are retained for the shared
-  `ReportPin` used by Claude, Codex, Muse and Antigravity; a session has only one agent kind, so no migration or vendor
-  tag is needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the capture
-  claim and writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing the
-  complete prior binding and exact previous pin. The writer takes the replacement ownership version explicitly: Codex
-  passes 1, while the positional integrations pass 0; the previous version remains an independent CAS precondition. No
-  in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later reports must come from the
-  pinned emitter, preserving the original stored ancestry rather than replacing it with a later snapshot. A recorded
-  Codex ancestor takes precedence: its verified record independently selects and corrects both pin and conversation,
-  never inheriting the child's file or persistent thread. A correction records the once-per-launch Codex correction
-  notification in the same transaction as adoption; notification-write failure rolls back the correction, and reload
-  restores it even if publication was interrupted. It does not resolve on capture because it records the prior mistaken
-  target. An unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin whose
-  process is gone, reused or non-running releases for a fresh emitter only if the pin is absent from the new report's
-  chain; descendants cannot inherit authority after its exit. Unavailable process evidence does not release it. Rows
-  already running across an upgrade start unpinned: a nested child's first selecting report after upgrade may pin it,
-  and the root's next report corrects and notifies. There is no upgrade suppression.
+  `ReportPin` used by Claude, Codex, Muse, Grok and Antigravity. A session has only one agent kind, so no migration or
+  vendor tag is needed. Schema 31 defaults existing rows to NULL without backfill. Admission reads the pin under the
+  capture claim and writes it through `Store::admit_pinned_conversation` in the same CAS as the conversation, fencing
+  the complete prior binding and exact previous pin. The writer takes the replacement ownership version explicitly.
+  Codex and Grok pass 1. Plain-ID positional integrations pass 0. The previous version remains an independent CAS
+  precondition. No in-memory pin mirror is needed. Relaunch clears it, and abort does not restore it. Later reports must
+  come from the pinned emitter, preserving the original stored ancestry rather than replacing it with a later snapshot.
+  A recorded ancestor takes precedence: its verified record independently selects and corrects both pin and
+  conversation, never inheriting the child's file or persistent thread. A correction records the once-per-launch Codex
+  correction notification in the same transaction as adoption; notification-write failure rolls back the correction, and
+  reload restores it even if publication was interrupted. It does not resolve on capture because it records the prior
+  mistaken target. An unverified ancestor changes nothing, and its unready Stop is acknowledged without effect. A pin
+  whose process is gone, reused or non-running releases for a fresh emitter only if the pin is absent from the new
+  report's chain; descendants cannot inherit authority after its exit. Unavailable process evidence does not release it.
+  A live Codex launch carries its stored pin across an upgrade. That pin keeps the ancestors recorded by the old
+  corridor until it is replaced or the session relaunches. If the launch has no pin, a nested child's selecting report
+  may pin it first, and the root's next verified report can correct it and notify.
 
   Process evidence is necessary but not sufficient: threads may share a process. A versioned `codex:` locator binds the
   reported runtime session ID to an absolute transcript path and a separately verified persistent thread ID. The bounded
@@ -4332,28 +4327,24 @@ no path values are stored in the notice.
   start token pinned while that process ran, and by pid alone for a child that had already exited when its host was
   adopted (`procs::TerminalAnchor`), and is cut there; it must be one unbroken line of parents within the depth and argv
   budgets, re-checked because the chain is now file input. Every launch runs a new root process, so anchoring is also
-  what ties a report to its launch, for every vendor. The per-kind step applies its own restrictive corridor to the
-  anchored chain — only the reporter plus a narrow trampoline between runtime and reporter; any other session-hosting
-  runtime or unclassified intermediary below the emitter refuses. Codex attributes its hook-shaped reporter through
-  shell-`-c` trampolines to the innermost native `codex`, accepts arbitrary ancestry above it, and applies its durable
-  process pin. Claude, Muse, Antigravity and Grok select their emitter by position through the same narrow hook
-  trampolines, accept arbitrary ancestry above it, and use the shared pin with every recorded ancestor eligible to
-  correct it. Grok checks `--no-leader` on the emitter. Admission runs five steps: cheap envelope/kind/generation gating
-  with no vendor I/O (the report file's discriminator check re-applied against the fenced resolution, plus raw
-  event/source/agent-identity validation before diagnostic sanitation); the unbounded capture claim (one shared
-  session-keyed `capture_locks` registry for report admission and readiness refresh, never the lifecycle claim; slow
-  waits are logged for diagnostics) and a reload comparing kind, generation, and the complete prior binding; the
-  mutation-free runtime and vendor-root proofs over the recorded chain (evidence recorded when the report was made
-  cannot change during verification, so there is no repeat walk); the atomic generation-plus-complete-binding CAS
-  committing identity, locator, provenance, source, readiness reset, and, for pinned kinds, the replacement pin and any
-  correction notification together, with the exact prior pin as an additional fence; and the mirror of only the
-  committed result into the matching current-generation entry under the same claim. Rejection at any pre-write step
-  changes nothing durable, in memory, pending, or offered. Refresh and report-only reconciliation passes take the same
-  claim and reload before mirroring, carrying the row's version beside the identity, so memory-derived offers apply the
-  same gate as row-derived ones without a second lookup — and a rejected report never triggers a readiness withdrawal
-  through them. Restart verification and lifecycle resets retain their durable generation/binding fences; they do not
-  all acquire this capture claim. The report claim has no time limit because every operation under it is local and no
-  hook waits on it; a slow wait is logged for diagnostics.
+  what ties a report to its launch, for every vendor. Codex, Claude, Muse, Antigravity and Grok select their emitter by
+  position through narrow hook trampolines, accept arbitrary ancestry above it, and use the shared pin with every
+  recorded ancestor eligible to correct it. Grok checks `--no-leader` on the emitter. OMP verifies its own launch shape.
+  Admission runs five steps: cheap envelope/kind/generation gating with no vendor I/O (the report file's discriminator
+  check re-applied against the fenced resolution, plus raw event/source/agent-identity validation before diagnostic
+  sanitation); the unbounded capture claim (one shared session-keyed `capture_locks` registry for report admission and
+  readiness refresh, never the lifecycle claim; slow waits are logged for diagnostics) and a reload comparing kind,
+  generation, and the complete prior binding; the mutation-free runtime and vendor-root proofs over the recorded chain
+  (evidence recorded when the report was made cannot change during verification, so there is no repeat walk); the atomic
+  generation-plus-complete-binding CAS committing identity, locator, provenance, source, readiness reset, and, for
+  pinned kinds, the replacement pin and any correction notification together, with the exact prior pin as an additional
+  fence; and the mirror of only the committed result into the matching current-generation entry under the same claim.
+  Rejection at any pre-write step changes nothing durable, in memory, pending, or offered. Refresh and report-only
+  reconciliation passes take the same claim and reload before mirroring, carrying the row's version beside the identity,
+  so memory-derived offers apply the same gate as row-derived ones without a second lookup — and a rejected report never
+  triggers a readiness withdrawal through them. Restart verification and lifecycle resets retain their durable
+  generation/binding fences; they do not all acquire this capture claim. The report claim has no time limit because
+  every operation under it is local and no hook waits on it; a slow wait is logged for diagnostics.
 
   **Ownership provenance and the offer gate.** Migration 20 adds `capture_ownership_version`
   (`INTEGER NOT NULL DEFAULT 0`, identical in fresh DDL and `ALTER`, tables kept `STRICT`): 0 means not established

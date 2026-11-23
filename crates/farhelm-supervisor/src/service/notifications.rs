@@ -209,8 +209,8 @@ pub(crate) const OLD_TERMINAL_ENDED_TEXT: &str = "This session ran in an old ter
 /// Describe the correction without promising that no further ancestor can report.
 /// The notification remains unresolved so the store posts it once per launch.
 pub(crate) const CODEX_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a Codex conversation \
-    started by another Codex process in this session. A Restart before now would have resumed \
-    that conversation. Farhelm now follows the conversation of the Codex process that started it.";
+    reported by another process in this session. A Restart before now could have resumed that \
+    conversation. Farhelm now follows the conversation reported by one of that process's ancestors.";
 
 /// Record the previous Restart target after a Grok ancestor corrects the selection.
 pub(crate) const GROK_PIN_CORRECTED_TEXT: &str = "Farhelm had been following a conversation \
