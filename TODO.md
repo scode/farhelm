@@ -4,17 +4,18 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Twelve buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to remove
-— the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses duplicate
-review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan ran or
-landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "near term" is what should
-be picked up next; "mid term" is wanted after the near-term work, sooner than "maybe later"; "doc todo" holds
-documentation work; "tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers
-test and harness reliability work, including CI execution and restoring gates; "broken tests" records tests that fail
-deterministically, with the failure and the evidence that it predates any in-flight work; "code cleanup" holds
-structural code smells from a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted
-but not soon, and may never happen; "unbucketized" is everything not yet sorted, which carries no implication either
-way. Within a bucket, no order unless the bucket explicitly says so.
+Thirteen buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to
+remove — the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses
+duplicate review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan
+ran or landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "near term" is what
+should be picked up next; "linux support" holds Linux desktop app installation, packaging, and Linux-specific feature
+work; "mid term" is wanted after the near-term work, sooner than "maybe later"; "doc todo" holds documentation work;
+"tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers test and harness
+reliability work, including CI execution and restoring gates; "broken tests" records tests that fail deterministically,
+with the failure and the evidence that it predates any in-flight work; "code cleanup" holds structural code smells from
+a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted but not soon, and may never
+happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no order
+unless the bucket explicitly says so.
 
 Near term's "Plan follow-up" subsection holds the entries that came out of plans (follow-ups asked for in review,
 leftovers from reports and landing notes), kept apart from the rest of the near-term work.
@@ -85,12 +86,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   intended changes; their one clear catch was two changes that broke the Trash dialog together (#3662). The options
   include exact comparison, a tolerance-based comparison, or keeping them a development-only check. Only then pick where
   the pictures live so a release can reach them (a read token for the release runners, a public store, another home, or
-  back in the repository), and add them to the release workflow next to the end-to-end GUI smoke.
-
-- **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
-  and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
-  Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
-  link, the tunnel pill, and the approval card's Tunnel and open, with the same consent and refusal rules as the Mac.
+  back in the repository), and add them to the release workflow next to the end-to-end GUI smoke. Plan:
+  `plans/queue/gui-goldens-in-releases.md`.
 
 - **Recognize Muse Code questions and approvals.** Detect questions and approval dialogs during a conversation from real
   Muse screens. These can currently look idle while Muse waits for an answer. Capturing them needs an authenticated test
@@ -158,27 +155,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   2026-11-14; first measure the old app with 200 running sessions for a fair comparison, then profile what each update
   costs in the app.
 
-- **Linux installation and updates for the desktop app.** The GPUI desktop app runs on Linux but has no install story:
-  no package (tarball, .deb, AppImage or Flatpak not chosen), no desktop entry or icon install beyond what a build
-  provides, and no auto-update (the updater runs only in the installed Mac app, so Linux shows no update UI). Decide the
-  package form and architectures, how updates arrive (a self-updater, the package manager, or manual), and write the
-  install docs and SPEC "Installation and updates"' Linux sentences to match. Known Linux issues to settle with it:
-  - No desktop entry or icon is installed, so there is no menu launcher. The app id the entry must match is
-    `org.scode.farhelm.desktop`, the Mac bundle id, reused on Linux until decided otherwise. A second launch brings the
-    open window forward by forwarding its `XDG_ACTIVATION_TOKEN`, so the launcher must pass one for the compositor to
-    allow focus.
-  - A launch without a Wayland display refuses with a line on stderr only (Linux has no native alert on that path), so a
-    launch from a desktop menu in an X11-only session shows nothing. X11 is not supported at all.
-  - No updater and no update UI on Linux: the updater runs only in the installed Mac bundle.
-  - The local supervisor is started detached and outlives the app, as on the Mac; whether an installed Linux app should
-    run it some other way (a systemd user unit, say) is open. SPEC "Topology"'s Linux NOTE says how the Linux app runs
-    and keeps its local supervisor is not specified yet; it needs replacing once this is decided.
-  - Under KDE (KWin draws the title bar) the app is untested: no drawn bar, no GPUI Kit frame margin, the 722 by 596
-    minimum, and drag, resize and close by KWin's own bar.
-  - In a real GNOME session the drawn title bar's drag, double-click maximize and Minimize are untested (headless Mutter
-    has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
-    another path than the drawn Close button, also untested.
-
 - **Harden the repository cache's Git lock repair.** Since the repo-cache-stale-git-locks plan (#3296), checkout
   preparation and background cache cleanup delete Git lock files left in a host's repository cache by an interrupted
   job, while holding Farhelm's own exclusive cache lock (`clear_git_locks` in
@@ -211,7 +187,8 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   to fundamentally rethink this. This cannot be this complicated. We cannot rely on these implementation details and
   whatever in Git; we need to fundamentally redesign this." Planning research that day also found that the parent-death
   signal recommended above would not cover background cleanup, where `git gc` hands the branch-list rewrite to a child
-  process the signal does not reach, and that it is Linux-only while the cache runs on Macs too.
+  process the signal does not reach, and that it is Linux-only while the cache runs on Macs too. Plan:
+  `plans/queue/repo-cache-lock-redesign.md`.
 
 - **Remove the "Remove the bundled tmux" step from Add and Update.** Since tmux-drop-from-install (#3371 to #3374),
   every Add and Update plan for a remote Linux host includes a step that deletes the tmux copy earlier releases
@@ -258,6 +235,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   remote Linux host. Extend it to a remote Mac. That needs new Tart fixture work: the one Mac guest runs the helm, and
   remote setup, Update and uninstall are refused on a Mac with the desktop app installed (SPEC.md, "Topology"), so the
   remote Mac has to be a second Mac guest without the app. The procedure is in `releasing/mac-vm-test/BRICK-TEST.md`.
+  Plan: `plans/queue/brick-test-remote-mac-uninstall.md`.
 
 ### Plan follow-up
 
@@ -465,6 +443,34 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   minutes while its being used or something liek that (details tbd during planning of todo item)
 - **Host auto-update may stall on 2FA prompts.** i THINK auto-updating of hosts may stop working when 2fa prompts are
   involved. at least i had to click in an environment where i also have a 2fa prompt. tbd during planning.
+
+## Linux support
+
+- **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
+  and open) only in the Mac app; on Linux the pill, the consent switch and the card's Tunnel and open are not offered.
+  Port them to the Linux desktop app: the tunnel consent switch in Settings → Terminal, Ctrl-click to tunnel a loopback
+  link, the tunnel pill, and the approval card's Tunnel and open, with the same consent and refusal rules as the Mac.
+
+- **Linux installation and updates for the desktop app.** The GPUI desktop app runs on Linux but has no install story:
+  no package (tarball, .deb, AppImage or Flatpak not chosen), no desktop entry or icon install beyond what a build
+  provides, and no auto-update (the updater runs only in the installed Mac app, so Linux shows no update UI). Decide the
+  package form and architectures, how updates arrive (a self-updater, the package manager, or manual), and write the
+  install docs and SPEC "Installation and updates"' Linux sentences to match. Known Linux issues to settle with it:
+  - No desktop entry or icon is installed, so there is no menu launcher. The app id the entry must match is
+    `org.scode.farhelm.desktop`, the Mac bundle id, reused on Linux until decided otherwise. A second launch brings the
+    open window forward by forwarding its `XDG_ACTIVATION_TOKEN`, so the launcher must pass one for the compositor to
+    allow focus.
+  - A launch without a Wayland display refuses with a line on stderr only (Linux has no native alert on that path), so a
+    launch from a desktop menu in an X11-only session shows nothing. X11 is not supported at all.
+  - No updater and no update UI on Linux: the updater runs only in the installed Mac bundle.
+  - The local supervisor is started detached and outlives the app, as on the Mac; whether an installed Linux app should
+    run it some other way (a systemd user unit, say) is open. SPEC "Topology"'s Linux NOTE says how the Linux app runs
+    and keeps its local supervisor is not specified yet; it needs replacing once this is decided.
+  - Under KDE (KWin draws the title bar) the app is untested: no drawn bar, no GPUI Kit frame margin, the 722 by 596
+    minimum, and drag, resize and close by KWin's own bar.
+  - In a real GNOME session the drawn title bar's drag, double-click maximize and Minimize are untested (headless Mutter
+    has no pointer drag and no visible minimize), and a close the compositor asks for (Alt+F4) reaches the app by
+    another path than the drawn Close button, also untested.
 
 ## Mid term
 
