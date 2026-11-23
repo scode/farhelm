@@ -125,7 +125,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
     Farhelm identifies an agent's conversation only from the harness's own explicit report. Also decide whether Restart
     keeps the old id until a new report arrives or clears it, whether the reporter gets a mode to withdraw the target
     ("no resumable conversation yet"), and whether to offer optional nesting protection (only admit a report when a
-    process with a named executable sits between the pane and the reporter).
+    process with a named executable sits between the pane and the reporter). Plan: `plans/queue/custom-agents.md`.
 
 - **Run the desktop app's own supervisor as the same launchd job remote Macs get.** Asked for by the maintainer on
   2026-11-08 while planning remote macOS hosts: once that plan has landed and remote Macs are validated as stable, move
