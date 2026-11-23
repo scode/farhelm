@@ -8,7 +8,7 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [complete] `fix-muse-conversation-reporting.md` — Pass non-secret session identity args to Muse Code hooks across environment scrubbing
 - [in-flight 61b9d9] `button-restyle.md` — Restyle buttons and button-like controls without outlines, with the larger session toolbar
 - [complete] `gui-goldens-in-releases.md` — Document keeping GPUI screenshot goldens development- and landing-only and remove the TODO entry
-- [in-flight b55dd0] `repo-cache-lock-redesign.md` — Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
+- [complete] `repo-cache-lock-redesign.md` — Replace repository cache Git lock deletion with atomic quarantine-and-rebuild
 - [in-flight 66ac6b] `brick-test-remote-mac-uninstall.md` — Extend release brick test P1 with a Tart-managed remote Mac uninstall pass
 - [in-flight aeef77] `remove-host-signin-lock.md` — Stop removing an SSH host from blocking on open sign-in prompts and probes
 - [pending] `eye-catching-pending-upgrade.md` — Highlight pending desktop updates with a tinted red pill and periodic reminder animation
