@@ -45,9 +45,7 @@ pub(crate) struct ProbeRequest {
     /// Present only on an add from the add host dialog, which asks for a NEW
     /// host entry (see `crate::store::NewHostEntry`): an existing entry for
     /// the destination is then refused instead of set up again, and the new
-    /// entry gets the alias. Every other caller of this request (a host
-    /// row's "set up again", update confirmation, an old browser page from before
-    /// this field existed) leaves it out and keeps the converging behavior.
+    /// entry gets the alias. Registered setup and legacy destination-only discovery leave it out to converge.
     #[serde(default)]
     pub(super) new_entry: Option<NewEntryRequest>,
 }
@@ -73,6 +71,11 @@ pub(super) enum ProbeDestination {
         /// A legacy request omits this field and inherits the stored mode.
         #[serde(default)]
         tailscale: Option<bool>,
+    },
+    /// Set up one registered SSH host. Keep the destination from the initiating UI action across a sign-in replay.
+    SshHost {
+        host: HostId,
+        destination: String,
     },
     Tensorlake {
         name: String,

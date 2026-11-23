@@ -22,7 +22,7 @@ use crate::AppState;
 use crate::access::RemoteRoute;
 use crate::ssh::{SharedConnection, SshAccessKind};
 use crate::ssh_sign_in::{Attempt, BeforeQuestion, SignIn, SignInNeeded};
-use crate::store::HostRow;
+use crate::store::{HostId, HostRow};
 
 const CONNECT: Duration = Duration::from_secs(15);
 const RETAIN: Duration = Duration::from_secs(180);
@@ -36,7 +36,7 @@ pub(super) struct Pending {
     pub(super) attempt: Attempt,
     destination: String,
     access: SshAccessKind,
-    entry: Option<(i64, String)>,
+    entry: Option<(HostId, String)>,
 }
 
 struct Completion {
@@ -44,13 +44,19 @@ struct Completion {
     at: Instant,
 }
 
+/// A detached preflight can need cancellation before its first SSH question exists.
+struct ActiveAttempt {
+    host: Option<HostId>,
+    cancel: oneshot::Sender<()>,
+}
+
 pub(super) struct SetupSignIn {
     relay: Arc<SignIn>,
     program: PathBuf,
     connect_timeout: Duration,
     completed: Mutex<VecDeque<Completion>>,
-    /// Add can close before there is a question id. Keep its cancel sender from the pending reply through cleanup.
-    drafts: Mutex<HashMap<String, oneshot::Sender<()>>>,
+    /// Cancel from the pending reply through cleanup, by attempt for Add and by host for Remove.
+    active: Mutex<HashMap<String, ActiveAttempt>>,
 }
 
 impl SetupSignIn {
@@ -60,7 +66,7 @@ impl SetupSignIn {
             program,
             connect_timeout: CONNECT,
             completed: Mutex::default(),
-            drafts: Mutex::default(),
+            active: Mutex::default(),
         }
     }
 
@@ -119,21 +125,21 @@ impl SetupSignIn {
     }
 
     /// Start the preflight after sending its correlation in the command reply path. The result remains readable
-    /// whether it finished before or after the channel next projects its collections.
+    /// whether it finished before or after the channel next projects its collections. Publish cancellation before
+    /// the task reads the registered row, so removal can either cancel the task or make its first lookup fail.
     pub(super) fn start(self: &Arc<Self>, pending: Pending, state: Arc<AppState>) {
         let setup = Arc::clone(self);
-        let cancel = pending.attempt.is_draft().then(|| {
-            let (send, recv) = oneshot::channel();
-            self.drafts
-                .lock()
-                .expect("SSH setup draft mutex")
-                .insert(pending.attempt.id.clone(), send);
-            recv
-        });
+        let (send, cancel) = oneshot::channel();
+        self.active.lock().expect("SSH setup active mutex").insert(
+            pending.attempt.id.clone(),
+            ActiveAttempt {
+                host: pending.entry.as_ref().map(|(host, _)| *host),
+                cancel: send,
+            },
+        );
         tokio::spawn(async move {
             let wait = async {
-                // Registered preflights have no draft cancellation request.
-                // The host lock keeps a mode edit from overtaking their SSH process.
+                // The route guard keeps a Tailscale mode edit from overtaking this SSH process.
                 let _guard = if let Some((host, entry)) = &pending.entry {
                     let lookup = || async {
                         state.provisioning.host_row(*host).await.map_err(|error| {
@@ -163,21 +169,16 @@ impl SetupSignIn {
                     .wait(&pending.destination, pending.access, &pending.attempt)
                     .await
             };
-            let result = if let Some(cancel) = cancel {
-                let result = tokio::select! {
-                    biased;
-                    _ = cancel => Err(BackendFailure::new("SSH sign-in was cancelled", "")),
-                    result = wait => result,
-                };
-                setup
-                    .drafts
-                    .lock()
-                    .expect("SSH setup draft mutex")
-                    .remove(&pending.attempt.id);
-                result
-            } else {
-                wait.await
+            let result = tokio::select! {
+                biased;
+                _ = cancel => Err(BackendFailure::new("SSH sign-in was cancelled", "")),
+                result = wait => result,
             };
+            setup
+                .active
+                .lock()
+                .expect("SSH setup active mutex")
+                .remove(&pending.attempt.id);
             let outcome = match result {
                 Ok(()) => SshSignInOutcome::Ready,
                 Err(error) => SshSignInOutcome::Failed {
@@ -203,15 +204,24 @@ impl SetupSignIn {
         });
     }
 
-    /// Only a draft may be abandoned without a question id. An already finished check has nothing left to stop.
+    /// Closing Add can abandon its own draft even before a question id exists. Registered checks belong to their host.
     fn cancel_draft(&self, attempt: &str) {
-        if let Some(cancel) = self
-            .drafts
-            .lock()
-            .expect("SSH setup draft mutex")
-            .remove(attempt)
+        let mut active = self.active.lock().expect("SSH setup active mutex");
+        if active
+            .get(attempt)
+            .is_some_and(|active| active.host.is_none())
+            && let Some(active) = active.remove(attempt)
         {
-            let _ = cancel.send(());
+            let _ = active.cancel.send(());
+        }
+    }
+
+    /// Cancel the removed host's detached checks after its row is gone. Dropping their waits closes the questions
+    /// and ends the SSH processes. Accepted provisioning runs own their lock and wait on their own tasks.
+    pub(super) fn cancel_host(&self, host: HostId) {
+        let mut active = self.active.lock().expect("SSH setup active mutex");
+        for (_, attempt) in active.extract_if(|_, attempt| attempt.host == Some(host)) {
+            let _ = attempt.cancel.send(());
         }
     }
 

@@ -602,3 +602,28 @@ pub(crate) fn menu_offers(
         offered
     }
 }
+
+/// Both the menu and the removal question use the live host hold. A detached sign-in frees only Remove and an
+/// accepted provisioning run still owns the host as shown in its progress.
+pub(super) fn current_menu_offers(
+    host: &HostView,
+    progress: Option<&ProvisioningView>,
+    cx: &gpui::App,
+) -> Offers {
+    let operations = crate::session::current_operations(cx);
+    let operations = operations.as_ref().map(|operations| operations.read(cx));
+    let key = crate::operations::OpKey::host(&HostView::key(host.id));
+    let mut offered = menu_offers(
+        host,
+        progress,
+        operations.is_some_and(|operations| operations.in_flight(&key).is_some()),
+        crate::desktop::updates::runs(cx),
+    );
+    if offered.remove == Some(false)
+        && !run_active(progress)
+        && operations.is_some_and(|operations| operations.can_remove_during_setup_sign_in(&key))
+    {
+        offered.remove = Some(true);
+    }
+    offered
+}

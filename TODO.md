@@ -192,16 +192,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hook, plus the first-report pin), and write it down as the default for every agent, with a name or launch-shape rule
   only where evidence shows the default does not work. Plan: `plans/queue/positional-hook-attribution.md`.
 
-- **Stop Remove host from blocking on an open SSH sign-in prompt.** PR #4638 (`tailscale-ssh-hosts`) added a per-host
-  read-write lock (`ssh_route_lock`) so toggling Tailscale mode or removing a host does not race with an active SSH
-  probe or sign-in check writing private `known_hosts` pins or starting a shared SSH master. Because a Set up, Update,
-  or Uninstall sign-in prompt holds a read guard on `ssh_route_lock` while waiting for the user (up to about 2 minutes
-  per prompt, reset on each new prompt) and `remove_host` awaits a write guard on the same lock for every SSH host (not
-  just Tailscale ones), clicking Remove while a sign-in prompt is open silently blocks until the prompt times out or is
-  answered, making Remove look stuck. Either make Remove fail fast as busy, cancel the open sign-in check, or check
-  whether `remove_host` needs `ssh_route_lock` across the sign-in wait at all (editing a host's SSH destination already
-  changes the route without taking it). Plan: `plans/queue/remove-host-signin-lock.md`.
-
 - **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
   watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
   Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read

@@ -210,9 +210,7 @@ pub(crate) fn ask(host: i64, mark: &Mark, window: &mut Window, cx: &mut App) -> 
     let (view, enabled) = {
         let collections = store.read(cx).collections();
         let view = collections.get::<HostView>(&key)?.clone();
-        let in_flight = session::current_operations(cx)
-            .is_some_and(|operations| operations.read(cx).in_flight(&OpKey::host(&key)).is_some());
-        let offered = offers::offers(&view, collections.get(&key), in_flight);
+        let offered = offers::current_menu_offers(&view, collections.get(&key), cx);
         // Each removal is enabled by its own offer: the menu offers Remove or the provider's Delete, never both.
         let enabled = match offers::HostKind::of(&view).provider() {
             Some(_) => offered.delete.is_some_and(|(_, enabled)| enabled),

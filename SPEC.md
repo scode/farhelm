@@ -5202,6 +5202,10 @@ release downloads or clipboard writes:
 - other hosts;
 - removing a host, which must respond promptly whatever that host is doing, if only to refuse because it is busy.
 
+Remove is available while a registered SSH host's Setup, Update or Uninstall check is waiting for a sign-in answer.
+Removing the host closes the question and ends the check. Any later discovery result or setup confirmation still belongs
+to the entry it started from. The final step of a successful Uninstall forgets the host under the same rules.
+
 The helm may plan and start background automatic updates one host at a time with bounded waits, provided interactive
 service to the other hosts keeps running.
 

@@ -6,8 +6,8 @@
 //! layer manager anchored beside its toggle, the shared header ([`MenuHeader`]) naming the host, then the commands in a
 //! [`Role::Menu`] of their own, each an icon, a label and a description line, walked with Up and Down.
 //!
-//! What the menu offers is [`offers::menu_offers`], one pure function of the pushed host, its retained run, its work in
-//! flight and whether the desktop app's updater runs, read while the menu draws, so an open menu follows the host. It
+//! [`offers::current_menu_offers`] reads the pushed host, its retained run, and the operation store while this menu
+//! draws, so an open menu follows the host. It
 //! draws Retry first, which tries the host's connection again now, then Adopt for a mismatched identity, naming the
 //! identity it accepts as the host reported it when the menu opened, which is the one the click sends
 //! ([`super::remedies`]), and which on a host whose machine's deletion failed deletes it again; then Re-run on an SSH
@@ -55,7 +55,6 @@ use crate::environment_ui::ProviderUi;
 use crate::focus::{self, Mark};
 use crate::host_text::{HostSentence, HostText};
 use crate::layers::{self, Anchor, LayerId, Popover};
-use crate::operations::OpKey;
 use crate::session;
 
 #[cfg(test)]
@@ -230,14 +229,7 @@ fn current(host: i64, cx: &App) -> Option<(HostView, Offers)> {
     let key = HostView::key(host);
     let collections = store.read(cx).collections();
     let view = collections.get::<HostView>(&key)?.clone();
-    let in_flight = session::current_operations(cx)
-        .is_some_and(|operations| operations.read(cx).in_flight(&OpKey::host(&key)).is_some());
-    let offered = offers::menu_offers(
-        &view,
-        collections.get(&key),
-        in_flight,
-        crate::desktop::updates::runs(cx),
-    );
+    let offered = offers::current_menu_offers(&view, collections.get(&key), cx);
     Some((view, offered))
 }
 

@@ -57,11 +57,6 @@ impl Attempt {
         }
     }
 
-    /// A draft has no registry row to retain its sign-in after the dialog closes.
-    pub(crate) fn is_draft(&self) -> bool {
-        matches!(self.target, SshQuestionTarget::Draft { .. })
-    }
-
     pub(crate) fn for_host(host: i64, connection: SharedConnection) -> Self {
         Self {
             id: Uuid::new_v4().to_string(),

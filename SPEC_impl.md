@@ -2764,10 +2764,15 @@ helm publishes a successful socket check. The result stays in memory for a short
 provision. A confirmed run already has progress and performs the same sign-in before revalidating or mutating its host,
 even when the setup master used during planning has expired.
 
-Closing Add before a question appears cancels its setup check by attempt id. An open sessions question during
-provisioning's Attach step keeps its own answer deadline. Attach waits without interrupting that dial and uses its
-ordinary 30-second window for the supervisor once sign-in finishes. A cancelled or expired question ends the run with
-Sign-in needed.
+Closing Add before a question appears cancels its setup check by attempt id. Removing a registered host cancels its
+detached setup, Update and Uninstall checks after committing the row deletion. The task publishes its cancel sender
+before looking up the row, so a check starting later sees the missing host. Both paths drop the same interactive wait,
+ending its SSH process and closing its question. In the desktop, Remove can send on the host's operation key over this
+particular hold. The operation store keeps the hold through the DELETE reply so a Ready arriving during Remove can drive
+its replay after the reply. The registered Setup request names the original host id and destination on every replay. An
+open sessions question during provisioning's Attach step keeps its own answer deadline. Attach waits without
+interrupting that dial and uses its ordinary 30-second window for the supervisor once sign-in finishes. A cancelled or
+expired question ends the run with Sign-in needed.
 
 ### Grid streams
 
@@ -5402,12 +5407,16 @@ installation it is on, so it follows an open session the sidebar's filter hides
 - The add host dialog marks its `POST /api/hosts/probe` as a new entry (`new_entry`, carrying the optional alias); no
   other caller sends it. Without the marker the probe keeps converging onto an existing row for the destination, which
   is how a host row's "set up again", path repair, a confirmed add's own second registration and update confirmation
-  work. With it, the alias passes the alias syntax rules and the helm refuses a destination that already has a row
-  (naming the row's display name) or an alias equal to any host's current display name, at three points: a read before
-  the probe contacts ssh, again when a pending setup confirmation is confirmed (before the run claims the host), and
-  inside the registration transaction, which is the only race-free one and writes the alias with the new row. The marker
-  rides the pending confirmation, and the registration derived from the stored row after the insert carries none, so the
-  run's later registration converges as before. Spellings are not normalized.
+  work. A probe that started against an existing row carries its id and entry UUID through discovery and confirmation.
+  The registration transaction also checks its destination before converging the result. Deletion or retargeting can
+  finish while discovery is away, so the transaction refuses a reply for a missing or moved entry. Run admission checks
+  the frozen SSH destination again under the provisioning lock before a confirmed plan can use it. With the Add dialog
+  marker, the alias passes the alias syntax rules and the helm refuses a destination that already has a row (naming the
+  row's display name) or an alias equal to any host's current display name, at three points: a read before the probe
+  contacts ssh, again when a pending setup confirmation is confirmed (before the run claims the host), and inside the
+  registration transaction, which is the only race-free one and writes the alias with the new row. The marker rides the
+  pending confirmation, and the registration derived from the stored row after the insert carries none, so the run's
+  later registration converges as before. Spellings are not normalized.
 - A host's `host_identity` is `NULL` until first contact ever succeeds for that row — including the local row, which is
   minted with no identity and learns one the same way any other host does. Recording it is split into two operations so
   silent identity merging is structurally impossible at the storage layer (SPEC.md: never silently merge): first contact
@@ -8205,11 +8214,13 @@ the containment and no mount lies inside the lib.
 
 The last action deletes the row from inside the run, which already holds the host's provisioning lock and is the host's
 own run task, so it cannot go through Remove's entry point, which takes that lock and aborts the host's task. Both share
-`ProvisioningService::delete_registered_host`, which takes the cache-write lock, deletes the row, purges the host's
-progress, plans and busy marker (aborting the task only for Remove), stops the actor and forgets its lock. The helm
-keeps no result for a deleted host, so the confirming client builds its success notice from the plan it already holds.
-Uninstall's host actions have only an SSH implementation: the local row is refused at planning, and the direct-local
-executor answers them with an error rather than an implementation nothing can reach.
+`ProvisioningService::delete_registered_host`, which takes the cache-write lock, deletes the row, cancels detached
+sign-in checks, purges the host's progress, plans and busy marker (aborting the task only for Remove), stops the actor
+and forgets its lock. This sequence can finish while discovery or a place check holds the SSH route lock. The mode
+editor still takes the route lock exclusively when it changes the SSH policy. The helm keeps no result for a deleted
+host, so the confirming client builds its success notice from the plan it already holds. Uninstall's host actions have
+only an SSH implementation: the local row is refused at planning, and the direct-local executor answers them with an
+error rather than an implementation nothing can reach.
 
 The Hosts heading's Update all (`start_all` in `crates/gui/farhelm-gui/src/hosts/update.rs`) sends the same request as
 each host's Update, for every listed host whose Update is available at the click: a remote host with nothing running or

@@ -89,7 +89,7 @@ mod tests {
     use crate::AppState;
     use crate::manager::{ConnectionManager, HostState};
     use crate::rest_harness::{FleetBuilder, Harness, HostScript};
-    use crate::store::{DialedAs, HelmStore, HostId, HostKind, HostRow};
+    use crate::store::{DialedAs, HelmStore, HostId, HostKind, HostRow, HostStoreError};
     use anyhow::{Context as _, bail};
     use async_trait::async_trait;
     use axum::body::{Body, to_bytes};
@@ -2671,6 +2671,354 @@ mod tests {
         assert!(backend.operations.lock().unwrap().is_empty());
         let row = stored_row(&harness.store, other).await;
         assert_eq!(row.remote_farhelm.as_deref(), Some("/other/farhelm"));
+    }
+
+    /// A host-row probe carries no Add dialog marker. It may refresh the existing host or prepare to set it up again.
+    fn known_ssh_probe(destination: &str) -> ProbeRequest {
+        ProbeRequest {
+            target: ProbeDestination::Ssh {
+                destination: destination.to_owned(),
+                tailscale: None,
+            },
+            remote_farhelm: None,
+            remote_state_dir: None,
+            new_entry: None,
+        }
+    }
+
+    /// Stop both discovery outcomes at a real route reader. Remove must finish before the reply, and the reply must
+    /// refuse the deleted entry even when another host has already adopted its destination.
+    #[farhelm_testtrace::test]
+    async fn remove_host_finishes_while_discovery_is_using_its_route() {
+        const DESTINATION: &str = "discovery.example";
+        let root = tempfile::tempdir().unwrap();
+        for backend in [
+            FakeBackend::supervisor(root.path().into()),
+            FakeBackend::skewed(root.path().into()),
+        ] {
+            let harness = harness().await;
+            let service = service(&harness, backend.clone(), root.path());
+            let state = AppState::with_provisioning(
+                Arc::clone(&harness.manager),
+                harness.store.clone(),
+                Arc::clone(&service),
+            );
+            let host = harness
+                .store
+                .add_ssh_host(DESTINATION, None, None)
+                .await
+                .unwrap();
+            backend
+                .block_probe
+                .store(true, std::sync::atomic::Ordering::SeqCst);
+            let probe_service = Arc::clone(&service);
+            let probe =
+                tokio::spawn(
+                    async move { probe_service.probe(known_ssh_probe(DESTINATION)).await },
+                );
+            tokio::time::timeout(Duration::from_secs(5), backend.entered.notified())
+                .await
+                .expect("premise: discovery is blocked after reading the registered row");
+            let route = harness.manager.ssh_route_lock(host);
+            assert!(
+                route.try_write().is_err(),
+                "premise: discovery holds the route read guard"
+            );
+
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                crate::hosts::remove_host_checked(&state, host, |_| Ok(())),
+            )
+            .await
+            .expect("Remove must answer while discovery is still blocked")
+            .unwrap();
+            assert!(
+                route.try_write().is_err(),
+                "the original discovery is still in flight"
+            );
+            let replacement = harness
+                .store
+                .add_ssh_host(DESTINATION, Some("/replacement/farhelm"), None)
+                .await
+                .expect("the original row and its destination claim are gone");
+            backend.release.notify_one();
+            let error = tokio::time::timeout(Duration::from_secs(5), probe)
+                .await
+                .expect("discovery must settle after its reply is released")
+                .unwrap()
+                .expect_err("discovery cannot register a supervisor for the removed host");
+            assert!(
+                matches!(
+                    error.downcast_ref::<HostStoreError>(),
+                    Some(HostStoreError::HostNotFound(id)) if *id == host
+                ),
+                "{error:#}"
+            );
+            let row = stored_row(&harness.store, replacement).await;
+            assert_eq!(row.remote_farhelm.as_deref(), Some("/replacement/farhelm"));
+        }
+    }
+
+    /// An already retained setup plan is cleared on removal. A probe that was still away can return a plan later,
+    /// but its confirmation must fail against the original entry before it can touch the replacement.
+    #[farhelm_testtrace::test]
+    async fn remove_host_rejects_stale_install_confirmations() {
+        const DESTINATION: &str = "install.example";
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().into());
+        let service = service(&harness, backend.clone(), root.path());
+        let state = AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        );
+        let host = harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } =
+            service.probe(known_ssh_probe(DESTINATION)).await.unwrap()
+        else {
+            panic!("premise: the registered host offers setup");
+        };
+        backend
+            .block_probe
+            .store(true, std::sync::atomic::Ordering::SeqCst);
+        let probe_service = Arc::clone(&service);
+        let late =
+            tokio::spawn(async move { probe_service.probe(known_ssh_probe(DESTINATION)).await });
+        tokio::time::timeout(Duration::from_secs(5), backend.entered.notified())
+            .await
+            .expect("premise: a second probe waits on the same host");
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::hosts::remove_host_checked(&state, host, |_| Ok(())),
+        )
+        .await
+        .expect("Remove must answer before the outstanding probe")
+        .unwrap();
+        let error = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .expect_err("Remove discards the earlier retained plan");
+        assert!(
+            matches!(
+                error.downcast_ref::<ProvisioningRequestError>(),
+                Some(ProvisioningRequestError::UnknownPlan)
+            ),
+            "{error:#}"
+        );
+
+        let replacement = harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        // An old setup must report its missing row even if the replacement is busy with its own work.
+        assert!(service.memory.lock().await.busy.insert(replacement));
+        backend.release.notify_one();
+        let ProbeResponse::Provisionable { probe_id, .. } =
+            tokio::time::timeout(Duration::from_secs(5), late)
+                .await
+                .expect("the last probe should return after release")
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("premise: the second probe offers setup after Remove's purge");
+        };
+        let error = service
+            .start_add(ProvisionRequest { probe_id })
+            .await
+            .expect_err("the late confirmation cannot register the removed row");
+        assert!(
+            matches!(
+                error.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::HostNotFound(id)) if *id == host
+            ),
+            "{error:#}"
+        );
+        assert!(backend.operations.lock().unwrap().is_empty());
+        let memory = service.memory.lock().await;
+        assert!(!memory.busy.contains(&host));
+        assert!(memory.busy.contains(&replacement));
+    }
+
+    /// Discovery may have saved the reply before Remove commits. Once Remove stops the actor, reconciliation needs
+    /// to report the missing host instead of presenting the expected absent actor as an internal error.
+    #[farhelm_testtrace::test]
+    async fn remove_host_after_discovery_write_reports_the_missing_entry() {
+        const DESTINATION: &str = "reconciling.example";
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let service = service(
+            &harness,
+            FakeBackend::supervisor(root.path().into()),
+            root.path(),
+        );
+        let state = AppState::with_provisioning(
+            Arc::clone(&harness.manager),
+            harness.store.clone(),
+            Arc::clone(&service),
+        );
+        let host = harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        let gate = Arc::new(service::TestBoundaryGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *service.registry_sync_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        let probe_service = Arc::clone(&service);
+        let probe =
+            tokio::spawn(async move { probe_service.probe(known_ssh_probe(DESTINATION)).await });
+        tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+            .await
+            .expect("premise: discovery saved the reply and is waiting to reconcile");
+        assert_eq!(
+            stored_row(&harness.store, host)
+                .await
+                .host_identity
+                .as_deref(),
+            Some("test-identity")
+        );
+        tokio::time::timeout(
+            Duration::from_secs(5),
+            crate::hosts::remove_host_checked(&state, host, |_| Ok(())),
+        )
+        .await
+        .expect("Remove must proceed while this reply is being reconciled")
+        .unwrap();
+        gate.release.notify_one();
+        let error = tokio::time::timeout(Duration::from_secs(5), probe)
+            .await
+            .expect("the committed probe should settle after release")
+            .unwrap()
+            .expect_err("the actor for the removed row cannot be retried");
+        assert!(
+            matches!(
+                error.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::HostNotFound(id)) if *id == host
+            ),
+            "{error:#}"
+        );
+    }
+
+    /// The registry row can be retargeted after confirmation saves install paths. The run is bound to the old plan's
+    /// destination and must refuse it under the provisioning guard before beginning another probe or installation.
+    #[farhelm_testtrace::test]
+    async fn provisioning_refuses_retarget_after_the_setup_confirmation_write() {
+        const DESTINATION: &str = "before.example";
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::absent(root.path().into());
+        let service = service(&harness, backend.clone(), root.path());
+        let host = harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        let ProbeResponse::Provisionable { probe_id, .. } =
+            service.probe(known_ssh_probe(DESTINATION)).await.unwrap()
+        else {
+            panic!("premise: the host offers setup");
+        };
+        let gate = Arc::new(service::TestBoundaryGate {
+            reached: tokio::sync::Notify::new(),
+            release: tokio::sync::Notify::new(),
+        });
+        *service.registry_sync_gate.lock().unwrap() = Some(Arc::clone(&gate));
+        let confirming = Arc::clone(&service);
+        let confirmation =
+            tokio::spawn(async move { confirming.start_add(ProvisionRequest { probe_id }).await });
+        tokio::time::timeout(Duration::from_secs(5), gate.reached.notified())
+            .await
+            .expect("premise: the setup confirmation is reconciling after writing its paths");
+        assert!(
+            stored_row(&harness.store, host)
+                .await
+                .remote_farhelm
+                .is_some()
+        );
+        {
+            let _guard = harness
+                .manager
+                .try_host_provision_lock(host)
+                .expect("retarget can win before run admission");
+            harness
+                .store
+                .update_ssh_destination(host, "after.example")
+                .await
+                .unwrap();
+        }
+        gate.release.notify_one();
+        let error = tokio::time::timeout(Duration::from_secs(5), confirmation)
+            .await
+            .expect("confirmation must settle after release")
+            .unwrap()
+            .expect_err("an old confirmation cannot install at the former destination");
+        assert!(
+            matches!(
+                error.downcast_ref::<HostStoreError>(),
+                Some(HostStoreError::StaleAttempt { host: stale }) if *stale == host
+            ),
+            "{error:#}"
+        );
+        assert_eq!(backend.probes.load(std::sync::atomic::Ordering::SeqCst), 1);
+        assert!(backend.operations.lock().unwrap().is_empty());
+        assert!(!service.memory.lock().await.busy.contains(&host));
+    }
+
+    /// Replayed setup requests already name a row. A destination shared with a newly registered entry must not
+    /// make a delayed replay discover it under the old user's action.
+    #[farhelm_testtrace::test]
+    async fn remove_host_refuses_a_replayed_registered_setup_before_dialing() {
+        const DESTINATION: &str = "replay.example";
+        let harness = harness().await;
+        let root = tempfile::tempdir().unwrap();
+        let backend = FakeBackend::supervisor(root.path().into());
+        let service = service(&harness, backend.clone(), root.path());
+        let host = harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        let replay = || {
+            serde_json::from_value::<ProbeRequest>(
+            serde_json::json!({"target": {"kind": "ssh-host", "host": host, "destination": DESTINATION}}),
+        ).unwrap()
+        };
+        harness
+            .store
+            .update_ssh_destination(host, "new-route.example")
+            .await
+            .unwrap();
+        let error = service
+            .probe(replay())
+            .await
+            .expect_err("the request used the old destination");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::StaleAttempt { host: stale }) if *stale == host
+        ));
+        harness.store.remove_ssh_host(host).await.unwrap();
+        harness
+            .store
+            .add_ssh_host(DESTINATION, None, None)
+            .await
+            .unwrap();
+        let error = service
+            .probe(replay())
+            .await
+            .expect_err("the replay still belongs to the removed host");
+        assert!(matches!(
+            error.downcast_ref::<HostStoreError>(),
+            Some(HostStoreError::HostNotFound(id)) if *id == host
+        ));
+        assert!(probe_unused(&backend));
     }
 
     /// A probe that finds a supervisor finishes registering the host even if
@@ -6294,8 +6642,8 @@ mod tests {
         }
     }
 
-    /// Add planning returns promptly enough to free the UI's command slot for the answer. Batch discovery starts
-    /// only on the repeated request, after the sign-in attempt confirms its setup socket.
+    /// Setup planning returns promptly enough to free the UI's command slot for the answer or Remove. Batch discovery
+    /// starts only on the repeated request, after the sign-in attempt confirms its setup socket.
     #[farhelm_testtrace::test]
     async fn ssh_setup_preflight_returns_pending_then_allows_the_probe() {
         use farhelm_proto::ui_channel::{
@@ -6339,6 +6687,28 @@ mod tests {
             .unwrap_or_else(|_| panic!("no completion for setup attempt {attempt}"))
         }
 
+        /// Observe this attempt's live question before answering it or removing its host.
+        async fn wait_for_setup_question(
+            questions: &crate::askpass::Questions,
+            feed: &mut tokio::sync::watch::Receiver<u64>,
+            attempt: &str,
+        ) -> farhelm_proto::ui_channel::SshQuestion {
+            tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    if let Some(question) = questions
+                        .list()
+                        .into_iter()
+                        .find(|question| question.attempt == attempt)
+                    {
+                        return question;
+                    }
+                    feed.changed().await.unwrap();
+                }
+            })
+            .await
+            .expect("the setup SSH process should be waiting for a code")
+        }
+
         let mut harness = harness().await;
         let root = super::ssh_stand_in::control_root();
         let program = root.path().join("ssh");
@@ -6370,6 +6740,8 @@ silent = Path(__file__).with_name("silent-first-attempt")
 if not silent.exists():
     silent.touch()
     signal.pause()
+if "registered.example" in sys.argv:
+    Path(__file__).with_name("registered-pid").write_text(str(os.getpid()))
 prompt = b"Verification code:"
 with socket.socket(socket.AF_UNIX) as connection:
     connection.connect(os.environ["FARHELM_SSH_ASKPASS_SOCKET"])
@@ -6474,19 +6846,70 @@ master.touch()
             }
         );
 
+        // Remove must complete while the registered check is still asking, then close its question and SSH process.
+        let host = harness
+            .store
+            .add_ssh_host("registered.example", None, None)
+            .await
+            .unwrap();
+        let (status, body) = send(
+            &router,
+            request(
+                "/api/hosts/probe",
+                serde_json::json!({
+                    "target": {"kind": "ssh-host", "host": host, "destination": "registered.example"}
+                }),
+            ),
+        )
+        .await;
+        assert_eq!(status, StatusCode::ACCEPTED, "{body}");
+        let registered: PendingSshSignIn = serde_json::from_str(&body).unwrap();
+        let question = wait_for_setup_question(&questions, &mut feed, &registered.attempt).await;
+        assert_eq!(question.target, SshQuestionTarget::Host { host });
+        assert_eq!(question.purpose, SshConnectionPurpose::Setup);
+        let pid = stand_in_pid(&root.path().join("registered-pid"), "registered SSH client").await;
+        assert!(
+            alive(pid),
+            "premise: the registered SSH child is still asking"
+        );
+        let route_lock = harness.manager.ssh_route_lock(host);
+        assert!(
+            route_lock.try_write().is_err(),
+            "premise: the question owns the route read guard"
+        );
+        let remove = axum::http::Request::builder()
+            .method("DELETE")
+            .uri(format!("/api/hosts/{host}"))
+            .header("host", "127.0.0.1:7433")
+            .body(Body::empty())
+            .unwrap();
+        let (status, body) = tokio::time::timeout(Duration::from_secs(5), send(&router, remove))
+            .await
+            .expect("Remove must respond without an answer to the open question");
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(
+            completed_attempt(&router, &mut feed, &registered.attempt).await,
+            SshSignInOutcome::Failed {
+                reason: "SSH sign-in was cancelled".into()
+            }
+        );
+        assert!(questions.list().is_empty());
+        wait_for_exit(pid, "removing the host must end its SSH child").await;
+        assert!(route_lock.try_write().is_ok());
+        assert!(
+            harness
+                .store
+                .list_hosts()
+                .await
+                .unwrap()
+                .iter()
+                .all(|row| row.id != host)
+        );
+
         let (status, body) = send(&router, probe()).await;
         assert_eq!(status, StatusCode::ACCEPTED, "{body}");
         let pending: PendingSshSignIn = serde_json::from_str(&body).unwrap();
-        let question = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                if let Some(question) = questions.list().into_iter().next() {
-                    break question;
-                }
-                feed.changed().await.unwrap();
-            }
-        })
-        .await
-        .expect("the setup SSH process should be waiting for a code");
+        let question = wait_for_setup_question(&questions, &mut feed, &pending.attempt).await;
         assert_eq!(question.purpose, SshConnectionPurpose::Setup);
         assert_eq!(question.attempt, pending.attempt);
         assert_eq!(
@@ -7187,13 +7610,15 @@ master.touch()
     /// Spec: confirming runs the planned host actions in plan order after a
     /// second inspection, then deletes the registry row, stops the host's
     /// connection actor, and purges its progress, busy marker and pending
-    /// plans, including a second plan made for the same host.
+    /// plans, including a second plan made for the same host. A discovery
+    /// reader can hold the route lock through the final ForgetHost step.
     #[farhelm_testtrace::test]
     async fn a_confirmed_uninstall_runs_in_order_and_forgets_the_host() {
         let (harness, host, _root, backend, service) = uninstall_fixture(Vec::new(), false).await;
         let first = service.plan_uninstall(host).await.unwrap();
         let second = service.plan_uninstall(host).await.unwrap();
         backend.operations.lock().unwrap().clear();
+        let probe = harness.manager.ssh_route_lock(host).read_owned().await;
 
         service
             .start_uninstall(
@@ -7222,6 +7647,7 @@ master.touch()
         assert!(!memory.runs.contains_key(&host));
         assert!(!memory.busy.contains(&host));
         assert!(!memory.plans.contains_key(&second.probe_id));
+        drop(probe);
     }
 
     /// Live sessions and tabs refuse uninstall before confirmation, so the
