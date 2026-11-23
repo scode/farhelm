@@ -9,4 +9,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 - [in-flight 9d8cd1] `toolkit-reduced-motion.md` — Follow GPUI's live reduced-motion setting everywhere and remove the desktop startup check
 - [in-flight 783aae] `fallback-unattachable-remembered-tab.md` — Fall back to the main terminal when a remembered shell tab receives an explicit initial attach refusal
 - [in-flight 224a28] `fix-muse-conversation-reporting.md` — Pass non-secret session identity args to Muse Code hooks across environment scrubbing
-- [pending] `button-restyle.md` — Restyle buttons and button-like controls without outlines, with the larger session toolbar
+- [in-flight 61b9d9] `button-restyle.md` — Restyle buttons and button-like controls without outlines, with the larger session toolbar
