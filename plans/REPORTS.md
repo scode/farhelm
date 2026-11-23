@@ -10,3 +10,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`codex-recipe-credentials-at-launch`](reports/codex-recipe-credentials-at-launch.report.md) landed 2026-11-23 in #4679, #4680, #4693: Supply Codex recipe API endpoint credentials at launch instead of writing ~/.codex/config.toml
 - [`explain-stale-launcher-choices`](reports/explain-stale-launcher-choices.report.md) landed 2026-11-23 in #4684: Show inline stale-choice warning and keep query when a New Session launcher choice disappears
 - [`approval-card-program-wording`](reports/approval-card-program-wording.report.md) landed 2026-11-23 in #4688, #4694: Name the shell or main program accurately in Stop and Delete approval cards
+- [`wayland-clipboard-file-paste`](reports/wayland-clipboard-file-paste.report.md) landed 2026-11-23 in #4682: Read text/uri-list local files in Wayland clipboard paste with same-offer fallback

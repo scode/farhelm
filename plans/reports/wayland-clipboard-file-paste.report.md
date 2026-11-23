@@ -56,3 +56,93 @@ attach in selection order.
 Independent source review found three issues. Paste can now resume when reading the clipboard takes time, checks that
 Farhelm still has keyboard focus before continuing, and skips a malformed remote file URL even if the URL parser can
 repair it. All three findings were addressed and the reviewed candidate passed the checks above.
+
+### Landing
+
+#### What landed with it
+
+The plan's one PR (#4682) landed last in a round with codex-recipe-credentials-at-launch, explain-stale-launcher-choices
+and approval-card-program-wording, none of which touches the terminal's paste or the vendored GPUI code. Since the
+plan's base, main had gained the retirement of the "Agent's own setting" permission and Settings keeping its list of
+leftover Tensorlake sandboxes when a refresh fails, neither near the paste path; the rebase met only TODO.md, where this
+plan's removal of its own entry was kept.
+
+The landing's independent reviewer checked that the change to the vendored GPUI Linux code matches its patch file
+exactly (every hunk, the patch's 406 added and 2 removed lines, and the totals in vendor/README.md), that only local
+`file:` addresses are attached and only regular files uploaded, that files are tried before an image and an image before
+text, with the fallback reading the same clipboard offer, that a replaced selection, a destroyed offer or lost keyboard
+focus cancels the paste with nothing half pasted, and that X11 and macOS are unaffected. The plan said more than once to
+leave the Wayland client code untouched, but the change adds the keyboard focus check there. The reviewer found that
+Wayland's rules call for it; the report mentions the check but not that it departs from the plan.
+
+#### Fixes made while landing
+
+None.
+
+#### Checks
+
+This round landed codex-recipe-credentials-at-launch (how Codex gets a recipe endpoint, in the helm and the supervisor,
+with the protocol version bumped), explain-stale-launcher-choices (the desktop launcher), approval-card-program-wording
+(the helm's approvals and the desktop's approval cards) and wayland-clipboard-file-paste (the vendored GPUI Linux
+crate's clipboard and the terminal's paste) together. Between them they reach every crate except the desktop app's outer
+program, so the landing ran the whole workspace suite, the lints (the desktop app's too), the end-to-end smoke test,
+every reference picture and the docs site build on the four plans stacked on main, then narrower runs after the landing
+fixes. The worker runs were on a separate arm64 Linux test worker with a systemd user manager, rootless Podman and SSH
+to itself; the rest ran locally on x86_64 Linux. The first worker attempt (recorder run
+`ef6ed206-f59e-44b9-9a19-e73ac2138ffe`) ran out of disk before it compiled anything; the disk was full of this landing's
+own earlier build output, which was cleared, and the worker's runners now clean up after themselves (#4701). None of the
+runs used a real agent program, a real Tensorlake account or a Wayland file manager: the tests use stand-ins, as the
+reports say.
+
+On the four plans as delivered, stacked on main:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `2dd259d9-fdaa-4006-b3ad-bf8181a7df43`): 8435 of 8437 passed. The two failures are Tensorlake setup tests that
+  codex-recipe-credentials-at-launch broke, which its landing fix (#4693) corrects; the failed run is kept. One test, a
+  check that stopping a session's containers reaches every selected scope, printed a runtime `SKIPPED` because it found
+  no usable systemd user manager that time; run again on its own (`cargo nextest run -p farhelm --test e2e` selecting
+  only `lifecycle_stops_containers_in_the_selected_scopes_before_signalling`, run
+  `1d248544-da0e-41c5-a68b-d4113c9881c1`) it ran fully and passed.
+- `cargo clippy --all-targets -- -D warnings`, `cargo clippy -p farhelm --bins -- -D warnings` and the desktop app's two
+  `cargo clippy -p farhelm-desktop --all-targets` runs (with and without `--features agent`), on the test worker:
+  passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `3b7e19df-96bb-4ec7-854c-83031f92e389`): of
+  its 50 steps, 49 passed and one was skipped as always on Linux (paste, which headless Mutter cannot give the app).
+- `python3 scripts/check-gui-goldens.py`, locally (recorder run `f5a29c37-701b-4967-b9cd-7517d44f437b`): every picture
+  but two matched its reference; the two are the terminal's covered-link scene, light and dark, whose approval card
+  approval-card-program-wording rewords, republished by its landing fix (#4694). A full `--update` (recorder run
+  `9fe8cb65-be4a-456f-af51-d4310849b6d8`) found those two the only changes.
+- `python3 -B scripts/test-gui-screenshot-batch.py` (the screenshot scene list's own checks, locally and not through the
+  recorder, so it has no run id), `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`,
+  `dprint check`, `python3 releasing/check-changelog.py format` and the docs site build (`bun run build` in `website/`),
+  locally: passed.
+
+After the landing fixes (#4693 and #4694):
+
+- `cargo nextest run -p farhelm-helm -E 'test(/tensorlake_add::tests::|credential_delivery/)'`, on the test worker
+  (recorder run `1974b03e-abe5-4a18-b7c7-9716db0f0872`): all 65 passed, the two corrected tests among them.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker,
+  with #4693 on main and the other three plans on top: passed.
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py`, `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+Reused: the workspace run and the smoke test above for everything else, since #4693 changes only those two tests, a
+comment and a release-notes draft, and #4694 only two reference pictures' manifest entries. Skipped: the tests of the
+desktop app's outer program (the part that starts the window and the embedded helm), which nothing here reaches; macOS,
+where nothing compiles differently and the Wayland change does not apply; real agent programs, a real Tensorlake account
+and a real Wayland file manager; CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The five new clipboard tests inside the vendored GPUI Linux code run in no check the repository documents; the
+  executor ran them through a temporary copy of the crate's manifest. Adding them to the vendored crates' checks would
+  be a follow-up.
+- The report says cancellation was exercised, but its test only marks the paste cancelled itself. Nothing tests the
+  parts that decide to cancel (a newer clipboard selection, lost keyboard focus, a clipboard offer that went away). A
+  follow-up could add such a test.
+- The file list's addresses are parsed more strictly than drag and drop parses them, so a file manager that leaves
+  characters such as spaces unencoded could have its files ignored and the paste fall back to text. The reviewer was not
+  sure any file manager does this.
+- The clipboard read has no size limit. That was already true for pasted images and text; the file list inherits it.
+- The patch file's blank context lines are now truly empty rather than a single space. `git apply` accepts both, but the
+  next regeneration of the patch will show it as a change.
