@@ -12,3 +12,4 @@ One line per landed plan whose report the maintainer has not reviewed yet, oldes
 - [`approval-card-program-wording`](reports/approval-card-program-wording.report.md) landed 2026-11-23 in #4688, #4694: Name the shell or main program accurately in Stop and Delete approval cards
 - [`wayland-clipboard-file-paste`](reports/wayland-clipboard-file-paste.report.md) landed 2026-11-23 in #4682: Read text/uri-list local files in Wayland clipboard paste with same-offer fallback
 - [`toolkit-reduced-motion`](reports/toolkit-reduced-motion.report.md) landed 2026-11-23 in #4681, #4687, #4707: Follow GPUI's live reduced-motion setting everywhere and remove the desktop startup check
+- [`fallback-unattachable-remembered-tab`](reports/fallback-unattachable-remembered-tab.report.md) landed 2026-11-23 in #4690, #4695: Fall back to the main terminal when a remembered shell tab receives an explicit initial attach refusal
