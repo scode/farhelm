@@ -275,6 +275,12 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning.
 
+- **Restore terminal hyperlink mismatch warnings for bracketed and quoted URLs.** Labels opening with a bracket or quote
+  (such as `<https://good.test/>`, `"https://good.test/"`, `(https://good.test/)`, or `[https://good.test/]`) pointing
+  to a different site stopped triggering the hover mismatch warning after #4737 tightened the scheme rule. Strip one
+  matching outer bracket or quote pair before checking whether the label looks like a web address and comparing it with
+  the destination, so spoofed bracketed or quoted addresses warn again without false warnings on honest ones.
+
 ## Linux support
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
