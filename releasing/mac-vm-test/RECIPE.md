@@ -62,10 +62,10 @@ can capture a different foreground app and cannot replace that image.
 
 The checks come in three named tiers, ordered by what a failure costs a user. **P0** asks whether an install or upgrade
 bricks Farhelm: a fresh install, both upgrade paths, and both supervisors upgrading with a new agent working on each.
-**P1** asks whether an upgrading user keeps what they had: old sessions surviving and resuming, and the remote host's
-Remove/re-add and Uninstall. **P2** is the live feedback send. A release that cannot resume old sessions but still
-installs, upgrades and starts new ones is a P1 failure; one whose supervisor never comes back is a P0 failure. Report
-each tier's named results and verdict separately. Bonus coverage follows P2.
+**P1** checks old-session survival and resume, Linux Remove/re-add and Uninstall, and Uninstall on a separate remote
+Mac. **P2** is the live feedback send. A release that cannot resume old sessions but still installs, upgrades and starts
+new ones is a P1 failure; one whose supervisor never comes back is a P0 failure. Report each tier's named results and
+verdict separately. Bonus coverage follows the tiered checks.
 
 ## P0 checks: install, upgrade and the supervisors
 
@@ -74,15 +74,15 @@ report its seven results and a separate P0 verdict. Preserve a failed or unavail
 checks; the host diagnoses, repairs and continues under BRICK-TEST.md's "Repair and continue". A successful step never
 substitutes for a later step. A request to **stop after P0 checks** ends after P0 evidence is recorded and its
 successful fixtures are cleaned up, without old sessions, the remote menu or feedback. Otherwise, report P0 promptly and
-go on to P1 and P2 on the last pair before any bonus work.
+go on to the installer pair's in-scope P1 and P2 checks and the separate Mac P1 pair before any bonus work.
 
 Use independent guest pairs: `p0-fresh` for step 1, `p0-updater-upgrade` for step 2 (stable candidates only) and
-`p0-installer-upgrade` for steps 3–5, then P1 and P2. Both upgrades start from the previous promoted stable and use its
-actual installed state. For each pair, verify the candidate's published bytes against that stable's compiled trust ring
-as described in BRICK-TEST.md. Export/record evidence and clean up each successful pair before starting the next. Unless
-scope is P0-only, keep the installer pair's candidate app running for P1 and P2 before its final export and cleanup. The
-pairs do not depend on each other's results: once a failed pair is released (which needs the maintainer's retention
-decision), the next P0 pair still runs, so a broken updater cannot hide a bricked supervisor.
+`p0-installer-upgrade` for steps 3–5, then its own P1 and P2 checks. Both upgrades start from the previous promoted
+stable and use its actual installed state. For each pair, verify the candidate's published bytes against that stable's
+compiled trust ring as described in BRICK-TEST.md. Export/record evidence and clean up each successful pair before
+starting the next. Unless scope is P0-only, keep the installer pair's candidate app running for P1 and P2 before its
+final export and cleanup. The pairs do not depend on each other's results: once a failed pair is released (which needs
+the maintainer's retention decision), the next P0 pair still runs, so a broken updater cannot hide a bricked supervisor.
 
 Identify genuine agent CLI/authentication prerequisites for the Mac and Linux hosts during environment readiness; Codex
 is the baseline. Follow BRICK-TEST.md's permission preflight and obtain missing approvals together before product
@@ -145,10 +145,10 @@ as historical coverage rather than rewriting them.
 
 ## P1 checks: old sessions and the remote host menu
 
-These run on the installer pair. A failed or unavailable P1 check stops the later P1 checks on that pair, since they
-share the same sessions, but it does not change P0's verdict, block P2 or fence bonus passes. Every P1 check except the
-first needs the pair's P0 checks passed. A request to **stop after P1 checks** ends after P0 and P1 and the last pair's
-cleanup, without sending feedback.
+The first five steps run on the installer pair and use its Linux peer. A failed or unavailable P1 check stops the later
+P1 checks on that pair, since they share the same sessions, but it does not change P0's verdict, block P2 or fence bonus
+passes. Every P1 check except the first needs the pair's P0 checks passed. A request to **stop after P1 checks** ends
+after P0 and P1 and the last pair's cleanup, without sending feedback.
 
 1. **Start the old sessions** (`old-sessions`), between the installer pair's old fixture and its upgrade. Still on the
    old app, start one genuine Codex session on the local host and one on the remote host, send each one prompt that also
@@ -182,22 +182,33 @@ cleanup, without sending feedback.
    and capture its actual removal plan and kept-data note, then confirm once. Require completion, disappearance of the
    host/cached sessions and the removal notice. Call `remote_host_after`: the lib directory/binary and unit file must be
    absent, the supervisor unloaded and stopped, no Farhelm process (supervisor or terminal host) left running, and the
-   data directory/database retained. This is the complete uninstall of a remote Linux host; a remote Mac is not covered
-   yet, since it needs a second Mac guest without the desktop app. Retain native completion evidence with the candidate
-   app/local host still usable. Never use command-line uninstall or direct file/service changes to manufacture this
-   result.
+   data directory/database retained. Retain native completion evidence with the candidate app and local host still
+   usable. Perform Uninstall through the app. Use the SSH operations to observe its effects.
+6. **Uninstall from a remote Mac** (`p1-remote-mac`). Start this pair after all P0 pairs have been released and cleaned
+   up. Run the signed-artifact, clean-fixture, install and app-start checks on the new pair. The primary Mac runs the
+   candidate app. The headless Mac starts without Farhelm and receives no Codex authentication.
+   - Use the app's **Add host** flow with the pinned Mac alias. Require the candidate version and a running
+     `io.farhelm.supervisor` job in the SSH user's launchd domain.
+   - Start one plain-command session (`/bin/sh`, agent type none) on the peer, then Stop it in the app. Retain its
+     session ID. Call `remote_host_before` and require the running supervisor and that session ID.
+   - Open the peer's host menu and choose **Uninstall**. Capture the actual removal plan and its kept-data note before
+     confirming. Then require the host and its cached sessions to disappear and capture the kept-data completion notice.
+     Verify the candidate app and local host are still usable.
+   - Call `remote_host_after` using the same pinned SSH alias. Require the launchd job unloaded, its plist and lib
+     directory gone, and no Farhelm processes left. The data directory and database must still hold the same session ID.
+     Export the evidence and clean up the pair.
 
-The four named P1 results are each old session (each folding in `old-sessions`, which started it) and the two remote
-menu checks.
+The five named P1 results are the two old sessions (each folding in `old-sessions`), the two Linux menu checks and
+`p1.checks.remote-mac-uninstall`, which combines all six checkpoints on the Mac pair. Saved runs without the Mac pass
+report four results.
 
 ## P2 check: send feedback from the candidate
 
 Run only after every runnable P0 check of the run passed with valid retained evidence (an RC or dev build's skipped
-discovery does not waive any other prerequisite). P1's results are not a prerequisite, but the P1 sequence must be over:
-every P1 check recorded or unable to run. Use the Mac guest of `p0-installer-upgrade`, on the candidate app those steps
-left running; do not create a new clone or install another app. Permission preflight must already cover the live send to
-`farhelm.io`, which creates an issue in the maintainer's private feedback inbox. This check does not run in
-stop-after-P0 or stop-after-P1 scope.
+discovery does not waive any other prerequisite). Wait for the installer pair's P1 results to be recorded or skipped.
+Use the Mac guest of `p0-installer-upgrade`, on the candidate app those steps left running; do not create a new clone or
+install another app. Permission preflight must already cover the live send to `farhelm.io`, which creates an issue in
+the maintainer's private feedback inbox. This check does not run in stop-after-P0 or stop-after-P1 scope.
 
 1. Through computer use bound to this exact guest, open **?** and choose **send feedback**. Enter this exact message,
    replacing only `vX.Y.Z` with the candidate's full tag:
@@ -224,9 +235,9 @@ stop-after-P0 or stop-after-P1 scope.
    named result (`feedback-send`) and `p2.verdict` promptly, separate from P0 and P1. Retain failure evidence before
    cleanup; a P2 failure does not change a valid P0 or P1 verdict, does not prevent ordinary cleanup of this pair, and
    does not fence bonus passes.
-5. Clean up this pair and wait for its foreground owner to exit. End here for **stop after P2 checks**; otherwise
-   continue the bonus passes below. Whether a failed P1 or P2 should prevent promotion is the maintainer's decision for
-   that release, not a rule this recipe chooses.
+5. Clean up this pair and wait for its foreground owner to exit. Run the planned remote Mac P1 pass before ending a
+   **stop after P2 checks** run or continuing with bonus coverage. The maintainer decides whether a failed P1 or P2
+   check should prevent promotion.
 
 The full verdict includes P1 and P2. Each stop scope's requested verdict follows the tiers it includes. Historical
 manifests report under the tiers they were planned with (feedback was P1 before this layout); do not retrofit a send or
@@ -405,7 +416,7 @@ hostnames, usernames or private paths. `window-drag` instead keeps exactly the t
 Verdict: pass | fail | could not run
 Scope: full | stop after P0 | stop after P1 | stop after P2
 P0 verdict and seven named results:
-P1 verdict and four named results:
+P1 verdict and five named results when the remote Mac pass is planned:
 P2 verdict and feedback-send result: pass | fail | could not run | not planned
 Requested-scope verdict:
 Candidate / previous stable / bonus upgrade pairs / older stables omitted by the cap:
@@ -420,8 +431,8 @@ Cleanup: owned clones deleted or retained by agreement; evidence retained
 ```
 
 “P0 pass” requires all seven P0 checks to run and pass; discovery on an RC or dev build stays unavailable, so its P0
-verdict is could not run even when every runnable check passed. “P1 pass” requires the old sessions and both remote menu
-checks to pass. “P2 pass” requires the feedback send after every runnable P0 check passes. “Full pass” additionally
+verdict is could not run even when every runnable check passed. “P1 pass” requires all planned old-session and remote
+menu checks to pass. “P2 pass” requires the feedback send after every runnable P0 check passes. “Full pass” additionally
 requires P1, P2 and every planned bonus check to run and pass. A product failure makes the relevant verdict fail; a
 missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped check or a
 clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero risk for

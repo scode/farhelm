@@ -60,12 +60,20 @@ portable recommendations in the repository.
   systemd user service; prove that user manager works before saving the base. Install genuine Codex on the SSH
   login-shell PATH: P0 requires a successful remote agent.
 
-Both reusable bases must contain **no agent authentication**. Remove inherited authentication files locally during
-setup; logging out a clone may revoke a shared login. Obtain explicit standing credential-copy consent for this
-machine's disposable Mac and Linux test clones (or the exact run scope). Inject that named file via stdin with mode 0600
-before testing. Treat fixtures and clones as private: never publish them or raw evidence. Respect the host's macOS VM
-licensing/concurrency constraints; the commonly cited limit of two running macOS guests must be checked for the actual
-setup. This recipe needs only one macOS guest at a time.
+For the remote Mac uninstall pass, enable Remote Login on `mac_base`, or set `remote_mac_base` to a separate prepared
+image with Remote Login enabled. The headless peer needs the Tart command channel and a responding launchd user domain.
+SSH setup uses `/opt/homebrew/bin/python3`. The paired fixture check and SSH probes use the profile's
+`guest_tester.settings.python` path, which must also exist in the peer. Start with Farhelm absent, including
+`Farhelm.app`. The owned clone needs noninteractive sudo for clean shutdown, guest routing when enabled and replacement
+of an inherited SSH host key when both clones have the same key. The primary supplies the GUI and authenticated native
+tester. The peer runs a plain command.
+
+All reusable bases must contain **no agent authentication**. Remove inherited authentication files locally during setup;
+logging out a clone may revoke a shared login. Obtain explicit standing credential-copy consent for this machine's
+disposable Mac and Linux test clones (or the exact run scope). Inject that named file via stdin with mode 0600 before
+testing. Treat fixtures and clones as private: never publish them or raw evidence. Respect the host's macOS VM
+licensing/concurrency constraints. The remote Mac uninstall pass needs two running macOS guests at once. All other
+passes use one Mac alongside a Linux peer.
 
 Use a current official Codex CLI package that can serve the profile's `gpt-6.2-sol` model in both guests. Preserve the
 package layout and install the companion executables. A standalone `codex` binary can answer a model prompt but leave
@@ -148,7 +156,8 @@ Use the command-only smoke to prove discovery, readiness, guest SSH, export and 
 Save private mode-0600 consent and fixture records referenced by `guest_tester` in BRICK-TEST's format-two profile. The
 consent record uses `format: 1`, `approved: true`, `scope: "disposable-test-clones"`, `destinations: ["mac", "linux"]`
 and `auth_source` matching the profile's normalized path. Record the maintainer's actual response and scope privately;
-this is authorization metadata, never an authentication file.
+this is authorization metadata. For `p1-remote-mac`, the existing consent covers the GUI Mac. Credentials are copied
+only to that Mac.
 
 Full and stop-after-P2 runs also need separately recorded `feedback_send_approved: true` in that authorization record,
 covering only RECIPE's fixed message through the disposable candidate app to `farhelm.io` and its private inbox with
