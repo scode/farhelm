@@ -65,3 +65,76 @@ The independent Sol reviewer checked both steps. Findings led to keeping one sig
 requests race, dismissing automatic-only questions as soon as the preference is turned off, and rechecking that the host
 connection is still eligible before starting an update. The last review confirmed the remaining findings were resolved.
 The commit wording also passed cold review.
+
+### Landing
+
+#### What landed with it
+
+The plan's two PRs (#4721, #4726) and one landing fix (#4730) landed alone in their round. The executor had already
+rebased them onto a main that held the three plans landed just before (removing a host during sign-in, the desktop
+button restyle and the pending-update pill), so main had gained nothing but plan bookkeeping since the stack's base and
+the stack applied without conflicts.
+
+The landing's independent reviewer read the plan against what the remove-host plan put on main, since both change the
+setup connection's sign-in checks. Removing a host also cancels a sign-in check an automatic update opened, and a
+sign-in that succeeds while the host is being removed starts no update. The reviewer also confirmed that a manual action
+and the automatic update waiting on the same host share one question, and that turning automatic updates off cancels
+only the questions opened for them. The plan gives a host with an incompatible supervisor a fresh automatic attempt when
+the helm newly sees it as incompatible or when you act on its connection (Retry, editing its address, taking it over and
+the like), and never on the periodic re-check of a host that stays incompatible, so a failed automatic update cannot
+retry in a loop. Nothing else in the helm or the desktop that tracks a host's connections reacts to this, since it all
+acts only on a connected host. There is no wire protocol or database change.
+
+#### Fixes made while landing
+
+- #4730 rewords one SPEC.md sentence. It said an automatic Update "never opens the Setup question by itself", which,
+  next to the Topology section saying the update does ask through **Answer**, read as if automatic updates never asked.
+  It now says the question waits in the attention row and its popover opens only when you press **Answer**. The same PR
+  corrects a test comment that misnamed the event the test sends.
+
+#### Checks
+
+The plan changes the helm's host connection tracking, automatic Update and setup sign-in, and adds desktop sign-in
+tests. Its own runs were filtered selections of the helm and desktop window libraries, while the change alters when a
+host counts as reconnected, which the end-to-end suite's helm and the desktop's host views read. So the landing ran the
+whole workspace suite, the lints and the end-to-end smoke (its host Update, setup and sign-in steps against fake SSH
+hosts) on the plan stacked on main. The worker runs were on a separate arm64 Linux test worker; the rest ran locally on
+x86_64 Linux.
+
+On the plan stacked on main, before the landing fix:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `e373ca13-f168-422f-9209-23424a675d5d`): all 8483 passed and none printed a runtime `SKIPPED`. That includes the
+  Tensorlake test the report says failed once during execution; this pass says nothing new about why it failed then.
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 -B scripts/gui-e2e-smoke.py`, on the test worker (recorder run `de5ad05e-224e-4abe-bc54-3089dd86303f`): of
+  its 50 steps, 49 passed and one was skipped as always on Linux (paste, which the headless Linux desktop session the
+  smoke runs in cannot provide).
+- `cargo fmt --all -- --check`, `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix, which changes one SPEC.md sentence and one test comment: `cargo fmt --all -- --check` and
+`dprint check SPEC.md`, locally, passed; the runs above are reused, since the fix changes no code.
+
+Skipped: the desktop window's reference screenshot comparisons, since no drawing code changed; the tests and lints of
+the desktop app's own startup and packaging code, since the plan changes no interface that code uses and it does not act
+on when a host reconnected; the workspace doctests, since the plan's doc-comment edits add no examples; macOS; CI, which
+runs only on demand.
+
+#### Things you should know that the report does not say
+
+- **An automatic update can get ahead of an Uninstall you asked for.** On an outdated host that needs a verification
+  code, if you choose **Uninstall** (or **Update**) while the automatic update's question is waiting, both share that
+  one question. Once you answer, the automatic update starts first, and your confirmation then fails because the host is
+  busy; choosing it again after the update finishes works. This is new: before the plan, the automatic update had
+  already given up on such a host, so it never competed with you. A possible follow-up is to have the automatic update
+  step aside once a manual action has joined its question.
+- **A waiting automatic question blocks that host's Tailscale toggle.** While the question waits, changing the host's
+  Tailscale mode is refused as busy, for up to the question's two-minute expiry. Manual Update and Uninstall questions
+  already did this, but there you had started the action yourself.
+- **An outdated host that needs a verification code asks again on every reconnect.** A question nobody answers is
+  remembered only for that connection, so while automatic updates stay on, each reconnect of such a host brings a new
+  question with its chime; a laptop that sleeps and wakes often would see one each time until someone answers or turns
+  automatic updates off. This is what the spec and the plan's decision ask for, but it is a new recurring prompt worth
+  watching in use.
