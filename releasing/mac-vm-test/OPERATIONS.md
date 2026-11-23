@@ -13,10 +13,11 @@ original failure and hashes in `readiness_retries`; never edit the manifest to c
 
 An unavailable fixture checkpoint can use `brick_test.py retry-unavailable` after a verified repair and event review,
 with `--reason` recording why replay is safe. The original observation stays in `checkpoint_retries`. This cannot retry
-feedback or clear a product fail. If peer SSH times out, compare both guests' current routes with the saved binding: a
-missing Linux return route was observed on a long-lived fixture. The existing `network.py --route-via-gateway` setup can
-reapply only the owned peers' routes and pinned SSH configuration, then prove SSH again; it never enables host
-forwarding. Record the missing route and actual restored connectivity rather than guessing why the route vanished.
+feedback or clear a product fail. If peer SSH times out, compare both guests' current routes with the saved binding. A
+missing Linux return route was observed on a long-lived fixture. On a Mac/Linux pair, `network.py --route-via-gateway`
+can reapply the owned peers' routes and pinned SSH configuration, then prove SSH again. It leaves host forwarding alone.
+On a two-Mac pair, use the coordinator's guest setup and retain the failed attempt under BRICK-TEST.md's repair rules.
+Record the missing route and actual restored connectivity.
 
 These stdlib Python helpers run on the macOS host and operate only the fresh clones recorded in one private manifest.
 The guest-native tester performs GUI checks; the operator judges its retained evidence. Use Python 3.13+ for the guest
@@ -75,6 +76,10 @@ control() {
 - `control status mac`, `control status linux` and `control ip linux` inspect the recorded guests. Reinspect after any
   interrupted operation before deciding whether to retry.
 
+For `p1-remote-mac`, the coordinator creates a primary `mac` and one `remote-mac` peer. The primary runs the desktop app
+and native tester. The peer starts headless and needs Remote Login and a responding launchd user domain. Use the roles
+and `control_prefix` in `brick_test.py status` when inspecting either owned clone.
+
 Read each result before the next mutation. The manifest serializes operations but grants no authority to arbitrary guest
 commands: the operator still owns their scope. Journal failure prevents mutation; failed commands remain in the record.
 A replaced VM with the same name but a different MAC is refused. This is an operational ownership fence, not protection
@@ -87,7 +92,7 @@ does not invalidate completed product checks; inspect the authoritative status b
 
 ## Guest SSH
 
-Run:
+For a Mac/Linux pair, run:
 
 ```sh
 python3 -B releasing/mac-vm-test/network.py --run-dir "$test_run" --journal "$journal" --linux-user "$linux_user"
@@ -98,11 +103,17 @@ Mac guest, authorizes its public key inside Linux and writes a run-specific SSH 
 It discovers the current clone address and verifies SSH plus the login's systemd user manager. No host SSH configuration
 is changed. Read the printed alias or manifest `ssh.alias`; add that destination through Farhelm's ordinary GUI.
 
+For the two-Mac pair, the coordinator reads the peer's Ed25519 host key through Tart. When the two clones inherited the
+same key, it uses noninteractive sudo inside the headless clone to replace that clone's key and reads it again through
+Tart. The `fh-mac-<uuid>` alias pins the resulting key and proves authenticated SSH and the peer's launchd user domain.
+Add the alias from the current manifest in Farhelm.
+
 On the exercised host, default shared-network peer isolation blocked direct guest-to-guest traffic. The explicitly
 selected `--route-via-gateway` option added reciprocal guest-only /32 routes through their existing shared gateway. It
 checks that host IPv4 forwarding is already enabled and refuses if it is not; it never enables host forwarding. Derive
 routes from the current pair, not saved DHCP addresses. If the current host lacks a usable approved route, resolve that
-with the maintainer before continuing. Do not enable bridging or forwarding as an implicit fallback.
+with the maintainer before continuing. Do not enable bridging or forwarding as an implicit fallback. For the two-Mac
+pair, reciprocal routes and neighbor cleanup use the macOS commands on both peers.
 
 Direct Linux `tart exec` does not necessarily inherit an SSH login's runtime environment. For service diagnostics, run
 over guest SSH, or set guest `XDG_RUNTIME_DIR=/run/user/$(id -u)` and
@@ -139,18 +150,24 @@ host, retain independent service and version evidence, and run the checkpoint's 
 own in P0's `remote-supervisor-upgrade`, or continuity in a bonus upgrade's `remote-update`. Leave the manual Update
 actions untouched so the result establishes the automatic path.
 
-P1's remote menu checks run after the old-session checks and before feedback. `remote_host_before` and
-`remote_host_after` are fixed read-only probes over the pinned SSH connection, independent of Farhelm's registration.
-They establish user-manager readiness, service state/PID, binary and unit hashes, lib/unit presence, retained data and
-database presence, and the pids of every process running Farhelm's private binary (found from each process's `exe` link,
-so a terminal host whose binary was already deleted still counts, and matched against the resolved lib path too; links
-the SSH user cannot read are skipped, since Farhelm's own processes run as that user), plus the session ids in the kept
-database, read read-only. The probe records the PIDs of SSH stdio proxies separately without exporting their command
-lines. Remove closes that connection, so its proxy may exit. All other snapshot resources must match before the host is
-re-added through native UI. Uninstall must remove the service/unit and lib and leave no Farhelm process running,
-including proxies, while retaining the data with the same session ids, after the remote session is stopped through
-Farhelm. A probe never uninstalls, stops a service or repairs state. Native captures still establish the actual menu,
-disappearance, recovered session, uninstall plan and kept-data completion notice.
+The Linux P1 menu checks run after the old-session checks on the installer pair and before feedback.
+`remote_host_before` and `remote_host_after` are fixed read-only probes over the pinned SSH connection, independent of
+Farhelm's registration. They establish user-manager readiness, service state/PID, binary and unit hashes, lib/unit
+presence, retained data and database presence, and the pids of every process running Farhelm's private binary (found
+from each process's `exe` link, so a terminal host whose binary was already deleted still counts, and matched against
+the resolved lib path too; links the SSH user cannot read are skipped, since Farhelm's own processes run as that user),
+plus the session ids in the kept database, read read-only. The probe records the PIDs of SSH stdio proxies separately
+without exporting their command lines. Remove closes that connection, so its proxy may exit. All other snapshot
+resources must match before the host is re-added through native UI. Uninstall must remove the service/unit and lib and
+leave no Farhelm process running, including proxies, while retaining the data with the same session ids, after the
+remote session is stopped through Farhelm. A probe never uninstalls, stops a service or repairs state. Native captures
+still establish the actual menu, disappearance, recovered session, uninstall plan and kept-data completion notice.
+
+The same operation names on `p1-remote-mac` inspect the SSH user's `io.farhelm.supervisor` launchd job and plist, the
+private lib directory, the processes running its binaries, and the database's session IDs. The starting sample must show
+a running supervisor and a nonempty set of session IDs before the test can proceed to Uninstall. Afterward, a successful
+user-domain probe and launchd's specific missing-job response establish that the job is unloaded. The final sample also
+checks that the plist, binaries and processes are gone and the database still holds the same IDs.
 
 After an override update, the candidate's own native update control must name the exact public latest release after a
 fresh Check for updates. Its accessibility text is sufficient when the provider cannot expose the tooltip in an image;
@@ -274,10 +291,10 @@ running app and helper; that was not a runtime replacement. Halving the image co
 either. Do not repeat either change as a known fix: retain independent frame measurements and establish a new reason for
 expecting a different outcome. The native backend's cause remains unproved.
 
-The staged `fixture_probe.py` performs read-only cleanliness inspection in the Mac and its pinned Linux peer. Use its
-recorded helper path and SSH alias from the task context; it writes one private receipt. Do not replace it with guessed
-source paths or ad hoc service probes. An empty systemd listing can exit 1 on a clean guest; the helper accepts only
-that exact no-output case after positive manager readiness, retaining other failures as unavailable evidence.
+The staged `fixture_probe.py` performs read-only cleanliness inspection in the GUI Mac and its pinned Linux or Mac peer.
+Use its recorded helper path and SSH alias from the task context; it writes one private receipt. Do not replace it with
+guessed source paths or ad hoc service probes. An empty systemd listing can exit 1 on a clean guest; the helper accepts
+only that exact no-output case after positive manager readiness, retaining other failures as unavailable evidence.
 
 - `control exec mac -- /bin/sh -c '<guest command>'` runs a bounded command in the owned guest. Arguments are journaled;
   keep secrets out of them and save private output inside a named guest evidence directory.
