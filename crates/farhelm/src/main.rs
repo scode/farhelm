@@ -137,7 +137,7 @@ enum Cmd {
         #[command(subcommand)]
         command: AgentCmd,
     },
-    /// Report conversation identity from a custom agent.
+    /// Read the custom-agent contract or report a custom agent's conversation.
     CustomAgent {
         #[command(subcommand)]
         command: CustomAgentCmd,
@@ -170,6 +170,8 @@ enum Cmd {
 /// The public entry points for user-authored integrations.
 #[derive(Subcommand)]
 enum CustomAgentCmd {
+    /// Print the custom-agent contract as Markdown. Works outside a Farhelm session.
+    Spec,
     /// Record a conversation ID from the current custom agent session.
     ReportConversation {
         #[arg(long, required = true)]
@@ -1723,6 +1725,54 @@ fn hold_own_version(command: &Cmd) -> anyhow::Result<()> {
 /// rather than beside the tables.
 const UNICODE_NOTICE: &str = include_str!("../../../vendor/UNICODE-LICENSE.txt");
 
+/// The website and offline CLI carry the same contract, including its change history.
+const CUSTOM_AGENT_CONTRACT: &str =
+    include_str!("../../../website/src/content/docs/docs/agents/custom-agent-contract.md");
+
+/// Strip the website header and the one stability aside's delimiters. Keep the notice text and fenced examples.
+fn custom_agent_spec() -> String {
+    let body = CUSTOM_AGENT_CONTRACT
+        .strip_prefix("---\n")
+        .and_then(|rest| rest.split_once("\n---\n"))
+        .map_or(CUSTOM_AGENT_CONTRACT, |(_, body)| body);
+    body.trim()
+        .replacen(":::caution[Stability notice]\n", "", 1)
+        .replacen("\n:::\n", "\n", 1)
+}
+
+/// This pins the printed contract to the implemented argument grammar and validation limits.
+#[test]
+fn custom_agent_spec_keeps_the_contract_and_omits_site_markup() {
+    const UPDATE: &str = "Update custom-agent-contract.md and its ## Contract changelog";
+    let spec = custom_agent_spec();
+    assert!(spec.starts_with("This specification defines"), "{UPDATE}");
+    assert!(
+        !spec.lines().any(|line| line.starts_with(":::")),
+        "{UPDATE}"
+    );
+    assert!(spec.contains("no stability guarantee yet"), "{UPDATE}");
+    let (_, changelog) = spec.split_once("## Contract changelog\n").expect(UPDATE);
+    let entries = changelog.split("\n## ").next().unwrap_or_default();
+    assert!(
+        entries.lines().any(|line| line.starts_with("- **`v1`")),
+        "{UPDATE}"
+    );
+    for term in farhelm_proto::conversation::RESERVED_LOCATOR_PREFIXES
+        .iter()
+        .copied()
+        .chain([
+            "--model",
+            "--effort",
+            "--resume",
+            "256",
+            "128",
+            "farhelm custom-agent report-conversation --id",
+        ])
+    {
+        assert!(spec.contains(term), "Missing {term:?}. {UPDATE}");
+    }
+}
+
 /// The license notices of every third-party crate compiled into Farhelm's shipped binaries (`farhelm` and
 /// `farhelm-desktop`), generated from `Cargo.lock` by `scripts/dependency-notices.py` and kept current by its `--check`
 /// in the ordinary checks. One file covers both binaries, so this binary also carries notices for crates only the
@@ -1799,6 +1849,12 @@ fn main() -> anyhow::Result<()> {
     };
     hold_own_version(&cli.command)?;
     match cli.command {
+        Cmd::CustomAgent {
+            command: CustomAgentCmd::Spec,
+        } => {
+            println!("{}", custom_agent_spec());
+            Ok(())
+        }
         Cmd::CustomAgent {
             command: CustomAgentCmd::ReportConversation { id },
         } => {

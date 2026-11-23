@@ -19,6 +19,8 @@ only needs to run Farhelm's agent command, use the [agent tab's wrapper prefix](
 What Farhelm can then do for a custom-command session depends on what you tell it, and the **Command** column of the
 [support matrix](/docs/agents/) sums that up.
 
+To make your own agent a reusable choice on the **Agent** tab, register a [custom agent](/docs/agents/custom-agents/).
+
 The command and resume command run through Bash, with the environment your login shell provides. You can use
 `~/bin/tool`, `$VARIABLE`, globs, pipes, redirection and compound commands as you would in a Bash script. Bash runs
 without rereading ordinary login or interactive startup files. Ordinary aliases and unexported functions from your login
@@ -29,14 +31,16 @@ too. A missing command prints Bash's error in the session's terminal and leaves 
 
 - **Agent command**: the command line to run. Write `{cwd}` as a whole unquoted argument where the command wants the
   session's directory, and Farhelm fills it in at every launch and restart.
-- **Runs in YOLO mode**: **Yes (YOLO)** or **No**, and you have to pick one. Guarded can approve actions automatically
-  through a classifier, AI reviewer or sandbox, so no prompt by itself does not mean YOLO
-  ([Permission modes](/docs/agents/#permission-modes)). Farhelm never reads the command to work out which; it takes your
-  answer, and asks you to [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask.
-  An agent cannot give this answer for you, so an agent cannot start a command at all on a host that asks before YOLO
-  launches ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
+- **Runs in YOLO mode**: Select **Yes (YOLO)** or **No**. Declaring **Custom** or a registered custom agent sets **Yes
+  (YOLO)** automatically. Guarded can approve actions automatically through a classifier, AI reviewer or sandbox, so no
+  prompt by itself does not mean YOLO ([Permission modes](/docs/agents/#permission-modes)). Farhelm never reads the
+  command to work out which; it takes your answer, and asks you to
+  [confirm a YOLO launch](/docs/using/start-a-session/#confirm-a-yolo-launch) on hosts that ask. An agent cannot give
+  this answer for you, so an agent cannot start a command at all on a host that asks before YOLO launches
+  ([Approve what agents do](/docs/using/approve-agent-requests/#yolo-sessions-and-custom-commands)).
 - **Agent type**, optional: the agent the command ends up running. Leave it at **None** for anything that is not one of
-  the agents Farhelm knows.
+  the agents Farhelm knows or you have registered. Choose **Custom** to declare an unregistered agent that reports its
+  own conversation.
 - **Resume**, which appears once you declare an agent type, and the **Resume command** it reveals: how to start the
   command again on the same conversation, so the session can be restarted.
 
@@ -47,13 +51,16 @@ Codex's and Muse's reading of the screen, including showing when the agent waits
 directory-trust question), and conversation tracking for Claude, Codex, Muse, Goose, OMP, Pi,
 [Grok](/docs/agents/grok/#setup) and [Antigravity](/docs/agents/antigravity/#set-up-restart). Grok and Antigravity use
 the hook setup switch on their own Settings pages. Declaring Cursor or OpenCode gives no tracking, since Farhelm has
-none for them.
+none for them. A declared custom agent uses the
+[custom-agent reporter](/docs/agents/custom-agents/contract/#3-reporting-the-active-conversation) and always counts as
+YOLO. The command's declaration enables its reporter directly, even if the registered agent has reporting disabled.
 
 A declared agent needs `{farhelm_args}` in the command, once, as a whole argument, where that agent's own arguments go.
 Farhelm fills it in with the arguments that agent needs, including any arguments for conversation tracking. Your command
 has to pass them on. For [Codex](/docs/agents/codex/#gotchas-and-quirks), they include `--no-daemon` even with
 conversation tracking off. That flag keeps Codex's commands in the session's own environment.
-[Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps them.
+[Agent wrappers](/docs/agents/agent-wrappers/) shows how to write a wrapper that keeps them. For a custom declaration,
+keep the placeholder in the command. It expands to zero arguments.
 
 Leave the placeholders unquoted and separate from other text: `{cwd}`, rather than `"{cwd}"` or `--dir={cwd}`. Farhelm
 quotes the value for you, so a directory or conversation containing spaces stays one argument and cannot turn into
@@ -77,7 +84,7 @@ The resume command is usually the start command plus the agent's own way of pick
 | Pi          | `--session {conversation} {farhelm_args}`                                 |
 
 So `claude --model sonnet {farhelm_args}` resumes as `claude --model sonnet --resume {conversation} {farhelm_args}`.
-Your answer to **Runs in YOLO mode** covers the resume command too.
+**Runs in YOLO mode** applies to the resume command too, including fixed **Yes (YOLO)** for custom declarations.
 
 Each agent's own page notes anything its custom commands need beyond this, such as Grok's `--no-leader` and Goose's
 `session`.

@@ -479,10 +479,27 @@ socket under the existing threat model.
 The helm is not a process of its own: it lives and dies with the desktop app, on the Mac and on Linux.
 
 Launch templates belong to the helm: one catalog applies to every host the helm manages, while a command a template
-carries still has to exist on the host that runs it. Farhelm ships no built-in templates; the agent types themselves are
-what a release supplies. Integrations are not user-authored: an agent type selects Farhelm's own status reading and
-conversation-identity reporting for that harness, and a command launch with no declared agent type gets generic
-treatment.
+carries still has to exist on the host that runs it. Farhelm ships no built-in templates. Built-in agent types select
+Farhelm's own status reading and conversation reporting for that harness. A command launch with no declared agent type
+gets generic treatment.
+
+Settings → **Custom agents** registers a user-supplied program for every host and environment managed by this helm. Each
+registration has a stable ID, an editable display name, one executable name or path, and separate switches for session
+resumption and reporting. The ID uses lowercase letters or digits with internal hyphens, takes at most 32 characters,
+and cannot collide with built-in harness names or reserved words. Saving an edit keeps the ID. The command is a name on
+`PATH`, an absolute path or a path under `~/`, without arguments or placeholders.
+
+Registered agents appear in the session launcher's **Custom** group and are searchable by display name and ID. They can
+use the ordinary wrapper prefix and templates, accept literal model and effort values of up to 256 bytes from
+`[a-z0-9_-]`, and always count as YOLO. They use screen activity for Running and Idle and have no initial prompt. The
+Command tab can declare a registered agent or generic **Custom**. Either declaration counts as YOLO and carries its own
+command, optional resume command and reporting behavior. Existing launches retain their commands and capabilities after
+a registration changes. The session list uses the current display name and falls back to the saved ID when the
+registration is deleted.
+
+The [custom-agent contract](website/src/content/docs/docs/agents/custom-agent-contract.md) defines the flags and
+reporter behavior for these integrations. It has no stability guarantee yet. Any change to the public contract updates
+that page's **Contract changelog** in the same change. `farhelm custom-agent spec` prints the contract offline.
 
 Confirmed 2026-10-10, extended 2026-10-11: a template's session name, launch command and resume command cannot contain
 control characters or invisible formatting characters. Saving such a value is refused with a clear message, from the
@@ -4066,6 +4083,12 @@ that exact file without following symlinks and requires its session ID to match.
 resume offer, which makes Restart unavailable, and rejects the stale Resume request so the user can refresh; it never
 silently launches fresh under that request.
 
+Custom agents report their conversation explicitly through `farhelm custom-agent report-conversation --id <ID>`. The
+reporter stays silent and exits successfully even if it cannot write a report. Valid reports can be recorded while the
+supervisor is down. Admission checks the current launch and uses ancestry to keep a nested agent's report from replacing
+its parent's capture. Plain Restart needs both a recorded conversation and a saved resume command. A named Restart with
+retains the old capture if the new launch can report. It clears the capture when the new launch has reporting disabled.
+
 Codex's first admitted selecting report pins the native Codex process that emitted it, under the session's agent
 terminal. Later reports must come from that process, not a Codex process below it that inherited its credential.
 Resident launchers and other processes above it are accepted. If a recorded Codex ancestor later reports a verified
@@ -4674,16 +4697,22 @@ on another.
 A known model ID in a template or `--model` can supply the agent type when it has a single owner and no agent type is
 chosen. This works for current and older catalog models.
 
+`--agent` also accepts a registered custom agent's ID. A command launch may declare `--agent custom` without a
+registration. `farhelm agent create` and ordinary `farhelm spawn` take `--conversation <ID>` for a one-time start with
+an agent that can resume a named conversation. Commands, managed checkouts and inherited spawns refuse the selector. For
+a registered custom agent the same `--resume <ID>` contract applies to that start and to Restart.
+
 `farhelm agent create` and ordinary `farhelm spawn` accept `--prompt TEXT` or `--prompt-file PATH`, mutually exclusive;
 `-` reads the file contents from stdin. Templates carry the same prompt field. The prompt shares the 64 KiB launch
 budget, allows newline and tab, and refuses other control characters. It is sent once as literal command-line data at
 creation, including for a managed checkout, and stays separate from the stored launch: Restart, Clone, Replace and
 recent setups never send or remember it again. A template supplies its prompt on every create using it. Command launches
 and inherited spawns refuse prompt flags. Claude, Antigravity, Codex, Cursor, Grok, Muse, OMP and OpenCode support
-prompts; Goose and Pi do not. Muse refuses a named conversation plus a prompt. A create's approval card shows the full
-escaped message in a scrollable block, under a distinct card kind an older UI cannot decode. Template cards carry the
-prompt in their fields and likewise fail an older decoder. A completed keyed create still replays when its template's
-prompt changes; an interrupted ordinary agent create refuses a changed resolved prompt before relaunching.
+prompts. Goose, Pi and custom agents refuse them. Muse refuses a named conversation plus a prompt. A create's approval
+card shows the full escaped message in a scrollable block, under a distinct card kind an older UI cannot decode.
+Template cards carry the prompt in their fields and likewise fail an older decoder. A completed keyed create still
+replays when its template's prompt changes; an interrupted ordinary agent create refuses a changed resolved prompt
+before relaunching.
 
 Agents can also write templates, behind the same card, since a template can carry a command line that every host the
 helm manages may later run. `farhelm agent template create <name>` sets the fields given by `--cwd` or

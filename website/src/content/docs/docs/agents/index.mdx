@@ -6,7 +6,8 @@ sidebar:
 ---
 
 Farhelm runs any coding agent in a session, but how much it adds on top depends on the agent. The matrix below is the
-big picture: what Farhelm does for each agent it knows, for [Bash and Zsh shells](/docs/agents/shells/), and for anything else you run as a
+big picture: what Farhelm does for each agent it knows, for [custom agents](/docs/agents/custom-agents/), for
+[Bash and Zsh shells](/docs/agents/shells/), and for anything else you run as a
 [custom command](/docs/agents/custom-commands/). Claude and Codex get the most; the others get less, in different
 ways. Each agent also has its own page, linked from its name in the matrix, with setup steps and gotchas specific to
 that agent when it has any.
@@ -61,8 +62,10 @@ export const agents = [
     tip: { trust: 'Never asks, so there is nothing to answer.', perms: 'YOLO only.', status: basic, resume: 'Farhelm cannot follow its conversation, so the session cannot be restarted.' } },
   { name: 'Shells', href: '/docs/agents/shells/', head: 'Bash and Zsh in their own sessions.', tier: 3, v: { launch: 'y', model: 'n', effort: 'n', perms: 'n', trust: 'n', status: 'p', waiting: 'n', resume: 'n', warn: 'n', farhelm: 'n' },
     tip: { status: 'The row shows Running while the terminal changes and Idle when it settles.', resume: 'Use Replace to start a fresh shell.' } },
+  { name: 'Custom', href: '/docs/agents/custom-agents/', head: 'Your own CLI agent registered under Settings → Custom agents.', tier: 3, v: { launch: 'y', model: 'p', effort: 'p', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'n', farhelm: 'n' },
+    tip: { launch: "Register custom agents under Settings → Custom agents; they appear on the launcher's Agent tab.", model: 'Free-text model string ([a-z0-9_-]), passed as --model <value> when set.', effort: 'Free-text effort string ([a-z0-9_-]), passed as --effort <value> when set.', perms: 'YOLO only: custom agents have no permission mode switch in this version.', trust: 'Handle directory trust inside your agent or wrapper script.', status: basic, resume: 'Available when both session resumption and session reporting are enabled in Settings and your agent reports its conversation ID.', warn: 'Farhelm does not know when a custom agent is expected to report, so it does not show a missing-report warning.', farhelm: "Custom agents do not receive Farhelm's automatic instructions pointer, though they can still run farhelm agent commands directly." } },
   { name: 'Command', href: '/docs/agents/custom-commands/', head: 'Any other program, run as a custom command.', tier: 3, v: { launch: 'p', model: 'n', effort: 'n', perms: 'p', trust: 'n', status: 'p', waiting: 'n', resume: 'p', warn: 'p', farhelm: 'n' },
-    tip: { warn: 'If you declare which agent it runs, the same warnings as that agent.', trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'You say whether the command runs in YOLO mode.', status: "Basic, or Claude's, Codex's or Muse's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
+    tip: { warn: 'If you declare which agent it runs, the same warnings as that agent.', trust: "Put the agent's own trust option in the command, if it has one.", launch: "From the launcher's command tab.", model: 'Write it into the command.', effort: 'Write it into the command.', perms: 'Custom agent declarations always count as YOLO. The permission field is a choice for other commands.', status: "Basic, or Claude's, Codex's or Muse's reading if you declare the command runs one of them.", resume: 'If you declare which agent it runs and give a resume command, for an agent Farhelm can follow.' } },
 ];
 export const sym = { y: '✓', p: '◐', n: '–' };
 export const word = { y: 'Yes', p: 'Partly', n: 'No' };

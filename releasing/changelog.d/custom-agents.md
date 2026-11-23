@@ -8,3 +8,5 @@ and report its ID.
 
 A conversation ID you already know can be supplied under **More options** in the launcher or with `--conversation`
 on a compatible CLI launch.
+
+`farhelm custom-agent spec` prints the wrapper contract for your installed version, including its change history.
