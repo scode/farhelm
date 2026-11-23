@@ -32,9 +32,8 @@
 //! connection with no helm client has none, which the app never makes; there every upload fails visibly, saying so
 //! ([`NO_HELM_CLIENT`]). Tests serve the fake through the connection, as the app's own transfers are served.
 //!
-//! NOTE: The vendored GPUI clipboard on Wayland never reports a file list, so a file copied in a Linux file manager
-//! pastes whatever text the file manager offers (usually its path), as text. That is the platform read's limit, not
-//! this module's; X11 falls back to GPUI's synchronous read, which reports text and images only too.
+//! On Wayland, GPUI turns local URIs from a file manager's clipboard into file entries. Offers with only web links
+//! can still supply image or text entries. X11 uses GPUI's synchronous read, which reports text and images.
 
 #[cfg(test)]
 mod tests;

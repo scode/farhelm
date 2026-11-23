@@ -8196,9 +8196,8 @@ fn input_made_for_an_earlier_attachment_is_dropped(cx: &mut TestAppContext) {
 /// Only plain text is typed, and a clipboard read that reports a file or an image types nothing at all, even with text
 /// beside it: SPEC.md's "Attachments" ranks a paste's flavors files first, then images, then text, and a Finder copy on
 /// macOS carries the file's path as text too, which would otherwise be typed into the program. Such a paste attaches
-/// the file instead (here, with no transfers served, it fails visibly); `terminal/attachments/tests.rs` pins the
-/// attaching. (The vendored Wayland read never reports a file, so on Linux a copied file's text still pastes; that is
-/// the read's limit, not this rule's.)
+/// the file instead (here, with no transfers served, it fails visibly). Wayland clipboard file entries use the same
+/// attachment path. `terminal/attachments/tests.rs` pins the transfer behavior.
 #[gpui::test]
 fn only_the_clipboards_text_is_pasted(cx: &mut TestAppContext) {
     let mut h = harness(cx);

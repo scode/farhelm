@@ -1316,7 +1316,7 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `capture-alpha`         | gpui-pre-wgpu 6 / 1                                                                 | Screenshot colors on premultiplied-alpha surfaces          |
 | `gpui-agent`            | gpui-agent 11 / 11, 29 / 11 and a lockfile refresh                                  | Build the bridge against these gpui-pre 0.3.12 trees       |
 | `native-key`            | gpui-pre 354 / 11, gpui-pre-linux 89 / 4, gpui-pre-macos 27 / 17                    | Physical key identity and the original Shift on key events |
-| `attachment-clipboard`  | gpui-pre-linux 159 / 1, gpui-pre-macos 92 / 0                                       | Image-before-text async clipboard reads for paste          |
+| `attachment-clipboard`  | gpui-pre-linux 406 / 2, gpui-pre-macos 92 / 0                                       | Files, images, then text for async paste                   |
 | `activation-token`      | gpui-pre 13 / 0, gpui-pre-linux 9 / 0                                               | Activate a window with another client's Wayland token      |
 | `frame-source`          | gpui-pre-macos 10 / 1                                                               | Keep the lower-latency frame source on macOS 14 and later  |
 | `no-kde-blur`           | gpui-pre-linux 4 / 36, gpui-agent 0 / 14                                            | Drop the KDE-blur fallback and its LGPL-bundling crate     |
@@ -1326,7 +1326,7 @@ Here's what each layer changes and why, in application order. Sizes are `git app
 | `mixed-font-ellipsis`   | gpui-pre 119 / 28                                                                   | Fit an end ellipsis using the actual fonts on the line     |
 | `zoomed-open`           | gpui-pre 11 / 1, gpui-pre-macos 15 / 5                                              | Restore maximized Mac windows before they appear           |
 
-Without the bridge's own patches and the notices, the GPUI changes come to 1,678 added and 232 removed lines, tests
+Without the bridge's own patches and the notices, the GPUI changes come to 1,925 added and 233 removed lines, tests
 included.
 
 - **bridge.** The bridge records what each frame drew (elements, text, accessibility roles and names, focus and input
@@ -1357,9 +1357,11 @@ included.
   original key-down keeps its repeat flag where upstream forced it off, so held-key filters can behave differently. The
   layer adds fields to `KeyDownEvent` and `KeyUpEvent`, so the unpatched `gpui-pre-windows` and `gpui-pre-web` crates
   would not compile against it; neither is a Farhelm target.
-- **attachment-clipboard.** The async clipboard read prefers images over text (and files over both on macOS), so pasting
-  a screenshot into a terminal uploads the image rather than its text label. Wayland reads the pipe on a background
-  thread. The synchronous clipboard API that text fields use keeps its text-first behavior.
+- **attachment-clipboard.** The async clipboard read on Wayland and macOS gives local files first priority, then images,
+  then text. On Wayland, a URI list with no local files can fall back to image or text from the captured offer. Loss of
+  keyboard focus, a new selection or a destroyed offer cancels the pending paste. Requesting the MIME flavor stays on
+  the platform thread and reading the pipe runs in the background. The synchronous clipboard API that text fields use
+  reads text first.
 - **activation-token.** `Window::activate_window_with_token` activates a window with an xdg-activation token another
   client obtained, which a second launch needs to bring the running app's window forward on Wayland. Upstream can only
   request its own token, which compositors usually refuse. Other platforms fall back to plain activation.
