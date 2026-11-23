@@ -2761,8 +2761,22 @@ interactive task starts only if the pending response wins the route's reply dead
 open a question for a draft that stopped waiting. The UI channel can then carry the answer while planning holds no slot.
 The GUI matches the setup attempt to the initiating host or Add draft and repeats the same planning request once the
 helm publishes a successful socket check. The result stays in memory for a short time and grants no authority to
-provision. A confirmed run already has progress and performs the same sign-in before revalidating or mutating its host,
-even when the setup master used during planning has expired.
+provision. Automatic Update uses the same preflight after planning releases its slot. The listener tracks a pending
+check by host and connection incarnation, and observes settlement independently of the bounded UI completion history. A
+successful check starts batch replanning through the listener's per-host attempt. It can use a planning slot while the
+ordinary fleet scan is waiting on another host. A failed check consumes that incarnation's automatic attempt. A new skew
+refusal advances the incarnation on entry to that state or after an explicit interrupt. An identical background probe
+within that state keeps the previous incarnation.
+
+Checks on the same registered entry and SSH route share one attempt, even when both callers prepared before either
+started. The 202 reply names that attempt so the manual caller can focus its question. The opt-out commit releases
+auto-only checks under the admission lock, even if the fleet watch coalesces a re-enable. The listener also releases its
+interest when a host loses eligibility or it stops. A manual caller that already joined keeps its check. A manual reply
+still being prepared can start a fresh check if the automatic one was released.
+
+A confirmed manual run already has progress and performs the same sign-in before revalidating or mutating its host, even
+when the setup master used during planning has expired. Automatic Update revalidates in batch mode. An expired master
+can fail the automatic run without opening a second question.
 
 Closing Add before a question appears cancels its setup check by attempt id. Removing a registered host cancels its
 detached setup, Update and Uninstall checks after committing the row deletion. The task publishes its cancel sender

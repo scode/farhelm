@@ -3,11 +3,14 @@
 //! The fleet revision is the wake source: connection transitions, provisioning
 //! completion and preference writes all publish there. There is no retry timer.
 
-use super::{ProvisionRequest, ProvisioningRequestError, ProvisioningService};
-use crate::manager::HostState;
+use super::super::setup_sign_in::{AutomaticSignIn, Pending, SetupSettlement};
+use super::{HostPlanResponse, ProvisionRequest, ProvisioningRequestError, ProvisioningService};
+use crate::manager::{HostSnapshot, HostState};
 use crate::store::{HostId, HostKind};
-use std::collections::{HashMap, HashSet};
+use farhelm_proto::ui_channel::SshSignInOutcome;
+use std::collections::HashMap;
 use std::sync::Arc;
+use tokio::sync::oneshot;
 
 /// Application-owned listener. A weak service reference breaks the waiting task's
 /// ownership cycle. Drop requests cooperative cancellation of pending listener
@@ -51,13 +54,13 @@ impl AutomaticUpdates {
         #[cfg(test)]
         let (scan_notices, completed_scans) = tokio::sync::watch::channel(0_u64);
         let task = tokio::spawn(async move {
-            let mut attempted = HashMap::new();
+            let mut attempts = HashMap::new();
             loop {
                 events.borrow_and_update();
                 let Some(service) = service.upgrade() else {
                     return;
                 };
-                if let Err(error) = scan(&service, &mut attempted).await {
+                if let Err(error) = scan(&service, &mut attempts).await {
                     tracing::warn!(error = %error, "automatic remote-host update scan failed");
                 }
                 drop(service);
@@ -76,15 +79,87 @@ impl AutomaticUpdates {
     }
 }
 
+/// Automatic work belongs to the connection that made it eligible. A pending check owns only its
+/// interest in sign-in. Dropping it on opt-out, retarget or shutdown leaves any attached manual work alive.
+pub(in crate::provisioning) enum AttemptState {
+    PendingSignIn {
+        incarnation: u64,
+        work: PendingUpdate,
+    },
+    Attempted(u64),
+}
+
+/// Keep Ready work with the listener's per-host reservation. Batch planning can use a shared planning
+/// slot while the fleet scan probes another host. Dropping the reservation cancels unadmitted work.
+pub(in crate::provisioning) struct PendingUpdate {
+    sign_in: AutomaticSignIn,
+    resume: tokio::task::JoinHandle<()>,
+    attempted: oneshot::Receiver<bool>,
+}
+
+impl Drop for PendingUpdate {
+    fn drop(&mut self) {
+        self.resume.abort();
+    }
+}
+
+impl AttemptState {
+    /// Preserve a failure the SSH task published before opt-out or temporary ineligibility.
+    /// A check released by policy has no failure to preserve.
+    fn retain_for(&mut self, host: &HostSnapshot, eligible: bool) -> bool {
+        match self {
+            Self::Attempted(_) => true,
+            Self::PendingSignIn { incarnation, .. } if *incarnation != host.incarnation => false,
+            Self::PendingSignIn { work, .. } => match work.sign_in.outcome() {
+                Some(SetupSettlement::Released) => false,
+                Some(SetupSettlement::Finished(SshSignInOutcome::Failed { reason })) => {
+                    *self = Self::sign_in_failed(host, &reason);
+                    true
+                }
+                Some(SetupSettlement::Finished(SshSignInOutcome::Ready)) => {
+                    // The continuation can set busy itself while it admits the run. Keep its reservation
+                    // until it reports the result, even if the host snapshot now looks busy or disabled.
+                    match work.attempted.try_recv() {
+                        Ok(true) => {
+                            *self = Self::Attempted(host.incarnation);
+                            true
+                        }
+                        Ok(false) => false,
+                        Err(oneshot::error::TryRecvError::Empty) => true,
+                        Err(oneshot::error::TryRecvError::Closed) => {
+                            *self = Self::sign_in_failed(
+                                host,
+                                "the automatic update continuation ended",
+                            );
+                            true
+                        }
+                    }
+                }
+                None => eligible,
+            },
+        }
+    }
+
+    /// A failed setup connection leaves the ordinary Update badge as the manual retry surface.
+    fn sign_in_failed(host: &HostSnapshot, reason: &str) -> Self {
+        tracing::warn!(host = host.id, incarnation = host.incarnation, %reason,
+            "automatic remote-host update stopped at SSH sign-in");
+        Self::Attempted(host.incarnation)
+    }
+}
+
 /// Use the rail's update badge rules with an exemption for development peers.
 ///
 /// A developer may have installed the build under test on that host. Its
 /// protocol can be older than the helm's, and manual Update can still restore
 /// the release. An unparseable non-development build can qualify by protocol.
 fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> bool {
-    if !kind.panel_updates() || busy {
-        return false;
-    }
+    kind.panel_updates() && !busy && connection_needs_update(state, helm_build)
+}
+
+/// A skewed connection can become ineligible without changing incarnation.
+/// Apply the same connection rule when scouting and when admitting a prepared update.
+pub(super) fn connection_needs_update(state: &HostState, helm_build: &str) -> bool {
     match state {
         HostState::Connected { build_version, .. } => {
             !farhelm_proto::is_development_build(build_version)
@@ -104,26 +179,46 @@ fn eligible(kind: HostKind, state: &HostState, busy: bool, helm_build: &str) -> 
     }
 }
 
-/// Start at most one attempt per host incarnation once Update is admitted or refused.
-/// Reserve before planning, not after run completion: a failed run clears busy
-/// and publishes its own revision before the start caller necessarily resumes.
-/// Skip a manual-only payload source before making any plan or recording any
-/// attempt. Manual starts still arbitrate through the service's busy claim.
+/// Scan the fleet without waiting for a user to answer SSH. Setup sign-in returns the planning slot first.
+/// A successful sign-in dispatches batch work directly through a listener-owned continuation.
+/// Reserve the attempt before starting work, since a run can publish completion before the start caller resumes.
 pub(super) async fn scan(
     service: &Arc<ProvisioningService>,
-    attempted: &mut HashMap<HostId, u64>,
+    attempts: &mut HashMap<HostId, AttemptState>,
 ) -> anyhow::Result<()> {
     if !service.payloads.allows_automatic_updates() {
         return Ok(());
     }
     let hosts = service.manager.snapshots();
-    let live: HashSet<_> = hosts.iter().map(|host| host.id).collect();
-    attempted.retain(|id, _| live.contains(id));
-    if service.store.preferences().await?.auto_update_remote_hosts == Some(false) {
+    let live: HashMap<_, _> = hosts.iter().map(|host| (host.id, host)).collect();
+    let enabled = service.store.preferences().await?.auto_update_remote_hosts != Some(false);
+    let helm_build = service.helm_build();
+    {
+        // Retire invalid pending checks even when the host cannot enter the scan below.
+        let memory = service.memory.lock().await;
+        attempts.retain(|id, attempt| {
+            let Some(host) = live.get(id) else {
+                return false;
+            };
+            attempt.retain_for(
+                host,
+                enabled
+                    && eligible(
+                        host.kind,
+                        &host.state,
+                        memory.busy.contains(id),
+                        &helm_build,
+                    ),
+            )
+        });
+    }
+    if !enabled {
         return Ok(());
     }
     for host in hosts {
         if service.store.preferences().await?.auto_update_remote_hosts == Some(false) {
+            // The preference commit cancelled auto-only checks. The next scan settles
+            // any observed failures before it forgets the listener's interest.
             return Ok(());
         }
         let (busy, failed) = {
@@ -136,55 +231,168 @@ pub(super) async fn scan(
                     .is_some_and(|run| run.failed_incarnation == Some(host.incarnation)),
             )
         };
-        if !eligible(host.kind, &host.state, busy, &service.helm_build())
-            || attempted.get(&host.id) == Some(&host.incarnation)
-            || failed
-        {
+        if !eligible(host.kind, &host.state, busy, &helm_build) || failed {
             continue;
         }
-        attempted.insert(host.id, host.incarnation);
-        let result = async {
-            let plan = service.plan_update(host.id).await?;
-            // The final policy read and connection check share admission's
-            // ordering with a committing opt-out; planning cannot authorize a
-            // later start by retaining an earlier enabled read.
-            if service
-                .start_automatic_update(
-                    host.id,
-                    host.entry_uuid.clone(),
-                    host.incarnation,
-                    ProvisionRequest {
-                        probe_id: plan.probe_id,
-                    },
-                )
-                .await?
-                .is_none()
-            {
-                attempted.remove(&host.id);
-            }
-            Ok::<(), anyhow::Error>(())
-        }
-        .await;
-        if let Err(error) = result {
-            // Manual work can claim the host while the automatic plan is in
-            // flight. Its completion wakes the listener to reconsider the host.
-            if matches!(
-                error.downcast_ref::<ProvisioningRequestError>(),
-                Some(ProvisioningRequestError::Busy(_))
-            ) {
-                attempted.remove(&host.id);
+        match attempts.get(&host.id) {
+            Some(AttemptState::Attempted(incarnation)) if *incarnation == host.incarnation => {
                 continue;
             }
-            // A refused probe can itself outlast a connection transition. The
-            // no-retry boundary starts when refusal is known, not before SSH.
-            if let Some(current) = service.manager.status(host.id) {
-                attempted.insert(host.id, current.incarnation);
+            Some(AttemptState::PendingSignIn { .. }) => continue,
+            _ => {}
+        }
+        attempts.insert(host.id, AttemptState::Attempted(host.incarnation));
+        let plan = match service.plan_update_guarded(host.id, true).await {
+            Err(error) if error.is::<Pending>() => {
+                match begin_sign_in(service, &host, error.downcast::<Pending>()?, &helm_build).await
+                {
+                    Ok(Some(work)) => {
+                        attempts.insert(
+                            host.id,
+                            AttemptState::PendingSignIn {
+                                incarnation: host.incarnation,
+                                work,
+                            },
+                        );
+                    }
+                    Ok(None) => {
+                        attempts.remove(&host.id);
+                    }
+                    Err(error) => {
+                        if let Some(incarnation) = refused(service, &host, &error) {
+                            attempts.insert(host.id, AttemptState::Attempted(incarnation));
+                        }
+                    }
+                }
+                continue;
             }
-            tracing::warn!(host = host.id, incarnation = host.incarnation, error = %error,
-                "automatic remote-host update refused before start");
+            result => result,
+        };
+        if let Some(incarnation) = admit(service, &host, plan).await {
+            attempts.insert(host.id, AttemptState::Attempted(incarnation));
+        } else {
+            attempts.remove(&host.id);
         }
     }
     Ok(())
+}
+
+/// Neither an old plan nor a successful sign-in from an old connection can authorize new work.
+async fn still_eligible(
+    service: &ProvisioningService,
+    host: &HostSnapshot,
+    helm_build: &str,
+) -> anyhow::Result<bool> {
+    if service.store.preferences().await?.auto_update_remote_hosts == Some(false) {
+        return Ok(false);
+    }
+    let memory = service.memory.lock().await;
+    Ok(service.manager.status(host.id).is_some_and(|current| {
+        current.entry_uuid == host.entry_uuid
+            && current.incarnation == host.incarnation
+            && eligible(
+                host.kind,
+                &current.state,
+                memory.busy.contains(&host.id),
+                helm_build,
+            )
+    }))
+}
+
+/// Once planning yields its slot, order prompt activation against a committing opt-out. The Ready continuation
+/// waits for this specific check and dispatches immediately, behind only the service's ordinary planning limits.
+async fn begin_sign_in(
+    service: &Arc<ProvisioningService>,
+    host: &HostSnapshot,
+    pending: Pending,
+    helm_build: &str,
+) -> anyhow::Result<Option<PendingUpdate>> {
+    let Some(setup) = &service.setup_sign_in else {
+        return Ok(None);
+    };
+    let _policy = service.automatic_update_admission.lock().await;
+    if !still_eligible(service, host, helm_build).await? {
+        return Ok(None);
+    }
+    let sign_in = setup.start_automatic(pending, service);
+    let ready = sign_in.wait_ready();
+    let service = Arc::downgrade(service);
+    let host = host.clone();
+    let helm_build = helm_build.to_owned();
+    let (finished, attempted) = oneshot::channel();
+    let resume = tokio::spawn(async move {
+        if !ready.await {
+            return;
+        }
+        let Some(service) = service.upgrade() else {
+            return;
+        };
+        let disposition = match still_eligible(&service, &host, &helm_build).await {
+            Ok(true) => {
+                let plan = service.plan_update(host.id).await;
+                admit(&service, &host, plan).await
+            }
+            Ok(false) => None,
+            Err(error) => refused(&service, &host, &error),
+        };
+        // A resumed probe belongs to the authentication that started it. A failure observed after
+        // retarget or reconnect cannot consume the replacement connection's opportunity.
+        let _ = finished.send(disposition == Some(host.incarnation));
+        service.manager.events().bump();
+    });
+    Ok(Some(PendingUpdate {
+        sign_in,
+        resume,
+        attempted,
+    }))
+}
+
+/// Fresh plans and resumed plans share the final preference, connection and busy checks.
+async fn admit(
+    service: &Arc<ProvisioningService>,
+    host: &HostSnapshot,
+    plan: anyhow::Result<HostPlanResponse>,
+) -> Option<u64> {
+    let result = async {
+        service
+            .start_automatic_update(
+                host.id,
+                host.entry_uuid.clone(),
+                host.incarnation,
+                ProvisionRequest {
+                    probe_id: plan?.probe_id,
+                },
+            )
+            .await
+    }
+    .await;
+    match result {
+        Ok(Some(_)) => Some(host.incarnation),
+        Ok(None) => None,
+        Err(error) => refused(service, host, &error),
+    }
+}
+
+/// A manual busy claim consumes no attempt. Its completion wakes the scan. For any other refusal, preserve the
+/// connection observed when the failure became known, which may differ from the one that began the probe.
+fn refused(
+    service: &ProvisioningService,
+    host: &HostSnapshot,
+    error: &anyhow::Error,
+) -> Option<u64> {
+    if matches!(
+        error.downcast_ref::<ProvisioningRequestError>(),
+        Some(ProvisioningRequestError::Busy(_))
+    ) {
+        None
+    } else {
+        tracing::warn!(host = host.id, incarnation = host.incarnation, %error,
+            "automatic remote-host update refused before start");
+        service
+            .manager
+            .status(host.id)
+            .map(|current| current.incarnation)
+    }
 }
 
 #[cfg(test)]

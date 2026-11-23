@@ -1,23 +1,25 @@
 //! Interactive preflight on the setup master, before any batch provisioning command.
 //!
 //! Planning may have to give the ordered UI channel back before SSH can finish asking questions. The pending reply
-//! carries an opaque attempt id. Only its terminal outcome is retained for the reprobe. An accepted run already has
-//! progress and an owned task, so it awaits exactly the same SSH relay without retaining a second result.
+//! carries the id of the attempt that owns the question. Manual and automatic planning can join a registered
+//! host's check. The automatic listener holds its outcome independently of the bounded desktop completion history.
+//! An accepted run already owns its task and awaits the same SSH relay directly.
 
 use std::collections::{HashMap, VecDeque};
 use std::path::PathBuf;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, Weak};
 use std::time::Duration;
 
 use axum::Json;
 use axum::extract::{Path as ApiPath, State};
 use axum::http::StatusCode;
 use farhelm_proto::ui_channel::{SshSignInCompletion, SshSignInOutcome};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, watch};
 use tokio::time::Instant;
 
 use super::backend::BackendFailure;
 use super::plan::ProvisioningTarget;
+use super::service::ProvisioningService;
 use crate::AppState;
 use crate::access::RemoteRoute;
 use crate::ssh::{SharedConnection, SshAccessKind};
@@ -34,10 +36,27 @@ const MAX_COMPLETIONS: usize = 128;
 #[error("SSH setup sign-in is pending")]
 pub(super) struct Pending {
     pub(super) attempt: Attempt,
+    route: SetupRoute,
+    /// A check observed by prepare may settle before the caller accepts the pending result.
+    existing: Option<SetupOutcome>,
+}
+
+/// The exact registered entry and SSH settings that may share a setup sign-in. Drafts are always independent.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct SetupRoute {
     destination: String,
     access: SshAccessKind,
     entry: Option<(HostId, String)>,
 }
+
+/// Automatic cancellation releases the retry opportunity. A real sign-in failure consumes it.
+#[derive(Clone, Debug)]
+pub(super) enum SetupSettlement {
+    Finished(SshSignInOutcome),
+    Released,
+}
+
+type SetupOutcome = watch::Receiver<Option<SetupSettlement>>;
 
 struct Completion {
     view: SshSignInCompletion,
@@ -46,8 +65,81 @@ struct Completion {
 
 /// A detached preflight can need cancellation before its first SSH question exists.
 struct ActiveAttempt {
-    host: Option<HostId>,
+    attempt: Attempt,
+    route: SetupRoute,
     cancel: oneshot::Sender<()>,
+    outcome: watch::Sender<Option<SetupSettlement>>,
+    manual: bool,
+}
+
+impl ActiveAttempt {
+    /// Reuse both the question id and the result even if settlement overtakes the caller's reply.
+    fn pending(&self) -> Pending {
+        Pending {
+            attempt: self.attempt.clone(),
+            route: self.route.clone(),
+            existing: Some(self.outcome.subscribe()),
+        }
+    }
+
+    /// Host removal can cancel every registered route check. An Add draft has no host to remove.
+    fn host(&self) -> Option<HostId> {
+        self.route.entry.as_ref().map(|(host, _)| *host)
+    }
+
+    /// Publish the policy cancellation while this check is still covered by the active lock.
+    /// A manual caller that prepared earlier can then distinguish it from an ordinary settlement.
+    fn release(self) {
+        self.outcome.send_replace(Some(SetupSettlement::Released));
+        let _ = self.cancel.send(());
+    }
+}
+
+/// An automatic listener's interest in a detached sign-in. Dropping it ends an auto-only check, including
+/// before its first question. A delivered manual request can keep the check alive on its own.
+pub(super) struct AutomaticSignIn {
+    attempt: String,
+    outcome: SetupOutcome,
+    setup: Weak<SetupSignIn>,
+}
+
+impl AutomaticSignIn {
+    /// A fleet revision follows settlement. The watch keeps the result even when many other checks finish.
+    pub(super) fn outcome(&self) -> Option<SetupSettlement> {
+        let closed = self.outcome.has_changed().is_err();
+        self.outcome.borrow().clone().or_else(|| {
+            closed.then(|| {
+                SetupSettlement::Finished(SshSignInOutcome::Failed {
+                    reason: "The SSH sign-in check ended without a result".into(),
+                })
+            })
+        })
+    }
+
+    /// Await the same result as the listener without borrowing or owning its check.
+    /// Only a successful authentication can dispatch an automatic continuation.
+    pub(super) fn wait_ready(&self) -> impl Future<Output = bool> + Send + 'static {
+        let mut outcome = self.outcome.clone();
+        async move {
+            outcome
+                .wait_for(Option::is_some)
+                .await
+                .is_ok_and(|settled| {
+                    matches!(
+                        &*settled,
+                        Some(SetupSettlement::Finished(SshSignInOutcome::Ready))
+                    )
+                })
+        }
+    }
+}
+
+impl Drop for AutomaticSignIn {
+    fn drop(&mut self) {
+        if let Some(setup) = self.setup.upgrade() {
+            setup.cancel_automatic(&self.attempt);
+        }
+    }
 }
 
 pub(super) struct SetupSignIn {
@@ -55,7 +147,7 @@ pub(super) struct SetupSignIn {
     program: PathBuf,
     connect_timeout: Duration,
     completed: Mutex<VecDeque<Completion>>,
-    /// Cancel from the pending reply through cleanup, by attempt for Add and by host for Remove.
+    /// Cancel by attempt or by removed host. The same lock also arbitrates concurrent starts for a route.
     active: Mutex<HashMap<String, ActiveAttempt>>,
 }
 
@@ -99,6 +191,21 @@ impl SetupSignIn {
         let Some((destination, access)) = Self::destination(transport) else {
             return Ok(());
         };
+        let route = SetupRoute {
+            destination: destination.to_owned(),
+            access,
+            entry: host.map(|row| (row.id, row.entry_uuid.clone())),
+        };
+        if route.entry.is_some()
+            && let Some(active) = self
+                .active
+                .lock()
+                .expect("SSH setup active mutex")
+                .values()
+                .find(|active| active.route == route)
+        {
+            return Err(active.pending().into());
+        }
         if self
             .relay
             .setup_ready(
@@ -117,32 +224,90 @@ impl SetupSignIn {
         };
         Err(Pending {
             attempt,
-            destination: destination.to_owned(),
-            access,
-            entry: host.map(|row| (row.id, row.entry_uuid.clone())),
+            route,
+            existing: None,
         }
         .into())
     }
 
-    /// Start the preflight after sending its correlation in the command reply path. The result remains readable
-    /// whether it finished before or after the channel next projects its collections. Publish cancellation before
-    /// the task reads the registered row, so removal can either cancel the task or make its first lookup fail.
-    pub(super) fn start(self: &Arc<Self>, pending: Pending, state: Arc<AppState>) {
+    /// Activate the check once the pending HTTP reply wins its deadline. A racing winner's id is also the
+    /// desktop's focus correlation, so give the caller the id of the running check.
+    pub(super) fn start_manual(
+        self: &Arc<Self>,
+        pending: Pending,
+        service: &Arc<ProvisioningService>,
+    ) -> String {
+        self.start(pending, service, true).0
+    }
+
+    /// Activate an eligible automatic check. Its lifetime belongs to the scan's pending state.
+    pub(super) fn start_automatic(
+        self: &Arc<Self>,
+        pending: Pending,
+        service: &Arc<ProvisioningService>,
+    ) -> AutomaticSignIn {
+        let (attempt, outcome) = self.start(pending, service, false);
+        AutomaticSignIn {
+            attempt,
+            outcome,
+            setup: Arc::downgrade(self),
+        }
+    }
+
+    /// Decide who owns the prompt atomically across callers that both passed prepare before either one started.
+    /// Publish cancellation before the task reads the row, so Remove can cancel it or make that lookup fail.
+    fn start(
+        self: &Arc<Self>,
+        pending: Pending,
+        service: &Arc<ProvisioningService>,
+        manual: bool,
+    ) -> (String, SetupOutcome) {
+        let Pending {
+            mut attempt,
+            route,
+            existing,
+        } = pending;
+        let mut active = self.active.lock().expect("SSH setup active mutex");
+        if let Some(outcome) = existing {
+            if let Some(joined) = active.get_mut(&attempt.id) {
+                joined.manual |= manual;
+            }
+            if !matches!(*outcome.borrow(), Some(SetupSettlement::Released)) {
+                return (attempt.id, outcome);
+            }
+            if let Some((host, _)) = &route.entry {
+                attempt = Attempt::for_host(*host, SharedConnection::Provisioning);
+            }
+        }
+        if route.entry.is_some()
+            && let Some(joined) = active.values_mut().find(|active| active.route == route)
+        {
+            joined.manual |= manual;
+            return (joined.attempt.id.clone(), joined.outcome.subscribe());
+        }
+
         let setup = Arc::clone(self);
+        let service = Arc::clone(service);
         let (send, cancel) = oneshot::channel();
-        self.active.lock().expect("SSH setup active mutex").insert(
-            pending.attempt.id.clone(),
+        let (settled, outcome) = watch::channel(None);
+        let id = attempt.id.clone();
+        active.insert(
+            id.clone(),
             ActiveAttempt {
-                host: pending.entry.as_ref().map(|(host, _)| *host),
+                attempt: attempt.clone(),
+                route: route.clone(),
                 cancel: send,
+                outcome: settled.clone(),
+                manual,
             },
         );
+        drop(active);
         tokio::spawn(async move {
             let wait = async {
                 // The route guard keeps a Tailscale mode edit from overtaking this SSH process.
-                let _guard = if let Some((host, entry)) = &pending.entry {
+                let _guard = if let Some((host, entry)) = &route.entry {
                     let lookup = || async {
-                        state.provisioning.host_row(*host).await.map_err(|error| {
+                        service.host_row(*host).await.map_err(|error| {
                             BackendFailure::new(
                                 "Could not read the host for SSH sign-in",
                                 error.to_string(),
@@ -150,11 +315,11 @@ impl SetupSignIn {
                         })
                     };
                     lookup().await?;
-                    let guard = state.manager.ssh_route_lock(*host).read_owned().await;
+                    let guard = service.manager.ssh_route_lock(*host).read_owned().await;
                     let row = lookup().await?;
                     if row.entry_uuid != *entry
-                        || row.destination.as_deref() != Some(pending.destination.as_str())
-                        || row.ssh_access() != Some(pending.access)
+                        || row.destination.as_deref() != Some(route.destination.as_str())
+                        || row.ssh_access() != Some(route.access)
                     {
                         return Err(BackendFailure::new(
                             "The SSH connection settings changed. Start the check again.",
@@ -165,20 +330,13 @@ impl SetupSignIn {
                 } else {
                     None
                 };
-                setup
-                    .wait(&pending.destination, pending.access, &pending.attempt)
-                    .await
+                setup.wait(&route.destination, route.access, &attempt).await
             };
             let result = tokio::select! {
                 biased;
                 _ = cancel => Err(BackendFailure::new("SSH sign-in was cancelled", "")),
                 result = wait => result,
             };
-            setup
-                .active
-                .lock()
-                .expect("SSH setup active mutex")
-                .remove(&pending.attempt.id);
             let outcome = match result {
                 Ok(()) => SshSignInOutcome::Ready,
                 Err(error) => SshSignInOutcome::Failed {
@@ -186,6 +344,8 @@ impl SetupSignIn {
                 },
             };
             {
+                // A caller must be able to join until the completion is already readable.
+                let mut active = setup.active.lock().expect("SSH setup active mutex");
                 let mut completed = setup.completed.lock().expect("SSH setup completion mutex");
                 let now = Instant::now();
                 completed.retain(|entry| now - entry.at < RETAIN);
@@ -195,13 +355,22 @@ impl SetupSignIn {
                 completed.push_back(Completion {
                     at: now,
                     view: SshSignInCompletion {
-                        attempt: pending.attempt.id,
-                        outcome,
+                        attempt: attempt.id.clone(),
+                        outcome: outcome.clone(),
                     },
                 });
+                settled.send_if_modified(|state| {
+                    if state.is_some() {
+                        return false;
+                    }
+                    *state = Some(SetupSettlement::Finished(outcome));
+                    true
+                });
+                active.remove(&attempt.id);
             }
-            state.manager.events().bump();
+            service.manager.events().bump();
         });
+        (id, outcome)
     }
 
     /// Closing Add can abandon its own draft even before a question id exists. Registered checks belong to their host.
@@ -209,10 +378,28 @@ impl SetupSignIn {
         let mut active = self.active.lock().expect("SSH setup active mutex");
         if active
             .get(attempt)
-            .is_some_and(|active| active.host.is_none())
+            .is_some_and(|active| active.host().is_none())
             && let Some(active) = active.remove(attempt)
         {
             let _ = active.cancel.send(());
+        }
+    }
+
+    /// Retire automatic-only preflights at the committed opt-out, even if fleet wakes coalesce.
+    pub(super) fn cancel_automatic_checks(&self) {
+        let mut active = self.active.lock().expect("SSH setup active mutex");
+        for (_, attempt) in active.extract_if(|_, attempt| !attempt.manual) {
+            attempt.release();
+        }
+    }
+
+    /// Cancellation and manual attachment use the same lock. A check already sponsored by a manual reply survives.
+    fn cancel_automatic(&self, attempt: &str) {
+        let mut active = self.active.lock().expect("SSH setup active mutex");
+        if active.get(attempt).is_some_and(|active| !active.manual)
+            && let Some(active) = active.remove(attempt)
+        {
+            active.release();
         }
     }
 
@@ -220,7 +407,7 @@ impl SetupSignIn {
     /// and ends the SSH processes. Accepted provisioning runs own their lock and wait on their own tasks.
     pub(super) fn cancel_host(&self, host: HostId) {
         let mut active = self.active.lock().expect("SSH setup active mutex");
-        for (_, attempt) in active.extract_if(|_, attempt| attempt.host == Some(host)) {
+        for (_, attempt) in active.extract_if(|_, attempt| attempt.host() == Some(host)) {
             let _ = attempt.cancel.send(());
         }
     }

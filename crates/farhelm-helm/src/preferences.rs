@@ -121,6 +121,7 @@ pub(crate) async fn put_preferences(
         || patch.antigravity_hook_hint_dismissed.is_some();
     let tunnel_consent_changed = patch.tunnel_consent.is_some();
     let auto_update_changed = patch.auto_update_remote_hosts.is_some();
+    let auto_update_disabled = patch.auto_update_remote_hosts == Some(Some(false));
     if let Some(Some(version)) = &patch.last_whats_new_release
         && semver::Version::parse(version).is_err()
     {
@@ -281,6 +282,9 @@ pub(crate) async fn put_preferences(
                 None
             };
             state.store.update_preferences(patch).await?;
+            if auto_update_disabled {
+                state.provisioning.cancel_automatic_sign_ins();
+            }
             // Release after the durable policy commit. Listener admission must
             // not hold up tunnel shutdown, or wait behind it while holding this.
             drop(policy);
@@ -313,6 +317,9 @@ pub(crate) async fn put_preferences(
                 None
             };
             state.store.update_preferences(patch).await?;
+            if auto_update_disabled {
+                state.provisioning.cancel_automatic_sign_ins();
+            }
             drop(policy);
             state.manager.events().bump();
             Ok::<(), anyhow::Error>(())

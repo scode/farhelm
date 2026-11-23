@@ -2,6 +2,7 @@
 
 use super::backend::BackendFailure;
 use super::plan::{PlanSteps, ProvisioningPlan};
+use super::service::ProvisioningService;
 use crate::store::HostId;
 use crate::{AppState, http_error};
 use axum::extract::{Path as AxPath, State};
@@ -351,13 +352,7 @@ pub(crate) async fn provisioning_runs(State(state): State<Arc<AppState>>) -> Res
 /// body can include remote text and is never authority for a UI action.
 pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
     if let Some(start) = error.downcast_ref::<super::setup_sign_in::Pending>() {
-        let mut reply = (
-            StatusCode::ACCEPTED,
-            axum::Json(farhelm_proto::ui_channel::PendingSshSignIn {
-                attempt: start.attempt.id.clone(),
-            }),
-        )
-            .into_response();
+        let mut reply = pending_sign_in(start.attempt.id.clone());
         reply.extensions_mut().insert(start.clone());
         return reply;
     }
@@ -384,6 +379,15 @@ pub(crate) fn provisioning_error(error: anyhow::Error) -> Response {
     http_error(error)
 }
 
+/// A pending reply names the check that owns the question and the eventual completion.
+fn pending_sign_in(attempt: String) -> Response {
+    (
+        StatusCode::ACCEPTED,
+        axum::Json(farhelm_proto::ui_channel::PendingSshSignIn { attempt }),
+    )
+        .into_response()
+}
+
 /// Keep the existing deadline and owned batch work. An interactive preflight only starts when the pending reply
 /// has won that deadline. A late 504's detached planning task can never strand a question for an unknown draft.
 async fn planning_reply<F>(
@@ -394,14 +398,24 @@ async fn planning_reply<F>(
 where
     F: std::future::Future<Output = Response> + Send + 'static,
 {
-    let mut reply =
+    let reply =
         crate::sessions::within_host_reply_bound_saying(work(Arc::clone(&state)), timed_out).await;
+    activate_pending_sign_in(&state.provisioning, reply)
+}
+
+/// The captured response won the command deadline. Start or join its check before serializing the final id.
+pub(super) fn activate_pending_sign_in(
+    service: &Arc<ProvisioningService>,
+    mut reply: Response,
+) -> Response {
     if let Some(start) = reply
         .extensions_mut()
         .remove::<super::setup_sign_in::Pending>()
-        && let Some(setup) = &state.provisioning.setup_sign_in
+        && let Some(setup) = &service.setup_sign_in
     {
-        setup.start(start, Arc::clone(&state));
+        // Concurrent manual and automatic requests may have prepared different ids. The winning check's id
+        // must reach the desktop so the explicit request can focus its question and replay on its completion.
+        return pending_sign_in(setup.start_manual(start, service));
     }
     reply
 }

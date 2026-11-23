@@ -8,6 +8,8 @@ mod tensorlake_add;
 #[cfg(test)]
 #[path = "session_launch_failure_tests.rs"]
 pub(crate) mod session_launch_failure_tests;
+#[cfg(test)]
+pub(super) use automatic::AttemptState;
 pub(crate) use automatic::AutomaticUpdates;
 
 use super::backend::{
@@ -265,7 +267,7 @@ pub(crate) struct ProvisioningService {
     delivery: Arc<CredentialDelivery>,
     payloads: Arc<dyn PayloadSource>,
     store: HelmStore,
-    manager: Arc<ConnectionManager>,
+    pub(super) manager: Arc<ConnectionManager>,
     layout: PlanLayout,
     local_farhelm: PathBuf,
     /// The oldest source release whose update mechanics this helm supports.
@@ -273,7 +275,7 @@ pub(crate) struct ProvisioningService {
     /// silently change orchestration fixtures' admission assumptions.
     pub(super) upgrade_floor: &'static str,
     pub(super) memory: tokio::sync::Mutex<ProvisioningMemory>,
-    /// Order policy commits against the final automatic busy/progress claim.
+    /// Order policy commits against automatic prompt activation and the final busy/progress claim.
     /// Held only for local authorization and admission, never for host locks or
     /// remote work; manual Update does not acquire it.
     pub(crate) automatic_update_admission: tokio::sync::Mutex<()>,
@@ -699,10 +701,19 @@ impl ProvisioningService {
     #[cfg(test)]
     pub(super) async fn scan_automatic_updates(
         self: &Arc<Self>,
-        attempted: &mut HashMap<HostId, u64>,
+        attempted: &mut HashMap<HostId, AttemptState>,
     ) -> anyhow::Result<()> {
         automatic::scan(self, attempted).await
     }
+
+    /// The preference writer calls this under the admission lock after it commits an opt-out.
+    /// The fleet watch may coalesce an immediate re-enable, so the cancellation belongs to the write.
+    pub(crate) fn cancel_automatic_sign_ins(&self) {
+        if let Some(setup) = &self.setup_sign_in {
+            setup.cancel_automatic_checks();
+        }
+    }
+
     /// Production composition uses real process/file operations and
     /// resolves `selection`/`release_build` (D13, D18) into a real payload
     /// source via [`production_payloads`] — see that function for what each
@@ -1630,8 +1641,7 @@ impl ProvisioningService {
         self.plan_update_guarded(host, false).await
     }
 
-    /// The desktop can receive a pending reply and resume planning after setup authentication. The automatic
-    /// fleet scan uses the existing batch planner, since it cannot hand that reply to a user.
+    /// The desktop can receive a pending reply and resume planning after setup authentication.
     pub(super) async fn plan_update_for_ui(
         self: &Arc<Self>,
         host: HostId,
@@ -1980,12 +1990,15 @@ impl ProvisioningService {
         if self.store.preferences().await?.auto_update_remote_hosts == Some(false) {
             return Ok(None);
         }
+        let helm_build = self.helm_build();
         let run_id = {
             let mut memory = self.memory.lock().await;
-            // No await separates the final connection capture from its
-            // busy/progress claim. Policy remains locked across both.
+            // A skewed host can move to SignInNeeded with the same token. Recheck the update
+            // rule alongside entry and incarnation, with no await before the busy claim.
             if !self.manager.status(host).is_some_and(|current| {
-                current.entry_uuid == entry_uuid && current.incarnation == incarnation
+                current.entry_uuid == entry_uuid
+                    && current.incarnation == incarnation
+                    && automatic::connection_needs_update(&current.state, &helm_build)
             }) {
                 return Ok(None);
             }
@@ -2572,6 +2585,10 @@ impl ProvisioningService {
         // Register the handle before the child can purge its own host during
         // uninstall. Purge takes the same memory lock.
         let mut memory = self.memory.lock().await;
+        let automatic = memory
+            .automatic_runs
+            .get(&host)
+            .is_some_and(|run| run.run_id == run_id);
         let task = tokio::spawn(async move {
             let _slot = Arc::clone(&service.run_slots)
                 .acquire_owned()
@@ -2580,7 +2597,7 @@ impl ProvisioningService {
             // The run hands the lock back as it publishes its end
             // (`Self::end_run`), not when this task ends.
             service
-                .revalidate_and_execute(host, pending, host_write)
+                .revalidate_and_execute(host, pending, host_write, automatic)
                 .await;
         });
         memory.tasks.insert(host, task);
@@ -2730,8 +2747,9 @@ impl ProvisioningService {
         host: HostId,
         pending: PendingPlan,
         host_write: ProvisionLockGuard,
+        automatic: bool,
     ) {
-        let preflight = self.revalidate(host, &pending).await;
+        let preflight = self.revalidate(host, &pending, automatic).await;
         match preflight {
             Ok(Revalidation::Execute) => self.execute(host, pending.plan, host_write).await,
             Ok(Revalidation::UseAsIs(message)) => {
@@ -2807,6 +2825,7 @@ impl ProvisioningService {
         &self,
         host: HostId,
         pending: &PendingPlan,
+        automatic: bool,
     ) -> Result<Revalidation, BackendFailure> {
         match &pending.confirmation {
             PendingConfirmation::Add {
@@ -2953,7 +2972,9 @@ impl ProvisioningService {
                     .await?;
                 self.require_not_suspended(&row)?;
                 self.require_update_trusted(host)?;
-                if let Some(setup) = &self.setup_sign_in {
+                // An automatic Update has already had its chance to ask during planning. If its master
+                // expires while the run waits for a slot, the same batch probe fails with ordinary progress.
+                if !automatic && let Some(setup) = &self.setup_sign_in {
                     setup.establish_for_run(&target.transport, host).await?;
                     self.require_update_trusted(host)?;
                 }

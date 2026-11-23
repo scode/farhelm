@@ -189,9 +189,16 @@ Progress and failure are the ordinary Update progress and failure in Hosts. A fa
 until that host's connection incarnation changes after failure or the helm restarts; switching the preference off and on
 does not clear this memory. A planning refusal starts no run: the helm logs the reason and remembers that failed attempt
 under the same no-retry rule. The badge remains, and a manual Update from the host menu can show the refusal. There is
-no separate automatic failure surface. Turning the switch off prevents new automatic starts, including planning still in
-flight. Accepted runs continue. When Farhelm uses a locally staged host build directory, automatic updates skip all
-hosts. Updates you start yourself, including Update and Update all, still use that directory.
+no separate automatic failure surface. If an SSH host needs to sign in before updating, the attention row offers
+**Answer** without taking focus. Other hosts can still update. Answering the Setup question lets Farhelm plan and run
+the update automatically. Cancelling, letting it expire, or failing to sign in uses the same no-retry rule as a failed
+update. Reconnecting to a host with an older protocol or explicitly retrying that connection can give it a fresh
+attempt. Periodic probes that keep seeing the same protocol mismatch preserve the previous attempt.
+
+Turning the switch off prevents new automatic starts, including planning still in flight. It cancels pending sign-ins
+opened only for automatic updates and preserves their retry opportunity. A sign-in shared with an explicit Update or
+Uninstall continues, as do accepted runs. When Farhelm uses a locally staged host build directory, automatic updates
+skip all hosts. Updates you start yourself, including Update and Update all, still use that directory.
 
 V1 provisioning targets Linux hosts with a usable systemd user manager on x86_64 or aarch64, and Apple-silicon Macs over
 SSH. An Intel Mac has no payload and cannot be set up this way. On Linux the distribution is not a requirement — nothing
@@ -5869,7 +5876,8 @@ Add host shows the setup connection's question inside the dialog, below the dest
 stops the check and keeps the destination and alias. The sessions connection may ask again after the dialog closes.
 Setup, Update and Uninstall can ask for the setup connection through the attention row. If the setup connection expired
 while a confirmation was open, confirming can require another sign-in before work starts. A question gets focus only
-while the user is still waiting on the action that caused it.
+while the user is still waiting on the action that caused it. An automatic Update never opens the Setup question by
+itself. A manual action that needs the same connection can open the question already waiting for that host.
 
 Confirmed 2026-10-14: for commands it offers for copying, Farhelm trusts the user's own configured host names, SSH
 destinations and helm state directory path (including the working directory a relative one resolves against) not to
