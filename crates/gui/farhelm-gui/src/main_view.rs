@@ -174,6 +174,14 @@ impl MainView {
     pub(crate) fn session_pane(&self) -> &Entity<SessionPane> {
         &self.session_pane
     }
+
+    /// The readout that stays alive while a disconnected window hides its header.
+    pub(crate) fn update_readout(
+        &self,
+        cx: &App,
+    ) -> Option<Entity<crate::update_readout::view::VersionReadout>> {
+        self.sidebar.read(cx).update_readout()
+    }
 }
 
 impl Render for MainView {
@@ -248,6 +256,8 @@ impl Render for MainView {
                 )
                 .into_any_element()
         } else {
+            self.sidebar
+                .update(cx, |sidebar, cx| sidebar.suspend_update_reminder(cx));
             inert(&state, cx)
         };
         let ground = session_list::pin_drag::catch_sweep_escape(div(), &self.session_list)

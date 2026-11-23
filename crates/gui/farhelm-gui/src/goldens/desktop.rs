@@ -147,15 +147,28 @@ fn kept_readouts(state: &SceneState) -> Vec<Entity<VersionReadout>> {
 /// hover help needs it drawn, and a step deferred to a later frame could be missed by [`settle`], which stops at the
 /// first two identical frames. Motion is reduced before any readout exists, so no spinner ever ticks and the capture
 /// settles; a row that shows a turn holds its step instead.
-fn readout_rows(state: &SceneState, rows: fn() -> Vec<ReadoutRow>, cx: &mut App) -> AnyElement {
+fn readout_rows(
+    state: &SceneState,
+    rows: fn() -> Vec<ReadoutRow>,
+    reminder_row: Option<usize>,
+    cx: &mut App,
+) -> AnyElement {
     let mut readouts = kept_readouts(state);
     if readouts.is_empty() {
         ticker::set_reduced_motion(true, cx);
         readouts = rows()
             .into_iter()
-            .map(|(readout, step)| {
+            .enumerate()
+            .map(|(row, (readout, step))| {
                 let updater = updates::fixture(readout, cx);
-                cx.new(|cx| VersionReadout::new(updater, cx).holding_step(step))
+                cx.new(|cx| {
+                    let view = VersionReadout::new(updater, cx).holding_step(step);
+                    if reminder_row == Some(row) {
+                        view.holding_reminder()
+                    } else {
+                        view
+                    }
+                })
             })
             .collect();
         state
@@ -182,6 +195,7 @@ fn readout_rows(state: &SceneState, rows: fn() -> Vec<ReadoutRow>, cx: &mut App)
                 .border_color(theme::color(palette.border_row))
                 // The main view's ink, which the header inherits there.
                 .text_color(theme::color(palette.fg_0))
+                .child(VersionReadout::reminder_gap(readout.clone()))
                 .child(div().min_w_0().child(readout))
         }))
         .into_any_element()
@@ -234,7 +248,7 @@ pub(super) fn version_readout_check(
     _: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    readout_rows(state, version_readout_check_rows, cx)
+    readout_rows(state, version_readout_check_rows, None, cx)
 }
 
 /// The pointer resting on each of [`LIT_CHECK_ROWS`], given through the hover state each readout reads, since a capture
@@ -273,7 +287,7 @@ pub(super) fn version_readout_progress(
     _: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    readout_rows(state, version_readout_progress_rows, cx)
+    readout_rows(state, version_readout_progress_rows, None, cx)
 }
 
 /// Rows of a check's outcome: Up to date in `--fg-1` beside the check button; Check failed, the failure button in
@@ -298,7 +312,7 @@ pub(super) fn version_readout_outcomes(
     _: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    readout_rows(state, version_readout_outcomes_rows, cx)
+    readout_rows(state, version_readout_outcomes_rows, None, cx)
 }
 
 /// Keyboard focus on the last row's Check failed button: the row's check button first, then one Tab on to the button
@@ -312,7 +326,8 @@ pub(super) fn version_readout_outcomes_setup(
 }
 
 /// Rows of the update-menu toggle once an update is installed. The resting pill puts `↑` before the version, the
-/// withdrawal row adds an amber `⚠`, and the focused row draws the accent ring over the resting red tint.
+/// withdrawal row adds an amber `⚠`, and the focused row draws the accent ring over the resting red tint. The final
+/// row holds the moment the reminder's arrow nears the highlighted pill.
 fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
     let withdrawn = Readout {
         withdrawn: true,
@@ -321,6 +336,7 @@ fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
     vec![
         (golden_readout(Activity::Idle, true), None),
         (withdrawn, None),
+        (golden_readout(Activity::Idle, true), None),
         (golden_readout(Activity::Idle, true), None),
     ]
 }
@@ -331,10 +347,10 @@ pub(super) fn version_readout_update_ready(
     _: &mut Window,
     cx: &mut App,
 ) -> AnyElement {
-    readout_rows(state, version_readout_update_ready_rows, cx)
+    readout_rows(state, version_readout_update_ready_rows, Some(3), cx)
 }
 
-/// Keyboard focus on the last row's toggle.
+/// Keyboard focus on the third row's resting toggle.
 pub(super) fn version_readout_update_ready_setup(
     state: &SceneState,
     window: &mut Window,
@@ -348,6 +364,7 @@ pub(super) fn version_readout_menu(state: &SceneState, _: &mut Window, cx: &mut 
     top_left(readout_rows(
         state,
         || vec![(golden_readout(Activity::Idle, true), None)],
+        None,
         cx,
     ))
 }
@@ -397,6 +414,7 @@ pub(super) fn version_readout_tooltip(
             };
             vec![(readout, None)]
         },
+        None,
         cx,
     ))
 }

@@ -21,7 +21,7 @@ use crate::test_support::{bounds, center, check, click, frame, keys, open, redra
 use super::{tooltip, wait_hover_delay};
 
 /// The update menu uses its red warning tint while open so the version continues to show that a restart is pending.
-/// Hover and the reminder pulse deepen the same tint. Keyboard focus leaves the pill's resting fill under the ring.
+/// The pulse is visibly stronger than hover alone. Keyboard focus leaves the pill's resting fill under the ring.
 #[test]
 fn pending_update_pill_keeps_its_tint_when_the_menu_opens() {
     use crate::theme::{DARK, LIGHT};
@@ -55,8 +55,13 @@ fn pending_update_pill_keeps_its_tint_when_the_menu_opens() {
             );
             assert_eq!(
                 pill(true).fill(palette, false, false),
-                Some(palette.danger_wash_hover)
+                Some(palette.danger_wash_pulse)
             );
+            assert_eq!(
+                pill(true).fill(palette, true, false),
+                Some(palette.danger_wash_pulse)
+            );
+            assert_ne!(palette.danger_wash_pulse, palette.danger_wash_hover);
         }
     }
 }
