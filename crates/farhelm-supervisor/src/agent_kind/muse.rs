@@ -77,6 +77,7 @@ mod tests {
             instructions: AgentInstructions::On,
             exe: Some("/opt/farhelm"),
             vendor_extension: None,
+            codex_endpoint: None,
         };
         for phase in [LaunchPhase::Start, LaunchPhase::Resume] {
             let active = MuseIntegration.farhelm_args(phase, &policy);
@@ -134,6 +135,7 @@ mod tests {
             instructions: AgentInstructions::On,
             exe: Some("/opt/farhelm"),
             vendor_extension: None,
+            codex_endpoint: None,
         };
         for words in [
             vec!["muse", "-c", "hooks={}"],

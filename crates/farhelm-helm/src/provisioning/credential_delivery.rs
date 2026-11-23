@@ -11,6 +11,7 @@ use crate::feed::FleetEvents;
 use crate::store::{HelmStore, HostId, HostRow};
 use crate::tensorlake::recipes::{ResolvedEndpoint, StoredEndpoint, StoredRecipe};
 use farhelm_proto::credentials::DeliveryFailure;
+use farhelm_supervisor::recipe_credentials::{self, RecipeCredentials};
 use futures_util::{StreamExt, stream};
 use rusqlite::{OptionalExtension, params};
 use serde::{Deserialize, Serialize};
@@ -69,11 +70,15 @@ impl Bindings {
         self.github_token_credential.as_deref() == Some(name)
             || self.uses_claude(name)
             || self.codex_login_credential.as_deref() == Some(name)
-            || self
-                .codex
-                .as_ref()
-                .and_then(|endpoint| endpoint.token_credential.as_deref())
-                == Some(name)
+            || self.uses_codex_endpoint(name)
+    }
+
+    /// A Codex endpoint cleanup warning belongs to its endpoint token, not a Subscription seed.
+    fn uses_codex_endpoint(&self, name: &str) -> bool {
+        self.codex
+            .as_ref()
+            .and_then(|endpoint| endpoint.token_credential.as_deref())
+            == Some(name)
     }
 
     /// Pending Claude cleanup affects a push only if Claude needs that value.
@@ -128,11 +133,72 @@ struct Record {
     /// The installed launch environment's own stamp. A failed upload can
     /// retry without reopening settled legacy settings.
     claude_environment: Option<EndpointStamp>,
+    /// Legacy settings ownership remains separate from successful endpoint file delivery.
     codex: Option<EndpointStamp>,
+    codex_environment: Option<EndpointStamp>,
     /// Codex refreshes this file itself. Leaving subscription mode must retain
     /// its last successful seed, or returning would overwrite refreshed bytes.
     codex_auth: Option<(String, u64, String)>,
     github: Option<GithubStamp>,
+}
+
+/// Keep pending cleanup associated with its agent while still reporting all warnings on the host.
+#[derive(Clone, Default)]
+struct EndpointWarnings {
+    claude: Option<String>,
+    codex: Option<String>,
+}
+
+impl EndpointWarnings {
+    /// Only the affected agents are relevant to a named value's save reply.
+    fn message(self, claude: bool, codex: bool) -> Option<String> {
+        match (self.claude.filter(|_| claude), self.codex.filter(|_| codex)) {
+            (Some(claude), Some(codex)) => Some(format!("{claude}. {codex}")),
+            (one, other) => one.or(other),
+        }
+    }
+}
+
+/// A tokenless Codex endpoint still needs its descriptor. Only a snapshot with neither agent has no file.
+fn encode_agent_environment(credentials: &RecipeCredentials) -> Result<Option<Vec<u8>>, String> {
+    if credentials.env.is_empty() && credentials.codex_endpoint.is_none() {
+        return Ok(None);
+    }
+    let bytes = serde_json::to_vec(credentials)
+        .map_err(|_| "could not encode the managed launch credentials")?;
+    if bytes.len() > recipe_credentials::MAX_FILE_BYTES {
+        return Err("the managed launch credentials are too large".into());
+    }
+    Ok(Some(bytes))
+}
+
+/// Setup can install the old file shape before the supervisor answers. Codex migration needs a successful
+/// hello so a supervisor that rejects the expanded file never receives it.
+#[derive(Clone, Copy)]
+enum DeliveryPhase {
+    Setup,
+    Connected,
+}
+
+/// The settings path and ownership stamp have to agree before cleanup touches a user file.
+#[derive(Clone, Copy)]
+enum LegacySettings {
+    Claude,
+    Codex,
+}
+
+/// Keep a failed legacy cleanup attributable to the binding that needs it.
+fn cleanup_pending(agent: &str, reason: &str) -> String {
+    format!("{agent} recipe credential cleanup is pending ({reason})")
+}
+
+impl LegacySettings {
+    fn stamp(self, record: &mut Record) -> &mut Option<EndpointStamp> {
+        match self {
+            Self::Claude => &mut record.claude,
+            Self::Codex => &mut record.codex,
+        }
+    }
 }
 
 /// Secret-bearing values exist only while a serialized operation uses them.
@@ -382,7 +448,9 @@ impl CredentialDelivery {
             let guard = Arc::clone(&entry.serial).lock_owned().await;
             let bindings = self.read_bindings(row).await?;
             entry.live.lock().unwrap().binding = Some((row.clone(), bindings.clone()));
-            self.apply(row, bindings, None, guard).await
+            self.apply(row, bindings, None, DeliveryPhase::Connected, guard)
+                .await
+                .map(|warnings| warnings.message(true, true))
         })
         .await
         .unwrap_or_else(|_| Err(TIMED_OUT.into()));
@@ -406,9 +474,11 @@ impl CredentialDelivery {
                 row,
                 Bindings::from_recipe(recipe),
                 Some(home.to_path_buf()),
+                DeliveryPhase::Setup,
                 guard,
             )
             .await?
+            .message(true, true)
             .map_or(Ok(()), Err)
         })
         .await
@@ -553,17 +623,21 @@ impl CredentialDelivery {
                 let guard = Arc::clone(&entry.serial).lock_owned().await;
                 let binding = entry.live.lock().unwrap().binding.clone();
                 let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else {
-                    return Ok((None, false));
+                    return Ok((None, None));
                 };
                 let uses_claude = bindings.uses_claude(name);
-                self.apply(&row, bindings, None, guard)
+                let uses_codex = bindings.uses_codex_endpoint(name);
+                self.apply(&row, bindings, None, DeliveryPhase::Connected, guard)
                     .await
-                    .map(|pending| (pending, uses_claude))
+                    .map(|warnings| {
+                        let failure = warnings.clone().message(uses_claude, uses_codex);
+                        (warnings.message(true, true), failure)
+                    })
             }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
         };
         let host = Self::reported_host(entry, name, generation)?;
-        let (warning, affects_replacement) = result.unwrap_or_else(|reason| (Some(reason), true));
-        let failure = warning.clone().filter(|_| affects_replacement);
+        let (warning, failure) =
+            result.unwrap_or_else(|reason| (Some(reason.clone()), Some(reason)));
         entry.warning(attempt, warning, events);
         failure.map(|reason| DeliveryFailure { host, reason })
     }
@@ -601,8 +675,9 @@ impl CredentialDelivery {
         row: &HostRow,
         bindings: Bindings,
         home: Option<PathBuf>,
+        phase: DeliveryPhase,
         mut guard: OwnedMutexGuard<()>,
-    ) -> Result<Option<String>, String> {
+    ) -> Result<EndpointWarnings, String> {
         let mut record = self.read_record(row).await?;
         if let Some(home) = home
             && record.home.as_ref() != Some(&home)
@@ -621,34 +696,20 @@ impl CredentialDelivery {
                 return Err("environment credentials require a remote route".into());
             }
         };
-        // Resolve each slot only at delivery, so an unavailable later value
-        // does not prevent recording an earlier successful replacement.
+        // Endpoint values are resolved inside the same lease and lock as the snapshot they replace.
         let claude = if let Some(login) = bindings.claude_login_credential {
-            self.resolve_claude_login(login).await?
+            self.resolve_claude_login(login).await
         } else {
-            self.resolve_endpoint(bindings.claude).await?
+            self.resolve_endpoint(bindings.claude).await
         };
-        let (next_guard, pending_cleanup) = self
-            .apply_claude(row, &target, &mut record, claude, guard)
+        let codex = match phase {
+            DeliveryPhase::Setup => None,
+            DeliveryPhase::Connected => Some(self.resolve_endpoint(bindings.codex).await),
+        };
+        let (next_guard, warnings) = self
+            .apply_agent_environment(row, &target, &mut record, claude, codex, guard)
             .await?;
         guard = next_guard;
-        let codex = self.resolve_endpoint(bindings.codex).await?;
-        if record.codex.as_ref() != Some(&codex.stamp) {
-            guard = self
-                .ensure_settings_home(row, &target, &mut record, guard)
-                .await?;
-            let directory = record.home.as_ref().expect("settings home").join(".codex");
-            self.merge_settings(&target, &directory, "config.toml", |previous| {
-                if let Some(endpoint) = &codex.endpoint {
-                    super::agent_endpoints::codex(previous, endpoint).map(Some)
-                } else {
-                    super::agent_endpoints::clear_codex(previous)
-                }
-            })
-            .await?;
-            record.codex = Some(codex.stamp);
-            guard = self.write_record(row, &record, guard).await?;
-        }
         if let Some(name) = bindings.codex_login_credential {
             let lookup = name.clone();
             let (auth, revision, incarnation) = self
@@ -666,8 +727,11 @@ impl CredentialDelivery {
                 .map_err(|_| "could not resolve the recipe's Codex login")?;
             let stamp = (name, revision, incarnation);
             if record.codex_auth.as_ref() != Some(&stamp) {
-                // Config cleanup established the ordinary home first. Never
-                // read auth.json: its refreshed contents belong to Codex.
+                if record.home.is_none() {
+                    record.home = Some(self.settings_home(&target).await?);
+                    guard = self.write_record(row, &record, guard).await?;
+                }
+                // Never read auth.json. Its refreshed contents belong to Codex.
                 let directory = record
                     .home
                     .as_ref()
@@ -762,73 +826,91 @@ impl CredentialDelivery {
             record.github = Some(github.stamp);
             self.write_record(row, &record, guard).await?;
         }
-        Ok(pending_cleanup)
+        Ok(warnings)
     }
 
-    /// Retire stamped legacy keys before publishing the launch environment.
-    /// Claude can prefer a settings URL over its environment. Withhold the
-    /// entire snapshot until cleanup succeeds so a new token cannot follow
-    /// that URL. Stamp cleanup separately so an upload retry leaves it alone.
-    async fn apply_claude(
+    /// Publish both agents' entries atomically. Each legacy settings file is retired separately so an upload retry
+    /// never rewrites an already-cleaned file and a failed migration withholds only the affected agent's entry.
+    async fn apply_agent_environment(
         &self,
         row: &HostRow,
         target: &ProvisioningTarget,
         record: &mut Record,
-        slot: Slot,
+        claude: Result<Slot, String>,
+        codex: Option<Result<Slot, String>>,
         mut guard: OwnedMutexGuard<()>,
-    ) -> Result<(OwnedMutexGuard<()>, Option<String>), String> {
-        let needs_delivery = record.claude_environment.as_ref() != Some(&slot.stamp);
-        let credentials =
-            super::agent_endpoints::claude_environment(slot.endpoint, slot.subscription);
-        let bytes = if needs_delivery && !credentials.env.is_empty() {
-            // Check that the next snapshot fits before removing legacy values.
-            let bytes = serde_json::to_vec(&credentials)
-                .map_err(|_| "could not encode the managed Claude launch credentials")?;
-            if bytes.len() > farhelm_supervisor::recipe_credentials::MAX_FILE_BYTES {
-                return Err("the managed Claude launch credentials are too large".into());
-            }
-            Some(bytes)
-        } else {
-            None
-        };
-
-        if record.claude != Some(EndpointStamp::Cleared) {
-            // A missing stamp can describe a fresh image with its own
-            // Claude settings. Only earlier Farhelm writes grant cleanup.
-            if record.claude.is_some() {
-                guard = self
-                    .ensure_settings_home(row, target, record, guard)
-                    .await?;
-                let directory = record.home.as_ref().expect("settings home").join(".claude");
-                if let Err(reason) = self
-                    .merge_settings(
-                        target,
-                        &directory,
-                        "settings.json",
-                        super::agent_endpoints::clear_claude,
-                    )
-                    .await
-                {
-                    return Ok((
-                        guard,
-                        Some(format!(
-                            "Claude recipe credential cleanup is pending ({reason})"
-                        )),
-                    ));
-                }
-            }
-            record.claude = Some(EndpointStamp::Cleared);
-            guard = self.write_record(row, record, guard).await?;
+    ) -> Result<(OwnedMutexGuard<()>, EndpointWarnings), String> {
+        let connected = codex.is_some();
+        if !connected && record.codex_environment.is_some() {
+            // A reconnect owns the next write to a previously installed combined snapshot. Setup has neither
+            // verified the supervisor's protocol nor resolved the Codex entry to carry forward.
+            return Ok((guard, EndpointWarnings::default()));
         }
-
-        if needs_delivery {
+        let mut warnings = EndpointWarnings::default();
+        let (mut credentials, mut claude_stamp) = match claude {
+            Ok(slot) => (
+                super::agent_endpoints::claude_environment(slot.endpoint, slot.subscription),
+                Some(slot.stamp),
+            ),
+            Err(reason) => {
+                warnings.claude = Some(reason);
+                (RecipeCredentials::default(), None)
+            }
+        };
+        let mut codex_stamp = match codex {
+            Some(Ok(slot)) => {
+                super::agent_endpoints::add_codex_endpoint(&mut credentials, slot.endpoint);
+                Some(slot.stamp)
+            }
+            Some(Err(reason)) => {
+                warnings.codex = Some(reason);
+                None
+            }
+            None => None,
+        };
+        // Check the largest candidate before clearing legacy keys, even if a cleanup later omits an entry.
+        let mut bytes = encode_agent_environment(&credentials)?;
+        let mut withheld = false;
+        if claude_stamp.is_some() {
+            let (next_guard, warning) = self
+                .retire_legacy_settings(row, target, record, LegacySettings::Claude, guard)
+                .await?;
+            guard = next_guard;
+            if let Some(reason) = warning {
+                warnings.claude = Some(reason);
+                claude_stamp = None;
+                credentials
+                    .env
+                    .retain(|name, _| name == recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV);
+                withheld = true;
+            }
+        }
+        if codex_stamp.is_some() {
+            let (next_guard, warning) = self
+                .retire_legacy_settings(row, target, record, LegacySettings::Codex, guard)
+                .await?;
+            guard = next_guard;
+            if let Some(reason) = warning {
+                warnings.codex = Some(reason);
+                codex_stamp = None;
+                credentials.codex_endpoint = None;
+                credentials
+                    .env
+                    .remove(recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV);
+                withheld = true;
+            }
+        }
+        if record.claude_environment != claude_stamp || record.codex_environment != codex_stamp {
+            if withheld {
+                bytes = encode_agent_environment(&credentials)?;
+            }
             let state_dir = row
                 .remote_state_dir
                 .as_deref()
                 .map(Path::new)
                 .filter(|path| path.is_absolute())
                 .ok_or("the host has no absolute supervisor state directory")?;
-            let path = farhelm_supervisor::recipe_credentials::host_file(state_dir);
+            let path = recipe_credentials::host_file(state_dir);
             let backend = self
                 .backend
                 .as_ref()
@@ -846,7 +928,7 @@ impl CredentialDelivery {
                     .await
                     .map_err(|error| {
                         error.redacted_reason(
-                            "could not prepare the managed Claude credentials directory",
+                            "could not prepare the managed launch credentials directory",
                         )
                     })?;
                 let temporary = path.with_file_name(format!(
@@ -857,47 +939,83 @@ impl CredentialDelivery {
                     .install_bytes(target, &bytes, &path, &temporary, 0o600)
                     .await
                     .map_err(|error| {
-                        error.redacted_reason(
-                            "could not install the managed Claude launch credentials",
-                        )
+                        error.redacted_reason("could not install the managed launch credentials")
                     })?;
             } else {
                 backend
                     .remove_owned_file(target, &path)
                     .await
                     .map_err(|error| {
-                        error.redacted_reason(
-                            "could not remove the managed Claude launch credentials",
-                        )
+                        error.redacted_reason("could not remove the managed launch credentials")
                     })?;
             }
-            record.claude_environment = Some(slot.stamp);
+            record.claude_environment = claude_stamp;
+            record.codex_environment = codex_stamp;
             guard = self.write_record(row, record, guard).await?;
         }
 
-        Ok((guard, None))
+        Ok((guard, warnings))
     }
 
-    /// Learn the host's home only for work that needs its settings. Persist
-    /// the exact home before using it so the next retry lands on the same file.
-    async fn ensure_settings_home(
+    /// Clear only a settings file for which a prior Farhelm left a stamp. Record each success before attempting the
+    /// other file so cancellation or a refusal cannot send a finished migration back through a user's settings.
+    async fn retire_legacy_settings(
         &self,
         row: &HostRow,
         target: &ProvisioningTarget,
         record: &mut Record,
-        guard: OwnedMutexGuard<()>,
-    ) -> Result<OwnedMutexGuard<()>, String> {
-        if record.home.is_some() {
-            return Ok(guard);
+        agent: LegacySettings,
+        mut guard: OwnedMutexGuard<()>,
+    ) -> Result<(OwnedMutexGuard<()>, Option<String>), String> {
+        let stamp = agent.stamp(record);
+        if *stamp == Some(EndpointStamp::Cleared) {
+            return Ok((guard, None));
         }
+        // Codex's old Absent stamp recorded a successful clear or no-op. Only Endpoint records a managed write.
+        let needs_cleanup = match agent {
+            LegacySettings::Claude => stamp.is_some(),
+            LegacySettings::Codex => matches!(stamp, Some(EndpointStamp::Endpoint { .. })),
+        };
+        if needs_cleanup {
+            let (name, subdir, file) = match agent {
+                LegacySettings::Claude => ("Claude", ".claude", "settings.json"),
+                LegacySettings::Codex => ("Codex", ".codex", "config.toml"),
+            };
+            if record.home.is_none() {
+                match self.settings_home(target).await {
+                    Ok(home) => {
+                        record.home = Some(home);
+                        guard = self.write_record(row, record, guard).await?;
+                    }
+                    Err(reason) => {
+                        return Ok((guard, Some(cleanup_pending(name, &reason))));
+                    }
+                }
+            }
+            let directory = record.home.as_ref().expect("settings home").join(subdir);
+            let merge = match agent {
+                LegacySettings::Claude => super::agent_endpoints::clear_claude,
+                LegacySettings::Codex => super::agent_endpoints::clear_codex,
+            };
+            if let Err(reason) = self.merge_settings(target, &directory, file, merge).await {
+                return Ok((guard, Some(cleanup_pending(name, &reason))));
+            }
+        }
+        *agent.stamp(record) = Some(EndpointStamp::Cleared);
+        guard = self.write_record(row, record, guard).await?;
+        Ok((guard, None))
+    }
+
+    /// Probe only for a stamped settings migration or a Subscription seed. An endpoint snapshot has no home dependency.
+    async fn settings_home(&self, target: &ProvisioningTarget) -> Result<PathBuf, String> {
         let backend = self
             .backend
             .as_ref()
             .ok_or("credential delivery is unavailable")?;
-        record.home = Some(backend.host_home(target).await.map_err(|error| {
-            error.redacted_reason("could not read the sandbox's home directory")
-        })?);
-        self.write_record(row, record, guard).await
+        backend
+            .host_home(target)
+            .await
+            .map_err(|error| error.redacted_reason("could not read the sandbox's home directory"))
     }
 
     /// Retry a concurrent settings save once with the editor's latest bytes.
