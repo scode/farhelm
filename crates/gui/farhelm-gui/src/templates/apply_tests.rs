@@ -127,6 +127,84 @@ fn new_draft() -> LaunchDraft {
     LaunchDraft::new(Some(1), "~".into(), None)
 }
 
+/// Saving from the launcher and replaying the template must preserve both the registered ID and an effort
+/// outside the built-in model catalog. A template never captures the selector for one named start.
+#[test]
+fn custom_agent_template_replays_the_saved_registration_and_effort() {
+    let fixture = Fixture::new();
+    let agent = farhelm_proto::custom_agents::CustomAgent {
+        id: "acme-code".into(),
+        display_name: "Acme Code".into(),
+        command: "acme-code".into(),
+        supports_resumption: true,
+        supports_reporting: false,
+    };
+    let mut source = new_draft();
+    source.choose_custom_agent(&agent, Some(&fixture.catalog), None);
+    source.agent.model = Some("deep-v2".into());
+    source.agent.custom_effort = "extra-deep".into();
+    source.edit_conversation("one-start".into());
+    let expected = source.agent_selection().unwrap();
+    let candidate = super::save::Candidate::from_draft(&source, &fixture.hosts);
+    assert_eq!(candidate.fields.custom_agent, Some(Some(agent.id)));
+    let mut draft = new_draft();
+    fixture
+        .apply(&mut draft, &[template("custom", candidate.fields)])
+        .unwrap();
+    assert_eq!(draft.agent_selection(), Some(expected));
+    assert!(draft.conversation.is_empty());
+
+    fixture
+        .apply(
+            &mut draft,
+            &[template(
+                "other",
+                TemplateFields {
+                    agent: Some(LaunchHarness::Custom),
+                    custom_agent: Some(Some("other-code".into())),
+                    ..TemplateFields::default()
+                },
+            )],
+        )
+        .unwrap();
+    let changed = draft.agent_selection().unwrap();
+    assert_eq!(changed.custom_agent.as_deref(), Some("other-code"));
+    assert_eq!((changed.model, changed.effort), (None, None));
+}
+
+/// Generic Custom is a deliberate declaration with its own command. Its template clears a previously
+/// selected registration and retains the same compulsory YOLO policy.
+#[test]
+fn generic_custom_command_template_clears_an_old_registration() {
+    let fixture = Fixture::new();
+    let generic = |draft: &mut LaunchDraft| {
+        draft.choose_tab(Tab::Command);
+        draft.choose_command_agent(Some(LaunchHarness::Custom));
+        draft.edit_command("my-agent {farhelm_args}".into());
+    };
+    let mut source = new_draft();
+    generic(&mut source);
+    let candidate = super::save::Candidate::from_draft(&source, &fixture.hosts);
+    assert_eq!(candidate.fields.custom_agent, Some(None));
+    let mut draft = new_draft();
+    generic(&mut draft);
+    draft.command.custom_agent = Some("old-id".into());
+    let non_yolo = template(
+        "guarded",
+        TemplateFields {
+            yolo: Some(false),
+            ..TemplateFields::default()
+        },
+    );
+    assert!(fixture.apply(&mut draft, &[non_yolo]).is_err());
+    assert_eq!(draft.command.custom_agent.as_deref(), Some("old-id"));
+    fixture
+        .apply(&mut draft, &[template("generic", candidate.fields)])
+        .unwrap();
+    assert_eq!(draft.command.custom_agent, None);
+    assert_eq!(draft.command.yolo, Some(true));
+}
+
 /// A session as the helm serves it (its pinned list fixture), in `/src/project`, titled `source`, with `launch` as its
 /// stored launch. A small copy of the launcher tests' own fixture, which is private to that module.
 fn session(launch: SessionLaunch) -> SessionInfo {

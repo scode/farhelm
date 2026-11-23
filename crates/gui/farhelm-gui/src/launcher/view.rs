@@ -49,6 +49,7 @@
 use std::rc::Rc;
 use std::time::Duration;
 
+use farhelm_proto::custom_agents::CustomAgent;
 use farhelm_proto::launcher::LaunchCatalogModel;
 use farhelm_proto::ui_channel::{
     HostStateView, HostView, PREFERENCES_KEY, Preferences, SessionRow,
@@ -600,6 +601,9 @@ pub(crate) struct Launcher {
     pub(super) flags: TextInputState,
     /// The model field's text: the chosen model while closed, what is typed while its list is open.
     pub(super) model_input: TextInputState,
+    /// The model and effort of a registered integration are literal flags with no model catalog.
+    custom_model: TextInputState,
+    custom_effort: TextInputState,
     /// Restart with's stored command fields, used to keep their unsafe spellings read-only until Clear.
     opened: shown_text::Opened,
     /// The model field's list and what the user is doing in it.
@@ -740,6 +744,10 @@ impl Launcher {
         // The model field is not a plain text edit: what is typed filters its list, and Enter, focus and blur drive it
         // (`model_field`), so it has its own subscriptions.
         let model_input = field(&model_field::model_display(&draft), window, cx);
+        let custom_model = field(draft.agent.model.as_deref().unwrap_or_default(), window, cx);
+        let custom_effort = field(&draft.agent.custom_effort, window, cx);
+        custom_model.set_placeholder("Agent default", window, cx);
+        custom_effort.set_placeholder("Agent default", window, cx);
         // The search box is not a plain text edit either: what is typed is a query, and Enter takes a row (`search`).
         let search = TextInputState::new(window, cx);
         search.set_placeholder(
@@ -857,6 +865,35 @@ impl Launcher {
             })
         })
         .collect();
+        for (input, is_model) in [(&custom_model, true), (&custom_effort, false)] {
+            let text = input.clone();
+            fields.push(input.subscribe(
+                window,
+                cx,
+                move |launcher: &mut Self, event, window, cx| {
+                    match event {
+                        TextInputEvent::Changed
+                            if launcher
+                                .draft
+                                .agent
+                                .harness
+                                .is_some_and(LaunchHarness::uses_custom_catalog) =>
+                        {
+                            let value = text.text(cx).to_string();
+                            if is_model {
+                                launcher.draft.agent.model = (!value.is_empty()).then_some(value);
+                                launcher.draft.agent.model_owner = launcher.draft.agent.harness;
+                            } else {
+                                launcher.draft.agent.custom_effort = value;
+                            }
+                            launcher.changed(cx);
+                        }
+                        TextInputEvent::Submitted { held: false } => launcher.press(window, cx),
+                        _ => {}
+                    }
+                },
+            ));
+        }
         fields.extend([
             model_events,
             model_focus,
@@ -890,6 +927,8 @@ impl Launcher {
             prompt,
             flags,
             model_input,
+            custom_model,
+            custom_effort,
             opened,
             model_field: model_field::ModelField::default(),
             search,
@@ -1109,6 +1148,11 @@ impl Launcher {
         let pairs = [
             (&self.conversation, self.draft.conversation.clone()),
             (&self.folder, present(Input::Folder).text),
+            (
+                &self.custom_model,
+                self.draft.agent.model.clone().unwrap_or_default(),
+            ),
+            (&self.custom_effort, self.draft.agent.custom_effort.clone()),
             // While a managed checkout is chosen the field shows the name the checkout gets, which ignores an untouched
             // copied title.
             (&self.name, present(Input::Name).text),
@@ -1289,6 +1333,7 @@ impl Launcher {
 
     /// Use the input mark from the answer that started the work, even when it first needed to save a setting.
     fn press_at(&mut self, mark: Mark, window: &mut Window, cx: &mut Context<Self>) {
+        self.refresh_custom_capabilities(cx);
         // While the YOLO question's host write is out, its answer owns the launch: a press now would send a create
         // without consent beside the one the answer sends with it.
         if self.yolo_in_flight(cx) || self.hook_answer_pending(cx) {
@@ -1377,6 +1422,7 @@ impl Launcher {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        self.refresh_custom_capabilities(cx);
         self.refused = None;
         self.yolo = None;
         self.sandbox = None;
@@ -1651,13 +1697,16 @@ fn section_label(text: &'static str, palette: &theme::Palette) -> Div {
 }
 
 /// Restart holds its launch kind. Keep the name and mark in the form without offering another editable choice.
-fn held_harness(harness: LaunchHarness, palette: &theme::Palette) -> AnyElement {
-    let name = harness_label(harness);
+fn held_harness(
+    harness: LaunchHarness,
+    name: crate::host_text::Line,
+    palette: &theme::Palette,
+) -> AnyElement {
     let mark = crate::harness::glyph(harness);
     div()
         .id("launcher-held-harness")
         .role(Role::Label)
-        .aria_label(format!("Agent: {name}"))
+        .aria_label(format!("Agent: {}", name.accessible_text()))
         .flex()
         .items_center()
         .gap(px(6.))
@@ -1680,6 +1729,7 @@ struct TargetWords {
     command: bool,
     /// The agent type, if one is named.
     harness: Option<&'static str>,
+    custom_agent: Option<HostText>,
     /// The host's name (see [`Launcher::target`]).
     host: HostText,
     folder: HostText,
@@ -1692,7 +1742,9 @@ impl TargetWords {
         if self.command {
             sentence = sentence.text("Command · ");
         }
-        if let Some(harness) = self.harness {
+        if let Some(custom_agent) = &self.custom_agent {
+            sentence = sentence.host(custom_agent).text(" · ");
+        } else if let Some(harness) = self.harness {
             sentence = sentence.text(format!("{harness} · "));
         }
         sentence.host(&self.host).text(" · ").host(&self.folder)
@@ -1745,6 +1797,10 @@ impl Launcher {
             Tab::Command => None,
         };
         let collections = self.store.read(cx).collections();
+        let custom_agent = match self.draft.tab {
+            Tab::Agent => self.draft.agent.custom_agent.as_deref(),
+            Tab::Command => self.draft.command.custom_agent.as_deref(),
+        };
         let source = match &self.draft.mode {
             Mode::RestartWith(restart) => collections
                 .get::<SessionRow>(&restart.source)
@@ -1769,6 +1825,7 @@ impl Launcher {
         TargetWords {
             command: self.draft.tab == Tab::Command,
             harness: harness.map(harness_label),
+            custom_agent: custom_agent.map(|id| crate::harness::custom_name(id, collections)),
             host,
             folder: self
                 .checkout_summary(cx)
@@ -1794,14 +1851,30 @@ impl Launcher {
         let mut fields = Vec::new();
         let harness = self.draft.agent.harness;
         if self.draft.holds(Field::AgentType) {
-            fields.extend(harness.map(|harness| held_harness(harness, palette)));
+            fields.extend(harness.map(|harness| {
+                let label = self.draft.agent.custom_agent.as_deref().map_or_else(
+                    || harness_label(harness).into(),
+                    |id| {
+                        HostSentence::new("launcher-held-custom-name")
+                            .host(&crate::harness::custom_name(
+                                id,
+                                self.store.read(cx).collections(),
+                            ))
+                            .into()
+                    },
+                );
+                held_harness(harness, label, palette)
+            }));
         } else {
             fields.push(self.harness_choices(palette, cx).into_any_element());
         }
-        if let Some(error) = &self.catalog_error {
+        let custom = harness.is_some_and(LaunchHarness::uses_custom_catalog);
+        if !custom && let Some(error) = &self.catalog_error {
             fields.push(self.catalog_error_line(error, palette, cx));
         }
-        if model.is_some() || !harness.is_some_and(LaunchHarness::is_shell) {
+        if custom {
+            fields.extend(self.custom_agent_fields(palette));
+        } else if model.is_some() || !harness.is_some_and(LaunchHarness::is_shell) {
             fields.push(self.model_choices(model, palette, cx).into_any_element());
         }
         let prompt_offered = harness
@@ -1934,10 +2007,20 @@ impl Launcher {
         if self.draft.holds(Field::AgentType) {
             fields.splice(
                 0..0,
-                self.draft
-                    .command
-                    .agent
-                    .map(|harness| held_harness(harness, palette)),
+                self.draft.command.agent.map(|harness| {
+                    let label = self.draft.command.custom_agent.as_deref().map_or_else(
+                        || harness_label(harness).into(),
+                        |id| {
+                            HostSentence::new("launcher-held-custom-command")
+                                .host(&crate::harness::custom_name(
+                                    id,
+                                    self.store.read(cx).collections(),
+                                ))
+                                .into()
+                        },
+                    );
+                    held_harness(harness, label, palette)
+                }),
             );
         }
         if Input::Command.present(&self.draft, &self.opened).read_only {
@@ -1977,7 +2060,7 @@ impl Launcher {
                          not check",
                     ),
                     false,
-                ))
+                ).disabled(self.draft.command.agent.is_some_and(LaunchHarness::uses_custom_catalog)))
                 .chosen(self.draft.command.yolo)
                 .on_change(move |yolo, _, cx| {
                     let _ = on_yolo.update(cx, |launcher, cx| {
@@ -1997,6 +2080,7 @@ impl Launcher {
         // track and resume it. Restart with holds it, so there it is not drawn; the footer still names it.
         if !self.draft.holds(Field::AgentType) {
             let (on_agent, on_agent_enter) = (weak.clone(), weak.clone());
+            let collections = self.store.read(cx).collections();
             let options = std::iter::once(SelectOption::new(
                 NO_AGENT,
                 "None",
@@ -2016,35 +2100,79 @@ impl Launcher {
                             HoverHelp::tooltip(format!("{label}: the command runs {label}")),
                         )
                     }),
+            )
+            .chain(std::iter::once(SelectOption::new(
+                harness_label(LaunchHarness::Custom), "Custom",
+                HoverHelp::tooltip("Declare a custom agent with the command you supplied"),
+            )))
+            .chain(collections.ordered::<CustomAgent>().into_iter()
+                .map(|agent| {
+                    let label = HostSentence::new("declared-custom-agent")
+                        .host(&HostText::from_host(agent.display_name.as_str()));
+                    SelectOption::new(
+                        format!("custom:{}", agent.id),
+                        label.accessible_name(),
+                        HoverHelp::tooltip(format!("Declare custom agent {}", agent.id)),
+                    ).mark(crate::assets::Icon::HarnessCustom)
+                }));
+            let chosen = self.draft.command.custom_agent.as_ref().map_or_else(
+                || {
+                    self.draft
+                        .command
+                        .agent
+                        .map_or(NO_AGENT, harness_label)
+                        .to_owned()
+                },
+                |id| format!("custom:{id}"),
             );
+            let agent_select = Select::new(
+                "launcher-command-agent",
+                "Agent type",
+                HoverHelp::tooltip(
+                    "The agent this command runs, if any, so Farhelm can track and resume it",
+                ),
+                Role::ComboBox,
+            )
+            .options(options)
+            .chosen(chosen);
+            // Keep the deleted ID visible so the user can repair the choice without losing the command text.
+            let agent_select = match self.draft.command.custom_agent.as_deref() {
+                Some(id) if collections.get::<CustomAgent>(id).is_none() => agent_select.retained(
+                    HostSentence::new("retained-custom-agent")
+                        .host(&HostText::from_host(id))
+                        .accessible_name(),
+                    HoverHelp::tooltip(
+                        "Choose Custom to run this command without the deleted registration",
+                    ),
+                ),
+                _ => agent_select,
+            };
             fields.push(
                 row(
                     "launcher-command-agent-row",
                     "Agent type",
-                    Select::new(
-                        "launcher-command-agent",
-                        "Agent type",
-                        HoverHelp::tooltip(
-                            "The agent this command runs, if any, so Farhelm can track and resume it",
-                        ),
-                        Role::ComboBox,
-                    )
-                    .options(options)
-                    .chosen(self.draft.command.agent.map_or(NO_AGENT, harness_label))
-                    .on_choose(move |value, window, cx| {
-                        let agent = LaunchHarness::BUILT_INS
-                            .iter()
-                            .copied()
-                            .find(|harness| !harness.is_shell() && harness_label(*harness) == value.as_ref());
-                        let _ = on_agent.update(cx, |launcher, cx| {
-                            launcher.draft.choose_command_agent(agent);
-                            launcher.changed(cx);
-                            launcher.check_hook_question(window, cx);
-                        });
-                    })
-                    .on_enter(move |window, cx| {
-                        let _ = on_agent_enter.update(cx, |launcher, cx| launcher.press(window, cx));
-                    }),
+                    agent_select
+                        .on_choose(move |value, window, cx| {
+                            let agent = LaunchHarness::ALL.iter().copied().find(|harness| {
+                                !harness.is_shell() && harness_label(*harness) == value.as_ref()
+                            });
+                            let _ = on_agent.update(cx, |launcher, cx| {
+                                if let Some(id) = value.strip_prefix("custom:") {
+                                    launcher
+                                        .draft
+                                        .choose_command_agent(Some(LaunchHarness::Custom));
+                                    launcher.draft.command.custom_agent = Some(id.to_owned());
+                                } else {
+                                    launcher.draft.choose_command_agent(agent);
+                                }
+                                launcher.changed(cx);
+                                launcher.check_hook_question(window, cx);
+                            });
+                        })
+                        .on_enter(move |window, cx| {
+                            let _ = on_agent_enter
+                                .update(cx, |launcher, cx| launcher.press(window, cx));
+                        }),
                     palette,
                 )
                 .into_any_element(),
@@ -2121,8 +2249,34 @@ impl Launcher {
     }
 }
 
+impl Launcher {
+    /// Refresh after catalog pushes and before dispatch, including template launches prepared out of sight.
+    fn refresh_custom_capabilities(&mut self, cx: &App) {
+        let collections = self.store.read(cx).collections();
+        let selected_custom = self
+            .draft
+            .agent
+            .custom_agent
+            .as_deref()
+            .and_then(|id| collections.get::<CustomAgent>(id));
+        self.draft.agent.custom_resumption =
+            selected_custom.is_some_and(|agent| agent.supports_resumption);
+        self.draft.agent.custom_reporting =
+            selected_custom.is_some_and(|agent| agent.supports_reporting);
+        self.draft.agent.custom_registration_missing =
+            self.draft.agent.custom_agent.is_some() && selected_custom.is_none();
+        self.draft.command.custom_registration_missing = self
+            .draft
+            .command
+            .custom_agent
+            .as_deref()
+            .is_some_and(|id| collections.get::<CustomAgent>(id).is_none());
+    }
+}
+
 impl Render for Launcher {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.refresh_custom_capabilities(cx);
         // The folder check follows the folder and the host's connection as drawn (`folder_check`), and a managed
         // checkout's reads follow it the same way (`checkout`).
         self.follow_folder_check(cx);

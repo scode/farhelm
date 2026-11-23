@@ -885,6 +885,12 @@ pub fn apply_template(
             crate::custom_agents::validate_id(id)
                 .map_err(|reason| refuse("custom agent", reason.into()))?;
         }
+        // Each registration defines its own model and effort strings, even though they share one harness.
+        if kind == LauncherKind::Agent && *selected_id != *id {
+            next.model = None;
+            next.model_owner = None;
+            next.effort = None;
+        }
         *selected_id = id.clone();
     }
 
@@ -1071,6 +1077,17 @@ pub fn apply_template(
         if let Some(resume) = &fields.resume_command {
             next.resume_command = resume.clone();
         }
+    }
+    if kind == LauncherKind::Command
+        && next
+            .command_agent
+            .is_some_and(LaunchHarness::uses_custom_catalog)
+        && fields.yolo == Some(false)
+    {
+        return Err(refuse(
+            "YOLO answer",
+            "custom agents always run in YOLO mode".into(),
+        ));
     }
 
     // 5. The destination and the session's name.

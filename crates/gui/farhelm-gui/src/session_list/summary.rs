@@ -236,6 +236,7 @@ impl Summary {
             agent: agent_line(
                 SharedString::from(format!("{SUMMARY_ID_PREFIX}{key}-agent")),
                 row,
+                collections,
             ),
             facts,
         }
@@ -250,7 +251,11 @@ impl Summary {
 /// the agent's status line was seen in a mode without checks, even for a launch that was YOLO already: seeing a mode
 /// and choosing it are different facts. The actions menu's header describes only the stored launch; this line is
 /// where the observation shows besides the shield.
-pub(crate) fn agent_line(id: SharedString, row: &SessionRow) -> HostSentence {
+pub(crate) fn agent_line(
+    id: SharedString,
+    row: &SessionRow,
+    collections: &Collections,
+) -> HostSentence {
     let launch = &row.info.launch;
     let mut line = HostSentence::new(id);
     match launch {
@@ -262,10 +267,12 @@ pub(crate) fn agent_line(id: SharedString, row: &SessionRow) -> HostSentence {
                 .harness
                 .stored_permission(selection.permissions)
                 .unwrap_or(farhelm_proto::LaunchPermission::Yolo);
-            line = line
-                .text(harness_label(selection.harness))
-                .text(" · ")
-                .text(words::permission_display(Some(permission)));
+            line = match selection.custom_agent.as_deref() {
+                Some(id) => line.host(&crate::harness::custom_name(id, collections)),
+                None => line.text(harness_label(selection.harness)),
+            }
+            .text(" · ")
+            .text(words::permission_display(Some(permission)));
             // The launcher's one rule for which choices are explicit and how each is worded (`Model: gpt-6`), each a
             // whole value escaped as the old card's peer runs were: the model is the host's text.
             for choice in explicit_before_permissions(selection) {
@@ -273,6 +280,11 @@ pub(crate) fn agent_line(id: SharedString, row: &SessionRow) -> HostSentence {
             }
         }
         SessionLaunch::Command(_) | SessionLaunch::Legacy { .. } => {
+            if let Some(id) = launch.custom_agent() {
+                line = line
+                    .host(&crate::harness::custom_name(id, collections))
+                    .text(" · ");
+            }
             line = line.mono(&HostText::from_host(menu::program_name(
                 &row.info.invocation,
             )));

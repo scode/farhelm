@@ -5,7 +5,7 @@ use std::collections::VecDeque;
 use gpui::{App, Context, Div, Entity, EntityId, ParentElement as _, Styled as _, Window, div, px};
 
 use super::{
-    CheckoutField, Section, SettingsDialog, credentials,
+    CheckoutField, Section, SettingsDialog, credentials, custom_agents,
     file_types::FileTypes,
     ntfy::NtfyAlerts,
     recipes,
@@ -99,6 +99,7 @@ enum Edit {
     Key(Place, Entity<TensorlakeKey>),
     Recipe(Entity<recipes::Editor>),
     Credential(Entity<credentials::Editor>),
+    CustomAgent(Section, Entity<custom_agents::Editor>),
 }
 
 impl Edit {
@@ -110,6 +111,7 @@ impl Edit {
             Self::Key(_, view) => view.entity_id(),
             Self::Recipe(view) => view.entity_id(),
             Self::Credential(view) => view.entity_id(),
+            Self::CustomAgent(_, view) => view.entity_id(),
         }
     }
 
@@ -122,6 +124,7 @@ impl Edit {
             Self::Key(Place::Tensorlake, _) => Section::Tensorlake,
             Self::Key(Place::Credentials, _) | Self::Credential(_) => Section::Credentials,
             Self::Recipe(_) => Section::Recipes,
+            Self::CustomAgent(section, _) => section.clone(),
         }
     }
 
@@ -135,6 +138,7 @@ impl Edit {
             Self::Key(Place::Credentials, _) => "Tensorlake API key in Credentials",
             Self::Recipe(_) => "Recipe",
             Self::Credential(_) => "Credential",
+            Self::CustomAgent(_, _) => "Custom agent",
         }
     }
 
@@ -146,6 +150,7 @@ impl Edit {
             Self::Key(_, view) => view.read(cx).edit_state(),
             Self::Recipe(view) => view.read(cx).edit_state(cx),
             Self::Credential(view) => view.read(cx).edit_state(cx),
+            Self::CustomAgent(_, view) => view.read(cx).edit_state(cx),
         }
     }
 
@@ -159,7 +164,10 @@ impl Edit {
     }
 
     fn is_form(&self) -> bool {
-        !matches!(self, Self::Recipe(_) | Self::Credential(_))
+        !matches!(
+            self,
+            Self::Recipe(_) | Self::Credential(_) | Self::CustomAgent(..)
+        )
     }
 
     /// Wait for an existing operation on this exact form. When starting a save, arm the receipt only after the
@@ -196,6 +204,10 @@ impl Edit {
             Self::Recipe(view) => settle_with!(view, recipes::Editor::save),
             Self::Credential(view) => settle_with!(view, |form: &mut credentials::Editor, cx| form
                 .save(window, cx)),
+            Self::CustomAgent(_, view) => {
+                settle_with!(view, |form: &mut custom_agents::Editor, cx| form
+                    .save(window, cx))
+            }
         }
     }
 
@@ -206,7 +218,7 @@ impl Edit {
             Self::Alerts(view) => view.update(cx, |form, cx| form.discard(window, cx)),
             Self::Checkout(view) => view.update(cx, CheckoutField::discard),
             Self::Key(_, view) => view.update(cx, TensorlakeKey::discard),
-            Self::Recipe(_) | Self::Credential(_) => {}
+            Self::Recipe(_) | Self::Credential(_) | Self::CustomAgent(..) => {}
         }
     }
 }
@@ -256,6 +268,12 @@ impl SettingsDialog {
             edits.push(Edit::Key(Place::Credentials, view.read(cx).key()));
             edits.extend(view.read(cx).editor().map(Edit::Credential));
         }
+        edits.extend(self.custom_agents.iter().map(|(key, editor)| {
+            let section = key.as_ref().map_or(Section::AddCustomAgent, |id| {
+                Section::CustomAgent(id.clone())
+            });
+            Edit::CustomAgent(section, editor.clone())
+        }));
         if let Some(batch) = &self.batch {
             for edit in &batch.active {
                 if !edits.iter().any(|current| current.id() == edit.id()) {
@@ -267,8 +285,8 @@ impl SettingsDialog {
         edits
     }
 
-    pub(super) fn section_edited(&self, section: Section, cx: &App) -> bool {
-        self.edits(cx).iter().any(|edit| edit.section() == section)
+    pub(super) fn section_edited(&self, section: &Section, cx: &App) -> bool {
+        self.edits(cx).iter().any(|edit| &edit.section() == section)
     }
 
     /// An editor owns its actions, but its dirty marker follows the same draft as the section and close question.
@@ -292,7 +310,7 @@ impl SettingsDialog {
     }
 
     pub(super) fn save_page(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.start_batch(Some(self.shown), window, cx);
+        self.start_batch(Some(self.shown.clone()), window, cx);
     }
 
     /// The current page has only one Save even when it holds several fields, as Checkouts does. Its identity
@@ -345,8 +363,8 @@ impl SettingsDialog {
         }
         let mut edits = self.edits(cx);
         self.key_conflict = false;
-        if let Some(page) = page {
-            edits.retain(|edit| edit.is_form() && edit.section() == page);
+        if let Some(page) = &page {
+            edits.retain(|edit| edit.is_form() && &edit.section() == page);
         } else if self.keys_disagree(cx) {
             self.reveal_key_conflict(window, cx);
             return;

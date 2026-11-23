@@ -19,6 +19,17 @@ use crate::assets::Icon;
 use crate::marks::HarnessGlyph;
 use crate::theme::{Palette, Token};
 
+/// A session keeps the registration's ID when its entry is edited or deleted.
+pub(crate) fn custom_name(
+    id: &str,
+    collections: &farhelm_helm_client::Collections,
+) -> crate::host_text::HostText {
+    let name = collections
+        .get::<farhelm_proto::custom_agents::CustomAgent>(id)
+        .map_or(id, |agent| agent.display_name.as_str());
+    crate::host_text::HostText::from_host(name)
+}
+
 /// The mark an agent type draws: the glyph of the same name. SPEC.md, "Session list": the mark comes from the launch
 /// (an agent launch's harness, a command launch's declared type), never from reading the command.
 #[warn(clippy::wildcard_enum_match_arm)]
@@ -36,7 +47,7 @@ pub(crate) const fn glyph(harness: LaunchHarness) -> HarnessGlyph {
         LaunchHarness::OpenCode => HarnessGlyph::OpenCode,
         LaunchHarness::Bash => HarnessGlyph::Bash,
         LaunchHarness::Zsh => HarnessGlyph::Zsh,
-        LaunchHarness::Custom => HarnessGlyph::Terminal,
+        LaunchHarness::Custom => HarnessGlyph::Custom,
     }
 }
 
@@ -54,7 +65,8 @@ pub(crate) const fn kind_glyph(kind: AgentKind) -> HarnessGlyph {
         AgentKind::Omp => HarnessGlyph::Omp,
         AgentKind::Grok => HarnessGlyph::Grok,
         AgentKind::Muse => HarnessGlyph::Muse,
-        AgentKind::Custom | AgentKind::Generic => HarnessGlyph::Terminal,
+        AgentKind::Custom => HarnessGlyph::Custom,
+        AgentKind::Generic => HarnessGlyph::Terminal,
     }
 }
 
@@ -144,6 +156,7 @@ pub(crate) const fn icon(glyph: HarnessGlyph) -> Icon {
         HarnessGlyph::Terminal => Icon::HarnessTerminal,
         HarnessGlyph::Bash => Icon::HarnessBash,
         HarnessGlyph::Zsh => Icon::HarnessZsh,
+        HarnessGlyph::Custom => Icon::HarnessCustom,
     }
 }
 
@@ -163,6 +176,7 @@ pub(crate) const fn ink(glyph: HarnessGlyph, palette: &Palette) -> Option<Token>
         HarnessGlyph::Grok => Some(palette.harness[5]),
         HarnessGlyph::OpenCode => Some(palette.harness[6]),
         HarnessGlyph::Antigravity => Some(palette.harness[7]),
+        HarnessGlyph::Custom => Some(palette.harness[8]),
         HarnessGlyph::Codex
         | HarnessGlyph::Goose
         | HarnessGlyph::Terminal
@@ -270,6 +284,7 @@ mod tests {
             (HarnessGlyph::Grok, 0xd8b839, 0x987f1e),
             (HarnessGlyph::OpenCode, 0x83b94b, 0x638d37),
             (HarnessGlyph::Antigravity, 0xe85d9a, 0xc73c7a),
+            (HarnessGlyph::Custom, 0xd2b79a, 0x886349),
         ];
         for (glyph, dark, light) in hues {
             assert_eq!(

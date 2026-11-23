@@ -801,18 +801,28 @@ fn an_open_editor_follows_a_fresh_read_and_keeps_its_secret(cx: &mut TestAppCont
         "the premise: in use"
     );
 
-    click(cx, section_button(Section::Sessions));
-    click(cx, section_button(Section::Credentials));
+    super::tests::click_section(cx, Section::Sessions);
+    assert_eq!(super::tests::heading(cx).as_deref(), Some("Sessions"));
+    super::tests::click_section(cx, Section::Credentials);
+    assert_eq!(super::tests::heading(cx).as_deref(), Some("Credentials"));
     let reads = sent(&mut helm);
+    assert_eq!(
+        reads.len(),
+        1,
+        "returning to Credentials refreshes its catalog"
+    );
+    assert_eq!(reads[0].path, "/api/credentials");
     answer(
         &mut helm,
         reads,
         &json!([entry("used", "endpoint_token", 1, &[])]),
     );
     settle(cx);
-    reach(cx, "credential-cancel");
-    assert!(painted(cx).contains("No recipes use this credential."));
     assert_eq!(available(cx, "credential-delete"), Some(true));
+    // The usage line belongs to the scrollable page. The pinned Cancel button does not reveal it.
+    super::tests::wheel(cx, 1000.);
+    let text = painted(cx);
+    assert!(text.contains("No recipes use this credential."), "{text}");
     assert_eq!(secret(cx).1, "fictional-typed-secret", "the secret is kept");
 }
 

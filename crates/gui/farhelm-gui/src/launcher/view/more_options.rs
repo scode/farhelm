@@ -30,7 +30,10 @@ impl Launcher {
         palette: &theme::Palette,
         cx: &mut Context<Self>,
     ) -> Vec<AnyElement> {
-        let offered = harness.filter(|harness| harness.offers_named_conversation());
+        let offered = harness.filter(|harness| {
+            self.draft.offers_conversation()
+                || (harness.uses_custom_catalog() && !self.draft.conversation.is_empty())
+        });
         let label = offered.map(conversation_label);
         let required = self.draft.requires_conversation();
         let conversation_error = self.draft.conversation_error();
@@ -74,7 +77,9 @@ impl Launcher {
                     .into_any_element(),
                 );
             }
-            if !harness.captures_named_conversation() {
+            if !harness.captures_named_conversation()
+                || (harness.uses_custom_catalog() && !self.draft.agent.custom_reporting)
+            {
                 fields.push(
                     help_line(
                         "Farhelm will not capture this conversation after a named start, so Restart will not be \

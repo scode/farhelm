@@ -46,13 +46,13 @@ use farhelm_proto::session_requests::{
 use farhelm_proto::tensorlake::Settings;
 use farhelm_proto::ui_channel::{Availability, Collection, HostStateView, HostView};
 use farhelm_proto::{
-    AcceptedGithubPreview, CommandLaunch, DeleteGuard, GithubCheckoutRequest, LaunchPermission,
-    LaunchSelection, LaunchTarget, RETIRED_CONTAINER_REASON, SessionLaunch, check_permission_flags,
-    split_permission_flags, split_wrapper_prefix,
+    AcceptedGithubPreview, CommandLaunch, DeleteGuard, GithubCheckoutRequest, LaunchHarness,
+    LaunchPermission, LaunchSelection, LaunchTarget, RETIRED_CONTAINER_REASON, SessionLaunch,
+    check_permission_flags, split_permission_flags, split_wrapper_prefix,
 };
 
 use super::draft::{
-    Catalog, ENVIRONMENT_HOME, FOLDER_INSTALLATION_MOVED, LaunchDraft, Mode, Restart,
+    Catalog, ENVIRONMENT_HOME, FOLDER_INSTALLATION_MOVED, Field, LaunchDraft, Mode, Restart,
     RestartBaseline, Tab, repo_identifier,
 };
 use crate::environment_ui::ProviderUi;
@@ -278,6 +278,13 @@ impl LaunchDraft {
                 }
             }
             Tab::Command => {
+                if self.command.custom_registration_missing {
+                    return Some(if self.holds(Field::AgentType) {
+                        "The custom agent registration was deleted. Register it again to use Restart with."
+                    } else {
+                        "The custom agent registration was deleted. Choose Custom to keep using this command."
+                    }.into());
+                }
                 if self.command.command.trim().is_empty() {
                     return Some("Enter an agent command before launching".to_owned());
                 }
@@ -326,7 +333,27 @@ impl LaunchDraft {
         {
             return Some("Enter valid custom permission flags before launching".to_owned());
         }
-        if !selection_fits_catalog(&selection, catalog) {
+        if selection.harness.uses_custom_catalog() {
+            if selection.custom_agent.is_none() {
+                return Some("Choose a registered custom agent before launching".into());
+            }
+            if self.agent.custom_registration_missing {
+                return Some("The selected custom agent is no longer registered".into());
+            }
+            for (field, value) in [
+                ("model", selection.model.as_deref()),
+                (
+                    "effort",
+                    selection.effort.as_ref().map(|value| value.as_cli_arg()),
+                ),
+            ] {
+                if let Some(reason) = value.and_then(|value| {
+                    farhelm_proto::custom_agents::validate_model_or_effort(value).err()
+                }) {
+                    return Some(format!("Custom agent {field}: {reason}"));
+                }
+            }
+        } else if !selection_fits_catalog(&selection, catalog) {
             return Some(
                 "This saved choice is no longer supported by the current catalog; choose a compatible model or effort"
                     .to_owned(),
@@ -350,7 +377,7 @@ impl LaunchDraft {
     /// until a setting changes or a conversation selector is entered").
     fn restart_refusal(&self, restart: &Restart, live: Option<&SessionLaunch>) -> Option<String> {
         let baseline = &restart.baseline;
-        if self.requires_conversation() && self.conversation.is_empty() {
+        if self.requires_conversation() && self.active_conversation().is_none() {
             return Some("Enter a conversation to restart".to_owned());
         }
         if self.restart_edit().as_ref() == Some(baseline) && self.active_conversation().is_none() {
@@ -462,10 +489,10 @@ impl LaunchDraft {
             .then(|| split_wrapper_prefix(&agent.wrapper).ok())
             .flatten();
         Some(LaunchSelection {
-            custom_agent: None,
+            custom_agent: agent.custom_agent.clone(),
             harness,
             model: agent.model.clone(),
-            effort: agent.effort.map(Into::into),
+            effort: agent.effort_value(),
             permissions,
             permission_flags,
             workspace_trust: None,
@@ -479,7 +506,7 @@ impl LaunchDraft {
     pub fn command_launch(&self) -> Option<CommandLaunch> {
         let command = &self.command;
         Some(CommandLaunch {
-            custom_agent: None,
+            custom_agent: command.custom_agent.clone(),
             command: command.command.clone(),
             yolo: command.yolo?,
             agent: command.agent,
@@ -501,12 +528,16 @@ impl LaunchDraft {
     /// The conversation selector this launch sends: only on the Agent tab, for an agent that offers one, when filled
     /// in.
     pub(super) fn active_conversation(&self) -> Option<&str> {
-        let offered = self
-            .agent
-            .harness
-            .is_some_and(|harness| harness.offers_named_conversation());
-        (self.tab == Tab::Agent && offered && !self.conversation.is_empty())
+        (self.tab == Tab::Agent && self.offers_conversation() && !self.conversation.is_empty())
             .then_some(self.conversation.as_str())
+    }
+
+    /// A name can only be acted on by a registration with a resume command.
+    pub(super) fn offers_conversation(&self) -> bool {
+        self.agent.harness.is_some_and(|harness| {
+            harness.offers_named_conversation()
+                && (!harness.uses_custom_catalog() || self.agent.custom_resumption)
+        })
     }
 
     /// The restart could not acquire a captured conversation. Supplying a valid selector makes it actionable,
@@ -539,6 +570,20 @@ impl LaunchDraft {
     /// Apply the helm's literal selector boundary before submission. A valid selector can still conflict with a
     /// prompt on an agent that only accepts prompts for fresh starts.
     fn named_start_error(&self) -> Option<String> {
+        if self.tab == Tab::Agent
+            && self
+                .agent
+                .harness
+                .is_some_and(LaunchHarness::uses_custom_catalog)
+            && !self.conversation.is_empty()
+            && !self.agent.custom_resumption
+        {
+            return Some(if self.requires_conversation() {
+                "This custom agent no longer supports resumption."
+            } else {
+                "This custom agent cannot resume now. Clear the conversation ID to start a new conversation."
+            }.into());
+        }
         let conversation = self.active_conversation()?;
         let harness = self.agent.harness?;
         if let Err(error) = validate_launch_conversation(harness, conversation) {

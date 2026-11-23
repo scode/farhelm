@@ -167,7 +167,11 @@ pub(super) struct Description {
 
 impl Description {
     /// `launch`'s description, with the observation first when `screen_yolo` says one was made.
-    pub(super) fn of(launch: &SessionLaunch, screen_yolo: bool) -> Description {
+    pub(super) fn of(
+        launch: &SessionLaunch,
+        screen_yolo: bool,
+        registration: Option<HostText>,
+    ) -> Description {
         let said = |text: String| vec![Piece::Words(text)];
         let command = Piece::Value(HostText::from_host(launch.display_command()));
         let mut paragraphs = Vec::new();
@@ -194,10 +198,14 @@ impl Description {
                 let help = words::permission_help(selection.harness, stored);
                 let mut help_paragraphs = help.split("\n\n");
                 let first = help_paragraphs.next().unwrap_or_default();
-                paragraphs.push(said(format!(
-                    "{launched_as}{} — {first}",
-                    harness::name(selection.harness)
-                )));
+                paragraphs.push(match registration {
+                    Some(name) => vec![
+                        Piece::Words(launched_as.to_owned()),
+                        Piece::Value(name),
+                        Piece::Words(format!(" — {first}")),
+                    ],
+                    None => said(format!("{launched_as}{} — {first}", harness::name(selection.harness))),
+                });
                 paragraphs.extend(help_paragraphs.map(|paragraph| said(paragraph.to_owned())));
                 if let Some(flags) = &selection.permission_flags {
                     paragraphs.push(vec![
@@ -218,10 +226,15 @@ impl Description {
                     "Not YOLO, as asserted when the command was launched, by the user or by an agent — not checked \
                      by Farhelm"
                 };
-                paragraphs.push(vec![
-                    Piece::Words(format!("{launched_as}{name} — {assertion} — ")),
-                    command,
-                ]);
+                paragraphs.push(match registration {
+                    Some(name) => vec![
+                        Piece::Words(launched_as.to_owned()),
+                        Piece::Value(name),
+                        Piece::Words(format!(" — {assertion} — ")),
+                        command,
+                    ],
+                    None => vec![Piece::Words(format!("{launched_as}{name} — {assertion} — ")), command],
+                });
             }
             SessionLaunch::Legacy { .. } => paragraphs.push(vec![
                 Piece::Words(format!(
@@ -341,7 +354,13 @@ impl RowMarks {
                 ink(harness::ink(glyph, palette).unwrap_or(palette.fg_1)),
             ),
             permission: shield.map(|shield| (shield, ink(shield.ink(palette)))),
-            description: Description::of(launch, row.info.screen_yolo),
+            description: Description::of(
+                launch,
+                row.info.screen_yolo,
+                launch
+                    .custom_agent()
+                    .map(|id| harness::custom_name(id, collections)),
+            ),
         }
     }
 }

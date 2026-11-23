@@ -74,6 +74,7 @@ struct Draft {
     model: Option<&'static str>,
     catalog: Option<Vec<LaunchCatalogModel>>,
     catalog_pending: bool,
+    custom_agents: Vec<farhelm_proto::custom_agents::CustomAgent>,
     repository_pending: Option<bool>,
     hosts: Vec<HostView>,
     templates: Result<Vec<TemplateRow>, HostSentence>,
@@ -88,6 +89,7 @@ impl Draft {
             model: None,
             catalog: Some(catalog()),
             catalog_pending: false,
+            custom_agents: Vec::new(),
             repository_pending: Some(false),
             hosts: hosts(),
             templates: Ok(Vec::new()),
@@ -104,12 +106,14 @@ impl Draft {
 
     fn search(&self, query: &str) -> Results {
         let placement = placement();
+        let custom_agents: Vec<_> = self.custom_agents.iter().collect();
         search(&Inputs {
             query,
             tab: self.tab,
             harness: self.harness,
             model: self.model,
             catalog: self.catalog.as_deref(),
+            custom_agents: &custom_agents,
             catalog_pending: self.catalog_pending,
             hosts: &self.hosts,
             templates: self.templates.as_deref(),
@@ -122,6 +126,29 @@ impl Draft {
 
     fn rows(&self, query: &str) -> Vec<Row> {
         self.search(query).rows
+    }
+}
+
+/// A catalog registration is findable by stable ID or its current display name. An exact ID wins
+/// over an effort with the same spelling so changing the displayed name keeps the shortcut usable.
+#[test]
+fn custom_agent_search_matches_id_and_display_name() {
+    let mut draft = Draft::agent(Some(LaunchHarness::Claude));
+    draft
+        .custom_agents
+        .push(farhelm_proto::custom_agents::CustomAgent {
+            id: "high".into(),
+            display_name: "Acme Code".into(),
+            command: "acme-code".into(),
+            supports_resumption: true,
+            supports_reporting: true,
+        });
+    for query in ["high", "harness:acme code"] {
+        let results = draft.search(query);
+        assert!(
+            matches!(&results.rows[results.default], Row::CustomAgent { id, .. } if id == "high"),
+            "{query}: {results:?}"
+        );
     }
 }
 
@@ -1313,12 +1340,12 @@ fn the_exact_template_name_is_preselected_by_unicode_lowercase() {
     }
 }
 
-/// The groups keep the old order, Templates between Harnesses and Models, so a later group added in its place never
-/// moves the template rows. Specified: the group order ranks Harnesses, Templates, Models; the group is headed
-/// "Templates"; a template row reads "Template: " and the name, escaped, with the old hover help.
+/// Template results follow all of the agent and shell choices before showing models. The group is headed
+/// "Templates". Its rows keep their own escaped name and hover help distinct from agent matches.
 #[test]
 fn template_rows_sit_between_harnesses_and_models_in_the_old_words() {
-    assert_eq!(Group::Harnesses as u8 + 1, Group::Shells as u8);
+    assert_eq!(Group::Harnesses as u8 + 1, Group::CustomAgents as u8);
+    assert_eq!(Group::CustomAgents as u8 + 1, Group::Shells as u8);
     assert_eq!(Group::Shells as u8 + 1, Group::Templates as u8);
     assert_eq!(Group::Templates as u8 + 1, Group::Models as u8);
     assert_eq!(Group::Templates.label(), "Templates");

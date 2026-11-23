@@ -482,10 +482,13 @@ fn every_catalog_entry_corresponds_to_something_drawn(cx: &mut TestAppContext) {
     settle(cx);
     let entries = catalog(Platform::Mac);
     for section in Section::all() {
-        click_section(cx, section);
+        click_section(cx, section.clone());
         assert_eq!(
             heading(cx).as_deref(),
-            Some(section.label()),
+            Some(match section {
+                Section::AddCustomAgent => "Add custom agent",
+                _ => section.label(),
+            }),
             "opened {section:?}"
         );
         for read in sent(&mut helm) {

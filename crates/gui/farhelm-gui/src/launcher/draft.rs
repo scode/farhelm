@@ -228,6 +228,17 @@ fn clone_repository(session: &SessionInfo) -> Option<Option<GithubRepo>> {
 pub struct AgentChoices {
     /// The agent type; New starts with none.
     pub harness: Option<LaunchHarness>,
+    /// A stable registration ID, independent of the label and of the host the launch will use.
+    pub custom_agent: Option<String>,
+    /// Text for the free-form effort control; built-in efforts still come from their closed vocabulary.
+    pub custom_effort: String,
+    /// Refreshed from the current catalog while the launcher is open. An existing session's ordinary Restart
+    /// uses its stored resume command without consulting this flag.
+    pub custom_resumption: bool,
+    /// Reporting and resumption are independent capabilities. A named start can succeed without recording an ID.
+    pub custom_reporting: bool,
+    /// The composer keeps a deleted ID visible so the user knows which choice to repair.
+    pub custom_registration_missing: bool,
     /// The accepted model id; `None` is the agent type's configured default.
     pub model: Option<String>,
     /// Which agent type a custom (non-catalog) model id was entered for, so a later agent switch clears it exactly as
@@ -257,6 +268,17 @@ pub struct AgentChoices {
     pub container: Option<farhelm_proto::ContainerConfig>,
 }
 
+impl AgentChoices {
+    /// Both saved templates and live requests use the same effort value.
+    pub(crate) fn effort_value(&self) -> Option<farhelm_proto::LaunchEffortValue> {
+        if self.harness.is_some_and(LaunchHarness::uses_custom_catalog) {
+            (!self.custom_effort.is_empty()).then(|| self.custom_effort.clone().into())
+        } else {
+            self.effort.map(Into::into)
+        }
+    }
+}
+
 /// The Command tab's fields.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct CommandChoices {
@@ -265,6 +287,9 @@ pub struct CommandChoices {
     pub yolo: Option<bool>,
     /// The optional declared agent type.
     pub agent: Option<LaunchHarness>,
+    pub custom_agent: Option<String>,
+    /// Keeps a saved declaration visible after deletion while preventing a newly rejected launch.
+    pub custom_registration_missing: bool,
     /// Whether the user opted into Resume; it counts only while an agent type is declared.
     pub resume_on: bool,
     /// The resume command's raw text, kept while Resume is off or hidden.
@@ -595,12 +620,27 @@ impl LaunchDraft {
     /// selection, so its permission is never treated as a passive default). A recent setup can change the harness,
     /// so an entered conversation selector belongs only to the harness it was entered for.
     fn restore_selection(&mut self, selection: &LaunchSelection) {
-        if self.agent.harness != Some(selection.harness) {
+        if self.agent.harness != Some(selection.harness)
+            || self.agent.custom_agent != selection.custom_agent
+        {
             self.conversation.clear();
         }
         self.tab = Tab::Agent;
         self.agent = AgentChoices {
             harness: Some(selection.harness),
+            custom_agent: selection.custom_agent.clone(),
+            custom_effort: if selection.harness.uses_custom_catalog() {
+                selection
+                    .effort
+                    .as_ref()
+                    .map_or("", |effort| effort.as_cli_arg())
+                    .into()
+            } else {
+                String::new()
+            },
+            custom_resumption: false,
+            custom_reporting: false,
+            custom_registration_missing: false,
             model: selection.model.clone(),
             model_owner: selection.model.as_ref().map(|_| selection.harness),
             effort: selection.effort.as_ref().and_then(|value| value.known()),
@@ -655,6 +695,8 @@ impl LaunchDraft {
             command: command.command.clone(),
             yolo: Some(command.yolo),
             agent: command.agent,
+            custom_agent: command.custom_agent.clone(),
+            custom_registration_missing: false,
             resume_on: command.resume.is_some(),
             resume: command.resume.clone().unwrap_or_default(),
         };
@@ -698,6 +740,35 @@ impl LaunchDraft {
         let selection = self.choices_for(harness);
         let owner = self.agent.model_owner;
         self.switch_agent(selection, owner, harness, catalog, remembered_wrapper)
+    }
+
+    /// The custom catalog groups many registrations under the same harness. Switching within that group
+    /// clears values typed for the old integration, including its one-time conversation ID.
+    pub fn choose_custom_agent(
+        &mut self,
+        agent: &farhelm_proto::custom_agents::CustomAgent,
+        catalog: Catalog<'_>,
+        remembered_wrapper: Option<&[String]>,
+    ) -> Edit {
+        if self.holds(Field::AgentType) {
+            return Edit {
+                notice: Some(AGENT_TYPE_HELD.to_owned()),
+                ..Edit::default()
+            };
+        }
+        let mut edit = self.choose_harness(LaunchHarness::Custom, catalog, remembered_wrapper);
+        if self.agent.custom_agent.as_deref() != Some(agent.id.as_str()) {
+            self.agent.custom_agent = Some(agent.id.clone());
+            self.agent.model = None;
+            self.agent.model_owner = None;
+            self.agent.custom_effort.clear();
+            self.conversation.clear();
+            edit.switched_agent = true;
+        }
+        self.agent.custom_resumption = agent.supports_resumption;
+        self.agent.custom_reporting = agent.supports_reporting;
+        self.agent.custom_registration_missing = false;
+        edit
     }
 
     /// Choose the catalog model `id`, which `owner` offers. Within the current agent type it only clears an effort the
@@ -757,6 +828,11 @@ impl LaunchDraft {
             self.agent.wrapper = joined(remembered_wrapper);
             self.agent.wrapper_explicit = false;
             self.agent.permission_flags = String::new();
+            self.agent.custom_agent = None;
+            self.agent.custom_resumption = false;
+            self.agent.custom_reporting = false;
+            self.agent.custom_registration_missing = false;
+            self.agent.custom_effort.clear();
         }
         self.tab = Tab::Agent;
         Edit {
@@ -985,6 +1061,11 @@ impl LaunchDraft {
     /// The declared agent type; clearing it hides Resume but keeps the resume command's text.
     pub fn choose_command_agent(&mut self, agent: Option<LaunchHarness>) {
         self.command.agent = agent;
+        self.command.custom_agent = None;
+        self.command.custom_registration_missing = false;
+        if agent.is_some_and(LaunchHarness::uses_custom_catalog) {
+            self.command.yolo = Some(true);
+        }
     }
 
     pub fn choose_command_resume(&mut self, on: bool) {

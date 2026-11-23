@@ -132,6 +132,8 @@ linux/launcher-checkout-on-suspended-host--dark.png 109aafeb89367ff0f3bbe7c122e6
 linux/launcher-checkout-on-suspended-host--light.png 262ac4523edf287d9dbaed7d10ef6ae464612681
 linux/launcher-command-results--dark.png 965a5d43af4b19d2779d487585376a242d06208c
 linux/launcher-command-results--light.png dade16fe9dabf49d7ce14f393e305601e35a6441
+linux/launcher-custom-agent--dark.png 9bbf7bac08c2fb6dfe24916badb28f9f9cf7d49c
+linux/launcher-custom-agent--light.png fe0bdd62e33fabca11a9556d0c431351749fbcbe
 linux/launcher-hook-setup--dark.png e2da2eaf5eddb2649daab8f6cc50987e0b6a3c49
 linux/launcher-hook-setup--light.png c44c6bbee52b9d65f8319378a4066e676f1e6dc1
 linux/launcher-host-menu--dark.png 136751a18fb7c316d2aedac88818b0436ee16369
@@ -282,6 +284,8 @@ linux/settings-credentials--dark.png b4f092efa520c043ed8abcdedcac638545febbc5
 linux/settings-credentials--light.png eb3696ad173bf7f996e11abc6d1141569eaf0534
 linux/settings-cursor--dark.png d8ad012ada154d51db4d1e36ffa9f51f47ac2699
 linux/settings-cursor--light.png bd600c900b660a3430b614521425ba1303d71d40
+linux/settings-custom-agent--dark.png 680aa6ca74f88420b802bfa95f33ad588f734783
+linux/settings-custom-agent--light.png bbeb3a9a3d792d00d6c3a5b5cf7734d1cc30be9f
 linux/settings-grok--dark.png ac5cfbf9a2a44e14c72621c1557a3c68aaabae20
 linux/settings-grok--light.png d7fd713e0f49a1bd74b5f2014b744e9ad6c1a606
 linux/settings-hosts--dark.png 46a06d13dd4bd244fdb89d16b9bbf5c0f7b6c18d

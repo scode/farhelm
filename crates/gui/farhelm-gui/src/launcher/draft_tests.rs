@@ -97,6 +97,49 @@ fn command(agent: Option<LaunchHarness>, resume: Option<&str>) -> CommandLaunch 
     }
 }
 
+/// A custom launch uses literal choices, and a saved setup carries the registration ID and the exact
+/// effort spelling without retaining the conversation used for its last start.
+#[test]
+fn custom_agent_choices_round_trip_through_a_saved_setup() {
+    let agent = farhelm_proto::custom_agents::CustomAgent {
+        id: "acme-code".into(),
+        display_name: "Acme Code".into(),
+        command: "acme-code".into(),
+        supports_resumption: true,
+        supports_reporting: false,
+    };
+    let mut launch = new_draft();
+    launch.choose_custom_agent(&agent, None, None);
+    launch.agent.model = Some("deep-v2".into());
+    launch.agent.custom_effort = "high".into();
+    launch.edit_conversation("one-start".into());
+    assert_eq!(launch.active_conversation(), Some("one-start"));
+    let selection = launch.agent_selection().unwrap();
+    assert_eq!(selection.effort, Some(LaunchEffort::High.into()));
+    assert_eq!(selection.custom_agent.as_deref(), Some("acme-code"));
+    let mut recent = new_draft();
+    recent.restore_recent(&selection, None);
+    assert_eq!(recent.agent_selection(), Some(selection));
+    assert_eq!(recent.active_conversation(), None);
+    launch.agent.custom_resumption = false;
+    assert_eq!(launch.conversation, "one-start");
+    assert!(
+        launch.conversation_error().is_some(),
+        "a revoked capability must refuse the named start"
+    );
+    launch.agent.custom_resumption = true;
+    let other = farhelm_proto::custom_agents::CustomAgent {
+        id: "other-code".into(),
+        supports_resumption: false,
+        ..agent
+    };
+    launch.choose_custom_agent(&other, None, None);
+    assert!(launch.conversation.is_empty());
+    assert!(launch.agent.custom_effort.is_empty());
+    assert_eq!(launch.agent.custom_agent.as_deref(), Some("other-code"));
+    assert!(!launch.offers_conversation());
+}
+
 // ---------------------------------------------------------------------------------------------------------------------
 // Tabs and New
 // ---------------------------------------------------------------------------------------------------------------------

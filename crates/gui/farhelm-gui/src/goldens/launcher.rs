@@ -128,6 +128,7 @@ enum LauncherScene {
     HostMenu,
     Container,
     RememberedWrapper,
+    CustomAgent,
     ShellWrapper,
     ShellWrapperNote,
     RepositoryRefusal,
@@ -167,6 +168,11 @@ pub(super) fn launcher_container_setup(state: &SceneState, window: &mut Window, 
 /// Show a wrapper brought in by the actual harness choice, without opening More options to see it.
 pub(super) fn launcher_more_options_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
     setup(state, LauncherScene::RememberedWrapper, window, cx);
+}
+
+/// Draw the registered chips and literal model and effort inputs without requiring a vendor or a launch.
+pub(super) fn launcher_custom_agent_setup(state: &SceneState, window: &mut Window, cx: &mut App) {
+    setup(state, LauncherScene::CustomAgent, window, cx);
 }
 
 /// Open a Bash launch with the wrapper row expanded and its help visible.
@@ -264,6 +270,9 @@ fn setup(state: &SceneState, scene: LauncherScene, window: &mut Window, cx: &mut
         );
     }
     let mut extra = vec![launcher_templates()];
+    if scene == LauncherScene::CustomAgent {
+        extra.push(super::custom_agent_state());
+    }
     if matches!(scene, LauncherScene::HostMenu | LauncherScene::Container) {
         // The recipe catalog must already be drawn when the host menu picks New container.
         extra.push(CollectionState {
@@ -352,7 +361,12 @@ fn open_new_with_claude(
     }
     let remembered = scene == LauncherScene::RememberedWrapper;
     draft.edit_folder("/home/user/src/api".into());
-    if matches!(
+    if scene == LauncherScene::CustomAgent {
+        let fixture = super::custom_agent();
+        draft.choose_custom_agent(&fixture, None, None);
+        draft.agent.model = Some("fast-v2".into());
+        draft.agent.custom_effort = "deep_work".into();
+    } else if matches!(
         scene,
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote
     ) {
@@ -371,6 +385,7 @@ fn open_new_with_claude(
     );
     state.after.set(Some(match scene {
         LauncherScene::RememberedWrapper => pick_claude,
+        LauncherScene::CustomAgent => open_shell_wrapper,
         LauncherScene::ShellWrapper | LauncherScene::ShellWrapperNote => open_shell_wrapper,
         _ => answer_new_reads,
     }));
@@ -387,6 +402,40 @@ fn open_shell_wrapper(
         state.after.set(Some(open_shell_wrapper));
     } else if launcher_scene(state) == LauncherScene::ShellWrapper {
         state.hover.set(Some("launcher-wrapper"));
+    } else if launcher_scene(state) == LauncherScene::CustomAgent {
+        state.after.set(Some(reveal_custom_wrapper));
+    }
+}
+
+/// The expanded options extend beyond the pinned footer. Scroll just enough to show the wrapper and the named start.
+fn reveal_custom_wrapper(
+    _: &Entity<SessionList>,
+    state: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) {
+    let nodes = window.driver_nodes();
+    let bounds = |id| {
+        nodes
+            .iter()
+            .find(|node| node.element_id.as_deref() == Some(id))
+            .map(|node| node.bounds)
+    };
+    let (Some(body), Some(wrapper)) = (bounds("launcher-body"), bounds("launcher-wrapper-row"))
+    else {
+        state.after.set(Some(reveal_custom_wrapper));
+        return;
+    };
+    let beyond = wrapper.bottom() + px(12.) - body.bottom();
+    if beyond > px(1.) {
+        window.dispatch_event(
+            gpui::PlatformInput::Scroll(gpui::ScrollEvent {
+                position: point(body.left() + px(8.), body.center().y),
+                delta: gpui::ScrollDelta::Pixels(point(px(0.), -beyond)),
+                ..Default::default()
+            }),
+            cx,
+        );
     }
 }
 
