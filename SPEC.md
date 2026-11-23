@@ -4374,14 +4374,16 @@ rather than answers by accident.
 
 `farhelm agent delete --session <id> [--stop-if-running]` removes a session with the same teardown and checkout notices
 as the UI's Delete. Without the flag it refuses to delete a session whose main program or any terminal tab is still
-running. With the flag, the approval card names what would be stopped, and deletion is held to that displayed state just
-as a UI confirmation is. A session cannot delete itself: its relay holds its own request fence until the reply, while
-deletion must take that same fence before revoking its credential. Self-stop remains available. A delete also refuses a
-target with an agent command still in flight rather than waiting, so two sessions deleting each other cannot stall on
-each other's fences. A lost reply means outcome unknown; it never claims that the session survived.
+running. The approval card says what deletion can stop and what would make Farhelm refuse it. Deletion is held to that
+displayed state just as a UI confirmation is. A session cannot delete itself: its relay holds its own request fence
+until the reply, while deletion must take that same fence before revoking its credential. Self-stop remains available. A
+delete also refuses a target with an agent command still in flight rather than waiting, so two sessions deleting each
+other cannot stall on each other's fences. A lost reply means outcome unknown; it never claims that the session
+survived.
 
-An approved `farhelm agent stop --session <id>` stops the session's main program and closes all its terminal tabs. Its
-approval card describes both consequences. Approval lets this path close tabs even when the session has tabs open.
+An approved `farhelm agent stop --session <id>` stops the session's main program and closes all its terminal tabs. The
+Stop heading describes both consequences. Stop and Delete approval cards name the shell for Bash or Zsh, the agent for
+agent sessions, and the main program for other commands or where the program kind is unavailable.
 
 NOTE: `farhelm agent prompt` is turned off in this version. The helm refuses every such request, as a deliberate refusal
 that a retry or approval does not change, before it reads the target, shows a card or contacts any supervisor. The CLI

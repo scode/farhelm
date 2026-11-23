@@ -21,8 +21,8 @@
 //! an answer a card should not have offered.
 
 use farhelm_proto::approvals::{
-    ApprovalAction, ApprovalAnswer, ApprovalSession, LaunchVerb, PendingApproval, QuickLaunchCard,
-    TemplateKeyCard,
+    ApprovalAction, ApprovalAnswer, ApprovalLaunchKind, ApprovalSession, LaunchVerb,
+    PendingApproval, QuickLaunchCard, TemplateKeyCard,
 };
 use farhelm_proto::launcher::{TemplateDestination, TemplateFields, TemplateNameKind};
 use farhelm_proto::{DeleteGuard, LaunchPermission, SessionLaunch};
@@ -242,7 +242,11 @@ pub fn summary(action: &ApprovalAction) -> &'static str {
             Spawn | SpawnInherited | Create => "Start a session in a new sandbox or container",
         },
         ApprovalAction::Rename { .. } => "Rename a session",
-        ApprovalAction::Stop { .. } => "Stop a session's agent and close its terminal tabs",
+        ApprovalAction::Stop { target } => match target.launch_kind {
+            Some(ApprovalLaunchKind::Shell) => "Stop a session's shell and close its terminal tabs",
+            Some(ApprovalLaunchKind::Agent) => "Stop a session's agent and close its terminal tabs",
+            _ => "Stop a session's main program and close its terminal tabs",
+        },
         ApprovalAction::Prompt { .. } => "Send a prompt to a session's agent",
         ApprovalAction::Delete { .. } => "Delete a session and its stored state",
         ApprovalAction::Restart { .. } => "Restart a session, resuming its conversation",
@@ -535,15 +539,7 @@ pub fn facts(action: &ApprovalAction) -> Vec<Fact> {
             session_facts(Role::Target, target, &mut facts);
             facts.push(Fact::Words(
                 "what deletion stops",
-                match guard {
-                    DeleteGuard::NothingAlive => {
-                        "nothing; refuse if the agent or any terminal tab is alive"
-                    }
-                    DeleteGuard::AgentEnded => {
-                        "terminal tabs; refuse if the agent is running again"
-                    }
-                    DeleteGuard::Unconditional => "the agent and all terminal tabs",
-                },
+                deletion_scope(*guard, target.launch_kind),
             ));
         }
         ApprovalAction::Restart {
@@ -689,6 +685,25 @@ fn boxed(key: &'static str, raw: &str) -> Fact {
 enum Role {
     Source,
     Target,
+}
+
+/// Name the processes this approval can stop and the liveness change that would invalidate its guard. The words
+/// come from the helm's program category so an older or newer peer with an unknown kind gets neutral wording.
+fn deletion_scope(guard: DeleteGuard, kind: Option<ApprovalLaunchKind>) -> &'static str {
+    use ApprovalLaunchKind::{Agent, Shell};
+    use DeleteGuard::{AgentEnded, NothingAlive, Unconditional};
+
+    match (guard, kind) {
+        (NothingAlive, Some(Agent)) => "nothing. Refuse if the agent or any terminal tab is alive",
+        (NothingAlive, Some(Shell)) => "nothing. Refuse if the shell or any terminal tab is alive",
+        (NothingAlive, _) => "nothing. Refuse if the main program or any terminal tab is alive",
+        (AgentEnded, Some(Agent)) => "terminal tabs. Refuse if the agent is running again",
+        (AgentEnded, Some(Shell)) => "terminal tabs. Refuse if the shell is running again",
+        (AgentEnded, _) => "terminal tabs. Refuse if the main program is running again",
+        (Unconditional, Some(Agent)) => "the agent and all terminal tabs",
+        (Unconditional, Some(Shell)) => "the shell and all terminal tabs",
+        (Unconditional, _) => "the main program and all terminal tabs",
+    }
 }
 
 /// A session as separate facts: its title (when the helm knows it), its full reference with Copy, and its host. Kept

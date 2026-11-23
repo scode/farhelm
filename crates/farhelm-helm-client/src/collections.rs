@@ -426,6 +426,7 @@ mod tests {
                 id: "s1".into(),
                 title: None,
                 host_name: None,
+                launch_kind: None,
             },
             action: farhelm_proto::approvals::ApprovalAction::HostAdd {
                 destination: label.into(),

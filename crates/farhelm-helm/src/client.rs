@@ -3247,7 +3247,29 @@ impl SupervisorClient {
     /// lookup: there is no page-walk primitive beside it, because the wire
     /// has no pages.
     pub async fn list_sessions(&self) -> anyhow::Result<SessionListing> {
+        self.read_session_list(self.req_id()).await
+    }
+
+    /// Read optional display metadata within the caller's budget. If the
+    /// reply arrives later, there is no waiter left and dispatch ignores it.
+    /// This read never takes the owning connection down on a missed deadline.
+    pub(crate) async fn list_sessions_for_description(
+        &self,
+        budget: Duration,
+    ) -> Option<SessionListing> {
         let req_id = self.req_id();
+        match tokio::time::timeout(budget, self.read_session_list(req_id)).await {
+            Ok(result) => result.ok(),
+            Err(_) => {
+                self.pending.lock().await.map.remove(&req_id);
+                None
+            }
+        }
+    }
+
+    /// Decode the one listing reply for both the authoritative read and the
+    /// optional one, whose request ID is also needed on deadline expiry.
+    async fn read_session_list(&self, req_id: u64) -> anyhow::Result<SessionListing> {
         match self
             .request(req_id, ControlMsg::ListSessions { req_id })
             .await?
@@ -7290,6 +7312,78 @@ mod tests {
             client.pending.lock().await.map.is_empty(),
             "a request cancelled while waiting for queue capacity left its pending entry \
              behind; it would never be reaped"
+        );
+    }
+
+    /// An optional listing can expire after enqueue while the peer stays
+    /// connected. The expiry releases its reply slot and a late answer must
+    /// neither satisfy another waiter nor break the connection.
+    #[farhelm_testtrace::test]
+    async fn an_expired_description_listing_discards_only_its_late_reply() {
+        let (client_side, peer_side) = tokio::io::duplex(1024);
+        let peer = tokio::spawn(async move {
+            let (r, w) = tokio::io::split(peer_side);
+            let mut reader = FrameReader::new(r);
+            let mut writer = FrameWriter::new(w);
+            handshake(&mut reader, &mut writer, "supervisor")
+                .await
+                .unwrap();
+            (reader, writer)
+        });
+        let (r, w) = tokio::io::split(client_side);
+        let client = SupervisorClient::start(r, w).await.unwrap();
+        let (mut reader, mut writer) = peer.await.unwrap();
+        tokio::time::pause();
+        let budget = Duration::from_secs(2);
+
+        let (optional, expired_id) =
+            tokio::join!(client.list_sessions_for_description(budget), async {
+                let frame = timeout(Duration::from_secs(5), reader.read_frame())
+                    .await
+                    .expect("description read dispatched")
+                    .unwrap()
+                    .unwrap();
+                let ControlMsg::ListSessions { req_id } = parse_control(&frame).unwrap() else {
+                    panic!("expected the optional listing request");
+                };
+                assert!(client.pending.lock().await.map.contains_key(&req_id));
+                // Timing starts from the observed request, with its reply held back.
+                tokio::time::advance(budget).await;
+                req_id
+            },);
+        assert!(optional.is_none());
+        assert!(!client.pending.lock().await.map.contains_key(&expired_id));
+
+        let (current, ()) = tokio::join!(
+            timeout(Duration::from_secs(5), client.list_sessions()),
+            async {
+                let frame = timeout(Duration::from_secs(5), reader.read_frame())
+                    .await
+                    .expect("next read dispatched on the same connection")
+                    .unwrap()
+                    .unwrap();
+                let ControlMsg::ListSessions { req_id } = parse_control(&frame).unwrap() else {
+                    panic!("expected a second listing request");
+                };
+                assert_ne!(req_id, expired_id);
+                for (req_id, truncated) in [(expired_id, true), (req_id, false)] {
+                    writer
+                        .write_control(&ControlMsg::SessionList {
+                            req_id,
+                            sessions: Vec::new(),
+                            truncated,
+                            sealed: false,
+                        })
+                        .await
+                        .unwrap();
+                }
+            },
+        );
+        assert!(
+            !current
+                .expect("reply arrived")
+                .expect("usable connection")
+                .truncated
         );
     }
 

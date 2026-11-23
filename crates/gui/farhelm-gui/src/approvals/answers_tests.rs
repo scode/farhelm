@@ -30,12 +30,14 @@ fn stop(id: &str) -> PendingApproval {
             id: "asker".to_owned(),
             title: None,
             host_name: None,
+            launch_kind: None,
         },
         action: ApprovalAction::Stop {
             target: ApprovalSession {
                 id: "target".to_owned(),
                 title: None,
                 host_name: None,
+                launch_kind: None,
             },
         },
         own_host_session_action: false,
