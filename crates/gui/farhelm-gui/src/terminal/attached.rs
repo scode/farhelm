@@ -529,8 +529,8 @@ pub struct AttachedTerminal {
     /// Cmd-click opens through ([`super::tunnels`]). One per session: a tab shares its agent terminal's
     /// ([`AttachedTerminal::sharing`]).
     tunnels: Entity<Tunnels>,
-    /// The terminal's file links: the host check behind a hovered printed path or `file://` hyperlink, and the
-    /// destination display it fills ([`super::files`]).
+    /// The terminal's file links: the host check behind a hovered printed path, and the destination display it fills
+    /// ([`super::files`]).
     files: Entity<FileLinks>,
     /// Redraws the terminal when a file check answers, since a printed path shows the pointing hand only then.
     _files: Subscription,
@@ -2754,8 +2754,9 @@ impl AttachedTerminal {
     /// program's hyperlink, or a printed address with a tunnel hint) opens only while that display is fully visible;
     /// otherwise the click is refused, and says why at the top of the terminal. On a Mac, Cmd alone on a link that was
     /// offered a tunnel at the press opens it through one ([`super::tunnels`]) instead of as printed. A click on a file
-    /// link (a printed path, or a program's `file://` hyperlink) goes to its host check instead ([`super::files`]),
-    /// whatever the link choice, and never reaches the browser.
+    /// link (a printed path) goes to its host check instead ([`super::files`]), whatever the link choice, and never
+    /// reaches the browser. A program's hyperlink that is not a web address is never pressed here: the view finds no
+    /// link over it ([`TerminalView::link_at`]).
     fn link_released(&mut self, event: &MouseUpEvent, window: &mut Window, cx: &mut Context<Self>) {
         let Some(press) = self.link_press.take() else {
             return;
@@ -2805,8 +2806,8 @@ impl AttachedTerminal {
         if LinkClick::current(cx) == LinkClick::Program {
             return;
         }
-        // A link that is neither a web address nor a file (a program's hyperlink to another scheme) opens nothing,
-        // and says nothing.
+        // Only a web address opens. The view already finds no link over a program's hyperlink to another scheme, so
+        // this refuses nothing that could be pressed; it keeps the opener's own rule next to the opening.
         let Some(target) = link_web_target(&press.link) else {
             return;
         };

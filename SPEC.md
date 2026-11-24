@@ -3637,19 +3637,20 @@ whatever the agent renders is what you see. There is no composer, no message abs
   forward login callbacks.
 
 - File paths in terminal output can be downloaded from the session's host, including the local host. Absolute and `~/`
-  paths, relative paths containing a slash or a file extension, and `file://` hyperlinks emitted by a program count;
-  plain words, version numbers and plain scheme-bearing text do not. Detection does not try to support file names that
-  contain whitespace. As a deliberate exception to conservative recognition, a path cut by a program's line break links
-  to the joined path from either half when the head ends in an unclosed path-like token and the next row starts with its
-  continuation (indentation is ignored), and that continuation would not fit in the head row's remaining columns after
-  allowing up to four columns for a TUI's right margin. Padding after the head is ignored. Both the head's final token
-  and the joined token must meet the ordinary path rules; a plain word cannot donate a head. This exception covers one
-  isolated pair of rows, not chains of hard breaks; ordinary terminal wraps still join as before. Diagnostic line/column
-  suffixes and trailing punctuation are excluded. Relative paths use the session's directory, not a shell's later
-  directory. Hover immediately underlines the path and shows a checking spinner, then the host, full resolved path and
-  size or refusal. Each hover checks afresh; a redraw beneath a pointer resting on the same path text and target at the
-  same position is not a new hover. Leaving cancels it. Only a successful check over link text unchanged since that
-  hover admits a click (OSC hyperlinks may show a pointer earlier). A partial redraw that changes the link text
+  paths, and relative paths containing a slash or a file extension, count; plain words, version numbers and plain
+  scheme-bearing text do not. A printed path never includes a cell that a program's hyperlink owns, whatever its scheme
+  and even where conceal hides it, and such a cell is never skipped as padding or indentation when a cut path is joined.
+  Detection does not try to support file names that contain whitespace. As a deliberate exception to conservative
+  recognition, a path cut by a program's line break links to the joined path from either half when the head ends in an
+  unclosed path-like token and the next row starts with its continuation (indentation is ignored), and that continuation
+  would not fit in the head row's remaining columns after allowing up to four columns for a TUI's right margin. Padding
+  after the head is ignored. Both the head's final token and the joined token must meet the ordinary path rules; a plain
+  word cannot donate a head. This exception covers one isolated pair of rows, not chains of hard breaks; ordinary
+  terminal wraps still join as before. Diagnostic line/column suffixes and trailing punctuation are excluded. Relative
+  paths use the session's directory, not a shell's later directory. Hover immediately underlines the path and shows a
+  checking spinner, then the host, full resolved path and size or refusal. Each hover checks afresh; a redraw beneath a
+  pointer resting on the same path text and target at the same position is not a new hover. Leaving cancels it. Only a
+  successful check over link text unchanged since that hover admits a click. A partial redraw that changes the link text
   withdraws transfer and opening permission even if the terminal library retains its old target. A click cannot transfer
   or open a file while the full hover disclosure does not fit in the window or is covered by another Farhelm surface
   such as an approval card or tunnel-error notice. Only a fully visible hover counts as disclosing the target; otherwise
@@ -3674,7 +3675,10 @@ whatever the agent renders is what you see. There is no composer, no message abs
   with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only an eligible desktop
   file has the opening hint. Any file the session's account can read is in reach, within the existing shell authority;
   hover discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file
-  reads. OSC hyperlink schemes are explicitly limited to http, https and file; every other scheme is ignored.
+  reads. OSC hyperlink schemes are explicitly limited to http and https. A hyperlink with any other scheme, `file://`
+  included, is inert: it gets no pointer, underline, hover, file check or click, and with mouse reporting on a press on
+  it reaches the program as a press on plain text does. Its cells stay the hyperlink's, so its text is not taken for a
+  printed URL or path either. To offer a file for download, a program prints its path.
 
 ## Attachments
 

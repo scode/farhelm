@@ -1,6 +1,7 @@
-//! File paths a program printed, and `file://` hyperlinks, as terminal links: the old web client's detection in
-//! `terminal-files.js` at reference commit 24bc0580 (`pathTokens`, `oscTarget`, `cutPathLink`, `pathLinks`,
-//! `softPathLinks` and `sameRange`), ported to the grid model's rows.
+//! File paths a program printed, as terminal links: the old web client's detection in `terminal-files.js` at reference
+//! commit 24bc0580 (`pathTokens`, `cutPathLink`, `pathLinks`, `softPathLinks` and `sameRange`), ported to the grid
+//! model's rows. The old client's `oscTarget`, which also made a program's `file://` hyperlink a file link, is not
+//! ported: every hyperlink that is not a web address is inert (SPEC.md, "Terminal experience").
 //!
 //! NOTE: This is recognition only. A path link grants nothing: the session's host decides what the path names (a
 //! relative path is resolved against the session's directory, never a shell's later one), and the terminal must
@@ -13,6 +14,11 @@
 //! across one isolated pair of rows when the continuation could not have fit on the head row (see
 //! [`GridModel::cut_path_link`]).
 //!
+//! A program's hyperlink (OSC 8) owns its cells, whatever its scheme and whether or not it is concealed: a printed path
+//! never includes one of them, and when a cut is joined, a hyperlink's space is never taken for the padding or
+//! indentation the join skips. Otherwise plain text beside a hyperlink could borrow its label, as `/tmp/` followed by a
+//! hyperlink labelled `report.pdf` would name `/tmp/report.pdf`, a file the program never printed as a path.
+//!
 //! Offsets here are byte offsets into the recognition text, each byte mapped to the cell that owns it. The old code
 //! counted UTF-16 units; its 8192-character bounds are kept in UTF-16 units, so the same output reaches the same
 //! limit.
@@ -23,7 +29,6 @@ use crate::{
 };
 use regex::Regex;
 use std::sync::LazyLock;
-use url::Url;
 
 /// The longest text, in UTF-16 units, that recognition reads: a logical line, or one row of a cut. Past it a line
 /// has no path links at all, rather than a truncated token whose apparent start would change what counts as a path.
@@ -52,10 +57,8 @@ static SCHEME: LazyLock<Regex> = LazyLock::new(|| constant_regex(r"(?i)^[a-z][a-
 static EXTENSION: LazyLock<Regex> =
     LazyLock::new(|| constant_regex(r"(?i)[^/.]+\.[a-z0-9][a-z0-9_-]*$"));
 static LOCATION: LazyLock<Regex> = LazyLock::new(|| constant_regex(r":[0-9]+(?::[0-9]+)?$"));
-static FILE_URI: LazyLock<Regex> =
-    LazyLock::new(|| constant_regex(r"(?i)^file://[^/?#]*(/[^?#]*)$"));
 
-/// Quotes and brackets end a path; a file name containing one needs an OSC 8 hyperlink.
+/// Quotes and brackets end a path, so a file name containing one cannot be offered from the terminal.
 const DELIMITERS: &[char] = &['"', '\'', '`', '<', '>', '(', ')', '{', '}', '[', ']'];
 /// Sentence punctuation dropped from a path's end.
 const SENTENCE_END: &[char] = &['.', ',', ';', '!', '?'];
@@ -64,52 +67,7 @@ const CHUNK_END: &[char] = &[
     '.', ',', ';', '!', '?', '"', '\'', '`', '<', '>', '(', ')', '{', '}', '[', ']',
 ];
 
-/// A program hyperlink's `file://` target as a path on the session's host: the URI's path, percent-decoded once.
-///
-/// The authority never picks a host, since files belong to the session's host, so `file://other/tmp/x` is `/tmp/x`.
-/// Dot segments are kept as written (`/a/../b` stays): Unix resolves them after following symlinks, so only the host
-/// can say what they mean. `None` for any other scheme, a URI the URL parser refuses, a query or fragment (even an
-/// empty one), a control character before or after decoding, and a malformed percent escape or invalid UTF-8.
-/// Web targets are [`crate::web_target`]'s; nothing here ever yields a URL to open. Callers outside the crate reach
-/// this through [`TerminalLink::file_path`].
-pub(crate) fn file_target(uri: &str) -> Option<String> {
-    if uri.chars().any(is_control) {
-        return None;
-    }
-    let raw = FILE_URI.captures(uri)?.get(1)?.as_str();
-    // The parser validates the authority, which the pattern above accepts loosely; its path is not used, because
-    // it removes dot segments.
-    if Url::parse(uri).ok()?.scheme() != "file" {
-        return None;
-    }
-    let path = percent_decoded(raw)?;
-    (path.starts_with('/') && !path.chars().any(is_control)).then_some(path)
-}
-
-/// JavaScript's `decodeURIComponent`: every `%XX` decoded, and `None` for a `%` without two hex digits after it or
-/// bytes that are not UTF-8.
-fn percent_decoded(text: &str) -> Option<String> {
-    let bytes = text.as_bytes();
-    let mut out = Vec::with_capacity(bytes.len());
-    let mut at = 0;
-    while let Some(&byte) = bytes.get(at) {
-        if byte == b'%' {
-            let digit = |offset| {
-                bytes
-                    .get(at + offset)
-                    .and_then(|&byte| char::from(byte).to_digit(16))
-            };
-            out.push(u8::try_from(digit(1)? * 16 + digit(2)?).ok()?);
-            at += 3;
-        } else {
-            out.push(byte);
-            at += 1;
-        }
-    }
-    String::from_utf8(out).ok()
-}
-
-/// The C0 controls and DEL, which no path or `file://` target may contain.
+/// The C0 controls and DEL, which no path may contain.
 fn is_control(ch: char) -> bool {
     ch <= '\u{1f}' || ch == '\u{7f}'
 }
@@ -191,6 +149,9 @@ struct Owner {
     line: u64,
     col: u16,
     end: u16,
+    /// Whether a program's hyperlink owns the cell ([`crate::GridRow::owns_cell`]). Such a byte is still
+    /// read, so tokens split where they would on screen, but no path may include it and no cut may skip it.
+    hyperlinked: bool,
 }
 
 /// Text read from rows for recognition, each byte mapped to its cell, with its length in UTF-16 units for the bounds.
@@ -208,6 +169,34 @@ impl CellText {
         self.units += text.encode_utf16().count();
     }
 
+    /// The length of the text without its trailing padding: the spaces after its last other character, stopping at
+    /// a hyperlink's cell, which is the program's text and never padding even when it is a space.
+    fn padded_end(&self) -> usize {
+        let unpadded = self
+            .text
+            .bytes()
+            .zip(&self.owners)
+            .rposition(|(byte, owner)| byte != b' ' || owner.hyperlinked);
+        unpadded.map_or(0, |at| at + 1)
+    }
+
+    /// The length of the text's indentation: its leading spaces, stopping at a hyperlink's cell for the same reason
+    /// as [`CellText::padded_end`].
+    fn indentation(&self) -> usize {
+        self.text
+            .bytes()
+            .zip(&self.owners)
+            .position(|(byte, owner)| byte != b' ' || owner.hyperlinked)
+            .unwrap_or(self.text.len())
+    }
+
+    /// Whether a program's hyperlink owns any cell of bytes `start..end`, which no printed path may include.
+    fn hyperlinked(&self, start: usize, end: usize) -> bool {
+        self.owners
+            .get(start..end)
+            .is_some_and(|owners| owners.iter().any(|owner| owner.hyperlinked))
+    }
+
     /// Append `other[from..]`, owners included.
     fn extend_from(&mut self, other: &CellText, from: usize) {
         let text = &other.text[from..];
@@ -219,6 +208,9 @@ impl CellText {
     /// The path at bytes `start..end` as a link: one range per row it reaches, covering exactly its own cells, so a
     /// cut path's padding and indentation are not part of it. Evidence is two rows either side, which a cut reads to
     /// rule out a chain; a missing row counts too, since history may still arrive there.
+    ///
+    /// This builds the link whoever owns the cells; callers check [`CellText::hyperlinked`] first, because a cut
+    /// must still count as a possible cut when it is refused for ownership.
     fn link(&self, start: usize, end: usize) -> Option<TerminalLink> {
         let mut ranges: Vec<Selection> = Vec::new();
         for owner in self.owners.get(start..end)? {
@@ -257,15 +249,13 @@ fn span(link: &TerminalLink) -> Option<(Position, Position)> {
 }
 
 impl TerminalLink {
-    /// The file this link names on the session's host: a printed path as printed, or a program hyperlink's `file://`
-    /// target, percent-decoded once with its authority ignored and its dot segments kept for the host to resolve.
-    /// `None` for a web address, for a hyperlink to any other scheme, and for a `file://` target with a query or
-    /// fragment, a control character before or after decoding, a malformed escape or invalid UTF-8.
+    /// The file this link names on the session's host: a printed path, as printed. `None` for every other link,
+    /// including a program's `file://` hyperlink, which is inert like every hyperlink that is not a web address: its
+    /// target is whatever the program sent, under a label the program chose, so it never names a file to download.
     pub fn file_path(&self) -> Option<String> {
         match &self.kind {
             LinkKind::Path => Some(self.uri.clone()),
-            LinkKind::Osc { .. } => file_target(&self.uri),
-            LinkKind::Text => None,
+            LinkKind::Osc { .. } | LinkKind::Text => None,
         }
     }
 
@@ -281,8 +271,9 @@ impl GridModel {
     /// The printed paths touching `line`, each a [`LinkKind::Path`] link: those of its soft-wrapped logical line, and
     /// a program-cut path joining it with the row above or below. A cut replaces the two fragments it joins.
     ///
-    /// This does not look at program hyperlinks or printed web addresses, which own their cells first (see
-    /// [`GridModel::path_link_at`]); [`GridModel::row_links`] and [`GridModel::link_at`] never return paths.
+    /// No path includes a cell a program's hyperlink owns, of any scheme and concealed or not (see the module docs).
+    /// Printed web addresses are not looked at here; they own their cells first in [`GridModel::path_link_at`].
+    /// [`GridModel::row_links`] and [`GridModel::link_at`] never return paths.
     pub fn path_links(&self, line: u64) -> Vec<TerminalLink> {
         let cuts = [
             line.checked_sub(2),
@@ -292,11 +283,13 @@ impl GridModel {
         ]
         .map(|head| head.and_then(|head| self.cut_path_link(head)));
         // Rows that could each be cut are a chain, which stays under the ordinary rules: the exception must never
-        // grow into a reconstruction of three rows.
+        // grow into a reconstruction of three rows. A cut over a hyperlink's cells still counts here; it is dropped
+        // only after, and before it is weighed against the fragments, so it never displaces a valid one either.
         let joined: Vec<TerminalLink> = [1, 2]
             .into_iter()
             .filter(|&at| cuts[at - 1].is_none() && cuts[at + 1].is_none())
             .filter_map(|at| cuts[at].clone())
+            .filter_map(|(cut, hyperlinked)| (!hyperlinked).then_some(cut))
             .collect();
         let overlaps = |link: &TerminalLink| {
             joined.iter().any(|cut| {
@@ -334,8 +327,10 @@ impl GridModel {
     }
 
     /// Append `line`'s cells to `into`, a blank for each uncovered column and nothing for the emulator's unused
-    /// wide-wrap pad; return its width, `None` when the line is not shown.
+    /// wide-wrap pad, each marked with whether a program's hyperlink owns it; return its width, `None` when the line
+    /// is not shown.
     fn read_cells(&self, line: u64, into: &mut CellText) -> Option<u16> {
+        let (_, row) = self.selection_line(line)?;
         self.walk_cells(line, false, |col, width, text| {
             into.push(
                 text,
@@ -343,6 +338,7 @@ impl GridModel {
                     line,
                     col,
                     end: col + width,
+                    hyperlinked: row.owns_cell(col),
                 },
             );
         })
@@ -372,6 +368,7 @@ impl GridModel {
         }
         path_tokens(&text.text)
             .into_iter()
+            .filter(|&(start, end)| !text.hyperlinked(start, end))
             .filter_map(|(start, end)| text.link(start, end))
             .filter(|link| {
                 span(link).is_some_and(|(start, end)| start.line <= line && line <= end.line)
@@ -389,7 +386,11 @@ impl GridModel {
     /// the head row's remaining columns with [`TUI_MARGIN`] to spare, counted in columns, not characters. The joined
     /// token is judged by the ordinary rules over the whole joined line, so a scheme-bearing head still cannot donate
     /// a file-looking suffix.
-    fn cut_path_link(&self, head: u64) -> Option<TerminalLink> {
+    ///
+    /// The flag says whether a program's hyperlink owns any of the joined path's cells. Such a cut is never offered,
+    /// but it is still returned: [`GridModel::path_links`] counts it as a possible cut when it looks for a chain, so
+    /// that refusing it never lets the cut beside it join two rows of a three-row path.
+    fn cut_path_link(&self, head: u64) -> Option<(TerminalLink, bool)> {
         let tail = head.checked_add(1)?;
         // The old client asked whether the row after the tail continues it, which a missing row never does.
         if self.has_screen_break_after(head)
@@ -406,9 +407,10 @@ impl GridModel {
         if a.units > MAX_TEXT_UNITS || b.units > MAX_TEXT_UNITS {
             return None;
         }
-        let end = a.text.trim_end_matches(' ').len();
+        // Padding and indentation stop at a hyperlink's cell: a space a hyperlink owns stays, and then separates.
+        let end = a.padded_end();
         let (last_at, last) = runs(&a.text[..end], separates).pop()?;
-        let indent = b.text.len() - b.text.trim_start_matches(' ').len();
+        let indent = b.indentation();
         let rest = &b.text[indent..];
         let next_len = rest.find(separates).unwrap_or(rest.len());
         if last_at + last.len() != end
@@ -436,6 +438,6 @@ impl GridModel {
         let (start, finish) = path_tokens(&a.text)
             .into_iter()
             .find(|&(start, finish)| start == last_at && finish > end)?;
-        a.link(start, finish)
+        Some((a.link(start, finish)?, a.hyperlinked(start, finish)))
     }
 }

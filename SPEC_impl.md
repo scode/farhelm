@@ -3440,44 +3440,51 @@ The hover splits the disclosed path for presentation into a file-type Nerd Font 
 without shortening either. Every remote fragment goes through the host-text element: escaped, direction-isolated and
 with format characters made visible. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and
 size color; refusals override size with red (`crates/gui/farhelm-gui/src/terminal/files.rs`). The hover advertises the
-platform modifier only for `can_open` files. Printed paths and OSC file links go to the same check and transfer path.
+platform modifier only for `can_open` files. Only printed paths reach the check and transfer path: a program's `file://`
+hyperlink is inert, as below.
 
 The grid model recognizes file links (`crates/gui/farhelm-grid-model/src/paths.rs`, ported from the old browser app's
 `terminal-files.js` at the reference commit), conservatively, after OSC 8 and printed web links in the order a line's
 links are offered. Recognition maps each byte of its text to the cell that owns it, preserving wide and combined glyphs.
 Logical lines over 8192 UTF-16 units (the old client's measure, kept so the same output reaches the same limit) or
 reaching more than 128 rows past their first are not linkified. Whitespace, quotes and brackets delimit ordinary paths;
-filenames with spaces require an OSC file link. A deliberate exception reconstructs one isolated pair of rows broken by
-a program rather than the terminal: the head's last token has no whitespace, quote or bracket after it apart from space
-padding, the tail's first token has only space indentation before it, and that token is longer in terminal columns than
-the head's unused columns minus a four-column right-margin allowance. The existing tokenizer must recognize a path at
-the head's final token and recognize the joined token; a plain word before an absolute path is not a cut. Both checks
-read the full line so URI chunk exclusions and diagnostic suffixes still apply. Both halves share its whole target and
-mapped range, with padding and indentation left out of the target. Consecutive possible hard cuts are left unchanged
-rather than reconstructing a three-row path. Terminal wrap handling and the 8192-unit bound remain in force. Plain
-schemes and protocol-relative tokens are excluded. File URIs decode once; their path belongs to the session host
-regardless of URI authority. No shell directory tracking or hover cache is introduced.
+filenames with spaces cannot be offered. A cell a program's hyperlink owns (`GridRow::owns_cell`, any scheme, concealed
+or not) is read as text, so tokens split where they do on screen, but a candidate covering one is dropped before cuts
+are weighed against single-row fragments, so it never displaces a valid neighbour. Such a cut still counts as a possible
+cut in the chain check, so refusing it never lets a neighbouring cut join two rows of a three-row path. And a cut's
+padding and indentation stop at such a cell, so a hyperlink's space is never skipped to join across it. A deliberate
+exception reconstructs one isolated pair of rows broken by a program rather than the terminal: the head's last token has
+no whitespace, quote or bracket after it apart from space padding, the tail's first token has only space indentation
+before it, and that token is longer in terminal columns than the head's unused columns minus a four-column right-margin
+allowance. The existing tokenizer must recognize a path at the head's final token and recognize the joined token; a
+plain word before an absolute path is not a cut. Both checks read the full line so URI chunk exclusions and diagnostic
+suffixes still apply. Both halves share its whole target and mapped range, with padding and indentation left out of the
+target. Consecutive possible hard cuts are left unchanged rather than reconstructing a three-row path. Terminal wrap
+handling and the 8192-unit bound remain in force. Plain schemes and protocol-relative tokens are excluded. No shell
+directory tracking or hover cache is introduced.
 
-A hover is the link as the grid model finds it under the pointer: its file, its cells and, for a program's hyperlink,
-its label (`crates/gui/farhelm-gui/src/terminal/files.rs`). A redraw that finds the same link again is the same hover
-and keeps its host check; a changed link (a relabel, a path that grew, other cells) is a new hover and checks again.
-Leaving drops the check, and dropping its future abandons the request on the helm. Only a successful check admits a
-click, and only for the link it checked: the terminal finds the link again from the live text at the release, and the
-click counts only while that link's cells, file and label are still the checked one's. A click pressed while checking,
-or on a path the host refused, does nothing. A printed path shows the pointing hand only once its check succeeded; a
-program's hyperlink shows it at once. Click reopens the disclosed canonical path independently.
+A hover is the link as the grid model finds it under the pointer: its file (the path as printed) and its cells
+(`crates/gui/farhelm-gui/src/terminal/files.rs`). A redraw that finds the same link again is the same hover and keeps
+its host check; a changed link (other text over the same cells, a path that grew, other cells) is a new hover and checks
+again. Leaving drops the check, and dropping its future abandons the request on the helm. Only a successful check admits
+a click, and only for the link it checked: the terminal finds the link again from the live text at the release, and the
+click counts only while that link's cells and file are still the checked one's. A click pressed while checking, or on a
+path the host refused, does nothing. A printed path shows the pointing hand only once its check succeeded; a web link
+shows it at once. Click reopens the disclosed canonical path independently.
 
-A click sorts a program's hyperlink by its parsed target: `TerminalLink::file_path`
-(`crates/gui/farhelm-grid-model/src/paths.rs`) sends a `file://` target without query or fragment to the host check;
-`web_target` (`crates/gui/farhelm-grid-model/src/links.rs`) admits only http and https, whose parsed serialization goes
-to the opener (or, for a Mac Cmd-click the display offered a tunnel for, through that tunnel); every other scheme opens
-nothing and says nothing (`link_released` in `crates/gui/farhelm-gui/src/terminal/attached.rs`). The hover's display is
-the click's safeguard. A click is refused before an open or transfer if the display lies outside the content area or
-another Farhelm surface blocks pointer input over any part of it. The panel contributes a transparent hitbox after its
-own card's hitbox, so the layer manager can check the other surfaces in the rendered frame. Mouse down captures the
-result before it closes popovers. A file release uses the same query, preserving a cover found at mouse down even if the
-cover has gone. A release can still finish an admitted press after it closes its own panel. An out-of-view panel gets
-the resize explanation before any cover is considered.
+A program's hyperlink is sorted by its parsed target before the terminal acts on it: `web_target`
+(`crates/gui/farhelm-grid-model/src/links.rs`) admits only http and https, whose parsed serialization a click sends to
+the opener (or, for a Mac Cmd-click the display offered a tunnel for, through that tunnel). The grid model still returns
+a hyperlink of any other scheme, since its cells stay owned, but the terminal view's `link_at`
+(`crates/gui/farhelm-gui/src/terminal.rs`) finds no link there, so the hover, underline, pointer, display and press
+handling never see one, and a mouse-reporting program gets the press as over plain text. `TerminalLink::file_path`
+(`crates/gui/farhelm-grid-model/src/paths.rs`) names a file only for a printed path. The hover's display is the click's
+safeguard. A click is refused before an open or transfer if the display lies outside the content area or another Farhelm
+surface blocks pointer input over any part of it. The panel contributes a transparent hitbox after its own card's
+hitbox, so the layer manager can check the other surfaces in the rendered frame. Mouse down captures the result before
+it closes popovers. A file release uses the same query, preserving a cover found at mouse down even if the cover has
+gone. A release can still finish an admitted press after it closes its own panel. An out-of-view panel gets the resize
+explanation before any cover is considered.
 
 An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
 platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its

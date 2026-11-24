@@ -50,11 +50,13 @@ crates/gui/farhelm-gui/src/terminal/files/tests.rs: "a printed path hovers with 
 by `a_click_saves_into_downloads_and_the_line_says_where`; "a redraw that changes the hovered path withdraws its click;
 the same text redrawn keeps it" by `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`;
 "in the desktop app, the platform's modifier-click opens an allowed file after saving it" by
-`the_modifier_click_opens_only_what_the_helm_offered`; "a relabelled OSC 8 file link is checked afresh and downloads" by
-`a_relabel_withdraws_the_click_until_checked_again`. Dropped, by SPEC.md's own decision: a change to only an adjacent
-row of a hovered link judged again (the warning "need not follow later redraws of other rows while the pointer rests",
-"Terminal experience"). Superseded: a pointer move between a relabel and its paint (the browser's frame timing; the GPUI
-view looks the hover up again as the output applies). Its attachment cases by
+`the_modifier_click_opens_only_what_the_helm_offered`. Withdrawn by SPEC.md, which made every hyperlink that is not a
+web address inert: "a relabelled OSC 8 file link is checked afresh and downloads" (its printed-path counterpart, other
+text over the same cells, is `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; the
+inert hyperlink is attached/tests.rs `a_hyperlink_that_is_not_a_web_address_is_inert`). Dropped, by SPEC.md's own
+decision: a change to only an adjacent row of a hovered link judged again (the warning "need not follow later redraws of
+other rows while the pointer rests", "Terminal experience"). Superseded: a pointer move between a relabel and its paint
+(the browser's frame timing; the GPUI view looks the hover up again as the output applies). Its attachment cases by
 crates/gui/farhelm-gui/src/terminal/attachments/tests.rs: the paste through the attachment rules (a copied file winning
 over the text the clipboard also carries, and its host path typed as a paste) by
 `a_pasted_file_is_uploaded_and_its_host_path_typed`, and the drop that uploads the file and types its path by
@@ -123,7 +125,7 @@ over the text the clipboard also carries, and its host path typed as a paste) by
   no check); its cut variant by `a_cut_paths_hover_survives_output_past_a_blank_row`.
 - "a new neighboring continuation withdraws a container path's old hover" by
   crates/gui/farhelm-grid-model/tests/paths.rs `a_printed_path_extended_on_its_next_row_is_a_different_link` and
-  files/tests.rs `ready_for_requires_the_same_cells_file_and_label`.
+  files/tests.rs `ready_for_requires_the_same_cells_and_file`.
 - "a click whose file hover is covered is refused with an explanation" and "a web link or tunnel click whose target
   display is covered is refused with an explanation": `a_real_approval_card_covering_the_link_panel_refuses_the_click`,
   `a_covered_tunnel_hint_refuses_the_modified_click` and files/tests.rs
@@ -451,10 +453,11 @@ one, in crates/gui/farhelm-gui/src/terminal/attached/tests.rs unless named other
 Tests: 6. Covers: changed OSC display text starts a fresh hover at the same cells.
 
 replaced: the hover and its refusals by crates/gui/farhelm-gui/src/terminal/files/tests.rs: "changed OSC display text
-starts a fresh hover at the same cells" by `a_relabel_withdraws_the_click_until_checked_again`; "file hover shows
-decimal size tiers and a red cap refusal" by `sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit` (the
-sizes, tiers and their colors), `folders_unreadable_and_other_refusals_say_why_and_admit_nothing` (the cap refusal) and
-the `terminal-file-disclosures` golden (the look); "leaving cancels lookup and the next hover checks again" by
+starts a fresh hover at the same cells" withdrawn with OSC file links (see above), its printed-path counterpart by
+`a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; "file hover shows decimal size tiers
+and a red cap refusal" by `sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit` (the sizes, tiers and their
+colors), `folders_unreadable_and_other_refusals_say_why_and_admit_nothing` (the cap refusal) and the
+`terminal-file-disclosures` golden (the look); "leaving cancels lookup and the next hover checks again" by
 `each_hover_checks_afresh_and_leaving_cancels`; the refusal half of "file refusals, OSC file save and forbidden OSC
 schemes" by `folders_unreadable_and_other_refusals_say_why_and_admit_nothing`; the hover half of "file hover and
 complete browser download" by `a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted`, against the fake
@@ -464,12 +467,12 @@ press is not withheld from a program under mouse reporting (pinned by
 `under_mouse_reporting_a_file_click_is_admitted_and_still_reported`). The saves, against the fake transfers (the helm's
 own tests cover the save on the host): the local and SSH downloads by
 `a_click_saves_into_downloads_and_the_line_says_where` (the session's host is the helm's to reach, so the two are one
-case here); the OSC file save by `a_relabel_withdraws_the_click_until_checked_again`; the failure after the file
-vanished by `a_success_fades_and_a_failure_stays_until_the_next_press_or_download`; "both halves of a program-broken
-path disclose and download the whole file" by `both_halves_of_a_cut_path_check_and_save_the_whole_file`. The forbidden
-OSC schemes are the web links' rule, pinned there: a `javascript:` hyperlink shows no display and a click opens nothing
-by crates/gui/farhelm-gui/src/terminal/attached/tests.rs `hostile_hyperlink_text_and_targets_stay_data`, and only an
-http or https target with a host reaches the browser by crates/gui/farhelm-grid-model/tests/links.rs
+case here); the OSC file save is withdrawn with OSC file links; the failure after the file vanished by
+`a_success_fades_and_a_failure_stays_until_the_next_press_or_download`; "both halves of a program-broken path disclose
+and download the whole file" by `both_halves_of_a_cut_path_check_and_save_the_whole_file`. The forbidden OSC schemes are
+the web links' rule, pinned there: a `javascript:` hyperlink shows no display and a click opens nothing by
+crates/gui/farhelm-gui/src/terminal/attached/tests.rs `hostile_hyperlink_text_and_targets_stay_data`, and only an http
+or https target with a host reaches the browser by crates/gui/farhelm-grid-model/tests/links.rs
 `prose_detection_and_native_browser_scheme_boundary`
 
 ### `terminal-files.test.js` (unit tests)
@@ -480,7 +483,7 @@ partly: detection by crates/gui/farhelm-grid-model/tests/paths.rs
 `paths_exclude_diagnostic_locations_prose_punctuation_urls_and_versions`,
 `bare_digit_leading_extensions_keep_the_numeric_token_exclusions`, `a_long_numeric_looking_file_name_is_a_path` and
 `version_spellings_stay_out_including_a_long_near_match` (both without the old time bounds, which guarded against
-backtracking the regex crate cannot do), `program_hyperlinks_give_decoded_absolute_file_paths_only`,
+backtracking the regex crate cannot do), `program_hyperlinks_name_no_file_whatever_their_scheme`,
 `path_cells_map_through_wide_combining_and_wrapped_cells`,
 `a_path_cut_near_the_right_edge_joins_through_a_soft_wrap_and_a_program_break`,
 `cut_paths_keep_delimiters_column_limits_and_the_two_row_boundary` and
@@ -504,18 +507,17 @@ pending hover and updates its newest link" by `a_pending_check_survives_output_t
 keeps a hover by the same link comparison, whatever the check's state, and the pending check is answered and admitted);
 "different paths, cell endpoints and unknown ranges start fresh checks", "changed and unknown OSC display text cancels
 old evidence at the same target and cells", "partial wrapped redraw invalidates file transfer evidence" by
-`a_relabel_withdraws_the_click_until_checked_again` and
 `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; the admission half of "a wrapped or
-program-broken printed path cannot grow beyond its cached endpoint" by
-`ready_for_requires_the_same_cells_file_and_label` (another end cell is not admitted); "file transfers refuse gestures
-the terminal did not admit as clicks" by `a_drag_across_a_checked_path_is_never_admitted`. Superseded by the GPUI view,
-which finds its hovered link again synchronously on every redraw and draws the pointer from it, with no deferred leave
-and no cursor setters: "ready redraw cursor restoration waits for accessors and rejects retired links" and "leave
-withdraws admission immediately and deferred teardown leaves another cursor alone"; the pointing hand that waits for a
-ready check is pinned by `the_pointing_hand_waits_for_a_ready_check_on_a_printed_path`, through the predicate the
-terminal draws it from. "disposal clears pending hover teardown and rejects late replies": superseded with the
-JavaScript disposal it tested: dropping a terminal drops its check's task, which is not tested on its own. The downloads
-by crates/gui/farhelm-gui/src/terminal/files/tests.rs: "modifier opening is native-only and save outcomes survive opener
+program-broken printed path cannot grow beyond its cached endpoint" by `ready_for_requires_the_same_cells_and_file`
+(another end cell is not admitted); "file transfers refuse gestures the terminal did not admit as clicks" by
+`a_drag_across_a_checked_path_is_never_admitted`. Superseded by the GPUI view, which finds its hovered link again
+synchronously on every redraw and draws the pointer from it, with no deferred leave and no cursor setters: "ready redraw
+cursor restoration waits for accessors and rejects retired links" and "leave withdraws admission immediately and
+deferred teardown leaves another cursor alone"; the pointing hand that waits for a ready check is pinned by
+`the_pointing_hand_waits_for_a_ready_check_on_a_printed_path`, through the predicate the terminal draws it from.
+"disposal clears pending hover teardown and rejects late replies": superseded with the JavaScript disposal it tested:
+dropping a terminal drops its check's task, which is not tested on its own. The downloads by
+crates/gui/farhelm-gui/src/terminal/files/tests.rs: "modifier opening is native-only and save outcomes survive opener
 refusal" and "a native modified click saves without opening when hover offered only download" by
 `the_modifier_click_opens_only_what_the_helm_offered` (native only: the desktop app's helm saves, so there is no browser
 half); "browser and native successes fade, while a failure waits for a terminal click" and "replacement cancels an

@@ -18,7 +18,7 @@ use farhelm_helm_client::fake::FakeHelm;
 use farhelm_helm_client::fake::terminal::{
     FakeAttach, FakePhase, FakeTerminal, FakeTerminalRequest,
 };
-use farhelm_helm_client::fake::transfers::{FakeTransfer, FakeTransfers};
+use farhelm_helm_client::fake::transfers::FakeTransfers;
 use farhelm_input_mapping::Modifiers as KeyModifiers;
 use farhelm_proto::{DETACH_REASON_STALLED, DetachCode};
 use gpui::{
@@ -5346,32 +5346,133 @@ fn a_display_closed_without_a_press_stays_closed_until_the_pointer_moves(cx: &mu
     );
 }
 
-/// A program's hyperlink that is not a web address (a `file://` link, as `ls --hyperlink` prints) never reaches the
-/// browser. Its display is its file check ([`super::super::files`]), which here the fake transfers never answer, so a
-/// click on it, made while it is still checking, saves nothing and must not claim the display was hidden.
+impl Harness<'_> {
+    /// What the view shows of the link under view cell `cell`, as (link found, underlined rows, pointing hand,
+    /// destination display), together with the program hyperlink the grid model itself finds at that cell, by its
+    /// target: the premise that the pointer really is over a hyperlink's cells.
+    pub(in crate::terminal) fn link_under(
+        &mut self,
+        cell: (u16, u16),
+    ) -> (bool, bool, bool, bool, Option<String>) {
+        let at = self.at_cell(cell.0, cell.1);
+        self.rest_on(at);
+        let (found, underlined, pointer, model) = self.read(|owner, cx| {
+            let view = owner.committed.as_ref().unwrap().read(cx);
+            assert_eq!(
+                view.hover_cell(),
+                Some(cell),
+                "the premise: the pointer rests there"
+            );
+            let model = view
+                .line_at_row(cell.1)
+                .and_then(|line| view.model.link_at(Position { line, col: cell.0 }))
+                .filter(|link| matches!(link.kind, LinkKind::Osc { .. }))
+                .map(|link| link.uri);
+            (
+                view.hovered_link().is_some(),
+                !view.underlined_rows().is_empty(),
+                owner.points_at_link(cx),
+                model,
+            )
+        });
+        let (shown, _) = self.disclosure_shown();
+        (found, underlined, pointer, shown, model)
+    }
+}
+
+/// SPEC.md: a program's hyperlink whose target is not a web address is inert. Its target is whatever the program
+/// sent under a label the program chose, so a `file://` hyperlink (as `ls --hyperlink` prints) may no longer offer a
+/// download, and no other scheme does anything either; a program reporting the mouse must still hear a press on it
+/// like a press on its text. Specified: over a `file://` and an `ssh://` hyperlink, each beside a hyperlink to a web
+/// address on its row, the pointer rests on the hyperlink's own cells (the grid model finds it there), but the view
+/// finds no link: no underline, no pointing hand, no display; a click there opens nothing, says nothing and asks the
+/// host nothing, while the web hyperlink beside it is found and shows its display (the positive control). With mouse
+/// reporting on, a press and release on the inert hyperlink reach the program, while one on the web hyperlink is
+/// withheld and opens it.
 #[gpui::test]
-fn a_click_on_a_file_hyperlink_says_nothing(cx: &mut TestAppContext) {
+fn a_hyperlink_that_is_not_a_web_address_is_inert(cx: &mut TestAppContext) {
     let mut h = harness(cx);
-    h.attach_hyperlink("notes.txt", "file:///home/user/notes.txt");
+    let run = |col: usize, text: &str, link: usize| {
+        serde_json::json!([col, text.chars().count(), text, [0, -1, -1], link])
+    };
+    h.attach_rows(
+        serde_json::json!([
+            [0, {"w":false,"r":[run(0, "notes.txt", 0), run(10, "docs", 2)]}],
+            [1, {"w":false,"r":[run(0, "build-box", 1), run(10, "docs", 2)]}]
+        ]),
+        serde_json::json!([
+            ["file", "file:///home/user/notes.txt"],
+            ["ssh", "ssh://build-box/work"],
+            ["web", "https://example.com/docs"]
+        ]),
+    );
     let owner = h.owner.clone();
     h.choose(&owner);
-    let on = h.at_cell(2, 0);
-    h.rest_on(on);
+    for (row, uri) in [
+        (0, "file:///home/user/notes.txt"),
+        (1, "ssh://build-box/work"),
+    ] {
+        assert_eq!(
+            h.link_under((11, row)),
+            (
+                true,
+                true,
+                true,
+                true,
+                Some("https://example.com/docs".to_owned())
+            ),
+            "row {row}: the web hyperlink beside it is a link with its display"
+        );
+        assert_eq!(
+            h.link_under((3, row)),
+            (false, false, false, false, Some(uri.to_owned())),
+            "{uri}: over its cells, yet no link, underline, hand or display"
+        );
+        let inert = h.at_cell(3, row);
+        h.click_at(inert);
+        assert_eq!(h.cx.opened_url(), None, "{uri}: nothing opens");
+        assert!(
+            h.cx.debug_bounds("terminal-link-refusal").is_none(),
+            "{uri}: nothing is said"
+        );
+        assert!(
+            h.transfers.take().is_empty(),
+            "{uri}: nothing is asked of the host"
+        );
+    }
+
+    h.fake().output(mouse_mode("click"));
+    settle(h.cx);
+    let presses = |sent: Vec<(GridInput, bool)>| -> Vec<MouseEventKind> {
+        sent.into_iter()
+            .filter_map(|(input, _)| match input {
+                GridInput::Mouse { kind, .. } => Some(kind),
+                _ => None,
+            })
+            .filter(|kind| matches!(kind, MouseEventKind::Down | MouseEventKind::Up))
+            .collect()
+    };
+    for row in [0, 1] {
+        let inert = h.at_cell(3, row);
+        h.click_at(inert);
+        assert_eq!(
+            presses(h.sent()),
+            [MouseEventKind::Down, MouseEventKind::Up],
+            "row {row}: the program heard the press and the release"
+        );
+    }
+    let web = h.at_cell(11, 0);
+    h.rest_on(web);
+    drop(h.sent());
+    h.click_at(web);
     assert_eq!(
-        h.hovered().as_deref(),
-        Some("file:///home/user/notes.txt"),
-        "the premise: it is a link"
+        presses(h.sent()),
+        [],
+        "the web hyperlink's press is withheld"
     );
-    h.click_at(on);
-    assert_eq!(h.cx.opened_url(), None);
-    assert!(
-        h.cx.debug_bounds("terminal-link-refusal").is_none(),
-        "no refusal"
-    );
-    let transfers = h.transfers.take();
-    assert!(
-        matches!(transfers.as_slice(), [FakeTransfer::Stat { .. }]),
-        "one check, still pending, and no save: {transfers:?}"
+    assert_eq!(
+        h.cx.opened_url().as_deref(),
+        Some("https://example.com/docs")
     );
 }
 

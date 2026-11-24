@@ -1,6 +1,8 @@
 //! The file links' contract, against the helm client's fake terminal and fake transfers: what a hover on a printed path
-//! or a program's `file://` hyperlink asks the host, what its display shows while checking and once answered, when a
-//! hover counts as new, and which clicks a check admits. One test per sentence of SPEC.md's file-path bullet in this
+//! asks the host, what its display shows while checking and once answered, when a hover counts as new, and which clicks
+//! a check admits. A program's `file://` hyperlink is no file link (it is inert, which
+//! `attached::tests::a_hyperlink_that_is_not_a_web_address_is_inert` pins), so it appears here only to show it asks
+//! nothing. One test per sentence of SPEC.md's file-path bullet in this
 //! scope, ported from the old app's `terminal-files.test.js` and `e2e/tests/terminal-files.spec.ts` (each test names
 //! the cases it replaces).
 //!
@@ -450,39 +452,6 @@ fn each_hover_checks_afresh_and_leaving_cancels(cx: &mut TestAppContext) {
     assert_eq!(h.line("terminal-file-status").as_deref(), Some("8 B"));
 }
 
-/// A program can change the text over the same cells and keep the old target, so a click must be judged on the text
-/// the check was shown for, never on a cached target. Specified (SPEC.md: "A partial redraw that changes the link text
-/// withdraws transfer and opening permission even if the terminal library retains its old target"; the e2e "changed
-/// OSC display text starts a fresh hover at the same cells", and the old "changed and unknown OSC display text cancels
-/// old evidence" and "partial wrapped redraw invalidates file transfer evidence"): a `file://` hyperlink relabelled over
-/// the same cells and target is a new hover with a fresh check; a click before that check answers is not admitted and
-/// says nothing; once it answers, a click is admitted.
-#[gpui::test]
-fn a_relabel_withdraws_the_click_until_checked_again(cx: &mut TestAppContext) {
-    let mut h = harness(cx);
-    let target = "file:///work/report.txt";
-    h.show(vec![row(0, "OLD-LABEL", true)], Some(target));
-    let on = h.at_cell(3, 0);
-    h.rest_on(on);
-    let first = h.check("/work/report.txt");
-    h.answer(first, ready("/work/report.txt", 17));
-    assert_eq!(h.line("terminal-file-status").as_deref(), Some("17 B"));
-
-    h.rewrite(vec![row(0, "NEW-LABEL", true)], Some(target), 2);
-    let second = h.check("/work/report.txt");
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
-    h.click(on);
-    assert_eq!(
-        h.admitted(),
-        Vec::<String>::new(),
-        "the relabel withdrew the click"
-    );
-    assert_eq!(h.refusal(), None, "and a click while checking says nothing");
-    h.answer(second, ready("/work/report.txt", 17));
-    h.click(on);
-    assert_eq!(h.admitted(), ["/work/report.txt"]);
-}
-
 // ---- Tiers and refusals ----------------------------------------------------------------------------------------------
 
 /// A refused file must stay unclickable, and the display must say why in the old words, since that is all the user
@@ -692,11 +661,11 @@ fn a_drag_across_a_checked_path_is_never_admitted(cx: &mut TestAppContext) {
 
 /// A check vouches for the text it was shown for, so what counts as "the same link" is the whole of a click's safety:
 /// too loose, and a click transfers a file the user never saw checked; too strict, and redraws withdraw good clicks.
-/// Specified: a hover's ready check admits a link with the same cells, the same file and the same label, whatever its
-/// hyperlink id or the rows around it it reads; another start or end cell, another file or another label is not
-/// admitted, and nothing is while the check is not a ready file.
+/// Specified: a hover's ready check on a printed path admits a link with the same cells and the same path, whatever
+/// rows around it it reads; another start or end cell, or other text over the same cells, is not admitted, and nothing
+/// is while the check is not a ready file.
 #[test]
-fn ready_for_requires_the_same_cells_file_and_label() {
+fn ready_for_requires_the_same_cells_and_file() {
     use farhelm_grid_model::{Position, Selection, SelectionMode};
     let span = |from: u16, to: u16| {
         vec![Selection::new(
@@ -706,11 +675,11 @@ fn ready_for_requires_the_same_cells_file_and_label() {
         )]
     };
     let checked = TerminalLink {
-        kind: LinkKind::Osc { id: "1".into() },
-        uri: "file:///work/a.txt".into(),
-        ranges: span(0, 6),
-        evidence: [4].into_iter().collect(),
-        label: "REPORT".into(),
+        kind: LinkKind::Path,
+        uri: "/work/a.txt".into(),
+        ranges: span(0, 11),
+        evidence: [2, 3, 4, 5, 6].into_iter().collect(),
+        label: String::new(),
         osc_label_ambiguous: false,
     };
     let mut files = FileLinks::new("s1".into(), None);
@@ -730,25 +699,20 @@ fn ready_for_requires_the_same_cells_file_and_label() {
         link
     };
     assert!(files.ready_for(&checked));
-    assert!(files.ready_for(&with(&|link| link.kind = LinkKind::Osc { id: "2".into() })));
     assert!(files.ready_for(&with(
         &|link| link.evidence = [3, 4, 5].into_iter().collect()
     )));
     assert!(
-        !files.ready_for(&with(&|link| link.ranges = span(1, 6))),
+        !files.ready_for(&with(&|link| link.ranges = span(1, 11))),
         "another start"
     );
     assert!(
-        !files.ready_for(&with(&|link| link.ranges = span(0, 7))),
+        !files.ready_for(&with(&|link| link.ranges = span(0, 12))),
         "another end"
     );
     assert!(
-        !files.ready_for(&with(&|link| link.uri = "file:///work/b.txt".into())),
-        "another file"
-    );
-    assert!(
-        !files.ready_for(&with(&|link| link.label = "REP0RT".into())),
-        "another label"
+        !files.ready_for(&with(&|link| link.uri = "/work/b.txt".into())),
+        "other text over the same cells"
     );
     let mut folder = ready("/work/a.txt", 3);
     folder.info.status = DownloadFileStatus::Folder;
@@ -899,17 +863,19 @@ fn an_answer_landing_between_press_and_release_leaves_the_click_silent(cx: &mut 
     assert_eq!(h.refusal(), None);
 }
 
-/// SPEC.md: "Only a successful check ... admits a click (OSC hyperlinks may show a pointer earlier)", and the old app
-/// gave a printed path the pointing hand only once its check was ready, so the hand never promises a click that would
-/// do nothing. Specified: on a printed path, no hand while checking or after a refusal, and the hand once the file is
-/// ready; on a program's `file://` hyperlink, the hand at once.
+/// SPEC.md: "Only a successful check ... admits a click", and the old app gave a printed path the pointing hand only
+/// once its check was ready, so the hand never promises a click that would do nothing. The old app also gave a
+/// program's `file://` hyperlink the hand at once; that hyperlink is now inert. Specified: on a printed path, no hand
+/// while checking or after a refusal, and the hand once the file is ready; resting on the cells of a program's
+/// `file://` hyperlink labelled with a path-shaped `report.txt` (the grid model finds the hyperlink there), no link, no
+/// hand and no check at all, so neither the hyperlink nor its path-shaped label is a file link.
 #[gpui::test]
 fn the_pointing_hand_waits_for_a_ready_check_on_a_printed_path(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(
         vec![
             row(0, "notes.txt", false),
-            row(1, "REPORT", true),
+            row(1, "report.txt", true),
             row(2, "folder.dir", false),
         ],
         Some("file:///work/report.txt"),
@@ -929,12 +895,20 @@ fn the_pointing_hand_waits_for_a_ready_check_on_a_printed_path(cx: &mut TestAppC
     h.answer(answer, refused);
     assert!(!h.pointer(), "refused");
 
-    let hyperlink = h.at_cell(2, 1);
-    h.rest_on(hyperlink);
-    let _checking = h.check("/work/report.txt");
+    assert_eq!(
+        h.link_under((2, 1)),
+        (
+            false,
+            false,
+            false,
+            false,
+            Some("file:///work/report.txt".to_owned())
+        ),
+        "over the hyperlink's cells, no link, underline, hand or display"
+    );
     assert!(
-        h.pointer(),
-        "a program's hyperlink shows the hand while checking"
+        h.checks().is_empty(),
+        "a program's file hyperlink asks nothing"
     );
 }
 

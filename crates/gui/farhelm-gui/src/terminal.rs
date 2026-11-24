@@ -39,8 +39,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use farhelm_grid_model::{
-    ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow, Position,
-    Selection, SelectionMode, TerminalLink, TerminalState, ViewRow, Viewport, display_text,
+    ApplyEffects, Cursor, CursorShape, Damage, GridError, GridModel, GridOutput, GridRow, LinkKind,
+    Position, Selection, SelectionMode, TerminalLink, TerminalState, ViewRow, Viewport,
+    display_text, web_target,
 };
 use farhelm_input_mapping::Platform;
 use farhelm_input_mapping::cursor::move_to_cell;
@@ -628,7 +629,7 @@ impl TerminalView {
         matches!(self.shown.get(usize::from(row)), Some(ShownRow::Notice))
     }
 
-    /// The link the pointer rests on, if any: a program's hyperlink (OSC 8) of any scheme, a web address printed as
+    /// The link the pointer rests on, if any: a program's hyperlink (OSC 8) to a web address, a web address printed as
     /// text, or a file path printed as text, as the grid model finds them ([`TerminalView::link_at`]).
     pub fn hovered_link(&self) -> Option<&TerminalLink> {
         self.hovered_link.as_ref()
@@ -638,10 +639,23 @@ impl TerminalView {
     /// still the link its press was on, which for a printed path re-recognizes it from the live text, as the old app's
     /// `pathCurrent` did. A program's hyperlink or a printed web address owns its cells first; only text that is
     /// neither can be a printed path (the grid model's `path_link_at`).
+    ///
+    /// A program's hyperlink that is not a web address (`file://`, `ssh://`, anything else) is inert: this finds no
+    /// link there, so it gets no underline, pointer, display, file check or click, and a press on it reaches a program
+    /// that reports the mouse like a press on plain text. Its cells stay the hyperlink's, so no printed address or
+    /// path is found there instead. Filtering here rather than in the hover alone keeps the hover and a release's
+    /// check agreeing on what is a link.
     pub fn link_at(&self, position: Position) -> Option<TerminalLink> {
-        self.model
-            .link_at(position)
-            .or_else(|| self.model.path_link_at(position))
+        match self.model.link_at(position) {
+            Some(link)
+                if matches!(link.kind, LinkKind::Osc { .. })
+                    && web_target(&link.uri, false).is_none() =>
+            {
+                None
+            }
+            Some(link) => Some(link),
+            None => self.model.path_link_at(position),
+        }
     }
 
     /// The view cell in the middle of the first place what is shown now holds `needle` within one row, top row first,
