@@ -171,6 +171,11 @@ Lint exceptions: 1: `theme::raw`, the one place raw colors are built: `theme::co
 (the migration's orchestrator decided on 2026-11-13 that the terminal palette lives in the theme, with no second
 exemption).
 
+The terminal palette's values stay in the theme (`TERMINAL`). The arithmetic that resolves a cell's style against them
+(the 256-color index, bold-as-bright, inverse, dim and the program's default colors) is the grid model's `colors`
+module, which the theme feeds through `theme::TERMINAL_GRID`; that module builds no GPUI color and holds no palette, so
+it needs no exemption.
+
 ### Component layer
 
 Extension points: reported, the whole directory. An area may add, without a request:

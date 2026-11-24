@@ -14,6 +14,12 @@
 //! values become GPUI colors here too, through [`TerminalColor::hsla`] under the same exemption, so no view builds a
 //! color either way.
 //!
+//! The terminal's palette values stay here, in [`TERMINAL`], but the arithmetic that resolves a cell's style against
+//! them (the 256-color index, bold-as-bright, inverse, dim and the program's OSC 10/11 defaults) lives in the grid
+//! model's `colors` module, which has no GPUI and no palette of its own. [`TERMINAL_GRID`] hands it these values:
+//! the terminal view creates its grid model with it, and [`terminal_color`] and the terminal's style resolution call
+//! the same arithmetic, so the colors the model reasons about are the colors the screen paints.
+//!
 //! Appearance follows SPEC.md: the user chooses System, Dark or Light, and System follows the operating system live.
 //! A change goes through [`set_preference`] or [`follow_system`], which re-project GPUI Kit's theme from the same
 //! tokens (Kit's text inputs read Kit's theme) and refresh every window. A refresh redraws cached views too, so no view
@@ -439,8 +445,9 @@ pub const LIGHT: Palette = Palette {
 /// reference commit, itself read from Ghostty's `Config.zig` and `color.zig`).
 ///
 /// The terminal surface stays dark in both appearances, as in the old app, so this is one palette, not a pair. A
-/// program can still name any color: the 256-color index, truecolor and the OSC 10/11 defaults all resolve through
-/// [`terminal_color`], which is the one place those wire values become GPUI colors, under this module's exemption.
+/// program can still name any color: the 256-color index, truecolor and the OSC 10/11 defaults resolve against these
+/// values in the grid model ([`TERMINAL_GRID`] is their form there), and [`TerminalColor::hsla`] is the one place
+/// the results become GPUI colors, under this module's exemption.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct TerminalPalette {
     /// `foreground`: the default text color.
@@ -506,44 +513,61 @@ impl TerminalColor {
     pub fn hsla(self, alpha: f32) -> Hsla {
         raw::rgb_value(self.0).alpha(alpha)
     }
+
+    /// The same color in the grid model's form, for handing a resolved color back to its arithmetic.
+    pub fn rgb(self) -> farhelm_grid_model::Rgb {
+        farhelm_grid_model::Rgb::from_hex(self.0)
+    }
+}
+
+/// A color the grid model resolved. This is the same door [`terminal_color`] already opens for a program's truecolor:
+/// the value is still plain data until [`TerminalColor::hsla`] paints it under this module's exemption.
+impl From<farhelm_grid_model::Rgb> for TerminalColor {
+    fn from(rgb: farhelm_grid_model::Rgb) -> Self {
+        Self(rgb.hex())
+    }
+}
+
+/// [`TERMINAL`]'s colors in the grid model's form, which is what a terminal's [`farhelm_grid_model::GridModel`] is
+/// created with and what [`terminal_color`] and the terminal's style resolution resolve against.
+///
+/// This is a projection, not a second copy: the values are read from [`TERMINAL`] at compile time, so the two cannot
+/// drift, and a constant means every cell's resolution borrows it rather than rebuilding it. The cursor colors are
+/// left out because only the renderer draws a cursor.
+pub const TERMINAL_GRID: farhelm_grid_model::TerminalPalette = terminal_palette();
+
+/// Build [`TERMINAL_GRID`]; only that constant calls this.
+const fn terminal_palette() -> farhelm_grid_model::TerminalPalette {
+    use farhelm_grid_model::Rgb;
+    let mut ansi = [Rgb { r: 0, g: 0, b: 0 }; 16];
+    // A `while` loop because `const fn` cannot call `array::map` or iterate yet.
+    let mut i = 0;
+    while i < ansi.len() {
+        ansi[i] = Rgb::from_hex(TERMINAL.ansi[i].value);
+        i += 1;
+    }
+    farhelm_grid_model::TerminalPalette {
+        foreground: Rgb::from_hex(TERMINAL.foreground.value),
+        background: Rgb::from_hex(TERMINAL.background.value),
+        ansi,
+    }
 }
 
 /// Resolve a wire color for one role: the role's default, a palette index (0-15 from [`TERMINAL`], 16-231 the xterm
 /// color cube, 232-255 the gray ramp) or a program's truecolor.
+///
+/// The arithmetic is the grid model's ([`farhelm_grid_model::colors::color`]), so the model and the screen agree on
+/// every color; only the values come from here.
 pub fn terminal_color(color: farhelm_grid_model::Color, role: TerminalRole) -> TerminalColor {
-    use farhelm_grid_model::Color;
-    match color {
-        Color::Default => role.default,
-        Color::Palette(index) => {
-            let index = if role.bright && index < 8 {
-                index + 8
-            } else {
-                index
-            };
-            TerminalColor(terminal_index(index))
-        }
-        Color::Rgb { r, g, b } => {
-            TerminalColor(u32::from(r) << 16 | u32::from(g) << 8 | u32::from(b))
-        }
-    }
-}
-
-/// One of the 256 xterm indices as `0xRRGGBB`, without consulting the host's theme.
-fn terminal_index(index: u8) -> u32 {
-    match index {
-        0..=15 => TERMINAL.ansi[usize::from(index)].value,
-        16..=231 => {
-            let i = index - 16;
-            let levels = [0u32, 95, 135, 175, 215, 255];
-            levels[usize::from(i / 36)] << 16
-                | levels[usize::from(i / 6 % 6)] << 8
-                | levels[usize::from(i % 6)]
-        }
-        _ => {
-            let v = 8 + u32::from(index - 232) * 10;
-            v << 16 | v << 8 | v
-        }
-    }
+    farhelm_grid_model::colors::color(
+        &TERMINAL_GRID,
+        color,
+        farhelm_grid_model::colors::ColorRole {
+            default: role.default.rgb(),
+            bright: role.bright,
+        },
+    )
+    .into()
 }
 
 /// Sizes the slice's surfaces use, copied from the old stylesheet. Shared by both appearances.

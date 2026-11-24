@@ -9,6 +9,8 @@
     clippy::expect_used,
     reason = "test-only crate; crates/gui/clippy.toml's test allowance covers #[test] functions but not these helpers"
 )]
+mod common;
+
 use farhelm_grid_model::{
     GridModel, GridOutput, LinkKind, Position, Selection, SelectionMode, TerminalLink, style_flags,
     web_target,
@@ -35,7 +37,7 @@ fn linked_lines(rows: Vec<(u16, Value)>, links: Vec<Value>) -> GridModel {
     for (first, (width, row)) in rows.into_iter().enumerate() {
         messages.push(json!({"t":"history","first":first,"cols":width,"rows":[row],"links":links}));
     }
-    let mut model = GridModel::new();
+    let mut model = GridModel::new(common::palette());
     for value in messages {
         let message: GridOutput = serde_json::from_value(value).unwrap();
         let _ = model.apply(&message.encode().unwrap()).unwrap();
