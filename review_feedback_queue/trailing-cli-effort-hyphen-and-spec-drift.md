@@ -54,3 +54,15 @@ spec/diagnostic drift; custom agents are already YOLO and gated by the YOLO laun
 boundary is crossed).; confidence: confirmed; possible cover: none.
 
 Review evidence is retained under run `746bd2ca-c078-44c7-90d6-305e2a679dca` as `g43_custom_agents_cli_hooks/f1`.
+
+## Extension from the trailing review through e159ffc7
+
+Reviewed commit: ff379d4ccc008ec7650bb9c301c899d30ff251d1
+
+The `SPEC_impl.md` sentence (now lines 7538-7540 at `e159ffc79ab147be44e92a92b59571650a4f322d`) is also wrong about
+`--agent`, not only `--effort`: `parse_agent_type` (`crates/farhelm/src/main.rs:909-921`) accepts any well-formed custom
+agent ID, and the helm refuses an unknown ID listing built-ins and registered IDs
+(`crates/farhelm-helm/src/custom_agents.rs:125-142`). Only `--permissions` is still a closed set refused locally. Reword
+the parenthetical accordingly when fixing it. Reviewer suggested bucket: other; confidence: confirmed. The independent
+drop check agreed the existing item covers the `--effort` part only. Evidence retained under run
+`71907637-41f3-4337-888c-8515d58c5dbb` as `g12-agent-cli-misc/f3`.

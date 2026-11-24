@@ -37,3 +37,20 @@ credentials remain safely withheld while legacy settings cleanup is pending, so 
 security exposure occurs); confidence: confirmed; possible cover: none.
 
 Review evidence is retained under run `34570dac-b635-4682-a942-3a3fc1728e12` as `g21-recipe-creds-delivery-core/l2`.
+
+## Extension from the trailing review through e159ffc7
+
+Reviewed commit: 107915bb765efe671d5012f461ed3c340cca43af
+
+Still present at the tip `e159ffc79ab147be44e92a92b59571650a4f322d` after #4751 reworked delivery, and wider than the
+original record: the same loss applies to a pending legacy **Codex** settings cleanup, not only Claude's. `apply`
+(`crates/farhelm-helm/src/provisioning/credential_delivery.rs:800-826`) now gets `DeliveryWarnings` from
+`apply_agent_environment`; when the launch lookups succeed but `retire_legacy_settings` (lines 1015-1041) returns a
+cleanup warning, `warnings.claude`/`warnings.codex` hold it with `lookup_aborted` false. If `apply_codex_login` or
+`apply_github_token` then fails, line 824 builds
+`DeliveryError { lookup_warnings: warnings.lookup_aborted.then_some(warnings) }`, i.e. `None`, so `connect` (line 535)
+and `push_one` (lines 719-724) report only the later reason. SPEC_impl.md "Named credential catalog" (lines 6220-6222)
+still requires the host warning to name the affected agent. Fix: carry all non-empty warnings into `DeliveryError` (drop
+the `lookup_aborted` filter) and have `push_failure`/`message_for` select cleanup reasons as they already do on the `Ok`
+path; add a test with a failed cleanup plus a deleted GitHub selection. Reviewer suggested bucket: other; confidence:
+confirmed. Evidence retained under run `71907637-41f3-4337-888c-8515d58c5dbb` as `g11-credentials/f2`.
