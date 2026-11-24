@@ -8,7 +8,8 @@
 mod common;
 
 use farhelm_grid_model::{
-    GridModel, GridOutput, LinkKind, Position, SelectionMode, style_flags, tunnel_port, web_target,
+    GridModel, GridOutput, LinkKind, Position, SelectionMode, colors, style_flags, tunnel_port,
+    web_target,
 };
 use serde_json::{Value, json};
 
@@ -440,6 +441,137 @@ fn concealed_text_breaks_a_wrapped_link_but_remains_in_selection() {
     assert_eq!(link.uri, "https://example.test");
     assert_eq!(link.ranges.len(), 1);
     assert!(model.link_at(Position { line: 1, col: 5 }).is_none());
+}
+
+/// The wire value of a direct (truecolor) color: `0x1000000 + 0xRRGGBB` (`farhelm_proto::grid::Color`).
+fn direct(rgb: u32) -> i64 {
+    0x100_0000 + i64::from(rgb)
+}
+
+/// A program can hide text without the conceal attribute by drawing it too close to its background to read.
+/// A plain click opens a printed URL without showing it first, so hidden text must end the URL exactly as concealed
+/// text does: a background-colored `.hidden` after the readable host must not quietly become part of it. The dimmest
+/// ordinary styles are the other side of the same rule. Bright black (SGR 90), dim default text and dim bright black
+/// are how programs print secondary text, and a URL in them must keep linking whole.
+#[test]
+fn a_printed_link_ends_before_hidden_text() {
+    let background = common::palette().background.hex();
+    for (name, style, hidden) in [
+        (
+            "ANSI black on the default background",
+            json!([0, 0, -1]),
+            true,
+        ),
+        (
+            "text in its own explicit background color",
+            json!([0, direct(0x336699), direct(0x336699)]),
+            true,
+        ),
+        (
+            "truecolor equal to the default background",
+            json!([0, direct(background), -1]),
+            true,
+        ),
+        ("bright black (SGR 90)", json!([0, 8, -1]), false),
+        ("dim default text", json!([style_flags::DIM, -1, -1]), false),
+        ("dim bright black", json!([style_flags::DIM, 8, -1]), false),
+    ] {
+        let model = model(
+            32,
+            vec![json!({"w":false,"r":[
+                [0,20,"https://example.test",[0,-1,-1]],
+                [20,7,".hidden",style]
+            ]})],
+            vec![],
+        );
+        // Premise: the fixture palette puts each style on the intended side of the threshold.
+        let suffix = &model.screen()[0].runs[1];
+        assert_eq!(
+            colors::unseen(model.palette(), suffix, model.state()),
+            hidden,
+            "{name}"
+        );
+        let link = model.link_at(Position { line: 0, col: 8 }).unwrap();
+        assert_eq!(link.kind, LinkKind::Text, "{name}");
+        if hidden {
+            assert_eq!(link.uri, "https://example.test", "{name}");
+            assert_eq!(link.ranges[0].end, Position { line: 0, col: 20 }, "{name}");
+            assert!(
+                model.link_at(Position { line: 0, col: 20 }).is_none(),
+                "{name}"
+            );
+        } else {
+            assert_eq!(link.uri, "https://example.test.hidden", "{name}");
+            assert_eq!(
+                model.link_at(Position { line: 0, col: 22 }),
+                Some(link),
+                "{name}"
+            );
+        }
+    }
+}
+
+/// Hidden text at the start of a soft-wrapped continuation ends the URL at the seam, as concealed text does
+/// (`concealed_text_breaks_a_wrapped_link_but_remains_in_selection`). Only link detection treats it as blank:
+/// selecting and copying the word still yields everything the program wrote, hidden part included.
+#[test]
+fn hidden_text_breaks_a_wrapped_link_but_remains_in_selection() {
+    let model = model(
+        20,
+        vec![
+            ascii("https://example.test", true, None),
+            json!({"w":false,"r":[[0,5,"/mask",[0,0,-1]],[5,5,"/tail",[0,-1,-1]]]}),
+        ],
+        vec![],
+    );
+    let mask = &model.screen()[1].runs[0];
+    assert!(colors::unseen(model.palette(), mask, model.state()));
+    let word = model.word_range(Position { line: 0, col: 8 }).unwrap();
+    assert_eq!(
+        model.selection_text(word.start, word.end, word.mode),
+        "https://example.test/mask/tail",
+    );
+    let link = model.link_at(Position { line: 0, col: 8 }).unwrap();
+    assert_eq!(link.uri, "https://example.test");
+    assert_eq!(link.ranges.len(), 1);
+    assert!(model.link_at(Position { line: 1, col: 5 }).is_none());
+}
+
+/// Hidden is judged against the program's current colors, not the theme's. A program that sets its default foreground
+/// (OSC 10) to the background color hides every default-colored cell while the text it colors explicitly stays
+/// readable, so a URL whose visible prefix is explicitly colored ends where that prefix does. Setting the default
+/// back makes the whole URL readable, and linked, again.
+#[test]
+fn a_default_foreground_set_to_the_background_hides_default_colored_text() {
+    let mut model = model(
+        32,
+        vec![json!({"w":false,"r":[
+            [0,20,"https://example.test",[0,7,-1]],
+            [20,7,".hidden",[0,-1,-1]]
+        ]})],
+        vec![],
+    );
+    let state = |default_fg: Option<i64>| json!({"t":"state","mouse":"off","focus":false,"alt_screen":false,"default_fg":default_fg,"default_bg":null,"history_trimmed":false,"exit":null});
+    let at = Position { line: 0, col: 8 };
+    assert_eq!(
+        model.link_at(at).unwrap().uri,
+        "https://example.test.hidden"
+    );
+
+    let background = direct(model.palette().background.hex());
+    apply_message(&mut model, state(Some(background)));
+    // Premise: the program's new default hides the default-colored suffix and leaves the explicit prefix readable.
+    let runs = &model.screen()[0].runs;
+    assert!(!colors::unseen(model.palette(), &runs[0], model.state()));
+    assert!(colors::unseen(model.palette(), &runs[1], model.state()));
+    assert_eq!(model.link_at(at).unwrap().uri, "https://example.test");
+    assert!(model.link_at(Position { line: 0, col: 20 }).is_none());
+
+    apply_message(&mut model, state(None));
+    assert_eq!(
+        model.link_at(at).unwrap().uri,
+        "https://example.test.hidden"
+    );
 }
 
 /// A style-only update changes which label a user sees. It can expose a real destination mismatch or remove

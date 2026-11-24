@@ -3,7 +3,7 @@
 //! Adapted from Farhelm's `assets/grid-buffer.js` at the pinned revision. Its
 //! selection rules derive from xterm.js 6.0.0 (MIT); see LICENSE-PORTED.
 
-use crate::{GridModel, GridRow, style_flags};
+use crate::{GridModel, GridRow, colors};
 use std::ops::Range;
 
 // Keep byte-identical to grid-buffer.js's pinned WORD_SEPARATORS (xterm's
@@ -245,12 +245,15 @@ impl GridModel {
     ///
     /// Selection and printed-link detection need the same cell boundaries even though they count different text
     /// units. Uncovered columns yield spaces, plain runs yield one character per column and indivisible runs yield
-    /// their full text and width. The emulator's unused wide-wrap padding contributes no text. Callers that hide
-    /// concealed text receive a space for each of its columns so a match cannot bridge across it.
+    /// their full text and width. The emulator's unused wide-wrap padding contributes no text.
+    ///
+    /// With `blank_unseen`, every run the user cannot see ([`colors::unseen`]: concealed, or drawn too close to its
+    /// background to read) yields a space for each of its columns instead of its text, so a match cannot bridge
+    /// across it. Its cells keep their positions, so ranges built from the visit still line up with the row.
     pub(crate) fn walk_cells(
         &self,
         line: u64,
-        blank_concealed: bool,
+        blank_unseen: bool,
         mut visit: impl FnMut(u16, u16, &str),
     ) -> Option<u16> {
         let (cols, row) = self.selection_line(line)?;
@@ -262,13 +265,13 @@ impl GridModel {
             }
             let end = (run.col + run.width).min(text_end);
             let width = end - run.col;
-            let concealed = blank_concealed && run.style.flags & style_flags::HIDDEN != 0;
-            let blank_end = if concealed { end } else { run.col };
+            let unseen = blank_unseen && colors::unseen(self.palette(), run, self.state());
+            let blank_end = if unseen { end } else { run.col };
             for blank in col..blank_end {
                 visit(blank, 1, " ");
             }
             col = end;
-            if concealed {
+            if unseen {
                 continue;
             }
             if run.is_plain_flow() {
@@ -286,12 +289,13 @@ impl GridModel {
         Some(cols)
     }
 
-    /// Map a bounded text window to UTF-16 cell owners. Word selection includes concealed text, while printed URL
-    /// detection blanks it so a match cannot join the text on either side.
-    pub(crate) fn word_cells(&self, first: u64, last: u64, blank_concealed: bool) -> Vec<WordCell> {
+    /// Map a bounded text window to UTF-16 cell owners. Word selection includes unseen text (concealed or hidden by
+    /// its color), because copying a range copies what the program wrote, while printed URL detection blanks it so a
+    /// match cannot join the text on either side.
+    pub(crate) fn word_cells(&self, first: u64, last: u64, blank_unseen: bool) -> Vec<WordCell> {
         let mut cells = Vec::new();
         for line in first..=last {
-            let _ = self.walk_cells(line, blank_concealed, |col, width, text| {
+            let _ = self.walk_cells(line, blank_unseen, |col, width, text| {
                 cells.extend(text.encode_utf16().map(|unit| WordCell {
                     position: Position { line, col },
                     width,
