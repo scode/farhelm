@@ -141,8 +141,36 @@ fn differently_wrapped_rows_keep_their_individual_address_claims() {
     );
 }
 
-/// Two rows with the same tag can each spell out the same target. The second address
-/// must be recognized as a repeat even when the rows quote it differently.
+/// A bracketed row joined to a bare one does not look like one address, so judging the join alone would show
+/// no warning while the bare row names another place. Hovering that row must compare it with the target.
+#[test]
+fn a_bare_address_row_beside_a_bracketed_one_keeps_its_claim() {
+    let bracketed = "<https://example.test/>";
+    let bare = "https://other.test/";
+    let target = "https://example.test/";
+    let grid = model(
+        40,
+        vec![
+            ascii(bracketed, false, Some(0)),
+            ascii(bare, false, Some(0)),
+        ],
+        vec![json!(["tag", target])],
+    );
+    let first = grid.link_at(Position { line: 0, col: 0 }).unwrap();
+    let second = grid.link_at(Position { line: 1, col: 0 }).unwrap();
+    assert_eq!(first.kind, second.kind);
+    assert_eq!(grid.link_disclosure(&first).unwrap().claimed_text, None);
+    assert_eq!(
+        grid.link_disclosure(&second)
+            .unwrap()
+            .claimed_text
+            .as_deref(),
+        Some(bare)
+    );
+}
+
+/// Honest output can print one address several times under one hyperlink, quoted differently on each row. If
+/// the repeat were not recognized, the hover would warn about an address that names the real target.
 #[test]
 fn repeated_quoted_addresses_each_match_the_destination() {
     let first = "<https://example.test/>";

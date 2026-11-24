@@ -62,13 +62,36 @@ enum AddressShape {
     Host,
 }
 
-/// A label can quote or bracket the whole address. Remove only matching outer pairs so prose
-/// around an address stays part of the label. The hover still displays the original text.
+/// Whether a character puts nothing visible between a delimiter and its neighbors: whitespace, a format
+/// character or combining mark (`INVISIBLE`), or one of the blank fillers `LEADING_BLANKS` also skips. The
+/// supervisor keeps zero-width characters with the cell before them, so a label can carry them right after a
+/// closing bracket while the screen shows a plain pair.
+fn draws_nothing_beside_a_delimiter(ch: char) -> bool {
+    is_js_space(ch)
+        || matches!(
+            ch,
+            '\u{115f}' | '\u{1160}' | '\u{3164}' | '\u{ffa0}' | '\u{2800}'
+        )
+        || INVISIBLE.is_match(ch.encode_utf8(&mut [0; 4]))
+}
+
+/// The address a label claims when it shows one inside matching outer pairs of `<>`, `()`, `[]`, `""` or
+/// `''`, peeled layer by layer; otherwise the label itself, trimmed. Only matching outer pairs come off, so prose
+/// around an address stays part of the label and keeps the ordinary display. A peeled label whose first word
+/// then ends in a closing delimiter (`[https://a.test/] [docs]`) is a phrase after an address, not an address in a
+/// pair, so it is returned unpeeled: such a label gets the ordinary display even when its leading address names
+/// another place, a known limit. The hover still displays the original text either way.
+///
+/// Pairs are found on a view of each layer with characters that draw nothing trimmed from both ends, so a
+/// zero-width character or blank filler beside a delimiter cannot hide the pair. The address the peel ends on
+/// is trimmed of whitespace only: an invisible character between the innermost delimiter and the address stays
+/// in the compared text, where it fails the parse and warns.
 fn strip_matching_wrappers(text: &str) -> &str {
     let label = text.trim_matches(is_js_space);
     let mut text = label;
     loop {
-        let closing = match text.as_bytes().first() {
+        let view = text.trim_matches(draws_nothing_beside_a_delimiter);
+        let closing = match view.as_bytes().first() {
             Some(b'<') => '>',
             Some(b'(') => ')',
             Some(b'[') => ']',
@@ -77,17 +100,16 @@ fn strip_matching_wrappers(text: &str) -> &str {
             _ => break,
         };
         // Every recognized opener is one byte. Search after it so a lone quote is not a pair.
-        let Some(inner) = text[1..].strip_suffix(closing) else {
+        let Some(inner) = view[1..].strip_suffix(closing) else {
             break;
         };
         text = inner.trim_matches(is_js_space);
     }
-    // A bracket or quote before a word break can end an address followed by prose.
-    // Check after peeling so spaces between genuinely nested delimiters stay legal.
-    if text.len() != label.len()
-        && text
-            .split_once(is_js_space)
-            .is_some_and(|(first, _)| first.ends_with(['>', ')', ']', '"', '\'']))
+    // A bracket or quote before a word break can end an address followed by prose. Check after peeling so
+    // spaces between genuinely nested delimiters stay legal. When nothing was peeled, `text` is `label`.
+    if text
+        .split_once(is_js_space)
+        .is_some_and(|(first, _)| first.ends_with(['>', ')', ']', '"', '\'']))
     {
         return label;
     }
@@ -224,6 +246,8 @@ impl GridModel {
     /// An isolated repeated tag is complete. Across rows, any ambiguous run or
     /// budget exhaustion returns the hovered row as a fragment, never a quiet
     /// assertion that the complete program-controlled label names this target.
+    /// A joined run whose rows each show an address on their own returns the hovered row as a whole label
+    /// (not a fragment) when the rows all repeat the target or the join does not look like one address.
     fn link_label(&self, link: &TerminalLink) -> (Option<String>, bool) {
         let LinkKind::Osc { id } = &link.kind else {
             return (None, false);
@@ -317,20 +341,16 @@ impl GridModel {
                 at = next;
             }
         }
-        if rows.iter().all(|text| {
-            address_shape(strip_matching_wrappers(text)).is_some() && !mismatch(text, &link.uri)
-        }) {
-            return (Some(fragment), false);
-        }
         let joined = rows.iter().map(String::as_str).collect::<String>();
         let joined = joined.trim_matches(is_js_space);
-        // Different delimiters can make the join lose its address shape even though each
-        // row spells out its own wrapped address. Keep the hovered row's claim in that case.
-        if rows.iter().all(|text| {
-            let label = text.trim_matches(is_js_space);
-            let address = strip_matching_wrappers(label);
-            address.len() != label.len() && address_shape(address).is_some()
-        }) && address_shape(strip_matching_wrappers(joined)).is_none()
+        // When every row shows an address of its own, the hovered row is the claim to judge if each row
+        // repeats the target, or if the rows' brackets or quotes keep the join from looking like one address
+        // (`<https://a.test/>` above `https://b.test/`). Judging the join there would quietly lose the claim.
+        if rows
+            .iter()
+            .all(|text| address_shape(strip_matching_wrappers(text)).is_some())
+            && (rows.iter().all(|text| !mismatch(text, &link.uri))
+                || address_shape(strip_matching_wrappers(joined)).is_none())
         {
             return (Some(fragment), false);
         }
@@ -388,8 +408,9 @@ mod tests {
         }
     }
 
-    /// A label can present an address inside several layers of punctuation. Judge the address inside
-    /// the matching pairs, including when the pieces have spaces around them.
+    /// `<https://a.test/>` is a common way to write a link, so a bracketed or quoted familiar address that goes
+    /// elsewhere is exactly the spoof the warning exists for; an earlier stricter scheme rule silenced it. The
+    /// address inside matching pairs, nested and with spaces around the layers, is compared with the target.
     #[test]
     fn bracketed_and_quoted_addresses_are_compared_with_the_target() {
         for label in [
@@ -425,12 +446,40 @@ mod tests {
         }
     }
 
-    /// Brackets that belong to a URL path survive peeling the pair around the whole address.
+    /// Peeling must stop at the outer pair: taking brackets that belong to a URL path (as wiki addresses use)
+    /// would compare a different address than the one shown, warning on an honest label or hiding a changed one.
     #[test]
     fn punctuation_inside_a_wrapped_address_is_part_of_the_path() {
         let label = "(https://example.test/page_(name))";
         assert!(!mismatch(label, "https://example.test/page_(name)"));
         assert!(mismatch(label, "https://example.test/page_name"));
+    }
+
+    /// Zero-width characters ride along with the visible cell before them, so a label can carry one right after
+    /// a closing bracket, between nested delimiters or beside a blank filler while the screen shows a plain
+    /// bracketed address. Each must not hide the pair, or the familiar address would go elsewhere unwarned. One
+    /// just inside a delimiter, before the scheme, stays in the compared address and warns even against the
+    /// address it spells, since the parse fails.
+    #[test]
+    fn characters_that_draw_nothing_beside_a_delimiter_do_not_hide_the_pair() {
+        for label in [
+            "<https://example.test/>\u{200b}",
+            "<https://example.test/>\u{2060}",
+            "<https://example.test/>\u{fe0f}",
+            "<https://example.test/>\u{34f}",
+            "(\u{200b}\"https://example.test/\")",
+            "(\"https://example.test/\"\u{200b})",
+            "\u{3164}<https://example.test/>",
+            "<https://example.test/>\u{3164}",
+            "<https://example.test/>\u{2800}",
+        ] {
+            assert!(!mismatch(label, "https://example.test/"), "{label:?}");
+            assert!(mismatch(label, "https://other.test/"), "{label:?}");
+        }
+        assert!(mismatch(
+            "<\u{200b}https://example.test/>",
+            "https://example.test/"
+        ));
     }
 
     /// The narrower syntax must still recognize labels that imitate addresses with different characters
