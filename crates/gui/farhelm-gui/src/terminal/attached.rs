@@ -518,7 +518,9 @@ pub struct AttachedTerminal {
     /// The explanation of a refused link click, shown at the top of the terminal until the next press there.
     refusal: Option<SharedString>,
     /// Suppress the destination panel until the pointer reaches a new cell, so the hover does not immediately
-    /// reopen over the refusal. An adjacent cell of the same link is enough to hover again.
+    /// reopen over the refusal. An adjacent cell of the same link is enough to hover again. Also set when the panel
+    /// opened over the resting pointer itself ([`AttachedTerminal::display_covers_pointer`]), so it does not close and
+    /// reopen forever; with no panel shown, a click there gets the "not visible" refusal.
     refusal_waits_for_hover: bool,
     /// The line stays above approvals as long as the pointer is still on the refused link, even if moving within
     /// the span has already restarted the disclosure.
@@ -2413,7 +2415,15 @@ impl Render for AttachedTerminal {
             // Typing does not count as the pointer leaving: the old app kept the bar shown while the pointer stayed
             // over the terminal, keys or not.
             .hover_listener_mode(HoverListenerMode::InputModalityIndependent)
-            .on_hover(cx.listener(|owner, hovered: &bool, _, cx| {
+            .on_hover(cx.listener(|owner, hovered: &bool, window, cx| {
+                // The pointer did not leave: the link's own panel opened over it. Clearing the hover would close the
+                // panel, uncover the pointer and open it again on the next frame, without end. Hold the panel back
+                // instead, keeping the hover, until the pointer reaches another cell.
+                if !*hovered && owner.display_covers_pointer(window) {
+                    owner.refusal_waits_for_hover = true;
+                    cx.notify();
+                    return;
+                }
                 if !*hovered {
                     owner.hover_link_at(None, cx);
                 }
@@ -3147,6 +3157,27 @@ impl AttachedTerminal {
             });
         }
         self.disclosure_anchor_element(window, cx)
+    }
+
+    /// Whether the current display was drawn over the pointer while it rested where it last moved over the terminal.
+    ///
+    /// The layer manager keeps every popover inside the window's content area, and one taller than the room above and
+    /// below the pointer is pushed back over it: a long destination, drawn in full, in a small window. Holding such a
+    /// panel back is a refusal condition of its own (SPEC.md: a hover the window could only show over the link itself),
+    /// not a restatement of the fit check: the panel may fit the content area and be uncovered, yet it hides the link
+    /// it describes and takes the hover from it. A click on the link then finds no panel and gets the ordinary "not
+    /// visible" refusal, whose advice (enlarge the window) is what helps. On each new cell of the link the panel opens
+    /// again and is drawn for one frame before this takes it back; so does the frame after a download's status clears
+    /// the shared hold-back flag ([`AttachedTerminal::file_status_shown`]). A pointer that moved onto the panel is not
+    /// this case: the terminal saw no move there, so the positions differ.
+    fn display_covers_pointer(&self, window: &Window) -> bool {
+        let pointer = window.mouse_position();
+        self.hover_point == Some(pointer)
+            && self
+                .disclosure
+                .as_ref()
+                .and_then(|shown| shown.drawn.get())
+                .is_some_and(|panel| panel.bounds.contains(&pointer))
     }
 
     /// The zero-width element the current display is anchored to, drawn by the pointer where the display opened.

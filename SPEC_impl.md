@@ -3528,6 +3528,30 @@ release lands after it. The old web client's recorded answers (`tests/fixtures/l
 safety direction, with the cases the new rules quiet listed in `tests/fixtures/links-oracle-exceptions.json`
 (`tests/fixtures/README.md`).
 
+The hover's display (`crates/gui/farhelm-gui/src/terminal/disclosure.rs`) draws `LinkDisclosure::target` whole, the URL
+parser's serialization that a click opens, as one host-text element that wraps like any other text; the old client's
+300-unit shortening now applies only to the label and address a warning quotes. `LinkDisclosure::difference` gives the
+mark. Only a plain mismatch has one: the target's middle left after the longest common prefix, and then the longest
+common suffix, with the first mismatching address's parsed form (`LinkWarning::address_parsed`), compared by character,
+with the suffix taken only from what the prefix left of the shorter string so the two never overlap. A disguised or
+credentials warning marks nothing, because the parsed form of a folded address, or of one with userinfo, does not spell
+the place the text shows. The display draws the mark through `host_text::marked`. A serialization is ASCII with nothing
+to escape, so the mark's byte range is also its character positions in the presentation; were the presentation ever to
+differ from the raw target, the mark is dropped rather than drawn at the wrong characters. The mark is an inverted chip,
+`on_fill` ground under `danger_bg` text, the warning's own two colors swapped. Both palettes use those two tokens, at
+about 6.07:1, and `theme.rs`'s tests hold the pair above 4.5:1.
+
+A display taller than the room above and below the pointer is pushed by the layer manager's shared clamp back over the
+pointer, which takes the hover from the terminal. Clearing the hover then would close the display, uncover the pointer
+and open it again, every frame. The terminal's hover listener (`AttachedTerminal::display_covers_pointer` in
+`crates/gui/farhelm-gui/src/terminal/attached.rs`) recognizes that case, a pointer that has not moved since the terminal
+last saw it and lies inside the drawn display, and instead holds the display back with the refused click's
+`refusal_waits_for_hover` until the pointer reaches another cell, so a click there finds no display and gets the "not
+visible" refusal. This is a refusal condition of its own, SPEC.md's hover that the window could only show over the link
+itself, not the fit check restated: such a display can fit the content area uncovered. Each new cell of the link draws
+the display for one frame before the listener holds it back again, as does the frame after a download's status clears
+the shared flag (`file_status_shown`).
+
 An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
 platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its
 status says that opening was not offered (`crates/gui/farhelm-gui/src/terminal/files/download.rs`). No GUI code touches

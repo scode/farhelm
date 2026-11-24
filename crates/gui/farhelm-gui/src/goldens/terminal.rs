@@ -1,6 +1,6 @@
-//! Golden scenes for the terminal: its styles, wide glyphs and cursor shapes, an attached terminal's status line,
-//! exit line and reconnect card, a file link's hover display, and the scrim a pending Delete puts over it. The scene
-//! list itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
+//! Golden scenes for the terminal: its styles, wide glyphs and cursor shapes, an attached terminal's status line, exit
+//! line and reconnect card, a file link's and a web link's hover displays, and the scrim a pending Delete puts over it.
+//! The scene list itself, `SCENES` with each scene's name and size, stays in `mod.rs`.
 
 use crate::session;
 use crate::session_list::SessionList;
@@ -507,6 +507,16 @@ pub(super) fn terminal_file_disclosures(
     cx: &mut App,
 ) -> AnyElement {
     crate::terminal::files::golden_displays(window, cx)
+}
+
+/// A web link's hover display: the ordinary one, a warning with the differing part of a long destination marked, and a
+/// warning about a disguised address (`crate::terminal::disclosure`). Drawn on their own, like the file link's.
+pub(super) fn terminal_link_disclosures(
+    _: &SceneState,
+    window: &mut Window,
+    cx: &mut App,
+) -> AnyElement {
+    crate::terminal::disclosure::golden_displays(window, cx)
 }
 
 /// A shell's last lines at the bottom of a small terminal, for the Delete scrim to lie over: enough text that the

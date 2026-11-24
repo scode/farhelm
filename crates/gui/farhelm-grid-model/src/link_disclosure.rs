@@ -2,8 +2,10 @@
 //! visible text gives a reason to doubt it.
 //!
 //! Target disclosure is data, not browser authorization: native geometry and gesture state must still establish that
-//! the current disclosure is visible before opening. The destination's presentation (its escaping and shortening)
-//! ports terminal-links.js (LICENSE-PORTED); the warning does not, and follows SPEC.md's terminal links paragraph.
+//! the current disclosure is visible before opening. The destination is disclosed in full, never shortened: a long one
+//! hides its differing part in the omitted middle as easily as anywhere else, and the desktop app wraps it instead. The
+//! label's and address's presentation (their escaping and shortening) ports terminal-links.js (LICENSE-PORTED); the
+//! warning does not, and follows SPEC.md's terminal links paragraph.
 //!
 //! The warning has five reasons, in the order the hover lists them:
 //!
@@ -28,16 +30,18 @@ use crate::link_claims::{self, MismatchKind, RowText, Seam};
 use crate::links::{Identities, is_js_space};
 use crate::{GridModel, LinkKind, TerminalLink, web_target};
 use std::collections::VecDeque;
+use std::ops::Range;
 use url::Url;
 
-/// Fully rendered text for one web target. The actual host is never shortened or replaced with userinfo. This owns no
-/// grid rows and cannot outlive the UI's independent evidence check.
+/// Fully rendered text for one web target. Neither the host nor the target is ever shortened, and the host is never
+/// replaced with userinfo. This owns no grid rows and cannot outlive the UI's independent evidence check.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LinkDisclosure {
     /// Parsed authority host, including a nondefault port and IPv6 brackets.
     pub host: String,
-    /// Serialized destination, retaining empty query/fragment delimiters. Long targets name the omitted middle; the
-    /// separate host always remains whole.
+    /// The destination in full: the URL parser's serialization, which is what a click opens, retaining empty
+    /// query/fragment delimiters. It is ASCII (the parser percent-encodes and punycodes everything else), so a byte
+    /// offset into it is also a character offset, which [`LinkDisclosure::difference`] relies on.
     pub target: String,
     /// Why the hover should make the user doubt the link, if it should. `None` is the ordinary display: the text
     /// mentions no other place, or nothing in it is out of sight.
@@ -53,15 +57,17 @@ pub struct LinkWarning {
     /// At least one reason, each at most once, in [`WarningReason`]'s order. At most one of the address reasons
     /// (mismatch, disguised, credentials) appears: the first mismatching address's.
     pub reasons: Vec<WarningReason>,
-    /// The visible label, every row of it, trimmed and shortened like the destination. A seam that separates shows as a
-    /// space, one that joins as nothing, and separate stretches of one row are spaced apart. Empty when the label was too
-    /// long to read ([`WarningReason::Incomplete`] alone), so no part of an unread label is ever shown as if whole.
+    /// The visible label, every row of it, trimmed and shortened to the old client's budget. A seam that separates
+    /// shows as a space, one that joins as nothing, and separate stretches of one row are spaced apart. Empty when the
+    /// label was too long to read ([`WarningReason::Incomplete`] alone), so no part of an unread label is ever shown as
+    /// if whole.
     pub label: String,
     /// The first address in the label that doesn't name the destination, as written (trailing decoration such as a
     /// sentence's full stop left off) and shortened. Present exactly when an address reason is.
     pub address: Option<String>,
     /// That address as the URL parser reads it, with the destination's scheme when it has none of its own: what the
-    /// destination is compared against to show where they differ. `None` when it doesn't parse.
+    /// destination is compared against to show where they differ ([`LinkDisclosure::difference`]). `None` when it
+    /// doesn't parse.
     pub address_parsed: Option<String>,
     /// How many other addresses in the label don't name the destination either.
     pub more: usize,
@@ -83,6 +89,58 @@ pub enum WarningReason {
     Incomplete,
     /// Part of the text, with this link's destination, is concealed or drawn too close to its background to read.
     Hidden,
+}
+
+impl LinkDisclosure {
+    /// The part of [`target`](Self::target) the hover marks as differing from what the link text says, as a byte range
+    /// into it.
+    ///
+    /// The mark is the single middle of the target left once it and the first mismatching address's parsed form
+    /// ([`LinkWarning::address_parsed`]) drop their common prefix and suffix. Only a plain mismatch is marked. A
+    /// disguised address or one with login details names its place in a way the parsed form doesn't show (look-alike
+    /// characters fold away, userinfo is not the host), so a mark there would point at the wrong part or at nothing;
+    /// those reasons explain themselves instead, and the hover shows that address escaped. `None` also when the address
+    /// doesn't parse, or when the target holds nothing the address lacks (`https://example.test/a/b` claimed against
+    /// `https://example.test/a`): an empty mark would draw nothing a user could see.
+    pub fn difference(&self) -> Option<Range<usize>> {
+        let warning = self.warning.as_ref()?;
+        if !warning.reasons.contains(&WarningReason::Mismatch) {
+            return None;
+        }
+        differing_middle(warning.address_parsed.as_deref()?, &self.target)
+    }
+}
+
+/// The target-side middle that remains once `claimed` and `target` drop their longest common prefix and then their
+/// longest common suffix, as a byte range into `target`; `None` when it is empty.
+///
+/// One middle, not a diff: the user is shown where the two first and last disagree, which for a spoof is the host or
+/// the path the label lied about, and anything finer (several marks, an edit script) would ask them to read an
+/// algorithm's output. The suffix is taken only from what the prefix left of the shorter string, so the two never
+/// overlap: `https://a.test/xx` against `https://a.test/xxx` marks the one extra `x`, not a range running backwards.
+/// Both strings are URL serializations and so ASCII, but the comparison steps by character so a non-ASCII input
+/// still yields a range on character boundaries.
+fn differing_middle(claimed: &str, target: &str) -> Option<Range<usize>> {
+    let prefix: usize = claimed
+        .chars()
+        .zip(target.chars())
+        .take_while(|(a, b)| a == b)
+        .map(|(_, b)| b.len_utf8())
+        .sum();
+    let room = claimed.len().min(target.len()) - prefix;
+    let suffix: usize = claimed[prefix..]
+        .chars()
+        .rev()
+        .zip(target[prefix..].chars().rev())
+        .take_while(|(a, b)| a == b)
+        .map(|(_, b)| b.len_utf8())
+        .scan(0, |taken, len| {
+            *taken += len;
+            (*taken <= room).then_some(len)
+        })
+        .sum();
+    let middle = prefix..target.len() - suffix;
+    (!middle.is_empty()).then_some(middle)
 }
 
 impl From<MismatchKind> for WarningReason {
@@ -107,8 +165,12 @@ fn visible(text: &str) -> String {
     farhelm_proto::text::escaped(text)
 }
 
-/// The pin budgets 300 UTF-16 units and names the omitted middle. A boundary inside a surrogate pair renders as
-/// replacement text, just as a native text widget would render the JS slice's unpaired surrogate.
+/// Shorten the program's text a warning quotes (its label and the address it found), never the destination. The pin
+/// budgets 300 UTF-16 units and names the omitted middle. A boundary inside a surrogate pair renders as replacement
+/// text, just as a native text widget would render the JS slice's unpaired surrogate.
+///
+/// The quoted text is evidence for the reasons above it, and the destination below it is what the user decides on, so
+/// only the destination has to be whole (SPEC.md: the hover shows the full destination).
 fn shortened(text: &str) -> String {
     let units: Vec<_> = text.encode_utf16().collect();
     if units.len() <= 300 {
@@ -199,7 +261,7 @@ impl GridModel {
         };
         Some(LinkDisclosure {
             host: target[url::Position::BeforeHost..url::Position::AfterPort].into(),
-            target: shortened(target.as_str()),
+            target: target.as_str().into(),
             warning,
         })
     }
@@ -583,6 +645,43 @@ fn separates(rows: &[RowText<'_>]) -> bool {
 mod tests {
     use super::*;
     use std::collections::BTreeSet;
+
+    /// The mark is the one thing in the hover that points at a place, so it must cover exactly where the destination
+    /// departs from what the text claimed: too little and the user doesn't see the host they're really going to, a
+    /// range that runs backwards or splits a character can't be drawn at all. Spec: the mark is the target's part left
+    /// after the longest common prefix, then the longest common suffix of what remains of the shorter string (so the
+    /// two never overlap); it is `None` when that part is empty, also when the claim is longer than the target; and a
+    /// non-ASCII difference is marked whole.
+    #[test]
+    fn the_difference_is_the_targets_middle_between_a_common_prefix_and_suffix() {
+        for (claimed, target, marked) in [
+            (
+                "https://github.com/login",
+                "https://evil.test/login",
+                Some("evil.test"),
+            ),
+            ("http://example.test/", "https://example.test/", Some("s")),
+            (
+                "https://example.test/",
+                "https://example.test/?q",
+                Some("?q"),
+            ),
+            ("https://a.test/xx", "https://a.test/xxx", Some("x")),
+            ("https://a.test/abc", "https://a.test/abcabc", Some("abc")),
+            ("https://x.test/", "https://y.test/", Some("y")),
+            ("https://x.test/é", "https://x.test/è", Some("è")),
+            ("https://example.test/a", "https://example.test/a", None),
+            ("https://example.test/a/b", "https://example.test/a", None),
+            ("https://a.test/abcabc", "https://a.test/abc", None),
+        ] {
+            // Slicing also proves the range lies on character boundaries inside the target.
+            assert_eq!(
+                differing_middle(claimed, target).map(|range| &target[range]),
+                marked,
+                "{claimed} against {target}"
+            );
+        }
+    }
 
     /// The exceptions to the pinned oracle's safety check, `tests/fixtures/links-oracle-exceptions.json`, after checking
     /// the whole file: every entry has a known kind, a key and a rule, and no key appears twice. Returns the `policy`
