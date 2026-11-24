@@ -175,34 +175,36 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   and catalog models) and OpenCode (`--model opencode/<id>`), cover Goose, Pi, and OMP with both
   `--provider openrouter --model <id>` and no explicit provider, validate current catalog model IDs across Claude,
   Codex, Antigravity, and Muse (rather than only `haiku` or one model), and verify each CLI actually selects the
-  requested model rather than silently ignoring it.
+  requested model rather than silently ignoring it. Plan: `plans/queue/drift-model-selection.md`.
 
 - **Drift tests: reasoning effort selection.** Add live coverage for Muse (`--reasoning-effort`) and Goose
   (`GOOSE_THINKING_EFFORT`), which currently have zero drift-test coverage, and exercise non-`low` effort values
   (especially `off`, `minimal`, `xhigh`, and `max`, which vendors rename or drop) across Claude, Codex, Antigravity, Pi,
-  and OMP, confirming each CLI accepts and applies the requested effort.
+  and OMP, confirming each CLI accepts and applies the requested effort. Plan: `plans/queue/drift-reasoning-effort.md`.
 
 - **Drift tests: permission modes and custom permission flags.** Cover YOLO launch flags on Claude, Codex, Antigravity,
   Grok, Muse, and OMP (currently only Guarded is exercised for those six); Goose's `approve`, `smart_approve`, and
   `chat` modes (`GOOSE_MODE`); OMP's `Approve` mode (`--approval-mode always-ask`); Cursor's "Agent's own setting"; and
-  custom permission flags surviving Restart (including Antigravity's `--settings` and `--` argument ordering).
+  custom permission flags surviving Restart (including Antigravity's `--settings` and `--` argument ordering). Plan:
+  `plans/queue/drift-permission-modes.md`.
 
 - **Drift tests: initial prompt delivery via launch arguments.** Cover all eight agents that accept a launch-time prompt
   (Claude, Codex, Cursor, Muse, OMP, and Grok via `-- <prompt>`; OpenCode via `--prompt=<prompt>`; Antigravity via
   `--prompt-interactive=<prompt>`), including leading-dash and multiline prompts, proving each starts interactively,
   submits the prompt automatically, does not re-send it on Restart, and works with a named conversation start where
-  supported.
+  supported. Plan: `plans/queue/drift-initial-prompt-launch.md`.
 
 - **Drift tests: one-time named conversation starts.** Cover starting a session on a named conversation ID or file
   across all ten agents — especially Cursor's `--resume <chat-id>` and OpenCode's `--session <session-id>`, which have
   no drift coverage today — plus relative and absolute session file paths on Pi and OMP, verifying capture on tracked
-  agents and Goose clearing prior capture.
+  agents and Goose clearing prior capture. Plan: `plans/queue/drift-named-conversation-starts.md`.
 
 - **Drift tests: conversation capture timing, Stop/UserPromptSubmit hooks, and hooks-disabled mode.** Verify
   `restart_readiness` timing (pre-prompt on Claude and Goose, first-prompt on Codex, Muse, Grok, and Antigravity,
   first-reply on Pi and OMP), end-to-end `Stop` and Grok `UserPromptSubmit` hook payloads through Farhelm's own hooks,
   OMP's 256-byte title-slot prelude, hook invisibility in the TUI (including Antigravity's `{}` stdout), and disabling
-  hooks via `FARHELM_AGENT_HOOKS=none` (including Goose's resume-time disable and Codex keeping `--no-daemon`).
+  hooks via `FARHELM_AGENT_HOOKS=none` (including Goose's resume-time disable and Codex keeping `--no-daemon`). Plan:
+  `plans/queue/drift-capture-timing-hooks.md`.
 
 - **Drift tests: opt-in persistent hook installation for Grok and Antigravity.** Using isolated config directories so
   the real user home stays untouched, verify that the exact hook files Farhelm installs for Grok (`hooks/farhelm.json`)
@@ -224,7 +226,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   prompt from appearing on Codex, Muse, and Antigravity (instead of silently answering a prompt that still appeared),
   and add live coverage for Antigravity's per-launch `--settings '{"trustedWorkspaces":[...]}'`, Pi's `--approve` and
   `--no-approve` with a project-local config or extension, Claude's `.claude.json` pre-trust edit in an isolated config
-  directory, and Codex's explicit untrusted setting.
+  directory, and Codex's explicit untrusted setting. Plan: `plans/queue/drift-workspace-trust.md`.
 
 - **Drift tests: terminal screen status and dialog detection.** Verify live anchored `Running` and `Idle` readings on
   Claude, Codex, and Muse (catching silent fallback to generic change-counting when vendor TUI layout drifts), live
@@ -239,7 +241,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Drift tests: `$farhelm` instructions pointer delivery.** Verify all six supporting agents (Claude, Codex, Muse via
   `SessionStart` hook stdout; Goose via MCP `initialize` instructions; Pi and OMP via `--append-system-prompt`) actually
   receive the `$farhelm` instructions pointer in model context, and that disabling instructions omits it without
-  breaking conversation hooks.
+  breaking conversation hooks. Plan: `plans/queue/drift-instructions-delivery.md`.
 
 - **Drift tests: running-agent prompt delivery via bracketed paste.** Verify live Claude and Codex TUIs enable terminal
   bracketed paste mode, and that Farhelm's bracketed-paste plus Enter (Claude) or Tab (Codex) submits cleanly at idle,
