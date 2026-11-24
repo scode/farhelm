@@ -275,13 +275,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
 
-- **Restore terminal hyperlink mismatch warnings for bracketed and quoted URLs.** Labels opening with a bracket or quote
-  (such as `<https://good.test/>`, `"https://good.test/"`, `(https://good.test/)`, or `[https://good.test/]`) pointing
-  to a different site stopped triggering the hover mismatch warning after #4737 tightened the scheme rule. Strip one
-  matching outer bracket or quote pair before checking whether the label looks like a web address and comparing it with
-  the destination, so spoofed bracketed or quoted addresses warn again without false warnings on honest ones. Plan:
-  `plans/queue/osc8-bracketed-url-warnings.md`.
-
 - **Make the pending-update pill reminder visible in light mode and bold its arrow.** In light mode, the ready-update
   pill's resting, hover, and pulse backgrounds (`#a63e4d` at 14.1%, 15.3%, and 16.5% alpha over `#e9edf4`) differ by
   only 1–3 RGB levels because `#a13443` text is already near 4.5:1 contrast at rest, so the reminder pulse is nearly

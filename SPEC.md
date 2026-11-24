@@ -3571,29 +3571,32 @@ whatever the agent renders is what you see. There is no composer, no message abs
   host permissions are independent and unchanged. A hyperlink a program emits (OSC 8) can underline text that differs
   from where it goes, so hovering it shows the exact target first, with its host emphasized. When the underlined text is
   itself a web address (it starts with a scheme or `www.`, or is a dotted host, optionally after credentials, ending in
-  a name of two or more letters followed by `/`; characters that draw nothing are ignored for this test) and names a
-  different place, ignoring only a trailing slash, the display becomes a prominent warning that shows the text beside
-  the real target. Link text that is not a web address, such as a file name or "click here", keeps the ordinary display.
-  Consecutive rows of the same hyperlink are compared together, including links an agent continues after indentation
-  with cursor movement. Restarting a hyperlink without an explicit id right where its previous piece ended, with the
-  same target, continues that hyperlink, across soft wraps too. A cursor-positioned continuation can keep its own link
-  identity when the preceding piece was already joined to an earlier anonymous piece on the previous row. The hover
-  comparison stops at the boundary between different link identities. An honest wrapped web address keeps the ordinary
-  display when the pieces join, and a lookalike is judged on the whole joined text. Repeated complete addresses that
-  each independently match the target keep the ordinary display. If an adjacent continuation cannot be joined
-  unambiguously within the bounds, a piece that looks like a web address warns rather than counting as a match. The
-  warning is judged when the hover starts and need not follow later redraws of other rows while the pointer rests; the
-  destination display stays authoritative. The warning is an aid, not a guarantee: unlinked text around the hyperlink is
-  outside the comparison, a program that chooses its own line breaks can still split a lookalike into pieces that are
-  not joined (separate hyperlinks, say) and that do not look like web addresses on their own, and the ordinary display,
-  which always names the real host, is what remains. The hover display is the whole safeguard: it counts as disclosing
-  the target only while fully visible, inside the window and not covered by another Farhelm surface such as an approval
-  card or tunnel-error notice. A click whose hover is not fully visible is refused with an explanation; this also
-  applies to Cmd-click tunnel opens. Plain URLs printed as text need no such display, because what is shown is what
-  opens, apart from the remote-localhost tunnel hint below. Concealed terminal cells break a printed URL. They are also
-  excluded from a program hyperlink's visible label, its hover and click area, and its underline. The program hyperlink
-  still owns those cells, preventing a printed URL or file path from taking its place there. This rule concerns the
-  terminal's conceal attribute. Text drawn in the background color is outside its scope.
+  a name of two or more letters followed by `/`), Farhelm compares it with the target. It peels matching outer pairs of
+  angle brackets, parentheses, square brackets, or single or double quotes before the check, trimming whitespace after
+  each layer. Characters that draw nothing are ignored when recognizing the address shape. If the address names a
+  different place, ignoring only a trailing slash, a prominent warning shows the original label beside the real target.
+  Descriptive link text such as a file name or "click here" keeps the ordinary display. Consecutive rows of the same
+  hyperlink are compared together, including links an agent continues after indentation with cursor movement. Restarting
+  a hyperlink without an explicit id right where its previous piece ended, with the same target, continues that
+  hyperlink, across soft wraps too. A cursor-positioned continuation can keep its own link identity when the preceding
+  piece was already joined to an earlier anonymous piece on the previous row. The hover comparison stops at the boundary
+  between different link identities. An honest wrapped web address keeps the ordinary display when the pieces join, and
+  a lookalike is judged on the whole joined text. Repeated complete addresses that each independently match the target
+  keep the ordinary display. When neighboring rows each display a wrapped address and the join has no address shape, the
+  hovered address is compared on its own. If an adjacent continuation cannot be joined unambiguously within the bounds,
+  a piece that looks like a web address warns rather than counting as a match. The warning is judged when the hover
+  starts and need not follow later redraws of other rows while the pointer rests; the destination display stays
+  authoritative. The warning is an aid, not a guarantee: unlinked text around the hyperlink is outside the comparison, a
+  program that chooses its own line breaks can still split a lookalike into pieces that are not joined (separate
+  hyperlinks, say) and that do not look like web addresses on their own, and the ordinary display, which always names
+  the real host, is what remains. The hover display is the whole safeguard: it counts as disclosing the target only
+  while fully visible, inside the window and not covered by another Farhelm surface such as an approval card or
+  tunnel-error notice. A click whose hover is not fully visible is refused with an explanation; this also applies to
+  Cmd-click tunnel opens. Plain URLs printed as text need no such display, because what is shown is what opens, apart
+  from the remote-localhost tunnel hint below. Concealed terminal cells break a printed URL. They are also excluded from
+  a program hyperlink's visible label, its hover and click area, and its underline. The program hyperlink still owns
+  those cells, preventing a printed URL or file path from taking its place there. This rule concerns the terminal's
+  conceal attribute. Text drawn in the background color is outside its scope.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
