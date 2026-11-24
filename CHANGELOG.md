@@ -2,6 +2,74 @@
 
 Notable user-facing changes in each stable release of Farhelm. Release candidates and dev builds are not listed; their changes appear under the stable release that follows them. Entries are written for someone running Farhelm, not for someone reading its source, so internal mechanics are left out unless they change what you have to do. cargo-dist copies each release's section into its GitHub release; `releasing/AGENTS.md` describes the format and how a section is written.
 
+## v0.45.0 - 2026-11-24
+**DRAFT release notes - not yet finalized**
+
+### 🚀 Added
+
+- You can now register a custom agent type in the Settings dialog under Custom agents. This allows you to take an unsupported or in-house (e.g. non open source that Farhelm cannot support) agent and make it be supported directly in Farhelm. The very first version of this is minimal in nature and only supports basic passing of model and effort as strings and conversation tracking (so you start a session with a known id and get the 'restart' button). You have to configure the capabilities manually in the GUI and provide a custom binary/script that implements a contract. The contract should be easy to implement by pointing your agent to [the custom agents documentation](https://farhelm.io/docs/agents/custom-agents/). (#4723, #4727, #4731, #4732, #4733)
+- Starting in this release, in addition to automated update checking, there is an automated check for any urgent announcements from upstream (once per 12 hours currently). You can turn it off in settings. This is meant to allow rare announcements in case of e.g. critical bugs in the future. There has been no need so far to ever send such an announcement. This is baking the feature in ahead of time so that if it ever is needed, the mechanism is there. (#4749, #4753, #4759)
+
+### 🔄 Changed
+
+- Simplified Farhelm's permission modes - we now only have "guarded" and "yolo" and removed an arguably confusing "agent's own settings" permission mode. Any existing settings with that mode are now treated as yolo from an approval dialog perspective (conservative/safe behavior). If you don't know what this mode was, it's safe to ignore this change. (#4669, #4672, #4685)
+
+### 🔧 Fixes worth highlighting
+
+- Muse Code session tracking was not functioning due to environment variable scrubbing performed by Muse Code (likely a recent change). This should now be fixed. (#4696)
+- Automatic updating of remote hosts now works even for remote hosts that require 2FA or other interactive sign-in flow. (#4721, #4726)
+- Grok conversation tracking has been fixed. It has been broken at least for a while. It is now on mechanism less likely to break in the future. Codex has also been made a little more resilient to certain environments or potential changes in codex agent binary naming. (#4724, #4725, #4728)
+- Fixed some false positive triggers of a safety check that alerts you when a clickable visible URL/link actually points to a different link than what you see on screen. (#4737, #4738, #4739)
+
+<details>
+<summary>All changes</summary>
+
+#### 💥 Breaking
+
+- Clickable links printed by terminal programs now open only web addresses. Programs that used `file://` hyperlinks to offer downloads need to print the file path as plain text for Farhelm to offer it. (#4761)
+- JSON output from `farhelm agent hosts`, `sessions`, and `templates` now reports schema version 8. Scripts that check the version need to accept 8. Existing fields keep their shape. (#4755)
+
+#### 🚀 Added
+
+- You can register an agent under **Settings → Custom agents** and launch it from the desktop app, CLI, or a template. Custom agents run in YOLO mode and can resume on **Restart** when their wrapper supports resumption and reports the conversation ID. (#4723, #4727, #4731, #4733, #4752, #4758)
+- `farhelm custom-agent spec` prints the wrapper requirements for the installed version, including its change history. (#4732)
+- Inside a session, `farhelm agent agents` lists the built-in and registered custom agents and the launch options each accepts. It also supports `--json`. (#4755)
+- The desktop app checks for signed announcements on startup and every 12 hours while running. The notification bell opens pending announcements, and **Settings → Notifications** lets you turn off the check. (#4749, #4753, #4759)
+
+#### 🔄 Changed
+
+- Farhelm now treats saved agent sessions with unset permissions as YOLO when asking for approval. **Clone**, **Replace with**, and **Restart with** start with YOLO selected for these sessions. The host's confirmation setting still applies, and **Replace** offers a Guarded launch when the agent supports it. (#4669, #4672, #4685)
+- Desktop buttons and choice chips have softer corners and clearer labels. The session toolbar uses larger controls when it has room, and the terminal's drag-copy notice is easier to dismiss. (#4691, #4704, #4711, #4712)
+- A desktop update waiting for a restart stands out in the sidebar. The reminder repeats every 15 minutes while you use the app, with a steady indicator when Reduce Motion is on. (#4706, #4719, #4747)
+- Hovering a terminal hyperlink shows its full destination and warns when its text mentions a different web address. The preview highlights where a plainly different address diverges, and an unusually long link needs enough window space to show the preview before it can open. (#4764, #4765, #4766)
+- The CLI explains when an agent or launch option is unavailable. A recipe that creates a new sandbox or container now rejects `--conversation` instead of silently ignoring it. (#4752, #4758)
+
+#### 🔧 Fixed
+
+- Updating or uninstalling a remote Linux host gives its supervisor the time systemd allows to shut down cleanly. This helps on hosts where shutdown takes longer than usual. (#4654)
+- **What's new in Farhelm** displays the changes in a bulleted list again. (#4660)
+- Farhelm skips automatically trusting your home directory and its parent directories in Claude Code. If an earlier release already marked one of those directories trusted, you can remove the entry from Claude Code's settings. (#4664, #4667)
+- **Suspend** and **Resume** require Farhelm to identify the Tensorlake sandbox first. A failed setup that only reserved a name can no longer act on a different sandbox with that name. (#4670)
+- **Stop and suspend** reports a timeout and tells you when the operation may still be running. (#4668, #4671)
+- Settings keeps the last list of leftover Tensorlake sandboxes visible when a refresh fails and shows the refresh error above it. (#4675)
+- Codex gets a recipe's API endpoint credentials when Farhelm starts it, so changing the endpoint no longer rewrites Codex settings. **Restart** picks up a credential change, and launching `codex` directly in a terminal tab uses that shell's own settings. (#4679)
+- A remote host keeps its last delivered Claude and Codex launch credentials when Farhelm cannot read a saved recipe credential. Farhelm reports when it could not deliver a change to the host. (#4751)
+- The session launcher explains when a choice disappears before you select it and keeps your search text so you can choose another result. (#4684)
+- **Stop** and **Delete** approval cards identify shell sessions. The Delete card says which running programs approval lets Farhelm stop, including terminal tabs. (#4688)
+- On Wayland, pasting files from a file manager into a session terminal attaches the files. Copied web links still paste as text. (#4682)
+- The desktop app follows system Reduce Motion changes while it is open. On macOS it refreshes when the window regains focus, and on Linux it follows the preference supplied by the desktop portal. (#4687)
+- Reopening a session falls back to its main terminal if the last shell tab is unavailable. The tab stays visible, and selecting it shows the reason and offers **Reconnect**. (#4690, #4695)
+- **Restart** can resume conversations in Muse Code 1.4.24 again. (#4696)
+- Farhelm can recover a managed checkout by rebuilding a stuck repository cache. The first managed checkout of each repository after the upgrade downloads it again, even when the old cache was healthy. (#4697)
+- Removing a remote host closes its open SSH sign-in prompt. **Remove** and the final step of **Uninstall** can finish while a background check is waiting for sign-in. (#4714)
+- Automatic remote host updates continue after interactive SSH sign-in. Reconnecting or selecting **Retry** also gives a failed update another chance. (#4721, #4726)
+- Farhelm can track and resume Grok conversations when the launcher points to a versioned Grok executable. (#4724, #4725)
+- **Restart** can resume Codex conversations started with a renamed Codex executable. (#4728)
+- Terminal hyperlink warnings handle brackets, quotes, and concealed characters more reliably, and ordinary decoration around a matching address causes fewer false warnings. (#4737, #4738, #4739, #4746, #4748)
+- Farhelm opens only the visible part of a printed web address if the rest is too faint to read. (#4763)
+
+</details>
+
 ## v0.44.1 - 2026-11-22
 
 ### 🚀 Added
