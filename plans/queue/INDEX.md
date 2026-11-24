@@ -4,6 +4,6 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight a883f2] `dynamic-announcements.md` — Add a signed central announcements feed on get.farhelm.io with helm polling, bell notice, Settings toggle, and P2 brick test
 - [complete] `osc8-bracketed-url-warnings.md` — Restore terminal hyperlink mismatch warnings for nested bracketed and quoted URLs
-- [in-flight 4ad9da] `light-mode-upgrade-pill-pulse.md` — Make the light-mode pending-update pill reminder pulse visible and bold its arrow in both themes
+- [complete] `light-mode-upgrade-pill-pulse.md` — Make the light-mode pending-update pill reminder pulse visible and bold its arrow in both themes
 - [in-flight 8fa974] `preserve-creds-on-lookup-failure.md` — Preserve remote agent-credentials on SQLite lookup failure and name the affected agent
 - [in-flight 4d2847] `custom-agents-cli-visibility.md` — Add `farhelm agent agents` discovery, include custom agents in unknown-agent refusals, forbid `--conversation` with recipes, and list valid built-in efforts
