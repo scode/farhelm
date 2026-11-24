@@ -808,6 +808,14 @@ impl AgentRequestHandler for HelmAgentRequests {
                     Err(refused) => Err(refused),
                 }
             }
+            ParsedAgentVerb::Agents => {
+                crate::custom_agents::agent_listing(&state.store)
+                    .await
+                    .map(|agents| AgentReply::Agents {
+                        agents,
+                        caller_host_id: caller_entry_uuid,
+                    })
+            }
             ParsedAgentVerb::Templates => template_listing(&state, &caller_entry_uuid).await,
             ParsedAgentVerb::TemplateCreate {
                 name,
@@ -1186,6 +1194,7 @@ enum ParsedAgentVerb {
     },
     Hosts,
     Sessions,
+    Agents,
     Templates,
     OpenUrl {
         url: String,
@@ -1282,6 +1291,7 @@ impl ParsedAgentVerb {
             }
             AgentVerb::Hosts {} => Self::Hosts,
             AgentVerb::Sessions {} => Self::Sessions,
+            AgentVerb::Agents {} => Self::Agents,
             AgentVerb::Templates {} => Self::Templates,
             AgentVerb::OpenUrl { url } => Self::OpenUrl { url },
             AgentVerb::Prompt { session_id, prompt } => {
@@ -14904,8 +14914,9 @@ mod tests {
     /// rests on, so every verb family is checked, for both providers, and each
     /// refusal must happen before any card or any supervisor contact elsewhere.
     ///
-    /// Spec: listings show only the environment; spawn, create with no host
-    /// and create naming the environment create there; Delete of a sibling is
+    /// Spec: host and session listings show only the environment, while
+    /// agent discovery includes the helm's custom choices. Spawn, create with
+    /// no host and create naming the environment create there. Delete of a sibling is
     /// session-only (the row survives); every other host, template, clone and
     /// host verb is refused with the one scope sentence.
     #[farhelm_testtrace::test]
@@ -14915,6 +14926,22 @@ mod tests {
             farhelm_proto::ProviderKind::Podman,
         ] {
             let (h, local, remote) = environment_fleet().await;
+            let registration = crate::custom_agents::create(
+                axum::extract::State(h.state.clone()),
+                axum::Json(farhelm_proto::custom_agents::CustomAgent {
+                    id: "review-code".into(),
+                    display_name: "Review Code".into(),
+                    command: "review-code-wrapper".into(),
+                    supports_resumption: true,
+                    supports_reporting: false,
+                }),
+            )
+            .await;
+            assert_eq!(
+                registration.status(),
+                axum::http::StatusCode::CREATED,
+                "premise: the helm has a registered custom agent"
+            );
             let (client_side, peer) = tokio::io::duplex(64 * 1024);
             let seen = spawn_environment_responder(peer);
             let owned = owned_environment(
@@ -14957,6 +14984,28 @@ mod tests {
             assert_eq!(hosts.len(), 1, "{provider:?}: {hosts:?}");
             assert_eq!(hosts[0].name, own_name);
             assert!(hosts[0].current);
+            let AgentOutcome::Ok {
+                reply:
+                    AgentReply::Agents {
+                        agents,
+                        caller_host_id,
+                    },
+            } = handler.handle(origin, "asker", AgentVerb::Agents {}).await
+            else {
+                panic!("{provider:?}: a confined origin can discover agent choices")
+            };
+            assert_eq!(caller_host_id, hosts[0].id);
+            assert!(
+                agents.iter().any(|agent| agent.id == "codex"),
+                "{provider:?}: built-in choices are visible"
+            );
+            assert!(
+                agents.iter().any(|agent| {
+                    agent.id == "review-code"
+                        && agent.kind == farhelm_proto::AgentListingKind::Custom
+                }),
+                "{provider:?}: registered custom choices are visible"
+            );
             let AgentOutcome::Ok {
                 reply: AgentReply::Sessions { sessions, .. },
             } = handler

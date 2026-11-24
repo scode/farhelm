@@ -75,6 +75,26 @@ impl LaunchHarness {
         _ => panic!("the custom catalog marker must follow the built-in harnesses"),
     };
 
+    /// The product name for an agent type in listings and launch descriptions. The custom
+    /// catalog marker names the type only. A registered entry supplies its own display name.
+    pub const fn display_name(self) -> &'static str {
+        match self {
+            Self::Cursor => "Cursor",
+            Self::Codex => "Codex",
+            Self::Claude => "Claude Code",
+            Self::Muse => "Muse Code",
+            Self::Goose => "Goose",
+            Self::Pi => "Pi",
+            Self::Omp => "OMP",
+            Self::OpenCode => "OpenCode",
+            Self::Grok => "Grok",
+            Self::Antigravity => "Antigravity",
+            Self::Bash => "Bash",
+            Self::Zsh => "Zsh",
+            Self::Custom => "Custom agent",
+        }
+    }
+
     /// Custom launches resolve an ID in the helm's user catalog and use that entry's separate literal command.
     pub const fn uses_custom_catalog(self) -> bool {
         match self {

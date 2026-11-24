@@ -7350,15 +7350,19 @@ clap (derive), one multi-call binary named `farhelm`, clean subcommand grammar. 
   it can be refused with a message saying an agent cannot confirm a YOLO launch for the user. `--agent` took a profile
   name before profiles were removed and is now the agent type flag; `--profile-id <id>` is still parsed, hidden, only so
   it can be refused with a message naming the launch flags and `--template`.
-- `farhelm agent hosts|sessions|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same injected
-  credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and puts a
-  refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is usually a
-  model quoting its own shell output. The JSON form uses schema version 7, includes exact IDs, caller identity, and
-  completeness fields, and omits invocation arguments, credentials, resume templates, and provider configuration.
-  Version 7 makes session IDs and `caller.session_id` full entry-bound references, and host IDs and `caller_host_id`
-  canonical entry UUIDs. The supervisor still relays the same typed fields; the CLI formats caller identity from the
-  existing caller-host field and its bare credential. Version 6 added the templates listing. The templates listing
-  carries each template's fields except a command line or resume command, which appear only as `sets_command` and
+- `farhelm agent hosts|sessions|agents|templates [--json]` — the in-session ASKING CLI from SPEC.md, on the same
+  injected credential spawn uses. It prints an aligned table on stdout, `*` marking the asking session and its host, and
+  puts a refusal on stderr with a non-zero exit exactly as spawn does. Human output is a table because the reader is
+  usually a model quoting its own shell output. The JSON form uses schema version 8, includes exact IDs, caller
+  identity, and completeness fields, and omits invocation arguments, credentials, resume templates, and provider
+  configuration. Version 7 makes session IDs and `caller.session_id` full entry-bound references, and host IDs and
+  `caller_host_id` canonical entry UUIDs. The supervisor still relays the same typed fields; the CLI formats caller
+  identity from the existing caller-host field and its bare credential. Version 8 adds the agents listing. Protocol 90
+  adds its new relay verb and reply tags. The helm projects `LaunchHarness::BUILT_INS` followed by its catalog in ID
+  order into a dedicated `AgentListingEntry` without configured commands. Confined sessions get the same projection.
+  Model, effort and initial prompt support come from the selected type. For a custom agent, named starts use the
+  registration's resumption setting. Version 6 added the templates listing. The templates listing carries each
+  template's fields except a command line or resume command, which appear only as `sets_command` and
   `sets_resume_command` (in the table, `command (set)`), and names the host a template's install identity currently
   resolves to. Named templates show their effective `name_kind` explicitly in JSON, including `base` when the wire reply
   omits it; the table labels the quoted title as a base or fixed name. This additive discovery default does not change

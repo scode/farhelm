@@ -100,7 +100,8 @@ fn render(agent: &Command) -> String {
          Discover first, resolve the exact row, then act. Use hosts --json and sessions --json\n\
          when exact ids and completeness matter. A table's * marks this session or host; it is\n\
          context, never an implicit target.\n\
-         Discovery JSON uses schema_version 7. Its caller.session_id and every listed session\n\
+         Use farhelm agent agents to find built-in and registered custom IDs for --agent.\n\
+         Discovery JSON uses schema_version 8. Its caller.session_id and every listed session\n\
          id are full ids: a canonical lowercase host-entry UUID, a colon, then the session's\n\
          own id. Host ids are those entry UUIDs. Copy a full session id literally; do not\n\
          shorten it, split it at a colon, or rebuild it from a host name. Create, clone and\n\
@@ -259,7 +260,8 @@ fn render(agent: &Command) -> String {
          \n\
          In a sandbox or container session, you can act only within that sandbox or container:\n\
          hosts and sessions list only it, spawn and create (with no --host, or its own name)\n\
-         start sessions in it, and the lifecycle verbs reach only its sessions. Deleting\n\
+         start sessions in it, and the lifecycle verbs reach only its sessions. You can still run\n\
+         farhelm agent agents to find agent IDs. Deleting\n\
          another session there removes just that session. Other hosts, clone, --recipe, the\n\
          template verbs and the host verbs are refused; do not retry them.\n\
          \n\
@@ -269,6 +271,7 @@ fn render(agent: &Command) -> String {
          session (with no --host or --cwd) copies it into a new one. These always show the user\n\
          a card, whatever the host's settings, and a Tensorlake sandbox bills while it runs. They\n\
          take no --host or --idempotency-key; the folder is the new home, or --gh clones there.\n\
+         A recipe or recipe template that creates a new environment refuses --conversation.\n\
          Building a new environment can take many minutes after the user allows it: run these\n\
          with a tool timeout of at least 40 minutes, or in the background, and if the command\n\
          reports an unknown outcome, check farhelm agent sessions before trying again. Agents elsewhere cannot\n\

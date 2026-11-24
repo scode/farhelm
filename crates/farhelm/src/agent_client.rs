@@ -680,6 +680,7 @@ enum ReplyKind {
     UrlOpened,
     Hosts,
     Sessions,
+    Agents,
     Templates,
     Session,
     Restarted,
@@ -699,6 +700,7 @@ impl ReplyKind {
         match verb {
             farhelm_proto::AgentVerb::Hosts {} => ReplyKind::Hosts,
             farhelm_proto::AgentVerb::Sessions {} => ReplyKind::Sessions,
+            farhelm_proto::AgentVerb::Agents {} => ReplyKind::Agents,
             farhelm_proto::AgentVerb::Templates {} => ReplyKind::Templates,
             farhelm_proto::AgentVerb::OpenUrl { .. } => ReplyKind::UrlOpened,
             farhelm_proto::AgentVerb::Rename { .. } => ReplyKind::Session,
@@ -728,6 +730,7 @@ impl ReplyKind {
         match reply {
             AgentReply::Hosts { .. } => ReplyKind::Hosts,
             AgentReply::Sessions { .. } => ReplyKind::Sessions,
+            AgentReply::Agents { .. } => ReplyKind::Agents,
             AgentReply::Templates { .. } => ReplyKind::Templates,
             AgentReply::UrlOpened {} => ReplyKind::UrlOpened,
             AgentReply::Session { .. } => ReplyKind::Session,
@@ -754,6 +757,7 @@ impl ReplyKind {
         match self {
             ReplyKind::Hosts => "hosts listing",
             ReplyKind::Sessions => "sessions listing",
+            ReplyKind::Agents => "agents listing",
             ReplyKind::Templates => "templates listing",
             ReplyKind::UrlOpened => "opened link confirmation",
             ReplyKind::Session => "session row",

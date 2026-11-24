@@ -316,7 +316,7 @@ fn hosts_json_has_the_exact_discovery_envelope() {
     assert_eq!(
         value,
         serde_json::json!({
-            "schema_version": 7,
+            "schema_version": 8,
             "caller": {"session_id": "11111111-1111-4111-8111-111111111111:session-1", "host_id": "11111111-1111-4111-8111-111111111111"},
             "reply": {
                 "reply": "hosts",
@@ -381,7 +381,7 @@ fn sessions_json_has_the_exact_entry_bound_discovery_envelope() {
     assert_eq!(
         serde_json::from_slice::<serde_json::Value>(&output.stdout).expect("JSON envelope"),
         serde_json::json!({
-            "schema_version": 7,
+            "schema_version": 8,
             "caller": {"session_id": format!("{CALLER_ENTRY}:{SESSION}"), "host_id": CALLER_ENTRY},
             "reply": {
                 "reply": "sessions",
@@ -744,7 +744,7 @@ fn templates_json_and_table_list_what_each_template_sets() {
         assert_eq!(
             value,
             serde_json::json!({
-                "schema_version": 7,
+                "schema_version": 8,
                 "caller": {"session_id": "11111111-1111-4111-8111-111111111111:session-1", "host_id": "11111111-1111-4111-8111-111111111111"},
                 "reply": {
                     "reply": "templates",

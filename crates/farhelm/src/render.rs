@@ -10,7 +10,7 @@
 //! floor ([`safe_cell`]) and one size bound, rather than each output path
 //! deciding for itself what is safe to print.
 
-use farhelm_proto::AgentReply;
+use farhelm_proto::{AgentListingKind, AgentReply};
 
 /// The one-line warning a cut listing owes its reader, or `None` for a
 /// complete one.
@@ -43,7 +43,7 @@ pub(crate) fn truncation_notice(reply: &AgentReply) -> Option<String> {
 /// piece of information that has no other spelling — which row is the
 /// asking session, and which host it is on.
 ///
-/// Only ever called with the reply to `Hosts`, `Sessions` or `Templates` —
+/// Only ever called with the reply to `Hosts`, `Sessions`, `Agents` or `Templates` —
 /// the lifecycle and prompt verbs print their own one-line confirmation
 /// instead, and the two creating verbs print an id on stdout with their
 /// confirmation on stderr. A non-listing reply is an error here rather than
@@ -120,6 +120,40 @@ pub(crate) fn render_agent_reply(reply: &AgentReply) -> anyhow::Result<String> {
             // make discovery print an ID no acting verb could use. The helm's
             // 77-byte full-ID cap bounds the extra padding across the table.
             Ok(aligned(&rows, &[1]))
+        }
+        AgentReply::Agents { agents, .. } => {
+            let mut rows = vec![
+                [
+                    "ID",
+                    "KIND",
+                    "NAME",
+                    "--conversation",
+                    "--prompt",
+                    "--model",
+                    "--effort",
+                ]
+                .map(str::to_owned)
+                .to_vec(),
+            ];
+            let offered = |supports| if supports { "yes".into() } else { "no".into() };
+            rows.extend(agents.iter().map(|agent| {
+                let kind = match agent.kind {
+                    AgentListingKind::BuiltIn => "built-in",
+                    AgentListingKind::Custom => "custom",
+                };
+                vec![
+                    agent.id.clone(),
+                    kind.into(),
+                    agent.display_name.clone(),
+                    offered(agent.supports_named_conversation),
+                    offered(agent.supports_initial_prompt),
+                    offered(agent.supports_model),
+                    offered(agent.supports_effort),
+                ]
+            }));
+            // The whole ID is the exact --agent selector. Display names use the usual
+            // escaping and width limit so they cannot change the table's structure.
+            Ok(aligned(&rows, &[0]))
         }
         AgentReply::Templates { templates, .. } => {
             let mut rows = vec![vec!["NAME".to_string(), "SETS".to_string()]];

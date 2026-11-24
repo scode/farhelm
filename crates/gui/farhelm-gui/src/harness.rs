@@ -73,23 +73,8 @@ pub(crate) const fn kind_glyph(kind: AgentKind) -> HarnessGlyph {
 /// An agent type's name as a row's agent and permission description says it (the old `harness_name`). It is the
 /// product's own name, so two differ from the launcher's chip labels and the menu header's `AgentKind::display_name`:
 /// "Claude Code" and "Muse Code", where those say "Claude" and "Muse".
-#[warn(clippy::wildcard_enum_match_arm)]
 pub(crate) const fn name(harness: LaunchHarness) -> &'static str {
-    match harness {
-        LaunchHarness::Codex => "Codex",
-        LaunchHarness::Claude => "Claude Code",
-        LaunchHarness::Antigravity => "Antigravity",
-        LaunchHarness::Muse => "Muse Code",
-        LaunchHarness::Cursor => "Cursor",
-        LaunchHarness::Goose => "Goose",
-        LaunchHarness::Pi => "Pi",
-        LaunchHarness::Omp => "OMP",
-        LaunchHarness::Grok => "Grok",
-        LaunchHarness::OpenCode => "OpenCode",
-        LaunchHarness::Bash => "Bash",
-        LaunchHarness::Zsh => "Zsh",
-        LaunchHarness::Custom => "Custom agent",
-    }
+    harness.display_name()
 }
 
 /// Settings navigation IDs also identify the agent's search results. They stay stable when display names change.

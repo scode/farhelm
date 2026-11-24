@@ -258,7 +258,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// remembered launcher defaults never travel here: the helm resolves them
 /// into a concrete launch bundle before it sends a create.
 ///
-/// `protocol_version_is_pinned_at_89` (renamed at every bump) and
+/// `protocol_version_is_pinned_at_90` (renamed at every bump) and
 /// `unknown_control_message_tag_fails_decode` below, plus the loop-level
 /// teardown test in the farhelm crate's e2e suite, pin the number and the
 /// fact that an unknown message tag is fatal rather than ignored.
@@ -269,7 +269,7 @@ pub const MAX_SESSION_ID_BYTES: usize = 1024;
 /// future bump records its reason in the commit that makes it, and in
 /// SPEC_impl.md when it establishes a wire contract later readers need; this
 /// comment states only the rules in force.
-pub const PROTOCOL_VERSION: u32 = 89;
+pub const PROTOCOL_VERSION: u32 = 90;
 
 /// Bound pending and active recipe tunnel sockets per supervisor and per helm.
 pub const MAX_TCP_TUNNEL_CONNECTIONS: usize = 64;
@@ -1971,6 +1971,9 @@ pub enum AgentVerb {
     /// for a page walk, and the honest shape when the fleet outgrows one
     /// answer is a filter on this verb rather than paging state.
     Sessions {},
+    /// Built-in types and registered custom IDs that an agent can pass as `--agent`.
+    /// The reply carries capabilities and display names, with executable commands omitted.
+    Agents {},
     /// Every launch template the helm holds, by name, with the fields each
     /// sets. Answered with [`AgentReply::Templates`], which withholds the
     /// text of a command line or resume command (SPEC.md: "listed as set
@@ -2251,7 +2254,7 @@ impl AgentVerb {
     /// the whole point of centralizing it.
     pub fn is_mutating(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} | AgentVerb::OpenUrl { .. } => false,
+            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Agents {} | AgentVerb::Templates {} | AgentVerb::OpenUrl { .. } => false,
             // The creating verbs sit on this side for a stronger reason
             // than the lifecycle four: what they leave behind is a session
             // that did not exist, running an agent process on some host. A
@@ -2296,7 +2299,10 @@ impl AgentVerb {
     /// Exhaustive for the reason `is_mutating` is.
     pub fn may_wait_for_user(&self) -> bool {
         match self {
-            AgentVerb::Hosts {} | AgentVerb::Sessions {} | AgentVerb::Templates {} => false,
+            AgentVerb::Hosts {}
+            | AgentVerb::Sessions {}
+            | AgentVerb::Agents {}
+            | AgentVerb::Templates {} => false,
             AgentVerb::Rename { .. }
             | AgentVerb::Stop { .. }
             | AgentVerb::Prompt { .. }
@@ -2336,6 +2342,7 @@ impl AgentVerb {
             | AgentVerb::Clone { .. } => true,
             AgentVerb::Hosts {}
             | AgentVerb::Sessions {}
+            | AgentVerb::Agents {}
             | AgentVerb::Templates {}
             | AgentVerb::OpenUrl { .. }
             | AgentVerb::Rename { .. }
@@ -2374,6 +2381,31 @@ pub struct SpawnPlacement {
     /// accepts that a compromised supervisor could misreport it).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub inherited_launch: Option<Box<SessionLaunch>>,
+}
+
+/// A choice in [`AgentReply::Agents`]. This projection carries the ID an agent can
+/// pass as `--agent` and omits the configured executable for a custom registration.
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct AgentListingEntry {
+    pub id: String,
+    pub kind: AgentListingKind,
+    pub display_name: String,
+    /// Whether a launch can take a one-time `--conversation` selector. The
+    /// running session's own readiness for Restart is reported separately.
+    pub supports_named_conversation: bool,
+    /// Whether a fresh launch can take an initial prompt.
+    pub supports_initial_prompt: bool,
+    pub supports_model: bool,
+    pub supports_effort: bool,
+}
+
+/// Where an agent ID comes from. Built-in IDs come from the release and custom IDs
+/// come from the helm's registered integrations.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentListingKind {
+    BuiltIn,
+    Custom,
 }
 
 /// One launch template as an agent sees it: what [`AgentVerb::Templates`]
@@ -2484,6 +2516,12 @@ pub enum AgentReply {
         /// The verb promises the fleet; this is how it admits when it did
         /// not deliver it.
         truncated: bool,
+    },
+    /// Answers `Agents` in built-in order, followed by custom entries ordered by ID.
+    Agents {
+        agents: Vec<AgentListingEntry>,
+        /// Helm-assigned entry UUID of the authenticated asking session.
+        caller_host_id: String,
     },
     /// Answers `Templates`, in name order.
     Templates {
@@ -6047,6 +6085,7 @@ mod tests {
     /// file. An older supervisor would refuse a launch after the helm installed that descriptor.
     /// Version 88 adds custom agent launches and conversation reporting.
     /// Version 89 requires the agent relay to honor a named conversation on Create. An older helm would ignore it.
+    /// Version 90 adds the Agents verb and reply. Older relays cannot decode their tags.
     /// Pinning the value here makes an accidental re-bump (or a forgotten
     /// one, if a later change needed it) a loud test failure rather than
     /// a silent drift discovered only by two builds refusing to talk to each other.
@@ -6057,8 +6096,45 @@ mod tests {
     /// an edit per bump; this test and the literal-30 skew check below are
     /// the places the number itself is asserted.
     #[farhelm_testtrace::test]
-    fn protocol_version_is_pinned_at_89() {
-        assert_eq!(PROTOCOL_VERSION, 89);
+    fn protocol_version_is_pinned_at_90() {
+        assert_eq!(PROTOCOL_VERSION, 90);
+    }
+
+    /// Discovery is a read-only relay with a fixed reply tag and only the fields needed to choose
+    /// an agent. An accidental command field would disclose a private registration to sessions.
+    #[farhelm_testtrace::test]
+    fn agent_discovery_relays_choices_without_commands_or_approval() {
+        let verb = AgentVerb::Agents {};
+        assert!(!verb.is_mutating());
+        assert!(!verb.may_wait_for_user());
+        assert!(!verb.may_launch_environment());
+        assert_eq!(
+            serde_json::to_value(verb).unwrap(),
+            serde_json::json!({"verb": "agents"})
+        );
+        let reply = AgentReply::Agents {
+            agents: vec![AgentListingEntry {
+                id: "review-code".into(),
+                kind: AgentListingKind::Custom,
+                display_name: "Review Code".into(),
+                supports_named_conversation: false,
+                supports_initial_prompt: false,
+                supports_model: true,
+                supports_effort: true,
+            }],
+            caller_host_id: "fixture-entry".into(),
+        };
+        let wire = serde_json::json!({
+            "reply": "agents",
+            "caller_host_id": "fixture-entry",
+            "agents": [{
+                "id": "review-code", "kind": "custom", "display_name": "Review Code",
+                "supports_named_conversation": false, "supports_initial_prompt": false,
+                "supports_model": true, "supports_effort": true,
+            }]
+        });
+        assert_eq!(serde_json::to_value(&reply).unwrap(), wire);
+        assert_eq!(serde_json::from_value::<AgentReply>(wire).unwrap(), reply);
     }
 
     /// Spec: `farhelm agent create --recipe` travels as its own verb tag,

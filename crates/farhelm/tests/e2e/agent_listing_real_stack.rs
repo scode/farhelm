@@ -622,6 +622,59 @@ while read -r ignored; do :; done
     let token = session_token(supervisor.state.path(), &asker.id).await;
     let socket = supervisor.state.path().join("supervisor.sock");
 
+    // A registered executable is useful to discover by ID. Fetch both listings through the
+    // real CLI relay and make sure neither exposes the registration's command path.
+    let visible = agent_command_args(&["agents"], &asker.id, &token, &socket).await;
+    assert!(
+        visible
+            .lines()
+            .any(|line| line.starts_with("acme-code ") && line.contains("Acme Code"))
+    );
+    assert!(!visible.contains(command.to_str().unwrap()));
+    let json = agent_command_args(&["agents", "--json"], &asker.id, &token, &socket).await;
+    let discovery: serde_json::Value = serde_json::from_str(&json).unwrap();
+    let asking: farhelm_proto::SessionRef = asker.id.parse().unwrap();
+    assert_eq!(discovery["schema_version"], 8);
+    assert_eq!(discovery["caller"]["session_id"], asker.id);
+    assert_eq!(discovery["caller"]["host_id"], asking.entry_uuid());
+    assert_eq!(discovery["reply"]["caller_host_id"], asking.entry_uuid());
+    assert_eq!(discovery["reply"]["reply"], "agents");
+    let agents = discovery["reply"]["agents"].as_array().unwrap();
+    let ids: Vec<_> = agents
+        .iter()
+        .map(|agent| agent["id"].as_str().unwrap())
+        .collect();
+    assert_eq!(
+        ids,
+        [
+            "cursor",
+            "codex",
+            "claude",
+            "muse",
+            "goose",
+            "pi",
+            "omp",
+            "open_code",
+            "grok",
+            "antigravity",
+            "bash",
+            "zsh",
+            "acme-code"
+        ]
+    );
+    assert!(agents[..12].iter().all(|agent| agent["kind"] == "built_in"));
+    assert_eq!(agents[1]["supports_named_conversation"], true);
+    assert_eq!(agents[1]["supports_initial_prompt"], true);
+    assert_eq!(
+        agents[12],
+        serde_json::json!({
+            "id": "acme-code", "kind": "custom", "display_name": "Acme Code",
+            "supports_named_conversation": true, "supports_initial_prompt": false,
+            "supports_model": true, "supports_effort": true,
+        })
+    );
+    assert!(!json.contains(command.to_str().unwrap()));
+
     let response = client.put(format!("{}/api/templates/acme", helm.base)).json(&serde_json::json!({
         "kind": "agent", "agent": "custom", "custom_agent": "acme-code", "model": "test-model", "effort": "deep_work",
     })).send().await.unwrap();
@@ -962,7 +1015,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     let json = agent_command_args(&["sessions", "--json"], &session_id, &token, &socket).await;
     let envelope: serde_json::Value = serde_json::from_str(&json).expect("discovery JSON envelope");
     let reference: farhelm_proto::SessionRef = session_id.parse().expect("created full reference");
-    assert_eq!(envelope["schema_version"], 7);
+    assert_eq!(envelope["schema_version"], 8);
     assert_eq!(envelope["caller"]["session_id"], session_id);
     assert_eq!(envelope["caller"]["host_id"], reference.entry_uuid());
     assert_eq!(envelope["reply"]["caller_host_id"], reference.entry_uuid());
@@ -976,7 +1029,7 @@ async fn the_shipped_agent_commands_are_answered_by_the_real_helm() {
     assert_eq!(own["host_id"], reference.entry_uuid());
     let hosts = agent_command_args(&["hosts", "--json"], &session_id, &token, &socket).await;
     let hosts: serde_json::Value = serde_json::from_str(&hosts).expect("hosts JSON envelope");
-    assert_eq!(hosts["schema_version"], 7);
+    assert_eq!(hosts["schema_version"], 8);
     let own_host = hosts["reply"]["hosts"]
         .as_array()
         .unwrap()
