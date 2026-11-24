@@ -293,8 +293,10 @@ impl GridModel {
     /// Every visible OSC 8 stretch on this row precedes plain URLs. All OSC targets keep ownership of their cells.
     /// Text detection walks only the pinned 2048-character neighboring window and preserves UTF-16 ownership across
     /// soft wraps.
-    /// Concealed cells break a printed URL: a plain click opens its address without showing it first, so it may only
-    /// open what the terminal actually draws.
+    /// Unseen cells break a printed URL: concealed text, and text drawn too close to its background to read
+    /// ([`crate::colors::unseen`]). A plain click opens the address without showing it first, so it may only open what
+    /// the user can actually see. The URL simply ends before such a cell, as it would before a real space; its
+    /// visible part still links. Program hyperlinks still read their label from concealment alone here.
     pub fn row_links(&self, line: u64) -> Vec<TerminalLink> {
         let Some((cols, row)) = self.selection_line(line) else {
             return Vec::new();

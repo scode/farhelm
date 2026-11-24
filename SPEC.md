@@ -3609,8 +3609,11 @@ whatever the agent renders is what you see. There is no composer, no message abs
   display, because what is shown is what opens, apart from the remote-localhost tunnel hint below. Concealed terminal
   cells break a printed URL. They are also excluded from a program hyperlink's visible label, its hover and click area,
   and its underline. The program hyperlink still owns those cells, preventing a printed URL or file path from taking its
-  place there. This rule concerns the terminal's conceal attribute. Text drawn in the background color is outside its
-  scope.
+  place there. Hidden text, too close to its background color to read, also breaks a printed URL, exactly as concealed
+  text does: a URL ends where the readable text does. Text is hidden when it has a character other than whitespace, a
+  format character or a combining mark, and its color contrasts with its background at less than 1.35:1, judged as
+  Farhelm draws it (after reverse video, bold, dim and the program's own color changes). A program hyperlink's label,
+  hover, click area and underline still include hidden text.
 
 - In the Mac app, a loopback link in a remote session's terminal offers Cmd-click to tunnel and open it in the browser.
   Its hover names the host and port, explains that a plain click still opens on the Mac, and preserves any OSC hyperlink
