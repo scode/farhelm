@@ -99,9 +99,10 @@ was saved but could not be opened. See the
 
 Paths can start with `/` or `~/`, contain a slash, or end in a file extension, such as `report.pdf`. A relative path uses
 the directory the session started in; it can miss after a shell changes directory. A path that a program breaks onto
-the next line near the terminal's right edge works from either half. Programs can also print file links
-under their own text. Directories and files over 100 MB cannot be downloaded. Check the host and path before clicking:
-an agent's path can name any file its account can read on that host.
+the next line near the terminal's right edge works from either half. A link a program prints under text of its own
+does nothing unless it goes to a web address, so a `file://` link, such as `ls --hyperlink` prints, offers no download;
+print the path itself instead. Directories and files over 100 MB cannot be downloaded. Check the host and path before
+clicking: an agent's path can name any file its account can read on that host.
 
 The terminal keeps at least the last 10,000 lines for scrolling back with the wheel, the scrollbar, or Shift+PageUp and
 Shift+PageDown; typing returns it to the live screen. How much of that history survives a restart is in

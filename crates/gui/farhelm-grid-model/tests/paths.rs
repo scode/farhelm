@@ -1,6 +1,8 @@
-//! Printed-path and `file://` recognition, ported from the old web client's `terminal-files.test.js` at reference
-//! commit 24bc0580, whose detection cases are the oracle here. Each test names the old case it replaces; the old
-//! cases about hovers, transfers and notices are not detection and are ported with those features.
+//! Printed-path recognition, ported from the old web client's `terminal-files.test.js` at reference commit 24bc0580,
+//! whose detection cases are the oracle here. Each test names the old case it replaces; the old cases about hovers,
+//! transfers and notices are not detection and are ported with those features. The old client also made a program's
+//! `file://` hyperlink a file link; here no hyperlink names a file, and a hyperlink's cells are never part of a
+//! printed path, which the tests at the end pin.
 
 #![allow(
     clippy::unwrap_used,
@@ -115,8 +117,10 @@ fn paths(model: &GridModel, line: u64) -> Vec<String> {
         .collect()
 }
 
-/// Conceal removes a program hyperlink's hit range without giving the cells back to printed paths. The
-/// same concealed text without an OSC 8 tag still follows the ordinary file-path rule.
+/// Conceal removes a program hyperlink's hit range without giving the cells back to printed paths: otherwise hidden
+/// text a program tagged with one target could be offered as a download of another file. The same concealed text
+/// without an OSC 8 tag still follows the ordinary file-path rule. Specified: concealed untagged `src/example.rs` is a
+/// path; tagged, it is neither a hyperlink hit nor a path, from the recognizer or the hit test.
 #[test]
 fn a_concealed_program_link_keeps_ownership_over_a_printed_path() {
     let label = "src/example.rs";
@@ -133,10 +137,9 @@ fn a_concealed_program_link_keeps_ownership_over_a_printed_path() {
         vec![(width, json!({"w":false,"r":[[0,width,label,concealed,0]]}))],
         vec![json!(["tag", "file:///work/other.rs"])],
     );
-    assert_eq!(
-        paths(&tagged, 0),
-        [label],
-        "the path recognizer still sees the text"
+    assert!(
+        paths(&tagged, 0).is_empty(),
+        "a hyperlink's cells are never a printed path"
     );
     assert!(
         tagged.link_at(position).is_none(),
@@ -266,48 +269,31 @@ fn hyperlink(uri: &str) -> TerminalLink {
     link
 }
 
-/// Replaces "OSC allows web unchanged and decoded file paths only". The terminal passes every OSC 8 scheme through,
-/// so the program's target must never reach an opener unchecked: web targets stay web (and never become files), a
-/// `file://` target becomes its percent-decoded path with the authority ignored and dot segments kept for the host to
-/// resolve, and everything else, a query or fragment, a decoded control character or a broken escape, is nothing.
-/// Each target is a real hyperlink's, read through [`TerminalLink::file_path`].
+/// Replaces "OSC allows web unchanged and decoded file paths only", whose file half SPEC.md withdrew: a program's
+/// hyperlink that is not a web address is inert, `file://` included, so its target never reaches a file check or an
+/// opener. Specified: a web target stays web and names no file; every other target, the `file://` ones the old client
+/// decoded to a path among them, names no file and is no web target either. Each target is a real hyperlink's, read
+/// through [`TerminalLink::file_path`].
 #[test]
-fn program_hyperlinks_give_decoded_absolute_file_paths_only() {
+fn program_hyperlinks_name_no_file_whatever_their_scheme() {
     assert!(web_target("https://example.test/x", false).is_some());
     assert_eq!(hyperlink("https://example.test/x").file_path(), None);
-    for (uri, path) in [
-        (
-            "file://another-host/tmp/my%20report.pdf",
-            "/tmp/my report.pdf",
-        ),
-        (
-            "file:///work/link/../report.pdf",
-            "/work/link/../report.pdf",
-        ),
-        (
-            "file:///work/link/%2e%2e/report.pdf",
-            "/work/link/../report.pdf",
-        ),
-    ] {
-        assert_eq!(hyperlink(uri).file_path().as_deref(), Some(path), "{uri}");
-        assert!(web_target(uri, false).is_none(), "{uri}");
-    }
     for uri in [
+        "file://another-host/tmp/my%20report.pdf",
+        "file:///work/link/../report.pdf",
+        "file:///work/report.pdf",
+        "file://localhost/work/report.pdf",
         "javascript:alert(1)",
         "data:text/html,<script>",
         "ftp://host/a",
+        "ssh://build-box/work",
         "file://host?next=/tmp/report.pdf",
-        "file://host#/tmp/report.pdf",
-        "file://?next=/tmp/report.pdf",
-        "file://#/tmp/report.pdf",
-        "file:///a?",
-        "file:///a#",
         "file:///a%00b",
-        "file:///a?x",
-        "file:///a#x",
         "file:///bad%",
     ] {
-        assert_eq!(hyperlink(uri).file_path(), None, "{uri}");
+        let link = hyperlink(uri);
+        assert_eq!(link.file_path(), None, "{uri}");
+        assert!(web_target(&link.uri, false).is_none(), "{uri}");
     }
 }
 
@@ -614,8 +600,9 @@ fn the_detector_reaches_129_rows_and_8192_units_of_a_wrapped_line() {
 
 /// The old client asked its links in order, program hyperlinks, printed web addresses, then paths, and the first one
 /// covering a cell won: a path never replaces a program's explicit target with its visible label. A path link's
-/// target is the printed path and never a URL, so it cannot reach the browser opener, while a `file://` hyperlink
-/// names its file through the same [`TerminalLink::file_path`]. The existing lookups return no paths.
+/// target is the printed path and never a URL, so it cannot reach the browser opener, and a `file://` hyperlink names
+/// no file through the same [`TerminalLink::file_path`]. The existing lookups return no paths, and the path lookup
+/// returns none over the hyperlink's cells.
 #[test]
 fn hyperlinks_and_web_addresses_own_their_cells_and_a_path_never_opens_a_browser() {
     let text = "/tmp/x.txt https://h.test/a.txt /srv/y.txt";
@@ -628,7 +615,11 @@ fn hyperlinks_and_web_addresses_own_their_cells_and_a_path_never_opens_a_browser
     );
     let hyperlink = model.link_at(Position { line: 0, col: 2 }).unwrap();
     assert!(matches!(hyperlink.kind, LinkKind::Osc { .. }));
-    assert_eq!(hyperlink.file_path().as_deref(), Some("/tmp/x.txt"));
+    assert_eq!(
+        hyperlink.file_path(),
+        None,
+        "an inert hyperlink names no file"
+    );
     assert_eq!(model.path_link_at(Position { line: 0, col: 2 }), None);
     assert_eq!(model.path_link_at(Position { line: 0, col: 15 }), None);
     let path = model.path_link_at(Position { line: 0, col: 35 }).unwrap();
@@ -642,5 +633,164 @@ fn hyperlinks_and_web_addresses_own_their_cells_and_a_path_never_opens_a_browser
             .iter()
             .all(|link| link.kind != LinkKind::Path)
     );
-    assert_eq!(paths(&model, 0), ["/tmp/x.txt", "/srv/y.txt"]);
+    assert_eq!(paths(&model, 0), ["/srv/y.txt"]);
+}
+
+/// A row of runs `(col, width, text, hyperlinked)`, the hyperlinked ones all hyperlink `0` of their model's table.
+fn tagged_row(wraps: bool, runs: &[(u16, u16, &str, bool)]) -> Value {
+    let runs: Vec<Value> = runs
+        .iter()
+        .map(|&(col, width, text, tagged)| {
+            if tagged {
+                json!([col, width, text, PLAIN, 0])
+            } else {
+                json!([col, width, text, PLAIN])
+            }
+        })
+        .collect();
+    json!({"w":wraps,"r":runs})
+}
+
+/// The paths touching each of `rows` lines.
+fn paths_by_line(model: &GridModel, rows: u64) -> Vec<Vec<String>> {
+    (0..rows).map(|line| paths(model, line)).collect()
+}
+
+/// SPEC.md: a printed path never includes a cell a program's hyperlink owns. Plain text right before an inert
+/// hyperlink must not borrow its label: `/tmp/` printed before a `file://` hyperlink labelled `report.pdf` would
+/// otherwise offer `/tmp/report.pdf`, a file the program named only through the hyperlink it is no longer allowed to
+/// act on. Specified: with the label on the same row, across a soft wrap, or as a cut path's continuation, no path
+/// includes the label, from any cell; without the tag (the premise), the same text is that one path. A cut that would
+/// take a hyperlink's cells is refused before cuts are weighed against fragments, so the plain head row stays the
+/// path it is on its own.
+#[test]
+fn plain_text_before_a_hyperlink_never_borrows_its_label_as_a_path() {
+    let link = || vec![json!(["id", "file:///tmp/report.pdf"])];
+    for tagged in [false, true] {
+        let same_row = linked_lines(
+            vec![(
+                15,
+                tagged_row(
+                    false,
+                    &[(0, 5, "/tmp/", false), (5, 10, "report.pdf", tagged)],
+                ),
+            )],
+            link(),
+        );
+        let soft = linked_lines(
+            vec![
+                (5, tagged_row(true, &[(0, 5, "/tmp/", false)])),
+                (10, tagged_row(false, &[(0, 10, "report.pdf", tagged)])),
+            ],
+            link(),
+        );
+        if tagged {
+            assert!(paths(&same_row, 0).is_empty(), "same row");
+            assert!(
+                paths_by_line(&soft, 2).iter().all(Vec::is_empty),
+                "soft wrap"
+            );
+            for col in 0..15 {
+                assert_eq!(
+                    same_row.path_link_at(Position { line: 0, col }),
+                    None,
+                    "col {col}"
+                );
+            }
+        } else {
+            assert_eq!(paths(&same_row, 0), ["/tmp/report.pdf"], "the premise");
+            assert_eq!(
+                paths_by_line(&soft, 2),
+                [["/tmp/report.pdf"]; 2],
+                "the premise"
+            );
+        }
+    }
+    // A program break: the head fits the cut rule (four spare columns, a four-column tail, so the tail could not have
+    // fit with a margin to spare), which the untagged premise shows by joining.
+    for tagged in [false, true] {
+        let cut = linked_lines(
+            vec![
+                ascii("/tmp/head-", 14, false),
+                (4, tagged_row(false, &[(0, 4, "x.rs", tagged)])),
+            ],
+            link(),
+        );
+        let expected: [&[&str]; 2] = if tagged {
+            [&["/tmp/head-"], &[]]
+        } else {
+            [&["/tmp/head-x.rs"], &["/tmp/head-x.rs"]]
+        };
+        assert_eq!(paths_by_line(&cut, 2), expected, "tagged={tagged}");
+    }
+}
+
+/// A cut path is joined across the padding after its head and the indentation before its tail, which are blanks a
+/// TUI left. A hyperlink's space is the program's text, not such a blank (SPEC.md: a hyperlink's cell never counts as
+/// padding when a cut path is joined), so a join that skipped it would build a path across a hyperlink. Specified:
+/// a head `/tmp/head-` with four blank columns after it joins its tail `x.rs` (the premise), and with those four
+/// columns a hyperlink's spaces it does not; a tail indented by two blank columns joins, and indented by a
+/// hyperlink's two spaces it does not. Each refusal leaves both rows' own paths.
+#[test]
+fn a_hyperlinks_space_is_never_padding_or_indentation_for_a_cut() {
+    let link = || vec![json!(["id", "file:///tmp/head-x.rs"])];
+    for tagged in [false, true] {
+        let padded = linked_lines(
+            vec![
+                (
+                    14,
+                    tagged_row(
+                        false,
+                        &[(0, 10, "/tmp/head-", false), (10, 4, "    ", tagged)],
+                    ),
+                ),
+                ascii("x.rs", 0, false),
+            ],
+            link(),
+        );
+        let indented = linked_lines(
+            vec![
+                ascii("/tmp/head-", 16, false),
+                (
+                    6,
+                    tagged_row(false, &[(0, 2, "  ", tagged), (2, 4, "x.rs", false)]),
+                ),
+            ],
+            link(),
+        );
+        for (name, model) in [("padding", padded), ("indentation", indented)] {
+            let expected: [&[&str]; 2] = if tagged {
+                [&["/tmp/head-"], &["x.rs"]]
+            } else {
+                [&["/tmp/head-x.rs"], &["/tmp/head-x.rs"]]
+            };
+            assert_eq!(
+                paths_by_line(&model, 2),
+                expected,
+                "{name}, tagged={tagged}"
+            );
+        }
+    }
+}
+
+/// The program-cut exception joins one isolated pair of rows, never a chain: of three rows that could each be cut,
+/// a two-row join would offer a piece of a longer path, resolved against the session's directory. Refusing a cut
+/// because a hyperlink owns its cells must not make the chain look shorter. Specified: with rows `/srv/`, `data/` and
+/// `file.txt`, each pair meeting the cut rule, nothing is joined, and each row keeps only its own path, whether or not
+/// `/srv/` is a hyperlink; with it a hyperlink, `/srv/` itself is no path and `data/file.txt` is offered from no row.
+#[test]
+fn a_cut_refused_for_a_hyperlink_still_makes_its_rows_a_chain() {
+    for tagged in [false, true] {
+        let model = linked_lines(
+            vec![
+                (9, tagged_row(false, &[(0, 5, "/srv/", tagged)])),
+                ascii("data/", 9, false),
+                ascii("file.txt", 0, false),
+            ],
+            vec![json!(["id", "file:///srv/data/file.txt"])],
+        );
+        let head: &[&str] = if tagged { &[] } else { &["/srv/"] };
+        let expected: [&[&str]; 3] = [head, &["data/"], &["file.txt"]];
+        assert_eq!(paths_by_line(&model, 3), expected, "tagged={tagged}");
+    }
 }

@@ -28,8 +28,9 @@ static URLS: LazyLock<Regex> = LazyLock::new(|| {
 /// must never replace a program's explicit target with its visible label.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum LinkKind {
-    /// A program's OSC 8 hyperlink, with `uri` its target as sent: a web address, a `file://` target
-    /// (`TerminalLink::file_path`), or an inert other scheme.
+    /// A program's OSC 8 hyperlink, with `uri` its target as sent. Only a web address ([`web_target`]) is ever
+    /// acted on; the terminal treats every other scheme, `file://` included, as inert, though the link still owns
+    /// its cells here.
     Osc { id: String },
     /// A web address printed as text, with `uri` the matched text.
     Text,
@@ -275,6 +276,16 @@ impl GridRow {
         self.runs
             .iter()
             .any(|run| run.link.is_some() && run.col < to && run.col + run.width > from)
+    }
+
+    /// [`GridRow::has_osc_link`] for the one cell at `col`, found by binary search over the protocol's sorted,
+    /// nonoverlapping runs: printed-path recognition asks it for every cell it reads, and a linear scan per cell
+    /// would make a long wrapped line quadratic.
+    pub(crate) fn owns_cell(&self, col: u16) -> bool {
+        let index = self.runs.partition_point(|run| run.col + run.width <= col);
+        self.runs
+            .get(index)
+            .is_some_and(|run| run.link.is_some() && run.col <= col)
     }
 }
 

@@ -1897,12 +1897,6 @@ consequences.
   resumption disabled (or is deleted), the More options disclosure is locked open with "A setting here is required or
   needs attention", yet shows neither the conversation field nor any error inside it.
 
-- [`trailing-printed-file-paths-consume-adjacent-osc8-cells.md`](trailing-printed-file-paths-consume-adjacent-osc8-cells.md)
-  — When a program hyperlink (including one whose cells are concealed) sits immediately beside plain terminal text with
-  no space between them — on the same row, across a soft wrap, or on the second row of a hard-cut path — hovering the
-  plain text can turn the combined text into a clickable file path that incorporates the hyperlink's hidden text and
-  underlines across the hyperlink's cells, even though the program hyperlink is supposed to own those cells.
-
 - [`trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md`](trailing-radio-group-chip-flex-none-overflows-long-custom-agent-name.md)
   — A registered custom agent with a long display name produces a chip in the session launcher's Custom group that
   cannot shrink or ellipsize to the dialog width, overflowing and getting clipped at the right edge of the launcher.

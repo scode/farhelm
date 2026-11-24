@@ -1,25 +1,26 @@
-//! File links in a session terminal: hovering a file path a program printed, or a program's `file://` hyperlink,
-//! checks it on the session's host and shows the host's answer before any click may transfer the file (SPEC.md,
-//! "Terminal experience", the file-path bullet; the old app's `FileLinks` in terminal-files.js at the reference commit).
+//! File links in a session terminal: hovering a file path a program printed checks it on the session's host and shows
+//! the host's answer before any click may transfer the file (SPEC.md, "Terminal experience", the file-path bullet; the
+//! old app's `FileLinks` in terminal-files.js at the reference commit). A program's `file://` hyperlink, which the old
+//! app also checked, is inert like every hyperlink that is not a web address: the terminal finds no link over it, so it
+//! never reaches this module.
 //!
 //! The grid model recognizes the links ([`farhelm_grid_model::TerminalLink::file_path`]); a link grants nothing. Only
 //! the host can say what a path names, so each hover asks it afresh (a stat through the helm client's
 //! [`Transfers`]), and the hover display shows what it said: the host, the full resolved path and the size, or the
 //! refusal. Here's the TLDR of the rules this module keeps:
 //!
-//! - One hover, one check. A hover is the link as the grid model finds it under the pointer: its file, its cells and,
-//!   for a program's hyperlink, its label. A redraw that finds the same link again is the same hover and keeps its
-//!   check; a changed link (a relabel, a path that grew, other cells) is a new hover and checks again. Leaving drops
-//!   the check, and dropping its future abandons the request on the helm.
+//! - One hover, one check. A hover is the link as the grid model finds it under the pointer: its file (the path as
+//!   printed) and its cells. A redraw that finds the same link again is the same hover and keeps its check; a changed
+//!   link (other text over the same cells, a path that grew, other cells) is a new hover and checks again. Leaving
+//!   drops the check, and dropping its future abandons the request on the helm.
 //! - Only a successful check admits a click, and only for the link it checked: the owner finds the link again from the
-//!   live text at the release, and a click counts only when that link's cells, file and label are still the checked
-//!   one's ([`FileLinks::ready_for`]). A click pressed while checking, even one whose answer lands before the
+//!   live text at the release, and a click counts only when that link's cells and file are still the checked one's
+//!   ([`FileLinks::ready_for`]). A click pressed while checking, even one whose answer lands before the
 //!   release, or on a path the host refused, does nothing. One pressed over a ready answer the display has not painted
 //!   yet is refused as not visible: a fresh answer forgets where the display was drawn.
 //! - The display is the safeguard. A click whose display was outside the window or covered by a pointer-blocking
 //!   surface is refused with the old app's explanation.
-//! - A printed path shows the pointing hand only once its check succeeded; a program's hyperlink shows it at once
-//!   (SPEC.md: "OSC hyperlinks may show a pointer earlier").
+//! - A printed path shows the pointing hand only once its check succeeded; a web link shows it at once.
 //! - A staged run's host (agent builds with a pins file only) is never asked: the check is answered at once from the
 //!   pins file ([`crate::agent_startup::staged_file_stat`]), and a click on such an answer saves nothing, since the
 //!   file it names exists on no host.
@@ -98,8 +99,8 @@ pub(crate) struct FileLinks {
 struct Hover {
     /// The link as the grid model found it when the hover started: what a click must still find.
     link: TerminalLink,
-    /// The path as it was asked about (printed, or decoded from the hyperlink), shown while checking or after a
-    /// failure, before the host has named the file itself.
+    /// The path as it was asked about, as printed, shown while checking or after a failure, before the host has named
+    /// the file itself.
     asked: HostText,
     /// Whose modifier the opening hint names.
     platform: Platform,
@@ -208,20 +209,19 @@ impl FileLinks {
     }
 
     /// Whether a click on `link` may transfer a file: the current hover's check found a ready file, and `link`, as the
-    /// owner found it from the live text, is still the link that hover checked. Still the same means the same cells,
-    /// the same file and the same label (a program's hyperlink relabelled over the same cells and target is another
-    /// link, whose text the user has not seen checked), so a partial redraw that changed the link's text withdraws the
-    /// click even where the terminal kept its old target.
+    /// owner found it from the live text, is still the link that hover checked. Still the same means the same cells and
+    /// the same file. A printed path's file is its text, so a partial redraw that changed the text over the same cells
+    /// withdraws the click: the user has not seen the new file checked.
     pub(super) fn ready_for(&self, link: &TerminalLink) -> bool {
         self.hover.as_ref().is_some_and(|hover| {
             matches!(&hover.check, Check::Answered(stat) if stat.info.status == DownloadFileStatus::Ready)
                 && link.same_range(&hover.link)
                 && link.file_path() == hover.link.file_path()
-                && link.label == hover.link.label
         })
     }
 
-    /// Whether `link` shows the pointing hand: a printed path once its check succeeded, every other link at once.
+    /// Whether `link` shows the pointing hand: a printed path once its check succeeded, every other link (a web link,
+    /// the only other kind the terminal finds) at once.
     pub(crate) fn shows_pointer(&self, link: &TerminalLink) -> bool {
         link.kind != LinkKind::Path || self.ready_for(link)
     }

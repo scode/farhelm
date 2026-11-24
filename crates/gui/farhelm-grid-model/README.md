@@ -43,8 +43,8 @@ Run `cargo nextest run -p farhelm-grid-model` (or `cargo test -p farhelm-grid-mo
   `tests/fixtures/README.md`);
 - check link recognition and disclosure against an oracle generated from the old web client's own JavaScript
   (`tests/fixtures/links-oracle.json`, regenerated with `tools/generate-links.ts`);
-- check printed-path and `file://` recognition against the old web client's own unit test cases (`tests/paths.rs`, each
-  test naming the case it replaces);
+- check printed-path recognition against the old web client's own unit test cases (`tests/paths.rs`, each test naming
+  the case it replaces), and that no hyperlink names a file or lends its cells to a printed path;
 - check transitions, copy rules and a valid history append of more than 100,000 rows.
 
 Frame sequencing (rows waiting for their frame, damage, history shifts) is covered by the recorded streams and
