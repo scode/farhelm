@@ -71,9 +71,11 @@ documentation error is `highest` only when the statement could lead a reader int
 
 Assign the bucket from the user-visible consequence, not from implementation difficulty or reviewer confidence. A rare
 security or data-loss consequence remains `highest`; uncertainty about whether a consequence crosses that boundary must
-be surfaced to the user before finalizing the bucket. Keep the index grouped by bucket, with the highest bucket first,
-and preserve index order within each bucket. Explain the chosen bucket when presenting an item for triage, and revisit
-it if the user supplies a different severity judgment.
+be surfaced to the user before finalizing the bucket. In an unattended recording, the trailing code review included,
+surfacing means recording the higher bucket and writing the uncertainty into the feedback file and the final report,
+never a question that waits for an answer (`review_feedback_queue/.agents/trailing-review.md`, "Unattended by default").
+Keep the index grouped by bucket, with the highest bucket first, and preserve index order within each bucket. Explain
+the chosen bucket when presenting an item for triage, and revisit it if the user supplies a different severity judgment.
 
 A consequence counts toward the bucket only once its route is established (maintainer, 2026-10-22). When a finding's
 `highest` consequence depends on a step nobody has shown to happen in shipped code (a missing source premise, an input
@@ -180,13 +182,14 @@ Scope: landed product code, product tests, executable maintainer tooling and the
 target. Apply `review_feedback_queue/.agents/trailing-review.md`, "Review scope", before assigning groups; excluded
 material may still be necessary context or recording coverage.
 
-Fence: use `persistent-review` for the primary review of the pinned range, and not for the independent drop check; the
-request authorizes recording findings and updating the checkpoint only, not triage, fixes or execution; the checkpoint
-advances only after every commit is inventoried, every in-scope change meets the skill's completion requirements and
-every finding is handled; the review-result PR stays a draft and is never merged automatically. Trailing-review result
-and merge reports end with a loud Markdown banner only when the review is incomplete or checkpoint handling is
-exceptional; an ordinary draft PR awaiting merge needs no banner. Follow
-`review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
+Fence: the review runs unattended and stops only on a hard blocker; an uncertain bucket gets the higher one
+(`review_feedback_queue/.agents/trailing-review.md`, "Unattended by default"); use `persistent-review` for the primary
+review of the pinned range, and not for the independent drop check; the request authorizes recording findings and
+updating the checkpoint only, not triage, fixes or execution; the checkpoint advances only after every commit is
+inventoried, every in-scope change meets the skill's completion requirements and every finding is handled; the
+review-result PR stays a draft and is never merged automatically. Trailing-review result and merge reports end with a
+loud Markdown banner only when the review is incomplete or checkpoint handling is exceptional; an ordinary draft PR
+awaiting merge needs no banner. Follow `review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
 
 ### Triage ("triage review feedback")
 

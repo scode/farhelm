@@ -325,13 +325,13 @@ Each entry: trigger phrases, the file to read in full before the first action, a
   copy of the latest `main`, after reconciling any recorded claim of its own (a dirty working copy belonging to that
   claim is resumed or reset, not reported); any other dirty working copy aborts the flow with a report; see also
   "Unattended runs".
-- **Review feedback** (recording it, commissioning a review that feeds the queue, "perform trailing code review",
-  "triage review feedback", "execute triage outcomes"): `review_feedback_queue/AGENTS.md`. Fence: triage is persistent;
-  "fix this", "yes", "agreed" during it are decisions to record, not permission to edit; execution needs a separate
-  command that names it. When asked to address a queued item, remove the item (or narrow it, if partially addressed) in
-  the same commit, change, or PR as the fix. Trailing-review result and merge reports end with a loud Markdown banner
-  only when the review is incomplete or checkpoint handling is exceptional; an ordinary draft PR awaiting merge needs no
-  banner. Follow `review_feedback_queue/.agents/trailing-review.md`, "Closing status banner".
+- **Review feedback** (recording it, commissioning a review that feeds the queue, "triage review feedback", "execute
+  triage outcomes"): `review_feedback_queue/AGENTS.md`. Fence: triage is persistent; "fix this", "yes", "agreed" during
+  it are decisions to record, not permission to edit; execution needs a separate command that names it. When asked to
+  address a queued item, remove the item (or narrow it, if partially addressed) in the same commit, change, or PR as the
+  fix.
+- **Trailing code review** ("perform trailing code review"): `review_feedback_queue/AGENTS.md`, "Trailing code review".
+  Fence: unattended; see `review_feedback_queue/.agents/trailing-review.md`.
 - **Docs website** (writing or changing docs pages, "refresh the docs"): `website/AGENTS.md`. Fence: when the task's
   main work changes the docs, start the preview and hand over page links when reporting, without being asked; unattended
   runs and incidental docs edits start no preview server and name the changed page instead.
