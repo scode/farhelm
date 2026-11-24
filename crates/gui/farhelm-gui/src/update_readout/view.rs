@@ -9,7 +9,9 @@
 //!   instead (eight steps a turn, from the ticker) and the words beside it say which. A reinstall, interrupted-install
 //!   or withdrawal warning turns the version amber with a `⚠` before it, and the press still retries.
 //! - **The update-menu toggle** once an update is installed: a red pill with the version and `↑` (and an amber `⚠`
-//!   when a warning stands). The reminder briefly brightens the pill and places an arrow in the header's spare space.
+//!   when a warning stands). The reminder briefly flashes the pill to a deeper fill (solid red with white text and mark
+//!   in light mode) and places a bold arrow in the header's spare space. Light-mode hover deepens the tint and darkens
+//!   the inks to keep their contrast.
 //!   A press opens the menu beside it, with Restart to update and What's new.
 //! - **The inline status** after either: Checking… or Installing…, Up to date for about five seconds, or Check failed,
 //!   a button that dismisses it. While an update waits, progress gets a ring of its own, since the toggle has no glyph
@@ -107,8 +109,8 @@ pub(crate) fn check_look(
     }
 }
 
-/// Ink for the pending-update pill's version, up-arrow and warning. The light hover wash needs darker amber for
-/// the warning. The solid light pulse needs white ink for all three.
+/// Ink for the pending-update pill's version and up-arrow, then for its warning mark, on the fill the pill shows in
+/// this frame. The reminder's fill holds under the pointer, so its inks win over hover's.
 fn toggle_look(
     palette: &theme::Palette,
     hovered: bool,
@@ -117,19 +119,11 @@ fn toggle_look(
     match (pulsing, hovered) {
         (true, _) => (
             palette.update_ready_pulse_ink,
-            if palette.dark {
-                palette.warn
-            } else {
-                palette.on_fill
-            },
+            palette.update_ready_pulse_warn,
         ),
         (false, true) => (
             palette.update_ready_hover_ink,
-            if palette.dark {
-                palette.warn
-            } else {
-                palette.warn_bright
-            },
+            palette.update_ready_hover_warn,
         ),
         (false, false) => (palette.danger_strong, palette.warn),
     }
@@ -336,7 +330,9 @@ impl VersionReadout {
         .on_click(|_, _, cx| updates::check_now(cx))
     }
 
-    /// Read one reminder frame for the button fill and its ink. Hover stays visible between pulses.
+    /// The tinted pill stays distinguishable from the ordinary check control while an update waits for restart. Its
+    /// fill and inks follow the current reminder frame and `hovered`, so hover still shows between the reminder's
+    /// flashes.
     fn toggle(&self, readout: &Readout, hovered: bool, cx: &mut Context<Self>) -> Button {
         let palette = theme::palette(cx);
         let open = self.menu.is_some();
