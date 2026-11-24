@@ -63,9 +63,9 @@ can capture a different foreground app and cannot replace that image.
 The checks come in three named tiers, ordered by what a failure costs a user. **P0** asks whether an install or upgrade
 bricks Farhelm: a fresh install, both upgrade paths, and both supervisors upgrading with a new agent working on each.
 **P1** checks old-session survival and resume, Linux Remove/re-add and Uninstall, and Uninstall on a separate remote
-Mac. **P2** is the live feedback send. A release that cannot resume old sessions but still installs, upgrades and starts
-new ones is a P1 failure; one whose supervisor never comes back is a P0 failure. Report each tier's named results and
-verdict separately. Bonus coverage follows the tiered checks.
+Mac. **P2** covers the live feedback send and signed announcements. A release that cannot resume old sessions but still
+installs, upgrades and starts new ones is a P1 failure; one whose supervisor never comes back is a P0 failure. Report
+each tier's named results and verdict separately. Bonus coverage follows the tiered checks.
 
 ## P0 checks: install, upgrade and the supervisors
 
@@ -235,9 +235,29 @@ the maintainer's private feedback inbox. This check does not run in stop-after-P
    named result (`feedback-send`) and `p2.verdict` promptly, separate from P0 and P1. Retain failure evidence before
    cleanup; a P2 failure does not change a valid P0 or P1 verdict, does not prevent ordinary cleanup of this pair, and
    does not fence bonus passes.
-5. Clean up this pair and wait for its foreground owner to exit. Run the planned remote Mac P1 pass before ending a
-   **stop after P2 checks** run or continuing with bonus coverage. The maintainer decides whether a failed P1 or P2
-   check should prevent promotion.
+5. Continue to the announcements check before cleaning up this pair.
+
+## P2 check: read a signed announcement
+
+Use the same candidate and guest after the feedback checkpoint, with the same P0 and P1 prerequisites. The fixed
+`announcements_feed` action checks the standing `announcements-test.json` and `announcements-test.json.minisig` at the
+release origin. A 404 fails this check with the missing filename. If the origin cannot be reached, report could not run.
+In either case leave the app running and keep the other tier results. The candidate app verifies the signature.
+
+1. Quit normally through native UI, then use `launch_announcements`. Its `open --env` sets
+   `FARHELM_ANNOUNCEMENTS_PATH=announcements-test.json` for this candidate process. The helm uses its normal HTTPS
+   verification and compiled-in release keys. The pending batch waits for the bell during this launch, even when the
+   first window already has it. The standing entry has title **Farhelm brick test announcement**.
+2. Open the rail's unread notification bell and capture **New announcement** with **Open Announcements**. Choose the
+   action, capture the test title in the dialog and dismiss it with **Got it**. Check that the rail notice resolved.
+   Reopen the same entry from **? → Announcements** and capture its history view.
+3. Quit normally again and call `relaunch_announcements`. It launches without the override and samples the running
+   candidate's environment to confirm the variable is gone. A pass requires the three native captures and the fixed
+   command receipts.
+
+Report the `announcements` result separately. Clean up this pair and wait for its foreground owner to exit. Run the
+planned remote Mac P1 pass before ending a **stop after P2 checks** run or continuing with bonus coverage. The
+maintainer decides whether a failed P1 or P2 check should prevent promotion.
 
 The full verdict includes P1 and P2. Each stop scope's requested verdict follows the tiers it includes. Historical
 manifests report under the tiers they were planned with (feedback was P1 before this layout); do not retrofit a send or
@@ -417,7 +437,7 @@ Verdict: pass | fail | could not run
 Scope: full | stop after P0 | stop after P1 | stop after P2
 P0 verdict and seven named results:
 P1 verdict and five named results when the remote Mac pass is planned:
-P2 verdict and feedback-send result: pass | fail | could not run | not planned
+P2 verdict and feedback-send and announcements results: pass | fail | could not run | not planned
 Requested-scope verdict:
 Candidate / previous stable / bonus upgrade pairs / older stables omitted by the cap:
 Tag's commit; SHA-256 of SHA256SUMS; guest OS versions (portable summary):
@@ -432,8 +452,8 @@ Cleanup: owned clones deleted or retained by agreement; evidence retained
 
 “P0 pass” requires all seven P0 checks to run and pass; discovery on an RC or dev build stays unavailable, so its P0
 verdict is could not run even when every runnable check passed. “P1 pass” requires all planned old-session and remote
-menu checks to pass. “P2 pass” requires the feedback send after every runnable P0 check passes. “Full pass” additionally
-requires P1, P2 and every planned bonus check to run and pass. A product failure makes the relevant verdict fail; a
-missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped check or a
-clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero risk for
-every supported installation.
+menu checks to pass. “P2 pass” requires both planned checks after every runnable P0 check passes. “Full pass”
+additionally requires P1, P2 and every planned bonus check to run and pass. A product failure makes the relevant verdict
+fail; a missing test environment with no demonstrated product failure makes it could not run. Never treat a skipped
+check or a clean process exit as a pass. This result covers the actual versions, artifacts and paths exercised, not zero
+risk for every supported installation.

@@ -17,7 +17,8 @@ from urllib.parse import urlparse
 
 from control import Refused
 from guest_tester import request
-from checkpoint_contract import update_instructions, window_instructions, remote_host_instructions, is_bonus_pass
+from checkpoint_contract import (announcements_instructions, is_bonus_pass, remote_host_instructions,
+                                 update_instructions, window_instructions)
 
 
 HERE = Path(__file__).resolve().parent
@@ -229,6 +230,8 @@ could-not-run boundary are too specific to leave to that mapping.
 """
     if check_id in ('remote-host-remove', 'remote-host-uninstall'):
         return remote_host_instructions(check_id, pass_id)
+    if check_id == 'p2-announcements':
+        return announcements_instructions()
     contracts = {
         'p2-feedback-send': '''This is the separately authorized P2 check after all runnable P0 checks passed.
 Expected RC or dev updater discovery skips and P1 results do not block this check.
@@ -440,6 +443,8 @@ Also double-click an unselected existing folder icon in Finder icon view and
 require navigation. Capture actual final native state. If either gesture is
 unsupported or has no effect, report could-not-run and stop before Farhelm
 installation. No product state, OS permissions or authentication changes.'''
+    if check_id == 'p2-announcements':
+        return announcements_instructions()
     contracts = {
         'native-preflight': '''Call brick_action prerequisites. Bind Finder and inspect fresh AX state before
 requesting an image. Establish a normal file window using native File > New

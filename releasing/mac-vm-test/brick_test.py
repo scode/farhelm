@@ -53,7 +53,7 @@ HISTORICAL_UPGRADE_LIMIT = 3
 # bricks: installing, upgrading through the installer and the in-app updater,
 # both supervisors upgrading, and a new agent working on each. P1 asks whether
 # the user keeps what they had: old sessions surviving and resuming, and the
-# remote host's Remove/re-add and Uninstall. P2 is the live feedback send.
+# remote host's Remove/re-add and Uninstall. P2 covers feedback and signed announcements.
 TIERS = ('P0', 'P1', 'P2')
 # What each requested scope runs. Only `full` also runs bonus fixtures.
 SCOPE_TIERS = {'p0-only': ('P0',), 'p1-only': ('P0', 'P1'), 'p2-only': TIERS, 'full': TIERS}
@@ -317,6 +317,8 @@ Continuity checkpoints require independent before/after receipts as well.
             # Feedback uses the candidate already running on this pair. Its
             # result is separate from P0 and P1 and must not prevent cleanup.
             required['p2-feedback-send'] = {'gui': True, 'command': False,
+                                             'continuity': False, 'priority': 'P2'}
+            required['p2-announcements'] = {'gui': True, 'command': True,
                                              'continuity': False, 'priority': 'P2'}
         return required
     # Dict order is the tester's checkpoint order. `window-drag` follows the
@@ -783,6 +785,10 @@ retained outcome.
                     captures = {hashlib.sha256(v).hexdigest() for v in contents if is_image(v)}
                     if len(captures & native_image_digests(events)) < 2:
                         raise Refused(f'{check_id} needs two distinct native images; review their action/result meaning')
+                if check_id == 'p2-announcements':
+                    captures = {hashlib.sha256(v).hexdigest() for v in contents if is_image(v)}
+                    if len(captures & image_digests) < 3:
+                        raise Refused('p2-announcements needs three distinct native images of the bell, dialog and history')
             if spec.get('command') and not any(v and not is_image(v)
                                                and hashlib.sha256(v).hexdigest() not in image_digests
                                                for v in contents):
@@ -862,8 +868,8 @@ released while the guest works so status remains queryable. Cleanup and another
 tester refuse the active claim. Every checkpoint gets a fresh bounded turn and
 retains its artifacts. A failed or unavailable P0 or bonus checkpoint stops the
 sequence. A P1 one, a harness failure at P1 included, stops only the later P1
-checkpoints, which are recorded as skipped while P2 still runs; a P2 one is
-the last checkpoint anyway. Only a proven pre-action provider 429 can back off
+checkpoints, which are recorded as skipped while P2 still runs. A P2 product
+failure leaves the other P2 check and ordinary cleanup available. Only a proven pre-action provider 429 can back off
 into a separately retained fresh attempt; it never retries feedback, uncertain
 actions or failed cleanup.
 """
@@ -873,7 +879,7 @@ actions or failed cleanup.
         check_id = 'native-preflight'
         with self.locked():
             feedback = 'P2' in self.scope_tiers() and any(
-                priority_entry(value, 'P2')['required'] for value in self.data['passes'].values())
+                'p2-feedback-send' in value['required'] for value in self.data['passes'].values())
             config = require_setup(self.profile, feedback=feedback)
             entry = self.selected(pass_id)
             if entry['phase'] != 'ready' or entry.get('tester', {}).get('phase') in ('running', 'reconciliation-required'):
@@ -937,7 +943,7 @@ actions or failed cleanup.
                     # made while an earlier turn ran fences the later ones.
                     if not self.in_scope(priority):
                         continue
-                    is_feedback = priority == 'P2'
+                    is_feedback = check_id == 'p2-feedback-send'
                     if check_id != 'native-preflight':
                         # A checkpoint that can never run is already recorded
                         # as skipped; the independent ones after it still run.
@@ -1729,6 +1735,8 @@ without P0 fixtures names only the P1 checks it declared.
                    ('remote-host-remove', installer, ['remote-host-remove']),
                    ('remote-host-uninstall', installer, ['remote-host-uninstall'])],
             'P2': [('feedback-send', installer, ['p2-feedback-send'])]}
+        if 'p2-announcements' in self.selected(installer)['required']:
+            results['P2'].append(('announcements', installer, ['p2-announcements']))
         if REMOTE_MAC_PASS in self.data['passes']:
             results['P1'].append(('remote-mac-uninstall', REMOTE_MAC_PASS, None))
         return results
@@ -1954,7 +1962,7 @@ def main():
             scope.add_argument('--stop-after-p1', action='store_true',
                                help='complete P0 and the P1 continuity checks, without the feedback send')
             scope.add_argument('--stop-after-p2', action='store_true',
-                               help='complete P0, P1 and the P2 feedback send, then refuse bonus fixtures')
+                               help='complete P0, P1 and both P2 checks, then refuse bonus fixtures')
     sub.add_parser('smoke')
     scope_commands = ('stop-after-p0', 'stop-after-p1', 'stop-after-p2')
     for name in ('serve', 'test', 'retry-readiness', 'retry-unavailable', 'reconcile-tester', 'status', 'select-update',

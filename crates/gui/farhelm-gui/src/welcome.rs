@@ -415,6 +415,12 @@ pub struct StartDialogs {
     _connection: Option<Subscription>,
 }
 
+/// The signed-feed brick launch reserves the batch for the bell even if the first snapshot already has it.
+/// Welcome and upgrade highlights keep their own startup decisions.
+pub(crate) struct AnnouncementsFromBell;
+
+impl gpui::Global for AnnouncementsFromBell {}
+
 /// What one UI session's start has decided and still owes.
 #[derive(Default)]
 struct Start {
@@ -565,7 +571,9 @@ impl StartDialogs {
                 });
             }
         });
-        if crate::announcements::open_pending(&mark, after, window, cx).is_none() {
+        if cx.try_global::<AnnouncementsFromBell>().is_some()
+            || crate::announcements::open_pending(&mark, after, window, cx).is_none()
+        {
             let task = crate::whats_new::check(mark, window, cx);
             self.start.current(cx)._highlights = task;
         }

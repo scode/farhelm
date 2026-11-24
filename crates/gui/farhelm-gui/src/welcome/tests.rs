@@ -12,7 +12,8 @@
 
 use farhelm_helm_client::Method;
 use farhelm_helm_client::fake::FakeHelm;
-use farhelm_proto::ui_channel::{CollectionState, Preferences};
+use farhelm_proto::announcements::AnnouncementQueue;
+use farhelm_proto::ui_channel::{ANNOUNCEMENTS_KEY, CollectionState, Preferences};
 use gpui::{
     AppContext as _, Context, Entity, FocusHandle, IntoElement, Keystroke, ParentElement as _,
     Render, Styled as _, Subscription, TestAppContext, VisualTestContext, Window, div, px, size,
@@ -569,7 +570,42 @@ fn a_reset_while_the_card_or_its_handoff_is_open_writes_nothing_and_decides_agai
     assert!(!shows(cx, "announcements"), "and no batch");
 }
 
-// ---- Agent runs that turn the start dialogs off --------------------------------------------------------------------
+// ---- Staged starts ------------------------------------------------------------------------------------------------
+
+/// A staged brick launch can receive its signed announcement before the first window. Welcome still opens, and
+/// closing it leaves the already-pending entry for the bell without recording it as shown.
+#[gpui::test]
+fn the_brick_launch_reserves_an_already_pending_batch_for_the_bell(cx: &mut TestAppContext) {
+    cx.update(|cx| cx.set_global(super::AnnouncementsFromBell));
+    let (mut helm, cx, _toggle, _home) = open_start(
+        cx,
+        Some(vec![
+            seen(None),
+            queue(vec![announcement("1", "Pending news", "Body.")], vec![]),
+        ]),
+    );
+    assert!(shows(cx, "welcome"), "premise: Welcome still opens");
+    cx.update(|_, cx| {
+        let store = session::current_store(cx).unwrap();
+        let queue = store
+            .read(cx)
+            .collections()
+            .get::<AnnouncementQueue>(ANNOUNCEMENTS_KEY)
+            .unwrap();
+        assert_eq!(
+            queue.pending[0].id, "1",
+            "premise: the first snapshot has the entry"
+        );
+    });
+    keys(cx, "escape");
+    expect_seen_write(&mut helm, 204);
+    settle(cx);
+    assert!(!shows(cx, "announcements"));
+    assert!(
+        helm.commands().is_empty(),
+        "the pending entry was not recorded as shown"
+    );
+}
 
 /// `agent_startup::start_dialogs_off` exists because every bridge run's helm is fresh, so without it every run would
 /// start under the Welcome card and its first click or key would act on the card. It must turn off the automatic

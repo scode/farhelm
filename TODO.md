@@ -271,10 +271,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 ### Trivial
 
-- **Dynamic network source for announcements.** add dynamic network source for announcements. we currently have hard
-  coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
-  deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
-
 ## Linux support
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
