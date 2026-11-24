@@ -270,7 +270,7 @@ use gpui::{
 
 use super::attachments::{self, Attachments, Offered, Paste, Uploaded};
 use super::disclosure::{self, Hidden};
-use super::files::{FileLinks, StatusShown};
+use super::files::{FileDisclosureView, FileLinks, StatusShown};
 use super::tunnels::{self, TunnelPill, Tunnels};
 use super::{CellMetrics, CursorPhase, SelectionModifier, TerminalView, style};
 use crate::actions::{self, KeyOwner};
@@ -2206,6 +2206,10 @@ impl Render for AttachedTerminal {
                 if view.viewport.set_top_padding(padding) {
                     view.update_shown();
                 }
+                let ready = view
+                    .hovered_link()
+                    .is_some_and(|link| self.file_hover_ready(link, cx));
+                view.set_path_hover_ready(ready, cx);
             });
         }
         let state = self.committed.as_ref().and_then(|view| view.read(cx).state);
@@ -2620,9 +2624,9 @@ struct LinkPress {
     /// Whether the link was offered a tunnel at the press, so a Cmd-click tunnels only an address whose display the
     /// admission checked (a tunnel read answering between press and release changes nothing).
     hinted: bool,
-    /// Whether a file link's check had found a ready file at the press, so a check answering between the press and
-    /// the release leaves the click silent rather than reading as a hidden display ([`FileLinks::clicked`]).
-    file_ready: bool,
+    /// The painted file disclosure that vouched for the press. A new stat cannot borrow that panel's authorization
+    /// even if the terminal restores the original path text before release.
+    file_disclosure: Option<u64>,
 }
 
 /// The web address a click on `link` opens: a printed address by the strict rule for text, a program's hyperlink by
@@ -2688,10 +2692,10 @@ impl AttachedTerminal {
             }
         }
         if let Some(view) = self.committed.clone() {
-            let before = view.read(cx).hovered_link().is_some();
+            let before = view.read(cx).hovered_link().cloned();
             view.update(cx, |view, cx| view.set_hover(cell, cx));
-            // The pointing hand is drawn by this owner, over the grid.
-            if view.read(cx).hovered_link().is_some() != before {
+            // Moving directly from one link to another can withdraw the pointing hand and start a new check.
+            if view.read(cx).hovered_link() != before.as_ref() {
                 cx.notify();
             }
         }
@@ -2793,17 +2797,19 @@ impl AttachedTerminal {
         // link's activation downloaded without reading the link choice (terminal.js:1050 and :1104), which only
         // `activateWeb` passed on (terminal.js:1012).
         if press.link.file_path().is_some() {
-            let released = self.disclosure_visibility(&press.link, window);
+            // A normal press closes the layer but keeps its disclosure record until release. Replacing the hover
+            // replaces that record, even if the same printed path comes back before mouse-up.
+            let Some(shown) = self
+                .disclosure
+                .as_ref()
+                .filter(|shown| Some(shown.generation) == press.file_disclosure)
+            else {
+                return;
+            };
+            let released = disclosure::visibility(&shown.drawn, window);
             let modifiers = event.modifiers;
             let refusal = self.files.update(cx, |files, cx| {
-                files.clicked(
-                    &press.link,
-                    press.visibility,
-                    press.file_ready,
-                    released,
-                    modifiers,
-                    cx,
-                )
+                files.clicked(&press.link, press.visibility, released, modifiers, cx)
             });
             if let Some(refusal) = refusal {
                 self.refusal = Some(refusal.into());
@@ -2888,16 +2894,38 @@ impl AttachedTerminal {
     /// The hovered link when it gets a destination display, with the tunnel hint the display ends with: a program's
     /// hyperlink to a web address always, since its text need not resemble where it goes; a printed web address only
     /// when the session's tunnels offer it a hint (a remote host's loopback address on a Mac), since otherwise what it
-    /// shows is what opens. A file link always, since its display is its host check ([`super::files`]).
+    /// shows is what opens. A file link needs a ready host check before it gets a disclosure ([`super::files`]).
     fn disclosed_link(&self, cx: &App) -> Option<(TerminalLink, Option<HostSentence>)> {
         let view = self.committed.as_ref()?.read(cx);
         let link = view.hovered_link()?;
         if link.file_path().is_some() {
-            return Some((link.clone(), None));
+            return self
+                .file_hover_ready(link, cx)
+                .then(|| (link.clone(), None));
         }
         link_web_target(link)?;
         let hint = self.tunnel_hint(link, cx);
         (matches!(link.kind, LinkKind::Osc { .. }) || hint.is_some()).then(|| (link.clone(), hint))
+    }
+
+    /// The same ready hover drives the underline, pointing hand and disclosure. A changed hover starts over even
+    /// when the new link's cells and path would match the looser identity used at click release.
+    fn file_hover_ready(&self, link: &TerminalLink, cx: &App) -> bool {
+        let files = self.files.read(cx);
+        !self.refusal_waits_for_hover && files.tracking() == Some(link) && files.ready_for(link)
+    }
+
+    /// Follow the hovered path after the frame. Pending and unsuccessful checks are tracked without a popover.
+    fn follow_files(&self, cx: &mut Context<Self>) {
+        let wanted = self
+            .committed
+            .as_ref()
+            .and_then(|view| view.read(cx).hovered_link())
+            .filter(|link| link.kind == LinkKind::Path && !self.refusal_waits_for_hover);
+        if self.files.read(cx).tracking() != wanted {
+            let (files, platform, wanted) = (self.files.clone(), self.platform, wanted.cloned());
+            cx.defer(move |cx| files.update(cx, |files, cx| files.follow(wanted, platform, cx)));
+        }
     }
 
     /// Ask for the session's tunnels the first time the pointer rests on a loopback link on a Mac, which is when the
@@ -3065,6 +3093,14 @@ impl AttachedTerminal {
         &self.files
     }
 
+    /// The underlines from the same committed grid that resolves the hovered link.
+    #[cfg(test)]
+    pub(super) fn underlined_rows(&self, cx: &App) -> Vec<(usize, std::ops::Range<u16>)> {
+        self.committed
+            .as_ref()
+            .map_or_else(Vec::new, |view| view.read(cx).underlined_rows())
+    }
+
     /// The session's tunnels: tests answer their reads and check their notice, and the terminal set hands the agent
     /// terminal's to its tabs.
     pub(crate) fn tunnels(&self) -> &Entity<Tunnels> {
@@ -3090,6 +3126,7 @@ impl AttachedTerminal {
     ) -> Option<AnyElement> {
         let pressing = self.link_press.is_some() || self.select.is_some() || self.reporting != 0;
         self.request_tunnels(cx);
+        self.follow_files(cx);
         let wanted = self
             .disclosed_link(cx)
             .filter(|_| !self.refusal_waits_for_hover);
@@ -3133,13 +3170,6 @@ impl AttachedTerminal {
                 });
             }
             let opening = self.disclosure.as_ref().map(|shown| shown.generation);
-            // The file links follow every change of display: a new file link's display starts its check, and any
-            // other change (no display, another link) drops the old check ([`FileLinks::follow`]).
-            let file_hover = self
-                .disclosure
-                .as_ref()
-                .map(|shown| (shown.link.clone(), shown.drawn.clone()));
-            let (files, platform) = (self.files.clone(), self.platform);
             let mark = Mark::take(cx);
             let owner = cx.weak_entity();
             window.defer(cx, move |window, cx| {
@@ -3148,7 +3178,6 @@ impl AttachedTerminal {
                 if let Some(old) = old {
                     layers::close(old, window, cx);
                 }
-                files.update(cx, |files, cx| files.follow(file_hover, platform, cx));
                 if let Some(generation) = opening {
                     let _ = owner.update(cx, |owner, cx| {
                         owner.open_disclosure(generation, &mark, window, cx)
@@ -3250,9 +3279,15 @@ impl AttachedTerminal {
         let shown = self.disclosure.as_ref()?;
         let view = self.committed.clone()?;
         let anchor = self.disclosure_anchor.clone()?;
-        // A file link's display is its file links' own view, which shows the check `follow` started for it.
         let content: AnyView = if shown.link.file_path().is_some() {
-            self.files.clone().into()
+            let stat = self.files.read(cx).ready_stat(&shown.link)?.clone();
+            let drawn = shown.drawn.clone();
+            cx.new(|_| FileDisclosureView {
+                stat,
+                platform: self.platform,
+                drawn,
+            })
+            .into()
         } else {
             let text = view.read(cx).link_disclosure(&shown.link)?;
             let drawn = shown.drawn.clone();
@@ -3297,24 +3332,12 @@ impl AttachedTerminal {
         disclosure::visibility(&panel.drawn, window)
     }
 
-    /// Whether the pointer rests on a link that shows the pointing hand, which the grid's area then draws: every link
-    /// does, except a printed path whose check has not found a ready file yet ([`FileLinks::shows_pointer`]).
+    /// Web links get the pointing hand immediately. Printed paths get it when their file check is ready.
     pub(crate) fn points_at_link(&self, cx: &App) -> bool {
         self.committed
             .as_ref()
             .and_then(|view| view.read(cx).hovered_link())
-            .is_some_and(|link| self.files.read(cx).shows_pointer(link))
-    }
-
-    /// Recheck the rendered display for a file release. The layer manager can have closed it on mouse down, so
-    /// a missing display here does not by itself withdraw a press that saw the panel.
-    fn disclosure_visibility(&self, link: &TerminalLink, window: &Window) -> Result<(), Hidden> {
-        let panel = self
-            .disclosure
-            .as_ref()
-            .filter(|shown| shown.link == *link)
-            .ok_or(Hidden::NotVisible)?;
-        disclosure::visibility(&panel.drawn, window)
+            .is_some_and(|link| link.kind != LinkKind::Path || self.file_hover_ready(link, cx))
     }
 
     /// Keep the line at its ordinary position even when an approval card could cover it. The hidden placeholder
@@ -4048,7 +4071,15 @@ impl AttachedTerminal {
             .unwrap_or(Err(Hidden::NotVisible));
         self.link_press = link.clone().map(|link| LinkPress {
             hinted: self.tunnel_hint(&link, cx).is_some(),
-            file_ready: link.file_path().is_some() && self.files.read(cx).ready_for(&link),
+            file_disclosure: self
+                .disclosure
+                .as_ref()
+                .filter(|shown| {
+                    shown.link == link
+                        && shown.drawn.get().is_some()
+                        && self.file_hover_ready(&link, cx)
+                })
+                .map(|shown| shown.generation),
             link,
             at: event.position,
             visibility,

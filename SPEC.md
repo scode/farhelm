@@ -3681,14 +3681,14 @@ whatever the agent renders is what you see. There is no composer, no message abs
   after the head is ignored. Both the head's final token and the joined token must meet the ordinary path rules; a plain
   word cannot donate a head. This exception covers one isolated pair of rows, not chains of hard breaks; ordinary
   terminal wraps still join as before. Diagnostic line/column suffixes and trailing punctuation are excluded. Relative
-  paths use the session's directory, not a shell's later directory. Hover immediately underlines the path and shows a
-  checking spinner, then the host, full resolved path and size or refusal. Each hover checks afresh; a redraw beneath a
-  pointer resting on the same path text and target at the same position is not a new hover. Leaving cancels it. Only a
-  successful check over link text unchanged since that hover admits a click. A partial redraw that changes the link text
-  withdraws transfer and opening permission even if the terminal library retains its old target. A click cannot transfer
-  or open a file while the full hover disclosure does not fit in the window or is covered by another Farhelm surface
-  such as an approval card or tunnel-error notice. Only a fully visible hover counts as disclosing the target; otherwise
-  the click is refused with a visible explanation to move the pointer or enlarge the window and hover again. While the
+  paths use the session's directory, not a shell's later directory. Hover checks the path silently. Only a downloadable
+  file gets an underline, a pointing hand, and a disclosure showing the host, full resolved path and size. Each hover
+  checks afresh; a redraw beneath a pointer resting on the same path text and target at the same position is not a new
+  hover. Leaving cancels it. A click before the disclosure paints does nothing. A partial redraw that changes the link
+  text withdraws transfer and opening permission even if the terminal library retains its old target. A click cannot
+  transfer or open a file while the full hover disclosure does not fit in the window or is covered by another Farhelm
+  surface such as an approval card or tunnel-error notice. A click on a file whose disclosure painted but is clipped or
+  covered is refused with a visible explanation to move the pointer or enlarge the window and hover again. While the
   pointer stays on a refused link, its explanation may cover the top of an approval card, including its heading and the
   requesting session and host. The card stays answerable from the keyboard meanwhile; the cover ends when the pointer
   leaves the link. File disclosures and transfer messages make presentation-unsafe characters visible, distinguish
@@ -3706,7 +3706,7 @@ whatever the agent renders is what you see. There is no composer, no message abs
   path disclosed at hover. Other types are saved without opening; an opening failure leaves the save successful and says
   why it was not opened. The hover uses a file icon and bright name, the host and full directory on a second line, and
   decimal size with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe
-  with neutral size, and 10–100 MB amber; refusals are red and checking has a neutral stripe. Only an eligible desktop
+  with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an eligible desktop
   file has the opening hint. Any file the session's account can read is in reach, within the existing shell authority;
   hover discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file
   reads. OSC hyperlink schemes are explicitly limited to http and https. A hyperlink with any other scheme, `file://`

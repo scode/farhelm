@@ -3445,9 +3445,9 @@ no Downloads directory, and so no file opener, supplies no capability. No quaran
 The hover splits the disclosed path for presentation into a file-type Nerd Font icon and name, then host:directory,
 without shortening either. Every remote fragment goes through the host-text element: escaped, direction-isolated and
 with format characters made visible. Decimal size (1000 bytes per KB) and exact byte thresholds set the left stripe and
-size color; refusals override size with red (`crates/gui/farhelm-gui/src/terminal/files.rs`). The hover advertises the
-platform modifier only for `can_open` files. Only printed paths reach the check and transfer path: a program's `file://`
-hyperlink is inert, as below.
+size color (`crates/gui/farhelm-gui/src/terminal/files.rs`). The hover advertises the platform modifier only for
+`can_open` files. Only printed paths reach the check and transfer path: a program's `file://` hyperlink is inert, as
+below.
 
 The grid model recognizes file links (`crates/gui/farhelm-grid-model/src/paths.rs`, ported from the old browser app's
 `terminal-files.js` at the reference commit), conservatively, after OSC 8 and printed web links in the order a line's
@@ -3471,12 +3471,13 @@ directory tracking or hover cache is introduced.
 
 A hover is the link as the grid model finds it under the pointer: its file (the path as printed) and its cells
 (`crates/gui/farhelm-gui/src/terminal/files.rs`). A redraw that finds the same link again is the same hover and keeps
-its host check; a changed link (other text over the same cells, a path that grew, other cells) is a new hover and checks
-again. Leaving drops the check, and dropping its future abandons the request on the helm. Only a successful check admits
-a click, and only for the link it checked: the terminal finds the link again from the live text at the release, and the
-click counts only while that link's cells and file are still the checked one's. A click pressed while checking, or on a
-path the host refused, does nothing. A printed path shows the pointing hand only once its check succeeded; a web link
-shows it at once. Click reopens the disclosed canonical path independently.
+its host check, including a settled non-actionable result. A changed link (other text over the same cells, a path that
+grew, other cells) is a new hover and checks again. Leaving drops the check, and dropping its future abandons the
+request on the helm. A `Ready` answer enables the underline and pointing hand and opens a disclosure that starts with a
+fresh paint witness. Pending checks, host refusals and transfer errors stay silent. The terminal finds the link again
+from the live text at release. A click requires a painted disclosure at press and the same disclosure and ready check at
+release. Restoring the old printed path with a new check does not restore the earlier press's authorization. Web links
+show their underline and pointing hand immediately. A click reopens the disclosed canonical path independently.
 
 A program's hyperlink is sorted by its parsed target before the terminal acts on it: `web_target`
 (`crates/gui/farhelm-grid-model/src/links.rs`) admits only http and https, whose parsed serialization a click sends to

@@ -952,6 +952,47 @@ fn a_column_selection_trimmed_at_the_cap_keeps_its_columns(cx: &mut TestAppConte
     );
 }
 
+/// An underline is evidence about one specific file path. An identical redraw keeps it, and changing the text beneath
+/// a resting pointer withdraws it until that new file has been checked.
+#[gpui::test]
+fn a_printed_path_underline_belongs_to_the_ready_hover(cx: &mut TestAppContext) {
+    let terminal = attached_with_history(cx);
+    terminal.update(cx, |view, cx| {
+        let rewrite = |path: &str, rev| {
+            messages(&format!(
+                r#"{{"t":"rows","rows":[[0,{{"w":false,"r":[[0,9,"{path}",[0,-1,-1]]]}}]]}}
+{{"t":"frame","rev":{rev},"cols":20,"rows":4,"cursor":{{"x":2,"y":2,"visible":true,"shape":"block","blink":true}}}}"#,
+            ))
+        };
+        let (_, applied) = view.apply(rewrite("notes.txt", 2), cx);
+        applied.unwrap();
+        view.set_hover(Some((2, 0)), cx);
+        assert_eq!(
+            view.hovered_link()
+                .and_then(TerminalLink::file_path)
+                .as_deref(),
+            Some("notes.txt")
+        );
+        assert!(view.underlined_rows().is_empty());
+
+        view.set_path_hover_ready(true, cx);
+        assert_eq!(view.underlined_rows(), [(0, 0..9)]);
+        let (_, applied) = view.apply(rewrite("notes.txt", 3), cx);
+        applied.unwrap();
+        assert_eq!(view.underlined_rows(), [(0, 0..9)]);
+
+        let (_, applied) = view.apply(rewrite("plans.txt", 4), cx);
+        applied.unwrap();
+        assert_eq!(
+            view.hovered_link()
+                .and_then(TerminalLink::file_path)
+                .as_deref(),
+            Some("plans.txt")
+        );
+        assert!(view.underlined_rows().is_empty());
+    });
+}
+
 /// A hover rests on the text it read: the link under the pointer is underlined on the rows it covers; when the view
 /// scrolls under the still pointer, what is under it now is looked up, and when the program rewrites those rows the
 /// link is looked up again, so a target that moved away or is gone is no longer underlined (or clickable). The

@@ -498,9 +498,7 @@ pub(super) fn terminal_covered_link(
         .into_any_element()
 }
 
-/// A file link's hover display in each of its states, stacked (`crate::terminal::files`): checking, the three size
-/// tiers, the limit refusal in red, a folder and a failed check. Drawn on their own rather than over a terminal, since
-/// a display's look does not depend on what it hovers over.
+/// The three size tiers of downloadable file disclosures, stacked on their own so the scene isolates the cards.
 pub(super) fn terminal_file_disclosures(
     _: &SceneState,
     window: &mut Window,
