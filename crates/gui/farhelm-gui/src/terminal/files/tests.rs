@@ -1,5 +1,5 @@
 //! The file links' contract, against the helm client's fake terminal and fake transfers: what a hover on a printed path
-//! asks the host, what its display shows while checking and once answered, when a hover counts as new, and which clicks
+//! asks the host, what becomes visible when the file is ready, when a hover counts as new, and which clicks
 //! a check admits. A program's `file://` hyperlink is no file link (it is inert, which
 //! `attached::tests::a_hyperlink_that_is_not_a_web_address_is_inert` pins), so it appears here only to show it asks
 //! nothing. One test per sentence of SPEC.md's file-path bullet in this
@@ -13,13 +13,14 @@
 use std::ops::{Deref, DerefMut};
 use std::time::Duration;
 
+use farhelm_grid_model::LinkKind;
 use farhelm_helm_client::fake::transfers::{FakeAnswer, FakeTransfer};
 use farhelm_helm_client::{OpenOutcome, SavedDownload};
 use farhelm_proto::grid::{GridInput, MouseEventKind};
 use farhelm_proto::ui_channel::{PREFERENCES_KEY, Preferences};
 use gpui::{
-    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, PlatformInput, Point, TestAppContext,
-    point, px,
+    Modifiers, MouseButton, MouseDownEvent, MouseUpEvent, Pixels, PlatformInput, Point,
+    TestAppContext, point, px,
 };
 
 use super::*;
@@ -34,15 +35,9 @@ use crate::theme;
 /// Sizes are what the user weighs before a transfer, and their units must agree with the host's decimal 100 MB limit:
 /// a file just over it must never read as under "100 MB". Specified (the old "file sizes and tiers use decimal
 /// boundaries including the exact cap"): whole bytes under 1000, then one decimal with `.0` dropped; the tiers switch
-/// at exactly 1 MB and 10 MB, the limit itself is still large rather than refused, and every refusal is red whatever its
-/// size.
+/// at exactly 1 MB and 10 MB, and the limit itself is still large.
 #[test]
 fn sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit() {
-    let ready = |size| DownloadFileInfo {
-        path: "/work/f".into(),
-        size: Some(size),
-        status: DownloadFileStatus::Ready,
-    };
     for (bytes, text, tier) in [
         (0, "0 B", SizeTier::Small),
         (999, "999 B", SizeTier::Small),
@@ -55,33 +50,14 @@ fn sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit() {
         (100_000_000, "100 MB", SizeTier::Large),
     ] {
         assert_eq!(format_size(bytes), text);
-        assert_eq!(SizeTier::of(&ready(bytes)), tier, "{bytes} bytes");
+        assert_eq!(SizeTier::of(Some(bytes)), tier, "{bytes} bytes");
     }
     assert_eq!(format_size(100_000_001), "100 MB");
     assert_eq!(format_size(2_500_000_000), "2.5 GB");
     // Half up on the exact quotient, where the old `toFixed` read the float just below it as "1.1 KB".
     assert_eq!(format_size(1150), "1.2 KB");
-    for status in [
-        DownloadFileStatus::TooLarge,
-        DownloadFileStatus::Folder,
-        DownloadFileStatus::NotFound,
-        DownloadFileStatus::NotReadable,
-        DownloadFileStatus::NotRegular,
-    ] {
-        let refused = DownloadFileInfo { status, ..ready(1) };
-        assert_eq!(
-            SizeTier::of(&refused),
-            SizeTier::Danger,
-            "a refusal overrides its size"
-        );
-    }
+    assert_eq!(SizeTier::of(None), SizeTier::Neutral);
     for palette in [&theme::DARK, &theme::LIGHT] {
-        assert_eq!(SizeTier::Danger.stripe(palette), palette.danger);
-        assert_eq!(
-            SizeTier::Danger.words(palette),
-            palette.danger,
-            "refusals are red"
-        );
         assert_eq!(SizeTier::Small.stripe(palette), palette.ok);
         assert_eq!(SizeTier::Medium.stripe(palette), palette.info);
         assert_eq!(
@@ -93,68 +69,49 @@ fn sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit() {
         assert_eq!(
             SizeTier::Neutral.stripe(palette),
             palette.fg_2,
-            "checking is neutral"
+            "an unknown size is neutral"
         );
     }
 }
 
 /// The icon tells kinds of file apart and claims nothing about opening: an unknown extension stays generic. Specified
-/// (the old "file icons distinguish documents, PDFs, images, archives and folders"): case-insensitive extensions, the
-/// last one deciding, and a folder's icon whatever its name.
+/// by case-insensitive extensions, with the last one deciding.
 #[test]
-fn icons_distinguish_documents_pdfs_images_archives_and_folders() {
-    let ready = &DownloadFileStatus::Ready;
-    assert_eq!(file_icon("/work/notes.MD", ready), '\u{f15c}');
-    assert_eq!(file_icon("/work/main.rs", ready), '\u{f15c}');
-    assert_eq!(file_icon("/work/report.pdf", ready), '\u{f1c1}');
-    assert_eq!(file_icon("/work/shot.png", ready), '\u{f1c5}');
-    assert_eq!(file_icon("/work/files.tar.gz", ready), '\u{f1c6}');
-    assert_eq!(
-        file_icon("/work/notes.md", &DownloadFileStatus::Folder),
-        '\u{f07b}'
-    );
-    assert_eq!(file_icon("/work/notes.txt.command", ready), '\u{f15b}');
+fn icons_distinguish_documents_pdfs_images_and_archives() {
+    assert_eq!(file_icon("/work/notes.MD"), '\u{f15c}');
+    assert_eq!(file_icon("/work/main.rs"), '\u{f15c}');
+    assert_eq!(file_icon("/work/report.pdf"), '\u{f1c1}');
+    assert_eq!(file_icon("/work/shot.png"), '\u{f1c5}');
+    assert_eq!(file_icon("/work/files.tar.gz"), '\u{f1c6}');
+    assert_eq!(file_icon("/work/notes.txt.command"), '\u{f15b}');
 }
 
 /// Only the helm decides whether a modifier-click may open a file, and the hint must name this platform's modifier.
 /// Specified (the hint half of the old "hover advertises open only for native admitted types"): a ready file always
 /// says a click downloads; the opening hint appears only when the helm offered opening (`can_open`), as ⌘ on a Mac and
-/// Ctrl elsewhere; a refusal has no hints.
+/// Ctrl elsewhere.
 #[test]
 fn hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier() {
-    let stat = |can_open, status| FileStat {
-        host: "build-box".into(),
+    let stat = |can_open| FileStat {
         can_open,
-        info: DownloadFileInfo {
-            path: "/work/notes.txt".into(),
-            size: Some(4800),
-            status,
-        },
+        ..ready("/work/notes.txt", 4800)
     };
-    let ready = DownloadFileStatus::Ready;
     for (can_open, platform, hint) in [
         (
             Some(true),
             Platform::Mac,
-            Some(" · click to download · ⌘-click to open"),
+            " · click to download · ⌘-click to open",
         ),
         (
             Some(true),
             Platform::Linux,
-            Some(" · click to download · Ctrl-click to open"),
+            " · click to download · Ctrl-click to open",
         ),
-        (Some(false), Platform::Mac, Some(" · click to download")),
-        (None, Platform::Linux, Some(" · click to download")),
+        (Some(false), Platform::Mac, " · click to download"),
+        (None, Platform::Linux, " · click to download"),
     ] {
-        assert_eq!(
-            hints(&stat(can_open, ready.clone()), platform).as_deref(),
-            hint
-        );
+        assert_eq!(hints(&stat(can_open), platform), hint);
     }
-    assert_eq!(
-        hints(&stat(Some(true), DownloadFileStatus::Folder), Platform::Mac),
-        None
-    );
 }
 
 // ---- Harness ---------------------------------------------------------------------------------------------------------
@@ -215,12 +172,11 @@ fn ready(path: &str, size: u64) -> FileStat {
 }
 
 /// The tier names the status line can carry as its debug selector.
-const TIERS: [&str; 5] = [
+const TIERS: [&str; 4] = [
     "terminal-file-status-neutral",
     "terminal-file-status-small",
     "terminal-file-status-medium",
     "terminal-file-status-large",
-    "terminal-file-status-danger",
 ];
 
 impl Files<'_> {
@@ -378,6 +334,17 @@ impl Files<'_> {
         self.cx.update(|_, cx| owner.read(cx).points_at_link(cx))
     }
 
+    /// Inspect all three affordances together at an intentionally pending or unsuccessful check boundary.
+    fn assert_silent_hover(&mut self) {
+        assert!(!self.shown(), "no file disclosure");
+        assert!(!self.pointer(), "no pointing hand");
+        let owner = self.owner.clone();
+        assert_eq!(
+            self.cx.update(|_, cx| owner.read(cx).underlined_rows(cx)),
+            []
+        );
+    }
+
     /// Rest on `at`, the printed path `path`, and answer its check: a ready file of `size` bytes at `path`, resolved
     /// against `/work` when relative.
     fn checked(&mut self, at: Point<Pixels>, path: &str, size: u64) {
@@ -394,26 +361,25 @@ impl Files<'_> {
 
 // ---- Hover and check -------------------------------------------------------------------------------------------------
 
-/// Hovering is the moment the user learns what a click would fetch, so the display must say it is checking at once and
-/// then show exactly what the host found. Specified (SPEC.md: "Hover immediately underlines the path and shows a
-/// checking spinner, then the host, full resolved path and size"; the old "hover preserves both path pieces", and the
-/// e2e "file hover and complete browser download" up to its click): resting on a printed relative path asks the
-/// session's host about it as printed and shows "Checking…" with the path, neutral; the answer shows the file's name,
-/// `host:directory` of the resolved path, its decimal size and the hints; a click then is admitted for the resolved
-/// path.
+/// A printed path checks silently. Once ready, the underline and pointing hand accompany the three-line disclosure,
+/// which gives the user the resolved path they are about to download.
 #[gpui::test]
-fn a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted(cx: &mut TestAppContext) {
+fn a_hover_is_silent_until_the_host_confirms_the_file_is_ready(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "see notes.txt now", false)], None);
     let on = h.at_cell(5, 0);
     h.rest_on(on);
     let answer = h.check("notes.txt");
-    assert!(h.shown(), "the display shows while checking");
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
-    assert_eq!(h.line("terminal-file-path").as_deref(), Some("notes.txt"));
-    assert_eq!(h.tier(), None, "checking has no size tier");
+    h.assert_silent_hover();
 
     h.answer(answer, ready("/work/notes.txt", 4800));
+    assert!(h.shown());
+    assert!(h.pointer());
+    let owner = h.owner.clone();
+    assert_eq!(
+        h.cx.update(|_, cx| owner.read(cx).underlined_rows(cx)),
+        [(0, 4..13)]
+    );
     assert_eq!(h.line("terminal-file-name").as_deref(), Some("notes.txt"));
     assert_eq!(
         h.line("terminal-file-directory").as_deref(),
@@ -454,34 +420,18 @@ fn each_hover_checks_afresh_and_leaving_cancels(cx: &mut TestAppContext) {
 
 // ---- Tiers and refusals ----------------------------------------------------------------------------------------------
 
-/// A refused file must stay unclickable, and the display must say why in the old words, since that is all the user
-/// gets. Specified (SPEC.md: "Files must be readable regular files no larger than 100 MB ... directories are refused",
-/// and "refusals are red"; the refusal half of the e2e "file refusals, OSC file save and forbidden OSC schemes", and the
-/// cap half of "file hover shows decimal size tiers and a red cap refusal"): a missing file, a folder, an unreadable
-/// file, something that is not a regular file and a file one byte over the limit each show their refusal in red with
-/// no hints, and a click on each is neither admitted nor explained; output on another row keeps the refused hover (the
-/// refused half of the old "same-task redraw preserves answered ready and refused hovers"); a check the helm itself
-/// refused shows the helm's words under the red stripe, admitting nothing.
+/// Failed checks and non-downloadable paths leave no affordance or notice. A redraw that preserves a settled check
+/// must also stay quiet on the wire, since a resting pointer can sit over a refused path through many frames.
 #[gpui::test]
-fn folders_unreadable_and_other_refusals_say_why_and_admit_nothing(cx: &mut TestAppContext) {
+fn unsuccessful_file_checks_stay_silent_and_admit_nothing(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     use DownloadFileStatus::{Folder, NotFound, NotReadable, NotRegular, TooLarge};
     let cases = [
-        ("missing.txt", NotFound, 0, "Not found"),
-        ("folder.dir", Folder, 0, "Folder: not downloadable"),
-        ("private.txt", NotReadable, 0, "Not readable"),
-        (
-            "fifo.sock",
-            NotRegular,
-            0,
-            "Not a regular file: not downloadable",
-        ),
-        (
-            "big.bin",
-            TooLarge,
-            100_000_001,
-            "Too large to download: 100 MB (100 MB limit)",
-        ),
+        ("missing.txt", NotFound, 0),
+        ("folder.dir", Folder, 0),
+        ("private.txt", NotReadable, 0),
+        ("fifo.sock", NotRegular, 0),
+        ("big.bin", TooLarge, 100_000_001),
     ];
     let mut rows: Vec<_> = (0u64..)
         .zip(cases.clone())
@@ -489,47 +439,35 @@ fn folders_unreadable_and_other_refusals_say_why_and_admit_nothing(cx: &mut Test
         .collect();
     rows.push(row(5, "gone.txt", false));
     h.show(rows, None);
-    for (row, (name, status, size, words)) in (0u16..).zip(cases) {
+    for (row, (name, status, size)) in (0u16..).zip(cases) {
         let at = h.at_cell(1, row);
         h.rest_on(at);
         let answer = h.check(name);
         let mut stat = ready(&format!("/work/{name}"), size);
         stat.info.status = status;
         h.answer(answer, stat);
-        assert_eq!(h.line("terminal-file-status").as_deref(), Some(words));
-        assert_eq!(h.tier(), Some("danger"), "{name}");
-        assert_eq!(
-            h.line("terminal-file-hint"),
-            None,
-            "{name}: a refusal offers nothing"
-        );
+        h.assert_silent_hover();
         h.click(at);
         assert_eq!(h.admitted(), Vec::<String>::new(), "{name}");
-        assert_eq!(h.refusal(), None, "{name}: the display already says why");
+        assert_eq!(h.refusal(), None, "{name}");
     }
     h.rewrite(vec![row(7, "other output", false)], None, 2);
     assert!(
         h.checks().is_empty(),
         "the same refused link is the same hover"
     );
-    assert_eq!(h.tier(), Some("danger"));
+    h.assert_silent_hover();
 
     let at = h.at_cell(1, 5);
     h.rest_on(at);
     let answer = h.check("gone.txt");
-    answer.answer(Err(TransferError::Refused {
-        status: 404,
-        message: "no such session".into(),
-    }));
+    answer.answer(Err(TransferError::Lost("connection reset".into())));
     settle(h.cx);
     redraw(h.cx);
-    assert_eq!(
-        h.line("terminal-file-status").as_deref(),
-        Some("no such session")
-    );
-    assert_eq!(h.tier(), Some("danger"));
+    h.assert_silent_hover();
     h.click(at);
     assert_eq!(h.admitted(), Vec::<String>::new());
+    assert_eq!(h.refusal(), None);
 }
 
 // ---- Admission -------------------------------------------------------------------------------------------------------
@@ -548,14 +486,7 @@ fn a_click_whose_file_details_are_not_fully_visible_is_refused(cx: &mut TestAppC
     h.rest_on(on);
     let answer = h.check("/work/report.pdf");
     h.answer(answer, ready("/work/report.pdf", 2000));
-    let owner = h.owner.clone();
-    h.cx.update(|_, cx| {
-        let files = owner.read(cx).files().read(cx);
-        let drawn = files.hover.as_ref().unwrap().drawn.clone();
-        let mut panel = drawn.get().expect("the premise: the display was drawn");
-        panel.bounds.origin.y = panel.area.bottom() - px(4.);
-        drawn.set(Some(panel));
-    });
+    h.stage_off_window();
     h.click(on);
     assert_eq!(h.admitted(), Vec::<String>::new(), "nothing is admitted");
     assert_eq!(
@@ -686,14 +617,12 @@ fn ready_for_requires_the_same_cells_and_file() {
     let mut files = FileLinks::new("s1".into(), None);
     let hover = |check| Hover {
         link: checked.clone(),
-        asked: HostText::from_host("/work/a.txt"),
         platform: Platform::Linux,
-        drawn: Drawn::default(),
         check,
         staged: false,
         _stat: None,
     };
-    files.hover = Some(hover(Check::Answered(ready("/work/a.txt", 3))));
+    files.hover = Some(hover(Check::Ready(ready("/work/a.txt", 3))));
     let with = |change: &dyn Fn(&mut TerminalLink)| {
         let mut link = checked.clone();
         change(&mut link);
@@ -717,7 +646,7 @@ fn ready_for_requires_the_same_cells_and_file() {
     );
     let mut folder = ready("/work/a.txt", 3);
     folder.info.status = DownloadFileStatus::Folder;
-    files.hover = Some(hover(Check::Answered(folder)));
+    files.hover = Some(hover(Check::from_stat(folder)));
     assert!(!files.ready_for(&checked), "a refusal admits nothing");
     files.hover = Some(hover(Check::Checking));
     assert!(!files.ready_for(&checked), "nor does a check in flight");
@@ -728,8 +657,7 @@ fn ready_for_requires_the_same_cells_and_file() {
 /// cells must withdraw it (SPEC.md: "A partial redraw that changes the link text withdraws transfer and opening
 /// permission"). Specified: with the pointer resting on a checked printed path, rewriting its own row with the same text,
 /// then the row below, starts no check and a click is admitted each time; rewriting its cells with another path, with
-/// the pointer still, starts a check of the new path, shows it checking without the pointing hand, and a click is not
-/// admitted and says nothing.
+/// the pointer still, starts a silent check of the new path and leaves a click there unadmitted.
 #[gpui::test]
 fn a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes(
     cx: &mut TestAppContext,
@@ -757,11 +685,7 @@ fn a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_chan
 
     h.rewrite(vec![row(0, "plans.txt", false)], None, 4);
     let fresh = h.check("plans.txt");
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
-    assert!(
-        !h.pointer(),
-        "no pointing hand until the new text is checked"
-    );
+    h.assert_silent_hover();
     h.click(on);
     assert_eq!(h.admitted().len(), 2, "the relabel withdrew the click");
     assert_eq!(h.refusal(), None);
@@ -790,12 +714,10 @@ fn a_click_right_after_output_changed_the_path_is_judged_on_the_new_text(cx: &mu
     assert_eq!(h.admitted(), Vec::<String>::new());
 }
 
-/// A check's answer changes what the display shows, and until the new display has painted, the user has not seen it:
-/// where the display was drawn while it said "Checking…" says nothing about the answer. Specified: an answer arriving
-/// leaves the display with no drawn position; a click pressed before the next frame is not admitted and is refused with
-/// the explanation; hovering again, once the answer has painted, a click is admitted.
+/// The host can answer before the first disclosure frame. A click in that interval stays silent because the user
+/// has yet to see the target. Once the same answer has painted, it admits a click.
 #[gpui::test]
-fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
+fn a_click_before_the_answer_has_painted_stays_silent(cx: &mut TestAppContext) {
     let mut h = harness(cx);
     h.show(vec![row(0, "/work/report.pdf", false)], None);
     let on = h.at_cell(3, 0);
@@ -809,13 +731,13 @@ fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
         let files = owner.read(cx).files().clone();
         files.update(cx, |files, cx| {
             files.answered(Ok(ready("/work/report.pdf", 2000)), cx);
-            let drawn = &files.hover.as_ref().unwrap().drawn;
-            assert_eq!(
-                drawn.get(),
-                None,
-                "the answer forgot where the checking display was drawn"
-            );
+            let link = files.tracking().expect("the premise: the check is tracked");
+            assert!(files.ready_for(link), "the premise: the host answered");
         });
+        assert!(
+            owner.read(cx).disclosure_drawn().is_none(),
+            "the premise: no display was opened yet"
+        );
         let down = MouseDownEvent {
             button: MouseButton::Left,
             position: on,
@@ -834,19 +756,14 @@ fn a_click_before_the_answer_has_painted_is_refused(cx: &mut TestAppContext) {
     });
     settle(h.cx);
     assert_eq!(h.admitted(), Vec::<String>::new());
-    assert_eq!(h.refusal().as_deref(), Some(FILE_REFUSAL));
-    drop(pending);
-
-    let again = h.at_cell(5, 0);
-    h.checked(again, "/work/report.pdf", 2000);
-    h.click(again);
+    assert_eq!(h.refusal(), None);
+    h.answer(pending, ready("/work/report.pdf", 2000));
+    assert!(h.shown(), "the premise: the ready answer painted");
+    h.click(on);
     assert_eq!(h.admitted(), ["/work/report.pdf"]);
 }
 
-/// A click is judged on what the user pressed over: a press while the display still said "Checking…" was not made over
-/// a disclosure, so it does nothing, even when the answer lands before the release, and it must not claim the display
-/// was hidden either. Specified: resting on a printed path, a press while checking, the check's ready answer, then the
-/// release: nothing is admitted and no explanation shows.
+/// A press while the stat is pending cannot gain permission from an answer that lands before release.
 #[gpui::test]
 fn an_answer_landing_between_press_and_release_leaves_the_click_silent(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -854,14 +771,60 @@ fn an_answer_landing_between_press_and_release_leaves_the_click_silent(cx: &mut 
     let on = h.at_cell(2, 0);
     h.rest_on(on);
     let answer = h.check("notes.txt");
+    h.assert_silent_hover();
     h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
     settle(h.cx);
     answer.answer(Ok(ready("/work/notes.txt", 10)));
     settle(h.cx);
+    redraw(h.cx);
+    assert!(
+        h.pointer(),
+        "the premise: the file is ready before mouse-up"
+    );
     h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
     settle(h.cx);
     assert_eq!(h.admitted(), Vec::<String>::new());
     assert_eq!(h.refusal(), None);
+}
+
+/// Restoring the same printed path can resolve to a different file. A press against the earlier disclosure cannot
+/// authorize the replacement, even after the new disclosure has painted at the same cells.
+#[gpui::test]
+fn a_replacement_file_check_cannot_inherit_a_press(cx: &mut TestAppContext) {
+    let mut h = harness(cx);
+    h.show(vec![row(0, "notes.txt", false)], None);
+    let on = h.at_cell(2, 0);
+    h.rest_on(on);
+    let original = h.check("notes.txt");
+    h.answer(original, ready("/work/first/notes.txt", 10));
+    assert_eq!(
+        h.line("terminal-file-directory").as_deref(),
+        Some("build-box:/work/first/"),
+        "the premise: the original target painted before the press"
+    );
+    h.cx.simulate_mouse_down(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+
+    h.rewrite(vec![row(0, "plans.txt", false)], None, 2);
+    let intervening = h.check("plans.txt");
+    h.rewrite(vec![row(0, "notes.txt", false)], None, 3);
+    assert!(intervening.abandoned());
+    let replacement = h.check("notes.txt");
+    h.answer(replacement, ready("/work/second/notes.txt", 20));
+    assert_eq!(
+        h.line("terminal-file-directory").as_deref(),
+        Some("build-box:/work/second/"),
+        "the premise: the replacement target painted before release"
+    );
+
+    h.cx.simulate_mouse_up(on, MouseButton::Left, Modifiers::none());
+    settle(h.cx);
+    redraw(h.cx);
+    assert!(h.admitted().is_empty());
+    assert_eq!(h.refusal(), None);
+
+    h.click(on);
+    assert_eq!(h.admitted(), ["/work/second/notes.txt"]);
 }
 
 /// SPEC.md: "Only a successful check ... admits a click", and the old app gave a printed path the pointing hand only
@@ -1450,8 +1413,7 @@ fn a_pending_check_survives_output_that_does_not_touch_its_line(cx: &mut TestApp
     h.rewrite(vec![row(0, "plans.txt", false)], None, 4);
     assert!(pending.abandoned(), "a changed path drops its check");
     let _fresh = h.check("plans.txt");
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
-    assert_eq!(h.line("terminal-file-path").as_deref(), Some("plans.txt"));
+    h.assert_silent_hover();
 }
 
 /// Why: a check vouches for the line it was asked about, and scrolling while it is pending puts another line under the
@@ -1460,7 +1422,7 @@ fn a_pending_check_survives_output_that_does_not_touch_its_line(cx: &mut TestApp
 /// the view scrolled away from the pointer"): over a screen with history above it, resting on the printed path
 /// `/work/asked.txt` on the second row and scrolling one line back while its check is pending drops that check and
 /// checks `/work/above.txt`, now under the pointer; the dropped check's late answer changes nothing, and the display
-/// shows only the new path's check and then its answer.
+/// stays silent while the new path checks, then shows its answer.
 #[gpui::test]
 fn a_pending_check_is_not_used_for_a_line_scrolled_away(cx: &mut TestAppContext) {
     let mut h = harness(cx);
@@ -1485,11 +1447,7 @@ fn a_pending_check_is_not_used_for_a_line_scrolled_away(cx: &mut TestAppContext)
     asked.answer(Ok(ready("/work/asked.txt", 99)));
     settle(h.cx);
     redraw(h.cx);
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
-    assert_eq!(
-        h.line("terminal-file-path").as_deref(),
-        Some("/work/above.txt")
-    );
+    h.assert_silent_hover();
     h.answer(above, ready("/work/above.txt", 5));
     assert_eq!(h.line("terminal-file-status").as_deref(), Some("5 B"));
 }
@@ -1547,7 +1505,7 @@ fn a_pending_history_check_is_not_used_after_a_same_number_same_text_reset(
     old.answer(Ok(ready("/work/history.txt", 99)));
     settle(h.cx);
     redraw(h.cx);
-    assert_eq!(h.line("terminal-file-checking").as_deref(), Some(CHECKING));
+    h.assert_silent_hover();
     h.answer(fresh, ready("/work/history.txt", 7));
     assert_eq!(h.line("terminal-file-status").as_deref(), Some("7 B"));
 }

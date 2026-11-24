@@ -1,13 +1,10 @@
-//! File links in a session terminal: hovering a file path a program printed checks it on the session's host and shows
-//! the host's answer before any click may transfer the file (SPEC.md, "Terminal experience", the file-path bullet; the
-//! old app's `FileLinks` in terminal-files.js at the reference commit). A program's `file://` hyperlink, which the old
-//! app also checked, is inert like every hyperlink that is not a web address: the terminal finds no link over it, so it
-//! never reaches this module.
+//! Hovering a printed file path checks it on the session's host. Only a downloadable file gets a disclosure and a
+//! click action (SPEC.md, "Terminal experience"). The grid model only recognizes web destinations in OSC 8 links, so
+//! a program's `file://` hyperlink never reaches this module.
 //!
 //! The grid model recognizes the links ([`farhelm_grid_model::TerminalLink::file_path`]); a link grants nothing. Only
 //! the host can say what a path names, so each hover asks it afresh (a stat through the helm client's
-//! [`Transfers`]), and the hover display shows what it said: the host, the full resolved path and the size, or the
-//! refusal. Here's the TLDR of the rules this module keeps:
+//! [`Transfers`]). A successful check discloses the host, the full resolved path and the size.
 //!
 //! - One hover, one check. A hover is the link as the grid model finds it under the pointer: its file (the path as
 //!   printed) and its cells. A redraw that finds the same link again is the same hover and keeps its check; a changed
@@ -15,20 +12,18 @@
 //!   drops the check, and dropping its future abandons the request on the helm.
 //! - Only a successful check admits a click, and only for the link it checked: the owner finds the link again from the
 //!   live text at the release, and a click counts only when that link's cells and file are still the checked one's
-//!   ([`FileLinks::ready_for`]). A click pressed while checking, even one whose answer lands before the
-//!   release, or on a path the host refused, does nothing. One pressed over a ready answer the display has not painted
-//!   yet is refused as not visible: a fresh answer forgets where the display was drawn.
+//!   ([`FileLinks::ready_for`]). The press must have a painted answer already. A click that starts before paint or
+//!   while a check is pending or unsuccessful stays silent.
 //! - The display is the safeguard. A click whose display was outside the window or covered by a pointer-blocking
 //!   surface is refused with the old app's explanation.
-//! - A printed path shows the pointing hand only once its check succeeded; a web link shows it at once.
+//! - A printed path gets an underline and a pointing hand only once its check succeeded.
 //! - A staged run's host (agent builds with a pins file only) is never asked: the check is answered at once from the
 //!   pins file ([`crate::agent_startup::staged_file_stat`]), and a click on such an answer saves nothing, since the
 //!   file it names exists on no host.
 //!
 //! The terminal's owner ([`super::attached`]) draws the display through the same non-focusing popover and anchor as a
 //! web link's destination display, so it opens by the pointer, closes on a press, comes back after it and is judged
-//! fully visible exactly as that one is; this module owns what the display shows (this entity is the popover's
-//! content) and the check behind it.
+//! fully visible exactly as that one is. The popover holds a snapshot of the ready check and a fresh paint witness.
 //!
 //! An admitted click saves the file into Downloads, and opens the save on the platform's modifier-click; the status
 //! line at the top of the terminal says how it went ([`download`]).
@@ -43,22 +38,23 @@ mod tests;
 
 use std::collections::HashMap;
 
-use farhelm_grid_model::{LinkKind, TerminalLink};
+use farhelm_grid_model::TerminalLink;
 use farhelm_helm_client::{FileStat, TransferError, Transfers};
 use farhelm_input_mapping::Platform;
-use farhelm_proto::{DownloadFileInfo, DownloadFileStatus};
+#[cfg(test)]
+use farhelm_proto::DownloadFileInfo;
+use farhelm_proto::DownloadFileStatus;
 use gpui::{
     AnyElement, App, Context, FontWeight, InteractiveElement, IntoElement, Modifiers,
-    ParentElement, Pixels, Render, SharedString, StatefulInteractiveElement as _, Styled, Task,
-    Window, div, prelude::FluentBuilder as _, px,
+    ParentElement, Render, SharedString, StatefulInteractiveElement as _, Styled, Task, Window,
+    div, px,
 };
 
 use super::disclosure::{self, Drawn, Hidden};
 use crate::assets::TERMINAL_FONT;
-use crate::components::{Role, Spinner, spinner_icon};
+use crate::components::Role;
 use crate::host_text::{HostSentence, HostText};
 use crate::theme::{self, Palette, Token};
-use crate::ticker;
 
 #[cfg(test)]
 const FILE_REFUSAL: &str = Hidden::NotVisible.file_words();
@@ -66,26 +62,13 @@ const FILE_REFUSAL: &str = Hidden::NotVisible.file_words();
 /// The display's element id, which tests and the bridge find it by.
 const PANEL_ID: &str = "terminal-file-disclosure";
 
-/// The old display's first line while the host has not answered.
-const CHECKING: &str = "Checking…";
-
-/// Why every check fails for a terminal whose UI session has no transfers: only a connection with no helm client has
-/// none, which the app never makes; tests that serve no transfers do.
-const NO_HELM_CLIENT: &str = "this window has no helm client to check files through";
-
-/// The shared spinner's size here: the old checking ring's 10 pixels plus its 2-pixel border on each side.
-const SPINNER_SIZE: Pixels = px(14.);
-
-/// The file links of one terminal: the hover the pointer rests on, its check, and the display that shows it. One per
-/// terminal, made with it and dropped with it, which drops any check in flight.
+/// The file checks and downloads of one terminal. Dropping the entity drops its outstanding transfers.
 pub(crate) struct FileLinks {
     /// The session's served id, which the helm resolves a path against (its working directory and home).
     session: String,
-    /// Where checks go: the UI session's transfers, `None` only without a helm client ([`NO_HELM_CLIENT`]).
+    /// The UI session's transfers. A session with no helm client can only answer with a staged stat.
     transfers: Option<Transfers>,
     hover: Option<Hover>,
-    /// The checking ring's turn, held only while the display shows a check in an active window.
-    spinner: Option<Spinner>,
     /// What the status line at the top of the terminal says about the latest download ([`download`]).
     status: Option<download::Status>,
     /// The saves in flight, by the number each was started under. Dropping one abandons it, and the helm then removes
@@ -99,13 +82,8 @@ pub(crate) struct FileLinks {
 struct Hover {
     /// The link as the grid model found it when the hover started: what a click must still find.
     link: TerminalLink,
-    /// The path as it was asked about, as printed, shown while checking or after a failure, before the host has named
-    /// the file itself.
-    asked: HostText,
     /// Whose modifier the opening hint names.
     platform: Platform,
-    /// Where the display was last drawn, which a click checks it against; the owner's for the display it opened.
-    drawn: Drawn,
     check: Check,
     /// Whether `check` came from a staged run's pins file rather than the host (agent builds only): the file it names
     /// exists on no host, so a click on it downloads nothing.
@@ -117,10 +95,20 @@ struct Hover {
 /// How far a hover's check got.
 enum Check {
     Checking,
-    /// The host answered: a ready file, or its refusal (a folder, a file over the limit, ...).
-    Answered(FileStat),
-    /// The request failed, in the helm's words (or the transport's).
-    Failed(HostText),
+    Ready(FileStat),
+    /// Retain a settled negative result for this hover. Redraws must not keep asking about the same path.
+    NotActionable,
+}
+
+impl Check {
+    /// Only a downloadable answer carries file details into the UI.
+    fn from_stat(stat: FileStat) -> Self {
+        if stat.info.status == DownloadFileStatus::Ready {
+            Self::Ready(stat)
+        } else {
+            Self::NotActionable
+        }
+    }
 }
 
 impl FileLinks {
@@ -130,43 +118,37 @@ impl FileLinks {
             session,
             transfers,
             hover: None,
-            spinner: None,
             status: None,
             downloads: HashMap::new(),
             next_download: 0,
         }
     }
 
-    /// The pointer rests on `hovered`, drawn into `drawn`, or on no file link: keep the hover if it is the same link,
-    /// otherwise drop it, with its check, and start a fresh one for the new link. The owner calls this whenever its
-    /// destination display changes, which is whenever the hovered link changes and when the display comes back after a
-    /// press, with that display's `drawn`.
+    /// The link whose check belongs to the current hover, including a pending or settled negative check.
+    pub(super) fn tracking(&self) -> Option<&TerminalLink> {
+        self.hover.as_ref().map(|hover| &hover.link)
+    }
+
+    /// Follow the hovered file independently of its popover. Leaving the link drops its task and abandons the request.
     pub(crate) fn follow(
         &mut self,
-        hovered: Option<(TerminalLink, Drawn)>,
+        hovered: Option<TerminalLink>,
         platform: Platform,
         cx: &mut Context<Self>,
     ) {
-        let hovered = hovered.and_then(|(link, drawn)| Some((link.file_path()?, link, drawn)));
-        let Some((path, link, drawn)) = hovered else {
-            if self.hover.take().is_some() {
-                cx.notify();
-            }
-            return;
-        };
-        if let Some(hover) = &mut self.hover
-            && hover.link == link
-        {
-            hover.drawn = drawn;
-            hover.platform = platform;
+        if self.tracking() == hovered.as_ref() {
             return;
         }
+        self.hover = None;
+        let Some((path, link)) = hovered.and_then(|link| Some((link.file_path()?, link))) else {
+            return;
+        };
         // A staged run's host is never asked: its answer comes from the pins file (`agent_startup`, "Staged host
         // values"), at once, as if the host had answered.
         let staged = crate::agent_startup::staged_file_stat(&self.session, &path, cx);
         let was_staged = staged.is_some();
         let (check, stat) = match (&self.transfers, staged) {
-            (_, Some(stat)) => (Check::Answered(stat), None),
+            (_, Some(stat)) => (Check::from_stat(stat), None),
             (Some(transfers), None) => {
                 let stat = transfers.stat(&self.session, &path);
                 let task = cx.spawn(async move |files, cx| {
@@ -175,21 +157,19 @@ impl FileLinks {
                 });
                 (Check::Checking, Some(task))
             }
-            (None, None) => (
-                Check::Failed(failure(&TransferError::NotSent(NO_HELM_CLIENT.into()))),
-                None,
-            ),
+            (None, None) => (Check::NotActionable, None),
         };
+        let ready = matches!(check, Check::Ready(_));
         self.hover = Some(Hover {
             link,
-            asked: HostText::from_host(path),
             platform,
-            drawn,
             check,
             staged: was_staged,
             _stat: stat,
         });
-        cx.notify();
+        if ready {
+            cx.notify();
+        }
     }
 
     /// The host answered the current hover's check. A replaced hover's answer never gets here: dropping its task
@@ -198,14 +178,10 @@ impl FileLinks {
         let Some(hover) = &mut self.hover else {
             return;
         };
-        hover.check = match answer {
-            Ok(stat) => Check::Answered(stat),
-            Err(error) => Check::Failed(failure(&error)),
-        };
-        // Where the display was drawn was where it said "Checking…": until it has painted the answer, a click must
-        // not count as made over a visible answer, so it fails closed ([`disclosure::visibility`] of nothing).
-        hover.drawn.set(None);
-        cx.notify();
+        hover.check = answer.map_or(Check::NotActionable, Check::from_stat);
+        if matches!(hover.check, Check::Ready(_)) {
+            cx.notify();
+        }
     }
 
     /// Whether a click on `link` may transfer a file: the current hover's check found a ready file, and `link`, as the
@@ -213,35 +189,35 @@ impl FileLinks {
     /// the same file. A printed path's file is its text, so a partial redraw that changed the text over the same cells
     /// withdraws the click: the user has not seen the new file checked.
     pub(super) fn ready_for(&self, link: &TerminalLink) -> bool {
-        self.hover.as_ref().is_some_and(|hover| {
-            matches!(&hover.check, Check::Answered(stat) if stat.info.status == DownloadFileStatus::Ready)
-                && link.same_range(&hover.link)
-                && link.file_path() == hover.link.file_path()
-        })
+        self.ready_stat(link).is_some()
     }
 
-    /// Whether `link` shows the pointing hand: a printed path once its check succeeded, every other link (a web link,
-    /// the only other kind the terminal finds) at once.
-    pub(crate) fn shows_pointer(&self, link: &TerminalLink) -> bool {
-        link.kind != LinkKind::Path || self.ready_for(link)
+    /// A ready answer for these cells and path, which a new disclosure snapshots when it opens.
+    pub(super) fn ready_stat(&self, link: &TerminalLink) -> Option<&FileStat> {
+        let hover = self.hover.as_ref()?;
+        match &hover.check {
+            Check::Ready(stat)
+                if link.same_range(&hover.link) && link.file_path() == hover.link.file_path() =>
+            {
+                Some(stat)
+            }
+            _ => None,
+        }
     }
 
     /// A click on the same checked link saves the disclosed file, and with its opening modifier also opens the save
-    /// ([`download`]). The press must have seen the whole disclosure. At release an observed cover still refuses
-    /// the click, though a missing panel is normal after the press closes its popover.
-    ///
-    /// A click with no ready check, now or at its press, is silent, as the old app's was: the display already says
-    /// why, and a check that answered between the press and the release was not one the user pressed over.
+    /// ([`download`]). The owner calls this only when the press and release refer to the same painted disclosure.
+    /// At release an observed cover still refuses the click, though a hidden panel is normal after a press closes it.
+    /// If the host check no longer applies to these cells and path, the click stays silent.
     pub(super) fn clicked(
         &mut self,
         link: &TerminalLink,
         pressed: Result<(), Hidden>,
-        ready_at_press: bool,
         released: Result<(), Hidden>,
         modifiers: Modifiers,
         cx: &mut Context<Self>,
     ) -> Option<&'static str> {
-        if !ready_at_press || !self.ready_for(link) {
+        if !self.ready_for(link) {
             return None;
         }
         let refusal = match (pressed, released) {
@@ -252,7 +228,7 @@ impl FileLinks {
             (Ok(()), _) => {
                 if let Some(hover) = &self.hover
                     && !hover.staged
-                    && let Check::Answered(stat) = &hover.check
+                    && let Check::Ready(stat) = &hover.check
                 {
                     let (path, can_open) = (stat.info.path.clone(), stat.can_open == Some(true));
                     let requested = download::opening(modifiers, hover.platform);
@@ -266,8 +242,7 @@ impl FileLinks {
     }
 }
 
-/// A failed check's line: the helm's own words for a refusal (the old app's "Download refused" when it sent none), the
-/// failure's description otherwise.
+/// The status line for a failed download. Use the helm's words when it sent a refusal message.
 fn failure(error: &TransferError) -> HostText {
     match error {
         TransferError::Refused { message, .. } if !message.is_empty() => {
@@ -281,10 +256,10 @@ fn failure(error: &TransferError) -> HostText {
 // ---- What the display shows ------------------------------------------------------------------------------------------
 
 /// The display's left stripe, and the size's color, by what the check found (the old `sizeTier` and its `data-tier`
-/// styles in app.css). Size sets it by exact decimal byte thresholds; any refusal or failure overrides the size.
+/// styles in app.css). The thresholds use decimal bytes, like the host's download limit.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum SizeTier {
-    /// Still checking, or a ready file whose size the host did not report: the neutral stripe.
+    /// The host reported a downloadable file without a size.
     Neutral,
     /// Under 1 MB: green stripe and size.
     Small,
@@ -292,23 +267,19 @@ enum SizeTier {
     Medium,
     /// 10 MB up to the 100 MB limit, which itself is allowed: amber stripe and size.
     Large,
-    /// A refusal or a failed check: the red stripe for both, red words only for the host's refusal of the file.
-    Danger,
 }
 
 impl SizeTier {
-    /// The tier of a host's answer.
-    fn of(info: &DownloadFileInfo) -> SizeTier {
-        match (&info.status, info.size) {
-            (DownloadFileStatus::Ready, None) => SizeTier::Neutral,
-            (DownloadFileStatus::Ready, Some(size)) if size < 1_000_000 => SizeTier::Small,
-            (DownloadFileStatus::Ready, Some(size)) if size < 10_000_000 => SizeTier::Medium,
-            (DownloadFileStatus::Ready, Some(_)) => SizeTier::Large,
-            _ => SizeTier::Danger,
+    fn of(size: Option<u64>) -> SizeTier {
+        match size {
+            None => SizeTier::Neutral,
+            Some(size) if size < 1_000_000 => SizeTier::Small,
+            Some(size) if size < 10_000_000 => SizeTier::Medium,
+            Some(_) => SizeTier::Large,
         }
     }
 
-    /// The stripe's color: `--fg-2`, `--ok`, `--info`, `--warn` and `--danger`, as the old tiers set
+    /// The stripe's color: `--fg-2`, `--ok`, `--info` and `--warn`, as the old tiers set
     /// `border-left-color`.
     fn stripe(self, palette: &Palette) -> Token {
         match self {
@@ -316,17 +287,15 @@ impl SizeTier {
             SizeTier::Small => palette.ok,
             SizeTier::Medium => palette.info,
             SizeTier::Large => palette.warn,
-            SizeTier::Danger => palette.danger,
         }
     }
 
-    /// The size's (or refusal's) color: green and amber for their tiers, red for a refusal, and the display's own text
+    /// The size's color: green and amber for their tiers, and the display's own text
     /// color otherwise, as the old `.terminal-file-size` inherited it.
     fn words(self, palette: &Palette) -> Token {
         match self {
             SizeTier::Small => palette.ok,
             SizeTier::Large => palette.warn,
-            SizeTier::Danger => palette.danger,
             SizeTier::Neutral | SizeTier::Medium => palette.fg_1,
         }
     }
@@ -338,14 +307,12 @@ impl SizeTier {
             SizeTier::Small => "small",
             SizeTier::Medium => "medium",
             SizeTier::Large => "large",
-            SizeTier::Danger => "danger",
         }
     }
 }
 
 /// `bytes` in decimal units, as the old `formatSize`: whole bytes under 1000, then KB, MB and GB to one decimal with a
-/// trailing `.0` dropped. Decimal units agree with the host's 100,000,000-byte limit, so a file just over it never
-/// reads as less than "100 MB" (the refusal names the limit beside it).
+/// trailing `.0` dropped. Decimal units agree with the host's 100,000,000-byte limit.
 ///
 /// The tenths round half up on exact integers. The old code rounded the floating-point quotient with `toFixed`, which
 /// can differ for a quotient that floating point stores just below a half (1,150 bytes read "1.1 KB" there and "1.2 KB"
@@ -368,28 +335,9 @@ fn format_size(bytes: u64) -> String {
     }
 }
 
-/// The status line's words for a host's answer: the size of a ready file, or its refusal, in the old app's words.
-fn status_words(info: &DownloadFileInfo) -> String {
-    let size = info.size.map(format_size);
-    match &info.status {
-        DownloadFileStatus::Ready => size.unwrap_or_else(|| "Size unknown".into()),
-        DownloadFileStatus::NotFound => "Not found".into(),
-        DownloadFileStatus::Folder => "Folder: not downloadable".into(),
-        DownloadFileStatus::TooLarge => match size {
-            Some(size) => format!("Too large to download: {size} (100 MB limit)"),
-            None => "Too large to download (100 MB limit)".into(),
-        },
-        DownloadFileStatus::NotReadable => "Not readable".into(),
-        DownloadFileStatus::NotRegular => "Not a regular file: not downloadable".into(),
-    }
-}
-
 /// The action hints after a ready file's size: a click downloads, and where the helm offers opening (only the desktop
 /// app's helm has an opener, and only for a type on the shared list), the platform's modifier-click opens.
-fn hints(stat: &FileStat, platform: Platform) -> Option<String> {
-    if stat.info.status != DownloadFileStatus::Ready {
-        return None;
-    }
+fn hints(stat: &FileStat, platform: Platform) -> String {
     let mut hints = String::from(" · click to download");
     if stat.can_open == Some(true) {
         hints.push_str(match platform {
@@ -397,16 +345,13 @@ fn hints(stat: &FileStat, platform: Platform) -> Option<String> {
             Platform::Linux => " · Ctrl-click to open",
         });
     }
-    Some(hints)
+    hints
 }
 
-/// The bundled Nerd Font symbol for a file's broad kind (the old `fileIcon`): a folder, a PDF, an image, an archive, a
+/// The bundled Nerd Font symbol for a file's broad kind (the old `fileIcon`): a PDF, an image, an archive, a
 /// text or source file, or a generic file. It names a kind, never whether the file may be opened; only the helm
 /// decides that.
-fn file_icon(path: &str, status: &DownloadFileStatus) -> char {
-    if *status == DownloadFileStatus::Folder {
-        return '\u{f07b}';
-    }
+fn file_icon(path: &str) -> char {
     let name = path.rsplit('/').next().unwrap_or(path);
     let extension = name.rsplit('.').next().unwrap_or(name).to_ascii_lowercase();
     match extension.as_str() {
@@ -430,138 +375,65 @@ fn words(id: &'static str, text: impl Into<SharedString>) -> gpui::Stateful<gpui
         .child(text)
 }
 
-impl Render for FileLinks {
+/// The ready stat for one popover. The owner supplies a fresh witness so only this panel's paint can admit a click.
+pub(super) struct FileDisclosureView {
+    pub(super) stat: FileStat,
+    pub(super) platform: Platform,
+    pub(super) drawn: Drawn,
+}
+
+impl Render for FileDisclosureView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let checking = self
-            .hover
-            .as_ref()
-            .is_some_and(|hover| matches!(hover.check, Check::Checking));
-        let spins = checking && ticker::is_active(window, cx);
-        if spins != self.spinner.is_some() {
-            self.spinner = spins.then(|| Spinner::start(window, cx));
-        }
-        let step = self.spinner.as_ref().map_or(0, |spinner| spinner.step(cx));
-        match &self.hover {
-            Some(hover) => panel(hover, step, window, cx),
-            None => div().into_any_element(),
-        }
+        panel(&self.stat, self.platform, self.drawn.clone(), window, cx)
     }
 }
 
-/// The display for `hover`, the old `.terminal-file-target`: the web-link display's floating surface, with a 3-pixel
-/// left stripe in its tier's color. Its three lines, once the host answered, are the file's icon and name in the bright
-/// face, then `host:directory`, then the size or refusal with the action hints; every host value goes through the
+/// The file disclosure uses the web-link display's floating surface with a 3-pixel stripe in the size tier's color.
+/// Its three lines show the file's icon and name, `host:directory`, and the size with the action hints. Every host value goes through the
 /// host-text element, so hidden characters show and repeated spaces stay. Long paths wrap rather than elide: the full
 /// path is the evidence a click needs, and a display too tall for the window is not fully visible, which refuses the
 /// click.
-fn panel(hover: &Hover, step: u8, window: &Window, cx: &App) -> AnyElement {
+fn panel(
+    stat: &FileStat,
+    platform: Platform,
+    drawn: Drawn,
+    window: &Window,
+    cx: &App,
+) -> AnyElement {
     let palette = theme::palette(cx);
-    let tier = match &hover.check {
-        Check::Checking => SizeTier::Neutral,
-        Check::Answered(stat) => SizeTier::of(&stat.info),
-        Check::Failed(_) => SizeTier::Danger,
-    };
-    let lines: Vec<AnyElement> = match &hover.check {
-        Check::Checking => vec![
-            spinner_icon(step, SPINNER_SIZE, theme::color(palette.fg_1)).into_any_element(),
-            words("terminal-file-checking", CHECKING).into_any_element(),
-            HostSentence::new("terminal-file-path")
-                .host(&hover.asked)
-                .into_any_element(),
-        ],
-        Check::Failed(message) => vec![
-            HostSentence::new("terminal-file-path")
-                .host(&hover.asked)
-                .into_any_element(),
-            // Ordinary text under the red stripe, as the old app showed a failed check (a refusal's words are red).
-            div()
-                .debug_selector(|| format!("terminal-file-status-{}", SizeTier::Danger.name()))
-                .child(HostSentence::new("terminal-file-status").host(message))
-                .into_any_element(),
-        ],
-        Check::Answered(stat) => answer_lines(stat, hover.platform, tier, palette),
-    };
+    let tier = SizeTier::of(stat.info.size);
     let panel = disclosure::surface(PANEL_ID, window, cx)
         .border_l(px(3.))
         .border_color(theme::color(tier.stripe(palette)))
-        .children(lines);
-    disclosure::witnessed(panel, hover.drawn.clone()).into_any_element()
+        .children(answer_lines(stat, platform, tier, palette));
+    disclosure::witnessed(panel, drawn).into_any_element()
 }
 
-/// Every kind of display, stacked, for the goldens' scene: checking, a small, medium and large ready file (the small
-/// one offering a Mac's ⌘-click), the limit refusal, a folder, and a failed check. Test builds only.
+/// The three size tiers for ready file disclosures, with the opening hint on the small file.
 #[cfg(test)]
 pub(crate) fn golden_displays(window: &Window, cx: &App) -> AnyElement {
-    use DownloadFileStatus::{Folder, Ready, TooLarge};
-    // The answered ones: what was asked, the resolved path, its size and status, and whether the helm offers opening.
     let answers = [
-        (
-            "notes/plan.md",
-            "/home/dev/notes/plan.md",
-            4_800,
-            Ready,
-            true,
-        ),
-        (
-            "report.pdf",
-            "/home/dev/report.pdf",
-            8_400_000,
-            Ready,
-            false,
-        ),
-        (
-            "dump.tar.gz",
-            "/home/dev/dump.tar.gz",
-            87_000_000,
-            Ready,
-            false,
-        ),
-        ("big.bin", "/home/dev/big.bin", 100_000_001, TooLarge, false),
-        ("src", "/home/dev/src", 4_096, Folder, false),
+        ("/home/dev/notes/plan.md", 4_800, true),
+        ("/home/dev/report.pdf", 8_400_000, false),
+        ("/home/dev/dump.tar.gz", 87_000_000, false),
     ];
-    let answered = answers
-        .into_iter()
-        .map(|(asked, path, size, status, can_open)| {
-            let info = DownloadFileInfo {
-                path: path.into(),
-                size: Some(size),
-                status,
-            };
-            let stat = FileStat {
-                host: "build-box".into(),
-                can_open: Some(can_open),
-                info,
-            };
-            (asked, Check::Answered(stat))
-        });
-    let lost = failure(&TransferError::Lost("connection reset".into()));
-    let hovers: Vec<Hover> = std::iter::once(("notes/plan.md", Check::Checking))
-        .chain(answered)
-        .chain(std::iter::once(("gone.txt", Check::Failed(lost))))
-        .map(|(asked, check)| Hover {
-            link: TerminalLink {
-                kind: LinkKind::Path,
-                uri: asked.into(),
-                ranges: Vec::new(),
-                evidence: Default::default(),
-                label: String::new(),
-                osc_label_ambiguous: false,
-                unseen: false,
-            },
-            asked: HostText::from_host(asked),
-            platform: Platform::Mac,
-            drawn: Drawn::default(),
-            check,
-            staged: false,
-            _stat: None,
-        })
-        .collect();
     div()
         .flex()
         .flex_col()
         .items_start()
         .gap(px(8.))
-        .children(hovers.iter().map(|hover| panel(hover, 0, window, cx)))
+        .children(answers.into_iter().map(|(path, size, can_open)| {
+            let stat = FileStat {
+                host: "build-box".into(),
+                can_open: Some(can_open),
+                info: DownloadFileInfo {
+                    path: path.into(),
+                    size: Some(size),
+                    status: DownloadFileStatus::Ready,
+                },
+            };
+            panel(&stat, Platform::Mac, Drawn::default(), window, cx)
+        }))
         .into_any_element()
 }
 
@@ -576,8 +448,11 @@ fn answer_lines(
     let path = stat.info.path.as_str();
     let split = path.rfind('/').map_or(0, |slash| slash + 1);
     let (directory, name) = path.split_at(split);
-    let icon = file_icon(path, &stat.info.status);
-    let ready = stat.info.status == DownloadFileStatus::Ready;
+    let icon = file_icon(path);
+    let size = stat
+        .info
+        .size
+        .map_or_else(|| "Size unknown".into(), format_size);
     vec![
         div()
             .flex()
@@ -605,12 +480,12 @@ fn answer_lines(
             .flex()
             .flex_wrap()
             .child(
-                words("terminal-file-status", status_words(&stat.info))
+                words("terminal-file-status", size)
                     .debug_selector(|| format!("terminal-file-status-{}", tier.name()))
-                    .when(ready, |status| status.font_weight(FontWeight::SEMIBOLD))
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_color(theme::color(tier.words(palette))),
             )
-            .children(hints(stat, platform).map(|hints| words("terminal-file-hint", hints)))
+            .child(words("terminal-file-hint", hints(stat, platform)))
             .into_any_element(),
     ]
 }

@@ -112,13 +112,9 @@ over the text the clipboard also carries, and its host path typed as a paste) by
 - "a host's file name with format characters is shown with them visible" by
   crates/gui/farhelm-gui/src/terminal/files/tests.rs
   `a_hosts_file_name_with_format_characters_is_shown_with_them_visible`.
-- "a container session offers only the paths its host admits": superseded. The GPUI app checks every hovered path and
-  shows the host's refusal ("Not found", in red) by files/tests.rs
-  `folders_unreadable_and_other_refusals_say_why_and_admit_nothing`, as SPEC.md's file-path rule says and as a container
-  session's file links follow "the ordinary supervisor rules inside their container" (SPEC.md, "Session view"). The
-  hover that hid a refusal belonged to the retired legacy containerized sessions, whose supervisor sat outside the
-  container; their check before a path was offered was removed with them in #3330, before the reference commit, so at
-  `24bc0580` the old app no longer read the `containerized: true` the spec still passed and showed "Not found" too.
+- "a container session offers only the paths its host admits" by files/tests.rs
+  `unsuccessful_file_checks_stay_silent_and_admit_nothing`. Container sessions use the same ready-only hover as other
+  sessions. Their supervisor checks paths inside the container (SPEC.md, "Session view").
 - "a container file hover survives unrelated neighboring output (single row)" by files/tests.rs
   `a_single_row_paths_hover_survives_output_past_a_blank_row` and
   `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes` (a rewrite of the row below starts
@@ -221,7 +217,7 @@ rounds to).
   `large_valid_history_append_is_not_rejected_by_a_client_only_count_limit`.
 - "a history link keeps its answer and hover across lazy reads and unrelated output" by terminal/tests.rs
   `a_hovered_link_stays_hovered_across_output_to_another_row` and crates/gui/farhelm-gui/src/terminal/files/tests.rs
-  `folders_unreadable_and_other_refusals_say_why_and_admit_nothing` (a refused hover kept across output).
+  `unsuccessful_file_checks_stay_silent_and_admit_nothing` (a settled unsuccessful check survives unrelated output).
 - "a late link answer still hovers after output that did not touch its line" by files/tests.rs
   `a_pending_check_survives_output_that_does_not_touch_its_line` (a check still pending across a cursor move and a
   rewrite of another row) and `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`
@@ -456,14 +452,13 @@ replaced: the hover and its refusals by crates/gui/farhelm-gui/src/terminal/file
 starts a fresh hover at the same cells" withdrawn with OSC file links (see above), its printed-path counterpart by
 `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; "file hover shows decimal size tiers
 and a red cap refusal" by `sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit` (the sizes, tiers and their
-colors), `folders_unreadable_and_other_refusals_say_why_and_admit_nothing` (the cap refusal) and the
+colors), `unsuccessful_file_checks_stay_silent_and_admit_nothing` (the cap stays silent) and the
 `terminal-file-disclosures` golden (the look); "leaving cancels lookup and the next hover checks again" by
 `each_hover_checks_afresh_and_leaving_cancels`; the refusal half of "file refusals, OSC file save and forbidden OSC
-schemes" by `folders_unreadable_and_other_refusals_say_why_and_admit_nothing`; the hover half of "file hover and
-complete browser download" by `a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted`, against the fake
-transfers served through the UI session. As in the old app, a file click is Farhelm's whatever the link choice and its
-press is not withheld from a program under mouse reporting (pinned by
-`a_file_click_is_farhelms_whatever_the_link_choice` and
+schemes" by `unsuccessful_file_checks_stay_silent_and_admit_nothing`; the hover half of "file hover and complete browser
+download" by `a_hover_is_silent_until_the_host_confirms_the_file_is_ready`, against the fake transfers served through
+the UI session. As in the old app, a file click is Farhelm's whatever the link choice and its press is not withheld from
+a program under mouse reporting (pinned by `a_file_click_is_farhelms_whatever_the_link_choice` and
 `under_mouse_reporting_a_file_click_is_admitted_and_still_reported`). The saves, against the fake transfers (the helm's
 own tests cover the save on the host): the local and SSH downloads by
 `a_click_saves_into_downloads_and_the_line_says_where` (the session's host is the helm's to reach, so the two are one
@@ -496,15 +491,15 @@ and "clipping refuses transfer and shows failure after its own click" by
 `a_click_whose_file_details_are_not_fully_visible_is_refused` (the fit itself is the web links' shared check); "file
 sizes and tiers use decimal boundaries including the exact cap" by
 `sizes_and_tiers_use_decimal_boundaries_including_the_exact_limit`; "file icons distinguish documents, PDFs, images,
-archives and folders" by `icons_distinguish_documents_pdfs_images_archives_and_folders`; "hover preserves both path
-pieces and advertises open only for native admitted types" by
+archives and folders" by `icons_distinguish_documents_pdfs_images_and_archives` (downloadable files); "hover preserves
+both path pieces and advertises open only for native admitted types" by
 `hints_offer_opening_only_where_the_helm_does_with_the_platforms_modifier` and
-`a_hover_shows_checking_then_the_hosts_answer_and_a_click_is_admitted`; "same-task redraw preserves answered ready and
-refused hovers" by `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes` (ready) and
-`folders_unreadable_and_other_refusals_say_why_and_admit_nothing` (refused); "real departure aborts and hides, and a
-later same-path hover checks afresh" by `each_hover_checks_afresh_and_leaving_cancels`; "same-task redraw preserves a
-pending hover and updates its newest link" by `a_pending_check_survives_output_that_does_not_touch_its_line` (a redraw
-keeps a hover by the same link comparison, whatever the check's state, and the pending check is answered and admitted);
+`a_hover_is_silent_until_the_host_confirms_the_file_is_ready`; "same-task redraw preserves answered ready and refused
+hovers" by `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes` (ready) and
+`unsuccessful_file_checks_stay_silent_and_admit_nothing` (refused); "real departure aborts and hides, and a later
+same-path hover checks afresh" by `each_hover_checks_afresh_and_leaving_cancels`; "same-task redraw preserves a pending
+hover and updates its newest link" by `a_pending_check_survives_output_that_does_not_touch_its_line` (a redraw keeps a
+hover by the same link comparison, whatever the check's state, and the pending check is answered and admitted);
 "different paths, cell endpoints and unknown ranges start fresh checks", "changed and unknown OSC display text cancels
 old evidence at the same target and cells", "partial wrapped redraw invalidates file transfer evidence" by
 `a_rewrite_under_the_pointer_withdraws_the_check_only_when_the_paths_text_changes`; the admission half of "a wrapped or

@@ -64,7 +64,7 @@ pub(super) fn mark_style(palette: &Palette) -> HighlightStyle {
     }
 }
 
-/// What the panel recorded at paint. An unanswered file check can invalidate this record before the answer draws.
+/// What this disclosure recorded at paint. A new disclosure starts without a witness from any earlier frame.
 pub(crate) type Drawn = Rc<Cell<Option<DrawnPanel>>>;
 
 /// The panel's geometry and its place in the frame's hitbox order. The hitbox lets the layer manager check that

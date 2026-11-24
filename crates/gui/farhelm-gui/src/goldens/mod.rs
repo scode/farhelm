@@ -3,7 +3,7 @@
 //! a summary that names a host value, once more with a feature-drawn body, a header tile and a footer note, and the
 //! prompt anchored to a row's menu button), the keyboard focus ring, host-supplied text over its spoofing corpus, the
 //! notice banner, the terminal's styles and cursor shapes, an attached terminal's exit line and status line, a terminal
-//! file link's hover display in each of its states, a web link's hover display (ordinary, and warning with the
+//! file link's hover display in three downloadable size tiers, a web link's hover display (ordinary, and warning with the
 //! differing part of a long destination marked, and about a disguised address), a refused click's explanation over an
 //! approval card, the scrim a pending Delete puts over the open session's terminal,
 //! the interrupted card in its place (with Restart and Replace, and with Replace alone), the unavailable card with the
@@ -703,7 +703,7 @@ static SCENES: &[Scene] = &[
     },
     Scene {
         name: "terminal-file-disclosures",
-        size: (420., 520.),
+        size: (420., 260.),
         draw: terminal_file_disclosures,
         setup: no_setup,
     },

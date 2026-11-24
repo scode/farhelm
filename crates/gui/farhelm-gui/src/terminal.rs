@@ -357,6 +357,8 @@ pub struct TerminalView {
     /// the screen again, a reset), so a hover never outlives the text it read: a redraw that changes, moves or removes
     /// the link drops it, and one that brings a link under a still pointer shows it.
     hovered_link: Option<TerminalLink>,
+    /// The attached terminal confirmed that the current printed path names a downloadable file.
+    path_hover_ready: bool,
     cols: u16,
     cursor: Option<Cursor>,
     visible: bool,
@@ -388,6 +390,7 @@ impl TerminalView {
             selection: None,
             hover: None,
             hovered_link: None,
+            path_hover_ready: false,
             cols: 0,
             cursor: None,
             visible: false,
@@ -704,9 +707,26 @@ impl TerminalView {
             return;
         }
         self.hover = cell;
+        if self.refresh_hovered_link() {
+            cx.notify();
+        }
+    }
+
+    /// File readiness belongs to the current link. Movement and output both withdraw it when they change that link.
+    fn refresh_hovered_link(&mut self) -> bool {
         let link = self.link_under_hover();
-        if link != self.hovered_link {
-            self.hovered_link = link;
+        if link == self.hovered_link {
+            return false;
+        }
+        self.hovered_link = link;
+        self.path_hover_ready = false;
+        true
+    }
+
+    /// Apply the attached terminal's readiness for this link before the grid paints.
+    fn set_path_hover_ready(&mut self, ready: bool, cx: &mut Context<Self>) {
+        if self.path_hover_ready != ready {
+            self.path_hover_ready = ready;
             cx.notify();
         }
     }
@@ -728,6 +748,9 @@ impl TerminalView {
         let Some(link) = &self.hovered_link else {
             return Vec::new();
         };
+        if link.kind == LinkKind::Path && !self.path_hover_ready {
+            return Vec::new();
+        }
         (0..self.shown.len())
             .filter(|&row| matches!(self.shown[row], ShownRow::Line(_)))
             .filter_map(|row| {
@@ -831,7 +854,7 @@ impl TerminalView {
     /// (output, a scroll, following the screen, a reset); each caller notifies when anything changed.
     fn update_shown(&mut self) {
         self.update_shown_rows();
-        self.hovered_link = self.link_under_hover();
+        self.refresh_hovered_link();
     }
 
     /// Rebuild the shown rows. A history line keeps its shaped glyphs while it stays shown and unchanged.
