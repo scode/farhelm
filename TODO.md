@@ -549,6 +549,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   `137328954707` passed the test. The fixture should make the descriptor restoration observable before asserting that
   the descendant still owns a PTY.
 
+- **Stop the Tensorlake add test racing the connected credential delivery.**
+  `codex_subscription_and_none_enter_setup_without_an_endpoint` in
+  `crates/farhelm-helm/src/provisioning/tensorlake_add_tests.rs` reads the host's credential delivery record after setup
+  and asserts that no Codex settings cleanup was recorded, but the delivery that runs once the new host connects records
+  one, so the test fails whenever that delivery finishes first. On the arm64 Linux test worker it failed 2 of 30 runs
+  alone on main (`975c7642-2c13-4786-81c5-a15bde4a0d07`) and once in a full helm run
+  (`f2abe974-d3aa-4c85-b5e7-855b3e63ac7e`). Assert what setup itself must not do (read or rewrite the agent settings,
+  which the fixture's backend events show) rather than the stamp a later delivery writes.
+
 ### Difficult deflake
 
 ## Broken tests
