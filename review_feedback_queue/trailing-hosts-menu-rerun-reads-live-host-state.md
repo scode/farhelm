@@ -63,3 +63,53 @@ Scope split: the sibling Retry live-state handler in `hosts/menu.rs:310-340` is 
 
 Review evidence is retained under run `34570dac-b635-4682-a942-3a3fc1728e12` as
 `g30-gui-refactors-approvals-hosts-prefs/l5`, `g05-triage-gui-templates-hosts/f1`.
+
+Additional source record at `1ec7724e3cd0e8353c75af6f9b65842795518e9d`, `crates/gui/farhelm-gui/src/hosts/menu.rs:431`
+(g33_remove_host_signin_lock_gui/f2):
+
+Follow-up observation at `1ec7724e3cd0e8353c75af6f9b65842795518e9d`: `super::setup::rerun(&view, ...)` also feeds the
+live `view.destination` into `1ec7724e`'s `rerun_command` (`hosts/setup.rs:704-710`) rather than the drawn destination.
+The sibling live `asks_first` Remove handler noted in this record is already tracked separately in
+`trailing-hosts-menu-remove-reads-live-skip-confirmation.md`.
+
+SPEC_impl.md, "Questions: the prompt" (L995-999) requires controls that ask a question or send a request directly to
+bind their handlers to the drawn state (including the skip preference and the parts of state that determine the
+command), and notes that GPUI draws a dirty frame before dispatching a key (the same trap `HostMenu` avoids for
+`adopt_identity` and `takeover_target` at `crates/gui/farhelm-gui/src/hosts/menu.rs:262-270`). Two handlers in files
+touched by `1ec7724e` (pre-existing from `34e6c89f`/`7baa1be2` and `fcbf0def`/`3438488e`, interacting with
+`menu.rs:232`, `remove.rs:213`, and `setup.rs:707`) violate this rule:
+
+1. `crates/gui/farhelm-gui/src/hosts/menu.rs:409-438`: `HostMenu::render` computes `which: Rerun` (`Rerun::Setup` vs
+   `Rerun::Update`) from `rerun(&view, &offered)`, but its `on_click` handler ignores `which` and calls live
+   `current(host, cx)` (`menu.rs:431`, modified in `1ec7724e`) and re-evaluates `rerun(&view, &offered)`
+   (`menu.rs:432`). If a failed Update replaces a failed Setup before Enter/click, clicking an item drawn as "Try the
+   failed setup again" dispatches `super::update::rerun` (which starts an unconfirmed Update) instead of
+   `super::setup::rerun`. Additionally, `super::setup::rerun(&view, ...)` passes the live `view.destination` into
+   `1ec7724e`'s `rerun_command` (`hosts/setup.rs:704-710`) rather than the destination the menu header displayed at
+   open, even though `SPEC_impl.md:5439-5441` says registered setup names "the destination the desktop showed at the
+   click" (note `SPEC.md:453-459` accepts operations following a host entry's destination change, so the `Rerun::Setup`
+   -> `Rerun::Update` dispatch flip is the uncovered part).
+2. `crates/gui/farhelm-gui/src/hosts/menu.rs:493-513` + `crates/gui/farhelm-gui/src/hosts/remove.rs:136-153`:
+   `host-menu-remove`'s click handler does not capture `asks_first` from the drawn frame; `remove::start` reads live
+   `asks_first(cx)` (`remove.rs:145`) at click time. If `skip_host_remove_confirmation` flips from `false` to `true`
+   after the menu drew, clicking/pressing Enter on Remove skips the confirmation dialog and sends
+   `DELETE /api/hosts/{id}` immediately. (`remove::ask` at `remove.rs:207-310`, where `1ec7724e` changed line 213 to
+   `offers::current_menu_offers`, properly freezes `Removal` and `enabled` into `Question` once opened;
+   Tensorlake/Podman hosts always ask via `removal.deletes.is_some()`.) How to verify: in a GPUI test over `HostMenu`,
+   open host 2's menu with a failed Add run (`Rerun::Setup`), push a failed Update run on host 2 without clicking
+   outside, and press Enter on `host-menu-rerun` — `POST /api/hosts/2/update` is sent instead of `POST /api/hosts/probe`
+   (or refusal). Similarly, open host 2's menu with `skip_host_remove_confirmation: false`, push
+   `skip_host_remove_confirmation: true`, and activate `host-menu-remove` — `DELETE /api/hosts/2` is sent without
+   opening the confirmation. Fix: freeze `which: Rerun` (and the SSH destination for `Rerun::Setup`) at menu open or
+   verify in `on_click` that live `rerun(&view, &offered)` still matches the drawn `which`, and capture `asks_first(cx)`
+   when drawing the Remove menu item so `remove::start` uses the drawn skip preference.
+
+Reviewer metadata (g33_remove_host_signin_lock_gui/f2): suggested bucket: other (neither path causes security compromise
+or irreversible loss of user data/sessions: Update refuses downgrades and preserves running sessions, and SSH Remove
+only forgets the registry entry while keeping supervisor and sessions running per SPEC.md:321-322; provider Delete
+always confirms).; confidence: confirmed; possible cover: none (pre-existing handlers outside 1ec7724e's hunk, though
+menu.rs:232 `current()`, setup.rs:707 `rerun_command`, and remove.rs:213 `ask()` were modified in 1ec7724e;
+SPEC.md:453-459 covers destination changes following a host entry, but not `Rerun::Setup` flipping to `Rerun::Update` or
+live `asks_first` skipping confirmation).
+
+Review evidence is retained under run `746bd2ca-c078-44c7-90d6-305e2a679dca` as `g33_remove_host_signin_lock_gui/f2`.
