@@ -4,4 +4,4 @@ One line per plan that has not landed, in queue order, oldest first. `plans/AGEN
 
 - [in-flight a883f2] `dynamic-announcements.md` — Add a signed central announcements feed on get.farhelm.io with helm polling, bell notice, Settings toggle, and P2 brick test
 - [landing 4d7f28] `preserve-creds-on-lookup-failure.md` — Preserve remote agent-credentials on SQLite lookup failure and name the affected agent
-- [in-flight 4d2847] `custom-agents-cli-visibility.md` — Add `farhelm agent agents` discovery, include custom agents in unknown-agent refusals, forbid `--conversation` with recipes, and list valid built-in efforts
+- [complete] `custom-agents-cli-visibility.md` — Add `farhelm agent agents` discovery, include custom agents in unknown-agent refusals, forbid `--conversation` with recipes, and list valid built-in efforts
