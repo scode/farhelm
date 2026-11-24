@@ -62,6 +62,9 @@ pub use updater::{UpdaterHandle, UpdaterState, readout};
 const DESKTOP_STARTUP_TIMEOUT: Duration = Duration::from_secs(30);
 /// The devbuild launcher's request to seed its own helm's initial remote-update choice.
 const DEVBUILD_ENV: &str = "FARHELM_DESKTOP_DEVBUILD";
+const ANNOUNCEMENTS_PATH_ENV: &str = "FARHELM_ANNOUNCEMENTS_PATH";
+/// The brick checkpoint exercises the bell even when this feed arrives before the window opens.
+const BRICK_ANNOUNCEMENTS_PATH: &str = "announcements-test.json";
 
 /// Dispatch a file the embedded helm has just published to its default app.
 /// This is separate from hardened webbrowser: local paths are admitted only
@@ -224,10 +227,14 @@ pub unsafe fn run() -> anyhow::Result<()> {
             None
         }
     };
-    let mut desktop = match DesktopBootstrap::start(session_start_path.as_deref()) {
-        Ok(desktop) => desktop,
-        Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
-    };
+    let announcements_path = std::env::var_os(ANNOUNCEMENTS_PATH_ENV);
+    let announcements_from_bell =
+        announcements_path.as_deref() == Some(OsStr::new(BRICK_ANNOUNCEMENTS_PATH));
+    let mut desktop =
+        match DesktopBootstrap::start(session_start_path.as_deref(), announcements_path) {
+            Ok(desktop) => desktop,
+            Err(error) => refuse_and_exit(&format!("farhelm-desktop: {error:#}")),
+        };
     #[cfg(feature = "agent")]
     agent::publish_helm(&desktop)?;
     let quit_requested = quit_on_signal()?;
@@ -278,6 +285,7 @@ pub unsafe fn run() -> anyhow::Result<()> {
         }),
         tab_reach: Box::new(tab_reach::current),
         helm: Some(desktop.helm_endpoint()),
+        announcements_from_bell,
         licenses: licenses_text,
         window_frame: Some(frame_host(frame)),
         // Only the installed release bundle on a Mac starts one (`updater::start` decides); everywhere else the window
@@ -520,6 +528,7 @@ fn embedded_helm_args(
     ssh_askpass_program: Option<PathBuf>,
     devbuild: bool,
     login_path_available: bool,
+    announcements_path: Option<std::ffi::OsString>,
 ) -> farhelm_helm::HelmArgs {
     farhelm_helm::HelmArgs {
         // The embedded helm is an internal implementation detail of this
@@ -533,7 +542,7 @@ fn embedded_helm_args(
         ssh_askpass_program,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
-        announcements_path: std::env::var_os("FARHELM_ANNOUNCEMENTS_PATH"),
+        announcements_path,
         backstop_refresh_secs: None,
     }
 }
@@ -571,7 +580,10 @@ impl DesktopBootstrap {
     /// program than this launch would start; see [`plan_local_supervisor`].
     /// A supervisor this launch starts is detached and outlives the app; it
     /// is monitored only until startup is done.
-    fn start(session_start_path: Option<&OsStr>) -> anyhow::Result<Self> {
+    fn start(
+        session_start_path: Option<&OsStr>,
+        announcements_path: Option<std::ffi::OsString>,
+    ) -> anyhow::Result<Self> {
         let state_dir = desktop_state_dir()?;
         let devbuild = std::env::var_os(DEVBUILD_ENV).is_some_and(|value| value == "1");
         // The hosts a staged agent run registers before the helm serves (`agent::ENSURE_HOSTS_ENV`). Every other build
@@ -695,6 +707,7 @@ impl DesktopBootstrap {
                         Some(farhelm),
                         devbuild,
                         login_path_available,
+                        announcements_path,
                     ),
                     Some(std::sync::Arc::new(|url: &str| {
                         webbrowser::open(url).map_err(|error| error.to_string())
@@ -1409,7 +1422,7 @@ impl SpawnInputs<'_> {
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
             // A brick-test announcement feed belongs to this launch alone.
-            .env_remove("FARHELM_ANNOUNCEMENTS_PATH")
+            .env_remove(ANNOUNCEMENTS_PATH_ENV)
             // The devbuild flag names this helm alone. A new app started from
             // one of its sessions must use its own update default.
             .env_remove(DEVBUILD_ENV)
@@ -1931,7 +1944,14 @@ mod tests {
             .to_string(),
         )
         .unwrap();
-        let args = embedded_helm_args(dir.path().join("state"), Some(file), None, false, true);
+        let args = embedded_helm_args(
+            dir.path().join("state"),
+            Some(file),
+            None,
+            false,
+            true,
+            None,
+        );
         let (ready_tx, ready) = mpsc::channel();
         let (shutdown, shutdown_rx) = tokio::sync::oneshot::channel();
         let helm = std::thread::spawn(move || {

@@ -19,14 +19,14 @@ a separate installer upgrade, the local and the remote supervisor each upgrading
 must survive the upgrade in its terminal host, then restart onto a new terminal host and resume its conversation; then
 Remove/re-add the remote Linux host with its sessions preserved, and Uninstall after ending all its sessions. A separate
 pair tests remote Mac Uninstall and confirms that its saved session survives. **P2** sends one live feedback submission
-from the candidate on P0's last Mac guest, before that fixture is exported and cleaned up. Broader work is bonus
-coverage after the tiered checks. Preserve failed attempts and repair safe harness or setup problems under "Repair and
-continue"; keep working toward the requested brick-test coverage instead of ending the task at the first obstacle. A P0
-failure stops the rest of its pair. A P1 failure stops later P1 checks on the same pair. Neither a P1 nor a P2 failure
-invalidates P0, blocks cleanup or fences bonus passes; each is reported promptly with its own verdict. A request to
-**stop after P0 checks** ends after recording P0 evidence and cleaning up its successful fixtures; no old sessions are
-checked, no feedback is sent and no bonus fixture starts. **Stop after P1 checks** ends after P0 and P1 evidence and the
-last fixture's cleanup, without the send. **Stop after P2 checks** ends after P0, P1 and P2 and the last fixture's
+and checks signed announcements on P0's last Mac guest, before that fixture is exported and cleaned up. Broader work is
+bonus coverage after the tiered checks. Preserve failed attempts and repair safe harness or setup problems under "Repair
+and continue"; keep working toward the requested brick-test coverage instead of ending the task at the first obstacle. A
+P0 failure stops the rest of its pair. A P1 failure stops later P1 checks on the same pair. Neither a P1 nor a P2
+failure invalidates P0, blocks cleanup or fences bonus passes; each is reported promptly with its own verdict. A request
+to **stop after P0 checks** ends after recording P0 evidence and cleaning up its successful fixtures; no old sessions
+are checked, no feedback is sent and no bonus fixture starts. **Stop after P1 checks** ends after P0 and P1 evidence and
+the last fixture's cleanup, without the send. **Stop after P2 checks** ends after P0, P1 and P2 and the last fixture's
 cleanup. Answer **did P0 checks succeed?** from the separate P0 verdict and seven results, naming anything incomplete,
 and **did P1 checks succeed?** and **did P2 checks succeed?** from their own verdicts and named checks. The full verdict
 includes P1 and P2; whether their failure blocks promotion is the maintainer's call for that release. Resolve missing
@@ -93,14 +93,14 @@ prerequisite and does not call for promotion; it selects the override or manual 
 run remains useful, but cannot gate the candidate's initial exposure.
 
 The checks come in three named tiers, ordered by what a failure costs a user: whether the release bricks an installation
-(P0) matters more than whether an upgrading user keeps their sessions (P1), which matters more than the live feedback
-send (P2). A release that cannot resume old sessions but still installs, upgrades and starts new ones fails P1, not P0.
+(P0) matters more than whether an upgrading user keeps their sessions (P1). The feedback and announcement paths are P2.
+A release that cannot resume old sessions but still installs, upgrades and starts new ones fails P1, not P0.
 
 | Tier | Checks, in order                                                                                                                                                                                                                                                                                                                | A failed or unavailable check stops                                                    |
 | ---- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------- |
 | P0   | `p0-fresh`: fresh install and app start. `p0-updater-upgrade` (stable candidates only): click-to-upgrade discovery and relaunch. `p0-installer-upgrade`: installer upgrade and Restart to update, local supervisor upgrade, remote supervisor upgrade, then one genuine new agent on the local host and one on the remote host. | the rest of its own pair's P0 and P1 checks, P2, and bonus work; never another P0 pair |
 | P1   | On `p0-installer-upgrade`: start one old session per host, then prove both survive and resume, and exercise remote Linux Remove/re-add and Uninstall. On `p1-remote-mac`: provision a headless Mac peer and prove its Uninstall preserves session data.                                                                         | later P1 checks on the same pair, which are recorded as skipped                        |
-| P2   | On `p0-installer-upgrade`: one live feedback send (`p2-feedback-send`).                                                                                                                                                                                                                                                         | nothing                                                                                |
+| P2   | On `p0-installer-upgrade`: one live feedback send (`p2-feedback-send`), then signed announcements (`p2-announcements`).                                                                                                                                                                                                         | nothing                                                                                |
 
 The seven named P0 results are fresh install, click-to-upgrade, installer upgrade, the two supervisor upgrades and the
 two new agents. Each supervisor's upgrade is observed on its own, before any new agent runs on it, so a flaky agent turn
@@ -118,12 +118,12 @@ behind while keeping the data. A guest harness failure at a P1 check makes that 
 stays retained) instead of stopping the pair; a permission block still stops it.
 
 P2 runs after every runnable P0 check passed with retained evidence, on the Mac guest of `p0-installer-upgrade`, before
-the final export and cleanup of that pair. The send waits for the installer pair's P1 results to be recorded or skipped.
-The separate Mac P1 pass starts after the installer pair has been cleaned up. If any runnable P0 check did not pass, the
-send is recorded as skipped. Its first line is `[brick-test] vX.Y.Z`, naming the candidate, so the private inbox issue
-is titled `Feedback: [brick-test] vX.Y.Z`. Report `p2.verdict` and its `feedback-send` result separately from P0 and P1.
-A P2 failure or unavailable check is reported promptly and does not stop bonus coverage. The full `verdict` includes P1
-and P2.
+the final export and cleanup of that pair. Both checks wait for the installer pair's P1 results to be recorded or
+skipped. The separate Mac P1 pass starts after the installer pair has been cleaned up. If any runnable P0 check did not
+pass, the P2 checks are recorded as skipped. The feedback's first line is `[brick-test] vX.Y.Z`, naming the candidate,
+so the private inbox issue is titled `Feedback: [brick-test] vX.Y.Z`. Report `p2.verdict` and both named results
+(`feedback-send`, `announcements`) separately from P0 and P1. A P2 failure or unavailable check is reported promptly and
+does not stop bonus coverage. The full `verdict` includes P1 and P2.
 
 The updater only discovers stable releases, so an RC or dev candidate plans no `p0-updater-upgrade` pair. Its installer
 pair carries the supervisor checks either way. Run the installer's in-scope P1 and P2 checks before its cleanup. Then
@@ -149,12 +149,12 @@ upgrade ran.
 
 **Stop after P1 checks** (`init vX.Y.Z --stop-after-p1`, or `brick_test.py stop-after-p1 "$test_run"` mid-run) finishes
 P0 and P1, including the separate Mac pair when planned, and cleans up the last pair before stopping. It needs no
-feedback approval. **Stop after P2 checks** (`--stop-after-p2`, or `stop-after-p2`) also runs the send on the installer
-pair before the Mac pair. It stops before bonus fixtures. Like full scope, it needs feedback approval in its preflight,
-and the mid-run command rechecks it. A run started with a narrower scope had no approval for the live feedback send, so
-obtain that approval before widening it to P2. `requested_verdict` combines the tiers the scope includes. **Did P1
-checks succeed?** and **did P2 checks succeed?** are answered from `p1.verdict` and `p2.verdict` and their named checks,
-never inferred from P0 or the full verdict.
+feedback approval. **Stop after P2 checks** (`--stop-after-p2`, or `stop-after-p2`) also runs both checks on the
+installer pair before the Mac pair. It stops before bonus fixtures. Like full scope, it needs feedback approval in its
+preflight, and the mid-run command rechecks it. A run started with a narrower scope had no approval for the live
+feedback send, so obtain that approval before widening it to P2. `requested_verdict` combines the tiers the scope
+includes. **Did P1 checks succeed?** and **did P2 checks succeed?** are answered from `p1.verdict` and `p2.verdict` and
+their named checks, never inferred from P0 or the full verdict.
 
 If a checkpoint was already dispatched when scope narrowed past its tier, it finishes: in particular, the send cannot be
 recalled. Retain its actual result, marked `dispatched_before_scope_stop`, and report that outcome separately. The stop
@@ -433,21 +433,21 @@ guest-only approval is explicit in the invocation. It selects the update branch 
 the action boundary, imports bounded private evidence, and stops at the first model, tool or permission failure, or P0
 or bonus product failure. A P1 failure, unavailable observation or harness failure instead makes that check fail or
 could not run and skips the pair's later P1 checkpoints (each skip is journaled and printed) before going on to P2; a P1
-permission block still stops the pair. A P2 result is the pair's last checkpoint anyway. A stop ends the attempt, not
-the host's repair work under "Repair and continue". The built-in whole-attempt automatic recovery is a provider HTTP 429
-before any test action: strict retained event and protocol records must prove no command, native action, approval or
-product observation, and the executor must acknowledge stopped cleanup. Up to three fresh attempts back off 60, 120 and
-240 seconds within the checkpoint deadline; every failed attempt and its hashes remain retained and reported. No
-permission block, uncertain action or feedback send is retried. Update checks reobserve the public default after backoff
-and stop if it changed. `--timeout` sets the base budget per checkpoint (30–3600 seconds, default 1200). The effective
-budget includes any checkpoint-specific floor listed below and is shared by the initial turn, backoff and retries. Exact
-native text entry uses paste with reactive-value verification; the tool omits `typeText` after observed partial
-delivery. Each turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a test.
-Bonus native readiness additionally proves a real Finder window move and folder double-click before installing Farhelm.
-P0 retains its smaller prerequisites. A gesture tool's successful return is insufficient: an independent same-window
-frame change must establish drag delivery, or that fixture stops as unavailable. Status remains queryable while a turn
-runs; cleanup and another tester refuse an active attempt. If the controller disappears, reconcile the retained claim
-and guest process before cleanup; a stale claim is not permission to start a second tester.
+permission block still stops the pair. A P2 product failure leaves the other P2 check available. A stop ends the
+attempt, not the host's repair work under "Repair and continue". The built-in whole-attempt automatic recovery is a
+provider HTTP 429 before any test action: strict retained event and protocol records must prove no command, native
+action, approval or product observation, and the executor must acknowledge stopped cleanup. Up to three fresh attempts
+back off 60, 120 and 240 seconds within the checkpoint deadline; every failed attempt and its hashes remain retained and
+reported. No permission block, uncertain action or feedback send is retried. Update checks reobserve the public default
+after backoff and stop if it changed. `--timeout` sets the base budget per checkpoint (30–3600 seconds, default 1200).
+The effective budget includes any checkpoint-specific floor listed below and is shared by the initial turn, backoff and
+retries. Exact native text entry uses paste with reactive-value verification; the tool omits `typeText` after observed
+partial delivery. Each turn receives its complete selected checkpoint contract, so recipe-file browsing is not part of a
+test. Bonus native readiness additionally proves a real Finder window move and folder double-click before installing
+Farhelm. P0 retains its smaller prerequisites. A gesture tool's successful return is insufficient: an independent
+same-window frame change must establish drag delivery, or that fixture stops as unavailable. Status remains queryable
+while a turn runs; cleanup and another tester refuse an active attempt. If the controller disappears, reconcile the
+retained claim and guest process before cleanup; a stale claim is not permission to start a second tester.
 
 If that owner has disappeared, run `brick_test.py reconcile-tester "$test_run" <pass>`. A kernel-held owner lease
 refuses interference with a live coordinator. Reconciliation asks the exclusive guest executor to cancel and requires
@@ -477,10 +477,11 @@ the owned window/process, calibrate actual image coordinates and verify moves, z
 Those measurements supplement the native images and gestures; they do not replace them. The guest requests screenshots
 at the important acceptance states; fixed operations retain command receipts, and the model never encodes or saves
 images itself. `final.txt` preserves the original UI observation, `model-result.json` adds machine-owned command
-references, and the accepted `result.json` adds native captures. The P2 contract requires before-Send and after-Send
-observations; its structural gate requires two distinct native images. This binds their bytes to real tool results;
-review of the images and event sequence must establish their before/after meaning. Interrupted event rows can be skipped
-when salvaging failure diagnostics, but successful execution still requires strict event parsing and a completed turn.
+references, and the accepted `result.json` adds native captures. P2 feedback requires two distinct native images, before
+and after Send. P2 announcements requires three distinct native images of the bell, open dialog and history. This binds
+their bytes to real tool results; review of the images and event sequence must establish their before/after meaning.
+Interrupted event rows can be skipped when salvaging failure diagnostics, but successful execution still requires strict
+event parsing and a completed turn.
 
 The tester reserves `fail` for actual Farhelm failures. Errors in its own scripts or evidence preparation use
 `automation-failure`; missing product prerequisites use `could-not-run`, and OS/CUA/authentication refusals use
@@ -506,13 +507,14 @@ failure, even if its tester called it `fail` or `could-not-run`. A false review-
 or failed automation gate: inspect its retained attempt and resolve that outcome before treating P0 as successful.
 
 Report P0's verdict promptly. The installer pair runs its in-scope P1 checks and, if every runnable P0 check passed and
-P2 is in scope, its feedback send. Export and clean up that pair, then run the dedicated Mac pair if P1 is in scope.
-Report each tier's verdict as it settles. A valid P1 or P2 product failure or unavailable observation allows ordinary
-cleanup and later bonus coverage. Its evidence and verdict remain saved. Model, tool or permission failures stop the
-current attempt. Follow "Repair and continue". After Mac pair cleanup, stop in stop-after-P1 or stop-after-P2 scope.
-Full scope continues to `fresh` and `upgrade-v<previous>` (at most three, newest first) when P0 permits bonus work.
-Historical manifests without explicit P0 fixtures report `p0.verdict: not planned`, and a tier a run never declared
-reports `not planned`. Do not relabel historical observations or add a live send to a run that never planned it.
+P2 is in scope, its feedback and announcement checks. Export and clean up that pair, then run the dedicated Mac pair if
+P1 is in scope. Report each tier's verdict as it settles. A valid P1 or P2 product failure or unavailable observation
+allows ordinary cleanup and later bonus coverage. Its evidence and verdict remain saved. Model, tool or permission
+failures stop the current attempt. Follow "Repair and continue". After Mac pair cleanup, stop in stop-after-P1 or
+stop-after-P2 scope. Full scope continues to `fresh` and `upgrade-v<previous>` (at most three, newest first) when P0
+permits bonus work. Historical manifests without explicit P0 fixtures report `p0.verdict: not planned`, and a tier a run
+never declared reports `not planned`. Do not relabel historical observations or add a live send to a run that never
+planned it.
 
 The guest tester receives the public helper/recipe and a credential-free public source URL. It checks the previous tag's
 source identity, then runs
@@ -533,12 +535,12 @@ matches; diagnostics or other failure statuses remain unavailable observations. 
 receipt, including all process/service observations. The helper never reads configuration, databases or credentials, and
 never repairs residue to manufacture a clean fixture.
 
-| Fixture                | Ordered checkpoints, with their tier                                                                                                                                                                                                                                                                                      |
-| ---------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `p0-fresh`             | P0: `artifact-verification`, `fixture-clean`, `install`, `app-start`                                                                                                                                                                                                                                                      |
-| `p0-updater-upgrade`   | P0: `artifact-verification`, `old-fixture`, `update-discovery`, `update-relaunch` (stable candidates only)                                                                                                                                                                                                                |
-| `p0-installer-upgrade` | P0: `artifact-verification`, `old-fixture`; P1: `old-sessions`; P0: `update-relaunch`, `local-supervisor-upgrade`, `remote-supervisor-upgrade`, `local-supervisor-agent`, `remote-supervisor-agent`; P1: `local-old-session`, `remote-old-session`, `remote-host-remove`, `remote-host-uninstall`; P2: `p2-feedback-send` |
-| `p1-remote-mac`        | P1: `artifact-verification`, `fixture-clean`, `install`, `app-start`, `remote-provision`, `remote-host-uninstall`                                                                                                                                                                                                         |
+| Fixture                | Ordered checkpoints, with their tier                                                                                                                                                                                                                                                                                                          |
+| ---------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `p0-fresh`             | P0: `artifact-verification`, `fixture-clean`, `install`, `app-start`                                                                                                                                                                                                                                                                          |
+| `p0-updater-upgrade`   | P0: `artifact-verification`, `old-fixture`, `update-discovery`, `update-relaunch` (stable candidates only)                                                                                                                                                                                                                                    |
+| `p0-installer-upgrade` | P0: `artifact-verification`, `old-fixture`; P1: `old-sessions`; P0: `update-relaunch`, `local-supervisor-upgrade`, `remote-supervisor-upgrade`, `local-supervisor-agent`, `remote-supervisor-agent`; P1: `local-old-session`, `remote-old-session`, `remote-host-remove`, `remote-host-uninstall`; P2: `p2-feedback-send`, `p2-announcements` |
+| `p1-remote-mac`        | P1: `artifact-verification`, `fixture-clean`, `install`, `app-start`, `remote-provision`, `remote-host-uninstall`                                                                                                                                                                                                                             |
 
 `update-discovery` requires the old app's actual in-app check to discover and install the candidate. It cannot pass on a
 manual installer path. The installer pair's `old-fixture` provisions the remote host through the old app; the updater
@@ -601,10 +603,17 @@ process remaining, and the data directory and database retaining the same sessio
 `p1.checks.remote-mac-uninstall` result covers all six checkpoints on this pair. Saved historical manifests keep their
 original required checkpoints and named results.
 
-When P2 is in scope, the installer pair's last check is `p2-feedback-send`. Retain a native PNG or JPEG of the filled
-dialog before Send and another showing it closed after success (or the failure state), with the agent's actual
-observation. GUI evidence is sufficient because the helm logs only failed sends. See RECIPE's P2 section for the fixed
-message, blank contact and candidate-version/surface premise.
+When P2 is in scope, the installer pair ends with `p2-feedback-send` followed by `p2-announcements`. For feedback,
+retain a native PNG or JPEG of the filled dialog before Send and another showing it closed after success (or the failure
+state), with the agent's actual observation. GUI evidence is sufficient because the helm logs only failed sends. See
+RECIPE's P2 section for the fixed message, blank contact and candidate-version/surface premise.
+
+For announcements, the guest checks whether both standing feed files exist on `get.farhelm.io`. A 404 is a P2 failure
+with the missing filename, independent of the other checks. An unreachable origin makes this checkpoint unavailable. The
+guest launches only the candidate app with `FARHELM_ANNOUNCEMENTS_PATH=announcements-test.json`. That launch reserves
+the pending batch for the bell so a fast fetch cannot open it automatically. Capture the rail notice with its action,
+the announcement the action opens, and the same entry in Help history after dismissal. A normal relaunch must leave the
+override unset.
 
 The bonus checkpoint names retain RECIPE's broader acceptance obligations:
 
@@ -658,8 +667,8 @@ reusing an old advancing pair or observing a replacement process cannot satisfy 
 After each named P0, P1 and P2 check, and each planned bonus checkpoint, inspect the recorded result and send the
 maintainer an updated Markdown status table. Send it as soon as the result is available, including while `test` is still
 running on the same pair. Carry forward earlier results and show the checks still ahead. List all seven named P0 checks,
-the five named P1 checks for a new run and the P2 feedback send, labeled with their tier. Group untouched historical
-pairs if there are many, then name the pair and checkpoint as each result comes in.
+the five named P1 checks for a new run and both P2 checks, labeled with their tier. Group untouched historical pairs if
+there are many, then name the pair and checkpoint as each result comes in.
 
 Use **Passed**, **Failed**, **Intentional skip**, or **Not yet run** for the corresponding results. Give the reason for
 each intentional skip, including RC/dev discovery and checks outside a requested stop scope. Use **Could not run** for a
@@ -714,16 +723,16 @@ requires ownership and clean shutdown. A manifest with an interrupted clone cann
 Do not kill a Tart process or force-stop a guest to get around a failed check.
 
 After every planned pass, run `status` and inspect its saved report. **P0 pass** requires all seven critical checks; a
-**P1 pass** requires every planned continuity and remote menu result, a **P2 pass** its feedback check, and a **full
-pass** additionally requires P1, P2 and every planned bonus check. Any product failure makes the relevant verdict fail;
-missing checks or fixtures make it could not run. In a stop scope, `requested_verdict` combines the tiers it includes,
-while the full `verdict` remains incomplete if bonus work did not run. A bonus failure does not erase valid P0 evidence,
-and a P0 pass does not excuse that bonus failure. Preserve a P0 or bonus failure and repair safe harness/setup problems
-under "Repair and continue" before resuming dependent work. For P1 and P2, report the failure promptly, retain evidence,
-clean up the pair and continue bonus coverage unless the requested scope ends there. Report exact versions, checksum
-hash, update paths, before/after-public-default coverage, omitted agents, diagnostic gaps, cleanup and private evidence
-retention. Publish only a redacted summary if separately requested. Never commit profiles, raw evidence, guest names,
-private paths, addresses or credentials. This procedure grants no GitHub writes or release promotion.
+**P1 pass** requires every planned continuity and remote menu result, a **P2 pass** both its planned checks, and a
+**full pass** additionally requires P1, P2 and every planned bonus check. Any product failure makes the relevant verdict
+fail; missing checks or fixtures make it could not run. In a stop scope, `requested_verdict` combines the tiers it
+includes, while the full `verdict` remains incomplete if bonus work did not run. A bonus failure does not erase valid P0
+evidence, and a P0 pass does not excuse that bonus failure. Preserve a P0 or bonus failure and repair safe harness/setup
+problems under "Repair and continue" before resuming dependent work. For P1 and P2, report the failure promptly, retain
+evidence, clean up the pair and continue bonus coverage unless the requested scope ends there. Report exact versions,
+checksum hash, update paths, before/after-public-default coverage, omitted agents, diagnostic gaps, cleanup and private
+evidence retention. Publish only a redacted summary if separately requested. Never commit profiles, raw evidence, guest
+names, private paths, addresses or credentials. This procedure grants no GitHub writes or release promotion.
 
 ## Validate changes to this coordinator
 

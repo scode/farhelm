@@ -759,6 +759,86 @@ printf 'installer contract satisfied\\n'
         self.assertIn('Use native paste', text)
         self.assertNotIn('Read RECIPE', text)
 
+    def test_missing_announcement_file_reports_404_without_starting_the_app(self):
+        """Either missing publication yields P2 evidence before any launch can mutate the guest."""
+        self.value.update(pass_id='p0-installer-upgrade', check_id='p2-announcements')
+        for statuses, missing in (([b'404'], 'announcements-test.json'),
+                                  ([b'200', b'404'], 'announcements-test.json.minisig')):
+            with self.subTest(missing=missing):
+                runner = mock.Mock(side_effect=[
+                    subprocess.CompletedProcess(['/usr/bin/curl'], 0, stdout, b'') for stdout in statuses])
+                output = self.output.parent / missing
+                (output / 'work').mkdir(parents=True)
+                operations = self.operations(output=output, runner=runner)
+                observation = operations.dispatch('announcements_feed')['observation']
+                self.assertFalse(observation['available'])
+                self.assertEqual(observation['outcome'], 'fail')
+                self.assertEqual(observation['detail'], f'{missing} is not published yet (HTTP 404)')
+                self.assertEqual(runner.call_count, len(statuses))
+                argv = runner.call_args.args[0]
+                self.assertEqual(argv[-1], 'https://get.farhelm.io/' + missing)
+                self.assertNotIn('--location', argv)
+                self.assertNotIn('--head', argv)
+                # The reported missing input is an observation, while trying
+                # to launch against it is a refused product mutation.
+                self.assertIsNone(operations.failure)
+                with self.assertRaisesRegex(RuntimeError, 'verify publication'):
+                    operations.perform('launch_announcements')
+
+    def test_announcement_origin_outage_is_a_retained_p2_observation(self):
+        """An unavailable fixture must not latch a harness failure or fence the later pairs."""
+        self.value.update(pass_id='p0-installer-upgrade', check_id='p2-announcements')
+        for exit_code, stdout, statuses, detail in ((6, b'000', {}, 'curl exit 6'),
+                                                    (0, b'503', {'announcements-test.json': 503}, 'HTTP 503')):
+            with self.subTest(detail=detail):
+                runner = mock.Mock(return_value=subprocess.CompletedProcess(['/usr/bin/curl'], exit_code, stdout, b''))
+                output = self.output.parent / str(exit_code)
+                (output / 'work').mkdir(parents=True)
+                operations = self.operations(output=output, runner=runner)
+                result = operations.dispatch('announcements_feed')['observation']
+                self.assertFalse(result['available'])
+                self.assertEqual(result['outcome'], 'could-not-run')
+                self.assertEqual(result['status'], statuses)
+                self.assertIn(detail, result['detail'])
+                self.assertIsNone(operations.failure)
+
+    def test_announcement_override_is_scoped_to_one_candidate_launch(self):
+        """Require the two fixed app launches and observe only the intended environment key."""
+        self.value.update(pass_id='p0-installer-upgrade', check_id='p2-announcements')
+        calls = []
+        def runner(argv, **kwargs):
+            calls.append(argv)
+            stdout = b''
+            if argv[0] == '/usr/bin/curl':
+                stdout = b'200'
+            if argv[0] == '/bin/ps':
+                stdout = b'farhelm-desktop UNRELATED_MARKER=private.fixture'
+                if '--env' in calls[-2]:
+                    stdout += b' FARHELM_ANNOUNCEMENTS_PATH=announcements-test.json'
+            return subprocess.CompletedProcess(argv, 0, stdout, b'')
+
+        operations = self.operations(runner=runner)
+        self.assertTrue(operations.dispatch('announcements_feed')['observation']['available'])
+        with mock.patch.object(operations, 'version', side_effect=[{'desktop_running': True},
+                                                                   {'desktop_running': False},
+                                                                   {'desktop_running': False}]), \
+                mock.patch('guest_operations.wait_running', side_effect=[{'desktop_pids': [101]}, {'desktop_pids': [102]}]):
+            deferred = operations.dispatch('launch_announcements')
+            self.assertEqual(deferred['status'], 'not-ready')
+            self.assertNotIn('launch_announcements', operations.completed)
+            self.assertTrue(all(argv[0] != '/usr/bin/open' for argv in calls))
+            staged = operations.dispatch('launch_announcements')['observation']
+            normal = operations.dispatch('relaunch_announcements')['observation']
+        self.assertEqual(staged['announcement_override'], 'announcements-test.json')
+        self.assertIsNone(normal['announcement_override'])
+        self.assertIn('FARHELM_ANNOUNCEMENTS_PATH=announcements-test.json', staged['command']['argv'])
+        self.assertNotIn('--env', normal['command']['argv'])
+        self.assertEqual([argv[1:4] for argv in calls if argv[0] == '/bin/ps'],
+                         [['-Eww', '-p', '101'], ['-Eww', '-p', '102']])
+        self.assertNotIn('private.fixture', json.dumps(operations.observations))
+        allowed = available_operations('p2-feedback-send', 'p0-installer-upgrade', 'manual')
+        self.assertTrue({'announcements_feed', 'launch_announcements', 'relaunch_announcements'}.isdisjoint(allowed))
+
     def test_window_contract_pairs_ten_images_with_measurements_and_control_checks(self):
         """App-only pixels cannot prove movement, and control closes must not escape the stationary-frame check."""
         text = managed_instructions('window-drag', 'fresh')

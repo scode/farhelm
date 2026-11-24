@@ -46,6 +46,35 @@ TURN_FLOORS = {('old-sessions', 'p0-installer-upgrade'): 1800,
                ('local-old-session', 'p0-installer-upgrade'): 1800,
                ('remote-old-session', 'p0-installer-upgrade'): 1800}
 
+# The standing fixture has a recognizable title so a compiled-in or live
+# production announcement cannot satisfy the native check.
+ANNOUNCEMENTS_TEST_PATH = 'announcements-test.json'
+ANNOUNCEMENTS_TEST_TITLE = 'Farhelm brick test announcement'
+
+
+def announcements_instructions():
+    """Exercise the installed candidate's verification path through the native bell."""
+    return f'''Call announcements_feed first. If either file is unavailable, retain the
+receipt and return its outcome with the exact detail. A 404 means the standing
+test feed or signature is not published yet. Leave the running app alone when
+the probe cannot establish publication.
+Otherwise quit the candidate normally through native UI and call launch_announcements.
+That launch alone uses FARHELM_ANNOUNCEMENTS_PATH={ANNOUNCEMENTS_TEST_PATH}.
+The staged launch leaves the pending batch for the bell even if it arrives
+before the first window. If a launch operation returns not-ready after Quit,
+observe the previous app's exit and repeat the operation.
+Bind the new candidate and require an unread notice in the notification bell
+above Hosts. Open the bell and capture the New announcement row with its
+Open Announcements action. Use that action to open Announcements. Require
+the standing feed's title "{ANNOUNCEMENTS_TEST_TITLE}" and capture it.
+Dismiss the dialog with Got it. Reopen the bell and verify the notice is
+resolved with no Open Announcements action. Open ? > Announcements and capture
+the same title in history. Only the standing feed's exact title counts.
+Once finished with the staged launch, quit through native UI and call
+relaunch_announcements. It verifies that the new process has no override.
+Pass needs the three native captures and the fixed command receipts.
+Any P2 failure leaves the recorded P0, P1 and feedback results intact.'''
+
 
 def turn_timeout(check, pass_id, requested):
     """Give a checkpoint at least its known floor, never more than the tester's maximum."""
@@ -165,6 +194,7 @@ def required_operations(check, pass_id, update_path):
         'remote-old-session': {'prior_receipts', 'remote_host_survival', 'remote_old_session_after'},
         'remote-host-remove': {'remote_host_before', 'remote_host_after', 'remote_version'},
         'remote-host-uninstall': {'remote_host_before', 'remote_host_after'},
+        'p2-announcements': {'announcements_feed', 'launch_announcements', 'relaunch_announcements'},
         'remote-provision': {'remote_version'}, 'codex-conversation': {'inspect_state'},
         'seed-state': {'inspect_state', 'versions'},
         'continuity-before': {'continuity_before'}, 'preserved-state': {'inspect_state'},

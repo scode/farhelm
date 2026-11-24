@@ -1227,13 +1227,14 @@ systemd or SSH substrate ran.
   pre-relaunch receipt and attempt-local exports on deferral, remote menu Remove/re-add and Uninstall sequencing,
   independent resource-preservation/removal receipts, restart process handoffs, calibrated window measurements,
   gesture-trace and bonus gesture-readiness gates, failure gates and evidence import with fictional fixtures, including
-  the P0/P1/P2 tier order, chain fences with recorded skips and stop scopes, independent P0 pairs, the three-stable
-  historical upgrade cap, a prerelease plan without an updater pair, stable discovery failure, explicit scope
-  restoration with feedback consent, refusal to continue runs planned under the earlier layout, and remote launcher
-  visibility guidance. Use a substrate that permits process-group inspection; Linux continuity cases skip on macOS.
-  These tests prove harness contracts, not native GUI behavior or a release pass. Actual native fixture probes and
-  release checks retain their own private evidence. The guest-only Swift geometry helper needs separate SDK type-check
-  and read-only runtime validation in an owned disposable guest; the portable suite does not exercise that OS API.
+  the P0/P1/P2 tier order, scoped signed-announcement launch and cleanup, announcement publication absence independent
+  of feedback, chain fences with recorded skips and stop scopes, independent P0 pairs, the three-stable historical
+  upgrade cap, a prerelease plan without an updater pair, stable discovery failure, explicit scope restoration with
+  feedback consent, refusal to continue runs planned under the earlier layout, and remote launcher visibility guidance.
+  Use a substrate that permits process-group inspection; Linux continuity cases skip on macOS. These tests prove harness
+  contracts, not native GUI behavior or a release pass. Actual native fixture probes and release checks retain their own
+  private evidence. The guest-only Swift geometry helper needs separate SDK type-check and read-only runtime validation
+  in an owned disposable guest; the portable suite does not exercise that OS API.
 - `python3 releasing/check-changelog.py format` and `python3 releasing/check-changelog.py --self-test` — the changelog
   layout lint the release gate runs on every tag, and the checker's own fixtures (format variants, including v0.40.0's
   one-time notes policy section and the folded full list's frame, synthetic git histories for the fragment sweep and for

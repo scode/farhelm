@@ -27,8 +27,8 @@ from test_fixture_probe import Commands
 from fixture_probe import probe, ProbeError
 
 
-def after_capture():
-    """Provide a distinct valid synthetic PNG for the two-observation feedback and remote menu receipt contracts.
+def after_capture(pixel=b'\xff\x00\x00\xff'):
+    """Provide a distinct valid synthetic PNG for a multi-observation receipt contract.
 
 This pixel is deliberately unrelated to Farhelm. Its role is to prove capture
 linkage and distinguish two retained observations, never a real dialog outcome.
@@ -37,7 +37,7 @@ linkage and distinguish two retained observations, never a real dialog outcome.
         """Encode a PNG chunk with its independent wire checksum."""
         return struct.pack('>I', len(value)) + kind + value + struct.pack('>I', zlib.crc32(kind + value))
     return (b'\x89PNG\r\n\x1a\n' + chunk(b'IHDR', struct.pack('>IIBBBBB', 1, 1, 8, 6, 0, 0, 0))
-            + chunk(b'IDAT', zlib.compress(b'\x00\xff\x00\x00\xff')) + chunk(b'IEND', b''))
+            + chunk(b'IDAT', zlib.compress(b'\x00' + pixel)) + chunk(b'IEND', b''))
 
 
 def provider_refusal():
@@ -91,10 +91,12 @@ class NativeCoordinatorTests(unittest.TestCase):
         self.source = source
 
     def archive(self, controller, envelope, status='pass', unverified=None, two_captures=True, image_only=False,
-                fixture_defect=None, nested_receipt=False, observation_identity=None):
+                fixture_defect=None, nested_receipt=False, observation_identity=None, detail=None):
         """Return a real archive with separate execution, observation and capture identities."""
         label = 'tester-' + envelope['attempt']
         observation = result(envelope, unverified or status)
+        if detail is not None:
+            observation['detail'] = detail
         if observation_identity is not None:
             observation['identity'] = observation_identity
         observation['evidence'] = ['native.png', 'commands.txt', 'verification.json']
@@ -105,10 +107,17 @@ class NativeCoordinatorTests(unittest.TestCase):
             observation['evidence'] = ['native.png', 'native.bin']
             native_rows[0]['item']['result']['content'].append(
                 {'type': 'image', 'data': base64.b64encode(b'unknown-native-image-format').decode()})
+        extra_captures = {}
         if envelope['check_id'] in ('p2-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
-            observation['evidence'].append('native-after.png')
+            extra_captures['native-after.png'] = after_capture()
+        if envelope['check_id'] == 'p2-announcements':
+            extra_captures['native-dialog.png'] = after_capture()
+            if two_captures:
+                extra_captures['native-history.png'] = after_capture(b'\x00\x00\xff\xff')
+        for name, capture in extra_captures.items():
+            observation['evidence'].append(name)
             native_rows[0]['item']['result']['content'].append(
-                {'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(after_capture()).decode()})
+                {'type': 'image', 'mimeType': 'image/png', 'data': base64.b64encode(capture).decode()})
         receipt = {'version': envelope['context']['candidate'], 'previous_trust_ring': envelope['context']['previous'],
                    'sha256sums_sha256': 'fixture-checksum', 'signature': 'verified',
                    'trusted_comment': 'verified', 'installer_checksum': 'verified'}
@@ -139,8 +148,7 @@ class NativeCoordinatorTests(unittest.TestCase):
             files['execution.json'] = json.dumps(summary).encode()
         if image_only:
             files['native.bin'] = b'unknown-native-image-format'
-        if envelope['check_id'] in ('p2-feedback-send', 'remote-host-remove', 'remote-host-uninstall') and two_captures:
-            files['native-after.png'] = after_capture()
+        files.update(extra_captures)
         with tarfile.open(controller.directory / (label + '.tar'), 'w') as archive:
             for name, content in files.items():
                 member = tarfile.TarInfo('./' + name)
@@ -495,7 +503,7 @@ failure, and the pair cleans up normally with the failure's evidence retained.
 
         self.drive_pair('p0-installer-upgrade', lost_session)
         dispatched = [value['check_id'] for value in self.seen]
-        self.assertEqual(dispatched[-2:], ['local-old-session', 'p2-feedback-send'])
+        self.assertEqual(dispatched[-3:], ['local-old-session', 'p2-feedback-send', 'p2-announcements'])
         for check in ('remote-old-session', 'remote-host-remove', 'remote-host-uninstall'):
             self.assertNotIn(check, dispatched)
         with self.run.locked():
@@ -575,6 +583,7 @@ A stop after P1 includes no send, so it needs no such consent.
             self.assertEqual(report['p0']['verdict'], 'pass')
             self.assertEqual(report['p1']['verdict'], 'pass')
             self.assertEqual(report['p2']['verdict'], 'fail')
+            self.assertEqual(report['p2']['checks'], {'feedback-send': 'fail', 'announcements': 'pass'})
             self.assertEqual(report['automation']['verdict'], 'no failure observed')
             self.assertNotIn('automation_failure', self.run.selected('p0-installer-upgrade'))
             self.run.cleanup('p0-installer-upgrade')
@@ -673,8 +682,34 @@ scheduler before the send and leaves the pair live for the maintainer.
             self.assertEqual(report['p0']['verdict'], 'pass')
             self.assertEqual(report['p1']['verdict'], 'pass')
             self.assertEqual(report['p2']['verdict'], 'pass')
+            self.assertEqual(report['p2']['checks'], {'feedback-send': 'pass', 'announcements': 'pass'})
             self.assertEqual(report['requested_verdict'], 'pass')
             self.run.cleanup('p0-installer-upgrade')
+
+    def test_missing_announcements_feed_preserves_all_earlier_results(self):
+        """Import the absent feed as a single terminal P2 result and leave bonus coverage available."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        self.widen('full')
+        detail = 'announcements-test.json is not published yet (HTTP 404)'
+
+        def missing_feed(controller, envelope, files):
+            self.seen.append(envelope)
+            if envelope['check_id'] == 'p2-announcements':
+                self.assertNotIn('feedback_authorized', envelope['context'])
+                return self.archive(controller, envelope, 'fail', detail=detail)
+            return self.archive(controller, envelope)
+
+        self.drive_pair('p0-installer-upgrade', missing_feed)
+        with self.run.locked():
+            report = self.run.report()
+            self.assertEqual((report['p0']['verdict'], report['p1']['verdict']), ('pass', 'pass'))
+            self.assertEqual(report['p2']['checks'], {'feedback-send': 'pass', 'announcements': 'fail'})
+            entry = self.run.selected('p0-installer-upgrade')
+            self.assertEqual(entry['results']['p2-announcements']['detail'], detail)
+            self.assertNotIn('automation_failure', entry)
+            self.run.cleanup('p0-installer-upgrade')
+            self.run.require_priority('fresh')
 
     def test_rc_native_dispatch_runs_every_planned_check_and_reports_discovery_skipped(self):
         """Exercise the real serial dispatcher on an RC, whose plan has no updater pair.
@@ -695,7 +730,7 @@ stays formally incomplete, with a summary saying every runnable check passed.
         self.assertNotIn('update-discovery', dispatched)
         for check in ('remote-supervisor-upgrade', 'local-old-session', 'remote-old-session', 'remote-host-uninstall'):
             self.assertIn(check, dispatched)
-        self.assertEqual(dispatched[-1], 'p2-feedback-send')
+        self.assertEqual(dispatched[-2:], ['p2-feedback-send', 'p2-announcements'])
         relaunch = next(value for value in self.seen if value['check_id'] == 'update-relaunch')
         self.assertEqual(relaunch['context']['update_path'], 'manual')
         with self.run.locked():
@@ -768,8 +803,10 @@ the send, which can no longer follow a passing P0.
             self.assertTrue(entry['results']['p2-feedback-send']['dispatched_before_scope_stop'])
             self.assertNotIn('dispatched_before_scope_stop', entry['results']['remote-host-uninstall'])
             self.assertNotIn('automation_failure', entry)
-            self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
-            self.assertEqual(self.run.report()['requested_verdict'], 'pass')
+            self.assertNotIn('p2-announcements', entry['results'])
+            report = self.run.report()
+            self.assertEqual(report['p2']['checks'], {'feedback-send': 'pass', 'announcements': 'could not run'})
+            self.assertEqual(report['requested_verdict'], 'pass')
             self.run.cleanup('p0-installer-upgrade')
 
     def test_native_p2_fault_keeps_p0_but_fences_bonus_and_cleanup(self):
@@ -809,6 +846,18 @@ the send, which can no longer follow a passing P0.
             return self.archive(controller, envelope, two_captures=envelope['check_id'] != 'p2-feedback-send')
         with self.assertRaisesRegex(Refused, 'two distinct native'):
             self.drive_pair('p0-installer-upgrade', one_capture)
+
+    def test_announcements_pass_requires_the_history_capture(self):
+        """Two native images can show the action but leave persistence into history unobserved."""
+        self.finish_preceding_pairs()
+        self.approve_feedback()
+        self.widen('p2-only')
+        def missing_history(controller, envelope, files):
+            self.seen.append(envelope)
+            return self.archive(controller, envelope, two_captures=envelope['check_id'] != 'p2-announcements')
+        with self.assertRaisesRegex(Refused, 'three distinct native'):
+            self.drive_pair('p0-installer-upgrade', missing_history)
+        self.assertEqual(self.seen[-1]['check_id'], 'p2-announcements')
 
     def test_remote_menu_pass_requires_action_and_result_native_captures(self):
         """Neither a menu-only image nor a result-only image establishes the requested remote action.
@@ -877,7 +926,7 @@ skipped) while the P0 checks after it and P2 still run.
             self.run.test('p0-installer-upgrade', source=self.source)
         dispatched = [value['check_id'] for value in self.seen]
         self.assertIn('remote-supervisor-agent', dispatched)
-        self.assertEqual(dispatched[-1], 'p2-feedback-send')
+        self.assertEqual(dispatched[-2:], ['p2-feedback-send', 'p2-announcements'])
         self.assertNotIn('local-old-session', dispatched)
         with self.run.locked():
             entry = self.run.selected('p0-installer-upgrade')

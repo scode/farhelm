@@ -261,6 +261,8 @@ pub struct Host {
     /// The helm this window talks to: the embedded helm's address and the device credential it minted for this
     /// process. `None` opens no channel, so the window stays at "Connecting to the helm…" (useful only in tests).
     pub helm: Option<farhelm_helm_client::HelmEndpoint>,
+    /// The standing signed-feed brick fixture reserves its first announcement presentation for the bell.
+    pub announcements_from_bell: bool,
     /// Builds the license notices that must travel with the binary, as the "Open-Source Notices" window shows them. A
     /// function, not the text, because the text is close to a megabyte and is needed only while that window is open.
     /// Handed to the desktop integration before the window opens.
@@ -291,6 +293,7 @@ pub struct Host {
 struct Startup {
     tab_reach: focus::TabReachSource,
     helm: Option<farhelm_helm_client::HelmEndpoint>,
+    announcements_from_bell: bool,
     licenses: fn() -> String,
     window_frame: Option<desktop::FrameHost>,
     updater: Option<desktop::UpdaterHost>,
@@ -306,6 +309,7 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
     let Startup {
         tab_reach,
         helm,
+        announcements_from_bell,
         licenses,
         window_frame,
         updater,
@@ -314,6 +318,9 @@ fn start(startup: Startup, cx: &mut App) -> anyhow::Result<AnyWindowHandle> {
         time_zone,
     } = startup;
     install(cx)?;
+    if announcements_from_bell {
+        cx.set_global(crate::welcome::AnnouncementsFromBell);
+    }
     focus::follow_tab_reach(tab_reach, cx);
     if let Some(time_zone) = time_zone {
         local_time::follow_platform(time_zone, cx);
@@ -358,6 +365,7 @@ pub fn run(host: Host) {
         on_startup_failure,
         tab_reach,
         helm,
+        announcements_from_bell,
         licenses,
         window_frame,
         updater,
@@ -368,6 +376,7 @@ pub fn run(host: Host) {
     let startup = Startup {
         tab_reach: Rc::from(tab_reach),
         helm,
+        announcements_from_bell,
         licenses,
         window_frame,
         updater,
@@ -474,6 +483,7 @@ mod tests {
         Startup {
             tab_reach: Rc::new(|| focus::TabReach::EveryControl),
             helm: None,
+            announcements_from_bell: false,
             licenses: String::new,
             window_frame: None,
             updater: None,

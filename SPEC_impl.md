@@ -5129,12 +5129,36 @@ Device-authenticated `GET /api/announcements` reads pending and history from one
 or already shown ids do nothing. A client can therefore dismiss an older window without draining newer unseen content,
 and a failed write leaves the whole batch pending.
 
-The compiled `release_announcements.json` table is the queue's first producer and ships empty. Before serving clients,
-the helm enqueues entries newer than its creation build and no newer than its running build, using full semver
-precedence, including prereleases and ignoring build metadata. An absent or `0.0.0-unreleased` creation build is older
-than every entry; a running `0.0.0-unreleased` build enqueues none. Only the producer interprets versions or supplies
-release-notes destinations: stable entries link to their version's notes, and prereleases omit the link because curated
-notes need not exist. Queue storage, routes and consumers carry display-ready content and know nothing about releases.
+The compiled `release_announcements.json` table is one producer. Before serving clients, the helm enqueues entries newer
+than its creation build and no newer than its running build, using full semver precedence, including prereleases and
+ignoring build metadata. An absent or `0.0.0-unreleased` creation build is older than every entry; a running
+`0.0.0-unreleased` build enqueues none. Only the producer interprets versions or supplies release-notes destinations:
+stable entries link to their version's notes, and prereleases omit the link because curated notes need not exist. Queue
+storage, routes and consumers carry display-ready content and know nothing about releases.
+
+`network_announcements` runs alongside helm serving. The first tick runs at startup and later ticks are 12 hours apart.
+Development builds skip it. A nullable shared `check_announcements` preference defaults to enabled. The helm samples it
+before each request and again before admitting the result. The desktop entry passes the raw `FARHELM_ANNOUNCEMENTS_PATH`
+value into `HelmArgs`. A filename may contain ASCII letters, digits, dots, dashes and underscores, starts with a letter
+or digit, is at most 128 bytes and has no `..`. Invalid values use the normal `announcements.json` on the same origin.
+The exact standing brick-test filename `announcements-test.json` reserves the pending batch for the bell in that
+process. The native check needs to open the batch from the bell even if the signed feed arrives before the first window.
+
+The announcement fetcher uses a 15-second request timeout, capped streaming reads (256 KiB for JSON, 4 KiB for the
+signature), HTTPS on `get.farhelm.io`, and no redirects. A 404 on either file is quiet. Other transport, HTTP, size,
+authentication or schema errors log a warning and leave the queue alone. `verify_signed_metadata` uses
+`RELEASE_KEY_RING` and requires the trusted comment `farhelm announcements` before any JSON is parsed. The v1 object has
+`version: 1` and an `announcements` array. Each entry has `id`, `title`, `body`, optional `detail` and
+`link { label, url }`. Optional `min_version` and `max_version` use inclusive SemVer precedence, `os` is `macos` or
+`linux` (or a list of those), and `expires_at` is RFC 3339. At or after expiry, the entry is excluded. Links outside the
+allowed destination are discarded and the text is kept.
+
+Schema 101 admits one app-wide announcement notice and adds the nullable preference. A network enqueue that inserts
+entries replaces the reminder in the same transaction with a new unread row. Its fresh ID prevents a stale panel
+acknowledgement from reading a later delivery. Dismissal records the exact shown IDs and resolves the reminder in the
+same transaction when the pending queue is empty. Changes invalidate the UI feed. The notice and queue can arrive in
+separate messages, so the bell action reads the current pending batch through the authenticated GET before acknowledging
+its popover. The click's focus mark and panel identity guard that handoff.
 
 Helm schema 85 adds seven nullable preference columns for the settings the old app kept per device: `appearance`
 (`system`, `dark` or `light`), `sidebar_width` (the sidebar's resize width in whole logical pixels, 296 to 656, the

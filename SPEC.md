@@ -2667,35 +2667,37 @@ one prominent warning beside the field for each listed type outside `md`, `txt`,
 that default; HTML-like types have a browser-specific warning, and all other unrecognized types have a generic warning.
 The warnings follow the draft as typed, including when another entry is malformed. A refused save leaves the draft and
 current helm policy unchanged and shows the reason inline. Under **Notifications**, **Sounds** has four switches that
-save separate helm preferences (see Status). Each row has its own play button for hearing that sound once. **ntfy
-alerts** has an off-by-default switch, server URL (default `https://ntfy.sh`), topic, optional access token, and
-priority (Min, Low, Default, High, Urgent; default Default). These ntfy settings are explicitly saved helm
-configuration, shared by every client, outside the preference row. Save refusals appear inline. The stored token is
-never returned: the form shows whether one exists and allows replacing or clearing it. Changing to another server clears
-a saved token unless a new one is entered, and the form says so before saving. **Send test** uses the saved
-configuration, even while disabled, and reports success or failure inline. The **Checkouts** section holds the
-explicitly saved **Default checkout folder** and, below it, a monospace multi-line post-clone command field and the
-default-on **Keep a checkout ready for faster launches** switch (see [Managed checkouts](#managed-checkouts)). The
-switch's help explains one extra checkout's disk space per repository and host, promptless login-shell preparation,
-earlier file times and Git hooks/filters, and discard on the next create or after 30 days unused; it links the full
-earlier-clone caveats. The folder's help explains expansion on each host, first-use folder creation, and that the
-default applies to hosts without their own folder, set in each host's settings. The command's help explains that it runs
-in each new checkout on its host, after cloning and before the agent starts, that changes affect future checkouts only,
-and that command-line host overrides keep their command. When the updater is active, the desktop app's dialog also has
-an **App** section. It shows the running version and a **Check for updates** button above the switch for installing
-updates automatically (see [Installation and updates](#installation-and-updates)). Automatic updates are a setting of
-that app installation. On an installed stable Mac release, App also offers **Show what's new after updates**, on by
-default. The helm shares that choice and the last shown or skipped release with the window. The two host confirmation
-choices apply to every host and client of this helm; existing controls with a natural place in the main UI stay there.
-No client keeps its own copy: the helm pushes its preferences to the window when it connects and whenever they change,
-and the window writes one on change, so a window opens in the same order and on the same session after a reconnect as
-before it. Per-client persistence — a desktop state file, anything that lets two clients remember different answers — is
-not wanted for these shared preferences, including Welcome, Announcements and upgrade highlights dismissals and the host
-rail's expansion. The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they
-are helm preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets
-creation time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage
-does not nest the list and implies nothing about VCS state. Parent tracking is not comprehensive:
-`farhelm spawn --parent` can record it, while `farhelm agent create` and `clone` need not record the asking session.
+save separate helm preferences (see Status). Each row has its own play button for hearing that sound once. **Check for
+announcements** is on by default on macOS and Linux. Turning it off stops the helm from requesting the network
+announcement feed. The switch is searchable and shared by windows on this helm. **ntfy alerts** has an off-by-default
+switch, server URL (default `https://ntfy.sh`), topic, optional access token, and priority (Min, Low, Default, High,
+Urgent; default Default). These ntfy settings are explicitly saved helm configuration, shared by every client, outside
+the preference row. Save refusals appear inline. The stored token is never returned: the form shows whether one exists
+and allows replacing or clearing it. Changing to another server clears a saved token unless a new one is entered, and
+the form says so before saving. **Send test** uses the saved configuration, even while disabled, and reports success or
+failure inline. The **Checkouts** section holds the explicitly saved **Default checkout folder** and, below it, a
+monospace multi-line post-clone command field and the default-on **Keep a checkout ready for faster launches** switch
+(see [Managed checkouts](#managed-checkouts)). The switch's help explains one extra checkout's disk space per repository
+and host, promptless login-shell preparation, earlier file times and Git hooks/filters, and discard on the next create
+or after 30 days unused; it links the full earlier-clone caveats. The folder's help explains expansion on each host,
+first-use folder creation, and that the default applies to hosts without their own folder, set in each host's settings.
+The command's help explains that it runs in each new checkout on its host, after cloning and before the agent starts,
+that changes affect future checkouts only, and that command-line host overrides keep their command. When the updater is
+active, the desktop app's dialog also has an **App** section. It shows the running version and a **Check for updates**
+button above the switch for installing updates automatically (see
+[Installation and updates](#installation-and-updates)). Automatic updates are a setting of that app installation. On an
+installed stable Mac release, App also offers **Show what's new after updates**, on by default. The helm shares that
+choice and the last shown or skipped release with the window. The two host confirmation choices apply to every host and
+client of this helm; existing controls with a natural place in the main UI stay there. No client keeps its own copy: the
+helm pushes its preferences to the window when it connects and whenever they change, and the window writes one on
+change, so a window opens in the same order and on the same session after a reconnect as before it. Per-client
+persistence — a desktop state file, anything that lets two clients remember different answers — is not wanted for these
+shared preferences, including Welcome, Announcements and upgrade highlights dismissals and the host rail's expansion.
+The sound switches are among these shared preferences: the maintainer decided on 2026-11-13 that they are helm
+preferences rather than per-device ones (see Status). A client that asks the helm for no particular order gets creation
+time. No mandatory hierarchy. Sessions may carry an optional parent reference usable by the API, but parentage does not
+nest the list and implies nothing about VCS state. Parent tracking is not comprehensive: `farhelm spawn --parent` can
+record it, while `farhelm agent create` and `clone` need not record the asking session.
 
 The sidebar can be resized by dragging its right edge, between 296px and 656px, with 396px as the default. Its 56px host
 rail leaves the session column between 240px and 600px, with 340px as the default. Double-click the edge to reset it, or
@@ -3295,8 +3297,12 @@ it. **Open Trash** opens the existing dialog, including while host management is
 closing that dialog returns focus to the visible rail bell. A notice keeps its identity and read state while the failure
 recurs; an unresolved problem never re-alerts merely because Retry or a supervisor restart reports it again. A folder
 being removed stays unresolved. Only a successful listing from a host capable of reporting accepted cleanup can resolve
-a checkout it no longer contains; failed reads, older hosts and cleanup receipts cannot. Host setup/update attention,
-release announcements and session bells keep their existing separate presentation.
+a checkout it no longer contains; failed reads, older hosts and cleanup receipts cannot. Host setup/update attention and
+session bells have separate presentations.
+
+A signed feed that adds entries raises an unread **New announcement** notice for the whole app. Another delivery
+replaces that notice with a new unread one. **Open Announcements** loads the current pending batch and closes the
+popover. Closing the dialog returns focus to the bell. The notice resolves when no announcements remain pending.
 
 A host whose session list is cut at the limit gets a notice naming it. Farhelm also raises one app-wide notice when the
 unfiltered merged fleet holds more than 500 sessions and the list shows only 500. Both notices can appear at once. They
@@ -4985,9 +4991,9 @@ do not depend on where an announcement came from.
 
 Once per window start or reset, after the initial preference decision, the client reads pending announcements and shown
 history. Initial Welcome, including its Send feedback now handoff, closes first. A failed preference read does not
-prevent this separate check. An empty queue opens nothing; a failed announcement read is logged silently and retried
-only at a later window start or reset. A batch ready behind another modal waits for it to close. The read-and-show
-operation can also be called by a later trigger; there is no live announcement event reader today.
+prevent this separate check. An empty queue opens nothing; a failed announcement read is logged silently and retried at
+a later window start or reset. A batch ready behind another modal waits for it to close. A live delivery raises a bell
+notice without opening the dialog by itself.
 
 The dialog is titled **Announcements**, with **Updates and information from Farhelm.** underneath. Pending entries
 appear newest first, each with its title, body and supplied extras. Blank lines separate plain-text paragraphs; text is
@@ -5001,15 +5007,20 @@ opens the same dialog with all shown announcements, newest shown first, and reop
 history view returns focus to Help. Closing an automatic batch restores ordinary initial focus and lets the upgrade
 highlights check proceed on eligible apps (see [Installation and updates](#installation-and-updates)).
 
-The first and only producer is a compiled-in release table, initially empty. It contains only announcements explicitly
-chosen by the maintainer during the release procedure, never everything under Breaking in the changelog. Before the helm
-serves clients, the producer enqueues entries newer than the version that first created this helm and no newer than its
-running build, in full semver precedence including RC and dev versions. Thus skipping releases includes their
-announcements, including intermediate release candidates. A fresh installation receives nothing from its own version or
-earlier. An older helm without a recorded creation version, or one created by a build from main, counts as older than
-every entry. A running build from main (`0.0.0-unreleased`) enqueues none. Stable entries include their release's notes
-link; prereleases omit it because curated notes need not exist yet. The desktop app selects upgrade highlights
-separately from this queue and uses screenshot links from the finalized release notes feed.
+The compiled-in release table contains only announcements explicitly chosen by the maintainer during the release
+procedure, never everything under Breaking in the changelog. Before the helm serves clients, the producer enqueues
+entries newer than the version that first created this helm and no newer than its running build, in full semver
+precedence including RC and dev versions. Thus skipping releases includes their announcements, including intermediate
+release candidates. A fresh installation receives nothing from its own version or earlier. An older helm without a
+recorded creation version, or one created by a build from main, counts as older than every entry. A running build from
+main (`0.0.0-unreleased`) enqueues none. Stable entries include their release's notes link; prereleases omit it because
+curated notes need not exist yet. The desktop app selects upgrade highlights separately from this queue and uses
+screenshot links from the finalized release notes feed.
+
+Released helms also check the signed network feed at startup and every 12 hours while running, including on fresh
+installs. The feed can target inclusive SemVer version bounds, macOS, Linux or both, and an expiry time. Once an entry
+expires it stops being eligible for enqueue. A fresh delivery uses the same permanent ID and history rules as release
+announcements. Turning network checks off in **Settings → Notifications** leaves already queued announcements available.
 
 ### Sending feedback
 
@@ -5078,6 +5089,12 @@ When an installed stable Mac app starts on a newer release and upgrade highlight
 credentials, cookies, release versions or helm state. Fresh installs, apps that have already shown or skipped this
 release, and apps with highlights turned off do not make this request. Automatic updates and their toggle do not control
 it. A screenshot link from the file can only open an entry on the HTTPS Release notes page on farhelm.io.
+
+The network announcement check asks `https://get.farhelm.io/announcements.json` and its `.minisig` companion with plain
+HTTPS GETs. It follows no redirects and sends no credentials, cookies or user, machine or release metadata. The helm
+verifies both the signature and its exact announcement purpose with the compiled-in release verification keys before
+parsing the body. Targeting uses local information. An announcement link can open only HTTPS on `farhelm.io` without
+user information or a custom port.
 
 When ntfy alerts are configured, the helm also posts waiting alerts and explicit test alerts to the saved server and
 topic, with the optional access token (see Status). This connection sends session titles and host display names; it

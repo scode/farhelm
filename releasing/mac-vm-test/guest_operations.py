@@ -25,7 +25,8 @@ import sys
 import time
 from urllib.request import urlopen
 
-from checkpoint_contract import (REMOTE_MAC_PASS, SIDES, available_operations, fixed_operations, host_identity,
+from checkpoint_contract import (ANNOUNCEMENTS_TEST_PATH, REMOTE_MAC_PASS, SIDES,
+                                 available_operations, fixed_operations, host_identity,
                                  is_bonus_pass, prerequisite_checks, require_applicable_operation,
                                  require_remote_host_start)
 from guest_ui import NativeUI, tool_definition, wait_running
@@ -46,6 +47,7 @@ command, native input and uncertain-action failures must keep the fatal gate.
 
 OPERATIONS = ('prerequisites', 'verify_candidate', 'verify_previous', 'fixture_clean', 'install_candidate',
               'install_previous', 'launch', 'launch_override', 'versions', 'remote_version',
+              'announcements_feed', 'launch_announcements', 'relaunch_announcements',
               'remote_host_before', 'remote_host_after',
               'update_logs', 'public_latest', 'inspect_state', 'remote_inspect_state', 'terminal_hosts',
               'remote_terminal_hosts', 'host_survival', 'remote_host_survival', 'old_session_after',
@@ -461,6 +463,7 @@ repeating the mistake past the bound stops an unproductive attempt.
             # legitimate replacement and overwrite the comparison that counts.
             if operation in self.completed and operation in (
                     'install_previous', 'install_candidate', 'launch', 'launch_override',
+                    'launch_announcements', 'relaunch_announcements',
                     'host_survival', 'remote_host_survival'):
                 raise RuntimeError('managed mutation or one-time observation already completed; it cannot be replayed')
             value = self.perform(operation)
@@ -532,6 +535,55 @@ its restart.
         result['desktop_pids'] = sorted(desktop)
         result['desktop_running'] = bool(desktop)
         return result
+
+    def announcements_feed(self):
+        """Check publication without interpreting feed bytes or following redirects.
+
+The candidate still has to download and authenticate the real feed. A missing
+file is an ordinary retained P2 observation, since the app treats 404 quietly.
+"""
+        statuses = {}
+        for name in (ANNOUNCEMENTS_TEST_PATH, ANNOUNCEMENTS_TEST_PATH + '.minisig'):
+            url = 'https://get.farhelm.io/' + name
+            argv = ['/usr/bin/curl', '--disable', '--silent', '--proto', '=https', '--max-time', '15',
+                    '--max-filesize', '262144', '--output', '/dev/null', '--write-out', '%{http_code}', url]
+            try:
+                probe = self.runner(argv, capture_output=True, timeout=20)
+            except subprocess.TimeoutExpired:
+                return {'available': False, 'status': statuses, 'outcome': 'could-not-run',
+                        'detail': f'the publication probe for {name} timed out'}
+            code = probe.stdout.strip()
+            if not re.fullmatch(rb'[1-5][0-9]{2}', code):
+                return {'available': False, 'status': statuses, 'outcome': 'could-not-run',
+                        'detail': f'could not reach {name} at the release origin (curl exit {probe.returncode})'}
+            status = int(code)
+            statuses[name] = status
+            if not 200 <= status < 300:
+                detail = (f'{name} is not published yet (HTTP 404)' if status == 404
+                          else f'{name} returned HTTP {status}')
+                return {'available': False, 'status': statuses,
+                        'outcome': 'fail' if status == 404 else 'could-not-run', 'detail': detail}
+            if probe.returncode:
+                return {'available': False, 'status': statuses, 'outcome': 'could-not-run',
+                        'detail': f'GET for {name} did not complete (curl exit {probe.returncode})'}
+        return {'available': True, 'status': statuses}
+
+    def check_announcement_launch(self, running, staged):
+        """Inspect just the owned desktop process and retain only this variable's value."""
+        pids = running['desktop_pids']
+        if len(pids) != 1:
+            raise RuntimeError('expected one candidate app for the announcement launch check')
+        # Darwin's -E always displays the launch environment. The lowercase -e
+        # can select all processes, depending on the compatibility mode.
+        process = self.command(['/bin/ps', '-Eww', '-p', str(pids[0]), '-o', 'command='],
+                               private_output=True)['stdout']
+        if not process.strip():
+            raise RuntimeError('could not read the running candidate app environment')
+        match = re.search(r'(?:^|\s)FARHELM_ANNOUNCEMENTS_PATH=(\S*)', process)
+        expected = ANNOUNCEMENTS_TEST_PATH if staged else None
+        if (match[1] if match else None) != expected:
+            raise RuntimeError('candidate app does not have the expected announcement override for this launch')
+        return expected
 
     def recorded_supervisor(self):
         """Read the app's supervisor record, or None when absent, unreadable or incomplete.
@@ -666,13 +718,24 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
                 state.mkdir(mode=0o700, parents=True)
                 write_json(state / 'desktop-client.json', {'install_updates_automatically': False})
             return {'installer': receipt, 'versions': self.version()}
-        if operation in ('launch', 'launch_override'):
-            allowed = ('app-start', 'old-fixture', 'reopen') if operation == 'launch' else ('update-discovery', 'update-relaunch')
+        if operation == 'announcements_feed':
+            return self.announcements_feed()
+        if operation in ('launch', 'launch_override', 'launch_announcements', 'relaunch_announcements'):
+            allowed = {'launch': ('app-start', 'old-fixture', 'reopen'),
+                       'launch_override': ('update-discovery', 'update-relaunch'),
+                       'launch_announcements': ('p2-announcements',),
+                       'relaunch_announcements': ('p2-announcements',)}[operation]
             if check not in allowed or (operation == 'launch_override' and self.context.get('update_path') != 'override'):
                 raise RuntimeError('manual launch is forbidden at this checkpoint')
+            if operation == 'launch_announcements' and not self.observations.get('announcements_feed', {}).get('available'):
+                raise RuntimeError('verify publication of the standing announcement and its signature before launching')
+            if operation == 'relaunch_announcements' and 'launch_announcements' not in self.completed:
+                raise RuntimeError('no staged announcement launch to clear')
             if check == 'update-relaunch' and self.task['pass_id'].startswith('p0-'):
                 raise RuntimeError('P0 relaunch must use the already-running app updater')
             if self.version()['desktop_running']:
+                if check == 'p2-announcements':
+                    raise ObservationNotReady('wait for the candidate app to exit after native Quit')
                 raise RuntimeError('quit the app normally through native UI before managed launch')
             logs = self.pass_dir / 'managed-logs'
             logs.mkdir(mode=0o700, exist_ok=True)
@@ -681,6 +744,8 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
             argv = ['/usr/bin/open', '-n', '--stdout', str(stdout), '--stderr', str(stderr)]
             if operation == 'launch_override':
                 argv += ['--env', 'FARHELM_DESKTOP_UPDATE_LATEST=' + candidate]
+            if operation == 'launch_announcements':
+                argv += ['--env', 'FARHELM_ANNOUNCEMENTS_PATH=' + ANNOUNCEMENTS_TEST_PATH]
             argv.append(str(app))
             receipt = self.command(argv)
             self.state['launch_log'] = str(stderr)
@@ -688,6 +753,9 @@ print(json.dumps(dict(cli=r.stdout.strip(),authentication_metadata='private regu
             self.receipt('launch-command', receipt)
             expected = previous if check == 'old-fixture' or operation == 'launch_override' else candidate
             running = wait_running(self, expected.removeprefix('v'), label='launch')
+            if check == 'p2-announcements':
+                path = self.check_announcement_launch(running, operation == 'launch_announcements')
+                return {'command': receipt, 'running': running, 'announcement_override': path}
             return {'command': receipt, 'running': running}
         if operation == 'versions':
             return self.version()

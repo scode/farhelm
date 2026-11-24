@@ -75,6 +75,14 @@ a separate, mutable publication; changing `/latest` or a release's signed checks
 maintainer's external publishing tooling needs to support it. Agents do not author or run that tooling, sign with
 release keys, or publish either file.
 
+Released helms also read `https://get.farhelm.io/announcements.json` and `announcements.json.minisig`. The network feed
+is published independently of the release, with trusted comment `farhelm announcements` and a signature from a
+compiled-in release key. The v1 JSON object and optional targeting fields are specified in SPEC_impl.md, "Shared
+preferences and announcements". The maintainer's external tooling owns signing and publication. The same purpose and
+keys apply to the standing `announcements-test.json` and `announcements-test.json.minisig` used at P2. Keep the test
+entry out of the production feed. Its title is **Farhelm brick test announcement** and it must target the candidate Mac
+without expiring before the test.
+
 Main's version is always `0.0.0-unreleased`, in both the root `Cargo.toml` and `packaging/farhelm-desktop/dist.toml`.
 Every kind of release sets its real version in a release commit that lives only under its tag: a stable one on its
 `release-X.Y.Z` branch, an RC or dev one in a bump PR that is closed without merging. Never merge a release commit into

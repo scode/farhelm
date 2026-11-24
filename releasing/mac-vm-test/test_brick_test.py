@@ -123,7 +123,7 @@ The installer pair still runs, and carries the supervisor checks either way.
                 self.assertNotIn('p0-updater-upgrade', [v['id'] for v in result['passes']])
 
     def test_installer_pair_upgrades_supervisors_before_agents_then_runs_p1_and_p2(self):
-        """The pair order is the priority order: bricking first, continuity next, the feedback send last.
+        """The pair finishes continuity before the two P2 checks.
 
 Each supervisor's upgrade is its own P0 checkpoint ahead of the new agents, so
 a flaky agent turn cannot obscure whether a supervisor came up. The old
@@ -137,9 +137,11 @@ relaunch; the updater pair checks discovery and relaunch only.
                           ('remote-supervisor-upgrade', 'P0'), ('local-supervisor-agent', 'P0'),
                           ('remote-supervisor-agent', 'P0'), ('local-old-session', 'P1'),
                           ('remote-old-session', 'P1'), ('remote-host-remove', 'P1'),
-                          ('remote-host-uninstall', 'P1'), ('p2-feedback-send', 'P2')])
+                          ('remote-host-uninstall', 'P1'), ('p2-feedback-send', 'P2'), ('p2-announcements', 'P2')])
         self.assertEqual(installer['p2-feedback-send'], {'gui': True, 'command': False, 'continuity': False,
                                                          'priority': 'P2'})
+        self.assertEqual(installer['p2-announcements'], {'gui': True, 'command': True, 'continuity': False,
+                                                          'priority': 'P2'})
         self.assertTrue(all(spec['command'] for key, spec in installer.items()
                             if key not in ('artifact-verification', 'p2-feedback-send')))
         self.assertEqual(list(checks('p0-updater-upgrade')),
@@ -854,6 +856,12 @@ are left unrecorded, as the scheduler leaves them.
         self.complete_p0('p0-fresh')
         self.complete_p0('p0-updater-upgrade')
 
+    def record_announcements(self, image):
+        """Complete the second P2 checkpoint with independent command evidence in a synthetic pair."""
+        receipt = self.evidence_file('announcements-launch.json', b'{"fixture": "announcement launch"}')
+        self.run.record('p0-installer-upgrade', 'p2-announcements', 'pass', [image, receipt],
+                        'Synthetic bell, dialog and history.')
+
     def test_remote_mac_pair_follows_installer_cleanup_and_counts_as_p1(self):
         """A failed Mac uninstall preserves P0 and feedback, while leaving bonus coverage runnable."""
         self.enable_p0(remote_mac=True)
@@ -870,6 +878,7 @@ are left unrecorded, as the scheduler leaves them.
             with self.assertRaisesRegex(Refused, 'clean up the installer pair'):
                 self.run.prepare(REMOTE_MAC_PASS, [])
             self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Synthetic feedback result.')
+            self.record_announcements(image)
             self.run.cleanup('p0-installer-upgrade')
             with self.assertRaisesRegex(Refused, 'remote Mac fixture before bonus'):
                 self.run.prepare('fresh', [])
@@ -978,7 +987,8 @@ P1 and P2 report their own named results from the same pair.
             self.assertEqual(report['p1'], {'verdict': 'pass', 'checks': {
                 'local-old-session': 'pass', 'remote-old-session': 'pass',
                 'remote-host-remove': 'pass', 'remote-host-uninstall': 'pass'}})
-            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {'feedback-send': 'pass'}})
+            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {
+                'feedback-send': 'pass', 'announcements': 'pass'}})
             self.assertEqual(report['verdict'], 'could not run')
         self.prepare('fresh')
 
@@ -1089,6 +1099,7 @@ failure's evidence is retained.
                                 'Must not continue.')
             self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image],
                             'Synthetic feedback frames; no live send claimed.')
+            self.record_announcements(image)
             self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
             self.run.cleanup('p0-installer-upgrade')
         self.assertTrue(all(child.poll() == 0 for child in children))
@@ -1257,8 +1268,13 @@ The two preceding pairs have already passed their evidence and cleanup gates.
             self.assertTrue(all(child.poll() is None for child in children))
             self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [before, after],
                             'Synthetic filled/closed frames; no live send or GUI result claimed.')
+            self.assertEqual(self.run.report()['p2']['verdict'], 'could not run')
+            with self.assertRaisesRegex(Refused, 'incomplete or failed'):
+                self.run.cleanup('p0-installer-upgrade')
+            self.record_announcements(before)
             report = self.run.report()
-            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {'feedback-send': 'pass'}})
+            self.assertEqual(report['p2'], {'verdict': 'pass', 'checks': {
+                'feedback-send': 'pass', 'announcements': 'pass'}})
             self.assertEqual(report['requested_verdict'], 'pass')
             self.assertEqual(report['verdict'], 'could not run')
             self.run.cleanup('p0-installer-upgrade')
@@ -1283,6 +1299,7 @@ lift that protection either: the scope fences future work, not evidence.
                 with self.run.locked():
                     self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image],
                                     'Synthetic P2 image independent of every P0 artifact.')
+                    self.record_announcements(image)
                     self.assertEqual(self.run.report()['p2']['verdict'], expected)
                     if narrowed:
                         self.run.limit_scope('p0-only')
@@ -1338,6 +1355,7 @@ for good. An unavailable P1 check that stops the chain ends the sequence.
             self.run.record('p0-installer-upgrade', 'local-old-session', 'could-not-run', [image],
                             'Synthetic unavailable old session; it stops the P1 chain.')
             self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'After P1 ended.')
+            self.record_announcements(image)
             self.assertEqual(self.run.report()['p2']['verdict'], 'pass')
             self.assertEqual(self.run.report()['p1']['verdict'], 'could not run')
 
@@ -1372,6 +1390,7 @@ for good. An unavailable P1 check that stops the chain ends the sequence.
                 with self.run.locked():
                     self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image],
                                     'Synthetic failed/unavailable feedback observation.')
+                    self.record_announcements(image)
                     report = self.run.report()
                     self.assertEqual(report['p0']['verdict'], 'pass')
                     self.assertEqual(set(report['p0']['checks'].values()), {'pass'})
@@ -1397,6 +1416,7 @@ for good. An unavailable P1 check that stops the chain ends the sequence.
                 with self.run.locked():
                     self.run.limit_scope('p2-only')
                     self.run.record('p0-installer-upgrade', 'p2-feedback-send', status, [image], 'Synthetic P2 result.')
+                    self.record_announcements(image)
                     self.assertEqual(self.run.report()['scope'], 'p2-only')
                     self.assertEqual(self.run.report()['requested_verdict'], expected)
                     self.run.cleanup('p0-installer-upgrade')
@@ -1429,6 +1449,7 @@ it as skipped, the send still runs, and the pair cleans up normally.
             with self.assertRaisesRegex(Refused, 'incomplete or failed'):
                 self.run.cleanup('p0-installer-upgrade')
             self.run.record('p0-installer-upgrade', 'p2-feedback-send', 'pass', [image], 'Synthetic send frames.')
+            self.record_announcements(image)
             report = self.run.report()
             self.assertEqual((report['p0']['verdict'], report['p1']['verdict'], report['p2']['verdict']),
                              ('pass', 'could not run', 'pass'))
