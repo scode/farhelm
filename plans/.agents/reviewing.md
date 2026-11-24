@@ -52,7 +52,7 @@ Act on each submission:
 - an "approve" pick is an approval (`queue approve`, as the approve item in this section says;
   `scripts/plans-landing/landing.py approve` runs it for several plans in a row from a plain git clone);
 - a comment with an instruction is that instruction, whether or not "approve" is selected: a follow-up, a TODO.md entry
-  (in the subsection `plans/AGENTS.md`, "Follow-up TODO entries", names), a question to answer, or anything else it asks
+  (in the bucket `plans/AGENTS.md`, "Follow-up TODO entries", names), a question to answer, or anything else it asks
   for;
 - an unselected report without a comment means the maintainer did not get to it. Leave it for later. It is never a
   follow-up or a rejection.

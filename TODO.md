@@ -4,21 +4,21 @@ A running list of things the maintainer wants fixed or built. This is intent, no
 same PR that addresses it, so the file only ever describes what is still wanted. It is not a roadmap and carries no
 priorities unless an entry says so itself.
 
-Thirteen buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to
+Fifteen buckets, assigned by the maintainer: "definite simplification" is complexity the maintainer has decided to
 remove — the decision is made, only the work remains; "planned" holds accepted work to implement later and suppresses
 duplicate review triage within each item's stated scope; "plan decisions to revisit" holds the calls made while a plan
-ran or landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "near term" is what
-should be picked up next; "linux support" holds Linux desktop app installation, packaging, and Linux-specific feature
-work; "mid term" is wanted after the near-term work, sooner than "maybe later"; "doc todo" holds documentation work;
-"tricky bugs" retains unresolved bug reports and their investigation findings; "deflake" gathers test and harness
-reliability work, including CI execution and restoring gates; "broken tests" records tests that fail deterministically,
-with the failure and the evidence that it predates any in-flight work; "code cleanup" holds structural code smells from
-a whole-codebase assessment, grouped by kind with a suggested order; "maybe later" is wanted but not soon, and may never
-happen; "unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no order
-unless the bucket explicitly says so.
-
-Near term's "Plan follow-up" subsection holds the entries that came out of plans (follow-ups asked for in review,
-leftovers from reports and landing notes), kept apart from the rest of the near-term work.
+ran or landed, often on the maintainer's behalf when a plan blocked, each recording the alternative; "immediate" is what
+should be planned right away, ahead of everything in "near term", and the todo planning flow selects its entries by
+default; "plan follow-ups" holds the entries that came out of plans (follow-ups asked for in review, leftovers from
+reports and landing notes), kept apart from the rest of the work; "near term" is what should be picked up next after
+those; "linux support" holds Linux desktop app installation, packaging, and Linux-specific feature work; "mid term" is
+wanted after the near-term work, sooner than "maybe later"; "doc todo" holds documentation work; "tricky bugs" retains
+unresolved bug reports and their investigation findings; "deflake" gathers test and harness reliability work, including
+CI execution and restoring gates; "broken tests" records tests that fail deterministically, with the failure and the
+evidence that it predates any in-flight work; "code cleanup" holds structural code smells from a whole-codebase
+assessment, grouped by kind with a suggested order; "maybe later" is wanted but not soon, and may never happen;
+"unbucketized" is everything not yet sorted, which carries no implication either way. Within a bucket, no order unless
+the bucket explicitly says so.
 
 Known product fixes stay in their product bucket. "Difficult deflake" retains unresolved failures and their
 investigation evidence within "Deflake"; that placement does not establish that the cause is test-only. Move a diagnosed
@@ -47,6 +47,18 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   can reopen the cache's original absolute path, so recovering in place could let it touch the replacement. The
   alternative was to keep the current layout and defer checkout recovery, leaving sessions on an affected cache able to
   fail at checkout. Plan: `plans/queue/repo-cache-lock-redesign.md`.
+
+## Immediate
+
+## Plan follow-ups
+
+- **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
+  watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
+  Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read
+  and wait for the pushed epoch after a delete times out. If a post-delete read reports that removal is finished,
+  another read is pending when the old delete reply arrives, and that pending read fails, the can can still show removal
+  until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
+  without showing the accepted removal.
 
 ## Near term
 
@@ -140,16 +152,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (`listing_proves_gone`), and reselects the previous session silently. The helm log would then say "could not record
   the session for routing". Nothing ties that to an active Codex agent, so it stays unconfirmed; the maintainer chose to
   keep watching for it.
-
-### Plan follow-up
-
-- **Review the two-lane desktop channel before moving more commands.** Check how the shared queue limit, per-lane
-  watchdog and operation keys interact, and verify the boundaries in `Work::lane()`. Connecting N hosts and opening
-  Checkout Trash can send up to 2N reads in quick succession. Revisit the choices to stop rechecking after a failed read
-  and wait for the pushed epoch after a delete times out. If a post-delete read reports that removal is finished,
-  another read is pending when the old delete reply arrives, and that pending read fails, the can can still show removal
-  until the next refresh. If the first refresh fails before the delete reply arrives, Trash may show the read failure
-  without showing the accepted removal.
 
 ### Tensorlake
 
@@ -268,8 +270,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 - **Drift tests: remote `BROWSER` opener integration.** Verify how real agent CLIs on Linux — especially Codex and
   Claude Code, which differ in whether they accept a command template or only a single executable path — invoke
   Farhelm's remote `BROWSER` opener.
-
-### Trivial
 
 ## Linux support
 
