@@ -273,13 +273,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
 
 - **Dynamic network source for announcements.** add dynamic network source for announcements. we currently have hard
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
-  deliver to users. details tbd during planning.
+  deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
 
 - **Restore terminal hyperlink mismatch warnings for bracketed and quoted URLs.** Labels opening with a bracket or quote
   (such as `<https://good.test/>`, `"https://good.test/"`, `(https://good.test/)`, or `[https://good.test/]`) pointing
   to a different site stopped triggering the hover mismatch warning after #4737 tightened the scheme rule. Strip one
   matching outer bracket or quote pair before checking whether the label looks like a web address and comparing it with
-  the destination, so spoofed bracketed or quoted addresses warn again without false warnings on honest ones.
+  the destination, so spoofed bracketed or quoted addresses warn again without false warnings on honest ones. Plan:
+  `plans/queue/osc8-bracketed-url-warnings.md`.
 
 - **Make the pending-update pill reminder visible in light mode and bold its arrow.** In light mode, the ready-update
   pill's resting, hover, and pulse backgrounds (`#a63e4d` at 14.1%, 15.3%, and 16.5% alpha over `#e9edf4`) differ by
@@ -288,7 +289,7 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   hover to a 22% wash with darker ink (`#8b2837`, 5.31:1), and flip the 2.5-second light-mode pulse to solid `danger_bg`
   (`#a83e4d`) with white `on_fill` text (6.07:1; switch the `⚠` warning glyph to white during the pulse so it stays
   readable). Also draw the bouncing `→` reminder arrow bold at 13 px instead of regular 12 px so it matches the pill's
-  weight.
+  weight. Plan: `plans/queue/light-mode-upgrade-pill-pulse.md`.
 
 - **Keep remote agent credentials intact when a recipe credential lookup fails.** After #4679 combined Claude and Codex
   into one remote launch-credentials file, a failed lookup in the helm's SQLite credential catalog for either agent
@@ -296,13 +297,14 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   (even during an unrelated push such as a GitHub token update). Fail out and leave the existing on-disk credentials
   file untouched whenever either agent's SQLite lookup fails (keep per-agent withholding only for legacy settings
   cleanup, without trying to simultaneously update the other agent's entry in the same file), and name which agent
-  failed in the host warning.
+  failed in the host warning. Plan: `plans/queue/preserve-creds-on-lookup-failure.md`.
 
 - **Make registered custom agents visible and consistent in the `farhelm agent` CLI.** Agents currently have no way to
   discover registered custom agent IDs through the CLI. Make custom agents behave like built-in agents in the CLI so
   they are visible to agents as usual: add a way to list registered custom agents (and include them alongside built-in
   types in unknown-agent refusals), reconcile the `--conversation` + `--recipe` disagreement between CLI and templates,
-  and restore listing valid built-in choices when `--effort` is mistyped for a built-in agent.
+  and restore listing valid built-in choices when `--effort` is mistyped for a built-in agent. Plan:
+  `plans/queue/custom-agents-cli-visibility.md`.
 
 ## Linux support
 
