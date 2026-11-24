@@ -4867,6 +4867,9 @@ the launcher's rules for a new environment: a folder is the new environment's ho
 inside it. `farhelm agent clone` of a sandbox or container session takes no `--host` or `--cwd`; it targets the source's
 recipe at the source's place, with the source's launch and repository intent, never a copy of its disk.
 
+`--conversation` is refused when the final placement creates a new environment, whether `--recipe` or a template
+selected it.
+
 Each of these always shows its own card, whatever the requesting host's permissions say, with Allow and Deny only. The
 card names the recipe and where the environment will be created (Tensorlake, or the container host), says that a
 Tensorlake sandbox bills while it runs, and otherwise shows what any launch card shows. Its Allow is the creation

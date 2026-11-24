@@ -106,7 +106,7 @@ impl HelmStore {
     }
 }
 
-/// Report a stale registration consistently from writes and launch compilation.
+/// Report a registration that disappeared before a catalog edit or deletion.
 pub(crate) fn missing_agent() -> anyhow::Error {
     SupervisorError::helm(
         ErrorKind::NotFound,
@@ -117,11 +117,9 @@ pub(crate) fn missing_agent() -> anyhow::Error {
 
 /// Refuse an agent's `--agent` value that names neither a built-in type nor a custom agent registered here.
 ///
-/// SPEC.md, "Agent-spawned sessions", requires such a refusal to list the agent types, because the calling agent's
-/// only way to recover is the message. The CLI accepts any well-formed custom ID, since it cannot read the catalog,
-/// so a typo of a built-in name (`cluade`) reaches the helm and is refused here rather than as a stale registration,
-/// which would claim the ID was once registered.
-pub(crate) fn unknown_agent(id: &str) -> anyhow::Error {
+/// Use the same catalog snapshot that ruled out the ID so the caller gets the choices it could have used on
+/// this request. A valid-looking custom ID might be a typo of a built-in type.
+pub(crate) fn unknown_agent(id: &str, registered: &[CustomAgent]) -> anyhow::Error {
     let built_ins: Vec<String> = farhelm_proto::LaunchHarness::BUILT_INS
         .iter()
         .filter_map(|harness| match serde_json::to_value(harness) {
@@ -129,11 +127,17 @@ pub(crate) fn unknown_agent(id: &str) -> anyhow::Error {
             _ => None,
         })
         .collect();
+    let custom = if registered.is_empty() {
+        "no custom agents are registered".to_owned()
+    } else {
+        let ids: Vec<&str> = registered.iter().map(|agent| agent.id.as_str()).collect();
+        format!("registered custom agents are {}", ids.join(", "))
+    };
     SupervisorError::helm(
         ErrorKind::NotFound,
         format!(
             "{id:?} is not a built-in agent type or a custom agent registered on this helm; \
-             built-in types are {}",
+             built-in types are {}. {custom}",
             built_ins.join(", ")
         ),
     )

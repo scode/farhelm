@@ -11,5 +11,6 @@ on a compatible CLI launch.
 
 `farhelm custom-agent spec` prints the wrapper contract for your installed version, including its change history.
 
-An agent that runs `farhelm agent create --agent` with a value that is neither a built-in agent type nor a custom agent
-registered on that helm is refused with the list of built-in types, as before custom agents.
+An unknown agent ID in a CLI launch or template write lists the built-in types and registered custom IDs. A refused
+built-in effort also reports the choices that apply. A launch through a recipe or recipe template refuses
+`--conversation` when it creates a new environment.

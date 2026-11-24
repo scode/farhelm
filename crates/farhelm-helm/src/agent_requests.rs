@@ -2006,7 +2006,8 @@ async fn create_for_agent(
     // placement, and a spawn stays on its own host (its recipe templates are
     // refused as unavailable there), so only a hostless ordinary create goes.
     // Only the final placement decides: a later template may replace a
-    // recipe target with an installed host, which leaves an ordinary create.
+    // recipe target with an installed host, which leaves an ordinary create
+    // that can still reopen a conversation.
     if scope == AgentScope::Fleet
         && !spawned
         && edits.host.is_none()
@@ -2018,14 +2019,13 @@ async fn create_for_agent(
         if intent_key.is_some() {
             return Err(keyed_environment_refusal());
         }
-        return launch_environment_for_agent(
-            state,
-            origin,
-            asking_session,
-            plan,
-            edits.conversation,
-        )
-        .await;
+        if edits.conversation.is_some() {
+            return Err(crate::sessions::invalid_request(
+                "--conversation cannot be used when a recipe creates a new sandbox or container"
+                    .into(),
+            ));
+        }
+        return launch_environment_for_agent(state, origin, asking_session, plan).await;
     }
     // A key's record lives only on the host the first attempt reached, so a
     // retry has to reach that same host to be matched against it. A host
@@ -3312,10 +3312,11 @@ async fn write_template_for_agent(
         fields.host = Some(identity);
         host_name = Some(name);
     }
-    if let Some(Some(id)) = &fields.custom_agent
-        && state.store.custom_agent(id).await?.is_none()
-    {
-        return Err(crate::custom_agents::missing_agent());
+    if let Some(Some(id)) = &fields.custom_agent {
+        let registered = state.store.custom_agents().await?;
+        if !registered.iter().any(|agent| agent.id == *id) {
+            return Err(crate::custom_agents::unknown_agent(id, &registered));
+        }
     }
     let before = find_template(state, &name).await?;
     let template = match (&before, create) {
@@ -4293,7 +4294,7 @@ async fn create_environment_for_agent(
     let plan = plan_environment_create(state, origin, &templates, edits, Some(explicit))
         .await?
         .context("an explicit recipe always leaves a recipe target")?;
-    launch_environment_for_agent(state, origin, asking_session, plan, None).await
+    launch_environment_for_agent(state, origin, asking_session, plan).await
 }
 
 /// Resolve a create that may land in a new environment, `None` when its
@@ -4515,7 +4516,6 @@ async fn clone_environment_for_agent(
                 client: source_client,
             }),
         },
-        None,
     )
     .await
 }
@@ -4540,7 +4540,6 @@ async fn launch_environment_for_agent(
     origin: AgentOrigin,
     asking_session: &str,
     plan: PlannedEnvironmentLaunch,
-    conversation: Option<String>,
 ) -> anyhow::Result<AgentReply> {
     let recipe = plan.target.recipe().to_string();
     let place = plan.target.place();
@@ -4610,10 +4609,8 @@ async fn launch_environment_for_agent(
         plan.prompt.clone(),
         plan.title.clone(),
         plan.repo.clone(),
-        conversation,
     )?;
-    let named_start = request.prepare_sandbox_launch(&state.store).await?;
-    let shown = launch_for_approval(shown, named_start.as_ref());
+    request.prepare_sandbox_launch(&state.store).await?;
     crate::environment::ProviderHandle::preflight_agent_launch(place, &state.tensorlake)
         .await
         .map_err(|error| {
@@ -15652,6 +15649,19 @@ mod tests {
             *host = None;
             templates.push("dev-container".into());
         }
+        let named = AgentVerb::Create {
+            conversation: Some("ab850620-df01-4899-b536-8479835f6dc0".into()),
+            host: None,
+            templates: vec!["dev-container".into()],
+            edits: farhelm_proto::launcher::TemplateFields {
+                kind: Some(farhelm_proto::launcher::LauncherKind::Agent),
+                agent: Some(farhelm_proto::LaunchHarness::Codex),
+                ..Default::default()
+            },
+            intent_key: None,
+            confirm_yolo: false,
+            spawn: None,
+        };
         let clone = |host: Option<&str>, cwd: Option<&str>, key: Option<&str>| AgentVerb::Clone {
             source_session_id: Some(full_id(&h, owned, "contained")),
             host: host.map(str::to_string),
@@ -15668,6 +15678,7 @@ mod tests {
         };
         for (verb, expected) in [
             (keyed, "an idempotency key cannot be used"),
+            (named, "--conversation cannot be used"),
             (clone(Some(&remote_name), None, None), "takes no --host"),
             (clone(None, Some("/work"), None), "takes no --cwd"),
             (
@@ -16008,7 +16019,6 @@ mod tests {
             false,
             None,
             Some("copy".into()),
-            None,
             None,
         )
         .unwrap();

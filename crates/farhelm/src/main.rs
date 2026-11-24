@@ -948,12 +948,21 @@ fn parse_wrapper_prefix(value: &str) -> Result<WrapperPrefix, String> {
     farhelm_proto::split_wrapper_prefix(value).map(WrapperPrefix)
 }
 
-/// A template can select the agent after this flag is parsed. The helm applies its vocabulary then.
+/// Bound effort text at the CLI. The helm validates its spelling once it knows the agent and model,
+/// which can come from a template and determine the choices a caller can retry with.
 fn parse_effort(value: &str) -> Result<Choice<farhelm_proto::LaunchEffortValue>, String> {
     if value == "default" {
         return Ok(Choice(None));
     }
-    farhelm_proto::custom_agents::validate_model_or_effort(value).map_err(str::to_owned)?;
+    if value.is_empty() || value.len() > 256 {
+        return Err("effort must be 1 to 256 bytes".into());
+    }
+    if value
+        .chars()
+        .any(farhelm_proto::text::is_presentation_unsafe)
+    {
+        return Err("effort cannot contain control or invisible formatting characters".into());
+    }
     serde_json::from_value(serde_json::Value::String(value.to_owned()))
         .map(|effort| Choice(Some(effort)))
         .map_err(|error| error.to_string())
@@ -3070,6 +3079,7 @@ mod tests {
         for refused in [
             &["create", "--recipe", "dev", "--host", "h"][..],
             &["create", "--recipe", "dev", "--idempotency-key", "k"],
+            &["create", "--recipe", "dev", "--conversation", "existing"],
             &["create", "--container-host", "build-box", "--host", "h"],
             &["create", "--container-host", "build-box"],
         ] {
@@ -3641,8 +3651,8 @@ mod tests {
         );
     }
 
-    /// Invalid agent and effort spellings fail before a connection, with guidance the caller can act on.
-    /// A syntactically valid custom ID and effort reach the helm for catalog-aware validation.
+    /// Agent IDs and permissions have local spelling checks. Effort has a local size bound so the
+    /// helm can handle ordinary typos with the resolved agent's vocabulary.
     #[farhelm_testtrace::test]
     fn an_unknown_launch_choice_lists_the_choices() {
         let create = |extra: &[&str]| {
@@ -3661,11 +3671,9 @@ mod tests {
             agent.contains("is not an agent type") && agent.contains("codex, claude"),
             "{agent}"
         );
-        let effort = create(&["--agent", "codex", "--effort", "two words"]);
-        assert!(
-            effort.contains("lowercase letters") && effort.contains("256"),
-            "{effort}"
-        );
+        let long = "x".repeat(257);
+        let effort = create(&["--agent", "codex", "--effort", &long]);
+        assert!(effort.contains("1 to 256 bytes"), "{effort}");
         let permissions = create(&["--agent", "codex", "--permissions", "free"]);
         assert!(
             permissions.contains("smart_approve") && permissions.contains("guarded"),

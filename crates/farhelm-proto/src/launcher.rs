@@ -121,6 +121,15 @@ pub fn compatible_efforts(
         .collect()
 }
 
+/// Spell the effort choices exactly as an agent can pass them on its next CLI attempt.
+fn effort_words(efforts: &[LaunchEffort]) -> String {
+    efforts
+        .iter()
+        .map(|effort| effort.as_cli_arg())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
 /// Move an agent launch's choices to another agent type without keeping
 /// values the new type cannot use (SPEC.md: "Replacing a harness clears
 /// incompatible choices and a YOLO permission that was the previous
@@ -570,12 +579,17 @@ pub fn check_template_shape(template: &LaunchTemplate) -> Result<(), String> {
     if let Some(Some(LaunchEffortValue::Custom(effort))) = &template.fields.effort {
         // A modifier with no agent can acquire its harness from an earlier template. An
         // explicit built-in agent still uses the closed effort vocabulary when saved.
-        if template
-            .fields
-            .agent
-            .is_some_and(|agent| !agent.uses_custom_catalog())
+        if let Some(agent) = template.fields.agent
+            && !agent.uses_custom_catalog()
         {
-            return Err(format!("unknown built-in effort {effort:?}"));
+            let label = harness_word(agent);
+            if !agent.offers_effort() {
+                return Err(format!("{label} does not accept --effort"));
+            }
+            return Err(format!(
+                "unknown built-in effort {effort:?}. The choices are {}",
+                effort_words(&LaunchEffort::ALL)
+            ));
         }
         crate::custom_agents::validate_model_or_effort(effort).map_err(str::to_owned)?;
     }
@@ -1016,20 +1030,28 @@ pub fn apply_template(
                 if harness.uses_custom_catalog() {
                     crate::custom_agents::validate_model_or_effort(effort.as_cli_arg())
                         .map_err(|reason| refuse("effort", reason.into()))?;
-                } else if !harness.offers_effort()
-                    || effort.known().is_none_or(|known| {
-                        !context.catalog.is_empty()
-                            && !compatible_efforts(harness, next.model.as_deref(), context.catalog)
-                                .contains(&known)
-                    })
-                {
-                    return Err(refuse(
-                        "effort",
-                        format!(
-                            "{} is not offered by {label} for this model",
-                            effort.as_cli_arg()
-                        ),
-                    ));
+                } else {
+                    if !harness.offers_effort() {
+                        return Err(refuse("effort", format!("is not accepted by {label}")));
+                    }
+                    let choices =
+                        compatible_efforts(harness, next.model.as_deref(), context.catalog);
+                    // A caller without a catalog can still use a known effort on a harness
+                    // that accepts efforts. A loaded catalog narrows that choice to the model.
+                    if effort.known().is_none_or(|known| {
+                        !context.catalog.is_empty() && !choices.contains(&known)
+                    }) {
+                        let reason = if choices.is_empty() {
+                            format!("is not accepted by {label} for this model")
+                        } else {
+                            format!(
+                                "value {:?} is not offered by {label} for this model. The choices are {}",
+                                effort.as_cli_arg(),
+                                effort_words(&choices)
+                            )
+                        };
+                        return Err(refuse("effort", reason));
+                    }
                 }
             }
             next.effort = effort.clone();
@@ -1721,6 +1743,74 @@ mod tests {
             known_recipes: &[],
             known_places: &[],
             host_fixed,
+        }
+    }
+
+    /// Template writes can list the built-in effort vocabulary without a model catalog. A harness
+    /// with no such setting instead tells the caller to remove the flag.
+    #[test]
+    fn template_effort_typos_list_global_choices_only_for_agents_with_effort() {
+        let fields = |agent| TemplateFields {
+            agent: Some(agent),
+            effort: Some(Some(LaunchEffortValue::Custom("hgh".into()))),
+            ..Default::default()
+        };
+        assert_eq!(
+            check_template_shape(&template("typo", fields(LaunchHarness::Codex))),
+            Err("unknown built-in effort \"hgh\". The choices are off, minimal, low, medium, high, xhigh, max, ultra".into())
+        );
+        assert_eq!(
+            check_template_shape(&template("typo", fields(LaunchHarness::Grok))),
+            Err("grok does not accept --effort".into())
+        );
+    }
+
+    /// The effort refusal during launch should offer choices usable with the resolved model. An
+    /// agent that offers effort on other models may still offer none for this particular model.
+    #[test]
+    fn applied_effort_refusals_offer_only_the_resolved_models_choices() {
+        let mut catalog = catalog();
+        catalog.push(LaunchCatalogModel {
+            id: "gpt-6-fixed".into(),
+            family: "fixed".into(),
+            latest: true,
+            harness: LaunchHarness::Codex,
+            efforts: vec![],
+        });
+        for (harness, model, reason) in [
+            (
+                LaunchHarness::Codex,
+                Some("gpt-6-luna"),
+                "value \"hgh\" is not offered by codex for this model. The choices are low, high",
+            ),
+            (
+                LaunchHarness::Codex,
+                Some("gpt-6-fixed"),
+                "is not accepted by codex for this model",
+            ),
+            (LaunchHarness::Grok, None, "is not accepted by grok"),
+        ] {
+            let edit = template(
+                "typo",
+                TemplateFields {
+                    agent: Some(harness),
+                    model: model.map(|model| Some(model.to_owned())),
+                    effort: Some(Some(LaunchEffortValue::Custom("hgh".into()))),
+                    ..Default::default()
+                },
+            );
+            let refusal = apply_template(
+                &LauncherState::default(),
+                &edit,
+                &context(&catalog, &[], false),
+            )
+            .unwrap_err();
+            assert_eq!(refusal.field, "effort");
+            assert_eq!(refusal.reason, reason);
+            assert_eq!(
+                refusal.to_string(),
+                format!("Template \"typo\" was not applied: its effort {reason}")
+            );
         }
     }
 
