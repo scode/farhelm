@@ -27,6 +27,7 @@ use tokio::time::{Instant, timeout_at};
 const PUSH_CONCURRENCY: usize = 4;
 const STORAGE: &str = "could not read or record the host's credential delivery state";
 const TIMED_OUT: &str = "credential delivery did not finish within the SSH timeout";
+const CODEX_LOGIN_LOOKUP: &str = "could not resolve the recipe's Codex login";
 
 /// The reason a replacement's reply gives a host still being delivered to
 /// when the reply was due (see [`CredentialDelivery::push`]). It says where
@@ -69,7 +70,7 @@ impl Bindings {
     fn uses(&self, name: &str) -> bool {
         self.github_token_credential.as_deref() == Some(name)
             || self.uses_claude(name)
-            || self.codex_login_credential.as_deref() == Some(name)
+            || self.uses_codex_login(name)
             || self.uses_codex_endpoint(name)
     }
 
@@ -79,6 +80,11 @@ impl Bindings {
             .as_ref()
             .and_then(|endpoint| endpoint.token_credential.as_deref())
             == Some(name)
+    }
+
+    /// Subscription login writes the separate auth.json file.
+    fn uses_codex_login(&self, name: &str) -> bool {
+        self.codex_login_credential.as_deref() == Some(name)
     }
 
     /// Pending Claude cleanup affects a push only if Claude needs that value.
@@ -142,20 +148,89 @@ struct Record {
     github: Option<GithubStamp>,
 }
 
-/// Keep pending cleanup associated with its agent while still reporting all warnings on the host.
-#[derive(Clone, Default)]
-struct EndpointWarnings {
+/// Keep each warning with its agent. A lookup failure holds the whole launch credentials file,
+/// while a pending cleanup holds only the entry that depends on it.
+#[derive(Debug, Default)]
+struct DeliveryWarnings {
+    lookup_aborted: bool,
     claude: Option<String>,
     codex: Option<String>,
+    codex_login_lookup_failed: bool,
 }
 
-impl EndpointWarnings {
-    /// Only the affected agents are relevant to a named value's save reply.
-    fn message(self, claude: bool, codex: bool) -> Option<String> {
-        match (self.claude.filter(|_| claude), self.codex.filter(|_| codex)) {
-            (Some(claude), Some(codex)) => Some(format!("{claude}. {codex}")),
-            (one, other) => one.or(other),
+/// A hard failure still ends the pass. Keep preceding lookup warnings separate
+/// so a save reply can include only the ones relevant to its delivery.
+#[derive(Debug)]
+struct DeliveryError {
+    reason: String,
+    lookup_warnings: Option<DeliveryWarnings>,
+}
+
+impl From<String> for DeliveryError {
+    fn from(reason: String) -> Self {
+        Self {
+            reason,
+            lookup_warnings: None,
         }
+    }
+}
+
+impl DeliveryError {
+    /// Host details show both the failed lookup and the failure that stopped the pass.
+    fn message(&self) -> String {
+        self.with_warning(
+            self.lookup_warnings
+                .as_ref()
+                .and_then(DeliveryWarnings::message),
+        )
+    }
+
+    /// Keep the hard failure in every reply, with any earlier warnings selected by that reply.
+    fn with_warning(&self, earlier: Option<String>) -> String {
+        match earlier {
+            Some(earlier) => format!("{earlier}. {}", self.reason),
+            None => self.reason.clone(),
+        }
+    }
+}
+
+impl DeliveryWarnings {
+    /// Host details and setup errors can report all affected slots from one pass.
+    fn message(&self) -> Option<String> {
+        self.message_for(true, true, true)
+    }
+
+    /// The host and save reply share wording, but a save selects only the slots it needed.
+    fn message_for(&self, claude: bool, codex: bool, codex_login: bool) -> Option<String> {
+        let mut reasons = [
+            self.claude.as_deref().filter(|_| claude),
+            self.codex.as_deref().filter(|_| codex),
+            (codex_login && self.codex_login_lookup_failed).then_some(CODEX_LOGIN_LOOKUP),
+        ]
+        .into_iter()
+        .flatten();
+        let mut message = reasons.next()?.to_owned();
+        for reason in reasons {
+            message.push_str(". ");
+            message.push_str(reason);
+        }
+        Some(message)
+    }
+
+    /// A push for either entry depends on publication of the whole file if a lookup fails.
+    /// A Codex login push depends only on its own warning, and a GitHub push depends on its own slot.
+    fn push_failure(
+        &self,
+        uses_claude: bool,
+        uses_codex: bool,
+        uses_codex_login: bool,
+    ) -> Option<String> {
+        let shared_blocked = self.lookup_aborted && (uses_claude || uses_codex);
+        self.message_for(
+            shared_blocked || uses_claude,
+            shared_blocked || uses_codex,
+            uses_codex_login,
+        )
     }
 }
 
@@ -450,7 +525,8 @@ impl CredentialDelivery {
             entry.live.lock().unwrap().binding = Some((row.clone(), bindings.clone()));
             self.apply(row, bindings, None, DeliveryPhase::Connected, guard)
                 .await
-                .map(|warnings| warnings.message(true, true))
+                .map(|warnings| warnings.message())
+                .map_err(|error| error.message())
         })
         .await
         .unwrap_or_else(|_| Err(TIMED_OUT.into()));
@@ -477,8 +553,9 @@ impl CredentialDelivery {
                 DeliveryPhase::Setup,
                 guard,
             )
-            .await?
-            .message(true, true)
+            .await
+            .map_err(|error| error.message())?
+            .message()
             .map_or(Ok(()), Err)
         })
         .await
@@ -623,21 +700,27 @@ impl CredentialDelivery {
                 let guard = Arc::clone(&entry.serial).lock_owned().await;
                 let binding = entry.live.lock().unwrap().binding.clone();
                 let Some((row, bindings)) = binding.filter(|(_, binding)| binding.uses(name)) else {
-                    return Ok((None, None));
+                    return (None, None);
                 };
                 let uses_claude = bindings.uses_claude(name);
                 let uses_codex = bindings.uses_codex_endpoint(name);
-                self.apply(&row, bindings, None, DeliveryPhase::Connected, guard)
-                    .await
-                    .map(|warnings| {
-                        let failure = warnings.clone().message(uses_claude, uses_codex);
-                        (warnings.message(true, true), failure)
-                    })
-            }) => result.unwrap_or_else(|_| Err(TIMED_OUT.into())),
+                let uses_codex_login = bindings.uses_codex_login(name);
+                match self.apply(&row, bindings, None, DeliveryPhase::Connected, guard).await {
+                    Ok(warnings) => {
+                        let failure = warnings.push_failure(uses_claude, uses_codex, uses_codex_login);
+                        (warnings.message(), failure)
+                    }
+                    Err(error) => {
+                        let earlier = error.lookup_warnings.as_ref().and_then(|warnings| {
+                            warnings.push_failure(uses_claude, uses_codex, uses_codex_login)
+                        });
+                        (Some(error.message()), Some(error.with_warning(earlier)))
+                    }
+                }
+            }) => result.unwrap_or_else(|_| (Some(TIMED_OUT.into()), Some(TIMED_OUT.into()))),
         };
         let host = Self::reported_host(entry, name, generation)?;
-        let (warning, failure) =
-            result.unwrap_or_else(|reason| (Some(reason.clone()), Some(reason)));
+        let (warning, failure) = result;
         entry.warning(attempt, warning, events);
         failure.map(|reason| DeliveryFailure { host, reason })
     }
@@ -668,8 +751,8 @@ impl CredentialDelivery {
 
     /// Resolve revisions under the host lock and record each successful file
     /// before attempting the next. Equal fingerprints perform no SSH at all.
-    /// A returned warning means the legacy Claude cleanup is still pending.
-    /// The other delivery slots can finish while those settings are untouched.
+    /// A lookup or legacy cleanup warning can leave launch credentials pending
+    /// while independent Codex login and GitHub deliveries finish.
     async fn apply(
         &self,
         row: &HostRow,
@@ -677,7 +760,7 @@ impl CredentialDelivery {
         home: Option<PathBuf>,
         phase: DeliveryPhase,
         mut guard: OwnedMutexGuard<()>,
-    ) -> Result<EndpointWarnings, String> {
+    ) -> Result<DeliveryWarnings, DeliveryError> {
         let mut record = self.read_record(row).await?;
         if let Some(home) = home
             && record.home.as_ref() != Some(&home)
@@ -693,84 +776,134 @@ impl CredentialDelivery {
         {
             crate::access::HostAccess::Remote(route) => ProvisioningTarget::Remote(route),
             crate::access::HostAccess::Local => {
-                return Err("environment credentials require a remote route".into());
+                return Err("environment credentials require a remote route"
+                    .to_owned()
+                    .into());
             }
         };
         // Endpoint values are resolved inside the same lease and lock as the snapshot they replace.
         let claude = if let Some(login) = bindings.claude_login_credential {
             self.resolve_claude_login(login).await
         } else {
-            self.resolve_endpoint(bindings.claude).await
+            self.resolve_endpoint(bindings.claude, "Claude").await
         };
         let codex = match phase {
             DeliveryPhase::Setup => None,
-            DeliveryPhase::Connected => Some(self.resolve_endpoint(bindings.codex).await),
+            DeliveryPhase::Connected => Some(self.resolve_endpoint(bindings.codex, "Codex").await),
         };
-        let (next_guard, warnings) = self
+        let (next_guard, mut warnings) = self
             .apply_agent_environment(row, &target, &mut record, claude, codex, guard)
             .await?;
         guard = next_guard;
-        if let Some(name) = bindings.codex_login_credential {
-            let lookup = name.clone();
-            let (auth, revision, incarnation) = self
-                .store
-                .conn()
-                .call("resolve Codex login", move |conn| {
-                    crate::credentials::secret(
-                        conn,
-                        &lookup,
-                        farhelm_proto::credentials::CredentialKind::CodexLogin,
-                    )?
-                    .ok_or_else(|| anyhow::anyhow!("Codex login no longer exists"))
-                })
-                .await
-                .map_err(|_| "could not resolve the recipe's Codex login")?;
-            let stamp = (name, revision, incarnation);
-            if record.codex_auth.as_ref() != Some(&stamp) {
-                if record.home.is_none() {
-                    record.home = Some(self.settings_home(&target).await?);
-                    guard = self.write_record(row, &record, guard).await?;
-                }
-                // Never read auth.json. Its refreshed contents belong to Codex.
-                let directory = record
-                    .home
-                    .as_ref()
-                    .ok_or("the host has no known home directory")?
-                    .join(".codex");
-                let path = directory.join("auth.json");
-                let backend = self
-                    .backend
-                    .as_ref()
-                    .ok_or("credential delivery is unavailable")?;
-                backend
-                    .ensure_directories(
-                        &target,
-                        &[DirectorySpec {
-                            path: directory,
-                            mode: 0o700,
-                            shared: true,
-                        }],
-                    )
-                    .await
-                    .map_err(|error| {
-                        error.redacted_reason("could not prepare the Codex login directory")
-                    })?;
-                let temporary =
-                    path.with_file_name(format!(".auth.json.farhelm-tmp-{}", uuid::Uuid::new_v4()));
-                backend
-                    .install_bytes(&target, auth.as_bytes(), &path, &temporary, 0o600)
-                    .await
-                    .map_err(|error| error.redacted_reason("could not install the Codex login"))?;
-                record.codex_auth = Some(stamp);
-                guard = self.write_record(row, &record, guard).await?;
+        let later_result = async {
+            if let Some(name) = bindings.codex_login_credential {
+                guard = self
+                    .apply_codex_login(row, &target, &mut record, name, guard, &mut warnings)
+                    .await?;
             }
+            self.apply_github_token(
+                row,
+                &target,
+                &mut record,
+                bindings.github_token_credential,
+                guard,
+            )
+            .await
         }
-        // An active connection can still name a credential removed after a
-        // pending recipe edit. That later slot must not prevent independent
-        // endpoint rotations and their successful stamps from reaching disk.
-        let github = self
-            .resolve_github(bindings.github_token_credential)
-            .await?;
+        .await;
+        match later_result {
+            Ok(()) => Ok(warnings),
+            Err(reason) => Err(DeliveryError {
+                reason,
+                lookup_warnings: warnings.lookup_aborted.then_some(warnings),
+            }),
+        }
+    }
+
+    /// Seed a selected login independently of the launch credentials. Once a launch lookup has stalled that file,
+    /// a missing login also leaves its slot pending so the pass can still reach GitHub under the same host lock.
+    async fn apply_codex_login(
+        &self,
+        row: &HostRow,
+        target: &ProvisioningTarget,
+        record: &mut Record,
+        name: String,
+        mut guard: OwnedMutexGuard<()>,
+        warnings: &mut DeliveryWarnings,
+    ) -> Result<OwnedMutexGuard<()>, String> {
+        let lookup = name.clone();
+        let result = self
+            .store
+            .conn()
+            .call("resolve Codex login", move |conn| {
+                crate::credentials::secret(
+                    conn,
+                    &lookup,
+                    farhelm_proto::credentials::CredentialKind::CodexLogin,
+                )?
+                .ok_or_else(|| anyhow::anyhow!("Codex login no longer exists"))
+            })
+            .await;
+        let (auth, revision, incarnation) = match result {
+            Ok(login) => login,
+            Err(_) if warnings.lookup_aborted => {
+                warnings.codex_login_lookup_failed = true;
+                return Ok(guard);
+            }
+            Err(_) => return Err(CODEX_LOGIN_LOOKUP.into()),
+        };
+        let stamp = (name, revision, incarnation);
+        if record.codex_auth.as_ref() == Some(&stamp) {
+            return Ok(guard);
+        }
+        if record.home.is_none() {
+            record.home = Some(self.settings_home(target).await?);
+            guard = self.write_record(row, record, guard).await?;
+        }
+        // Codex owns refreshed auth.json contents. The last delivered stamp alone authorizes a replacement.
+        let directory = record
+            .home
+            .as_ref()
+            .ok_or("the host has no known home directory")?
+            .join(".codex");
+        let path = directory.join("auth.json");
+        let backend = self
+            .backend
+            .as_ref()
+            .ok_or("credential delivery is unavailable")?;
+        backend
+            .ensure_directories(
+                target,
+                &[DirectorySpec {
+                    path: directory,
+                    mode: 0o700,
+                    shared: true,
+                }],
+            )
+            .await
+            .map_err(|error| {
+                error.redacted_reason("could not prepare the Codex login directory")
+            })?;
+        let temporary =
+            path.with_file_name(format!(".auth.json.farhelm-tmp-{}", uuid::Uuid::new_v4()));
+        backend
+            .install_bytes(target, auth.as_bytes(), &path, &temporary, 0o600)
+            .await
+            .map_err(|error| error.redacted_reason("could not install the Codex login"))?;
+        record.codex_auth = Some(stamp);
+        self.write_record(row, record, guard).await
+    }
+
+    /// Resolve GitHub last so a stale selection here cannot withhold earlier slot deliveries or their stamps.
+    async fn apply_github_token(
+        &self,
+        row: &HostRow,
+        target: &ProvisioningTarget,
+        record: &mut Record,
+        credential: Option<String>,
+        guard: OwnedMutexGuard<()>,
+    ) -> Result<(), String> {
+        let github = self.resolve_github(credential).await?;
         if record.github.as_ref() != Some(&github.stamp) {
             let state_dir = row
                 .remote_state_dir
@@ -786,7 +919,7 @@ impl CredentialDelivery {
             if let Some(token) = github.token {
                 backend
                     .ensure_directories(
-                        &target,
+                        target,
                         &[DirectorySpec {
                             path: state_dir.to_path_buf(),
                             mode: 0o700,
@@ -802,11 +935,11 @@ impl CredentialDelivery {
                     uuid::Uuid::new_v4()
                 ));
                 backend
-                    .install_bytes(&target, token.as_bytes(), &path, &temporary, 0o600)
+                    .install_bytes(target, token.as_bytes(), &path, &temporary, 0o600)
                     .await
                     .map_err(|error| error.redacted_reason("could not install the GitHub token"))?;
                 if !matches!(record.github, Some(GithubStamp::Token { .. })) {
-                    let available = backend.setup_github_git(&target).await.map_err(|error| {
+                    let available = backend.setup_github_git(target).await.map_err(|error| {
                         error.redacted_reason("could not configure GitHub's git helper")
                     })?;
                     if !available {
@@ -817,20 +950,21 @@ impl CredentialDelivery {
                 }
             } else {
                 backend
-                    .remove_owned_file(&target, &path)
+                    .remove_owned_file(target, &path)
                     .await
                     .map_err(|error| {
                         error.redacted_reason("could not remove the managed GitHub token")
                     })?;
             }
             record.github = Some(github.stamp);
-            self.write_record(row, &record, guard).await?;
+            self.write_record(row, record, guard).await?;
         }
-        Ok(warnings)
+        Ok(())
     }
 
-    /// Publish both agents' entries atomically. Each legacy settings file is retired separately so an upload retry
-    /// never rewrites an already-cleaned file and a failed migration withholds only the affected agent's entry.
+    /// Publish both agents' entries atomically after their catalog lookups succeed. The previous
+    /// file and stamps are the last known good snapshot if a lookup fails. Once both values are
+    /// known, legacy settings retire independently, and a failed cleanup withholds its own entry.
     async fn apply_agent_environment(
         &self,
         row: &HostRow,
@@ -839,51 +973,48 @@ impl CredentialDelivery {
         claude: Result<Slot, String>,
         codex: Option<Result<Slot, String>>,
         mut guard: OwnedMutexGuard<()>,
-    ) -> Result<(OwnedMutexGuard<()>, EndpointWarnings), String> {
-        let connected = codex.is_some();
-        if !connected && record.codex_environment.is_some() {
+    ) -> Result<(OwnedMutexGuard<()>, DeliveryWarnings), String> {
+        let (claude, codex) = match (claude, codex.transpose()) {
+            (Ok(claude), Ok(codex)) => (claude, codex),
+            (claude, codex) => {
+                return Ok((
+                    guard,
+                    DeliveryWarnings {
+                        lookup_aborted: true,
+                        claude: claude.err(),
+                        codex: codex.err(),
+                        codex_login_lookup_failed: false,
+                    },
+                ));
+            }
+        };
+        if codex.is_none() && record.codex_environment.is_some() {
             // A reconnect owns the next write to a previously installed combined snapshot. Setup has neither
             // verified the supervisor's protocol nor resolved the Codex entry to carry forward.
-            return Ok((guard, EndpointWarnings::default()));
+            return Ok((guard, DeliveryWarnings::default()));
         }
-        let mut warnings = EndpointWarnings::default();
-        let (mut credentials, mut claude_stamp) = match claude {
-            Ok(slot) => (
-                super::agent_endpoints::claude_environment(slot.endpoint, slot.subscription),
-                Some(slot.stamp),
-            ),
-            Err(reason) => {
-                warnings.claude = Some(reason);
-                (RecipeCredentials::default(), None)
-            }
-        };
-        let mut codex_stamp = match codex {
-            Some(Ok(slot)) => {
-                super::agent_endpoints::add_codex_endpoint(&mut credentials, slot.endpoint);
-                Some(slot.stamp)
-            }
-            Some(Err(reason)) => {
-                warnings.codex = Some(reason);
-                None
-            }
-            None => None,
-        };
+        let mut warnings = DeliveryWarnings::default();
+        let mut credentials =
+            super::agent_endpoints::claude_environment(claude.endpoint, claude.subscription);
+        let mut claude_stamp = Some(claude.stamp);
+        let mut codex_stamp = codex.map(|slot| {
+            super::agent_endpoints::add_codex_endpoint(&mut credentials, slot.endpoint);
+            slot.stamp
+        });
         // Check the largest candidate before clearing legacy keys, even if a cleanup later omits an entry.
         let mut bytes = encode_agent_environment(&credentials)?;
         let mut withheld = false;
-        if claude_stamp.is_some() {
-            let (next_guard, warning) = self
-                .retire_legacy_settings(row, target, record, LegacySettings::Claude, guard)
-                .await?;
-            guard = next_guard;
-            if let Some(reason) = warning {
-                warnings.claude = Some(reason);
-                claude_stamp = None;
-                credentials
-                    .env
-                    .retain(|name, _| name == recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV);
-                withheld = true;
-            }
+        let (next_guard, warning) = self
+            .retire_legacy_settings(row, target, record, LegacySettings::Claude, guard)
+            .await?;
+        guard = next_guard;
+        if let Some(reason) = warning {
+            warnings.claude = Some(reason);
+            claude_stamp = None;
+            credentials
+                .env
+                .retain(|name, _| name == recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV);
+            withheld = true;
         }
         if codex_stamp.is_some() {
             let (next_guard, warning) = self
@@ -1109,7 +1240,11 @@ impl CredentialDelivery {
 
     /// Each catalog read binds a value to its revision. The shared resolver
     /// already keeps secrets transient; warnings discard storage diagnostics.
-    async fn resolve_endpoint(&self, endpoint: Option<StoredEndpoint>) -> Result<Slot, String> {
+    async fn resolve_endpoint(
+        &self,
+        endpoint: Option<StoredEndpoint>,
+        agent: &str,
+    ) -> Result<Slot, String> {
         let Some(endpoint) = endpoint else {
             return Ok(Slot {
                 endpoint: None,
@@ -1118,11 +1253,10 @@ impl CredentialDelivery {
             });
         };
         let name = endpoint.token_credential.clone();
-        let resolved = self
-            .store
-            .resolve_endpoint(endpoint)
-            .await
-            .map_err(|_| "could not resolve the recipe's endpoint credentials")?;
+        let resolved =
+            self.store.resolve_endpoint(endpoint).await.map_err(|_| {
+                format!("could not resolve the recipe's {agent} endpoint credential")
+            })?;
         let credential = name
             .zip(resolved.revision)
             .zip(resolved.incarnation.clone())

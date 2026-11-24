@@ -6098,6 +6098,13 @@ as `FARHELM_CODEX_ENDPOINT_TOKEN`. The helm sends the extended file only after a
 (protocol 87). Setup can still write the old Claude-only format until that connection and leaves a previously delivered
 combined file for the connected delivery path. An empty snapshot unlinks the owned file.
 
+When either agent's selected launch credential lookup fails, delivery leaves the combined file, both launch stamps and
+both legacy settings files alone. It reports each failed lookup by agent and continues with the separate Codex auth and
+GitHub slots. If the Codex auth lookup also fails on that pass, the GitHub slot can still finish. Host details report
+both the failed launch lookup and any later failure that ends the pass. A save for either entry in the combined file
+also reports the failed launch lookup because the replacement could not reach the host. During setup, a failed Claude
+lookup is a setup error.
+
 The supervisor reads one snapshot per host-terminal agent or tab spawn, with Restart using the agent path. Only the
 Codex endpoint descriptor reaches launch composition. Codex Start and Resume select the `farhelm` provider in `-c`
 overrides even when session hooks are disabled. The provider uses `env_key` only when the bearer is present. A missing

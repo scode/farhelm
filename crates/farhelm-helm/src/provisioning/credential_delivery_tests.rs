@@ -1210,6 +1210,291 @@ async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
     );
 }
 
+/// Failed endpoint lookups leave the last delivered snapshot intact. A push for
+/// either entry reports the failed lookup, including when GitHub lookup also fails.
+#[farhelm_testtrace::test]
+async fn endpoint_lookup_failures_preserve_the_shared_file_and_fail_dependent_pushes() {
+    for (lose_claude, lose_codex) in [(true, false), (false, true), (true, true)] {
+        let f = Fixture::new(false).await;
+        f.store
+            .create_credential(CreateCredential {
+                name: "codex-api".into(),
+                kind: CredentialKind::EndpointToken,
+                secret: SECOND.into(),
+            })
+            .await
+            .unwrap();
+        f.github_credential().await;
+        let mut recipe = crate::tensorlake::recipes::tests_support::save();
+        recipe.claude = Some(endpoint("https://first.example/v1", "work"));
+        recipe.codex = Some(endpoint("https://codex.example/v1", "codex-api"));
+        recipe.github_token_credential = Some("git-work".into());
+        f.store
+            .update_tensorlake_recipe("recipe".into(), recipe.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        let _lease = f.connected().await;
+        assert_eq!(
+            f.snapshot().await.env[recipe_credentials::CODEX_ENDPOINT_TOKEN_ENV],
+            SECOND
+        );
+        let prior = tokio::fs::read(f.claude_path()).await.unwrap();
+        assert_eq!(
+            tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+            "fictional-github-first"
+        );
+
+        // A stamped legacy file would authorize cleanup if delivery made it past the failed lookups.
+        let config = f.home.join(".codex/config.toml");
+        tokio::fs::create_dir(config.parent().unwrap())
+            .await
+            .unwrap();
+        let legacy = legacy_codex_config("personal");
+        tokio::fs::write(&config, &legacy).await.unwrap();
+        f.stamp_legacy_codex().await;
+        let before = f.delivery.read_record(&f.row).await.unwrap();
+        assert!(before.claude_environment.is_some() && before.codex_environment.is_some());
+
+        // An edit can release a name in the catalog while a connected host still uses that selection.
+        if lose_claude {
+            recipe.claude = None;
+        }
+        if lose_codex {
+            recipe.codex = None;
+        }
+        f.store
+            .update_tensorlake_recipe("recipe".into(), recipe.clone())
+            .await
+            .unwrap()
+            .unwrap();
+        if lose_claude {
+            f.store.delete_credential("work".into()).await.unwrap();
+        }
+        if lose_codex {
+            f.store.delete_credential("codex-api".into()).await.unwrap();
+        }
+
+        let warning = match (lose_claude, lose_codex) {
+            (true, false) => "could not resolve the recipe's Claude endpoint credential",
+            (false, true) => "could not resolve the recipe's Codex endpoint credential",
+            (true, true) => {
+                "could not resolve the recipe's Claude endpoint credential. could not resolve the recipe's Codex endpoint credential"
+            }
+            (false, false) => unreachable!(),
+        };
+        if let Some(name) = match (lose_claude, lose_codex) {
+            (true, false) => Some("codex-api"),
+            (false, true) => Some("work"),
+            _ => None,
+        } {
+            f.replace(name, THIRD).await;
+            let failures = f
+                .delivery
+                .push(name, past_the_ssh_budget(), &f.events)
+                .await;
+            assert_eq!(failures.len(), 1);
+            assert_eq!(failures[0].reason, warning);
+            assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), prior);
+        }
+
+        f.replace("git-work", "fictional-github-second").await;
+        let failures = f
+            .delivery
+            .push("git-work", past_the_ssh_budget(), &f.events)
+            .await;
+        assert!(failures.is_empty());
+        assert_eq!(
+            tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+            "fictional-github-second"
+        );
+        assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(warning));
+        assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), prior);
+        assert_eq!(tokio::fs::read_to_string(&config).await.unwrap(), legacy);
+        let after = f.delivery.read_record(&f.row).await.unwrap();
+        assert_eq!(after.claude_environment, before.claude_environment);
+        assert_eq!(after.codex_environment, before.codex_environment);
+        assert_eq!(after.codex, before.codex);
+
+        if lose_claude && !lose_codex {
+            // The old connection also keeps the GitHub selection until it reconnects.
+            recipe.github_token_credential = None;
+            f.store
+                .update_tensorlake_recipe("recipe".into(), recipe)
+                .await
+                .unwrap()
+                .unwrap();
+            f.store.delete_credential("git-work".into()).await.unwrap();
+            f.replace("codex-api", "fictional-fourth-endpoint-token")
+                .await;
+            let failures = f
+                .delivery
+                .push("codex-api", past_the_ssh_budget(), &f.events)
+                .await;
+            let both = format!("{warning}. could not resolve the recipe's GitHub credential");
+            assert_eq!(failures.len(), 1);
+            assert_eq!(failures[0].reason, both);
+            assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(both.as_str()));
+            assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), prior);
+        }
+    }
+}
+
+/// A failed Claude subscription lookup leaves its last launch environment in place.
+/// A valid Codex login can rotate, and a missing login still leaves GitHub available.
+/// Setup reports the failed Claude lookup to its caller.
+#[farhelm_testtrace::test]
+async fn claude_lookup_failure_allows_codex_login_rotation_and_refuses_setup() {
+    const CLAUDE_LOGIN: &str = "sk-ant-oat01-fictional-claude-first";
+    const WARNING: &str = "could not resolve the recipe's Claude login";
+    let f = Fixture::new(false).await;
+    f.claude_credential(CLAUDE_LOGIN).await;
+    f.codex_credential().await;
+    f.github_credential().await;
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.claude_login_credential = Some("claude-work".into());
+    recipe.codex_login_credential = Some("codex-work".into());
+    recipe.github_token_credential = Some("git-work".into());
+    let confirmed = f
+        .store
+        .update_tensorlake_recipe("recipe".into(), recipe.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    let _lease = f.delivery.enter(&f.row);
+    f.delivery.connect(&f.row, &f.events).await;
+    assert_eq!(f.delivery.warning(f.row.id), None);
+    assert_eq!(
+        f.snapshot().await.env["CLAUDE_CODE_OAUTH_TOKEN"],
+        CLAUDE_LOGIN
+    );
+    let prior = tokio::fs::read(f.claude_path()).await.unwrap();
+    let before = f.delivery.read_record(&f.row).await.unwrap();
+    let auth = f.home.join(".codex/auth.json");
+    assert_eq!(tokio::fs::read_to_string(&auth).await.unwrap(), CODEX_FIRST);
+    assert_eq!(
+        tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+        "fictional-github-first"
+    );
+
+    recipe.claude_login_credential = None;
+    f.store
+        .update_tensorlake_recipe("recipe".into(), recipe.clone())
+        .await
+        .unwrap()
+        .unwrap();
+    f.store
+        .delete_credential("claude-work".into())
+        .await
+        .unwrap();
+    f.replace("codex-work", CODEX_REFRESHED).await;
+    let failures = f
+        .delivery
+        .push("codex-work", past_the_ssh_budget(), &f.events)
+        .await;
+    assert!(failures.is_empty());
+    assert_eq!(
+        tokio::fs::read_to_string(&auth).await.unwrap(),
+        CODEX_REFRESHED
+    );
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(WARNING));
+    let delivered_login = f.stamp("codex-work", 2).await;
+
+    assert_eq!(
+        f.delivery
+            .setup(&f.row, &confirmed, &f.home, &f.events)
+            .await
+            .unwrap_err(),
+        WARNING
+    );
+    recipe.codex_login_credential = None;
+    f.store
+        .update_tensorlake_recipe("recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    f.store
+        .delete_credential("codex-work".into())
+        .await
+        .unwrap();
+    f.replace("git-work", "fictional-github-second").await;
+    let failures = f
+        .delivery
+        .push("git-work", past_the_ssh_budget(), &f.events)
+        .await;
+    assert!(failures.is_empty());
+    assert_eq!(
+        tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+        "fictional-github-second"
+    );
+    let both = format!("{WARNING}. could not resolve the recipe's Codex login");
+    assert_eq!(f.delivery.warning(f.row.id).as_deref(), Some(both.as_str()));
+    assert_eq!(
+        tokio::fs::read_to_string(&auth).await.unwrap(),
+        CODEX_REFRESHED
+    );
+    assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), prior);
+    let after = f.delivery.read_record(&f.row).await.unwrap();
+    assert_eq!(after.claude_environment, before.claude_environment);
+    assert_eq!(after.codex_environment, before.codex_environment);
+    assert_eq!(after.codex_auth, Some(delivered_login));
+}
+
+/// A late GitHub error still belongs in the save reply under the existing pass
+/// error contract. A delivered Codex login has no dependency on the Claude
+/// launch lookup, so only host details also report that lookup.
+#[farhelm_testtrace::test]
+async fn codex_login_save_filters_an_unrelated_launch_lookup_warning() {
+    let f = Fixture::new(false).await;
+    f.codex_credential().await;
+    f.github_credential().await;
+    f.select_codex(true, false, true).await;
+    let _lease = f.connected().await;
+    let before = tokio::fs::read(f.claude_path()).await.unwrap();
+    let auth = f.home.join(".codex/auth.json");
+    assert_eq!(tokio::fs::read_to_string(&auth).await.unwrap(), CODEX_FIRST);
+    assert_eq!(
+        tokio::fs::read_to_string(f.github_path()).await.unwrap(),
+        "fictional-github-first"
+    );
+
+    let mut recipe = crate::tensorlake::recipes::tests_support::save();
+    recipe.codex_login_credential = Some("codex-work".into());
+    f.store
+        .update_tensorlake_recipe("recipe".into(), recipe)
+        .await
+        .unwrap()
+        .unwrap();
+    f.store.delete_credential("work".into()).await.unwrap();
+    f.store.delete_credential("git-work".into()).await.unwrap();
+    f.replace("codex-work", CODEX_REFRESHED).await;
+    let failures = f
+        .delivery
+        .push("codex-work", past_the_ssh_budget(), &f.events)
+        .await;
+
+    assert_eq!(failures.len(), 1);
+    assert_eq!(
+        failures[0].reason,
+        "could not resolve the recipe's GitHub credential"
+    );
+    assert_eq!(
+        f.delivery.warning(f.row.id).as_deref(),
+        Some(
+            "could not resolve the recipe's Claude endpoint credential. could not resolve the recipe's GitHub credential"
+        )
+    );
+    assert_eq!(
+        tokio::fs::read_to_string(&auth).await.unwrap(),
+        CODEX_REFRESHED
+    );
+    assert_eq!(
+        f.delivery.read_record(&f.row).await.unwrap().codex_auth,
+        Some(f.stamp("codex-work", 2).await)
+    );
+    assert_eq!(tokio::fs::read(f.claude_path()).await.unwrap(), before);
+}
+
 /// Distinct URLs and names let the edit-timing test distinguish a binding
 /// snapshot from accidentally reloading the newest recipe during a push.
 fn endpoint(url: &str, name: &str) -> EndpointSave {
