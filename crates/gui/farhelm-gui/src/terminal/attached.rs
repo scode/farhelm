@@ -531,8 +531,8 @@ pub struct AttachedTerminal {
     /// Cmd-click opens through ([`super::tunnels`]). One per session: a tab shares its agent terminal's
     /// ([`AttachedTerminal::sharing`]).
     tunnels: Entity<Tunnels>,
-    /// The terminal's file links: the host check behind a hovered printed path, and the destination display it fills
-    /// ([`super::files`]).
+    /// The terminal's file links: the host check behind a hovered printed path, whose ready answer the file
+    /// disclosure snapshots when it opens ([`super::files`]).
     files: Entity<FileLinks>,
     /// Redraws the terminal when a file check answers, since a printed path shows the pointing hand only then.
     _files: Subscription,
@@ -2866,7 +2866,7 @@ const DISCLOSURE_ABOVE: f32 = 4.;
 const DISCLOSURE_BELOW: f32 = 12.;
 
 /// The destination display of the link the pointer rests on: a program's hyperlink, a printed address offered a
-/// tunnel, or a file link, whose display shows its host check ([`super::files`]).
+/// tunnel, or a file link whose host check found a downloadable file ([`super::files`]).
 struct Disclosure {
     /// The link it is for: a program's hyperlink, a printed address offered a tunnel, or a file link.
     link: TerminalLink,
@@ -3066,7 +3066,8 @@ impl AttachedTerminal {
     }
 
     /// Decide the tunnel offer, the file opening hint and the opening modifier for `platform` instead of this
-    /// machine's, so tests on any machine cover both platforms. A file hover takes it when its display next changes.
+    /// machine's, so tests on any machine cover both platforms. A file hover's opening modifier follows it from the
+    /// next check, and the opening hint from the next disclosure.
     #[cfg(test)]
     pub(crate) fn set_platform(&mut self, platform: Platform) {
         self.platform = platform;

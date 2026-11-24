@@ -3,9 +3,9 @@
 //! a summary that names a host value, once more with a feature-drawn body, a header tile and a footer note, and the
 //! prompt anchored to a row's menu button), the keyboard focus ring, host-supplied text over its spoofing corpus, the
 //! notice banner, the terminal's styles and cursor shapes, an attached terminal's exit line and status line, a terminal
-//! file link's hover display in three downloadable size tiers, a web link's hover display (ordinary, and warning with the
-//! differing part of a long destination marked, and about a disguised address), a refused click's explanation over an
-//! approval card, the scrim a pending Delete puts over the open session's terminal,
+//! file link's hover display in three downloadable size tiers, a web link's hover display (ordinary, and warning with
+//! the differing part of a long destination marked, and about a disguised address), a refused click's explanation over
+//! an approval card, the scrim a pending Delete puts over the open session's terminal,
 //! the interrupted card in its place (with Restart and Replace, and with Replace alone), the unavailable card with the
 //! stale band above it (a host that does not answer, and one that needs an update), the open session's details bar
 //! (every status and host it draws differently, and a narrow one, and once more with a copy confirmed and its

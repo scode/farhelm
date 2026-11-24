@@ -3684,35 +3684,37 @@ whatever the agent renders is what you see. There is no composer, no message abs
   paths use the session's directory, not a shell's later directory. Hover checks the path silently. Only a downloadable
   file gets an underline, a pointing hand, and a disclosure showing the host, full resolved path and size. Each hover
   checks afresh; a redraw beneath a pointer resting on the same path text and target at the same position is not a new
-  hover. Leaving cancels it. A click before the disclosure paints does nothing. A partial redraw that changes the link
-  text withdraws transfer and opening permission even if the terminal library retains its old target. A click cannot
-  transfer or open a file while the full hover disclosure does not fit in the window or is covered by another Farhelm
-  surface such as an approval card or tunnel-error notice. A click on a file whose disclosure painted but is clipped or
-  covered is refused with a visible explanation to move the pointer or enlarge the window and hover again. While the
-  pointer stays on a refused link, its explanation may cover the top of an approval card, including its heading and the
-  requesting session and host. The card stays answerable from the keyboard meanwhile; the cover ends when the pointer
-  leaves the link. File disclosures and transfer messages make presentation-unsafe characters visible, distinguish
-  literal escape notation from escaped characters, and preserve repeated spaces. They do not guarantee that names
-  differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters render differently (confirmed
-  2026-10-17): a trailing space only makes a file less openable, and in the usual case the program that could plant such
-  a name can already write the file it imitates. Files must be readable regular files no larger than 100 MB, including
-  while transferring; directories are refused. The desktop app saves into Downloads under a unique name and shows where
-  it went, with no partial file after failure or interruption, except that a crash or force-quit mid-transfer can leave
-  its partial file behind. Status appears at the top of that terminal: success fades after a few seconds, while a
-  failure stays until the next click or download there. Plain click only downloads. In the desktop app, Cmd-click on
-  macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the saved file's final extension
-  is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json and the common image types
-  .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same final extension as the
-  path disclosed at hover. Other types are saved without opening; an opening failure leaves the save successful and says
-  why it was not opened. The hover uses a file icon and bright name, the host and full directory on a second line, and
-  decimal size with the action hints on a third. A left stripe and size color show under 1 MB green, 1–10 MB blue stripe
-  with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral stripe. Only an eligible desktop
-  file has the opening hint. Any file the session's account can read is in reach, within the existing shell authority;
-  hover discloses the agent-provided target before an explicit click. Only the helm can ask the supervisor for file
-  reads. OSC hyperlink schemes are explicitly limited to http and https. A hyperlink with any other scheme, `file://`
-  included, is inert: it gets no pointer, underline, hover, file check or click, and with mouse reporting on a press on
-  it reaches the program as a press on plain text does. Its cells stay the hyperlink's, so its text is not taken for a
-  printed URL or path either. To offer a file for download, a program prints its path.
+  hover. Leaving cancels it. A click before the disclosure paints does nothing. Only a click pressed and released over
+  the same painted disclosure, with the link text unchanged since that hover, transfers or opens the file. A partial
+  redraw that changes the link text withdraws transfer and opening permission even if the terminal library retains its
+  old target. A click cannot transfer or open a file while the full hover disclosure does not fit in the window or is
+  covered by another Farhelm surface such as an approval card or tunnel-error notice. A click on a file whose disclosure
+  painted but is clipped or covered is refused with a visible explanation to move the pointer or enlarge the window and
+  hover again. While the pointer stays on a refused link, its explanation may cover the top of an approval card,
+  including its heading and the requesting session and host. The card stays answerable from the keyboard meanwhile; the
+  cover ends when the pointer leaves the link. File disclosures and transfer messages make presentation-unsafe
+  characters visible, distinguish literal escape notation from escaped characters, and preserve repeated spaces. They do
+  not guarantee that names differing only by leading or trailing spaces, other Unicode spaces, or lookalike letters
+  render differently (confirmed 2026-10-17): a trailing space only makes a file less openable, and in the usual case the
+  program that could plant such a name can already write the file it imitates. Files must be readable regular files no
+  larger than 100 MB, including while transferring; directories are refused. The desktop app saves into Downloads under
+  a unique name and shows where it went, with no partial file after failure or interruption, except that a crash or
+  force-quit mid-transfer can leave its partial file behind. Status appears at the top of that terminal: success fades
+  after a few seconds, while a failure stays until the next click or download there. Plain click only downloads. In the
+  desktop app, Cmd-click on macOS (Ctrl-click elsewhere) also opens the completed save with the default app when the
+  saved file's final extension is in the helm's shared list, case-insensitively. The list defaults to .md, .txt, .json
+  and the common image types .png, .jpg, .jpeg, .gif, .webp, .bmp and .avif, and the saved file must still have the same
+  final extension as the path disclosed at hover. Other types are saved without opening; an opening failure leaves the
+  save successful and says why it was not opened. The hover uses a file icon and bright name, the host and full
+  directory on a second line, and decimal size with the action hints on a third. A left stripe and size color show under
+  1 MB green, 1–10 MB blue stripe with neutral size, and 10–100 MB amber. A file with an unknown size uses a neutral
+  stripe. Only an eligible desktop file has the opening hint. Any file the session's account can read is in reach,
+  within the existing shell authority; hover discloses the agent-provided target before an explicit click. Only the helm
+  can ask the supervisor for file reads. OSC hyperlink schemes are explicitly limited to http and https. A hyperlink
+  with any other scheme, `file://` included, is inert: it gets no pointer, underline, hover, file check or click, and
+  with mouse reporting on a press on it reaches the program as a press on plain text does. Its cells stay the
+  hyperlink's, so its text is not taken for a printed URL or path either. To offer a file for download, a program prints
+  its path.
 
 ## Attachments
 
