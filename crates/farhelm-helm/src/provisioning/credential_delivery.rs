@@ -152,9 +152,15 @@ struct Record {
 /// while a pending cleanup holds only the entry that depends on it.
 #[derive(Debug, Default)]
 struct DeliveryWarnings {
+    /// A launch lookup failed, so the pass left the combined file, both launch stamps and both legacy settings
+    /// files as they were.
     lookup_aborted: bool,
+    /// Claude's reason: its failed launch lookup when `lookup_aborted`, otherwise its pending legacy cleanup.
     claude: Option<String>,
+    /// Codex's reason, read the same way as `claude`.
     codex: Option<String>,
+    /// The separate Codex login lookup failed too. Only recorded when `lookup_aborted`; otherwise that failure ends
+    /// the pass as a hard error.
     codex_login_lookup_failed: bool,
 }
 
@@ -821,7 +827,8 @@ impl CredentialDelivery {
     }
 
     /// Seed a selected login independently of the launch credentials. Once a launch lookup has stalled that file,
-    /// a missing login also leaves its slot pending so the pass can still reach GitHub under the same host lock.
+    /// a failed login lookup also leaves its slot pending so the pass can still reach GitHub under the same host
+    /// lock. Without a stalled launch file, a failed login lookup is a hard error that ends the pass, as before.
     async fn apply_codex_login(
         &self,
         row: &HostRow,
@@ -860,7 +867,8 @@ impl CredentialDelivery {
             record.home = Some(self.settings_home(target).await?);
             guard = self.write_record(row, record, guard).await?;
         }
-        // Codex owns refreshed auth.json contents. The last delivered stamp alone authorizes a replacement.
+        // Never read auth.json: Codex owns its refreshed contents. The last delivered stamp alone authorizes a
+        // replacement.
         let directory = record
             .home
             .as_ref()

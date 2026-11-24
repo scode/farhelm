@@ -1210,8 +1210,12 @@ async fn a_deleted_github_selection_does_not_block_endpoint_replacement() {
     );
 }
 
-/// Failed endpoint lookups leave the last delivered snapshot intact. A push for
-/// either entry reports the failed lookup, including when GitHub lookup also fails.
+/// Before this behavior, a failed lookup for one agent rewrote the combined launch
+/// file without that agent's entry, even during an unrelated GitHub push, which
+/// silently took the agent's credentials off the host. Failed endpoint lookups
+/// leave the last delivered snapshot intact. A push for either entry reports the
+/// failed lookup, including when GitHub lookup also fails, because a rotation that
+/// cannot reach the host must not be reported as delivered.
 #[farhelm_testtrace::test]
 async fn endpoint_lookup_failures_preserve_the_shared_file_and_fail_dependent_pushes() {
     for (lose_claude, lose_codex) in [(true, false), (false, true), (true, true)] {
@@ -1340,9 +1344,11 @@ async fn endpoint_lookup_failures_preserve_the_shared_file_and_fail_dependent_pu
     }
 }
 
-/// A failed Claude subscription lookup leaves its last launch environment in place.
-/// A valid Codex login can rotate, and a missing login still leaves GitHub available.
-/// Setup reports the failed Claude lookup to its caller.
+/// A failed Claude subscription lookup must not take Claude's credentials off the host
+/// or hold back the separately stored ones: its last launch environment stays in place,
+/// a valid Codex login can still rotate, and a missing login still leaves GitHub
+/// available. Setup reports the failed Claude lookup to its caller, which shows it on
+/// the setup step.
 #[farhelm_testtrace::test]
 async fn claude_lookup_failure_allows_codex_login_rotation_and_refuses_setup() {
     const CLAUDE_LOGIN: &str = "sk-ant-oat01-fictional-claude-first";
