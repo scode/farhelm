@@ -281,6 +281,15 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   matching outer bracket or quote pair before checking whether the label looks like a web address and comparing it with
   the destination, so spoofed bracketed or quoted addresses warn again without false warnings on honest ones.
 
+- **Make the pending-update pill reminder visible in light mode and bold its arrow.** In light mode, the ready-update
+  pill's resting, hover, and pulse backgrounds (`#a63e4d` at 14.1%, 15.3%, and 16.5% alpha over `#e9edf4`) differ by
+  only 1–3 RGB levels because `#a13443` text is already near 4.5:1 contrast at rest, so the reminder pulse is nearly
+  invisible (especially when the arrow is hidden). Keep the tinted pill at rest (`#e0d4dc` / `#a13443`, 4.74:1), step
+  hover to a 22% wash with darker ink (`#8b2837`, 5.31:1), and flip the 2.5-second light-mode pulse to solid `danger_bg`
+  (`#a83e4d`) with white `on_fill` text (6.07:1; switch the `⚠` warning glyph to white during the pulse so it stays
+  readable). Also draw the bouncing `→` reminder arrow bold at 13 px instead of regular 12 px so it matches the pill's
+  weight.
+
 ## Linux support
 
 - **Tunnels from remote sessions on Linux.** The desktop app opens Cmd/Ctrl-click tunnels (and approval cards' Tunnel
