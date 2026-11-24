@@ -20,6 +20,24 @@ the skill's supported backends and observable-delegation requirements. Do not as
 they have not specified one. If the requested or default configuration cannot meet the skill's requirements, report the
 limitation and leave the review incomplete rather than silently substituting.
 
+## Unattended by default
+
+A trailing review runs unattended from the request to the draft review-result PR, whether or not the maintainer happens
+to be watching. Treat it as an unattended run under `AGENTS.md`, "Unattended runs": do not stop to ask the maintainer
+anything along the way, not about buckets, coverage, filters, drops, group sizing or reviewer configuration. Decide,
+write the reason into the feedback file or the completion record, and list the judgment calls in the final report so the
+maintainer can revisit them at triage.
+
+A hard blocker is the only reason to stop, and it has to be a real one: something the procedure cannot get past by
+deciding, such as a missing or invalid checkpoint, a reviewer backend that cannot run, or a fenced action (merging,
+publication, deletion) the request does not authorize. Even then, keep every finding already produced, report the gap,
+and leave the checkpoint unchanged as "Procedure" step 4 describes. A decision that is merely uncertain is not a
+blocker.
+
+When a finding's bucket is uncertain, record the higher of the buckets in question. Write the uncertainty into the
+feedback file (what would move it down, and what the bucket rests on) so triage can lower it. This is how a trailing
+review surfaces bucket uncertainty to the maintainer under `review_feedback_queue/AGENTS.md`, "Priority buckets".
+
 ## Review scope
 
 Review landed product code, product tests and their helpers and fixtures, and executable maintainer tooling, including
