@@ -3491,6 +3491,20 @@ it closes popovers. A file release uses the same query, preserving a cover found
 gone. A release can still finish an admitted press after it closes its own panel. An out-of-view panel gets the resize
 explanation before any cover is considered.
 
+The scanner that finds the web addresses a hyperlink's visible text mentions, and judges each against the destination,
+is `crates/gui/farhelm-grid-model/src/link_claims.rs`. Nothing outside its tests calls it yet: the hover's warning still
+comes from `link_disclosure.rs`, which shares only the URL comparison and the look-alike table with it. It works on a
+recognition view folded one extended grapheme cluster at a time (NFKC through `icu_normalizer`, the look-alike table,
+format characters removed, and combining marks removed except on letters of scripts other than Latin, Greek and
+Cyrillic, where they are spelling), finds addresses at anchors in one left-to-right pass, and judges boundaries and
+extents on the original characters. Scanning is linear in the label's length; a test holds it to twelve counted steps
+per UTF-16 unit on adversarial labels (some passes count bytes, so labels of multi-byte characters cost more per unit).
+Which dotted names count as sites rests on a snapshot of IANA's root zone list, `link_claims/tlds.txt` beside that
+module. To refresh it, download `https://data.iana.org/TLD/tlds-alpha-by-domain.txt` with plain `curl` (no credentials
+or identifying headers are needed), replace the file whole, keeping IANA's `# Version` first line, and run the grid
+model's tests. A refresh can change which bare names count, since every two-letter ending the snapshot holds, outside
+the excluded list in `link_claims/endings.rs`, counts as a site with nothing after it.
+
 An admitted click always asks the helm to save into Downloads (`save_to_downloads`), adding `open` only for the
 platform's modifier-click when that hover's stat reply offered opening; otherwise the modified click saves and its
 status says that opening was not offered (`crates/gui/farhelm-gui/src/terminal/files/download.rs`). No GUI code touches

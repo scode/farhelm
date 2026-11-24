@@ -2005,8 +2005,10 @@ name = "farhelm-grid-model"
 version = "0.0.0-unreleased"
 dependencies = [
  "farhelm-proto",
+ "icu_normalizer",
  "regex",
  "serde_json",
+ "unicode-segmentation",
  "url",
 ]
 

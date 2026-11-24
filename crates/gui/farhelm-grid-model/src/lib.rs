@@ -14,6 +14,10 @@
 //! `terminal-links.js`, and `terminal-files.js` for printed paths), whose behavior this model reproduces.
 
 pub mod colors;
+// The address scanner the hover's warning will move to. Until then only its tests, and the two helpers the current
+// warning shares with it, use it.
+#[cfg_attr(not(test), allow(dead_code))]
+mod link_claims;
 mod link_disclosure;
 mod links;
 mod paths;

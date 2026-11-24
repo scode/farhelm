@@ -14,7 +14,9 @@ dist = false
 # Framework-free on purpose (SPEC_impl.md, "GUI architecture"): no gpui here, so the model is tested without a window.
 [dependencies]
 farhelm-proto.workspace = true
+icu_normalizer.workspace = true
 regex.workspace = true
+unicode-segmentation.workspace = true
 url.workspace = true
 
 [dev-dependencies]

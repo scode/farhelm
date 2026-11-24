@@ -5,6 +5,7 @@
 use crate::constant_regex;
 use crate::{
     GridModel, LinkKind, TerminalLink,
+    link_claims::{comparable, lookalike},
     links::{Identities, JS_SPACE, is_js_space},
     web_target,
 };
@@ -121,59 +122,13 @@ fn strip_matching_wrappers(text: &str) -> &str {
 fn address_shape(text: &str) -> Option<AddressShape> {
     let text = LEADING_BLANKS.replace(text, "");
     let text = INVISIBLE.replace_all(&text, "");
-    let gated: String = text
-        .chars()
-        .map(|ch| match ch {
-            '\u{02d0}' | '\u{02f8}' | '\u{2236}' | '\u{a789}' | '\u{ff1a}' | '\u{fe13}'
-            | '\u{fe55}' => ':',
-            '\u{2215}' | '\u{2044}' | '\u{29f8}' | '\u{ff0f}' | '\u{2571}' => '/',
-            '\u{3002}' | '\u{ff0e}' | '\u{ff61}' | '\u{2024}' => '.',
-            '\u{ff20}' | '\u{fe6b}' => '@',
-            other => other,
-        })
-        .collect();
+    let gated: String = text.chars().map(lookalike).collect();
     let claim = ADDRESS.captures(&gated)?;
     Some(if claim.name("scheme").is_some() {
         AddressShape::Scheme
     } else {
         AddressShape::Host
     })
-}
-
-/// Compare places, retaining credentials, query and fragment. Only one final
-/// path slash and percent-escape hex case are immaterial in the pinned policy.
-fn comparable(url: &Url) -> String {
-    let path = url.path().strip_suffix('/').unwrap_or(url.path());
-    let query = url
-        .query()
-        .filter(|q| !q.is_empty())
-        .map(|q| format!("?{q}"))
-        .unwrap_or_default();
-    let fragment = url
-        .fragment()
-        .filter(|q| !q.is_empty())
-        .map(|q| format!("#{q}"))
-        .unwrap_or_default();
-    let text = format!(
-        "{}://{}:{}@{}{path}{query}{fragment}",
-        url.scheme(),
-        url.username(),
-        url.password().unwrap_or(""),
-        &url[url::Position::BeforeHost..url::Position::AfterPort]
-    );
-    let mut bytes = text.into_bytes();
-    for index in 0..bytes.len().saturating_sub(2) {
-        if bytes[index] == b'%'
-            && bytes[index + 1].is_ascii_hexdigit()
-            && bytes[index + 2].is_ascii_hexdigit()
-        {
-            bytes[index + 1].make_ascii_uppercase();
-            bytes[index + 2].make_ascii_uppercase();
-        }
-    }
-    // Only ASCII hex digits were case-changed, so the bytes are still the valid UTF-8 they came from.
-    String::from_utf8(bytes)
-        .unwrap_or_else(|error| String::from_utf8_lossy(error.as_bytes()).into_owned())
 }
 
 /// A URL-shaped label that cannot be parsed is a warning, not quiet prose.

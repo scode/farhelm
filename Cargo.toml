@@ -112,6 +112,10 @@ futures-util = { version = "0.3", default-features = false }
 # The helm's in-memory client credentials are credentials, not identifiers:
 # they are minted directly from 128 bits of operating-system randomness.
 getrandom = "0.3"
+# NFKC for the terminal link warning's recognition view of a hyperlink's text
+# (crates/gui/farhelm-grid-model/src/link_claims.rs). Already in `Cargo.lock` through `url`'s IDNA support; the
+# features are the ones `idna_adapter` already enables, so the dependency adds no crate to the graph.
+icu_normalizer = { version = "2.4", default-features = false, features = ["compiled_data"] }
 # The `--ensure-hosts` file's format (PLAN_M6.md item 5). JSON5 rather than
 # JSON because the file is hand-edited: comments and trailing commas are
 # what make a checked-in fleet description survivable, and it is otherwise
@@ -222,6 +226,9 @@ tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tree-sitter = { version = "0.27.1", default-features = false, features = ["std"] }
 tree-sitter-bash = "0.25.1"
+# Extended grapheme clusters for the same recognition view: it folds a hyperlink's text one cluster at a time, so an
+# emoji sequence or a letter with its marks stays whole. Already in `Cargo.lock` through GPUI and its text shaping.
+unicode-segmentation = "1.13"
 # Builds the asset URLs the download payload source fetches from its
 # release base URL (D2).
 url = "2"
