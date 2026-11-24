@@ -75,3 +75,87 @@ Both drafts passed source review and a separate commit-message read. The first r
 were still intercepted before the model was known. The final checks verify that Codex reports its known choices and a
 custom wrapper still rejects the same value. The second review strengthened discovery coverage for both sandbox and
 container sessions and clarified the command-omission wording.
+
+### Landing
+
+#### What landed with it
+
+This was the only plan landed this time: its two PRs ([#4752](https://github.com/scode/farhelm/pull/4752/changes),
+[#4755](https://github.com/scode/farhelm/pull/4755/changes)) plus one landing fix,
+[#4758](https://github.com/scode/farhelm/pull/4758/changes). While the plan was being built, main gained the desktop
+sidebar's update-pill colors (light-mode-upgrade-pill-pulse) and the helm's handling of unreadable recipe credentials
+(preserve-creds-on-lookup-failure), plus plan bookkeeping. Neither touches the agent catalog, the `farhelm agent`
+commands or the wire protocol, so nothing interacted with this plan. The plan moves the helm-supervisor protocol from 89
+to 90, and main was still at 89, so no renumbering was needed. The rebase met one conflict, in TODO.md, where this plan
+and the two plans that reached main meanwhile each removed their own entry; all three removals were kept.
+
+#### Fixes made while landing
+
+- **A value that is not even an agent ID got no pointer to the new listing.** The CLI itself refuses an `--agent` value
+  that does not fit the custom ID format, such as a display name typed in place of an ID (`--agent "Acme Code"`, which
+  the listing's new name column makes more likely), before the helm sees it. That refusal listed `custom` as if it were
+  a built-in type and said nothing about how to find registered IDs. #4758 lists only the real built-in types and names
+  `farhelm agent agents`.
+- **The changelog fragment did not mention the JSON schema change.** The report says scripts that check the `--json`
+  schema version need to accept 8, but the fragment did not; the earlier bumps to 6 and 7 were announced in the
+  changelog. It now says so.
+- Doc comments that had gone stale or were missing were fixed: the agent type's two display names (a full product name
+  for listings, a short name for session wording) now say why they differ, a supervisor comment now names where an
+  agent's full product name is defined, and the listing entry's fields are documented.
+
+#### Checks
+
+The plan moves the helm-supervisor protocol to 90 and changes the agent catalog's refusals and discovery across the
+protocol crate, the helm, the supervisor, the CLI and the desktop app's agent names, plus a docs page. So the landing
+ran the whole Rust workspace suite, clippy with warnings as errors over the workspace and over the `farhelm` CLI binary,
+every desktop screenshot against its reference picture, the docs website build, and the formatting checks (`cargo fmt`,
+`dprint`), the test-sleep check and the changelog format check. Worker runs were on a separate arm64 Linux test worker
+(Ubuntu 24.04, with a working systemd user manager, Podman, tmux and self-ssh); the rest ran locally on x86_64 Linux.
+One test failed once, as described below; no other check failed.
+
+On the plan's PRs rebased onto main, before the landing fix:
+
+- `cargo nextest run --workspace --exclude farhelm-desktop`, on the test worker (recorder run
+  `d9292233-66c8-4f92-b418-2499e43d9894`): 8539 passed, one failed and 86 were skipped as ignored, and no test silently
+  skipped for a missing systemd, ssh or Podman setup. The failing test,
+  `codex_identity::nested_native_codex_reports_cannot_replace_the_foreground_conversation`, failed because the worker's
+  systemd user manager refused a Restart; the run is kept. That test then passed 3 of 3 alone on the worker
+  (`b09d3291-d48d-440e-898e-4a5e3d5c7f0c`).
+- `cargo clippy --all-targets -- -D warnings` and `cargo clippy -p farhelm --bins -- -D warnings`, on the test worker:
+  passed.
+- `python3 scripts/check-gui-goldens.py`, locally (recorder run `b916b858-09d6-46fd-8f40-5ff0c86da4aa`): every
+  screenshot matched its reference.
+- `cd website && bun install --frozen-lockfile && bun run build`, `cargo fmt --all -- --check`,
+  `python -B scripts/check-test-sleeps.py` (in its pinned interpreter), `dprint check` and
+  `python3 releasing/check-changelog.py format`, locally: passed.
+
+After the landing fix (#4758):
+
+- `cargo nextest run -p farhelm -p farhelm-proto --bin farhelm --test agent_cli --lib`, on the test worker (recorder run
+  `8deebdbf-62f6-4d13-bde9-4c2664e0cb79`): all 488 passed, including the test of the CLI's refusal, none of them
+  silently skipped.
+- Both clippy runs on the test worker, and the formatter, `dprint check` and the changelog format check locally: passed.
+  The test-sleep check was not rerun: the fix only tightens one unit test's assertions and adds no delay.
+
+Reused for the fix: the rest of the workspace suite, the screenshots and the website build above, since the fix changes
+only the CLI's own refusal text, doc comments and the changelog fragment. Skipped: the desktop app's own tests, since
+the app's crate did not change (the agent names it shows moved inside the shared GUI library, which the workspace run
+and the screenshots covered); the end-to-end desktop smoke, whose steps do not use the agent catalog's refusals or
+listing; macOS, since nothing platform-specific changed and no Mac was used; and CI, which runs only on demand.
+
+#### Things you should know that the report does not say
+
+- The worker's full workspace run had one failure that is not this plan's: a test of restarting a Codex session failed
+  because the worker's systemd user manager refused the Restart at that moment. The plan changes nothing about Restart
+  or process cleanup, and the test passed three times alone right after. A single failure of the machine's own service
+  manager is treated as an environment event rather than a flake, so it is not recorded in FLAKES.md.
+- When the helm has no model catalog for an agent (for example right after connecting), a mistyped effort reads "is not
+  accepted by codex for this model", which sounds as if Codex takes no effort at all. Small and cosmetic; a follow-up
+  could list the general effort vocabulary there instead, as template writes already do.
+- The end-to-end listing test pins all twelve built-in agent IDs, so adding a harness will need that test updated too.
+  That is intended (it proves the listing shows every built-in type), so no action is needed.
+
+#### Possible follow-ups
+
+- The cosmetic effort wording above, if it bothers you. I suggest folding it into the next change that touches effort
+  validation rather than a plan of its own.
