@@ -919,8 +919,10 @@ fn parse_agent_type(value: &str) -> Result<AgentTypeChoice, String> {
             custom_agent: Some(value.to_owned()),
         });
     }
+    // A display name typed in place of an ID (`--agent "Acme Code"`) lands here before any helm contact, so the
+    // refusal names the listing that shows registered IDs. The custom catalog marker is not a type to pass.
     Err({
-        let types: Vec<String> = farhelm_proto::LaunchHarness::ALL
+        let types: Vec<String> = farhelm_proto::LaunchHarness::BUILT_INS
             .iter()
             .filter_map(|harness| match serde_json::to_value(harness) {
                 Ok(serde_json::Value::String(name)) => Some(name),
@@ -928,7 +930,8 @@ fn parse_agent_type(value: &str) -> Result<AgentTypeChoice, String> {
             })
             .collect();
         format!(
-            "{value:?} is not an agent type or custom agent ID; built-in types are {}",
+            "{value:?} is not an agent type or custom agent ID; built-in types are {}; \
+             run farhelm agent agents to list registered custom agent IDs",
             types.join(", ")
         )
     })
@@ -3677,7 +3680,11 @@ mod tests {
         };
         let agent = create(&["--agent", "Not An ID"]);
         assert!(
-            agent.contains("is not an agent type") && agent.contains("codex, claude"),
+            agent.contains("is not an agent type")
+                && agent.contains("codex, claude")
+                && agent.contains("farhelm agent agents")
+                && !agent.contains("custom,")
+                && !agent.contains(", custom;"),
             "{agent}"
         );
         let long = "x".repeat(257);

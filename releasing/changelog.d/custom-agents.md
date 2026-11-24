@@ -10,7 +10,8 @@ A conversation ID you already know can be supplied under **More options** in the
 on a compatible CLI launch.
 
 `farhelm agent agents` lists built-in agents and registered custom IDs with their available launch options. Use
-`--json` for structured output. `farhelm custom-agent spec` prints the wrapper contract for your installed version,
+`--json` for structured output. The `--json` output of every `farhelm agent` listing now reports schema version 8, so
+scripts that check the version need to accept it; the existing fields keep their shape. `farhelm custom-agent spec` prints the wrapper contract for your installed version,
 including its change history.
 
 An unknown agent ID in a CLI launch or template write lists the built-in types and registered custom IDs. A refused
