@@ -62,18 +62,29 @@ impl HelmStore {
     pub(crate) async fn enqueue_announcements(
         &self,
         announcements: Vec<Announcement>,
-    ) -> anyhow::Result<()> {
+        source: AnnouncementSource,
+    ) -> anyhow::Result<usize> {
+        if announcements.is_empty() {
+            return Ok(0);
+        }
         self.conn()
             .call("announcement enqueue task panicked", move |conn| {
                 let tx = conn
                     .transaction()
                     .context("beginning announcement enqueue")?;
+                // The preference can change while the request is in flight.
+                if source == AnnouncementSource::Network
+                    && !crate::network_announcements::enabled(&tx)?
+                {
+                    return Ok(0);
+                }
+                let mut inserted = 0;
                 for announcement in announcements {
                     let (link_label, link_url) = match announcement.link {
                         Some(link) => (Some(link.label), Some(link.url)),
                         None => (None, None),
                     };
-                    tx.execute(
+                    inserted += tx.execute(
                         "INSERT INTO announcements (id, title, body, detail, link_label, link_url)
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6) ON CONFLICT (id) DO NOTHING",
                         rusqlite::params![
@@ -87,7 +98,11 @@ impl HelmStore {
                     )
                     .context("enqueueing an announcement")?;
                 }
-                tx.commit().context("committing announcement enqueue")
+                if inserted > 0 && source == AnnouncementSource::Network {
+                    crate::notices::raise_new_announcement_notice(&tx)?;
+                }
+                tx.commit().context("committing announcement enqueue")?;
+                Ok(inserted)
             })
             .await
     }
@@ -139,10 +154,18 @@ impl HelmStore {
                     )
                     .context("marking an announcement shown")?;
                 }
+                crate::notices::resolve_new_announcement_notice(&tx)?;
                 tx.commit().context("committing announcement dismissal")
             })
             .await
     }
+}
+
+/// Only network delivery signals through the bell. Both producers share the same permanent IDs.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum AnnouncementSource {
+    BuiltIn,
+    Network,
 }
 
 /// Decode either list using the caller's snapshot and explicit ordering.
@@ -269,7 +292,10 @@ mod tests {
         let first = announcement("first");
         let second = announcement("second");
         store
-            .enqueue_announcements(vec![first.clone(), second.clone()])
+            .enqueue_announcements(
+                vec![first.clone(), second.clone()],
+                AnnouncementSource::BuiltIn,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -282,7 +308,7 @@ mod tests {
         rewritten.detail = None;
         rewritten.link = None;
         store
-            .enqueue_announcements(vec![rewritten.clone()])
+            .enqueue_announcements(vec![rewritten.clone()], AnnouncementSource::BuiltIn)
             .await
             .unwrap();
         assert_eq!(store.announcements().await.unwrap().pending[0], first);
@@ -309,7 +335,10 @@ mod tests {
                 [],
             )
             .unwrap();
-        store.enqueue_announcements(vec![rewritten]).await.unwrap();
+        store
+            .enqueue_announcements(vec![rewritten], AnnouncementSource::BuiltIn)
+            .await
+            .unwrap();
         store
             .mark_announcements_shown(vec!["first".into(), "missing".into(), "first".into()])
             .await
@@ -343,7 +372,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let store = HelmStore::open(&dir.path().join("helm.db")).await.unwrap();
         let entries: Vec<_> = ["a", "b", "c", "d"].into_iter().map(announcement).collect();
-        store.enqueue_announcements(entries.clone()).await.unwrap();
+        store
+            .enqueue_announcements(entries.clone(), AnnouncementSource::BuiltIn)
+            .await
+            .unwrap();
         assert_eq!(store.announcements().await.unwrap().pending, entries);
         store
             .mark_announcements_shown(vec!["b".into(), "c".into(), "d".into()])
@@ -385,7 +417,7 @@ mod tests {
         let entries = vec![announcement("a"), announcement("b")];
         harness
             .store
-            .enqueue_announcements(entries.clone())
+            .enqueue_announcements(entries.clone(), AnnouncementSource::BuiltIn)
             .await
             .unwrap();
         assert_eq!(
@@ -434,7 +466,10 @@ mod tests {
         plain.link = None;
         harness
             .store
-            .enqueue_announcements(vec![announcement("first"), plain.clone()])
+            .enqueue_announcements(
+                vec![announcement("first"), plain.clone()],
+                AnnouncementSource::BuiltIn,
+            )
             .await
             .unwrap();
         assert_eq!(
@@ -483,7 +518,7 @@ mod tests {
         let harness = rest_harness::idle_helm().await;
         harness
             .store
-            .enqueue_announcements(vec![announcement("a")])
+            .enqueue_announcements(vec![announcement("a")], AnnouncementSource::BuiltIn)
             .await
             .unwrap();
         for (method, path) in [

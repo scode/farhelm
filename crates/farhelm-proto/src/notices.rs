@@ -22,6 +22,8 @@ pub enum NoticeContent {
     FleetSessionLimit,
     /// The desktop kept its inherited PATH after its interactive login shell lookup failed.
     DesktopLoginPathUnavailable,
+    /// A signed feed added announcements that are waiting to be shown.
+    NewAnnouncement,
     /// A Delete finished after the reply deadline and reported cleanup details.
     LateDelete {
         /// The supervisor names any checkout left behind and explains other cleanup outcomes.

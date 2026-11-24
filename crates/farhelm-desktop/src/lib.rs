@@ -533,6 +533,7 @@ fn embedded_helm_args(
         ssh_askpass_program,
         ensure_hosts,
         payload_dir: helm_payload_dir(),
+        announcements_path: std::env::var_os("FARHELM_ANNOUNCEMENTS_PATH"),
         backstop_refresh_secs: None,
     }
 }
@@ -1407,6 +1408,8 @@ impl SpawnInputs<'_> {
             // from one would silently push this launch's payloads,
             // possibly long after the app that set it has quit.
             .env_remove("FARHELM_HELM_PAYLOAD_DIR")
+            // A brick-test announcement feed belongs to this launch alone.
+            .env_remove("FARHELM_ANNOUNCEMENTS_PATH")
             // The devbuild flag names this helm alone. A new app started from
             // one of its sessions must use its own update default.
             .env_remove(DEVBUILD_ENV)

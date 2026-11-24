@@ -1550,13 +1550,16 @@ async fn dismissing_an_announcement_outside_the_channel_moves_it_to_history_on_t
     let mut harness = rest_harness::idle_helm().await;
     harness
         .store
-        .enqueue_announcements(vec![Announcement {
-            id: "news-1".into(),
-            title: "News".into(),
-            body: "Something new.".into(),
-            detail: None,
-            link: None,
-        }])
+        .enqueue_announcements(
+            vec![Announcement {
+                id: "news-1".into(),
+                title: "News".into(),
+                body: "Something new.".into(),
+                detail: None,
+                link: None,
+            }],
+            crate::announcements::AnnouncementSource::BuiltIn,
+        )
         .await
         .unwrap();
     let addr = harness.serve().await;
@@ -3117,16 +3120,19 @@ async fn every_pushed_collection_round_trips_through_its_proto_type() {
 
     harness
         .store
-        .enqueue_announcements(vec![farhelm_proto::announcements::Announcement {
-            id: "news-1".into(),
-            title: "News".into(),
-            body: "Something new.".into(),
-            detail: Some("More.".into()),
-            link: Some(farhelm_proto::announcements::AnnouncementLink {
-                label: "Read".into(),
-                url: "https://example.com/news".into(),
-            }),
-        }])
+        .enqueue_announcements(
+            vec![farhelm_proto::announcements::Announcement {
+                id: "news-1".into(),
+                title: "News".into(),
+                body: "Something new.".into(),
+                detail: Some("More.".into()),
+                link: Some(farhelm_proto::announcements::AnnouncementLink {
+                    label: "Read".into(),
+                    url: "https://example.com/news".into(),
+                }),
+            }],
+            crate::announcements::AnnouncementSource::BuiltIn,
+        )
         .await
         .unwrap();
     let announcements = served(&harness, "/api/announcements").await;

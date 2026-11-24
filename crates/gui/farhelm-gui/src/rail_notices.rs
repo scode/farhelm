@@ -621,6 +621,17 @@ fn entry(
                 palette,
             );
         }
+        NoticeContent::NewAnnouncement => {
+            let id = notice.id;
+            return entry_frame(
+                SharedString::from(format!("{ENTRY_ID_PREFIX}{id}")),
+                is_unread(notice),
+                palette,
+                div()
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .child("New announcement"),
+            );
+        }
         NoticeContent::LateDelete { detail } => {
             let id = notice.id;
             let title = HostSentence::new(format!("{ENTRY_ID_PREFIX}{id}-title"))

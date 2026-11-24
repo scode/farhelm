@@ -878,6 +878,7 @@ pub(crate) fn helm_args(state_dir: &std::path::Path) -> farhelm_helm::HelmArgs {
         ssh_askpass_program: None,
         ensure_hosts: None,
         payload_dir: None,
+        announcements_path: None,
         backstop_refresh_secs: None,
     }
 }

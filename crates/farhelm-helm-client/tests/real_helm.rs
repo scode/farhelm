@@ -53,6 +53,7 @@ impl Helm {
             ssh_askpass_program: None,
             ensure_hosts: None,
             payload_dir: None,
+            announcements_path: None,
             backstop_refresh_secs: None,
         };
         let (ready_tx, ready) = std::sync::mpsc::channel();

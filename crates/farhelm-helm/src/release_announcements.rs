@@ -6,7 +6,7 @@
 //! ids have been enqueued, and idempotent storage keeps later wording changes
 //! from rewriting content a helm already received.
 
-use crate::announcements::{Announcement, AnnouncementLink};
+use crate::announcements::{Announcement, AnnouncementLink, AnnouncementSource};
 use crate::store::HelmStore;
 use anyhow::Context;
 use semver::Version;
@@ -82,7 +82,10 @@ async fn enqueue(
             }),
         })
         .collect();
-    store.enqueue_announcements(announcements).await
+    store
+        .enqueue_announcements(announcements, AnnouncementSource::BuiltIn)
+        .await?;
+    Ok(())
 }
 
 /// Validate every entry, including releases that this build cannot enqueue.
