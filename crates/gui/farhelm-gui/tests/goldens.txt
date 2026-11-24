@@ -292,10 +292,10 @@ linux/settings-hosts--dark.png 46a06d13dd4bd244fdb89d16b9bbf5c0f7b6c18d
 linux/settings-hosts--light.png 33b6cfc23d19e0949a77ee41630067f4d30023bd
 linux/settings-muse--dark.png ec6f70d9c29674cca4a674cd1de05cac58bd37c7
 linux/settings-muse--light.png 8eeb6c7ce9d4010f04e3a19cbce2fe07bbf8bc40
-linux/settings-notifications--dark.png 1f2a0485be16f1fd095c1835f78ad43c4fe82433
-linux/settings-notifications--light.png d213fb6c46d77bded860ed58dd8448489c48d04c
-linux/settings-notifications-edited--dark.png 034a8ed789c9e141b793e4995c91984b07357648
-linux/settings-notifications-edited--light.png e74caab0ea8a5b62d8d2c14828ba259d44d8b7c7
+linux/settings-notifications--dark.png d840be64cd5dea47269fc23e3abe5dd84b287028
+linux/settings-notifications--light.png 8ec48218bbc0ab8fb89a3d164799dc157a7a995c
+linux/settings-notifications-edited--dark.png 7b1b91b8cee0db46981f78855f4d45441d25cba9
+linux/settings-notifications-edited--light.png c4ea0f05d9ecba4eb0ace255d46389abe1a81ed9
 linux/settings-pi--dark.png dc6db7aed2c9e26d0d3858f194903b26bb610c79
 linux/settings-pi--light.png bce5ef487dd52d613fa2fbbde19120dfe4fa8432
 linux/settings-recipe-editor--dark.png 8ce268966c7f92304387803d8a0323b895001f5d
@@ -332,8 +332,8 @@ linux/settings-terminal--dark.png 8baa35e6a5faa5edeb715cd1b1e4970f07e58a11
 linux/settings-terminal--light.png b2a583d3566c1d1d2c726fec1d0e7986e5eb8abc
 linux/settings-terminal-edited--dark.png a8a82e30939f289604fa23b0dd302c046e6b70e4
 linux/settings-terminal-edited--light.png 18fe4fc9326d64ecfafd1f12ca547a0317396096
-linux/settings-unsaved--dark.png 74b7c7ccad1ad5e40de3791263f074c91170bd0a
-linux/settings-unsaved--light.png cc79f5c26a6edf9e908846cc09e98b81525f6056
+linux/settings-unsaved--dark.png d954a23d96202ad50d80895eb2fb15cab041afab
+linux/settings-unsaved--light.png c9d17af7959b251487e7b6dfe652a06e4d1b379d
 linux/ssh-sign-in-code--dark.png 2ac6b6b96fe0a3bf10f6e0257bd12c28033bc40a
 linux/ssh-sign-in-code--light.png f7f4828f8525b7c77ff4f5b515dea5ea6a106729
 linux/ssh-sign-in-duo--dark.png 9cd0e8b4ad813e40271df5e8c756fbaa732c718a

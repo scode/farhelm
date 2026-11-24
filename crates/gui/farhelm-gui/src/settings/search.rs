@@ -152,6 +152,7 @@ impl Entry {
             ) => "hooks restart conversation resume",
             (Section::Agent(_), Target::Trust(_) | Target::Choice(_)) => "agent trust",
             (Section::Agent(_), Target::Top) if self.id == agent_trust::CAUTION_ID => "agent trust",
+            (Section::Notifications, Target::Choice(Choice::CheckAnnouncements)) => "news",
             (Section::Notifications, Target::Choice(_)) => "sound bell",
             (Section::Notifications, Target::Top) if self.id == SOUNDS_ID => "sound bell",
             (Section::Notifications, _) => "push phone",

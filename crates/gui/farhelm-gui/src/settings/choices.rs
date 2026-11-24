@@ -90,6 +90,8 @@ pub(super) enum Choice {
     SoundTurnFinished,
     /// Notifications, Sounds: SSH sign-in, on by default.
     SoundSshSignIn,
+    /// Notifications: the shared opt-out from network announcement checks.
+    CheckAnnouncements,
     /// App: Show finalized highlights after the next upgrade, shared by windows on this helm.
     ShowWhatsNew,
 }
@@ -113,6 +115,7 @@ impl Choice {
         Choice::SoundApproval,
         Choice::SoundTurnFinished,
         Choice::SoundSshSignIn,
+        Choice::CheckAnnouncements,
         Choice::ShowWhatsNew,
     ];
 
@@ -137,7 +140,8 @@ impl Choice {
             Self::SoundWaiting
             | Self::SoundApproval
             | Self::SoundTurnFinished
-            | Self::SoundSshSignIn => Section::Notifications,
+            | Self::SoundSshSignIn
+            | Self::CheckAnnouncements => Section::Notifications,
         }
     }
 
@@ -146,6 +150,7 @@ impl Choice {
         match self {
             Choice::ShowHookSetupHint(agent) => agent.dismissal_field(),
             Choice::ShowWhatsNew => "show_whats_new",
+            Choice::CheckAnnouncements => "check_announcements",
             Choice::SkipSessionConfirmations => "skip_session_confirmations",
             Choice::NameSessionsOnQuickLaunch => "name_session_on_quick_launch",
             Choice::ColorTerminalFrames => "color_terminal_frames",
@@ -173,6 +178,7 @@ impl Choice {
         let field = preferences.and_then(|preferences| match self {
             Choice::ShowHookSetupHint(agent) => agent.dismissal(preferences),
             Choice::ShowWhatsNew => preferences.show_whats_new,
+            Choice::CheckAnnouncements => preferences.check_announcements,
             Choice::SkipSessionConfirmations => preferences.skip_session_confirmations,
             Choice::NameSessionsOnQuickLaunch => preferences.name_session_on_quick_launch,
             Choice::ColorTerminalFrames => preferences.color_terminal_frames,
@@ -195,7 +201,8 @@ impl Choice {
             Choice::SoundSshSignIn => sound(Sound::SshSignIn),
             Choice::NameSessionsOnQuickLaunch
             | Choice::AutoUpdateRemoteHosts
-            | Choice::ShowWhatsNew => field != Some(false),
+            | Choice::ShowWhatsNew
+            | Choice::CheckAnnouncements => field != Some(false),
             Choice::ShowClaudeTrustHint
             | Choice::ShowCodexTrustHint
             | Choice::ShowMuseTrustHint
@@ -219,6 +226,7 @@ impl Choice {
             | Choice::ShowHookSetupHint(_) => !on,
             Choice::SkipSessionConfirmations
             | Choice::ShowWhatsNew
+            | Choice::CheckAnnouncements
             | Choice::NameSessionsOnQuickLaunch
             | Choice::ColorTerminalFrames
             | Choice::AutoUpdateRemoteHosts
@@ -237,6 +245,7 @@ impl Choice {
         match self {
             Choice::ShowHookSetupHint(agent) => agent.dismissal_id(),
             Choice::ShowWhatsNew => "settings-show-whats-new",
+            Choice::CheckAnnouncements => "settings-check-announcements",
             Choice::SkipSessionConfirmations => "settings-skip-session-confirmations",
             Choice::NameSessionsOnQuickLaunch => "settings-name-quick-launches",
             Choice::ColorTerminalFrames => "settings-color-terminal-frames",
@@ -263,6 +272,7 @@ impl Choice {
         match self {
             Choice::ShowHookSetupHint(_) => "Show the hook setup prompt and hint",
             Choice::ShowWhatsNew => "Show what's new after updates",
+            Choice::CheckAnnouncements => "Check for announcements",
             Choice::SkipSessionConfirmations => "Skip session confirmations",
             Choice::NameSessionsOnQuickLaunch => "Name sessions on quick launch",
             Choice::ColorTerminalFrames => "Color terminal frames by host",
@@ -289,6 +299,9 @@ impl Choice {
                 "Offer hook setup when choosing this agent and in sessions where setup was skipped"
             }
             Choice::ShowWhatsNew => "Show release highlights after Farhelm upgrades",
+            Choice::CheckAnnouncements => {
+                "Check for announcements from Farhelm at startup and every 12 hours"
+            }
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click"
             }
@@ -340,6 +353,7 @@ impl Choice {
             Choice::ShowWhatsNew => {
                 "Skip upgrade highlights. All windows on this helm use this choice."
             }
+            Choice::CheckAnnouncements => self.tooltip(),
             Choice::SkipSessionConfirmations => {
                 "Stop, delete, replace, restart and close terminal tabs on the first click. YOLO, host and trash \
                  confirmations still follow their own rules."
@@ -400,6 +414,9 @@ impl Choice {
                 "Could not save whether to show the hook setup prompt and hint. Try again."
             }
             Choice::ShowWhatsNew => "Could not save whether to show upgrade highlights. Try again.",
+            Choice::CheckAnnouncements => {
+                "Could not save whether to check for announcements. Try again."
+            }
             Choice::SkipSessionConfirmations if !sent => {
                 "Confirmations may still be off for this helm. Try again."
             }

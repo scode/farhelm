@@ -1191,6 +1191,7 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
         choice != naming
             && choice != updates
             && choice != Choice::ShowWhatsNew
+            && choice != Choice::CheckAnnouncements
             && !hints.contains(&choice)
             && !SOUNDS.contains(&choice)
     }) {
@@ -1202,10 +1203,15 @@ fn name_sessions_on_quick_launch_reads_as_on_when_the_helm_stored_no_choice() {
     }
     let opted_out = Preferences {
         show_whats_new: Some(false),
+        check_announcements: Some(false),
         ..Preferences::default()
     };
     assert!(Choice::ShowWhatsNew.stored(None) && Choice::ShowWhatsNew.stored(Some(&empty)));
     assert!(!Choice::ShowWhatsNew.stored(Some(&opted_out)));
+    assert!(
+        Choice::CheckAnnouncements.stored(None) && Choice::CheckAnnouncements.stored(Some(&empty))
+    );
+    assert!(!Choice::CheckAnnouncements.stored(Some(&opted_out)));
     // A hint's switch is its dismissal inverted: "Unset and false both allow the hint".
     let dismissed = |value: bool| -> Preferences {
         serde_json::from_value(json!({
