@@ -4,8 +4,9 @@
 use std::time::Duration;
 
 use gpui::{
-    AnyElement, App, AvailableSpace, Context, Entity, InteractiveElement as _, IntoElement as _,
-    ParentElement as _, Pixels, Styled as _, Subscription, Window, canvas, div, point, px, size,
+    AnyElement, App, AvailableSpace, Context, Entity, FontWeight, InteractiveElement as _,
+    IntoElement as _, ParentElement as _, Pixels, Styled as _, Subscription, Window, canvas, div,
+    point, px, size,
 };
 
 use super::{VersionReadout, inline_presentation};
@@ -217,7 +218,8 @@ impl VersionReadout {
                     .id("upgrade-reminder-arrow")
                     .debug_selector(|| "upgrade-reminder-arrow".into())
                     .font_family(assets::TERMINAL_FONT)
-                    .text_size(theme::metrics::TEXT_SM)
+                    .text_size(theme::metrics::TEXT_MD)
+                    .font_weight(FontWeight::BOLD)
                     .text_color(theme::color(theme::palette(cx).danger_strong))
                     .opacity(frame.opacity)
                     .child("→")

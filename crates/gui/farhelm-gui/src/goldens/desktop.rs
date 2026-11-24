@@ -327,7 +327,8 @@ pub(super) fn version_readout_outcomes_setup(
 
 /// Rows of the update-menu toggle once an update is installed. The resting pill puts `↑` before the version, the
 /// withdrawal row adds an amber `⚠`, and the focused row draws the accent ring over the resting red tint. The final
-/// row holds the moment the reminder's arrow nears the highlighted pill.
+/// row holds the moment the reminder's arrow nears the highlighted pill, with a warning to show how it reads on the
+/// solid light-mode fill.
 fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
     let withdrawn = Readout {
         withdrawn: true,
@@ -335,9 +336,9 @@ fn version_readout_update_ready_rows() -> Vec<ReadoutRow> {
     };
     vec![
         (golden_readout(Activity::Idle, true), None),
+        (withdrawn.clone(), None),
+        (golden_readout(Activity::Idle, true), None),
         (withdrawn, None),
-        (golden_readout(Activity::Idle, true), None),
-        (golden_readout(Activity::Idle, true), None),
     ]
 }
 

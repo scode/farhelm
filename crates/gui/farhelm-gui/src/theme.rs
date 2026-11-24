@@ -180,8 +180,13 @@ pub struct Palette {
     pub danger_wash: Token,
     /// The pending-update pill's pointer tint, between its resting and reminder fills.
     pub danger_wash_hover: Token,
-    /// The reminder's stronger fill also shows while hovering. Its alpha preserves contrast with the small text.
+    /// The reminder's strongest fill holds under the pointer. Light mode uses a solid fill to distinguish the pulse
+    /// from the hover wash.
     pub danger_wash_pulse: Token,
+    /// The pending-update pill's text on its hover wash.
+    pub update_ready_hover_ink: Token,
+    /// The pending-update pill's text on the reminder fill.
+    pub update_ready_pulse_ink: Token,
     /// `color-mix(in srgb, var(--danger) 20%, var(--bg-2))`, worked out: the launcher's permission-escalation banner,
     /// the old `.permission-escalation-banner` background.
     pub danger_tint: Token,
@@ -289,6 +294,8 @@ pub const DARK: Palette = Palette {
     danger_wash: rgba_token(0xee8a8a24),
     danger_wash_hover: rgba_token(0xee8a8a30),
     danger_wash_pulse: rgba_token(0xee8a8a39),
+    update_ready_hover_ink: rgb_token(0xf09595),
+    update_ready_pulse_ink: rgb_token(0xf09595),
     danger_tint: rgb_token(0x50404a),
     info: rgb_token(0x8ea2f5),
     on_accent_dim: rgb_token(0xf4f6ff),
@@ -378,8 +385,10 @@ pub const LIGHT: Palette = Palette {
     danger_bg_dim: rgb_token(0xfae9ec),
     // `--danger` at 14% alpha (0x24 is 14% of 255, rounded).
     danger_wash: rgba_token(0xa63e4d24),
-    danger_wash_hover: rgba_token(0xa63e4d27),
-    danger_wash_pulse: rgba_token(0xa63e4d2a),
+    danger_wash_hover: rgba_token(0xa63e4d38),
+    danger_wash_pulse: rgb_token(0xa83e4d),
+    update_ready_hover_ink: rgb_token(0x8b2837),
+    update_ready_pulse_ink: rgb_token(0xffffff),
     danger_tint: rgb_token(0xedd8db),
     info: rgb_token(0x445acf),
     on_accent_dim: rgb_token(0xf4f6ff),
@@ -790,6 +799,72 @@ mod raw {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Read the three sRGB channels before compositing a translucent wash over the sidebar.
+    fn srgb(token: Token) -> [f64; 3] {
+        let rgb = if token.alpha {
+            token.value >> 8
+        } else {
+            token.value
+        };
+        [16, 8, 0].map(|shift| f64::from((rgb >> shift) & 0xff) / 255.)
+    }
+
+    /// Relative luminance uses linear channels. Washes are composited in sRGB before this conversion.
+    fn luminance(rgb: [f64; 3]) -> f64 {
+        let linear = rgb.map(|channel| {
+            if channel <= 0.04045 {
+                channel / 12.92
+            } else {
+                ((channel + 0.055) / 1.055).powf(2.4)
+            }
+        });
+        0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2]
+    }
+
+    /// The small readout text and warning stay above 4.5:1 over the pill as drawn on the sidebar. The stronger
+    /// hover wash would reduce both below that floor with their resting inks.
+    #[test]
+    fn light_update_pill_text_has_contrast_on_every_fill() {
+        assert_eq!(LIGHT.danger_wash, rgba_token(0xa63e4d24));
+        assert_eq!(LIGHT.danger_strong, rgb_token(0xa13443));
+        assert_eq!(LIGHT.danger_wash_hover, rgba_token(0xa63e4d38));
+        assert_eq!(LIGHT.update_ready_hover_ink, rgb_token(0x8b2837));
+        assert_eq!(LIGHT.danger_wash_pulse, LIGHT.danger_bg);
+        assert_eq!(LIGHT.update_ready_pulse_ink, LIGHT.on_fill);
+
+        let backdrop = srgb(LIGHT.bg_1);
+        for (fill, inks) in [
+            (LIGHT.danger_wash, [LIGHT.danger_strong, LIGHT.warn]),
+            (
+                LIGHT.danger_wash_hover,
+                [LIGHT.update_ready_hover_ink, LIGHT.warn_bright],
+            ),
+            (
+                LIGHT.danger_wash_pulse,
+                [LIGHT.update_ready_pulse_ink, LIGHT.on_fill],
+            ),
+        ] {
+            let alpha = if fill.alpha {
+                f64::from(fill.value & 0xff) / 255.
+            } else {
+                1.
+            };
+            let wash = srgb(fill);
+            let background = luminance(std::array::from_fn(|i| {
+                alpha * wash[i] + (1. - alpha) * backdrop[i]
+            }));
+            for ink in inks {
+                let foreground = luminance(srgb(ink));
+                let contrast =
+                    (background.max(foreground) + 0.05) / (background.min(foreground) + 0.05);
+                assert!(
+                    contrast >= 4.5,
+                    "{ink:?} on {fill:?} has {contrast:.2}:1 contrast"
+                );
+            }
+        }
+    }
 
     /// The projection of both palettes is accepted by Kit's schema; a rejected projection would silently fall back to
     /// Kit's own colors in a release build, so this is the test that catches it.
