@@ -15,7 +15,7 @@ use gpui::{
 };
 
 use super::reminder::{ARROW_ROOM, BURST_TICKS};
-use super::{Look, RELEASE_NOTES_URL, UP_TO_DATE_FOR, VersionReadout, check_look};
+use super::{Look, RELEASE_NOTES_URL, UP_TO_DATE_FOR, VersionReadout, check_look, toggle_look};
 use crate::desktop::updates::fake::{Feed, Seen, fake_host, readout_saying};
 use crate::desktop::updates::{self, Updater};
 use crate::test_support;
@@ -416,6 +416,34 @@ fn hover_and_keyboard_focus_brighten_the_version_and_turn_the_glyph() {
     }
     assert_eq!(check_look(palette, false, None, true).version, palette.warn);
     assert_eq!(check_look(palette, true, None, true).version, palette.fg_0);
+}
+
+/// The light pill uses darker red and amber on hover and white ink on its solid pulse. Dark mode already has
+/// enough contrast and keeps its red version and amber warning in every state.
+#[test]
+fn update_pill_warns_in_ink_that_reads_on_its_current_fill() {
+    let light = &theme::LIGHT;
+    assert_eq!(
+        toggle_look(light, false, false),
+        (light.danger_strong, light.warn)
+    );
+    assert_eq!(
+        toggle_look(light, true, false),
+        (light.update_ready_hover_ink, light.warn_bright)
+    );
+    let dark = &theme::DARK;
+    for hovered in [false, true] {
+        assert_eq!(
+            toggle_look(light, hovered, true),
+            (light.on_fill, light.on_fill)
+        );
+        for pulsing in [false, true] {
+            assert_eq!(
+                toggle_look(dark, hovered, pulsing),
+                (dark.danger_strong, dark.warn)
+            );
+        }
+    }
 }
 
 // ---- The check button ----------------------------------------------------------------------------------------------

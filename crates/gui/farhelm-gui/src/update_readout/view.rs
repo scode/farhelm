@@ -107,6 +107,34 @@ pub(crate) fn check_look(
     }
 }
 
+/// Ink for the pending-update pill's version, up-arrow and warning. The light hover wash needs darker amber for
+/// the warning. The solid light pulse needs white ink for all three.
+fn toggle_look(
+    palette: &theme::Palette,
+    hovered: bool,
+    pulsing: bool,
+) -> (theme::Token, theme::Token) {
+    match (pulsing, hovered) {
+        (true, _) => (
+            palette.update_ready_pulse_ink,
+            if palette.dark {
+                palette.warn
+            } else {
+                palette.on_fill
+            },
+        ),
+        (false, true) => (
+            palette.update_ready_hover_ink,
+            if palette.dark {
+                palette.warn
+            } else {
+                palette.warn_bright
+            },
+        ),
+        (false, false) => (palette.danger_strong, palette.warn),
+    }
+}
+
 /// The readout while an updater runs. The sidebar makes one when an updater runs and keeps it for the window's life,
 /// so Up to date's timer and a dismissal survive the header moving between the sidebar and the narrow window's top row.
 pub struct VersionReadout {
@@ -271,7 +299,7 @@ impl VersionReadout {
         let look = check_look(palette, lit, step, warning);
         #[cfg(test)]
         self.drawn_look.set(Some(look));
-        let marks = marks(readout_marks(readout), look.version, palette);
+        let marks = marks(readout_marks(readout), look.version, palette.warn);
         Button::new(
             "app-version-check",
             "Check for updates",
@@ -308,11 +336,13 @@ impl VersionReadout {
         .on_click(|_, _, cx| updates::check_now(cx))
     }
 
-    /// The tinted pill stays distinguishable from the ordinary check control while an update waits for restart.
-    fn toggle(&self, readout: &Readout, cx: &mut Context<Self>) -> Button {
+    /// Read one reminder frame for the button fill and its ink. Hover stays visible between pulses.
+    fn toggle(&self, readout: &Readout, hovered: bool, cx: &mut Context<Self>) -> Button {
         let palette = theme::palette(cx);
         let open = self.menu.is_some();
-        let marks = marks(readout_marks(readout), palette.danger_strong, palette);
+        let pulsing = self.reminder.frame(cx).is_some_and(|frame| frame.pulsing);
+        let (ink, warning_ink) = toggle_look(palette, hovered, pulsing);
+        let marks = marks(readout_marks(readout), ink, warning_ink);
         let view = cx.weak_entity();
         Button::new(
             "app-version-toggle",
@@ -320,9 +350,7 @@ impl VersionReadout {
             readout_help(readout.tooltip.clone()),
             Role::Button,
         )
-        .tier(Tier::UpdateReady {
-            pulsing: self.reminder.frame(cx).is_some_and(|frame| frame.pulsing),
-        })
+        .tier(Tier::UpdateReady { pulsing })
         .accessible_name(format!(
             "Farhelm {}, update ready: {}",
             farhelm_proto::BUILD_VERSION,
@@ -338,7 +366,7 @@ impl VersionReadout {
                 .min_w_0()
                 .font_weight(FontWeight::BOLD)
                 .children(marks)
-                .child(version_text(palette.danger_strong)),
+                .child(version_text(ink)),
         )
         .on_click(move |_, window, cx| {
             let _ = view.update(cx, |readout, cx| readout.toggle_menu(window, cx));
@@ -458,7 +486,7 @@ impl Render for VersionReadout {
                 div()
                     .relative()
                     .min_w_0()
-                    .child(self.toggle(&readout, cx))
+                    .child(self.toggle(&readout, is_hovered, cx))
                     .child(anchor.track())
                     .into_any_element()
             }
@@ -502,13 +530,13 @@ fn version_text(ink: theme::Token) -> impl IntoElement {
         .child(farhelm_proto::BUILD_VERSION)
 }
 
-/// The marks before the version: the warning in `--warn` whatever surrounds it, the update arrow in `ink`.
-fn marks(marks: Vec<ReadoutMark>, ink: theme::Token, palette: &theme::Palette) -> Vec<AnyElement> {
+/// The warning takes the ink its control supplies for the current fill. The up-arrow shares the version's ink.
+fn marks(marks: Vec<ReadoutMark>, ink: theme::Token, warning_ink: theme::Token) -> Vec<AnyElement> {
     marks
         .into_iter()
         .map(|mark| {
             let mark_ink = if mark == WARNING_MARK {
-                palette.warn
+                warning_ink
             } else {
                 ink
             };

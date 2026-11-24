@@ -275,15 +275,6 @@ product fix out of "Deflake" rather than changing user-visible behavior as a tes
   coded announcements in releases, but i want one where i can push announcements by publishing them centrally and
   deliver to users. details tbd during planning. Plan: `plans/queue/dynamic-announcements.md`.
 
-- **Make the pending-update pill reminder visible in light mode and bold its arrow.** In light mode, the ready-update
-  pill's resting, hover, and pulse backgrounds (`#a63e4d` at 14.1%, 15.3%, and 16.5% alpha over `#e9edf4`) differ by
-  only 1–3 RGB levels because `#a13443` text is already near 4.5:1 contrast at rest, so the reminder pulse is nearly
-  invisible (especially when the arrow is hidden). Keep the tinted pill at rest (`#e0d4dc` / `#a13443`, 4.74:1), step
-  hover to a 22% wash with darker ink (`#8b2837`, 5.31:1), and flip the 2.5-second light-mode pulse to solid `danger_bg`
-  (`#a83e4d`) with white `on_fill` text (6.07:1; switch the `⚠` warning glyph to white during the pulse so it stays
-  readable). Also draw the bouncing `→` reminder arrow bold at 13 px instead of regular 12 px so it matches the pill's
-  weight. Plan: `plans/queue/light-mode-upgrade-pill-pulse.md`.
-
 - **Keep remote agent credentials intact when a recipe credential lookup fails.** After #4679 combined Claude and Codex
   into one remote launch-credentials file, a failed lookup in the helm's SQLite credential catalog for either agent
   falls into the legacy-cleanup withholding path and rewrites or deletes the remote file without that agent's entry

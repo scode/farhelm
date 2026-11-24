@@ -8635,12 +8635,13 @@ check button running the same check as the Help menu's Check for updates. Its di
 version and turns a quarter on hover or keyboard focus, and spins during a visible check. Once Installed is newer than
 the running version, the version and a one-character up-arrow before it sit in a tinted red pill (`Tier::UpdateReady`)
 that is a toggle opening the update menu (Restart to update, What's new), with a ring of its own for progress since the
-toggle has no glyph to spin. A reminder (`crates/gui/farhelm-gui/src/update_readout/view/reminder.rs`) deepens the
-pill's tint and bounces a small arrow toward it for about two and a half seconds when the update becomes ready and again
-every 15 minutes while the window is active and in use. It runs on a one-shot ticker deadline, a burst of animation
-ticks and a one-shot wake on the next click or keystroke, and stays still under reduced motion. A verification warning
-keeps its leading mark, and a press still retries. Without an updater the version is plain text. The update menu and the
-`?` menu are drawn from the same menu pieces as the session row's menu.
+toggle has no glyph to spin. In light mode the hover wash uses darker red text, and the reminder uses the solid danger
+fill with white text and warning mark. A reminder (`crates/gui/farhelm-gui/src/update_readout/view/reminder.rs`) bounces
+a bold 13-pixel arrow toward the pill for about two and a half seconds when the update becomes ready and again every 15
+minutes while the window is active and in use. It runs on a one-shot ticker deadline, a burst of animation ticks and a
+one-shot wake on the next click or keystroke, and stays still under reduced motion. A verification warning keeps its
+leading mark, and a press still retries. Without an updater the version is plain text. The update menu and the `?` menu
+are drawn from the same menu pieces as the session row's menu.
 
 The rail's notices bell sits at the top of the rail's foot, above Hosts (`crates/gui/farhelm-gui/src/rail_notices.rs`).
 The bell and its panel draw the helm's pushed notices straight from the store. Every close sends one read mark for the
