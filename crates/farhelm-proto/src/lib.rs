@@ -2387,15 +2387,19 @@ pub struct SpawnPlacement {
 /// pass as `--agent` and omits the configured executable for a custom registration.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct AgentListingEntry {
+    /// The exact value to pass as `--agent`: a built-in type's wire word or a registered custom ID.
     pub id: String,
     pub kind: AgentListingKind,
+    /// The name people see: the built-in product name, or the registration's own display name.
     pub display_name: String,
     /// Whether a launch can take a one-time `--conversation` selector. The
     /// running session's own readiness for Restart is reported separately.
     pub supports_named_conversation: bool,
     /// Whether a fresh launch can take an initial prompt.
     pub supports_initial_prompt: bool,
+    /// Whether a launch can take `--model`.
     pub supports_model: bool,
+    /// Whether a launch can take `--effort`.
     pub supports_effort: bool,
 }
 

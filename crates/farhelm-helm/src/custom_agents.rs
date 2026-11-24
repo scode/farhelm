@@ -108,7 +108,8 @@ impl HelmStore {
     }
 }
 
-/// Report a registration that disappeared before a catalog edit or deletion.
+/// Report a registration that disappeared before a catalog edit or deletion, or between a launch's
+/// selection and its compilation.
 pub(crate) fn missing_agent() -> anyhow::Error {
     SupervisorError::helm(
         ErrorKind::NotFound,

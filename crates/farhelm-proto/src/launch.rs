@@ -77,6 +77,8 @@ impl LaunchHarness {
 
     /// The product name for an agent type in listings and launch descriptions. The custom
     /// catalog marker names the type only. A registered entry supplies its own display name.
+    /// This is the full product name ("Claude Code"); `AgentKind::display_name` keeps the short
+    /// agent name ("Claude") that session-level wording uses, so the two deliberately differ.
     pub const fn display_name(self) -> &'static str {
         match self {
             Self::Cursor => "Cursor",

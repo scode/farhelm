@@ -98,7 +98,8 @@
 //!   The session row's marks read theirs from
 //!   `crates/gui/farhelm-gui/src/harness.rs`:
 //!   which mark an agent type and a legacy session's stored kind draw, each
-//!   mark's bundled picture and identity color, the agent's product name, and
+//!   mark's bundled picture and identity color (the agent's product name now comes from
+//!   `LaunchHarness::display_name` in `farhelm-proto`), and
 //!   the status-line words for a mode without checks. The launcher reads the
 //!   same mark and identity ink for its harness chips. The row's
 //!   permission shield describes an agent launch with the launcher's

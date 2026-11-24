@@ -15656,7 +15656,8 @@ mod tests {
     }
 
     /// The refusals that keep an environment launch honest come before any
-    /// card: a key a retry could never find, overrides a copy into a new
+    /// card: a key a retry could never find, a `--conversation` that a new
+    /// environment's fresh agent could not resume, overrides a copy into a new
     /// environment cannot honor, and a place that cannot run one. A card for
     /// any of these would ask the user to approve something that then fails
     /// or quietly does something else.
